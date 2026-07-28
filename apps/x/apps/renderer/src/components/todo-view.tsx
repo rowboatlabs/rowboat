@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, Loader2, MessageCircle, Plus, RotateCcw, X } from 'lucide-react'
+import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, X } from 'lucide-react'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,16 @@ const CALLOUT_KEY = 'todo.firstReceiptCalloutDone'
 
 function mentionsRowboat(text: string): boolean {
   return ROWBOAT_MENTION_RE.test(text)
+}
+
+// Mirrors core fileops key derivation — the renderer computes keys locally
+// only for optimistic UI; core re-keys authoritatively on save.
+function normKey(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function childKey(parentText: string, subText: string): string {
+  return `${normKey(parentText)} :: ${normKey(subText)}`
 }
 
 function openLink(link: TodoLink, onOpenNote: (path: string) => void) {
@@ -113,6 +123,32 @@ function ReceiptRow({ item, onOpenNote, onRetry, onOpenThread }: {
 // ---------------------------------------------------------------------------
 // One item row — checkbox, editable text, chips, receipts, dismiss
 // ---------------------------------------------------------------------------
+
+function SubComposer({ onSubmit, onCancel }: {
+  onSubmit: (text: string) => void
+  onCancel: () => void
+}) {
+  const [text, setText] = useState('')
+  return (
+    <div className="mt-1 flex items-center gap-2 rounded-lg border border-dashed border-border px-2.5 py-1.5">
+      <ListPlus className="size-3.5 shrink-0 text-muted-foreground" />
+      <input
+        autoFocus
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && text.trim()) {
+            e.preventDefault()
+            onSubmit(text.trim())
+          }
+          if (e.key === 'Escape') onCancel()
+        }}
+        placeholder="Add a step… mention @rowboat to hand it off"
+        className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
+      />
+    </div>
+  )
+}
 
 function CommentComposer({ onSend, onCancel }: {
   onSend: (message: string) => void
@@ -231,12 +267,18 @@ function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetr
   )
 }
 
-function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
+function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
   item: TodoItem
   isRunning: boolean
   commentOpen: boolean
   sessionId: string | null
   bubbles: TodoChatBubble[]
+  /** 0 = top-level, 1 = sub-item. One level only. */
+  depth?: number
+  /** Rendered sub-item rows (built by the parent view) + sub composer. */
+  childRows?: React.ReactNode
+  /** Top-level only: open the "add sub-task" input. */
+  onAddSub?: () => void
   onToggle: (checked: boolean) => void
   onCommitText: (text: string) => void
   onDismiss: () => void
@@ -251,6 +293,8 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, onToggle, o
   // The live exchange renders as bubbles; a checked item collapses back to
   // its compact receipt lines so the list stays a list.
   const showConversation = !item.checked && bubbles.length > 0
+  const doneChildren = item.children.filter((c) => c.checked).length
+  const allChildrenDone = item.children.length > 0 && doneChildren === item.children.length
 
   const commit = () => {
     setEditing(false)
@@ -289,6 +333,14 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, onToggle, o
             className={`cursor-text text-sm ${item.checked ? 'text-muted-foreground line-through' : ''}`}
           >
             <TextWithMentions text={item.text} />
+            {item.children.length > 0 && (
+              <span
+                className={`${CHIP} ml-2 ${allChildrenDone && !item.checked ? 'bg-primary/10 font-semibold text-primary' : 'text-muted-foreground/70'}`}
+                title={allChildrenDone && !item.checked ? 'All steps done — check it off?' : undefined}
+              >
+                {doneChildren}/{item.children.length}
+              </span>
+            )}
             {isRunning && (
               <span className={`${CHIP} ml-2 animate-pulse bg-primary/10 text-primary`}>
                 <Loader2 className="size-3 animate-spin" /> working…
@@ -317,7 +369,18 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, onToggle, o
         {commentOpen && (
           <CommentComposer onSend={onComment} onCancel={onToggleComment} />
         )}
+        {childRows}
       </div>
+      {onAddSub && depth === 0 && (
+        <button
+          type="button"
+          onClick={onAddSub}
+          title="Add a sub-task"
+          className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
+        >
+          <ListPlus className="size-3.5" />
+        </button>
+      )}
       {/* ＋ is the standing way to comment on any item; once bubbles are
           shown, the in-thread "+ reply" chip takes over that job. */}
       {!showConversation && (
@@ -502,6 +565,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
   const [archived, setArchived] = useState<ArchivedEntry[]>([])
   const [showCallout, setShowCallout] = useState(false)
   const [commentKey, setCommentKey] = useState<string | null>(null)
+  const [subDraftFor, setSubDraftFor] = useState<string | null>(null)
 
   const blocksRef = useRef<TodoBlock[] | null>(null)
   const dirtyRef = useRef(false)
@@ -614,6 +678,33 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
     await refetch()
   }, [refetch])
 
+  const dismissKey = useCallback(async (key: string) => {
+    // Flush edits so the archived copy matches the screen.
+    if (dirtyRef.current) await saveNowRef.current()
+    await window.ipc.invoke('todo:dismiss', { key })
+    await refetch()
+  }, [refetch])
+
+  const addSub = useCallback(async (parentKey: string, text: string) => {
+    setSubDraftFor(null)
+    if (dirtyRef.current) await saveNowRef.current()
+    await window.ipc.invoke('todo:addSubItem', { parentKey, text, run: mentionsRowboat(text) })
+    await refetch()
+  }, [refetch])
+
+  // Apply a change to one sub-item (null = remove the row).
+  const updateChild = useCallback((index: number, ci: number, updater: (c: TodoItem) => TodoItem | null) => {
+    const next = [...blocksRef.current!]
+    const blk = next[index]
+    if (blk.kind !== 'item') return
+    const children = [...blk.item.children]
+    const updated = updater(children[ci])
+    if (updated === null) children.splice(ci, 1)
+    else children[ci] = updated
+    next[index] = { kind: 'item', item: { ...blk.item, children } }
+    mutate(next)
+  }, [mutate])
+
   const itemBlocks = (blocks ?? []).map((b, i) => ({ block: b, index: i }))
   const hasCompleted = itemBlocks.some(({ block }) => block.kind === 'item' && block.item.checked)
   const todayLabel = new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
@@ -680,6 +771,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
                   <ItemRow
                     key={`${index}:${item.key}`}
                     item={item}
+                    depth={0}
                     isRunning={running.has(item.key)}
                     onToggle={(checked) => {
                       const next = [...blocksRef.current!]
@@ -694,7 +786,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
                         return
                       }
                       const wasDelegated = item.delegated
-                      const updated: TodoItem = { ...item, text, key: text.replace(/\s+/g, ' ').trim().toLowerCase(), delegated: mentionsRowboat(text) }
+                      const updated: TodoItem = { ...item, text, key: normKey(text), delegated: mentionsRowboat(text) }
                       next[index] = { kind: 'item', item: updated }
                       mutate(next)
                       // Typing @rowboat into a line is the go signal.
@@ -702,14 +794,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
                         void saveNowRef.current().then(() => runItem(updated.key))
                       }
                     }}
-                    onDismiss={() => {
-                      void (async () => {
-                        // Flush edits so the archived copy matches the screen.
-                        if (dirtyRef.current) await saveNowRef.current()
-                        await window.ipc.invoke('todo:dismiss', { key: item.key })
-                        await refetch()
-                      })()
-                    }}
+                    onDismiss={() => void dismissKey(item.key)}
                     onRun={() => runItem(item.key)}
                     onOpenNote={onOpenNote}
                     commentOpen={commentKey === item.key}
@@ -718,6 +803,47 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
                     onToggleComment={() => setCommentKey(commentKey === item.key ? null : item.key)}
                     onComment={(message) => commentOnItem(item.key, message)}
                     onOpenInChat={onOpenInChat}
+                    onAddSub={() => setSubDraftFor(subDraftFor === item.key ? null : item.key)}
+                    childRows={(item.children.length > 0 || subDraftFor === item.key) && (
+                      <div className="mt-1 flex flex-col border-l border-border/60 pl-1">
+                        {item.children.map((child, ci) => (
+                          <ItemRow
+                            key={`${index}:${ci}:${child.key}`}
+                            item={child}
+                            depth={1}
+                            isRunning={running.has(child.key)}
+                            onToggle={(checked) => updateChild(index, ci, (c) => ({ ...c, checked }))}
+                            onCommitText={(text) => {
+                              if (text === '') {
+                                updateChild(index, ci, () => null)
+                                return
+                              }
+                              const wasDelegated = child.delegated
+                              const newKey = childKey(item.text, text)
+                              updateChild(index, ci, (c) => ({ ...c, text, key: newKey, delegated: mentionsRowboat(text) }))
+                              if (!wasDelegated && mentionsRowboat(text) && !child.checked) {
+                                void saveNowRef.current().then(() => runItem(newKey))
+                              }
+                            }}
+                            onDismiss={() => void dismissKey(child.key)}
+                            onRun={() => runItem(child.key)}
+                            onOpenNote={onOpenNote}
+                            commentOpen={commentKey === child.key}
+                            sessionId={sessions[child.key] ?? null}
+                            bubbles={conversations[child.key] ?? []}
+                            onToggleComment={() => setCommentKey(commentKey === child.key ? null : child.key)}
+                            onComment={(message) => commentOnItem(child.key, message)}
+                            onOpenInChat={onOpenInChat}
+                          />
+                        ))}
+                        {subDraftFor === item.key && (
+                          <SubComposer
+                            onSubmit={(text) => void addSub(item.key, text)}
+                            onCancel={() => setSubDraftFor(null)}
+                          />
+                        )}
+                      </div>
+                    )}
                   />
                 )
               })

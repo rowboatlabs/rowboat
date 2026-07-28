@@ -8,7 +8,7 @@ import { TurnNotSettledError } from '../runtime/sessions/api.js';
 import type { ITurnEventBus } from '../runtime/turns/event-hub.js';
 import { assistantText } from '../runtime/assembly/headless.js';
 import { ASK_HUMAN_TOOL } from '../runtime/turns/bridges/real-agent-resolver.js';
-import { attachReceipt, getItem, normalizeKey, setChecked, TODO_REL_PATH } from './fileops.js';
+import { attachReceipt, findItem, getItem, normalizeKey, setChecked, TODO_REL_PATH } from './fileops.js';
 import { getSessionId, setSessionId } from './session-index.js';
 import { todoBus } from './bus.js';
 
@@ -43,17 +43,21 @@ function errorLine(msg: string, n = 200): string {
     return truncate(msg.split('\n')[0], n);
 }
 
-function buildFirstMessage(text: string, context?: string): string {
+function buildFirstMessage(text: string, context?: string, parentText?: string): string {
     const now = new Date();
     const localNow = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+    const partOf = parentText ? `\n**Part of:** ${parentText} — this item is one step of that larger to-do; scope your work to THIS step only.` : '';
+    const report = parentText
+        ? `report the outcome with \`todo-report\` (item text exactly as above, parent exactly as in **Part of**)`
+        : `report the outcome with \`todo-report\` (item text exactly as above)`;
     const base = `Work on this item from the user's to-do list at \`${TODO_REL_PATH}\`:
 
-**Item:** ${text}
+**Item:** ${text}${partOf}
 **Time:** ${localNow} (${tz})
 
-Start by calling \`file-readText\` on \`${TODO_REL_PATH}\` — the surrounding list often carries context this item's phrasing assumes. Then do the work per your instructions, and report the outcome with \`todo-report\` (item text exactly as above).`;
+Start by calling \`file-readText\` on \`${TODO_REL_PATH}\` — the surrounding list often carries context this item's phrasing assumes. Then do the work per your instructions, and ${report}.`;
 
     return context ? `${base}\n\n**Context from the user:**\n${context}` : base;
 }
@@ -327,16 +331,18 @@ export async function runTodoItem(key: string, context?: string): Promise<TodoRu
     }
     runningItems.add(norm);
     try {
-        const item = await getItem(norm);
-        if (!item) {
+        const found = await findItem(norm);
+        if (!found) {
             return { key: norm, sessionId: null, turnId: null, summary: null, error: 'Item not found' };
         }
+        const { item, parent } = found;
         if (item.checked) {
             return { key: norm, sessionId: null, turnId: null, summary: null, error: 'Item is already done' };
         }
         const { sessions } = await resolveDeps();
-        const { sessionId } = await ensureSession(sessions, norm, item.text);
-        return await driveTurn(norm, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context), 'manual');
+        const title = parent ? `${item.text} · ${parent.text}` : item.text;
+        const { sessionId } = await ensureSession(sessions, item.key, title);
+        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context, parent?.text), 'manual');
     } finally {
         runningItems.delete(norm);
     }
@@ -355,12 +361,13 @@ export async function commentOnTodoItem(key: string, message: string): Promise<T
     }
     runningItems.add(norm);
     try {
-        const item = await getItem(norm);
-        if (!item) {
+        const found = await findItem(norm);
+        if (!found) {
             return { key: norm, sessionId: null, turnId: null, summary: null, error: 'Item not found' };
         }
+        const { item, parent } = found;
         if (item.checked) {
-            await setChecked(norm, false);
+            await setChecked(item.key, false);
             todoBus.publish({ type: 'list_changed' });
         }
 
@@ -392,9 +399,10 @@ export async function commentOnTodoItem(key: string, message: string): Promise<T
             }
         }
 
-        const { sessionId, isNew } = await ensureSession(sessions, norm, item.text);
-        const text = isNew ? buildFirstMessage(item.text, message) : message;
-        return await driveTurn(norm, item.text, item.receipts.length, sessionId, text, 'comment');
+        const title = parent ? `${item.text} · ${parent.text}` : item.text;
+        const { sessionId, isNew } = await ensureSession(sessions, item.key, title);
+        const text = isNew ? buildFirstMessage(item.text, message, parent?.text) : message;
+        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, text, 'comment');
     } finally {
         runningItems.delete(norm);
     }

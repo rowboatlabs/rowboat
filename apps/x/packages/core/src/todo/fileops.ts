@@ -10,8 +10,10 @@ const log = new PrefixLogger('Todo:Fileops');
 
 // ---------------------------------------------------------------------------
 // One rolling list at ~/.rowboat/todo.md — the file is the whole truth.
-// Receipts (agent outcomes) are indented "- → …" lines under their item.
-// Completed items get archived to todo/archive/<YYYY-MM>.md.
+// Top-level task lines are items; task lines indented under one are its
+// sub-items (one level only). Receipts (agent outcomes) are indented
+// "- → …" lines under their line. Completed/dismissed items get archived to
+// todo/archive/<YYYY-MM>.md.
 // ---------------------------------------------------------------------------
 
 const TODO_PATH = path.join(WorkDir, 'todo.md');
@@ -22,11 +24,20 @@ export const TODO_REL_PATH = 'todo.md';
 
 const ROWBOAT_MENTION_RE = /(^|\s)@rowboat\b/i;
 const TASK_LINE_RE = /^- \[( |x|X)\] (.*\S)\s*$/;
+const SUB_TASK_LINE_RE = /^\s{2,6}- \[( |x|X)\] (.*\S)\s*$/;
 const RECEIPT_LINE_RE = /^\s+- → (.*\S)\s*$/;
 const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
+/** Receipt stamped onto a dismissed sub-item so restore can re-nest it. */
+const FROM_RE = /^from: (.+)$/;
 
 export function normalizeKey(text: string): string {
     return text.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** A sub-item's identity: scoped by its parent so same-named steps under
+ * different projects never collide. */
+export function subKey(parentText: string, subText: string): string {
+    return `${normalizeKey(parentText)} :: ${normalizeKey(subText)}`;
 }
 
 export function isDelegated(text: string): boolean {
@@ -59,45 +70,60 @@ function parseReceipt(body: string): TodoReceipt {
     return { kind, text, links };
 }
 
-function serializeReceipt(r: TodoReceipt): string {
+function serializeReceipt(r: TodoReceipt, indent: string): string {
     // A receipt is exactly one line — embedded newlines (e.g. multi-line
     // provider errors) would leak raw text lines into the file.
     const text = r.text.replace(/\s+/g, ' ').trim();
-    if (r.kind === 'question') return `  - → needs you: ${text}`;
-    if (r.kind === 'error') return `  - → failed: ${text}`;
+    if (r.kind === 'question') return `${indent}- → needs you: ${text}`;
+    if (r.kind === 'error') return `${indent}- → failed: ${text}`;
     const links = r.links.map(l => `[${l.label}](${l.url ?? l.path ?? ''})`).join(', ');
-    if (links && text) return `  - → ${links} — ${text}`;
-    if (links) return `  - → ${links}`;
-    return `  - → ${text}`;
+    if (links && text) return `${indent}- → ${links} — ${text}`;
+    if (links) return `${indent}- → ${links}`;
+    return `${indent}- → ${text}`;
+}
+
+function newItem(text: string, checked: boolean, key: string): TodoItem {
+    return {
+        key,
+        text: text.trim(),
+        checked,
+        delegated: isDelegated(text),
+        receipts: [],
+        children: [],
+    };
 }
 
 export function parseTodoFile(markdown: string): TodoList {
     const blocks: TodoBlock[] = [];
-    const lines = markdown.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-        const task = TASK_LINE_RE.exec(lines[i]);
-        if (!task) {
-            blocks.push({ kind: 'raw', text: lines[i] });
+    // Receipts and sub-items attach to the immediately preceding line's
+    // item; any other line breaks the block.
+    let parent: TodoItem | null = null;
+    let current: TodoItem | null = null;
+
+    for (const line of markdown.split('\n')) {
+        const receipt = RECEIPT_LINE_RE.exec(line);
+        if (receipt && current) {
+            current.receipts.push(parseReceipt(receipt[1]));
             continue;
         }
-        const text = task[2].trim();
-        const receipts: TodoReceipt[] = [];
-        while (i + 1 < lines.length) {
-            const receipt = RECEIPT_LINE_RE.exec(lines[i + 1]);
-            if (!receipt) break;
-            receipts.push(parseReceipt(receipt[1]));
-            i++;
+        const task = TASK_LINE_RE.exec(line);
+        if (task) {
+            const item = newItem(task[2], task[1].toLowerCase() === 'x', normalizeKey(task[2]));
+            blocks.push({ kind: 'item', item });
+            parent = item;
+            current = item;
+            continue;
         }
-        blocks.push({
-            kind: 'item',
-            item: {
-                key: normalizeKey(text),
-                text,
-                checked: task[1].toLowerCase() === 'x',
-                delegated: isDelegated(text),
-                receipts,
-            },
-        });
+        const sub = SUB_TASK_LINE_RE.exec(line);
+        if (sub && parent) {
+            const child = newItem(sub[2], sub[1].toLowerCase() === 'x', subKey(parent.text, sub[2]));
+            parent.children.push(child);
+            current = child;
+            continue;
+        }
+        blocks.push({ kind: 'raw', text: line });
+        parent = null;
+        current = null;
     }
     // Drop trailing empty raw lines beyond one — keeps repeated saves from
     // growing the file.
@@ -112,8 +138,15 @@ export function parseTodoFile(markdown: string): TodoList {
 }
 
 function serializeItem(item: TodoItem): string[] {
-    const box = item.checked ? 'x' : ' ';
-    return [`- [${box}] ${item.text.trim()}`, ...item.receipts.map(serializeReceipt)];
+    const out = [
+        `- [${item.checked ? 'x' : ' '}] ${item.text.trim()}`,
+        ...item.receipts.map(r => serializeReceipt(r, '  ')),
+    ];
+    for (const child of item.children) {
+        out.push(`  - [${child.checked ? 'x' : ' '}] ${child.text.trim()}`);
+        out.push(...child.receipts.map(r => serializeReceipt(r, '    ')));
+    }
+    return out;
 }
 
 export function serializeTodoFile(list: TodoList): string {
@@ -125,6 +158,56 @@ export function serializeTodoFile(list: TodoList): string {
     let md = out.join('\n');
     if (!md.endsWith('\n')) md += '\n';
     return md;
+}
+
+// ---------------------------------------------------------------------------
+// Walking & key resolution
+// ---------------------------------------------------------------------------
+
+export type FoundItem = { item: TodoItem; parent: TodoItem | null };
+
+function* walkItems(list: TodoList): Generator<FoundItem> {
+    for (const block of list.blocks) {
+        if (block.kind !== 'item') continue;
+        yield { item: block.item, parent: null };
+        for (const child of block.item.children) {
+            yield { item: child, parent: block.item };
+        }
+    }
+}
+
+/** Re-derive every key from current text (authoritative on save). */
+function rekey(list: TodoList): void {
+    for (const block of list.blocks) {
+        if (block.kind !== 'item') continue;
+        const item = block.item;
+        item.key = normalizeKey(item.text);
+        item.delegated = isDelegated(item.text);
+        for (const child of item.children) {
+            child.key = subKey(item.text, child.text);
+            child.delegated = isDelegated(child.text);
+            child.children = [];
+        }
+    }
+}
+
+/**
+ * Find by key. Scoped keys match exactly; a bare key that misses at the top
+ * level falls back to a unique sub-item text match — so an agent reporting
+ * without parent context still lands when unambiguous.
+ */
+function resolveLocked(list: TodoList, key: string): FoundItem | null {
+    const norm = normalizeKey(key);
+    for (const found of walkItems(list)) {
+        if (found.item.key === norm) return found;
+    }
+    if (!norm.includes(' :: ')) {
+        const matches = [...walkItems(list)].filter(
+            f => f.parent && normalizeKey(f.item.text) === norm,
+        );
+        if (matches.length === 1) return matches[0];
+    }
+    return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,32 +255,24 @@ export async function readTodo(): Promise<TodoList> {
     });
 }
 
-function itemsByKey(list: TodoList): Map<string, TodoItem> {
-    const map = new Map<string, TodoItem>();
-    for (const block of list.blocks) {
-        if (block.kind === 'item' && !map.has(block.item.key)) map.set(block.item.key, block.item);
-    }
-    return map;
-}
-
-const receiptId = (r: TodoReceipt) => serializeReceipt(r);
+const receiptId = (r: TodoReceipt) => serializeReceipt(r, '');
 
 /**
  * Full-model save from the renderer. Merges against disk so a receipt that
  * landed after the renderer's last read is never lost: receipts are unioned
- * per item, and an item the agent just checked stays checked if the incoming
- * copy predates its receipts.
+ * per item (top-level and sub), and an item the agent just checked stays
+ * checked if the incoming copy predates its receipts.
  */
 export async function saveTodo(incoming: TodoList): Promise<TodoList> {
     return withTodoLock(async () => {
+        rekey(incoming);
         const disk = parseTodoFile(await readRaw());
-        const diskItems = itemsByKey(disk);
-        for (const block of incoming.blocks) {
-            if (block.kind !== 'item') continue;
-            const item = block.item;
-            item.key = normalizeKey(item.text);
-            item.delegated = isDelegated(item.text);
-            const onDisk = diskItems.get(item.key);
+        const diskByKey = new Map<string, TodoItem>();
+        for (const { item } of walkItems(disk)) {
+            if (!diskByKey.has(item.key)) diskByKey.set(item.key, item);
+        }
+        for (const { item } of walkItems(incoming)) {
+            const onDisk = diskByKey.get(item.key);
             if (!onDisk) continue;
             const have = new Set(item.receipts.map(receiptId));
             const missing = onDisk.receipts.filter(r => !have.has(receiptId(r)));
@@ -215,13 +290,7 @@ export async function saveTodo(incoming: TodoList): Promise<TodoList> {
 
 /** Append one task line to the end of the list. */
 export async function addItem(text: string): Promise<TodoItem> {
-    const item: TodoItem = {
-        key: normalizeKey(text),
-        text: text.replace(/\s+/g, ' ').trim(),
-        checked: false,
-        delegated: isDelegated(text),
-        receipts: [],
-    };
+    const item = newItem(text.replace(/\s+/g, ' ').trim(), false, normalizeKey(text));
     await withTodoLock(async () => {
         const list = parseTodoFile(await readRaw());
         list.blocks.push({ kind: 'item', item });
@@ -230,9 +299,31 @@ export async function addItem(text: string): Promise<TodoItem> {
     return item;
 }
 
+/** Add a sub-item under an existing top-level item. */
+export async function addSubItem(parentKey: string, text: string): Promise<TodoItem | null> {
+    const norm = normalizeKey(parentKey);
+    return withTodoLock(async () => {
+        const list = parseTodoFile(await readRaw());
+        for (const block of list.blocks) {
+            if (block.kind !== 'item' || block.item.key !== norm) continue;
+            const clean = text.replace(/\s+/g, ' ').trim();
+            const child = newItem(clean, false, subKey(block.item.text, clean));
+            block.item.children.push(child);
+            await writeRaw(serializeTodoFile(list));
+            return child;
+        }
+        return null;
+    });
+}
+
 export async function getItem(key: string): Promise<TodoItem | null> {
+    return (await findItem(key))?.item ?? null;
+}
+
+/** Find an item (top-level or sub) with its parent context. */
+export async function findItem(key: string): Promise<FoundItem | null> {
     const list = await readTodo();
-    return itemsByKey(list).get(normalizeKey(key)) ?? null;
+    return resolveLocked(list, key);
 }
 
 /**
@@ -245,36 +336,32 @@ export async function attachReceipt(
     receipt: TodoReceipt,
     opts?: { check?: boolean },
 ): Promise<boolean> {
-    const norm = normalizeKey(key);
     return withTodoLock(async () => {
         const list = parseTodoFile(await readRaw());
-        for (const block of list.blocks) {
-            if (block.kind !== 'item' || block.item.key !== norm) continue;
-            const have = new Set(block.item.receipts.map(receiptId));
-            if (!have.has(receiptId(receipt))) block.item.receipts.push(receipt);
-            if (opts?.check) block.item.checked = true;
-            await writeRaw(serializeTodoFile(list));
-            return true;
+        const found = resolveLocked(list, key);
+        if (!found) {
+            log.log(`receipt dropped — item vanished: "${normalizeKey(key)}"`);
+            return false;
         }
-        log.log(`receipt dropped — item vanished: "${norm}"`);
-        return false;
+        const have = new Set(found.item.receipts.map(receiptId));
+        if (!have.has(receiptId(receipt))) found.item.receipts.push(receipt);
+        if (opts?.check) found.item.checked = true;
+        await writeRaw(serializeTodoFile(list));
+        return true;
     });
 }
 
 /** Set an item's checkbox. Returns false when the line no longer exists. */
 export async function setChecked(key: string, checked: boolean): Promise<boolean> {
-    const norm = normalizeKey(key);
     return withTodoLock(async () => {
         const list = parseTodoFile(await readRaw());
-        for (const block of list.blocks) {
-            if (block.kind !== 'item' || block.item.key !== norm) continue;
-            if (block.item.checked !== checked) {
-                block.item.checked = checked;
-                await writeRaw(serializeTodoFile(list));
-            }
-            return true;
+        const found = resolveLocked(list, key);
+        if (!found) return false;
+        if (found.item.checked !== checked) {
+            found.item.checked = checked;
+            await writeRaw(serializeTodoFile(list));
         }
-        return false;
+        return true;
     });
 }
 
@@ -302,8 +389,9 @@ async function appendToArchive(items: TodoItem[], now: Date): Promise<void> {
     await fs.writeFile(target, existing + stamp + body, 'utf-8');
 }
 
-/** Move checked items (with receipts) out of the list into the monthly
- * archive, stamped with today's date. Returns how many were archived. */
+/** Move checked TOP-LEVEL items (children and receipts intact) into the
+ * monthly archive. Checked sub-items of an open parent stay — they are the
+ * parent's progress record until the parent itself clears. */
 export async function clearCompleted(now: Date = new Date()): Promise<number> {
     return withTodoLock(async () => {
         const list = parseTodoFile(await readRaw());
@@ -323,19 +411,33 @@ export async function clearCompleted(now: Date = new Date()): Promise<number> {
 }
 
 /**
- * Dismiss = move the item (receipts intact) into the monthly archive, not
- * delete it. Everything stays restorable from the "Done & dismissed"
- * section; nothing typed into the list is ever lost from disk.
+ * Dismiss = move to the monthly archive, not delete. A parent takes its
+ * whole block (children included); a sub-item is archived standalone with a
+ * "from: <parent>" receipt so restore can re-nest it. Everything stays
+ * restorable; nothing typed into the list is ever lost from disk.
  */
 export async function dismissItem(key: string, now: Date = new Date()): Promise<boolean> {
     const norm = normalizeKey(key);
     return withTodoLock(async () => {
         const list = parseTodoFile(await readRaw());
-        const idx = list.blocks.findIndex(b => b.kind === 'item' && b.item.key === norm);
-        if (idx === -1) return false;
-        const [removed] = list.blocks.splice(idx, 1);
-        if (removed.kind !== 'item') return false;
-        await appendToArchive([removed.item], now);
+        const found = resolveLocked(list, norm);
+        if (!found) return false;
+
+        if (found.parent) {
+            found.parent.children = found.parent.children.filter(c => c !== found.item);
+            const standalone: TodoItem = {
+                ...found.item,
+                key: normalizeKey(found.item.text),
+                receipts: [...found.item.receipts, { kind: 'result', text: `from: ${found.parent.text}`, links: [] }],
+                children: [],
+            };
+            await appendToArchive([standalone], now);
+        } else {
+            const idx = list.blocks.findIndex(b => b.kind === 'item' && b.item === found.item);
+            if (idx === -1) return false;
+            list.blocks.splice(idx, 1);
+            await appendToArchive([found.item], now);
+        }
         await writeRaw(serializeTodoFile(list));
         log.log(`dismissed "${norm}" → ${path.basename(archivePath(now))}`);
         return true;
@@ -390,8 +492,10 @@ export async function listArchived(limit = 30, now: Date = new Date()): Promise<
 
 /**
  * Bring an archived item back onto the list, unchecked (restoring means
- * "this is active again"). The handle is (month, blockIndex) from
- * listArchived; `key` guards against the file having changed since.
+ * "this is active again"). A "from: <parent>" stamp re-nests the item under
+ * its parent when that parent still exists; otherwise it lands top-level.
+ * The handle is (month, blockIndex) from listArchived; `key` guards against
+ * the file having changed since.
  */
 export async function restoreItem(month: string, blockIndex: number, key: string): Promise<boolean> {
     if (!/^\d{4}-\d{2}$/.test(month)) return false;
@@ -407,7 +511,25 @@ export async function restoreItem(month: string, blockIndex: number, key: string
         await fs.writeFile(target, serializeTodoFile({ blocks }), 'utf-8');
 
         const list = parseTodoFile(await readRaw());
-        list.blocks.push({ kind: 'item', item: { ...block.item, checked: false } });
+        const fromIdx = block.item.receipts.findIndex(r => FROM_RE.test(r.text));
+        const parentText = fromIdx >= 0 ? FROM_RE.exec(block.item.receipts[fromIdx].text)![1] : null;
+        const restored: TodoItem = { ...block.item, checked: false };
+        if (fromIdx >= 0) restored.receipts = restored.receipts.filter((_r, i) => i !== fromIdx);
+
+        const parent = parentText
+            ? list.blocks.find(
+                  (b): b is Extract<TodoBlock, { kind: 'item' }> =>
+                      b.kind === 'item' && b.item.key === normalizeKey(parentText),
+              )
+            : undefined;
+        if (parent) {
+            restored.key = subKey(parent.item.text, restored.text);
+            restored.children = [];
+            parent.item.children.push(restored);
+        } else {
+            restored.key = normalizeKey(restored.text);
+            list.blocks.push({ kind: 'item', item: restored });
+        }
         await writeRaw(serializeTodoFile(list));
         log.log(`restored "${norm}" from ${month}`);
         return true;

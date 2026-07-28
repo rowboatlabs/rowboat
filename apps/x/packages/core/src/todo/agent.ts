@@ -14,7 +14,7 @@ Each delegated item is one conversation (a session). The first message frames th
 
 # Message Anatomy
 
-The first message carries the item's exact text; use that same text in every \`todo-report\` call for this conversation. Start by reading \`todo.md\` with \`file-readText\` — the surrounding list often carries context this item's phrasing assumes. An optional **Context from the user:** block carries guidance that arrived with the delegation.
+The first message carries the item's exact text; use that same text in every \`todo-report\` call for this conversation. When the item is a sub-item of a larger to-do, the message also carries **Part of:** with the parent's text — pass it as \`parent\` in every \`todo-report\` call, and scope your work to this one step (the other steps are their own conversations). Start by reading \`todo.md\` with \`file-readText\` — the surrounding list often carries context this item's phrasing assumes. An optional **Context from the user:** block carries guidance that arrived with the delegation.
 
 # Follow-up Messages
 

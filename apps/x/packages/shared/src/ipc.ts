@@ -2469,6 +2469,18 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  // Add a sub-item under an existing top-level item (one level only).
+  'todo:addSubItem': {
+    req: z.object({
+      parentKey: z.string(),
+      text: z.string(),
+      run: z.boolean(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   // Compact conversation view of an item's session: each turn's user message
   // and the agent's final reply (with todo-report links). Derived, not stored.
   'todo:getConversation': {

@@ -147,6 +147,7 @@ import {
   readTodo,
   saveTodo,
   addItem as addTodoItem,
+  addSubItem as addTodoSubItem,
   clearCompleted as clearTodoCompleted,
   dismissItem as dismissTodoItem,
   listArchived as listTodoArchived,
@@ -2650,6 +2651,19 @@ export function setupIpcHandlers() {
     'todo:runItem': async (_event, args) => {
       try {
         void runTodoItem(args.key, args.context).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:addSubItem': async (_event, args) => {
+      try {
+        const child = await addTodoSubItem(args.parentKey, args.text);
+        if (!child) return { success: false, error: 'Parent not found' };
+        if (args.run || child.delegated) {
+          void runTodoItem(child.key).catch(() => {});
+        }
+        todoBus.publish({ type: 'list_changed' });
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

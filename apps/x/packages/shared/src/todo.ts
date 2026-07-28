@@ -51,7 +51,8 @@ export type TodoReceipt = {
 };
 
 export type TodoItem = {
-    /** Normalized line text — the item's identity for runs and push events. */
+    /** Normalized line text — the item's identity for runs and push events.
+     * Sub-items are scoped: `<parent key> :: <normalized sub text>`. */
     key: string;
     /** Raw line text after the checkbox (includes any @rowboat mention). */
     text: string;
@@ -59,6 +60,9 @@ export type TodoItem = {
     /** True when the text mentions @rowboat. */
     delegated: boolean;
     receipts: TodoReceipt[];
+    /** Sub-items — one level only; a sub-item's children are always empty.
+     * Each is a full item: own thread, receipts, delegation. */
+    children: TodoItem[];
 };
 
 /** The file, block by block: task items (with their receipts) plus every
@@ -106,13 +110,15 @@ export const TodoReceiptSchema = z.object({
     links: z.array(TodoLinkSchema),
 });
 
-export const TodoItemSchema = z.object({
+export const TodoItemSchema: z.ZodType<TodoItem> = z.lazy(() => z.object({
     key: z.string(),
     text: z.string(),
     checked: z.boolean(),
     delegated: z.boolean(),
     receipts: z.array(TodoReceiptSchema),
-});
+    // Depth (one level) is enforced by the parser, not the schema.
+    children: z.array(TodoItemSchema),
+}));
 
 export const TodoBlockSchema = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('item'), item: TodoItemSchema }),

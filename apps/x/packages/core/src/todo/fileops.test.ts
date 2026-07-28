@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isDelegated, normalizeKey, parseArchive, parseTodoFile, serializeTodoFile } from './fileops.js';
+import { isDelegated, normalizeKey, parseArchive, parseTodoFile, serializeTodoFile, subKey } from './fileops.js';
 
 const SAMPLE = `- [ ] build a deck
 - [x] @rowboat research pricing models
@@ -51,12 +51,37 @@ describe('todo fileops parse/serialize', () => {
         expect(normalizeKey('  @Rowboat   Research pricing MODELS ')).toEqual('@rowboat research pricing models');
     });
 
+    it('parses nested sub-items with scoped keys and their own receipts', () => {
+        const md = `- [ ] create pitch deck
+  - → outline receipt on the parent
+  - [x] @rowboat research TAM
+    - → [TAM research](knowledge/Topics/tam.md) — $4.2B, three segments
+  - [ ] research competitors
+- [ ] send follow-up emails
+`;
+        const list = parseTodoFile(md);
+        const items = list.blocks.filter(b => b.kind === 'item').map(b => b.item);
+        expect(items).toHaveLength(2);
+        const deck = items[0];
+        expect(deck.receipts).toHaveLength(1);
+        expect(deck.children.map(c => [c.text, c.checked, c.delegated])).toEqual([
+            ['@rowboat research TAM', true, true],
+            ['research competitors', false, false],
+        ]);
+        expect(deck.children[0].key).toEqual(subKey('create pitch deck', '@rowboat research TAM'));
+        expect(deck.children[0].receipts[0].links).toEqual([
+            { label: 'TAM research', path: 'knowledge/Topics/tam.md' },
+        ]);
+        // Byte-stable round-trip with nesting.
+        expect(serializeTodoFile(list)).toEqual(md);
+    });
+
     it('flattens multi-line receipt text to one line', () => {
         const md = serializeTodoFile({
             blocks: [{
                 kind: 'item',
                 item: {
-                    key: 'x', text: 'x', checked: false, delegated: false,
+                    key: 'x', text: 'x', checked: false, delegated: false, children: [],
                     receipts: [{ kind: 'error', text: 'Incorrect API key [status 401 — {\n  "error": {\n    "message": "boom"\n}]', links: [] }],
                 },
             }],
