@@ -318,16 +318,32 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, onToggle, o
           <CommentComposer onSend={onComment} onCancel={onToggleComment} />
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => (sessionId ? onOpenInChat(sessionId) : onToggleComment())}
-        title={sessionId ? 'Open this conversation in the chat sidebar' : 'Comment — tell @rowboat something about this item'}
-        className={`mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 transition-opacity hover:bg-accent hover:text-foreground ${
-          item.receipts.length > 0 || isRunning || showConversation ? '' : 'opacity-0 group-hover/todo:opacity-100'
-        }`}
-      >
-        <MessageCircle className="size-3.5" />
-      </button>
+      {/* ＋ is the standing way to comment on any item; once bubbles are
+          shown, the in-thread "+ reply" chip takes over that job. */}
+      {!showConversation && (
+        <button
+          type="button"
+          onClick={onToggleComment}
+          title="Comment — tell @rowboat something about this item"
+          className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      )}
+      {/* 💬 appears only once a thread exists — then there is something to
+          continue in the sidebar. */}
+      {sessionId && (
+        <button
+          type="button"
+          onClick={() => onOpenInChat(sessionId)}
+          title="Open this conversation in the chat sidebar"
+          className={`mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 transition-opacity hover:bg-accent hover:text-foreground ${
+            showConversation || isRunning ? '' : 'opacity-0 group-hover/todo:opacity-100'
+          }`}
+        >
+          <MessageCircle className="size-3.5" />
+        </button>
+      )}
       <button
         type="button"
         onClick={onDismiss}
@@ -563,7 +579,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
           {showCallout && (
             <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
               <Bot className="size-4 shrink-0 text-primary" />
-              <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Hit 💬 on the row to refine the work with a comment, or open it in chat.</span>
+              <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Hit ＋ on the row to refine the work with a comment; 💬 opens the whole conversation in the sidebar.</span>
               <button
                 type="button"
                 onClick={() => { localStorage.setItem(CALLOUT_KEY, '1'); setShowCallout(false) }}
