@@ -21,6 +21,7 @@
         "chokidar": "^4.0.3",
         "electron-chrome-extensions": "^4.9.0",
         "electron-context-menu": "^4.1.2",
+        "electron-liquid-glass": "^1.1.1",
         "electron-squirrel-startup": "^1.0.1",
         "html-to-docx": "^1.8.0",
         "mammoth": "^1.11.0",
