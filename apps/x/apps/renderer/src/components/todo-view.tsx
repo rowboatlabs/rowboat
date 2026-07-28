@@ -31,6 +31,36 @@ function normKey(text: string): string {
   return text.replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
+// ---------------------------------------------------------------------------
+// @rowboat autocomplete — shared by every composer (main, reply, sub-task).
+// A trailing "@" or partial "@row…" offers the completion; Tab or click
+// completes it. Slack/Notion muscle memory, everywhere text is typed.
+// ---------------------------------------------------------------------------
+
+function useMention(text: string, setText: (t: string) => void) {
+  const match = /(^|\s)@(r(o(w(b(o(a(t?)?)?)?)?)?)?)?$/i.exec(text)
+  const show = match !== null && !/(^|\s)@rowboat$/i.test(text)
+  const complete = () => {
+    if (!match) return
+    setText(`${text.slice(0, match.index)}${match[1]}@rowboat `)
+  }
+  return { show, complete }
+}
+
+function MentionPopup({ onPick }: { onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      onMouseDown={(e) => { e.preventDefault(); onPick() }}
+      className="absolute bottom-full left-3 z-10 mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-1.5 text-sm shadow-md hover:bg-accent"
+    >
+      <Bot className="size-3.5 text-primary" />
+      <span className="font-medium">@rowboat</span>
+      <span className="text-xs text-muted-foreground">hand this off — Tab</span>
+    </button>
+  )
+}
+
 function childKey(parentText: string, subText: string): string {
   return `${normKey(parentText)} :: ${normKey(subText)}`
 }
@@ -129,14 +159,17 @@ function SubComposer({ onSubmit, onCancel }: {
   onCancel: () => void
 }) {
   const [text, setText] = useState('')
+  const mention = useMention(text, setText)
   return (
-    <div className="mt-1 flex items-center gap-2 rounded-lg border border-dashed border-border px-2.5 py-1.5">
+    <div className="relative mt-1 flex items-center gap-2 rounded-lg border border-dashed border-border px-2.5 py-1.5">
+      {mention.show && <MentionPopup onPick={mention.complete} />}
       <ListPlus className="size-3.5 shrink-0 text-muted-foreground" />
       <input
         autoFocus
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
+          if (e.key === 'Tab' && mention.show) { e.preventDefault(); mention.complete(); return }
           if (e.key === 'Enter' && text.trim()) {
             e.preventDefault()
             onSubmit(text.trim())
@@ -155,14 +188,17 @@ function CommentComposer({ onSend, onCancel }: {
   onCancel: () => void
 }) {
   const [message, setMessage] = useState('')
+  const mention = useMention(message, setMessage)
   return (
-    <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
+    <div className="relative mt-1.5 flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
+      {mention.show && <MentionPopup onPick={mention.complete} />}
       <MessageCircle className="size-3.5 shrink-0 text-muted-foreground" />
       <input
         autoFocus
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         onKeyDown={(e) => {
+          if (e.key === 'Tab' && mention.show) { e.preventDefault(); mention.complete(); return }
           if (e.key === 'Enter' && message.trim()) {
             e.preventDefault()
             onSend(message.trim())
@@ -290,6 +326,7 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(item.text)
+  const mention = useMention(draft, setDraft)
   // The live exchange renders as bubbles; a checked item collapses back to
   // its compact receipt lines so the list stays a list.
   const showConversation = !item.checked && bubbles.length > 0
@@ -316,17 +353,21 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
       />
       <div className="min-w-0 flex-1">
         {editing ? (
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commit()
-              if (e.key === 'Escape') { setDraft(item.text); setEditing(false) }
-            }}
-            className="w-full bg-transparent text-sm outline-none"
-          />
+          <div className="relative">
+            {mention.show && <MentionPopup onPick={mention.complete} />}
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === 'Tab' && mention.show) { e.preventDefault(); mention.complete(); return }
+                if (e.key === 'Enter') commit()
+                if (e.key === 'Escape') { setDraft(item.text); setEditing(false) }
+              }}
+              className="w-full bg-transparent text-sm outline-none"
+            />
+          </div>
         ) : (
           <div
             onClick={() => { if (!item.checked) { setDraft(item.text); setEditing(true) } }}
@@ -349,6 +390,17 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
             {showGoChip && !lastReceipt && (
               <button type="button" onClick={(e) => { e.stopPropagation(); onRun() }} className={`${CHIP} ml-2 border border-border text-muted-foreground hover:bg-accent hover:text-foreground`}>
                 <Bot className="size-3" /> run
+              </button>
+            )}
+            {/* One-click delegation — prepends the mention, which routes
+                through the same "typed @rowboat" go path. */}
+            {!item.delegated && !item.checked && !isRunning && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onCommitText(`@rowboat ${item.text}`) }}
+                className={`${CHIP} ml-2 border border-border text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100`}
+              >
+                <Bot className="size-3" /> assign
               </button>
             )}
           </div>
@@ -425,19 +477,7 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
 
 function Composer({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [text, setText] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  // Trailing "@" or partial "@row…" (not already the full mention) → offer
-  // the completion. Everyone has the Slack/Notion muscle memory for this.
-  const mentionMatch = /(^|\s)@(r(o(w(b(o(a(t?)?)?)?)?)?)?)?$/i.exec(text)
-  const showMention = mentionMatch !== null && !/(^|\s)@rowboat$/i.test(text)
-
-  const completeMention = () => {
-    if (!mentionMatch) return
-    const upToAt = text.slice(0, mentionMatch.index) + mentionMatch[1]
-    setText(`${upToAt}@rowboat `)
-    inputRef.current?.focus()
-  }
+  const mention = useMention(text, setText)
 
   const submit = () => {
     const t = text.trim()
@@ -448,24 +488,13 @@ function Composer({ onSubmit }: { onSubmit: (text: string) => void }) {
 
   return (
     <div className="relative">
-      {showMention && (
-        <button
-          type="button"
-          onMouseDown={(e) => { e.preventDefault(); completeMention() }}
-          className="absolute bottom-full left-3 mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-1.5 text-sm shadow-md hover:bg-accent"
-        >
-          <Bot className="size-3.5 text-primary" />
-          <span className="font-medium">@rowboat</span>
-          <span className="text-xs text-muted-foreground">hand this off — Tab</span>
-        </button>
-      )}
+      {mention.show && <MentionPopup onPick={mention.complete} />}
       <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5">
         <input
-          ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Tab' && showMention) { e.preventDefault(); completeMention(); return }
+            if (e.key === 'Tab' && mention.show) { e.preventDefault(); mention.complete(); return }
             if (e.key === 'Enter') { e.preventDefault(); submit() }
           }}
           placeholder="Add a to-do… mention @rowboat to hand it off"
