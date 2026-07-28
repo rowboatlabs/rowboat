@@ -425,11 +425,81 @@ function Composer({ onSubmit }: { onSubmit: (text: string) => void }) {
 // The view
 // ---------------------------------------------------------------------------
 
+type ArchivedEntry = {
+  month: string
+  blockIndex: number
+  date: string | null
+  item: TodoItem
+}
+
+// Everything dismissed or cleared lands here (todo/archive/), listed below
+// the composer and restorable — nothing typed into the list is ever lost.
+function ArchivedSection({ entries, onRestore, onOpenNote }: {
+  entries: ArchivedEntry[]
+  onRestore: (entry: ArchivedEntry) => void
+  onOpenNote: (path: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  if (entries.length === 0) return null
+  return (
+    <div className="rounded-xl border border-border bg-card/60 px-4 py-2.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+      >
+        <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
+        Done &amp; dismissed · {entries.length}
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col">
+          {entries.map((entry) => (
+            <div key={`${entry.month}:${entry.blockIndex}`} className="group/arch flex items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-accent/40">
+              <span className="mt-[3px] size-4 shrink-0 text-center text-[13px] leading-4 text-muted-foreground/60">
+                {entry.item.checked ? '✓' : '·'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className={`text-sm text-muted-foreground ${entry.item.checked ? 'line-through' : ''}`}>
+                  <TextWithMentions text={entry.item.text} />
+                  {entry.date && <span className="ml-2 text-[11px] text-muted-foreground/60">{entry.date}</span>}
+                </div>
+                {entry.item.receipts.length > 0 && (
+                  <div className="mt-0.5 flex flex-wrap gap-1.5">
+                    {entry.item.receipts.flatMap((r) => r.links).map((l, j) => (
+                      <button
+                        key={j}
+                        type="button"
+                        onClick={() => openLink(l, onOpenNote)}
+                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border hover:bg-accent hover:text-foreground"
+                      >
+                        <ArrowUpRight className="size-3" /> {l.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => onRestore(entry)}
+                title="Bring this back onto the list"
+                className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/arch:opacity-100"
+              >
+                <RotateCcw className="size-3" /> restore
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   const [sessions, setSessions] = useState<Record<string, string>>({})
   const [conversations, setConversations] = useState<Record<string, TodoChatBubble[]>>({})
+  const [archived, setArchived] = useState<ArchivedEntry[]>([])
   const [showCallout, setShowCallout] = useState(false)
   const [commentKey, setCommentKey] = useState<string | null>(null)
 
@@ -449,6 +519,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
     adopt(res.list)
     setRunning(new Set(res.running))
     setSessions(res.sessions)
+    void window.ipc.invoke('todo:listArchived', null).then((r) => setArchived(r.items)).catch(() => {})
     // Conversations are derived per session; fetch them all (lists are small).
     const keys = Object.keys(res.sessions)
     const fetched = await Promise.all(
@@ -632,9 +703,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
                       }
                     }}
                     onDismiss={() => {
-                      const next = [...blocksRef.current!]
-                      next.splice(index, 1)
-                      mutate(next)
+                      void (async () => {
+                        // Flush edits so the archived copy matches the screen.
+                        if (dirtyRef.current) await saveNowRef.current()
+                        await window.ipc.invoke('todo:dismiss', { key: item.key })
+                        await refetch()
+                      })()
                     }}
                     onRun={() => runItem(item.key)}
                     onOpenNote={onOpenNote}
@@ -652,6 +726,19 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
 
           {/* Composer */}
           <Composer onSubmit={(text) => void addItem(text)} />
+
+          {/* Done & dismissed — the archive, restorable */}
+          <ArchivedSection
+            entries={archived}
+            onOpenNote={onOpenNote}
+            onRestore={(entry) => {
+              void (async () => {
+                if (dirtyRef.current) await saveNowRef.current()
+                await window.ipc.invoke('todo:restore', { month: entry.month, blockIndex: entry.blockIndex, key: entry.item.key })
+                await refetch()
+              })()
+            }}
+          />
 
           <div className="text-[11px] text-muted-foreground/60">
             Saved to <code className="rounded bg-muted px-1">~/.rowboat/todo.md</code> — done items archive to <code className="rounded bg-muted px-1">todo/archive/</code>.

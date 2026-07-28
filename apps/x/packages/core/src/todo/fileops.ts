@@ -133,7 +133,7 @@ export function serializeTodoFile(list: TodoList): string {
 
 const SEED = `- [ ] Add your first to-do — just type below
 - [ ] @rowboat introduce yourself — what can you do here?
-- [ ] Dismiss anything you don't want — hover a row and hit ✕
+- [ ] Dismiss anything you don't want — hover a row and hit ✕ (it lands in Done & dismissed below, restorable)
 `;
 
 function ensureDirs(): void {
@@ -293,6 +293,15 @@ function localDateStr(d: Date): string {
     return `${d.getFullYear()}-${m}-${day}`;
 }
 
+async function appendToArchive(items: TodoItem[], now: Date): Promise<void> {
+    ensureDirs();
+    const target = archivePath(now);
+    const existing = await fs.readFile(target, 'utf-8').catch(() => '');
+    const stamp = `\n## ${localDateStr(now)}\n\n`;
+    const body = items.map(i => serializeItem(i).join('\n')).join('\n') + '\n';
+    await fs.writeFile(target, existing + stamp + body, 'utf-8');
+}
+
 /** Move checked items (with receipts) out of the list into the monthly
  * archive, stamped with today's date. Returns how many were archived. */
 export async function clearCompleted(now: Date = new Date()): Promise<number> {
@@ -306,15 +315,101 @@ export async function clearCompleted(now: Date = new Date()): Promise<number> {
         }
         if (archived.length === 0) return 0;
 
-        ensureDirs();
-        const target = archivePath(now);
-        const existing = await fs.readFile(target, 'utf-8').catch(() => '');
-        const stamp = `\n## ${localDateStr(now)}\n\n`;
-        const body = archived.map(i => serializeItem(i).join('\n')).join('\n') + '\n';
-        await fs.writeFile(target, existing + stamp + body, 'utf-8');
-
+        await appendToArchive(archived, now);
         await writeRaw(serializeTodoFile({ blocks: kept }));
-        log.log(`archived ${archived.length} item(s) → ${path.basename(target)}`);
+        log.log(`archived ${archived.length} item(s) → ${path.basename(archivePath(now))}`);
         return archived.length;
+    });
+}
+
+/**
+ * Dismiss = move the item (receipts intact) into the monthly archive, not
+ * delete it. Everything stays restorable from the "Done & dismissed"
+ * section; nothing typed into the list is ever lost from disk.
+ */
+export async function dismissItem(key: string, now: Date = new Date()): Promise<boolean> {
+    const norm = normalizeKey(key);
+    return withTodoLock(async () => {
+        const list = parseTodoFile(await readRaw());
+        const idx = list.blocks.findIndex(b => b.kind === 'item' && b.item.key === norm);
+        if (idx === -1) return false;
+        const [removed] = list.blocks.splice(idx, 1);
+        if (removed.kind !== 'item') return false;
+        await appendToArchive([removed.item], now);
+        await writeRaw(serializeTodoFile(list));
+        log.log(`dismissed "${norm}" → ${path.basename(archivePath(now))}`);
+        return true;
+    });
+}
+
+export type ArchivedTodo = {
+    /** YYYY-MM — which archive file. */
+    month: string;
+    /** Block index inside that file — the restore handle. */
+    blockIndex: number;
+    /** YYYY-MM-DD stamp the item was archived under, when present. */
+    date: string | null;
+    item: TodoItem;
+};
+
+const ARCHIVE_DATE_RE = /^## (\d{4}-\d{2}-\d{2})\s*$/;
+
+/** Pure helper: archive-file markdown → items with their date stamps. */
+export function parseArchive(month: string, markdown: string): ArchivedTodo[] {
+    const out: ArchivedTodo[] = [];
+    let date: string | null = null;
+    const blocks = parseTodoFile(markdown).blocks;
+    for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        if (block.kind === 'raw') {
+            const m = ARCHIVE_DATE_RE.exec(block.text);
+            if (m) date = m[1];
+            continue;
+        }
+        out.push({ month, blockIndex: i, date, item: block.item });
+    }
+    return out;
+}
+
+function monthStr(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Recent archived items (this month + last), newest first. */
+export async function listArchived(limit = 30, now: Date = new Date()): Promise<ArchivedTodo[]> {
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const months = [monthStr(now), monthStr(prev)];
+    const out: ArchivedTodo[] = [];
+    for (const month of months) {
+        const raw = await fs.readFile(path.join(ARCHIVE_DIR, `${month}.md`), 'utf-8').catch(() => '');
+        if (raw) out.push(...parseArchive(month, raw));
+    }
+    // File order is chronological (appends); newest first for display.
+    return out.reverse().slice(0, limit);
+}
+
+/**
+ * Bring an archived item back onto the list, unchecked (restoring means
+ * "this is active again"). The handle is (month, blockIndex) from
+ * listArchived; `key` guards against the file having changed since.
+ */
+export async function restoreItem(month: string, blockIndex: number, key: string): Promise<boolean> {
+    if (!/^\d{4}-\d{2}$/.test(month)) return false;
+    const norm = normalizeKey(key);
+    return withTodoLock(async () => {
+        const target = path.join(ARCHIVE_DIR, `${month}.md`);
+        const raw = await fs.readFile(target, 'utf-8').catch(() => '');
+        if (!raw) return false;
+        const blocks = parseTodoFile(raw).blocks;
+        const block = blocks[blockIndex];
+        if (!block || block.kind !== 'item' || block.item.key !== norm) return false;
+        blocks.splice(blockIndex, 1);
+        await fs.writeFile(target, serializeTodoFile({ blocks }), 'utf-8');
+
+        const list = parseTodoFile(await readRaw());
+        list.blocks.push({ kind: 'item', item: { ...block.item, checked: false } });
+        await writeRaw(serializeTodoFile(list));
+        log.log(`restored "${norm}" from ${month}`);
+        return true;
     });
 }

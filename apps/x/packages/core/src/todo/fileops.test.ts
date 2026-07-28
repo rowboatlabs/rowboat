@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isDelegated, normalizeKey, parseTodoFile, serializeTodoFile } from './fileops.js';
+import { isDelegated, normalizeKey, parseArchive, parseTodoFile, serializeTodoFile } from './fileops.js';
 
 const SAMPLE = `- [ ] build a deck
 - [x] @rowboat research pricing models
@@ -68,6 +68,31 @@ describe('todo fileops parse/serialize', () => {
         expect(items).toHaveLength(1);
         expect(items[0].kind === 'item' && items[0].item.receipts).toHaveLength(1);
         expect(back.blocks.filter(b => b.kind === 'raw' && b.text.trim() !== '')).toHaveLength(0);
+    });
+
+    it('parses archive files into dated entries with restore handles', () => {
+        const archive = `
+## 2026-07-27
+
+- [x] @rowboat research pricing
+  - → [notes](knowledge/Topics/pricing.md)
+
+## 2026-07-28
+
+- [ ] call the bank
+`;
+        const entries = parseArchive('2026-07', archive);
+        expect(entries.map(e => [e.item.text, e.date, e.item.checked])).toEqual([
+            ['@rowboat research pricing', '2026-07-27', true],
+            ['call the bank', '2026-07-28', false],
+        ]);
+        // blockIndex points at the item inside the parsed file, so a
+        // restore can splice it out precisely.
+        const blocks = parseTodoFile(archive).blocks;
+        for (const e of entries) {
+            const b = blocks[e.blockIndex];
+            expect(b.kind === 'item' && b.item.key).toEqual(e.item.key);
+        }
     });
 
     it('detects @rowboat mentions as delegation', () => {

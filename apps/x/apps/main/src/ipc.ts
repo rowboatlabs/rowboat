@@ -148,6 +148,9 @@ import {
   saveTodo,
   addItem as addTodoItem,
   clearCompleted as clearTodoCompleted,
+  dismissItem as dismissTodoItem,
+  listArchived as listTodoArchived,
+  restoreItem as restoreTodoItem,
 } from '@x/core/dist/todo/fileops.js';
 import { backgroundTaskBus } from '@x/core/dist/background-tasks/bus.js';
 import {
@@ -2668,6 +2671,27 @@ export function setupIpcHandlers() {
         const archived = await clearTodoCompleted();
         todoBus.publish({ type: 'list_changed' });
         return { success: true, archived };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:dismiss': async (_event, args) => {
+      try {
+        const ok = await dismissTodoItem(args.key);
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true } : { success: false, error: 'Item not found' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:listArchived': async () => {
+      return { items: await listTodoArchived() };
+    },
+    'todo:restore': async (_event, args) => {
+      try {
+        const ok = await restoreTodoItem(args.month, args.blockIndex, args.key);
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true } : { success: false, error: 'Item moved — refresh and retry' };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }

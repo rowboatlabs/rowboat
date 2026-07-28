@@ -7,7 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
-import { TodoChatBubbleSchema, TodoEvent, TodoListSchema } from './todo.js';
+import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -2499,6 +2499,43 @@ const ipcSchemas = {
     res: z.object({
       success: z.boolean(),
       archived: z.number().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Dismiss = move to the archive (never delete); restorable from the
+  // "Done & dismissed" section.
+  'todo:dismiss': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Recent archived items (done + dismissed), newest first.
+  'todo:listArchived': {
+    req: z.null(),
+    res: z.object({
+      items: z.array(z.object({
+        month: z.string(),
+        blockIndex: z.number(),
+        date: z.string().nullable(),
+        item: TodoItemSchema,
+      })),
+    }),
+  },
+  // Bring an archived item back onto the list (unchecked). The
+  // (month, blockIndex) handle comes from todo:listArchived; key guards
+  // against staleness.
+  'todo:restore': {
+    req: z.object({
+      month: z.string(),
+      blockIndex: z.number(),
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
       error: z.string().optional(),
     }),
   },
