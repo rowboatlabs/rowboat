@@ -138,7 +138,7 @@ import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
-import { playAckCue, playAlertCue } from '@/lib/call-sounds'
+import { playAckCue, playAlertCue, playPopCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
 import { TokenUsageMenu } from '@/components/token-usage-menu'
 
@@ -1801,10 +1801,15 @@ function App() {
     if (localStorage.getItem('quick-ask-tip-shown')) return
     const timer = setTimeout(() => {
       localStorage.setItem('quick-ask-tip-shown', '1')
+      playPopCue()
       toast('Ask Rowboat from anywhere', {
         description: `Press ${isMac ? '⌥⇧Space' : 'Alt+Shift+Space'} in any app for a quick question — the answer shows up right there and in your chat.`,
         duration: 12000,
         closeButton: true,
+        // Lift the card off the page, and move sonner's close button (which
+        // defaults to the top-LEFT corner) to the top right.
+        className:
+          'shadow-xl shadow-black/25 [&_[data-close-button]]:!left-auto [&_[data-close-button]]:!right-0 [&_[data-close-button]]:!translate-x-[35%] [&_[data-close-button]]:!-translate-y-[35%]',
         action: {
           label: 'Try it',
           onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),

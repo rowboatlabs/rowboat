@@ -8,6 +8,32 @@ let ctx: AudioContext | null = null
  * instead of dead air.
  */
 /**
+ * Soft single-swell pop for a passive notification appearing (e.g. the
+ * quick-ask discoverability toast) — quieter and rounder than the ack blip.
+ */
+export function playPopCue() {
+  try {
+    if (!ctx) ctx = new AudioContext()
+    if (ctx.state === 'suspended') void ctx.resume()
+    const t = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(523, t)
+    osc.frequency.exponentialRampToValueAtTime(659, t + 0.12)
+    gain.gain.setValueAtTime(0.0001, t)
+    gain.gain.exponentialRampToValueAtTime(0.05, t + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(t)
+    osc.stop(t + 0.36)
+  } catch {
+    // cosmetic — never let a sound failure affect the flow
+  }
+}
+
+/**
  * Two-tone attention chime for permission problems — something needs the
  * user's action and would otherwise fail silently (they may be looking at
  * another app entirely when it fires).
