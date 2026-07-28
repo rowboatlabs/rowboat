@@ -308,7 +308,7 @@ export function QuickAskBar() {
               shape edge to see (the previous half-ellipse showed its rim) */}
           <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.2),transparent_55%)]" />
           <Mic
-            className={`relative h-5 w-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] ${
+            className={`relative h-[18px] w-[18px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] ${
               recording ? 'text-emerald-100' : 'text-sky-100'
             }`}
           />
