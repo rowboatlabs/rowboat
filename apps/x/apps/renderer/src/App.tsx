@@ -1832,15 +1832,15 @@ function App() {
   // model its earlier frames are stale (history keeps frames inline forever,
   // so without this it answers "what's on my screen" from the past).
   const screenShareEndedRef = useRef(false)
-  const prevScreenStateRef = useRef(video.screenState)
+  const lastScreenStateForNoticeRef = useRef(video.screenState)
   useEffect(() => {
-    if (prevScreenStateRef.current === 'live' && video.screenState !== 'live') {
+    if (lastScreenStateForNoticeRef.current === 'live' && video.screenState !== 'live') {
       screenShareEndedRef.current = true
     }
     // Sharing again supersedes the notice — fresh frames arrive with the
     // next message anyway.
     if (video.screenState === 'live') screenShareEndedRef.current = false
-    prevScreenStateRef.current = video.screenState
+    lastScreenStateForNoticeRef.current = video.screenState
   }, [video.screenState])
 
   // Quick-ask toggles (voice response / screen share), pushed from the bar.
