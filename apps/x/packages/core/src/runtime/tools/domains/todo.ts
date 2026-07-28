@@ -4,6 +4,46 @@ import { z } from "zod";
 import { BuiltinToolsSchema } from "../types.js";
 
 export const todoTools: z.infer<typeof BuiltinToolsSchema> = {
+    'todo-add': {
+        permission: "none",
+        description: "Add items to the user's to-do list (the home surface, todo.md). Use when the user asks to add, track, or remember something as a to-do — e.g. 'add X to my list', 'track this as a to-do'. Items land at the end of the list. Include @rowboat in an item's text ONLY when the user wants it delegated — that starts a background run immediately. Never add items the user didn't ask for.",
+        inputSchema: z.object({
+            items: z.array(z.object({
+                text: z.string().describe("The item's line text, phrased as the user would write it (e.g. 'chase the SOC2 vendor'). Include @rowboat only to delegate."),
+                parent: z.string().optional().describe("Line text of an existing top-level item to nest this under as a sub-task. Omit for top-level."),
+            })).min(1).describe("The to-dos to add, in order."),
+        }),
+        execute: async ({ items }: {
+            items: { text: string; parent?: string }[];
+        }) => {
+            try {
+                // Lazy imports to break a module-init cycle, mirroring todo-report.
+                const { addItem, addSubItem, isDelegated } = await import("../../../todo/fileops.js");
+                const { todoBus } = await import("../../../todo/bus.js");
+                const added: string[] = [];
+                const failed: string[] = [];
+                for (const entry of items) {
+                    const item = entry.parent
+                        ? await addSubItem(entry.parent, entry.text)
+                        : await addItem(entry.text);
+                    if (!item) {
+                        failed.push(`${entry.text} (parent not found: ${entry.parent})`);
+                        continue;
+                    }
+                    added.push(item.text);
+                    if (isDelegated(item.text)) {
+                        const { runTodoItem } = await import("../../../todo/runner.js");
+                        void runTodoItem(item.key).catch(() => {});
+                    }
+                }
+                todoBus.publish({ type: 'list_changed' });
+                return { success: failed.length === 0, added, ...(failed.length > 0 ? { failed } : {}) };
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return { success: false, error: msg };
+            }
+        },
+    },
     'todo-report': {
         permission: "none",
         description: "Report the outcome of one delegated item on the user's to-do list (todo.md). Writes a one-line receipt under the item — this is the to-do item agent's ONLY pen on the list; never edit todo.md with file tools. Trust rules: `done` (checks the box) is only for internal/read-only work; anything outward-facing (sending email, posting) stops at `ready` with the prepared draft linked — the user's check is the approval.",

@@ -494,20 +494,19 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
 // Composer — with the @rowboat autocomplete popup
 // ---------------------------------------------------------------------------
 
+// The page-bottom composer is PURELY the assistant — no modes, nothing to
+// remember. Tasks are born where tasks live (the add-row inside the list),
+// or by meaning: an @rowboat mention here creates a delegated item, and
+// "add X to my list" works because the copilot has the todo-add tool.
 function Composer({ onSubmit }: { onSubmit: (text: string, kind: 'task' | 'chat') => void }) {
   const [text, setText] = useState('')
-  const [asTask, setAsTask] = useState(false)
   const mention = useMention(text, setText)
-
-  // Routing: explicit To-do toggle or an @rowboat mention → task; anything
-  // else is a question — a chat thread in the stream. Never auto-classified.
-  const isTask = asTask || mentionsRowboat(text)
+  const isTask = mentionsRowboat(text)
 
   const submit = () => {
     const t = text.trim()
     if (!t) return
     setText('')
-    setAsTask(false)
     onSubmit(t, isTask ? 'task' : 'chat')
   }
 
@@ -522,26 +521,45 @@ function Composer({ onSubmit }: { onSubmit: (text: string, kind: 'task' | 'chat'
             if (e.key === 'Tab' && mention.show) { e.preventDefault(); mention.complete(); return }
             if (e.key === 'Enter') { e.preventDefault(); submit() }
           }}
-          placeholder={asTask ? 'Add a to-do… mention @rowboat to hand it off' : 'Ask anything, or add a to-do…'}
+          placeholder="Ask anything… mention @rowboat to hand off a task"
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
-        <button
-          type="button"
-          onClick={() => setAsTask((v) => !v)}
-          title="Add as a to-do instead of asking"
-          className={`${CHIP} shrink-0 border ${isTask ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-accent'}`}
-        >
-          To-do
-        </button>
         <button
           type="button"
           onClick={submit}
           disabled={!text.trim()}
           className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground enabled:hover:bg-accent disabled:opacity-40"
         >
-          {isTask ? 'Add' : 'Ask'}
+          {isTask ? 'Add task' : 'Ask'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// The to-do door, where to-dos live: a slim always-there row at the end of
+// the list. Enter appends the line — no model, no modes.
+function AddItemRow({ onAdd }: { onAdd: (text: string) => void }) {
+  const [text, setText] = useState('')
+  const mention = useMention(text, setText)
+  return (
+    <div className="relative mt-1 flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+      {mention.show && <MentionPopup onPick={mention.complete} />}
+      <Plus className="size-4 shrink-0 text-muted-foreground/50" />
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Tab' && mention.show) { e.preventDefault(); mention.complete(); return }
+          if (e.key === 'Enter' && text.trim()) {
+            e.preventDefault()
+            onAdd(text.trim())
+            setText('')
+          }
+        }}
+        placeholder="Add a to-do… @rowboat hands it off"
+        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
+      />
     </div>
   )
 }
@@ -1206,6 +1224,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
                 )
               })
             )}
+            {blocks !== null && <AddItemRow onAdd={(text) => void addItem(text)} />}
           </div>
 
           {/* Composer — one door for both: tasks land above, asks below */}
