@@ -1244,10 +1244,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer }:
             {blocks !== null && <AddItemRow onAdd={(text) => void addItem(text)} />}
           </div>
 
-          {/* The assistant composer — always chat; tasks are born in the
-              list's add-row or by @rowboat mention. */}
-          {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
-
           {/* The stream — recent chat threads */}
           <ConversationsSection
             threads={streamThreads}
@@ -1278,6 +1274,15 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer }:
           <div className="text-[11px] text-muted-foreground/60">
             Saved to <code className="rounded bg-muted px-1">~/.rowboat/todo.md</code> — done items archive to <code className="rounded bg-muted px-1">todo/archive/</code>.
           </div>
+        </div>
+      </div>
+
+      {/* The assistant composer — pinned to the bottom like any chat
+          surface; everything above scrolls. Tasks are born in the list's
+          add-row or by @rowboat mention. */}
+      <div className="shrink-0 px-9 pb-5 pt-2">
+        <div className="mx-auto max-w-[720px]">
+          {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
         </div>
       </div>
     </div>
