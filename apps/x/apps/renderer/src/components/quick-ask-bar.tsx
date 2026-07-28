@@ -319,7 +319,7 @@ export function QuickAskBar() {
           value={inputValue}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={recording ? 'Listening…' : 'Ask Rowboat anything…'}
-          className="h-full min-w-0 flex-1 bg-transparent text-xl font-light outline-none placeholder:text-neutral-500"
+          className="h-full min-w-0 flex-1 bg-transparent text-lg font-light outline-none placeholder:text-neutral-500"
         />
         {micDenied ? (
           <button
@@ -359,7 +359,7 @@ export function QuickAskBar() {
               <Volume2 className="relative h-4 w-4" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="top">{voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}</TooltipContent>
+          <TooltipContent side="bottom">{voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -380,7 +380,7 @@ export function QuickAskBar() {
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="top">
+          <TooltipContent side="bottom">
             {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
           </TooltipContent>
         </Tooltip>
