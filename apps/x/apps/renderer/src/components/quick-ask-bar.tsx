@@ -305,8 +305,8 @@ export function QuickAskBar() {
         <span
           className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all duration-300 ${
             recording
-              ? 'animate-pulse bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 shadow-[0_0_18px_rgba(52,211,153,0.3)] ring-emerald-500/25'
-              : 'bg-gradient-to-b from-sky-400/25 via-blue-500/15 to-indigo-500/10 shadow-[0_0_16px_rgba(96,165,250,0.25)] ring-sky-500/20'
+              ? 'animate-pulse bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 shadow-[0_0_26px_rgba(52,211,153,0.45)] ring-emerald-500/25'
+              : 'bg-gradient-to-b from-sky-400/25 via-blue-500/15 to-indigo-500/10 shadow-[0_0_24px_rgba(96,165,250,0.4)] ring-sky-500/20'
           }`}
         >
           {/* top sheen — a radial fade from the top center, so there is no
@@ -367,8 +367,8 @@ export function QuickAskBar() {
                 aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
                 className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
                   voiceOut
-                    ? 'bg-gradient-to-b from-sky-400/60 to-sky-500/30 text-sky-800 ring-sky-500/50 shadow-[0_0_14px_rgba(56,189,248,0.45)]'
-                    : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 hover:text-neutral-800'
+                    ? 'bg-gradient-to-b from-sky-400/60 to-sky-500/30 text-sky-800 ring-sky-500/50 shadow-[0_0_20px_rgba(56,189,248,0.55)]'
+                    : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 shadow-[0_2px_10px_rgba(0,0,0,0.12)] hover:text-neutral-800'
                 }`}
               >
                 <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
@@ -394,8 +394,8 @@ export function QuickAskBar() {
                 aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
                 className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
                   sharing
-                    ? 'bg-gradient-to-b from-emerald-400/60 to-emerald-500/30 text-emerald-800 ring-emerald-500/50 shadow-[0_0_14px_rgba(52,211,153,0.45)]'
-                    : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 hover:text-neutral-800'
+                    ? 'bg-gradient-to-b from-emerald-400/60 to-emerald-500/30 text-emerald-800 ring-emerald-500/50 shadow-[0_0_20px_rgba(52,211,153,0.55)]'
+                    : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 shadow-[0_2px_10px_rgba(0,0,0,0.12)] hover:text-neutral-800'
                 }`}
               >
                 <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
@@ -416,7 +416,7 @@ export function QuickAskBar() {
           type="submit"
           disabled={!draft.trim()}
           aria-label="Send"
-          className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-700 ring-1 ring-inset ring-black/10 transition-all hover:from-black/[0.08] disabled:opacity-40"
+          className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-700 ring-1 ring-inset ring-black/10 shadow-[0_2px_10px_rgba(0,0,0,0.12)] transition-all hover:from-black/[0.08] disabled:opacity-40"
         >
           <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
           <CornerDownLeft className="relative h-5 w-5" />
