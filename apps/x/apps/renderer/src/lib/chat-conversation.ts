@@ -46,6 +46,28 @@ export interface ToolCall {
   subAgent?: { childTurnId: string; agentName: string; task: string }
 }
 
+export type WebSearchGroupStatus = 'running' | 'completed' | 'error'
+
+export const getWebSearchGroupStatus = (
+  searches: ToolCall[]
+): WebSearchGroupStatus => {
+  if (
+    searches.some(
+      search =>
+        search.status === 'pending' ||
+        search.status === 'running'
+    )
+  ) {
+    return 'running'
+  }
+
+  if (searches.some(search => search.status === 'error')) {
+    return 'error'
+  }
+
+  return 'completed'
+}
+
 export interface ErrorMessage {
   id: string
   kind: 'error'
@@ -693,10 +715,22 @@ export type ToolGroup = {
   groupId: string
 }
 
-export type GroupedConversationItem = ConversationItem | ToolGroup
+export type WebSearchGroup = {
+  type: 'web-search-group'
+  items: ToolCall[]
+  groupId: string
+}
+
+export type GroupedConversationItem = ConversationItem | ToolGroup | WebSearchGroup
 
 export const isToolGroup = (item: GroupedConversationItem): item is ToolGroup =>
   'type' in item && (item as ToolGroup).type === 'tool-group'
+
+export const isWebSearchGroup = (item: GroupedConversationItem): item is WebSearchGroup =>
+  'type' in item && (item as WebSearchGroup).type === 'web-search-group'
+
+const isWebSearchToolCall = (item: ConversationItem): item is ToolCall =>
+  isToolCall(item) && getWebSearchCardData(item) !== null
 
 const isPlainToolCall = (item: ConversationItem): item is ToolCall => {
   if (!isToolCall(item)) return false
@@ -717,7 +751,22 @@ export const groupConversationItems = (
 
   while (i < items.length) {
     const item = items[i]
-    if (isPlainToolCall(item) && !hasPermissionRequest(item.id)) {
+    if (isWebSearchToolCall(item)) {
+      const group: ToolCall[] = [item]
+      i++
+      while (
+        i < items.length &&
+        isWebSearchToolCall(items[i] as ConversationItem)
+      ) {
+        group.push(items[i] as ToolCall)
+        i++
+      }
+      if (group.length === 1) {
+        result.push(group[0])
+      } else {
+        result.push({ type: 'web-search-group', items: group, groupId: group[0].id })
+      }
+    } else if (isPlainToolCall(item) && !hasPermissionRequest(item.id)) {
       const group: ToolCall[] = [item]
       i++
       while (

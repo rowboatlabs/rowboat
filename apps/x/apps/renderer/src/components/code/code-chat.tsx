@@ -10,11 +10,21 @@ import { Conversation, ConversationContent, ConversationScrollButton } from '@/c
 import { MessageResponse } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
-import { toToolState, getToolDisplayName, getToolErrorText, getWebSearchCardData, type ToolCall } from '@/lib/chat-conversation'
+import {
+  toToolState,
+  getToolDisplayName,
+  getToolErrorText,
+  getWebSearchCardData,
+  type ToolCall,
+  type WebSearchGroup,
+} from '@/lib/chat-conversation'
 import { CodeRunPermissionRequest, CodingRunTimeline } from '@/components/coding-run'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
-import { WebSearchResult } from '@/components/ai-elements/web-search-result'
+import {
+  WebSearchGroupResult,
+  WebSearchResult,
+} from '@/components/ai-elements/web-search-result'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useCodeChat, isDirectTurn, isChatToolCall, isChatErrorMessage, type CodeChatItem } from './use-code-chat'
 
@@ -97,6 +107,60 @@ function RowboatToolCall({ item, onOpenDiff }: { item: ToolCall; onOpenDiff: (pa
       <span className="truncate">{getToolDisplayName(item)}</span>
     </div>
   )
+}
+
+type GroupedCodeChatItem = CodeChatItem | WebSearchGroup
+
+const isCodeChatWebSearch = (
+  item: CodeChatItem
+): item is ToolCall =>
+  isChatToolCall(item) &&
+  getWebSearchCardData(item) !== null
+
+const isCodeChatWebSearchGroup = (
+  item: GroupedCodeChatItem
+): item is WebSearchGroup =>
+  'type' in item && item.type === 'web-search-group'
+
+function groupCodeChatItems(
+  items: CodeChatItem[]
+): GroupedCodeChatItem[] {
+  const result: GroupedCodeChatItem[] = []
+  let index = 0
+
+  while (index < items.length) {
+    const item = items[index]
+
+    if (isCodeChatWebSearch(item)) {
+      const searches: ToolCall[] = [item]
+      index++
+
+      while (
+        index < items.length &&
+        isCodeChatWebSearch(items[index])
+      ) {
+        searches.push(items[index] as ToolCall)
+        index++
+      }
+
+      if (searches.length === 1) {
+        result.push(searches[0])
+      } else {
+        result.push({
+          type: 'web-search-group',
+          items: searches,
+          groupId: searches[0].id,
+        })
+      }
+
+      continue
+    }
+
+    result.push(item)
+    index++
+  }
+
+  return result
 }
 
 function ChatItem({ item, onOpenDiff }: { item: CodeChatItem; onOpenDiff: (path: string) => void }) {
@@ -290,9 +354,24 @@ export function CodeChat({
               </p>
             </div>
           )}
-          {items.map((item) => (
-            <ChatItem key={item.id} item={item} onOpenDiff={onOpenDiff} />
-          ))}
+          {groupCodeChatItems(items).map((item) => {
+            if (isCodeChatWebSearchGroup(item)) {
+              return (
+                <WebSearchGroupResult
+                  key={item.groupId}
+                  searches={item.items}
+                />
+              )
+            }
+
+            return (
+              <ChatItem
+                key={item.id}
+                item={item}
+                onOpenDiff={onOpenDiff}
+              />
+            )
+          })}
           {liveText && (
             <div className="min-w-0 max-w-none break-words text-sm">
               <MessageResponse>{liveText.replace(/<\/?voice>/g, '')}</MessageResponse>
