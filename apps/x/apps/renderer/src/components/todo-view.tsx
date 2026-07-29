@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, ChevronDown, CircleAlert, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
 
@@ -358,7 +358,7 @@ function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetr
   )
 }
 
-function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
+function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, collapsed = false, onToggleCollapsed, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
   item: TodoItem
   isRunning: boolean
   commentOpen: boolean
@@ -372,6 +372,9 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
   dimmed?: boolean
   /** The composer is replying to this row — lift it gently. */
   spotlight?: boolean
+  /** Collapsed = just the line + a one-line preview; content hidden. */
+  collapsed?: boolean
+  onToggleCollapsed?: () => void
   /** Rendered sub-item rows (built by the parent view) + sub composer. */
   childRows?: React.ReactNode
   /** Top-level only: open the "add sub-task" input. */
@@ -403,6 +406,10 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
 
   const lastReceipt = item.receipts[item.receipts.length - 1]
   const showGoChip = item.delegated && !item.checked && !isRunning && item.receipts.length === 0
+  // Anything under the line makes the row collapsible.
+  const collapsible = bubbles.length > 0 || item.children.length > 0 || item.receipts.length > 0
+  const isCollapsed = collapsed && collapsible
+  const collapsedPreview = isCollapsed && bubbles.length > 0 ? previewLine(bubbles) : null
 
   return (
     <div className={`group/todo relative flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-[opacity,transform,box-shadow] duration-200 hover:bg-accent/40 ${dimmed ? 'opacity-35' : ''} ${
@@ -413,6 +420,20 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
           title="Changed since you last looked"
           className="absolute -left-1 top-[13px] size-1.5 rounded-full bg-primary"
         />
+      )}
+      {collapsible && onToggleCollapsed && (
+        <IconTip label={isCollapsed ? 'Expand' : 'Collapse'}>
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+            className={`absolute -left-5 top-[7px] rounded p-0.5 text-muted-foreground/40 transition-[opacity,color] hover:text-foreground ${
+              isCollapsed ? '' : 'opacity-0 group-hover/todo:opacity-100'
+            }`}
+          >
+            <ChevronDown className={`size-3.5 transition-transform ${isCollapsed ? '-rotate-90' : ''} motion-reduce:transition-none`} />
+          </button>
+        </IconTip>
       )}
       <input
         type="checkbox"
@@ -474,23 +495,43 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
             )}
           </div>
         )}
-        {showConversation ? (
-          <ConversationView
-            bubbles={bubbles}
-            sessionId={sessionId}
-            onOpenNote={onOpenNote}
-            onOpenInChat={onOpenInChat}
-            onRetry={onRun}
-            onReply={onToggleComment}
-            composerOpen={commentOpen}
-          />
+        {isCollapsed ? (
+          // The stream's trick: one muted line says where this ended up;
+          // clicking it (or the chevron) expands.
+          collapsedPreview && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              className={`block w-full truncate text-left text-[12px] ${
+                bubbles[bubbles.length - 1]?.kind === 'error'
+                  ? 'text-red-600/80 dark:text-red-400/80'
+                  : 'text-muted-foreground/70'
+              } hover:text-foreground`}
+            >
+              {collapsedPreview}
+            </button>
+          )
         ) : (
-          <ReceiptRow item={item} onOpenNote={onOpenNote} onRetry={onRun} onOpenThread={onToggleComment} />
+          <>
+            {showConversation ? (
+              <ConversationView
+                bubbles={bubbles}
+                sessionId={sessionId}
+                onOpenNote={onOpenNote}
+                onOpenInChat={onOpenInChat}
+                onRetry={onRun}
+                onReply={onToggleComment}
+                composerOpen={commentOpen}
+              />
+            ) : (
+              <ReceiptRow item={item} onOpenNote={onOpenNote} onRetry={onRun} onOpenThread={onToggleComment} />
+            )}
+            {commentOpen && (
+              <CommentComposer onSend={onComment} onCancel={onToggleComment} />
+            )}
+            {childRows}
+          </>
         )}
-        {commentOpen && (
-          <CommentComposer onSend={onComment} onCancel={onToggleComment} />
-        )}
-        {childRows}
       </div>
       {onAddSub && depth === 0 && (
         <IconTip label="Add a sub-task">
@@ -927,6 +968,17 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   // sessions stay whole in chat history; losing this file just makes
   // threads reappear.
   const hiddenThreadsRef = useRef<Set<string>>(new Set())
+  // Per-row collapse (chevron) — a reading preference, persisted locally.
+  const [collapsedRows, setCollapsedRows] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('todo.collapsedRows') ?? '{}') as Record<string, boolean> } catch { return {} }
+  })
+  const setRowCollapsed = useCallback((key: string, value: boolean) => {
+    setCollapsedRows((m) => {
+      const next = { ...m, [key]: value }
+      localStorage.setItem('todo.collapsedRows', JSON.stringify(next))
+      return next
+    })
+  }, [])
 
   const blocksRef = useRef<TodoBlock[] | null>(null)
   const dirtyRef = useRef(false)
@@ -1332,6 +1384,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     changed={isChanged(item.key)}
                     dimmed={(triageFilter !== null && !blockMatches(item)) || (spotKey !== null && !blockContainsSpot(item))}
                     spotlight={item.key === spotKey}
+                    collapsed={!!collapsedRows[item.key]}
+                    onToggleCollapsed={() => setRowCollapsed(item.key, !collapsedRows[item.key])}
                     isRunning={running.has(item.key)}
                     onToggle={(checked) => {
                       const next = [...blocksRef.current!]
@@ -1360,14 +1414,18 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     commentOpen={commentKey === item.key}
                     sessionId={sessions[item.key] ?? null}
                     bubbles={conversations[item.key] ?? []}
-                    onToggleComment={() => (onComposeTodo
-                      ? onComposeTodo({ kind: 'comment', key: item.key, itemText: item.text, quote: lastBubbleText(conversations[item.key]) })
-                      : setCommentKey(commentKey === item.key ? null : item.key))}
+                    onToggleComment={() => {
+                      setRowCollapsed(item.key, false)
+                      if (onComposeTodo) onComposeTodo({ kind: 'comment', key: item.key, itemText: item.text, quote: lastBubbleText(conversations[item.key]) })
+                      else setCommentKey(commentKey === item.key ? null : item.key)
+                    }}
                     onComment={(message) => commentOnItem(item.key, message)}
                     onOpenInChat={onOpenInChat}
-                    onAddSub={() => (onComposeTodo
-                      ? onComposeTodo({ kind: 'sub', parentKey: item.key, parentText: item.text })
-                      : setSubDraftFor(subDraftFor === item.key ? null : item.key))}
+                    onAddSub={() => {
+                      setRowCollapsed(item.key, false)
+                      if (onComposeTodo) onComposeTodo({ kind: 'sub', parentKey: item.key, parentText: item.text })
+                      else setSubDraftFor(subDraftFor === item.key ? null : item.key)
+                    }}
                     childRows={(item.children.length > 0 || subDraftFor === item.key) && (
                       <div className="mt-1 flex flex-col border-l border-border/60 pl-1">
                         {item.children.map((child, ci) => (
@@ -1378,6 +1436,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                             changed={isChanged(child.key)}
                             dimmed={triageFilter !== null && !triageMatch(child)}
                             spotlight={child.key === spotKey}
+                            collapsed={!!collapsedRows[child.key]}
+                            onToggleCollapsed={() => setRowCollapsed(child.key, !collapsedRows[child.key])}
                             isRunning={running.has(child.key)}
                             onToggle={(checked) => updateChild(index, ci, (c) => ({ ...c, checked }))}
                             onCommitText={(text) => {
