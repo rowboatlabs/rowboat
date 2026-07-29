@@ -4473,13 +4473,13 @@ function App() {
         : undefined
       const model = homeSelectedModelRef.current ?? undefined
       if (target.kind === 'comment') {
-        void window.ipc.invoke('todo:comment', { key: target.key, message: text, attachments, model })
+        void window.ipc.invoke('todo:comment', { key: target.key, message: text, attachments, model, permissionMode })
       } else if (target.kind === 'chatReply') {
-        void window.ipc.invoke('todo:chatReply', { sessionId: target.sessionId, message: text, attachments, model })
+        void window.ipc.invoke('todo:chatReply', { sessionId: target.sessionId, message: text, attachments, model, permissionMode })
       } else if (target.kind === 'sub') {
-        void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model })
+        void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
       } else {
-        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model })
+        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
       }
       setHomeComposeTarget(null)
       return

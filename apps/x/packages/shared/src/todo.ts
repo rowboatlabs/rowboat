@@ -98,6 +98,9 @@ export type TodoEventType =
     | { type: 'run_start'; key: string }
     | { type: 'run_complete'; key: string; summary?: string }
     | { type: 'run_error'; key: string; error: string }
+    /** A live run is waiting on the user (permission approval) — ephemeral,
+     * cleared by the next run_complete/run_error for the key. */
+    | { type: 'attention'; key: string; message: string }
     | { type: 'list_changed' };
 
 export const TodoLinkSchema = z.object({
@@ -145,5 +148,6 @@ export const TodoEvent = z.discriminatedUnion('type', [
     z.object({ type: z.literal('run_start'), key: z.string() }),
     z.object({ type: z.literal('run_complete'), key: z.string(), summary: z.string().optional() }),
     z.object({ type: z.literal('run_error'), key: z.string(), error: z.string() }),
+    z.object({ type: z.literal('attention'), key: z.string(), message: z.string() }),
     z.object({ type: z.literal('list_changed') }),
 ]);

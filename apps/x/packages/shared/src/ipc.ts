@@ -2466,6 +2466,9 @@ const ipcSchemas = {
         provider: z.string(),
         model: z.string(),
       }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2509,6 +2512,9 @@ const ipcSchemas = {
         provider: z.string(),
         model: z.string(),
       }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2538,6 +2544,9 @@ const ipcSchemas = {
         provider: z.string(),
         model: z.string(),
       }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2570,6 +2579,9 @@ const ipcSchemas = {
         provider: z.string(),
         model: z.string(),
       }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
     }),
     res: z.object({
       success: z.boolean(),

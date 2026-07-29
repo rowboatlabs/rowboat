@@ -2685,7 +2685,7 @@ export function setupIpcHandlers() {
         const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
         const item = await addTodoItem(text);
         if (args.run || item.delegated) {
-          void runTodoItem(item.key, undefined, args.model ? { model: args.model } : undefined).catch(() => {});
+          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return { success: true };
@@ -2715,7 +2715,7 @@ export function setupIpcHandlers() {
       try {
         const links = await importTodoAttachments(args.attachments ?? []);
         const message = links.length > 0 ? `${args.message}\n\nAttached: ${todoLinksToText(links)}` : args.message;
-        void replyHomeChat(args.sessionId, message, args.model ? { model: args.model } : undefined).catch(() => {});
+        void replyHomeChat(args.sessionId, message, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -2732,7 +2732,7 @@ export function setupIpcHandlers() {
         const child = await addTodoSubItem(args.parentKey, text);
         if (!child) return { success: false, error: 'Parent not found' };
         if (args.run || child.delegated) {
-          void runTodoItem(child.key, undefined, args.model ? { model: args.model } : undefined).catch(() => {});
+          void runTodoItem(child.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return { success: true };
@@ -2747,7 +2747,7 @@ export function setupIpcHandlers() {
       try {
         const links = await importTodoAttachments(args.attachments ?? []);
         const message = links.length > 0 ? `${args.message}\n\nAttached: ${todoLinksToText(links)}` : args.message;
-        void commentOnTodoItem(args.key, message, args.model ? { model: args.model } : undefined).catch(() => {});
+        void commentOnTodoItem(args.key, message, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

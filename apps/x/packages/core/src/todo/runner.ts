@@ -1,4 +1,4 @@
-import { getBackgroundTaskAgentModel, getDefaultModelAndProvider } from '../models/defaults.js';
+import { getDefaultModelAndProvider } from '../models/defaults.js';
 import { withUseCase } from '../analytics/use_case.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
@@ -271,13 +271,15 @@ async function driveTurn(
     message: string,
     subUseCase: string,
     modelOverride?: { provider: string; model: string },
+    autoPermission = true,
 ): Promise<TodoRunResult> {
     const { sessions, turnEventBus } = await resolveDeps();
     const watcher = watchSettles(turnEventBus);
     try {
         let sent: { turnId: string };
         try {
-            const { model, provider } = modelOverride ?? await getBackgroundTaskAgentModel();
+            // Chat parity: the assistant model unless the composer overrode it.
+            const { model, provider } = modelOverride ?? await getDefaultModelAndProvider();
             sent = await withUseCase(
                 { useCase: 'todo_item_agent', subUseCase },
                 () => sessions.sendMessage(
@@ -288,7 +290,7 @@ async function driveTurn(
                             agentId: 'todo-item-agent',
                             overrides: { model: { provider, model } },
                         },
-                        autoPermission: true,
+                        autoPermission,
                     },
                 ),
             );
@@ -308,8 +310,31 @@ async function driveTurn(
 
         log.log(`turn=${sent.turnId} session=${sessionId} item="${truncate(itemText, 80)}"`);
         todoBus.publish({ type: 'run_start', key: norm });
-        const settled = await watcher.waitFor(sent.turnId, TURN_TIMEOUT_MS);
-        return await landSettled(norm, itemText, receiptsBefore, sessionId, sent.turnId, settled);
+        // A manual-permission run suspends until the user approves from the
+        // item's chat — surface it once, then KEEP WAITING so the completion
+        // receipt still lands after approval.
+        const deadline = Date.now() + TURN_TIMEOUT_MS;
+        let surfacedSuspension = false;
+        for (;;) {
+            const settled = await watcher.waitFor(sent.turnId, Math.max(1000, deadline - Date.now()));
+            if (settled.kind !== 'suspended') {
+                return await landSettled(norm, itemText, receiptsBefore, sessionId, sent.turnId, settled);
+            }
+            if (!surfacedSuspension) {
+                surfacedSuspension = true;
+                await attachReceipt(norm, {
+                    kind: 'question',
+                    text: 'waiting for your approval — open this item\'s chat to allow it',
+                    links: [],
+                }).catch(() => {});
+                todoBus.publish({ type: 'attention', key: norm, message: 'waiting for your approval' });
+                void notifyIfEnabled('agent_permission', {
+                    title: 'Rowboat needs an approval',
+                    message: itemText,
+                    link: 'rowboat://open?type=home',
+                });
+            }
+        }
     } finally {
         watcher.dispose();
     }
@@ -327,7 +352,7 @@ async function driveTurn(
 export async function runTodoItem(
     key: string,
     context?: string,
-    opts?: { model?: { provider: string; model: string } },
+    opts?: { model?: { provider: string; model: string }; autoPermission?: boolean },
 ): Promise<TodoRunResult> {
     const norm = normalizeKey(key);
     if (runningItems.has(norm)) {
@@ -352,7 +377,7 @@ export async function runTodoItem(
         const { sessions } = await resolveDeps();
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
         const { sessionId } = await ensureSession(sessions, item.key, title);
-        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context, parent?.text), 'manual', opts?.model);
+        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context, parent?.text), 'manual', opts?.model, opts?.autoPermission ?? true);
     } finally {
         runningItems.delete(norm);
     }
@@ -375,6 +400,7 @@ async function driveChatTurn(
     sessionId: string,
     message: string,
     modelOverride?: { provider: string; model: string },
+    autoPermission = true,
 ): Promise<HomeChatResult> {
     const key = `chat:${sessionId}`;
     if (runningItems.has(key)) {
@@ -397,9 +423,7 @@ async function driveChatTurn(
                             agentId: 'copilot',
                             overrides: { model: { provider, model } },
                         },
-                        // Matches in-app chat semantics: permission prompts
-                        // pend for the chat surface rather than auto-decide.
-                        autoPermission: false,
+                        autoPermission,
                     },
                 ),
             );
@@ -414,15 +438,34 @@ async function driveChatTurn(
         }
 
         todoBus.publish({ type: 'run_start', key });
-        const settled = await watcher.waitFor(sent.turnId, TURN_TIMEOUT_MS);
-        if (settled.kind === 'failed') {
-            todoBus.publish({ type: 'run_error', key, error: settled.error });
-            return { sessionId, turnId: sent.turnId, error: settled.error };
+        // A manual-permission turn suspends until the user approves from the
+        // chat — surface it once, then keep waiting so the thread still shows
+        // completion after approval.
+        const deadline = Date.now() + TURN_TIMEOUT_MS;
+        let surfacedSuspension = false;
+        for (;;) {
+            const settled = await watcher.waitFor(sent.turnId, Math.max(1000, deadline - Date.now()));
+            if (settled.kind === 'suspended') {
+                if (!surfacedSuspension) {
+                    surfacedSuspension = true;
+                    todoBus.publish({ type: 'attention', key, message: 'waiting for your approval' });
+                    void notifyIfEnabled('agent_permission', {
+                        title: 'Rowboat needs an approval',
+                        message: truncate(message, 120),
+                        link: 'rowboat://open?type=home',
+                    });
+                }
+                continue;
+            }
+            if (settled.kind === 'failed') {
+                todoBus.publish({ type: 'run_error', key, error: settled.error });
+                return { sessionId, turnId: sent.turnId, error: settled.error };
+            }
+            // Completed / question / cancelled / timeout all just end the
+            // spinner — the conversation itself is the record.
+            todoBus.publish({ type: 'run_complete', key });
+            return { sessionId, turnId: sent.turnId };
         }
-        // Completed / question / suspended / cancelled / timeout all just end
-        // the spinner — the conversation itself is the record.
-        todoBus.publish({ type: 'run_complete', key });
-        return { sessionId, turnId: sent.turnId };
     } finally {
         watcher.dispose();
         runningItems.delete(key);
@@ -445,9 +488,9 @@ export async function startHomeChat(text: string): Promise<HomeChatResult> {
 export async function replyHomeChat(
     sessionId: string,
     message: string,
-    opts?: { model?: { provider: string; model: string } },
+    opts?: { model?: { provider: string; model: string }; autoPermission?: boolean },
 ): Promise<HomeChatResult> {
-    return driveChatTurn(sessionId, message, opts?.model);
+    return driveChatTurn(sessionId, message, opts?.model, opts?.autoPermission ?? true);
 }
 
 /**
@@ -459,7 +502,7 @@ export async function replyHomeChat(
 export async function commentOnTodoItem(
     key: string,
     message: string,
-    opts?: { model?: { provider: string; model: string } },
+    opts?: { model?: { provider: string; model: string }; autoPermission?: boolean },
 ): Promise<TodoRunResult> {
     const norm = normalizeKey(key);
     if (runningItems.has(norm)) {
@@ -508,7 +551,7 @@ export async function commentOnTodoItem(
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
         const { sessionId, isNew } = await ensureSession(sessions, item.key, title);
         const text = isNew ? buildFirstMessage(item.text, message, parent?.text) : message;
-        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, text, 'comment', opts?.model);
+        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, text, 'comment', opts?.model, opts?.autoPermission ?? true);
     } finally {
         runningItems.delete(norm);
     }

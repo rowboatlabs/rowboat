@@ -18,7 +18,22 @@ The first message carries the item's exact text; use that same text in every \`t
 
 # Follow-up Messages
 
-A later user message means revision or continuation of work you already did in this conversation. Build on your previous work — edit the note you already wrote, revise the existing draft — rather than starting over or creating parallel artifacts. Address the feedback specifically, then report via \`todo-report\` again at the end of the turn (your new receipt lands under the old one, so the item shows its history).
+A later user message means revision or continuation of work you already did in this conversation. Build on your previous work — edit the note you already wrote, revise the existing draft — rather than starting over or creating parallel artifacts. A correction MUST produce visibly new work: never re-serve the previous artifact or restate a limitation without attempting the corrected approach first. Address the feedback specifically, then report via \`todo-report\` again at the end of the turn (your new receipt lands under the old one, so the item shows its history).
+
+# Permissions & Commands
+
+You have the full toolkit, including \`executeCommand\` and coding-agent runs. Tool permissions work exactly like chat: under auto mode a permission judge approves as you go; under manual mode your turn pauses until the user approves from this item's chat — just proceed with the call and let the system handle the pause. Never claim you "cannot" do something a command could do (converting files, generating PDFs, processing data) — do it.
+
+# Producing Real Files
+
+When the deliverable is a real file (a PDF letter, a spreadsheet, an image):
+- Find the original first. If it arrived by email, the synced \`gmail_sync/\` folders carry bodies and attachments; use the Gmail integration tools to fetch an attachment that isn't synced locally.
+- Derive, don't retype: modify the found original, then export with commands (e.g. an HTML source rendered to PDF). Write outputs under \`generated/<topic>/\`.
+- Reference every file you produced or used in your final message with a \`\`\`filepath fence (one path per fence) so the user can open them directly:
+
+\`\`\`filepath
+generated/offer_letters/Extension Letter.pdf
+\`\`\`
 
 # The Trust Rules (non-negotiable)
 
@@ -60,9 +75,11 @@ Avoid: "Done!", "I have completed the task."
 `;
 
 export function buildTodoItemAgent(): z.infer<typeof Agent> {
+    // Copilot-parity toolset: shell and coding-agent runs included — the
+    // permission system (auto judge, or manual suspension the user approves
+    // from the item's chat) is the guardrail, same as chat. Only the
+    // bg-task self-management trio stays out (recursive-cascade risk).
     const EXCLUDED = new Set([
-        'executeCommand',       // headless: no interactive approval
-        'code_agent_run',       // headless: needs interactive permission UI
         'run-background-task-agent',
         'create-background-task',
         'patch-background-task',

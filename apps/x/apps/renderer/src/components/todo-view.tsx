@@ -366,9 +366,11 @@ function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetr
   )
 }
 
-function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, collapsed = false, onToggleCollapsed, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
+function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, collapsed = false, onToggleCollapsed, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
   item: TodoItem
   isRunning: boolean
+  /** The live run is suspended on a permission prompt — approve from the chat. */
+  needsApproval?: string | null
   commentOpen: boolean
   sessionId: string | null
   bubbles: TodoChatBubble[]
@@ -488,7 +490,19 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
                 {doneChildren}/{item.children.length}
               </span>
             )}
-            {isRunning && (
+            {isRunning && needsApproval && (
+              /* Suspended on a permission prompt — the prompt itself renders
+                 in the chat surface, so the chip is a door, not a form. */
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); if (sessionId) onOpenInChat(sessionId) }}
+                className={`${CHIP} ml-2 bg-amber-500/15 font-medium text-amber-600 hover:bg-amber-500/25 dark:text-amber-400`}
+                title={needsApproval}
+              >
+                <Bot className="size-3" /> approve in chat
+              </button>
+            )}
+            {isRunning && !needsApproval && (
               <span className={`${CHIP} ml-2 animate-pulse bg-primary/10 text-primary`}>
                 <Loader2 className="size-3 animate-spin" /> working…
               </span>
@@ -739,9 +753,11 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   return last.text || links
 }
 
-function ConversationsSection({ threads, running, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
+function ConversationsSection({ threads, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
   threads: StreamThread[]
   running: Set<string>
+  /** Runs suspended on a permission prompt, keyed `chat:<sessionId>`. */
+  needsApproval?: Record<string, string>
   conversations: Record<string, TodoChatBubble[]>
   expanded: string | null
   replyFor: string | null
@@ -768,6 +784,7 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
       <div>
         {threads.map((t) => {
           const isRunning = running.has(`chat:${t.sessionId}`)
+          const approvalMsg = needsApproval?.[`chat:${t.sessionId}`] ?? null
           const isOpen = expanded === t.sessionId
           const bubbles = conversations[t.sessionId] ?? []
           const preview = previewLine(bubbles)
@@ -800,7 +817,17 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
                     <span className="block truncate pl-[22px] text-[12px] text-muted-foreground/70">{preview}</span>
                   )}
                 </button>
-                {isRunning && <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
+                {isRunning && approvalMsg && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenInChat(t.sessionId)}
+                    className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 hover:bg-amber-500/25 dark:text-amber-400"
+                    title={approvalMsg}
+                  >
+                    approve in chat
+                  </button>
+                )}
+                {isRunning && !approvalMsg && <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
                 <span className="shrink-0 text-[11px] text-muted-foreground/60">{relativeTime(t.updatedAt)}</span>
                 {/* Same floating tray as items — one grammar everywhere. */}
                 <div className="absolute -top-3 right-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/thread:flex">
@@ -845,7 +872,16 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
                   {lastResponseTail(bubbles).map((b, i) => (
                     <Bubble key={i} b={b} onOpenNote={onOpenNote} />
                   ))}
-                  {isRunning && (
+                  {isRunning && approvalMsg && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenInChat(t.sessionId)}
+                      className="flex w-fit items-center gap-1.5 text-[12px] font-medium text-amber-600 hover:underline dark:text-amber-400"
+                    >
+                      waiting for your approval — open the chat to allow it →
+                    </button>
+                  )}
+                  {isRunning && !approvalMsg && (
                     <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
                       <Loader2 className="size-3 animate-spin" /> working…
                     </div>
@@ -971,6 +1007,10 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
 export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, onComposeTodo, composeTarget, onOpenChatHistory }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
+  // Live runs suspended on a permission prompt (manual mode): key → message.
+  // Ephemeral overlay — cleared when the run settles or the user heads to
+  // the chat to approve.
+  const [needsApproval, setNeedsApproval] = useState<Record<string, string>>({})
   const [sessions, setSessions] = useState<Record<string, string>>({})
   const [conversations, setConversations] = useState<Record<string, TodoChatBubble[]>>({})
   const [archived, setArchived] = useState<ArchivedEntry[]>([])
@@ -1194,10 +1234,21 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
         setRunning((s) => new Set(s).add(event.key))
         return
       }
+      if (event.type === 'attention') {
+        setNeedsApproval((a) => ({ ...a, [event.key]: event.message }))
+        void refetch()
+        return
+      }
       if (event.type === 'run_complete' || event.type === 'run_error') {
         setRunning((s) => {
           const next = new Set(s)
           next.delete(event.key)
+          return next
+        })
+        setNeedsApproval((a) => {
+          if (!(event.key in a)) return a
+          const next = { ...a }
+          delete next[event.key]
           return next
         })
         if (event.key.startsWith('chat:')) {
@@ -1577,6 +1628,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     collapsed={collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0}
                     onToggleCollapsed={() => setRowCollapsed(item.key, !(collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0))}
                     isRunning={running.has(item.key)}
+                    needsApproval={needsApproval[item.key] ?? null}
                     onToggle={(checked) => {
                       const next = [...blocksRef.current!]
                       next[index] = { kind: 'item', item: { ...item, checked } }
@@ -1628,6 +1680,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                             collapsed={collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0}
                             onToggleCollapsed={() => setRowCollapsed(child.key, !(collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0))}
                             isRunning={running.has(child.key)}
+                            needsApproval={needsApproval[child.key] ?? null}
                             onToggle={(checked) => updateChild(index, ci, (c) => ({ ...c, checked }))}
                             onCommitText={(text) => {
                               if (text === '') {
@@ -1723,6 +1776,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
           <ConversationsSection
             threads={streamThreads}
             running={running}
+            needsApproval={needsApproval}
             conversations={streamConvs}
             expanded={expandedThread}
             replyFor={chatReplyFor}

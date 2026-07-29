@@ -112,7 +112,9 @@ export const todoTools: z.infer<typeof BuiltinToolsSchema> = {
                 const key = parent ? subKey(parent, item) : item;
                 const receipt = status === 'needs_user'
                     ? { kind: 'question' as const, text: summary, links: [] }
-                    : { kind: 'result' as const, text: summary, links: links ?? [] };
+                    // A link needs a target — label-only links would serialize
+                    // as dead `[label]()` markdown on the list.
+                    : { kind: 'result' as const, text: summary, links: (links ?? []).filter((l) => l.path || l.url) };
                 const attached = await attachReceipt(key, receipt, { check: status === 'done' });
                 todoBus.publish({ type: 'list_changed' });
                 if (!attached) {
