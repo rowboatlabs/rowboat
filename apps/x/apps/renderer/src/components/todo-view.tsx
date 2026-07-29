@@ -654,7 +654,7 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   return last.text || links
 }
 
-function ConversationsSection({ threads, running, conversations, expanded, replyFor, spotlightSessionId, dimAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
+function ConversationsSection({ threads, running, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
   threads: StreamThread[]
   running: Set<string>
   conversations: Record<string, TodoChatBubble[]>
@@ -664,6 +664,8 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
   spotlightSessionId?: string | null
   /** The composer's destination is in the other section — dim this one. */
   dimAll?: boolean
+  /** Threads that advanced since the user last looked — unread dots. */
+  changedSessionIds?: Set<string>
   onToggle: (sessionId: string) => void
   onReply: (sessionId: string) => void
   onSendReply: (sessionId: string, message: string) => void
@@ -692,8 +694,14 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
                 <button
                   type="button"
                   onClick={() => onToggle(t.sessionId)}
-                  className="min-w-0 flex-1 text-left"
+                  className="relative min-w-0 flex-1 text-left"
                 >
+                  {changedSessionIds?.has(t.sessionId) && (
+                    <span
+                      title="New activity since you last looked"
+                      className="absolute -left-2.5 top-[7px] size-1.5 rounded-full bg-primary"
+                    />
+                  )}
                   <span className="flex items-center gap-2">
                     <MessageCircle className="size-3.5 shrink-0 text-muted-foreground/60" />
                     <span className="min-w-0 flex-1 truncate text-sm">{t.title}</span>
@@ -705,6 +713,16 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
                 </button>
                 {isRunning && <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
                 <span className="shrink-0 text-[11px] text-muted-foreground/60">{relativeTime(t.updatedAt)}</span>
+                {/* Reply straight from the row — the composer's quote card
+                    shows what you're replying to, so no expand needed. */}
+                <button
+                  type="button"
+                  onClick={() => onReply(t.sessionId)}
+                  title="Reply"
+                  className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
+                >
+                  <Plus className="size-3.5" />
+                </button>
                 <button
                   type="button"
                   onClick={() => onOpenInChat(t.sessionId)}
@@ -1330,6 +1348,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
             replyFor={chatReplyFor}
             spotlightSessionId={spotSession}
             dimAll={spotKey !== null}
+            changedSessionIds={new Set(streamThreads.filter((t) => t.updatedAt > seenBaseline).map((t) => t.sessionId))}
             onToggle={toggleThread}
             onReply={(sid) => (onComposeTodo
               ? onComposeTodo({ kind: 'chatReply', sessionId: sid, title: streamThreads.find((t) => t.sessionId === sid)?.title ?? 'conversation', quote: lastBubbleText(streamConvs[sid]) })
