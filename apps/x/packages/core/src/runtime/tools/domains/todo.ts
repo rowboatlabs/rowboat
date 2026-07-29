@@ -44,6 +44,44 @@ export const todoTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
+    'todo-propose': {
+        permission: "none",
+        description: "PROPOSE items for the user's to-do list (the morning planner's ONLY pen). Proposed items carry a visible 'via rowboat' marker and NEVER start work — even with @rowboat in the text, the run waits for the user's explicit go. Duplicates of existing items and previously dismissed suggestions are skipped automatically. Propose few and good: 2–3 at most, zero is a valid outcome.",
+        inputSchema: z.object({
+            items: z.array(z.object({
+                text: z.string().describe("The item's line text, phrased as the user would write it. Include @rowboat only when offering to do the work yourself (internal prep only — research, outlines, summaries; never anything outward-facing)."),
+                }).strict()).min(1).max(5).describe("The proposals, best first."),
+        }),
+        execute: async ({ items }: { items: { text: string }[] }) => {
+            try {
+                const { addItem, getItem, normalizeKey } = await import("../../../todo/fileops.js");
+                const { stickyDismissedKeys, recordPlannerSignal } = await import("../../../todo/planner-memory.js");
+                const { todoBus } = await import("../../../todo/bus.js");
+                const sticky = await stickyDismissedKeys();
+                const added: string[] = [];
+                const skipped: { text: string; reason: string }[] = [];
+                for (const entry of items) {
+                    const key = normalizeKey(entry.text);
+                    if (sticky.has(key)) {
+                        skipped.push({ text: entry.text, reason: 'previously dismissed — do not re-propose' });
+                        continue;
+                    }
+                    if (await getItem(key)) {
+                        skipped.push({ text: entry.text, reason: 'already on the list' });
+                        continue;
+                    }
+                    const item = await addItem(entry.text, { proposed: true });
+                    await recordPlannerSignal('proposed', item.text);
+                    added.push(item.text);
+                }
+                todoBus.publish({ type: 'list_changed' });
+                return { success: true, added, ...(skipped.length > 0 ? { skipped } : {}) };
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return { success: false, error: msg };
+            }
+        },
+    },
     'todo-report': {
         permission: "none",
         description: "Report the outcome of one delegated item on the user's to-do list (todo.md). Writes a one-line receipt under the item — this is the to-do item agent's ONLY pen on the list; never edit todo.md with file tools. Trust rules: `done` (checks the box) is only for internal/read-only work; anything outward-facing (sending email, posting) stops at `ready` with the prepared draft linked — the user's check is the approval.",

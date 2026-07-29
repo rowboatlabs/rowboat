@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Bot, ChevronDown, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
 
 // ---------------------------------------------------------------------------
@@ -469,6 +470,9 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
             className={`cursor-text text-sm ${item.checked ? 'text-muted-foreground line-through' : changed ? 'font-semibold' : ''}`}
           >
             <TextWithMentions text={item.text} onOpenLink={(l) => openLink(l, onOpenNote)} />
+            {item.proposed && (
+              <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 align-middle text-[10px] font-medium text-muted-foreground">via rowboat</span>
+            )}
             {item.children.length > 0 && (
               <span
                 className={`${CHIP} ml-2 ${allChildrenDone && !item.checked ? 'bg-primary/10 font-semibold text-primary' : 'text-muted-foreground/70'}`}
@@ -956,6 +960,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const [conversations, setConversations] = useState<Record<string, TodoChatBubble[]>>({})
   const [archived, setArchived] = useState<ArchivedEntry[]>([])
   const [showCallout, setShowCallout] = useState(false)
+  const [plannerIntroSeen, setPlannerIntroSeen] = useState(() => !!localStorage.getItem('todo.plannerIntroSeen'))
   const [commentKey, setCommentKey] = useState<string | null>(null)
   const [subDraftFor, setSubDraftFor] = useState<string | null>(null)
   // The stream: recent chat threads (non-todo sessions).
@@ -1212,8 +1217,31 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const dismissKey = useCallback(async (key: string) => {
     // Flush edits so the archived copy matches the screen.
     if (dirtyRef.current) await saveNowRef.current()
-    await window.ipc.invoke('todo:dismiss', { key })
+    const itemText = (() => {
+      for (const b of blocksRef.current ?? []) {
+        if (b.kind !== 'item') continue
+        if (b.item.key === key) return b.item.text
+        const child = b.item.children.find((c) => c.key === key)
+        if (child) return child.text
+      }
+      return null
+    })()
+    const res = await window.ipc.invoke('todo:dismiss', { key })
     await refetch()
+    if (res.success && res.wasProposed && itemText) {
+      // The dismissal already taught by example; this offers the durable rule.
+      toast('Suggestion dismissed', {
+        description: 'Rowboat won\'t re-suggest this one.',
+        action: {
+          label: "Don't suggest things like this",
+          onClick: () => {
+            void window.ipc.invoke('todo:teach', { text: itemText }).then(() => {
+              toast.success('Noted — rule added to todo/preferences.md')
+            })
+          },
+        },
+      })
+    }
   }, [refetch])
 
   const addSub = useCallback(async (parentKey: string, text: string) => {
@@ -1344,6 +1372,22 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
               <button
                 type="button"
                 onClick={markSeenNow}
+                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* First-proposals explainer — shown once, ever */}
+          {!plannerIntroSeen
+            && itemBlocks.some(({ block }) => block.kind === 'item' && block.item.proposed && !block.item.checked) && (
+            <div className="flex items-center gap-2 border-y border-border/60 px-1 py-2 text-[13px] text-muted-foreground">
+              <Bot className="size-3.5 shrink-0" />
+              <span className="flex-1">Rowboat suggested items from your mail and calendar (marked "via rowboat"). Keep what's useful — dismissing teaches it what not to suggest, and nothing runs until you say go.</span>
+              <button
+                type="button"
+                onClick={() => { localStorage.setItem('todo.plannerIntroSeen', '1'); setPlannerIntroSeen(true) }}
                 className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
               >
                 <X className="size-3.5" />

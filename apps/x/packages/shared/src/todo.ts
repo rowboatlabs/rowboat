@@ -59,6 +59,10 @@ export type TodoItem = {
     checked: boolean;
     /** True when the text mentions @rowboat. */
     delegated: boolean;
+    /** True when the planner suggested this item ("(via rowboat)" marker on
+     * the line). Proposed items never self-start — the user's go is the run
+     * chip. */
+    proposed?: boolean;
     receipts: TodoReceipt[];
     /** Sub-items — one level only; a sub-item's children are always empty.
      * Each is a full item: own thread, receipts, delegation. */
@@ -115,6 +119,7 @@ export const TodoItemSchema: z.ZodType<TodoItem> = z.lazy(() => z.object({
     text: z.string(),
     checked: z.boolean(),
     delegated: z.boolean(),
+    proposed: z.boolean().optional(),
     receipts: z.array(TodoReceiptSchema),
     // Depth (one level) is enforced by the parser, not the schema.
     children: z.array(TodoItemSchema),

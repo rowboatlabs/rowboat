@@ -142,6 +142,8 @@ import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
 import { runTodoItem, commentOnTodoItem, startHomeChat, replyHomeChat, runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
 import { getConversation as getTodoConversation, deriveConversation as deriveSessionConversation } from '@x/core/dist/todo/conversation.js';
+import { recordPlannerSignal, addYourRule as addPlannerRule } from '@x/core/dist/todo/planner-memory.js';
+import { findItem as findTodoItem } from '@x/core/dist/todo/fileops.js';
 import { todoBus } from '@x/core/dist/todo/bus.js';
 import {
   readTodo,
@@ -2724,9 +2726,23 @@ export function setupIpcHandlers() {
     },
     'todo:dismiss': async (_event, args) => {
       try {
+        // Dismissing a planner proposal is a learning signal.
+        const found = await findTodoItem(args.key).catch(() => null);
         const ok = await dismissTodoItem(args.key);
+        if (ok && found?.item.proposed) {
+          void recordPlannerSignal('dismissed', found.item.text).catch(() => {});
+        }
         todoBus.publish({ type: 'list_changed' });
-        return ok ? { success: true } : { success: false, error: 'Item not found' };
+        return ok ? { success: true, wasProposed: !!found?.item.proposed } : { success: false, error: 'Item not found' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:teach': async (_event, args) => {
+      try {
+        await addPlannerRule(`Don't suggest items like: "${args.text}"`);
+        void recordPlannerSignal('taught', args.text).catch(() => {});
+        return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }

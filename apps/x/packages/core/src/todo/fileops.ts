@@ -29,6 +29,8 @@ const RECEIPT_LINE_RE = /^\s+- → (.*\S)\s*$/;
 const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
 /** Receipt stamped onto a dismissed sub-item so restore can re-nest it. */
 const FROM_RE = /^from: (.+)$/;
+/** Planner provenance marker — visible in the file, badge in the UI. */
+const PROPOSED_RE = /\s*\(via rowboat\)\s*$/i;
 
 export function normalizeKey(text: string): string {
     return text.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -93,6 +95,12 @@ function newItem(text: string, checked: boolean, key: string): TodoItem {
     };
 }
 
+/** Split the provenance marker out of a raw line's text. */
+function parseProposed(raw: string): { text: string; proposed: boolean } {
+    if (!PROPOSED_RE.test(raw)) return { text: raw, proposed: false };
+    return { text: raw.replace(PROPOSED_RE, '').trim(), proposed: true };
+}
+
 export function parseTodoFile(markdown: string): TodoList {
     const blocks: TodoBlock[] = [];
     // Receipts and sub-items attach to the immediately preceding line's
@@ -108,7 +116,9 @@ export function parseTodoFile(markdown: string): TodoList {
         }
         const task = TASK_LINE_RE.exec(line);
         if (task) {
-            const item = newItem(task[2], task[1].toLowerCase() === 'x', normalizeKey(task[2]));
+            const parsed = parseProposed(task[2]);
+            const item = newItem(parsed.text, task[1].toLowerCase() === 'x', normalizeKey(parsed.text));
+            if (parsed.proposed) item.proposed = true;
             blocks.push({ kind: 'item', item });
             parent = item;
             current = item;
@@ -116,7 +126,9 @@ export function parseTodoFile(markdown: string): TodoList {
         }
         const sub = SUB_TASK_LINE_RE.exec(line);
         if (sub && parent) {
-            const child = newItem(sub[2], sub[1].toLowerCase() === 'x', subKey(parent.text, sub[2]));
+            const parsed = parseProposed(sub[2]);
+            const child = newItem(parsed.text, sub[1].toLowerCase() === 'x', subKey(parent.text, parsed.text));
+            if (parsed.proposed) child.proposed = true;
             parent.children.push(child);
             current = child;
             continue;
@@ -138,12 +150,13 @@ export function parseTodoFile(markdown: string): TodoList {
 }
 
 function serializeItem(item: TodoItem): string[] {
+    const mark = (i: TodoItem) => (i.proposed ? ' (via rowboat)' : '');
     const out = [
-        `- [${item.checked ? 'x' : ' '}] ${item.text.trim()}`,
+        `- [${item.checked ? 'x' : ' '}] ${item.text.trim()}${mark(item)}`,
         ...item.receipts.map(r => serializeReceipt(r, '  ')),
     ];
     for (const child of item.children) {
-        out.push(`  - [${child.checked ? 'x' : ' '}] ${child.text.trim()}`);
+        out.push(`  - [${child.checked ? 'x' : ' '}] ${child.text.trim()}${mark(child)}`);
         out.push(...child.receipts.map(r => serializeReceipt(r, '    ')));
     }
     return out;
@@ -289,8 +302,10 @@ export async function saveTodo(incoming: TodoList): Promise<TodoList> {
 }
 
 /** Append one task line to the end of the list. */
-export async function addItem(text: string): Promise<TodoItem> {
-    const item = newItem(text.replace(/\s+/g, ' ').trim(), false, normalizeKey(text));
+export async function addItem(text: string, opts?: { proposed?: boolean }): Promise<TodoItem> {
+    const clean = text.replace(PROPOSED_RE, '').replace(/\s+/g, ' ').trim();
+    const item = newItem(clean, false, normalizeKey(clean));
+    if (opts?.proposed) item.proposed = true;
     await withTodoLock(async () => {
         const list = parseTodoFile(await readRaw());
         list.blocks.push({ kind: 'item', item });

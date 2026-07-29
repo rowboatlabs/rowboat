@@ -697,6 +697,9 @@ app.whenReady().then(async () => {
   // start todo event watcher (forwards bus → renderer)
   startTodoWatcher();
 
+  // seed the morning planner background task (once, best-effort)
+  void import("@x/core/dist/todo/planner-task.js").then((m) => m.ensureMorningPlannerTask());
+
   // start live-note scheduler (cron / window)
   initLiveNoteScheduler();
 

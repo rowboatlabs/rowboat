@@ -2583,10 +2583,23 @@ const ipcSchemas = {
     }),
   },
   // Dismiss = move to the archive (never delete); restorable from the
-  // "Done & dismissed" section.
+  // "Done & dismissed" section. wasProposed lets the renderer offer the
+  // "don't suggest things like this" teaching affordance.
   'todo:dismiss': {
     req: z.object({
       key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      wasProposed: z.boolean().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // "Don't suggest things like this" — writes a rule into the Your-rules
+  // section of todo/preferences.md and records the signal.
+  'todo:teach': {
+    req: z.object({
+      text: z.string(),
     }),
     res: z.object({
       success: z.boolean(),

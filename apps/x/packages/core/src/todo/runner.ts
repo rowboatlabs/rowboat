@@ -344,6 +344,11 @@ export async function runTodoItem(
         if (item.checked) {
             return { key: norm, sessionId: null, turnId: null, summary: null, error: 'Item is already done' };
         }
+        if (item.proposed && item.receipts.length === 0) {
+            // The user gave a planner proposal its go — a positive signal.
+            const { recordPlannerSignal } = await import('./planner-memory.js');
+            void recordPlannerSignal('ran', item.text).catch(() => {});
+        }
         const { sessions } = await resolveDeps();
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
         const { sessionId } = await ensureSession(sessions, item.key, title);
