@@ -1,9 +1,7 @@
-import { DEV_SERVER_URL } from './dev-server.js';
-import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen, powerSaveBlocker } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
 import {
   connectProvider,
   disconnectProvider,
@@ -28,7 +26,16 @@ const execFileAsync = promisify(execFile);
 let caffeinateBlockerId: number | null = null;
 
 import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
-import { getQuickAskWindow, hideQuickAsk, showQuickAsk } from './quick-ask.js';
+import {
+  getCompanionMode,
+  getPopoutState,
+  getQuickAskWindow,
+  hideQuickAsk,
+  pushPopoutState,
+  resizeCompanionPinned,
+  setCompanionPinned,
+  showQuickAsk,
+} from './quick-ask.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -454,40 +461,19 @@ type InvokeHandlers = {
 // In-flight streaming TTS requests, keyed by renderer-chosen requestId.
 const activeTtsStreams = new Map<string, AbortController>();
 
-// Video-mode popout window (shown for the whole duration of a screen share,
-// floating over every app including Rowboat itself) and the last call state
-// pushed by the main window — replayed to the popout when it finishes loading.
-let videoPopoutWin: BrowserWindow | null = null;
-let lastVideoPopoutState: {
-  ttsState: 'idle' | 'synthesizing' | 'speaking';
-  status: 'idle' | 'listening' | 'thinking' | 'speaking' | null;
-  cameraOn: boolean;
-  micMuted: boolean;
-  screenSharing: boolean;
-  interimText: string | null;
-  pttLocked: boolean;
-  responseText: string | null;
-  questionText: string | null;
-} | null = null;
-
-// Popout window height bounds: the base pill, and the ceiling with the
-// response panel expanded (renderer-driven via video:popoutResize).
-const POPOUT_BASE_HEIGHT = 218;
-const POPOUT_MAX_HEIGHT = 500;
-
-// Match only real app windows — getAllWindows() can also contain the popout
-// itself and hidden utility windows (e.g. PDF-export renderers), which must
-// not be shown, focused, or sent app events.
+// Match only real app windows — getAllWindows() can also contain the
+// companion window and hidden utility windows (e.g. PDF-export renderers),
+// which must not be shown, focused, or sent app events.
 function findMainAppWindow(): BrowserWindow | undefined {
   return BrowserWindow.getAllWindows().find((w) => {
-    if (w === videoPopoutWin || w.isDestroyed()) return false;
+    if (w.isDestroyed()) return false;
     const url = w.webContents.getURL();
     const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
     // Every utility window loads the same bundle with a hash route
-    // (#video-popout, #quick-ask, #meeting-detected) — only the hashless
-    // window is the real app. Matching just video-popout let the quick-ask
-    // relay pick the quick-ask window ITSELF as the "app window" and send
-    // the question right back to it (bar stuck on "Thinking…").
+    // (#quick-ask, #meeting-detected) — only the hashless window is the real
+    // app. Matching anything looser let the quick-ask relay pick the
+    // companion window ITSELF as the "app window" and send the question
+    // right back to it (bar stuck on "Thinking…").
     return isAppWindow && !url.includes('#');
   });
 }
@@ -1039,6 +1025,9 @@ export function setupIpcHandlers() {
     'quickAsk:stop': async () => {
       findMainAppWindow()?.webContents.send('quick-ask:stop', null);
       return {};
+    },
+    'quickAsk:getMode': async () => {
+      return { mode: getCompanionMode() };
     },
     'quickAsk:hide': async () => {
       hideQuickAsk();
@@ -2479,87 +2468,17 @@ export function setupIpcHandlers() {
       }
     },
     'video:setPopout': async (_event, args) => {
-      if (!args.show) {
-        if (videoPopoutWin && !videoPopoutWin.isDestroyed()) videoPopoutWin.destroy();
-        videoPopoutWin = null;
-        return {};
-      }
-      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) return {};
-
-      const workArea = screen.getPrimaryDisplay().workArea;
-      const width = 340;
-      const height = POPOUT_BASE_HEIGHT;
-      const ipcDir = path.dirname(fileURLToPath(import.meta.url));
-      const preloadPath = app.isPackaged
-        ? path.join(ipcDir, '../preload/dist/preload.js')
-        : path.join(ipcDir, '../../../preload/dist/preload.js');
-      const win = new BrowserWindow({
-        width,
-        height,
-        x: workArea.x + workArea.width - width - 24,
-        y: workArea.y + 24,
-        frame: false,
-        resizable: false,
-        // Never let macOS fullscreen/tile the pill: creating a window while
-        // the app window is in a native-fullscreen Space can otherwise open
-        // it AS a fullscreen window (the pill swallowing the whole screen).
-        fullscreenable: false,
-        minimizable: false,
-        maximizable: false,
-        // NSPanel (macOS): auxiliary windows may join other apps' fullscreen
-        // Spaces — a plain window can't, which made the pill vanish whenever
-        // the user's current app was fullscreen.
-        ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
-        alwaysOnTop: true,
-        skipTaskbar: true,
-        show: false,
-        hasShadow: true,
-        backgroundColor: '#171717',
-        webPreferences: {
-          nodeIntegration: false,
-          contextIsolation: true,
-          sandbox: true,
-          preload: preloadPath,
-        },
-      });
-      // Float above other apps on every workspace, INCLUDING fullscreen
-      // Spaces. `skipTransformProcessType` keeps the Dock icon: without it,
-      // `visibleOnFullScreen` turns the app into a macOS "agent" app for as
-      // long as the window exists (reads as Rowboat having vanished).
-      win.setAlwaysOnTop(true, 'floating');
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-      win.webContents.once('did-finish-load', () => {
-        if (lastVideoPopoutState) {
-          win.webContents.send('video:popout-state', lastVideoPopoutState);
-        }
-        // showInactive: appearing must not steal focus from the app the user
-        // switched to — that would immediately re-hide the popout.
-        if (!win.isDestroyed()) win.showInactive();
-      });
-      win.on('closed', () => {
-        if (videoPopoutWin === win) videoPopoutWin = null;
-      });
-      videoPopoutWin = win;
-      if (app.isPackaged) {
-        win.loadURL('app://-/index.html#video-popout');
-      } else {
-        win.loadURL(`${DEV_SERVER_URL}/#video-popout`);
-      }
+      // The call's floating surface is the companion window's pinned role —
+      // no separate popout window anymore (see quick-ask.ts).
+      setCompanionPinned(args.show);
       return {};
     },
     'video:popoutState': async (_event, args) => {
-      lastVideoPopoutState = args;
-      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
-        videoPopoutWin.webContents.send('video:popout-state', args);
-      }
+      pushPopoutState(args);
       return {};
     },
     'video:popoutResize': async (_event, args) => {
-      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
-        const clamped = Math.max(POPOUT_BASE_HEIGHT, Math.min(POPOUT_MAX_HEIGHT, Math.round(args.height)));
-        const [width] = videoPopoutWin.getSize();
-        videoPopoutWin.setSize(width, clamped);
-      }
+      resizeCompanionPinned(args.height);
       return {};
     },
     'app:focusMainWindow': async () => {
@@ -2575,7 +2494,7 @@ export function setupIpcHandlers() {
       return {};
     },
     'video:getPopoutState': async () => {
-      return { state: lastVideoPopoutState };
+      return { state: getPopoutState() };
     },
     'video:popoutAction': async (_event, args) => {
       // Relay a popout control-bar action to the app window, which owns the

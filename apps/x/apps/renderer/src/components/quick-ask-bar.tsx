@@ -1,9 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, MonitorUp, Plus, Volume2 } from 'lucide-react'
+import {
+  ArrowUpRight,
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Mic,
+  MicOff,
+  MonitorUp,
+  PhoneOff,
+  Plus,
+  Square,
+  User,
+  Video,
+  VideoOff,
+  Volume2,
+} from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
+import { TalkingHead } from '@/components/talking-head'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { stripKnowledgePrefix } from '@/lib/wiki-links'
 import {
@@ -20,6 +36,52 @@ import type { FileMention, PromptInputMessage } from '@/components/ai-elements/p
 // menu) — right Ctrl is the safe equivalent there.
 const IS_MAC = navigator.platform.startsWith('Mac')
 const PTT_CODE = IS_MAC ? 'MetaRight' : 'ControlRight'
+
+type CompanionMode = 'hidden' | 'summoned' | 'pinned'
+
+// Call state mirrored from the app window (the old #video-popout contract).
+type CallState = {
+  ttsState: 'idle' | 'synthesizing' | 'speaking'
+  status: 'idle' | 'listening' | 'thinking' | 'speaking' | null
+  cameraOn: boolean
+  /** User mute = full input pause: no mic audio AND no frame capture. */
+  micMuted: boolean
+  screenSharing: boolean
+  interimText: string | null
+  /** A quick ⌘ tap locked hands-free capture (until the next tap). */
+  pttLocked: boolean
+  /** Latest assistant reply of this call (streams while generating). */
+  responseText: string | null
+  /** The user message that reply answers. */
+  questionText: string | null
+}
+
+const IDLE_CALL_STATE: CallState = {
+  ttsState: 'idle',
+  status: null,
+  cameraOn: false,
+  micMuted: false,
+  screenSharing: false,
+  interimText: null,
+  pttLocked: false,
+  responseText: null,
+  questionText: null,
+}
+
+type PopoutAction =
+  | 'toggle-mic'
+  | 'toggle-camera'
+  | 'toggle-share'
+  | 'stop-speaking'
+  | 'ptt-down'
+  | 'ptt-up'
+  | 'end-call'
+  | 'expand'
+
+// Pill window heights the renderer asks main for (design px, clamped by
+// main): the base pill, and with the response panel expanded.
+const PINNED_BASE_HEIGHT = 320
+const PINNED_RESPONSE_HEIGHT = 560
 
 /**
  * Content of the quick-ask window (global ⌥⇧Space — see main's quick-ask.ts).
@@ -67,6 +129,45 @@ export function QuickAskBar() {
     const onFocus = () => setFocusSignal((n) => n + 1)
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  // Which role the window is playing: summoned Spotlight bar or pinned call
+  // pill (the old #video-popout, folded into this window). Pushed by main on
+  // every transition; fetched once to cover the load race. 'hidden' renders
+  // as summoned — the window is invisible then anyway.
+  const [mode, setMode] = useState<CompanionMode>('summoned')
+  useEffect(() => {
+    const cleanup = window.ipc.on('quick-ask:mode', (m) => {
+      setMode(m.mode === 'hidden' ? 'summoned' : m.mode)
+    })
+    void window.ipc
+      .invoke('quickAsk:getMode', null)
+      .then((m) => setMode(m.mode === 'hidden' ? 'summoned' : m.mode))
+      .catch(() => {})
+    return cleanup
+  }, [])
+  const pinned = mode === 'pinned'
+
+  // Call state mirrored from the app window, which owns the call engine —
+  // this window only renders it (same contract as the old popout).
+  const [callState, setCallState] = useState<CallState>(IDLE_CALL_STATE)
+  useEffect(() => {
+    const cleanup = window.ipc.on('video:popout-state', (next) => setCallState(next))
+    // Main replays the cached state on did-finish-load, but that can race
+    // this listener's registration — fetch it explicitly too.
+    void window.ipc
+      .invoke('video:getPopoutState', null)
+      .then(({ state }) => {
+        if (state) setCallState(state)
+      })
+      .catch(() => {})
+    return cleanup
+  }, [])
+
+  // Relay a call control action to the app window (mic/camera/capture live
+  // there; the pill is a dumb terminal).
+  const sendAction = useCallback((action: PopoutAction) => {
+    void window.ipc.invoke('video:popoutAction', { action }).catch(() => {})
   }, [])
 
   // Knowledge files for @-mentions, fetched over IPC (this window has no
@@ -254,13 +355,22 @@ export function QuickAskBar() {
     reset()
   }, [reset])
 
-  // Hold the platform PTT key to speak; release submits the transcript.
-  // Esc: cancel recording → clear the answer → dismiss, in that order.
+  // Hold the platform PTT key to speak. Outside a call: local dictation,
+  // release submits the transcript. During a call (pinned): the app's PTT
+  // machine owns the mic — relay the key edges to it instead (this works
+  // even without the Input Monitoring grant, since the pill has focus).
+  // Esc: cancel recording → clear the answer → dismiss, in that order —
+  // but never dismiss a live call surface.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === PTT_CODE && !e.repeat && !recordingRef.current) {
-        startRecording()
+      if (e.code === PTT_CODE && !e.repeat) {
+        if (pinned) {
+          sendAction('ptt-down')
+        } else if (!recordingRef.current) {
+          startRecording()
+        }
       } else if (e.key === 'Escape') {
+        if (pinned) return
         e.preventDefault()
         if (recordingRef.current) {
           cancelRecording()
@@ -272,7 +382,10 @@ export function QuickAskBar() {
       }
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === PTT_CODE && recordingRef.current) {
+      if (e.code !== PTT_CODE) return
+      if (pinned) {
+        sendAction('ptt-up')
+      } else if (recordingRef.current) {
         void submitRecording()
       }
     }
@@ -282,7 +395,40 @@ export function QuickAskBar() {
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('keyup', onKeyUp)
     }
-  }, [asked, startRecording, submitRecording, cancelRecording, reset, dismiss])
+  }, [asked, pinned, sendAction, startRecording, submitRecording, cancelRecording, reset, dismiss])
+
+  // Pinned role: the call pill (old #video-popout), with the real composer
+  // as its typed input. The window is pill-sized in this mode — no
+  // transparent stage.
+  if (pinned) {
+    return (
+      <>
+        <PinnedPill
+          state={callState}
+          sendAction={sendAction}
+          composer={
+            <ChatInputWithMentions
+              knowledgeFiles={knowledgeFiles}
+              recentFiles={[]}
+              visibleFiles={knowledgeFiles}
+              onSubmit={submit}
+              onStop={() => sendAction('stop-speaking')}
+              isProcessing={callState.status === 'thinking'}
+              runId={null}
+              placeholder="Type instead — @ mentions work too…"
+              onSelectedModelChange={(m) => {
+                modelRef.current = m ?? null
+              }}
+              onReasoningEffortChange={(effort) => {
+                effortRef.current = effort ?? null
+              }}
+            />
+          }
+        />
+        <Toaster />
+      </>
+    )
+  }
 
   return (
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden">
@@ -444,6 +590,321 @@ export function QuickAskBar() {
         </div>
       </div>
       <Toaster />
+    </div>
+  )
+}
+
+const STATUS_DISPLAY: Record<NonNullable<CallState['status']>, { label: string; dotClass: string }> = {
+  idle: { label: 'Hold right ⌘ to talk', dotClass: 'bg-neutral-500' },
+  listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
+  thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
+  speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
+}
+
+const dragRegion = { WebkitAppRegion: 'drag' } as React.CSSProperties
+const noDragRegion = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
+
+/**
+ * The pinned role's layout: the Meet-style floating mini-call pill (absorbed
+ * from the old #video-popout window) — camera tile when on + mascot tile,
+ * live caption, control bar, collapsible response panel, and the REAL
+ * composer as its typed input. All call state arrives over
+ * `video:popout-state`; control actions round-trip through
+ * `video:popoutAction` to the app window, which owns the devices. Captures
+ * its own webcam preview — MediaStreams can't cross windows.
+ *
+ * Wrapped in `.dark`: the pill keeps its dark skin even though the summoned
+ * bar claims light tokens, so the composer inside renders dark too.
+ */
+function PinnedPill({
+  state,
+  sendAction,
+  composer,
+}: {
+  state: CallState
+  sendAction: (action: PopoutAction) => void
+  composer: React.ReactNode
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  // Response panel: auto-opens when a new turn starts generating, user can
+  // fold it away. The reply is also spoken — this is the readable half.
+  const [responseOpen, setResponseOpen] = useState(true)
+  const responseRef = useRef<HTMLDivElement | null>(null)
+
+  // A new turn re-opens the panel and rewinds to the top — the reply reads
+  // from its beginning, not wherever the last one left off. The re-open is
+  // a render-time state adjustment (React's sanctioned previous-state
+  // pattern); the scroll rewind is a DOM mutation, so it stays in an effect.
+  const [prevStatus, setPrevStatus] = useState(state.status)
+  if (prevStatus !== state.status) {
+    setPrevStatus(state.status)
+    if (state.status === 'thinking') setResponseOpen(true)
+  }
+  useEffect(() => {
+    if (state.status === 'thinking' && responseRef.current) {
+      responseRef.current.scrollTop = 0
+    }
+  }, [state.status])
+
+  // Grow/shrink the window with the panel (design px; main clamps).
+  const showResponse = Boolean(state.responseText || state.questionText) && responseOpen
+  useEffect(() => {
+    void window.ipc
+      .invoke('video:popoutResize', { height: showResponse ? PINNED_RESPONSE_HEIGHT : PINNED_BASE_HEIGHT })
+      .catch(() => {})
+  }, [showResponse])
+
+  // Own camera feed, following the app window's camera-on/off state.
+  useEffect(() => {
+    if (!state.cameraOn) return
+    let stream: MediaStream | null = null
+    let cancelled = false
+    navigator.mediaDevices
+      .getUserMedia({ video: { width: { ideal: 640 }, facingMode: 'user' }, audio: false })
+      .then((s) => {
+        if (cancelled) {
+          s.getTracks().forEach((t) => t.stop())
+          return
+        }
+        stream = s
+        if (videoRef.current) {
+          videoRef.current.srcObject = s
+          videoRef.current.play().catch(() => {})
+        }
+      })
+      .catch((err) => console.error('[companion] camera failed:', err))
+    return () => {
+      cancelled = true
+      stream?.getTracks().forEach((t) => t.stop())
+      if (videoRef.current) videoRef.current.srcObject = null
+    }
+  }, [state.cameraOn])
+
+  // No TTS audio pipeline in this window — synthesize a plausible mouth
+  // level so the mascot still animates while the assistant speaks in the
+  // app window.
+  const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
+
+  const statusDisplay = state.status ? STATUS_DISPLAY[state.status] : null
+
+  return (
+    <div
+      className="dark relative flex h-screen w-screen select-none flex-col gap-1.5 overflow-hidden rounded-2xl bg-neutral-900 p-1.5 text-white"
+      style={dragRegion}
+    >
+      <div className="flex min-h-0 flex-1 gap-1.5">
+        <div className="relative flex-1 overflow-hidden rounded-lg bg-neutral-800">
+          {state.cameraOn ? (
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              className="h-full w-full object-cover"
+              style={{ transform: 'scaleX(-1)' }}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-700 text-neutral-400">
+                <User className="h-6 w-6" />
+              </span>
+            </div>
+          )}
+          <span className="absolute bottom-1 left-1.5 rounded bg-black/50 px-1 py-px text-[10px] text-white">
+            You
+          </span>
+          {/* Persistent consent badge — the user must always be able to see
+              at a glance that their screen is going out. Muted pauses frame
+              capture while keeping the share stream open, so say so. */}
+          {state.screenSharing && (
+            <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+              <span className={`block h-1.5 w-1.5 rounded-full bg-white ${state.micMuted ? '' : 'animate-pulse'}`} />
+              {state.micMuted ? 'Sharing paused' : 'Sharing screen'}
+            </span>
+          )}
+          {state.micMuted && (
+            <span className="absolute bottom-1 right-1.5 flex items-center gap-1 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+              <MicOff className="h-2.5 w-2.5" />
+              Muted
+            </span>
+          )}
+        </div>
+        <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg bg-neutral-800">
+          <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={84} />
+          <span className="absolute bottom-1 left-1.5 rounded bg-black/50 px-1 py-px text-[10px] text-white">
+            Rowboat
+          </span>
+          {statusDisplay && (
+            <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white">
+              {/* Muted overrides the listening/PTT states — the green pulse
+                  (or the "hold to talk" invite) would be a lie. */}
+              {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
+                <>
+                  <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
+                  Muted
+                </>
+              ) : state.pttLocked ? (
+                <>
+                  <span className="block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                  Hands-free
+                </>
+              ) : (
+                <>
+                  <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
+                  {statusDisplay.label}
+                </>
+              )}
+            </span>
+          )}
+          {(state.status === 'speaking' || state.status === 'thinking') && (
+            <button
+              type="button"
+              onClick={() => sendAction('stop-speaking')}
+              className="absolute bottom-1 right-1.5 flex items-center gap-1 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-red-500"
+              style={noDragRegion}
+              aria-label="Stop the assistant"
+              title={state.status === 'speaking' ? 'Stop speaking' : 'Stop responding'}
+            >
+              <Square className="h-2.5 w-2.5 fill-current" />
+              Stop
+            </button>
+          )}
+        </div>
+        {/* Live caption of the in-progress utterance, floating over the tiles */}
+        {state.interimText && (
+          <div className="pointer-events-none absolute inset-x-1.5 bottom-9 flex justify-center">
+            <span className="max-w-full truncate rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/90">
+              {state.interimText}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Control bar — actions execute in the main app window */}
+      <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>
+        {/* Push-to-talk: hold to talk, quick tap to lock hands-free —
+            mirrors the Right ⌘ key. Pointer capture keeps the release edge
+            even if the cursor slides off mid-hold. */}
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId)
+            sendAction('ptt-down')
+          }}
+          onPointerUp={() => sendAction('ptt-up')}
+          onPointerCancel={() => sendAction('ptt-up')}
+          disabled={state.micMuted}
+          className={`flex h-6 select-none items-center gap-1 rounded-full px-2 text-[10px] font-medium transition-colors ${
+            state.status === 'listening' || state.pttLocked
+              ? 'bg-green-600 text-white hover:bg-green-500'
+              : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+          } ${state.micMuted ? 'opacity-50' : ''}`}
+          aria-label="Hold to talk — or hold the right ⌘ key from any app"
+          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
+        >
+          <Mic className="h-3 w-3" />
+          {state.pttLocked ? 'Tap to send' : state.status === 'listening' ? 'Release to send' : 'Hold to talk'}
+        </button>
+        <button
+          type="button"
+          onClick={() => sendAction('toggle-mic')}
+          className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+            state.micMuted
+              ? 'bg-red-600 text-white hover:bg-red-500'
+              : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+          }`}
+          aria-label={state.micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
+          title={state.micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}
+        >
+          {state.micMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => sendAction('toggle-camera')}
+          className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+            state.cameraOn
+              ? 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+              : 'bg-red-600 text-white hover:bg-red-500'
+          }`}
+          aria-label={state.cameraOn ? 'Turn off camera' : 'Turn on camera'}
+          title={state.cameraOn ? 'Turn off camera' : 'Turn on camera'}
+        >
+          {state.cameraOn ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => sendAction('toggle-share')}
+          className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+            state.screenSharing
+              ? 'bg-sky-600 text-white hover:bg-sky-500'
+              : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+          }`}
+          aria-label={state.screenSharing ? 'Stop sharing screen' : 'Share your screen'}
+          title={state.screenSharing ? 'Stop sharing screen' : 'Share your screen'}
+        >
+          <MonitorUp className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => sendAction('end-call')}
+          className="flex h-6 w-8 items-center justify-center rounded-full bg-red-600 text-white transition-colors hover:bg-red-500"
+          aria-label="End call"
+          title="End call"
+        >
+          <PhoneOff className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => sendAction('expand')}
+          className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-700 text-white/90 transition-colors hover:bg-neutral-600"
+          aria-label="Expand to full screen (stops screen sharing)"
+          title="Expand to full screen (stops sharing)"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* The current exchange, readable in the pill: the question plus its
+          streaming reply. Auto-opens each turn, collapsible, sits between
+          the controls and the composer. */}
+      {(state.responseText || state.questionText) && (
+        <div className="flex min-h-0 shrink-0 flex-col gap-1" style={noDragRegion}>
+          <button
+            type="button"
+            onClick={() => setResponseOpen((v) => !v)}
+            className="flex items-center gap-1 self-start text-[10px] font-medium text-neutral-400 transition-colors hover:text-white"
+          >
+            {responseOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {responseOpen ? 'Hide response' : 'Show response'}
+          </button>
+          {responseOpen && (
+            <div
+              ref={responseRef}
+              className="h-[150px] overflow-y-auto rounded-md bg-neutral-800 px-2 py-1.5 text-[11px] leading-relaxed"
+            >
+              {state.questionText && (
+                <div className="mb-1.5 whitespace-pre-wrap border-l-2 border-sky-500/70 pl-1.5 text-neutral-400">
+                  {state.questionText}
+                </div>
+              )}
+              <div className="text-neutral-100">
+                {state.responseText && (
+                  <Streamdown className="prose prose-sm prose-invert max-w-none text-[11px] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_pre]:my-1.5 [&_pre]:text-[10px] [&_code]:text-[10px]">
+                    {state.responseText}
+                  </Streamdown>
+                )}
+                {state.status === 'thinking' && <span className="animate-pulse">▍</span>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* The real composer as the pill's typed input — messages land in the
+          chat exactly like composer messages, current frames riding along
+          (the app attaches them to any submit while a call is live). */}
+      <div className="shrink-0" style={noDragRegion}>
+        {composer}
+      </div>
     </div>
   )
 }

@@ -1146,6 +1146,17 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
+  // The companion window's current role: summoned Spotlight bar, pinned
+  // call pill, or hidden. Pushed on every transition; the invoke covers the
+  // load race (the window may finish loading after a transition fired).
+  'quickAsk:getMode': {
+    req: z.null(),
+    res: z.object({ mode: z.enum(['hidden', 'summoned', 'pinned']) }),
+  },
+  'quick-ask:mode': {
+    req: z.object({ mode: z.enum(['hidden', 'summoned', 'pinned']) }),
+    res: z.null(),
+  },
   // App window → main: open the bar (the discoverability toast's "Try it").
   'quickAsk:show': {
     req: z.null(),
