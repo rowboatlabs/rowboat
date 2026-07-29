@@ -6,7 +6,7 @@
  * also uses it to decide what to keep mounted.
  */
 
-export type ViewerType = 'html' | 'image' | 'video' | 'audio' | 'pdf' | 'docx'
+export type ViewerType = 'html' | 'image' | 'video' | 'audio' | 'pdf' | 'docx' | 'pptx'
 
 const VIEWER_BY_EXT: Record<string, ViewerType> = {
   html: 'html',
@@ -32,6 +32,7 @@ const VIEWER_BY_EXT: Record<string, ViewerType> = {
   aac: 'audio',
   pdf: 'pdf',
   docx: 'docx',
+  pptx: 'pptx',
 }
 
 function extensionOf(path: string): string {
