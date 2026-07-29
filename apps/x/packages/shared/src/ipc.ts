@@ -70,7 +70,7 @@ const UpdaterStatusSchema = z.object({
   reason: z.enum(['dev', 'platform', 'not-in-applications']).optional(),
   newVersion: z.string().optional(),
   // Markdown body of the staged update's GitHub release, when known — the
-  // restart card renders it as "What's new".
+  // restart card renders it verbatim.
   releaseNotes: z.string().optional(),
   error: z.string().optional(),
   lastCheckedAt: z.number().optional(),
