@@ -2,7 +2,7 @@ import { useMemo, useEffect, useState, useCallback } from 'react'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command'
 import { wikiLabel, stripKnowledgePrefix } from '@/lib/wiki-links'
-import { FileTextIcon } from 'lucide-react'
+import { Bot, FileTextIcon } from 'lucide-react'
 import type { CaretCoordinates } from '@/lib/textarea-caret'
 
 interface MentionPopoverProps {
@@ -18,6 +18,11 @@ interface MentionPopoverProps {
 }
 
 const MAX_VISIBLE_FILES = 8
+
+/** Sentinel entry for mentioning the agent itself — always offered first
+ * while the query is a prefix of "rowboat". Selecting it inserts the
+ * literal @rowboat mention, never a file mention. */
+export const ROWBOAT_MENTION_SENTINEL = '::rowboat::'
 
 export function MentionPopover({
   files,
@@ -75,10 +80,18 @@ export function MentionPopover({
       .slice(0, MAX_VISIBLE_FILES)
   }, [files, recentFiles, visibleFiles, query])
 
+  // @rowboat leads the list whenever it still matches what's typed.
+  const entries = useMemo(() => {
+    const showRowboat = 'rowboat'.startsWith(query.toLowerCase())
+    return showRowboat
+      ? [ROWBOAT_MENTION_SENTINEL, ...orderedAndFilteredFiles].slice(0, MAX_VISIBLE_FILES)
+      : orderedAndFilteredFiles
+  }, [orderedAndFilteredFiles, query])
+
   // Reset selection when filtered list changes
   useEffect(() => {
     setSelectedIndex(0)
-  }, [orderedAndFilteredFiles.length, query])
+  }, [entries.length, query])
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
@@ -89,19 +102,19 @@ export function MentionPopover({
         case 'ArrowDown':
           e.preventDefault()
           e.stopPropagation()
-          setSelectedIndex((prev) => (prev + 1) % orderedAndFilteredFiles.length)
+          setSelectedIndex((prev) => (prev + 1) % entries.length)
           break
         case 'ArrowUp':
           e.preventDefault()
           e.stopPropagation()
-          setSelectedIndex((prev) => (prev - 1 + orderedAndFilteredFiles.length) % orderedAndFilteredFiles.length)
+          setSelectedIndex((prev) => (prev - 1 + entries.length) % entries.length)
           break
         case 'Enter':
           e.preventDefault()
           e.stopPropagation()
-          if (orderedAndFilteredFiles[selectedIndex]) {
-            const path = orderedAndFilteredFiles[selectedIndex]
-            onSelect(path, wikiLabel(path))
+          if (entries[selectedIndex]) {
+            const path = entries[selectedIndex]
+            onSelect(path, path === ROWBOAT_MENTION_SENTINEL ? 'rowboat' : wikiLabel(path))
           }
           break
         case 'Escape':
@@ -112,14 +125,14 @@ export function MentionPopover({
         case 'Tab':
           e.preventDefault()
           e.stopPropagation()
-          if (orderedAndFilteredFiles[selectedIndex]) {
-            const path = orderedAndFilteredFiles[selectedIndex]
-            onSelect(path, wikiLabel(path))
+          if (entries[selectedIndex]) {
+            const path = entries[selectedIndex]
+            onSelect(path, path === ROWBOAT_MENTION_SENTINEL ? 'rowboat' : wikiLabel(path))
           }
           break
       }
     },
-    [open, orderedAndFilteredFiles, selectedIndex, onSelect, onClose]
+    [open, entries, selectedIndex, onSelect, onClose]
   )
 
   // Attach keyboard listener
@@ -133,7 +146,7 @@ export function MentionPopover({
     }
   }, [open, handleKeyDown])
 
-  if (!open || !position || orderedAndFilteredFiles.length === 0) {
+  if (!open || !position || entries.length === 0) {
     return null
   }
 
@@ -161,19 +174,29 @@ export function MentionPopover({
       >
         <Command shouldFilter={false}>
           <CommandList>
-            {orderedAndFilteredFiles.length === 0 ? (
+            {entries.length === 0 ? (
               <CommandEmpty>No files found</CommandEmpty>
             ) : (
-              orderedAndFilteredFiles.map((path, index) => (
+              entries.map((path, index) => (
                 <CommandItem
                   key={path}
                   value={path}
-                  onSelect={() => onSelect(path, wikiLabel(path))}
+                  onSelect={() => onSelect(path, path === ROWBOAT_MENTION_SENTINEL ? 'rowboat' : wikiLabel(path))}
                   className={index === selectedIndex ? 'bg-accent' : ''}
                   onMouseEnter={() => setSelectedIndex(index)}
                 >
-                  <FileTextIcon className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{wikiLabel(path)}</span>
+                  {path === ROWBOAT_MENTION_SENTINEL ? (
+                    <>
+                      <Bot className="mr-2 h-4 w-4 shrink-0 text-primary" />
+                      <span className="truncate font-medium">rowboat</span>
+                      <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">hand off a task</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileTextIcon className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{wikiLabel(path)}</span>
+                    </>
+                  )}
                 </CommandItem>
               ))
             )}
