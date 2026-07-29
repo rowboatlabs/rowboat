@@ -1,75 +1,96 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Command, CornerDownLeft, Mic, MonitorUp, Plus, Volume2 } from 'lucide-react'
+import { ArrowUpRight, MonitorUp, Plus, Volume2 } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Toaster } from '@/components/ui/sonner'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { stripKnowledgePrefix } from '@/lib/wiki-links'
+import {
+  ChatInputWithMentions,
+  type PermissionMode,
+  type ReasoningEffortLevel,
+  type SelectedModel,
+  type StagedAttachment,
+} from '@/components/chat-input-with-mentions'
+import type { FileMention, PromptInputMessage } from '@/components/ai-elements/prompt-input'
 
-// Window heights the bar asks main for: just the input row, or input +
-// answer area. Fixed steps (not content-measured) so the window never
-// feedback-loops with its own resize.
-const BAR_HEIGHT = 88
-const ANSWER_HEIGHT = 380
-
-// Hold-to-speak key by platform. macOS: right ⌘, unchanged. Windows: the
-// same physical position is the right Win key, which the OS owns (a tap
-// opens the Start menu) — right Ctrl is the safe equivalent there.
+// Hold-to-speak key by platform. macOS: right ⌘. Windows: the same physical
+// position is the right Win key, which the OS owns (a tap opens the Start
+// menu) — right Ctrl is the safe equivalent there.
 const IS_MAC = navigator.platform.startsWith('Mac')
 const PTT_CODE = IS_MAC ? 'MetaRight' : 'ControlRight'
 
 /**
  * Content of the quick-ask window (global ⌥⇧Space — see main's quick-ask.ts).
- * A Spotlight-style bar floating over whatever the user is doing: type a
- * question (or hold Right ⌘ to speak it) and it lands in the current chat in
- * the app window; the answer streams back here over `quick-ask:state`.
- * The window is hidden, not destroyed, on dismiss — state survives toggles.
+ * The REAL chat composer (ChatInputWithMentions) in a floating card over
+ * whatever the user is doing: type a question with @-mentions, attachments,
+ * model picker and all — or hold Right ⌘ to speak it — and it lands in the
+ * current chat in the app window; the answer streams back here over
+ * `quick-ask:state`. The window is hidden, not destroyed, on dismiss — state
+ * survives toggles.
+ *
+ * Geometry: the window is a fixed tall transparent frame (main never resizes
+ * it). The card is bottom-anchored; the transparent zone above is where the
+ * composer's popovers (mentions, model picker, menus) open upward, and a
+ * click there dismisses the bar — preserving the click-away feel.
  */
 export function QuickAskBar() {
-  const [draft, setDraft] = useState('')
   const [asked, setAsked] = useState<string | null>(null)
   const [answer, setAnswer] = useState<{ processing: boolean; text: string; statusText: string | null } | null>(null)
   // Only answer pushes that follow OUR submit render — the app window's chat
   // may show unrelated turns from before the bar was opened.
   const awaitingRef = useRef(false)
-  const inputRef = useRef<HTMLInputElement | null>(null)
 
-  // Voice input: hold the platform PTT key (right ⌘ on macOS, right Ctrl on
-  // Windows) while the bar is focused. Local dictation via
-  // the same Deepgram flow as the composer mic — no global hook needed, the
-  // bar has keyboard focus by construction.
-  const [recording, setRecording] = useState(false)
-  const recordingRef = useRef(false)
-  const [micDenied, setMicDenied] = useState(false)
-  const voice = useVoiceMode()
-
-  // Transparent window: the page's default (light) background paints the
-  // corner areas OUTSIDE the border-radius — white spurs at every corner.
-  // Clear every layer so only the rounded capsule is visible.
+  // Transparent window: clear every layer so only the card paints. The bar
+  // window skips the app's ThemeProvider — claim the LIGHT tokens explicitly
+  // (the light-skin redesign, #810). Removing 'dark' matters: the
+  // pre-light-redesign code added it, and the window persists across HMR, so
+  // a stale 'dark' class left code blocks rendering dark-theme tokens on the
+  // light panel.
   useEffect(() => {
-    // The bar window skips the app's ThemeProvider — claim the LIGHT tokens
-    // explicitly. Removing 'dark' matters: the pre-light-redesign code added
-    // it, and the window persists across HMR, so a stale 'dark' class left
-    // code blocks rendering dark-theme tokens (near-white text) on the
-    // light panel.
     document.documentElement.classList.remove('dark')
     document.documentElement.classList.add('light')
     document.documentElement.style.background = 'transparent'
     document.body.style.background = 'transparent'
-    // The document must never scroll: during window resize transitions the
-    // layout can be a frame taller than the viewport, and a wheel event in
-    // that frame scrolls the whole capsule out of place (input row drifting
-    // up, content bleeding past it).
+    // The document must never scroll — a wheel event could shove the whole
+    // card out of place inside the fixed frame.
     document.documentElement.style.overflow = 'hidden'
     document.body.style.overflow = 'hidden'
     const root = document.getElementById('root')
     if (root) root.style.background = 'transparent'
   }, [])
 
+  // Focus the composer whenever the window is summoned.
+  const [focusSignal, setFocusSignal] = useState(1)
   useEffect(() => {
-    const focusInput = () => inputRef.current?.focus()
-    focusInput()
-    window.addEventListener('focus', focusInput)
-    return () => window.removeEventListener('focus', focusInput)
+    const onFocus = () => setFocusSignal((n) => n + 1)
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  // Knowledge files for @-mentions, fetched over IPC (this window has no
+  // App-owned tree). Refreshed on every summon — notes change while the bar
+  // is hidden.
+  const [knowledgeFiles, setKnowledgeFiles] = useState<string[]>([])
+  useEffect(() => {
+    const refresh = () => {
+      void window.ipc
+        .invoke('workspace:readdir', {
+          path: 'knowledge',
+          opts: { recursive: true, includeHidden: false },
+        })
+        .then((entries) => {
+          const files = entries
+            .filter((e) => e.kind === 'file' && e.path.endsWith('.md'))
+            .map((e) => stripKnowledgePrefix(e.path))
+          setKnowledgeFiles(Array.from(new Set(files)))
+        })
+        .catch(() => {})
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
   }, [])
 
   useEffect(() => {
@@ -79,50 +100,104 @@ export function QuickAskBar() {
     })
   }, [])
 
-  // Ask main to grow/shrink the window when the answer area toggles.
-  // Content-driven: the panel takes only what the answer needs (short
-  // answers get a short panel), up to the unchanged ANSWER_HEIGHT cap.
-  // Measured off an inner wrapper so the scroll container's own size can
-  // never feed back into the measurement.
-  const expanded = asked !== null
-  const panelContentRef = useRef<HTMLDivElement | null>(null)
-  // Panel chrome around the measured content: pt-5 + pb-3 + footer line +
-  // its mt-2 + the divider, in design px.
-  const PANEL_CHROME = 62
-  useEffect(() => {
-    if (!expanded) {
-      void window.ipc.invoke('quickAsk:resize', { height: BAR_HEIGHT }).catch(() => {})
-      return
-    }
-    const content = panelContentRef.current?.offsetHeight ?? 0
-    const needed = Math.min(ANSWER_HEIGHT, BAR_HEIGHT + PANEL_CHROME + content)
-    void window.ipc.invoke('quickAsk:resize', { height: needed }).catch(() => {})
-    // Undo any scroll offset a resize frame let slip through.
-    window.scrollTo(0, 0)
-  }, [expanded, asked, answer?.text, answer?.statusText, answer?.processing])
+  // Model/effort picked in the bar's composer ride along with each submit —
+  // the app window applies them to the active chat before submitting.
+  const modelRef = useRef<SelectedModel | null>(null)
+  const effortRef = useRef<ReasoningEffortLevel | null>(null)
 
-  const submit = useCallback((raw: string) => {
-    const text = raw.trim()
-    if (!text) return
-    setAsked(text)
-    setDraft('')
-    awaitingRef.current = true
-    setAnswer({ processing: true, text: '', statusText: 'Thinking…' })
-    void window.ipc.invoke('quickAsk:submit', { text }).catch(() => {})
+  const processing = answer?.processing ?? false
+
+  const submit = useCallback(
+    (
+      message: PromptInputMessage,
+      mentions?: FileMention[],
+      attachments?: StagedAttachment[],
+      searchEnabled?: boolean,
+      codeMode?: 'claude' | 'codex',
+      permissionMode?: PermissionMode,
+    ) => {
+      const text = message.text.trim()
+      if (!text && !attachments?.length) return
+      setAsked(text || (attachments ?? []).map((a) => a.filename).join(', '))
+      awaitingRef.current = true
+      setAnswer({ processing: true, text: '', statusText: 'Thinking…' })
+      void window.ipc
+        .invoke('quickAsk:submit', {
+          text,
+          mentions,
+          attachments,
+          searchEnabled,
+          codeMode,
+          permissionMode,
+          model: modelRef.current,
+          reasoningEffort: effortRef.current,
+        })
+        .catch(() => {})
+    },
+    [],
+  )
+
+  const stop = useCallback(() => {
+    void window.ipc.invoke('quickAsk:stop', null).catch(() => {})
   }, [])
 
   const reset = useCallback(() => {
     awaitingRef.current = false
     setAsked(null)
     setAnswer(null)
-    setDraft('')
   }, [])
 
-  // Optional toggles (the standup's "voice and screen share as opt-ins").
-  // voiceOut: answers to bar questions are spoken aloud. sharing: the app
-  // window's screen capture runs and frames ride along with bar submits —
-  // the ACTUAL state comes back over quick-ask:options-state (a denied
-  // permission must never leave a lying badge).
+  // Voice input: the composer's mic button, or hold the platform PTT key
+  // (right ⌘ on macOS, right Ctrl on Windows) while the bar is focused.
+  // Local dictation via the same Deepgram flow as the app composer — no
+  // global hook needed, the bar has keyboard focus by construction.
+  const voice = useVoiceMode()
+  const [recording, setRecording] = useState(false)
+  const recordingRef = useRef(false)
+  const [voiceAvailable, setVoiceAvailable] = useState(false)
+  useEffect(() => {
+    Promise.all([
+      window.ipc.invoke('voice:getConfig', null),
+      window.ipc.invoke('oauth:getState', null),
+    ])
+      .then(([config, oauthState]) => {
+        const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
+        setVoiceAvailable(!!config.deepgram || rowboatConnected)
+      })
+      .catch(() => setVoiceAvailable(false))
+  }, [])
+
+  const startRecording = useCallback(() => {
+    if (recordingRef.current) return
+    recordingRef.current = true
+    setRecording(true)
+    void voice.start().then((result) => {
+      if (result === 'mic-denied') {
+        recordingRef.current = false
+        setRecording(false)
+        void window.ipc.invoke('app:openPrivacySettings', { section: 'microphone' }).catch(() => {})
+      }
+    })
+  }, [voice])
+
+  const submitRecording = useCallback(async () => {
+    if (!recordingRef.current) return
+    recordingRef.current = false
+    setRecording(false)
+    const text = await voice.submit()
+    if (text) submit({ text, files: [] })
+  }, [voice, submit])
+
+  const cancelRecording = useCallback(() => {
+    voice.cancel()
+    recordingRef.current = false
+    setRecording(false)
+  }, [voice])
+
+  // Optional toggles. voiceOut: answers to bar questions are spoken aloud.
+  // sharing: the app window's screen capture runs and frames ride along with
+  // bar submits — the ACTUAL state comes back over quick-ask:options-state
+  // (a denied permission must never leave a lying badge).
   const [voiceOut, setVoiceOut] = useState(false)
   const [sharing, setSharing] = useState(false)
   const pushOptions = useCallback((voiceOutput: boolean, screenShare: boolean) => {
@@ -180,24 +255,15 @@ export function QuickAskBar() {
   }, [reset])
 
   // Hold the platform PTT key to speak; release submits the transcript.
+  // Esc: cancel recording → clear the answer → dismiss, in that order.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === PTT_CODE && !e.repeat && !recordingRef.current) {
-        recordingRef.current = true
-        setRecording(true)
-        void voice.start().then((result) => {
-          if (result === 'mic-denied') {
-            recordingRef.current = false
-            setRecording(false)
-            setMicDenied(true)
-          }
-        })
+        startRecording()
       } else if (e.key === 'Escape') {
         e.preventDefault()
         if (recordingRef.current) {
-          voice.cancel()
-          recordingRef.current = false
-          setRecording(false)
+          cancelRecording()
         } else if (asked) {
           reset()
         } else {
@@ -207,11 +273,7 @@ export function QuickAskBar() {
     }
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === PTT_CODE && recordingRef.current) {
-        recordingRef.current = false
-        setRecording(false)
-        void voice.submit().then((text) => {
-          if (text) submit(text)
-        })
+        void submitRecording()
       }
     }
     document.addEventListener('keydown', onKeyDown)
@@ -220,75 +282,113 @@ export function QuickAskBar() {
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('keyup', onKeyUp)
     }
-  }, [voice, asked, reset, dismiss, submit])
-
-  const inputValue = recording ? voice.interimText || draft : draft
+  }, [asked, startRecording, submitRecording, cancelRecording, reset, dismiss])
 
   return (
-    // Bottom-anchored window (grows upward): the answer stacks ABOVE the
-    // input row, which stays pinned to the bottom edge. Collapsed, the bar
-    // is a full capsule; expanded, the capsule softens so the answer panel
-    // reads as one surface.
-    <div
-      // No CSS shadow here: it would paint into the window's square corner
-      // zones (the only area it isn't clipped) as dark smudges — the native
-      // window shadow already provides the depth.
-      className={`qa-root flex h-screen w-screen select-none flex-col overflow-hidden border border-black/10 bg-white/[0.97] text-neutral-900 ${
-        expanded ? 'rounded-[44px]' : 'rounded-full'
-      }`}
-    >
-      {/* Liquid Glass experiment: when main confirms the native glass view
-          applied (html[data-liquid-glass]), the solid capsule becomes a
-          translucent skin over it. Plain CSS so no re-render is needed. */}
-      <style>{`
-        html[data-liquid-glass="1"] .qa-root {
-          background-color: rgba(255, 255, 255, 0.75) !important;
-          border-color: rgba(0, 0, 0, 0.12) !important;
-        }
-        /* Charcoal code blocks. Streamdown's own dark rule is
-           background: var(--shiki-dark-bg) !important inside Tailwind's
-           utilities layer — layered !important outranks any override we
-           write, and with the variable undefined it computed to transparent
-           (the washed-out grey). Supplying the variable lets THEIR rule
-           paint the charcoal. */
-        .qa-root [data-streamdown="code-block-body"] {
-          --shiki-dark-bg: #202124;
-          background-color: #202124;
-        }
-        .qa-root [data-streamdown="code-block"] {
-          border-color: rgba(0, 0, 0, 0.3) !important;
-        }
-      `}</style>
-      {asked && (
-        <div className="relative flex min-h-0 flex-1 flex-col border-b border-black/5 px-7 pb-3 pt-5">
+    <div className="flex h-screen w-screen select-none flex-col overflow-hidden">
+      {/* The invisible stage: popovers open into this zone; clicking it
+          dismisses the bar (the click-away feel, inside our own window). */}
+      <div className="min-h-0 flex-1" onMouseDown={dismiss} />
+
+      {/* Light skin (#810): near-white card, hairline dark border, dark
+          text. The window's native shadow is off (it would outline the
+          whole transparent frame) — the card draws its own. */}
+      <div className="qa-card shrink-0 overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_24px_60px_rgba(0,0,0,0.22),0_4px_16px_rgba(0,0,0,0.12)]">
+        {/* Charcoal code blocks. Streamdown's own dark rule is
+            background: var(--shiki-dark-bg) !important inside Tailwind's
+            utilities layer — layered !important outranks any override we
+            write, and with the variable undefined it computed to transparent
+            (the washed-out grey). Supplying the variable lets THEIR rule
+            paint the charcoal. */}
+        <style>{`
+          .qa-card [data-streamdown="code-block-body"] {
+            --shiki-dark-bg: #202124;
+            background-color: #202124;
+          }
+          .qa-card [data-streamdown="code-block"] {
+            border-color: rgba(0, 0, 0, 0.3) !important;
+          }
+        `}</style>
+        {/* Action strip: bar-level controls that aren't the composer's job.
+            Always visible so voice-out/share can be set before asking. */}
+        <div className="flex items-center justify-end gap-2 px-4 pt-3">
+          {asked && (
+            <span className="mr-auto text-[11px] text-neutral-400">
+              Also in your Rowboat chat · Esc to {processing ? 'dismiss' : 'clear'}
+            </span>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={newChat}
-                aria-label="New chat"
-                className="absolute right-14 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                onClick={toggleVoiceOut}
+                aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
+                className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                  voiceOut
+                    ? 'bg-sky-500/15 text-sky-700 ring-sky-500/30'
+                    : 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
+                }`}
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Volume2 className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">New chat</TooltipContent>
+            <TooltipContent side="top">
+              {voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}
+            </TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={openInApp}
-                aria-label="Open in Rowboat"
-                className="absolute right-5 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                onClick={toggleShare}
+                aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
+                className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                  sharing
+                    ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/30'
+                    : 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
+                }`}
               >
-                <ArrowUpRight className="h-3.5 w-3.5" />
+                <MonitorUp className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Open in Rowboat</TooltipContent>
+            <TooltipContent side="top">
+              {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
+            </TooltipContent>
           </Tooltip>
-          <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-800">
-            <div ref={panelContentRef}>
+          {asked && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={newChat}
+                    aria-label="New chat"
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">New chat</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={openInApp}
+                    aria-label="Open in Rowboat"
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                  >
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Open in Rowboat</TooltipContent>
+              </Tooltip>
+            </>
+          )}
+        </div>
+
+        {asked && (
+          <div className="max-h-[280px] overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800">
             {/* Inside the scroll area — the question scrolls away with the
                 answer instead of persisting as a header. */}
             <div className="mb-2 text-sm font-medium text-neutral-500">{asked}</div>
@@ -306,144 +406,44 @@ export function QuickAskBar() {
               )
             )}
             {answer?.processing && answer.text && <span className="animate-pulse">▍</span>}
-            </div>
           </div>
-          <div className="mt-2 shrink-0 text-[11px] text-neutral-500">
-            Also in your Rowboat chat · Esc to {answer?.processing ? 'dismiss' : 'clear'}
-          </div>
-        </div>
-      )}
-
-      <form
-        className="flex h-[88px] shrink-0 items-center gap-4 pl-4 pr-4"
-        onSubmit={(e) => {
-          e.preventDefault()
-          submit(draft)
-        }}
-      >
-        {/* Mic orb: layered like a physical button — a soft vertical
-            gradient base, an inset hairline, a top sheen, and a tight halo.
-            Green (and breathing) while live. */}
-        <span
-          className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all duration-300 ${
-            recording
-              ? 'animate-pulse bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-[0_0_26px_rgba(52,211,153,0.55)] ring-emerald-600/30'
-              : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] shadow-[0_2px_10px_rgba(0,0,0,0.12)] ring-black/10'
-          }`}
-        >
-          {/* top sheen — a radial fade from the top center, so there is no
-              shape edge to see (the previous half-ellipse showed its rim) */}
-          <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.2),transparent_55%)]" />
-          <Mic
-            className={`relative h-[18px] w-[18px] ${
-              recording ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.25)]' : 'text-neutral-700'
-            }`}
-          />
-        </span>
-        <input
-          ref={inputRef}
-          type="text"
-          value={inputValue}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={recording ? 'Listening…' : 'Ask Rowboat anything…'}
-          className="h-full min-w-0 flex-1 bg-transparent text-lg font-light outline-none placeholder:text-neutral-500"
-        />
-        {micDenied ? (
-          <button
-            type="button"
-            onClick={() => void window.ipc.invoke('app:openPrivacySettings', { section: 'microphone' }).catch(() => {})}
-            className="shrink-0 text-[11px] text-red-600 underline-offset-2 hover:underline"
-          >
-            Mic blocked — open System Settings
-          </button>
-        ) : (
-          <span className="flex shrink-0 items-center gap-3">
-            {/* Same layered construction as the mic orb: gradient base,
-                inset hairline, radial top sheen. */}
-            <span className="relative flex items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-b from-black/[0.05] to-black/[0.02] px-3 py-1.5 text-[13px] text-neutral-700 ring-1 ring-inset ring-black/10">
-              <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
-              {/* Platform label (Windows says right Ctrl; the right-cmd
-                  position is the Win key there) at main's smaller glyph size. */}
-              <span className="relative">{IS_MAC ? 'Hold right' : 'Hold right Ctrl'}</span>
-              {IS_MAC && <Command className="relative h-3.5 w-3.5 text-sky-600 drop-shadow-[0_1px_1px_rgba(0,0,0,0.12)]" />}
-            </span>
-            <span className="text-[13px] text-neutral-500">to speak</span>
-          </span>
         )}
-        {/* Optional toggles: speak answers aloud, share the screen. Same
-            layered chrome as the send button; a lit tint marks active. The
-            hover hints are tiny in-capsule labels UNDER each button — a real
-            tooltip can't open downward here (the window ends ~24px below,
-            and with liquid glass the window must stay exactly capsule-sized),
-            so the label lives in that 24px instead. */}
-        {/* Hint placement depends on the surface: expanded, the panel above
-            gives a normal tooltip room to open upward; collapsed, the window
-            is exactly the capsule, so a tiny in-capsule label sits in the
-            ~24px under the button instead. */}
-        <span className="relative shrink-0">
-          <Tooltip open={expanded ? undefined : false}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleVoiceOut}
-                aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
-                className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
-                  voiceOut
-                    ? 'bg-gradient-to-b from-sky-400/90 to-sky-500/70 text-sky-950 ring-sky-600/60 shadow-[0_0_22px_rgba(56,189,248,0.6)]'
-                    : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 shadow-[0_2px_10px_rgba(0,0,0,0.12)] hover:text-neutral-800'
-                }`}
-              >
-                <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
-                <Volume2 className="relative h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}
-            </TooltipContent>
-          </Tooltip>
-          {!expanded && (
-            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
-              {voiceOut ? 'Click to mute' : 'Speak answers aloud'}
-            </span>
-          )}
-        </span>
-        <span className="relative shrink-0">
-          <Tooltip open={expanded ? undefined : false}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleShare}
-                aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
-                className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
-                  sharing
-                    ? 'bg-gradient-to-b from-emerald-400/90 to-emerald-500/70 text-emerald-950 ring-emerald-600/60 shadow-[0_0_22px_rgba(52,211,153,0.6)]'
-                    : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 shadow-[0_2px_10px_rgba(0,0,0,0.12)] hover:text-neutral-800'
-                }`}
-              >
-                <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
-                <MonitorUp className="relative h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
-            </TooltipContent>
-          </Tooltip>
-          {!expanded && (
-            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
-              {sharing ? 'Stop sharing' : 'Share your screen'}
-            </span>
-          )}
-        </span>
-        <button
-          type="submit"
-          disabled={!draft.trim()}
-          aria-label="Send"
-          className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-700 ring-1 ring-inset ring-black/10 shadow-[0_2px_10px_rgba(0,0,0,0.12)] transition-all hover:from-black/[0.08] disabled:opacity-40"
-        >
-          <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
-          <CornerDownLeft className="relative h-5 w-5" />
-        </button>
-      </form>
+
+        {/* The real composer. Submits relay the FULL payload (mentions,
+            attachments, search/code/permissions, model/effort) to the app
+            window, which submits into the active chat exactly like an
+            in-app composer message. */}
+        <div className="border-t border-black/5 p-3">
+          <ChatInputWithMentions
+            knowledgeFiles={knowledgeFiles}
+            recentFiles={[]}
+            visibleFiles={knowledgeFiles}
+            onSubmit={submit}
+            onStop={stop}
+            isProcessing={processing}
+            runId={null}
+            placeholder="Ask Rowboat anything…"
+            focusSignal={focusSignal}
+            onSelectedModelChange={(m) => {
+              modelRef.current = m ?? null
+            }}
+            onReasoningEffortChange={(effort) => {
+              effortRef.current = effort ?? null
+            }}
+            isRecording={recording}
+            recordingText={voice.interimText}
+            recordingState={
+              voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'
+            }
+            audioLevelsRef={voice.audioLevelsRef}
+            onStartRecording={startRecording}
+            onSubmitRecording={submitRecording}
+            onCancelRecording={cancelRecording}
+            voiceAvailable={voiceAvailable}
+          />
+        </div>
+      </div>
+      <Toaster />
     </div>
   )
 }

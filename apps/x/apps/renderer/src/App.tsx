@@ -1894,17 +1894,42 @@ function App() {
       .catch(() => {})
   }, [inCall, video.screenState])
 
-  // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
-  // in the current chat exactly like a composer message.
+  // Quick-ask bar: a submit from the global ⌥⇧Space bar lands in the current
+  // chat exactly like a composer message. The bar hosts the REAL composer,
+  // so the payload carries everything an in-app submit does — mentions,
+  // attachments, per-turn config — plus the bar's model/effort picks, which
+  // are applied to the active tab the same way its own composer would.
   const quickAskActiveRef = useRef(false)
   const quickAskStartedAtRef = useRef(0)
   useEffect(() => {
-    return window.ipc.on('quick-ask:submit', ({ text }) => {
-      const trimmed = text.trim()
-      if (!trimmed) return
+    return window.ipc.on('quick-ask:submit', (payload) => {
+      const trimmed = payload.text.trim()
+      if (!trimmed && !payload.attachments?.length) return
       quickAskActiveRef.current = true
       quickAskStartedAtRef.current = Date.now()
-      handlePromptSubmitRef.current?.({ text: trimmed, files: [] })
+      const tabId = activeChatTabIdRef.current
+      if (payload.model) {
+        selectedModelByTabRef.current.set(tabId, payload.model)
+      }
+      if (payload.reasoningEffort) {
+        reasoningEffortByTabRef.current.set(tabId, payload.reasoningEffort)
+      }
+      void handlePromptSubmitRef.current?.(
+        { text: trimmed, files: [] },
+        payload.mentions,
+        payload.attachments ?? [],
+        payload.searchEnabled,
+        payload.codeMode,
+        payload.permissionMode,
+      )
+    })
+  }, [])
+
+  // Stop relay: the bar composer's send button becomes Stop while a turn is
+  // processing, same as in the app.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:stop', () => {
+      void stopRunRef.current?.()
     })
   }, [])
 

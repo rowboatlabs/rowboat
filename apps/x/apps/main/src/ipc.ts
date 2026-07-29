@@ -28,7 +28,7 @@ const execFileAsync = promisify(execFile);
 let caffeinateBlockerId: number | null = null;
 
 import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
-import { getQuickAskWindow, hideQuickAsk, showQuickAsk, resizeQuickAsk } from './quick-ask.js';
+import { getQuickAskWindow, hideQuickAsk, showQuickAsk } from './quick-ask.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -1036,6 +1036,10 @@ export function setupIpcHandlers() {
       findMainAppWindow()?.webContents.send('quick-ask:submit', args);
       return {};
     },
+    'quickAsk:stop': async () => {
+      findMainAppWindow()?.webContents.send('quick-ask:stop', null);
+      return {};
+    },
     'quickAsk:hide': async () => {
       hideQuickAsk();
       return {};
@@ -1065,10 +1069,6 @@ export function setupIpcHandlers() {
         app.focus({ steal: true });
         main.webContents.send('quick-ask:open-chat', null);
       }
-      return {};
-    },
-    'quickAsk:resize': async (_event, args) => {
-      resizeQuickAsk(args.height);
       return {};
     },
     'quickAsk:state': async (_event, args) => {

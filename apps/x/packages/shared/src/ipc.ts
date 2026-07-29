@@ -34,6 +34,42 @@ import { ChannelsConfig, ChannelsStatus } from './channels.js';
 // Runtime Validation Schemas (Single Source of Truth)
 // ============================================================================
 
+// Everything the in-app composer's onSubmit carries, so a bar question
+// behaves exactly like a composer message: mentions and attachments flow
+// into the turn, and the per-turn config (search/code/permissions) plus the
+// bar's model/effort picks are applied by the app window before submitting.
+const QuickAskSubmitPayload = z.object({
+  text: z.string(),
+  mentions: z
+    .array(
+      z.object({
+        id: z.string(),
+        path: z.string(),
+        displayName: z.string(),
+        lineNumber: z.number().optional(),
+      }),
+    )
+    .optional(),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        path: z.string(),
+        filename: z.string(),
+        mimeType: z.string(),
+        isImage: z.boolean(),
+        size: z.number(),
+        thumbnailUrl: z.string().optional(),
+      }),
+    )
+    .optional(),
+  searchEnabled: z.boolean().optional(),
+  codeMode: z.enum(['claude', 'codex']).optional(),
+  permissionMode: z.enum(['manual', 'auto']).optional(),
+  model: ModelRef.nullable().optional(),
+  reasoningEffort: ReasoningEffort.nullable().optional(),
+});
+
 const KnowledgeSourceScopeSchema = z.object({
   type: z.string(),
   id: z.string(),
@@ -1085,14 +1121,24 @@ const ipcSchemas = {
     res: z.object({}),
   },
   // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
-  // Bar → main: relay a typed/spoken question into the app window's chat.
+  // Bar → main: relay a composer submit into the app window's chat.
   'quickAsk:submit': {
-    req: z.object({ text: z.string() }),
+    req: QuickAskSubmitPayload,
     res: z.object({}),
   },
-  // Push channel: main → app window with the relayed question.
+  // Push channel: main → app window with the relayed submit.
   'quick-ask:submit': {
-    req: z.object({ text: z.string() }),
+    req: QuickAskSubmitPayload,
+    res: z.null(),
+  },
+  // Bar → main → app window: stop the in-flight turn (the bar composer's
+  // send button becomes Stop while processing, same as in the app).
+  'quickAsk:stop': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  'quick-ask:stop': {
+    req: z.null(),
     res: z.null(),
   },
   // Bar → main: dismiss the bar (Esc).
@@ -1162,11 +1208,6 @@ const ipcSchemas = {
   'quick-ask:new-chat': {
     req: z.null(),
     res: z.null(),
-  },
-  // Bar → main: grow/shrink the window as the response area changes.
-  'quickAsk:resize': {
-    req: z.object({ height: z.number() }),
-    res: z.object({}),
   },
   // App window → main: mirror of the in-flight answer for the bar
   // (streaming text while processing, final text when done).
