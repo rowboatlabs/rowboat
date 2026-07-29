@@ -305,16 +305,16 @@ export function QuickAskBar() {
         <span
           className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all duration-300 ${
             recording
-              ? 'animate-pulse bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 shadow-[0_0_26px_rgba(52,211,153,0.45)] ring-emerald-500/25'
-              : 'bg-gradient-to-b from-sky-400/25 via-blue-500/15 to-indigo-500/10 shadow-[0_0_24px_rgba(96,165,250,0.4)] ring-sky-500/20'
+              ? 'animate-pulse bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-[0_0_26px_rgba(52,211,153,0.55)] ring-emerald-600/30'
+              : 'bg-gradient-to-b from-violet-500 to-indigo-600 shadow-[0_0_24px_rgba(139,92,246,0.5)] ring-indigo-600/30'
           }`}
         >
           {/* top sheen — a radial fade from the top center, so there is no
               shape edge to see (the previous half-ellipse showed its rim) */}
           <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.2),transparent_55%)]" />
           <Mic
-            className={`relative h-[18px] w-[18px] drop-shadow-[0_1px_1px_rgba(0,0,0,0.12)] ${
-              recording ? 'text-emerald-600' : 'text-sky-600'
+            className={`relative h-[18px] w-[18px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.25)] ${
+              recording ? 'text-white' : 'text-white'
             }`}
           />
         </span>
