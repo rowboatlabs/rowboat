@@ -1093,6 +1093,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const [plannerIntroSeen, setPlannerIntroSeen] = useState(() => !!localStorage.getItem('todo.plannerIntroSeen'))
   // The suggestion tray + the planner's Home controls.
   const [suggestions, setSuggestions] = useState<string[]>([])
+  // The tray's DOM node — the header's count pill scrolls here.
+  const suggestionsRef = useRef<HTMLDivElement>(null)
   const [planner, setPlanner] = useState<{ slug: string | null; active: boolean; frequency: 'morning' | 'twice' | 'thrice' } | null>(null)
   const [suggesting, setSuggesting] = useState(false)
   const [plannerMenuOpen, setPlannerMenuOpen] = useState(false)
@@ -1553,6 +1555,20 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
               {triagePill('done', 'done', doneCount, 'text-muted-foreground')}
             </div>
             <div className="ml-auto flex items-center gap-2">
+              {suggestions.length > 0 && (
+                <IconTip label="Suggestions waiting for your accept — jump to them">
+                  <button
+                    type="button"
+                    onClick={() => suggestionsRef.current?.scrollIntoView({
+                      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+                      block: 'center',
+                    })}
+                    className={`${CHIP} bg-amber-500/15 font-medium text-amber-600 hover:bg-amber-500/25 dark:text-amber-400`}
+                  >
+                    <Sparkles className="size-3" /> {suggestions.length} suggested
+                  </button>
+                </IconTip>
+              )}
               {planner?.slug && (
                 <div ref={plannerMenuRef} className="relative flex items-center">
                   <IconTip label="Ask Rowboat for suggestions now">
@@ -1815,14 +1831,16 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
           </div>
 
           {/* The suggestion tray — proposals awaiting your accept. Never
-              part of the list until you say so. */}
+              part of the list until you say so. The amber tint is this
+              surface's "needs your decision" color — the one tinted block
+              on the page. */}
           {suggestions.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Suggested</div>
+            <div ref={suggestionsRef} className="flex flex-col gap-1 rounded-lg bg-amber-500/[0.06] px-2.5 py-2 ring-1 ring-amber-500/15">
+              <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-amber-600/80 dark:text-amber-400/80">Suggested</div>
               <div>
                 {suggestions.map((text) => (
-                  <div key={text} className="group/sugg flex items-center gap-2.5 border-b border-border/40 px-2 py-2 last:border-0">
-                    <Sparkles className="size-3.5 shrink-0 text-muted-foreground/60" />
+                  <div key={text} className="group/sugg flex items-center gap-2.5 border-b border-amber-500/10 px-2 py-2 last:border-0">
+                    <Sparkles className="size-3.5 shrink-0 text-amber-500/70" />
                     <span className="min-w-0 flex-1 text-sm">
                       <TextWithMentions text={text} onOpenLink={(l) => openLink(l, onOpenNote)} />
                     </span>
