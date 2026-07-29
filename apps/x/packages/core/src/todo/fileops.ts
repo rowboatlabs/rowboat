@@ -527,6 +527,25 @@ export async function listArchived(limit = 30, now: Date = new Date()): Promise<
     return out.reverse().slice(0, limit);
 }
 
+/** Permanently remove an archived item. The one true delete in the system —
+ * only reachable from the archive, so the list itself stays loss-proof. */
+export async function deleteArchived(month: string, blockIndex: number, key: string): Promise<boolean> {
+    if (!/^\d{4}-\d{2}$/.test(month)) return false;
+    const norm = normalizeKey(key);
+    return withTodoLock(async () => {
+        const target = path.join(ARCHIVE_DIR, `${month}.md`);
+        const raw = await fs.readFile(target, 'utf-8').catch(() => '');
+        if (!raw) return false;
+        const blocks = parseTodoFile(raw).blocks;
+        const block = blocks[blockIndex];
+        if (!block || block.kind !== 'item' || block.item.key !== norm) return false;
+        blocks.splice(blockIndex, 1);
+        await fs.writeFile(target, serializeTodoFile({ blocks }), 'utf-8');
+        log.log(`deleted "${norm}" from archive ${month}`);
+        return true;
+    });
+}
+
 /**
  * Bring an archived item back onto the list, unchecked (restoring means
  * "this is active again"). A "from: <parent>" stamp re-nests the item under

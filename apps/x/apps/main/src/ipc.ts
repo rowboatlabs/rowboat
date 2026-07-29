@@ -152,6 +152,7 @@ import {
   dismissItem as dismissTodoItem,
   listArchived as listTodoArchived,
   restoreItem as restoreTodoItem,
+  deleteArchived as deleteTodoArchived,
   importTodoAttachments,
   linksToText as todoLinksToText,
 } from '@x/core/dist/todo/fileops.js';
@@ -2732,6 +2733,15 @@ export function setupIpcHandlers() {
     },
     'todo:listArchived': async () => {
       return { items: await listTodoArchived() };
+    },
+    'todo:deleteArchived': async (_event, args) => {
+      try {
+        const ok = await deleteTodoArchived(args.month, args.blockIndex, args.key);
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true } : { success: false, error: 'Item moved — refresh and retry' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
     },
     'todo:restore': async (_event, args) => {
       try {

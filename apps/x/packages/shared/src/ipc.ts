@@ -2605,6 +2605,19 @@ const ipcSchemas = {
       })),
     }),
   },
+  // Permanently delete an archived item — the one true delete, only
+  // reachable from the archive. Same handle contract as todo:restore.
+  'todo:deleteArchived': {
+    req: z.object({
+      month: z.string(),
+      blockIndex: z.number(),
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   // Bring an archived item back onto the list (unchecked). The
   // (month, blockIndex) handle comes from todo:listArchived; key guards
   // against staleness.

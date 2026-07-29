@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, X } from 'lucide-react'
+import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,16 @@ function useMention(text: string, setText: (t: string) => void) {
     setText(`${text.slice(0, match.index)}${match[1]}@rowboat `)
   }
   return { show, complete }
+}
+
+// Real tooltips for icon-only buttons (native title is too slow to teach).
+function IconTip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <Tooltip delayDuration={400}>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 function MentionPopup({ onPick }: { onPick: () => void }) {
@@ -480,49 +491,57 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
         {childRows}
       </div>
       {onAddSub && depth === 0 && (
-        <button
-          type="button"
-          onClick={onAddSub}
-          title="Add a sub-task"
-          className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
-        >
-          <ListPlus className="size-3.5" />
-        </button>
+        <IconTip label="Add a sub-task">
+          <button
+            type="button"
+            onClick={onAddSub}
+            aria-label="Add a sub-task"
+            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
+          >
+            <ListPlus className="size-3.5" />
+          </button>
+        </IconTip>
       )}
       {/* ＋ is the standing way to comment on any item; once bubbles are
           shown, the in-thread "+ reply" chip takes over that job. */}
       {!showConversation && (
+        <IconTip label="Reply — tell @rowboat something about this">
+          <button
+            type="button"
+            onClick={onToggleComment}
+            aria-label="Reply to this item"
+            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
+          >
+            <Plus className="size-3.5" />
+          </button>
+        </IconTip>
+      )}
+      {/* The arrow appears only once a thread exists — then there is
+          something to open in the sidebar. */}
+      {sessionId && (
+        <IconTip label="Open the full conversation in the sidebar">
+          <button
+            type="button"
+            onClick={() => onOpenInChat(sessionId)}
+            aria-label="Open the full conversation in the sidebar"
+            className={`mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 transition-opacity hover:bg-accent hover:text-foreground ${
+              showConversation || isRunning ? '' : 'opacity-0 group-hover/todo:opacity-100'
+            }`}
+          >
+            <ArrowUpRight className="size-3.5" />
+          </button>
+        </IconTip>
+      )}
+      <IconTip label="Dismiss — moves to Done & dismissed, restorable">
         <button
           type="button"
-          onClick={onToggleComment}
-          title="Comment — tell @rowboat something about this item"
+          onClick={onDismiss}
+          aria-label="Dismiss"
           className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
         >
-          <Plus className="size-3.5" />
+          <X className="size-3.5" />
         </button>
-      )}
-      {/* 💬 appears only once a thread exists — then there is something to
-          continue in the sidebar. */}
-      {sessionId && (
-        <button
-          type="button"
-          onClick={() => onOpenInChat(sessionId)}
-          title="Open this conversation in the chat sidebar"
-          className={`mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 transition-opacity hover:bg-accent hover:text-foreground ${
-            showConversation || isRunning ? '' : 'opacity-0 group-hover/todo:opacity-100'
-          }`}
-        >
-          <MessageCircle className="size-3.5" />
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={onDismiss}
-        title="Dismiss"
-        className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
-      >
-        <X className="size-3.5" />
-      </button>
+      </IconTip>
     </div>
   )
 }
@@ -715,22 +734,26 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
                 <span className="shrink-0 text-[11px] text-muted-foreground/60">{relativeTime(t.updatedAt)}</span>
                 {/* Reply straight from the row — the composer's quote card
                     shows what you're replying to, so no expand needed. */}
-                <button
-                  type="button"
-                  onClick={() => onReply(t.sessionId)}
-                  title="Reply"
-                  className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
-                >
-                  <Plus className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onOpenInChat(t.sessionId)}
-                  title="Open the full thread in the chat sidebar"
-                  className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
-                >
-                  <ArrowUpRight className="size-3.5" />
-                </button>
+                <IconTip label="Reply">
+                  <button
+                    type="button"
+                    onClick={() => onReply(t.sessionId)}
+                    aria-label="Reply"
+                    className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </IconTip>
+                <IconTip label="Open the full thread in the sidebar">
+                  <button
+                    type="button"
+                    onClick={() => onOpenInChat(t.sessionId)}
+                    aria-label="Open the full thread in the sidebar"
+                    className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
+                  >
+                    <ArrowUpRight className="size-3.5" />
+                  </button>
+                </IconTip>
               </div>
               {isOpen && (
                 <div className="flex flex-col gap-1.5 pb-1 pl-5 pt-1">
@@ -780,9 +803,10 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
 
 // Everything dismissed or cleared lands here (todo/archive/), listed below
 // the composer and restorable — nothing typed into the list is ever lost.
-function ArchivedSection({ entries, onRestore, onOpenNote }: {
+function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   entries: ArchivedEntry[]
   onRestore: (entry: ArchivedEntry) => void
+  onDelete: (entry: ArchivedEntry) => void
   onOpenNote: (path: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -824,14 +848,26 @@ function ArchivedSection({ entries, onRestore, onOpenNote }: {
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => onRestore(entry)}
-                title="Bring this back onto the list"
-                className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/arch:opacity-100"
-              >
-                <RotateCcw className="size-3" /> restore
-              </button>
+              <IconTip label="Bring this back onto the list">
+                <button
+                  type="button"
+                  onClick={() => onRestore(entry)}
+                  aria-label="Restore"
+                  className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/arch:opacity-100"
+                >
+                  <RotateCcw className="size-3" /> restore
+                </button>
+              </IconTip>
+              <IconTip label="Delete forever">
+                <button
+                  type="button"
+                  onClick={() => onDelete(entry)}
+                  aria-label="Delete forever"
+                  className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-600 group-hover/arch:opacity-100 dark:hover:text-red-400"
+                >
+                  <Trash2 className="size-3" /> delete
+                </button>
+              </IconTip>
             </div>
           ))}
         </div>
@@ -1366,6 +1402,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
               void (async () => {
                 if (dirtyRef.current) await saveNowRef.current()
                 await window.ipc.invoke('todo:restore', { month: entry.month, blockIndex: entry.blockIndex, key: entry.item.key })
+                await refetch()
+              })()
+            }}
+            onDelete={(entry) => {
+              void (async () => {
+                await window.ipc.invoke('todo:deleteArchived', { month: entry.month, blockIndex: entry.blockIndex, key: entry.item.key })
                 await refetch()
               })()
             }}
