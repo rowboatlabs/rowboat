@@ -11,6 +11,12 @@ import { useVoiceMode } from '@/hooks/useVoiceMode'
 const BAR_HEIGHT = 88
 const ANSWER_HEIGHT = 380
 
+// Hold-to-speak key by platform. macOS: right ⌘, unchanged. Windows: the
+// same physical position is the right Win key, which the OS owns (a tap
+// opens the Start menu) — right Ctrl is the safe equivalent there.
+const IS_MAC = navigator.platform.startsWith('Mac')
+const PTT_CODE = IS_MAC ? 'MetaRight' : 'ControlRight'
+
 /**
  * Content of the quick-ask window (global ⌥⇧Space — see main's quick-ask.ts).
  * A Spotlight-style bar floating over whatever the user is doing: type a
@@ -27,7 +33,8 @@ export function QuickAskBar() {
   const awaitingRef = useRef(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
-  // Voice input: hold Right ⌘ while the bar is focused. Local dictation via
+  // Voice input: hold the platform PTT key (right ⌘ on macOS, right Ctrl on
+  // Windows) while the bar is focused. Local dictation via
   // the same Deepgram flow as the composer mic — no global hook needed, the
   // bar has keyboard focus by construction.
   const [recording, setRecording] = useState(false)
@@ -169,10 +176,10 @@ export function QuickAskBar() {
     reset()
   }, [reset])
 
-  // Hold Right ⌘ to speak; release submits the transcript.
+  // Hold the platform PTT key to speak; release submits the transcript.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight' && !e.repeat && !recordingRef.current) {
+      if (e.code === PTT_CODE && !e.repeat && !recordingRef.current) {
         recordingRef.current = true
         setRecording(true)
         void voice.start().then((result) => {
@@ -196,7 +203,7 @@ export function QuickAskBar() {
       }
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight' && recordingRef.current) {
+      if (e.code === PTT_CODE && recordingRef.current) {
         recordingRef.current = false
         setRecording(false)
         void voice.submit().then((text) => {
@@ -335,8 +342,10 @@ export function QuickAskBar() {
                 inset hairline, radial top sheen. */}
             <span className="relative flex items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] px-3 py-1.5 text-[13px] text-neutral-200 ring-1 ring-inset ring-white/15">
               <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
-              <span className="relative">Hold right</span>
-              <Command className="relative h-3.5 w-3.5 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />
+              {/* Platform label (Windows says right Ctrl; the right-cmd
+                  position is the Win key there) at main's smaller glyph size. */}
+              <span className="relative">{IS_MAC ? 'Hold right' : 'Hold right Ctrl'}</span>
+              {IS_MAC && <Command className="relative h-3.5 w-3.5 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />}
             </span>
             <span className="text-[13px] text-neutral-400">to speak</span>
           </span>
