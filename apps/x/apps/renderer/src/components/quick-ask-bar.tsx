@@ -305,8 +305,8 @@ export function QuickAskBar() {
         <span
           className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all duration-300 ${
             recording
-              ? 'animate-pulse bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-[0_0_26px_rgba(52,211,153,0.55)] ring-emerald-600/30'
-              : 'bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-[0_0_24px_rgba(52,211,153,0.45)] ring-emerald-600/30'
+              ? 'animate-pulse bg-gradient-to-b from-emerald-300/80 to-emerald-500/70 shadow-[0_0_22px_rgba(52,211,153,0.4)] ring-emerald-500/30'
+              : 'bg-gradient-to-b from-emerald-300/70 to-emerald-500/60 shadow-[0_0_18px_rgba(52,211,153,0.3)] ring-emerald-500/25'
           }`}
         >
           {/* top sheen — a radial fade from the top center, so there is no
