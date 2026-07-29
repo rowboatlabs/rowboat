@@ -131,6 +131,7 @@ import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { CALL_VOICE_HOLDER, acquireVoice, releaseVoice, useVoiceOwner, voiceOwnerId } from '@/lib/voice-ownership'
 import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { VideoCallView } from '@/components/video-call-view'
@@ -1212,6 +1213,9 @@ function App() {
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice
+  // Which chat (or the call engine) holds the mic — render gating for the
+  // per-chat recording UI reads this instead of "is this the active tab".
+  const voiceOwner = useVoiceOwner()
 
   // Calls: one engine (hands-free voice loop + forced read-aloud TTS + frame
   // capture), started via presets that only differ in device defaults. The
@@ -1329,19 +1333,29 @@ function App() {
     void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
   }, [permissionDialog])
 
-  const handleStartRecording = useCallback(() => {
+  // Steal handler for PTT: another holder is taking the mic — drop the
+  // in-flight recording without releasing ownership (the thief owns it now).
+  const cancelPttForSteal = useCallback(() => {
+    voice.cancel()
+    setIsRecording(false)
+    isRecordingRef.current = false
+  }, [voice])
+
+  const handleStartRecording = useCallback((holderId: string) => {
     // A live call owns the mic — ignore push-to-talk while one is running.
     if (inCallRef.current) return
+    acquireVoice(holderId, cancelPttForSteal)
     setIsRecording(true)
     isRecordingRef.current = true
     void voice.start().then((result) => {
       if (result === 'mic-denied') {
         setIsRecording(false)
         isRecordingRef.current = false
+        releaseVoice(holderId)
         setPermissionDialog('microphone')
       }
     })
-  }, [voice])
+  }, [voice, cancelPttForSteal])
 
   const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
@@ -1356,6 +1370,8 @@ function App() {
     const text = await voice.submit()
     setIsRecording(false)
     isRecordingRef.current = false
+    const holder = voiceOwnerId()
+    if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
     if (text) {
       pendingVoiceInputRef.current = true
       handlePromptSubmitRef.current?.({ text, files: [] })
@@ -1366,6 +1382,8 @@ function App() {
     voice.cancel()
     setIsRecording(false)
     isRecordingRef.current = false
+    const holder = voiceOwnerId()
+    if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
   }, [voice])
 
   // Start a call. Presets only differ in device defaults — the engine
@@ -1381,10 +1399,16 @@ function App() {
 
   const startCall = useCallback(async (preset: CallPreset) => {
     if (inCallRef.current) return
+    // The call engine owns the mic for the call's whole duration; any live
+    // push-to-talk recording is stolen (cancelled cleanly) here. Nothing
+    // steals FROM a call — handleStartRecording defers while in-call — so
+    // the call's own onStolen is defensively a no-op.
+    acquireVoice(CALL_VOICE_HOLDER, () => {})
     const camera = preset === 'video' || preset === 'practice'
     const ok = await video.start({ camera })
     if (!ok) {
       // Camera denied/unavailable — stay out of the call, and say why.
+      releaseVoice(CALL_VOICE_HOLDER)
       if (camera) setPermissionDialog('camera')
       return
     }
@@ -1466,6 +1490,7 @@ function App() {
     setCallMinimized(false)
     inCallRef.current = false
     setInCall(false)
+    releaseVoice(CALL_VOICE_HOLDER)
   }, [video, setPttState])
 
   // The user-mute half that lives in the video pipeline: stop sampling
@@ -7821,11 +7846,11 @@ function App() {
                             }}
                             workDir={workDirByTab[tab.id] ?? null}
                             onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
-                            isRecording={isActive && isRecording}
-                            recordingText={isActive ? voice.interimText : undefined}
-                            recordingState={isActive ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
+                            isRecording={isRecording && voiceOwner === tab.chatId}
+                            recordingText={voiceOwner === tab.chatId ? voice.interimText : undefined}
+                            recordingState={voiceOwner === tab.chatId ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
                             audioLevelsRef={voice.audioLevelsRef}
-                            onStartRecording={isActive ? handleStartRecording : undefined}
+                            onStartRecording={isActive ? () => handleStartRecording(tab.chatId) : undefined}
                             onSubmitRecording={isActive ? handleSubmitRecording : undefined}
                             onCancelRecording={isActive ? handleCancelRecording : undefined}
                             voiceAvailable={isActive && voiceAvailable}
@@ -7944,7 +7969,7 @@ function App() {
                 recordingText={voice.interimText}
                 recordingState={voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'}
                 audioLevelsRef={voice.audioLevelsRef}
-                onStartRecording={handleStartRecording}
+                onStartRecording={() => handleStartRecording(chatIdForTab(activeChatTabIdRef.current))}
                 onSubmitRecording={handleSubmitRecording}
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
