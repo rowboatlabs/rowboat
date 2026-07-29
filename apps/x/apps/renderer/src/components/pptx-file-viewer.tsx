@@ -10,22 +10,53 @@ import {
   type Ref,
 } from 'react'
 import { ExternalLinkIcon, Loader2Icon, PresentationIcon } from 'lucide-react'
-import type { PowerPointViewerHandle, PowerPointViewerProps } from 'pptx-react-viewer'
+import type { PowerPointViewerHandle, PowerPointViewerProps, ViewerTheme } from 'pptx-react-viewer'
+
+// Maps the viewer's --pptx-* tokens onto the app's shadcn palette so it tracks
+// the active (dark) theme. Its own stylesheet is deliberately never imported:
+// that file is a standalone Tailwind build whose :root tokens and unscoped
+// utility classes win over ours app-wide once loaded. App.css generates the
+// viewer's classes from our tokens instead — see the @source directive there.
+// destructiveForeground is left to the viewer's default (white): the app has no
+// equivalent token, and its foreground colors are unreadable on red.
+const VIEWER_THEME: ViewerTheme = {
+  colors: {
+    background: 'var(--background)',
+    foreground: 'var(--foreground)',
+    card: 'var(--card)',
+    cardForeground: 'var(--card-foreground)',
+    popover: 'var(--popover)',
+    popoverForeground: 'var(--popover-foreground)',
+    primary: 'var(--primary)',
+    primaryForeground: 'var(--primary-foreground)',
+    secondary: 'var(--secondary)',
+    secondaryForeground: 'var(--secondary-foreground)',
+    muted: 'var(--muted)',
+    mutedForeground: 'var(--muted-foreground)',
+    accent: 'var(--accent)',
+    accentForeground: 'var(--accent-foreground)',
+    destructive: 'var(--destructive)',
+    border: 'var(--border)',
+    input: 'var(--input)',
+    ring: 'var(--ring)',
+  },
+  radius: 'var(--radius)',
+}
 
 type LazyPptxViewerProps = PowerPointViewerProps & {
   viewerRef: Ref<PowerPointViewerHandle>
 }
 
-// The viewer (its CSS, and the i18next stack it renders through) is heavy and
-// only needed when a .pptx is open, so it loads in its own chunk the first time
-// a presentation is viewed.
+// The viewer (and the i18next stack it renders through) is heavy and only
+// needed when a .pptx is open, so it loads in its own chunk the first time a
+// presentation is viewed. Its stylesheet is not among these imports by design —
+// see VIEWER_THEME above.
 const LazyPptxViewer = lazy(async () => {
   const [viewerMod, i18nMod, reactI18nMod, i18nAssets] = await Promise.all([
     import('pptx-react-viewer'),
     import('i18next'),
     import('react-i18next'),
     import('pptx-react-viewer/i18n'),
-    import('pptx-react-viewer/styles.css'),
   ])
 
   // The viewer resolves every UI string through react-i18next. The app has no
@@ -341,6 +372,7 @@ export function PptxFileViewer({ path }: PptxFileViewerProps) {
               fileName={baseName(path)}
               canEdit={true}
               onContentChange={handleContentChange}
+              theme={VIEWER_THEME}
               className="flex-1 min-h-0"
             />
           </Suspense>

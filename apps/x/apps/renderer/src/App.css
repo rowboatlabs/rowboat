@@ -4,6 +4,12 @@
 /* Required for Streamdown markdown rendering (bullet points, lists, etc.) */
 @source "../node_modules/streamdown/dist/*.js";
 
+/* The PowerPoint viewer ships a standalone Tailwind build whose :root tokens
+   and unscoped utility layer override ours app-wide once loaded, so we don't
+   import it. Generating its classes here instead resolves them against our own
+   tokens, which is also what makes the viewer follow the active theme. */
+@source "../node_modules/pptx-react-viewer/dist/*.mjs";
+
 @custom-variant dark (&:is(.dark *));
 
 #root {
