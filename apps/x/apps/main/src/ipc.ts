@@ -152,6 +152,8 @@ import {
   dismissItem as dismissTodoItem,
   listArchived as listTodoArchived,
   restoreItem as restoreTodoItem,
+  importTodoAttachments,
+  linksToText as todoLinksToText,
 } from '@x/core/dist/todo/fileops.js';
 import { backgroundTaskBus } from '@x/core/dist/background-tasks/bus.js';
 import {
@@ -2638,9 +2640,11 @@ export function setupIpcHandlers() {
     },
     'todo:addItem': async (_event, args) => {
       try {
-        const item = await addTodoItem(args.text);
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
+        const item = await addTodoItem(text);
         if (args.run || item.delegated) {
-          void runTodoItem(item.key).catch(() => {});
+          void runTodoItem(item.key, undefined, args.model ? { model: args.model } : undefined).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return { success: true };
@@ -2680,10 +2684,12 @@ export function setupIpcHandlers() {
     },
     'todo:addSubItem': async (_event, args) => {
       try {
-        const child = await addTodoSubItem(args.parentKey, args.text);
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
+        const child = await addTodoSubItem(args.parentKey, text);
         if (!child) return { success: false, error: 'Parent not found' };
         if (args.run || child.delegated) {
-          void runTodoItem(child.key).catch(() => {});
+          void runTodoItem(child.key, undefined, args.model ? { model: args.model } : undefined).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return { success: true };

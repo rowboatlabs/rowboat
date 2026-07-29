@@ -18,6 +18,8 @@ type TodoViewProps = {
   /** The real assistant composer, mounted by App (full features, submits
    * through the app's chat machinery). Falls back to a basic input. */
   composer?: React.ReactNode
+  /** Route a ＋ affordance into the composer with a destination chip. */
+  onComposeTodo?: (target: { kind: 'todo' } | { kind: 'sub'; parentKey: string; parentText: string }) => void
 }
 
 const ROWBOAT_MENTION_RE = /(^|\s)@rowboat\b/i
@@ -73,21 +75,40 @@ function openLink(link: TodoLink, onOpenNote: (path: string) => void) {
   else if (link.path) onOpenNote(link.path)
 }
 
-// Render @rowboat mentions as chips inside a read-only text row.
-function TextWithMentions({ text }: { text: string }) {
-  const parts = text.split(/(@rowboat)/i)
+// Render @rowboat mentions as chips and [label](target) links as buttons
+// inside a read-only text row.
+function TextWithMentions({ text, onOpenLink }: { text: string; onOpenLink?: (link: TodoLink) => void }) {
+  const parts = text.split(/(@rowboat|\[[^\]]+\]\([^)]+\))/i)
   return (
     <>
-      {parts.map((part, i) =>
-        /^@rowboat$/i.test(part) ? (
-          <span key={i} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1 text-primary">
-            <Bot className="size-3" />
-            rowboat
-          </span>
-        ) : (
-          <span key={i}>{part}</span>
-        ),
-      )}
+      {parts.map((part, i) => {
+        if (/^@rowboat$/i.test(part)) {
+          return (
+            <span key={i} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1 text-primary">
+              <Bot className="size-3" />
+              rowboat
+            </span>
+          )
+        }
+        const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(part)
+        if (link) {
+          const target = link[2]
+          const parsed: TodoLink = /^[a-z][a-z0-9+.-]*:\/\//i.test(target)
+            ? { label: link[1], url: target }
+            : { label: link[1], path: target }
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenLink?.(parsed) }}
+              className="mx-0.5 inline-flex items-center gap-0.5 rounded bg-muted px-1 text-[12px] text-muted-foreground ring-1 ring-border hover:bg-accent hover:text-foreground"
+            >
+              <ArrowUpRight className="size-3" /> {link[1]}
+            </button>
+          )
+        }
+        return <span key={i}>{part}</span>
+      })}
     </>
   )
 }
@@ -395,7 +416,7 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
             onClick={() => { if (!item.checked) { setDraft(item.text); setEditing(true) } }}
             className={`cursor-text text-sm ${item.checked ? 'text-muted-foreground line-through' : ''}`}
           >
-            <TextWithMentions text={item.text} />
+            <TextWithMentions text={item.text} onOpenLink={(l) => openLink(l, onOpenNote)} />
             {item.children.length > 0 && (
               <span
                 className={`${CHIP} ml-2 ${allChildrenDone && !item.checked ? 'bg-primary/10 font-semibold text-primary' : 'text-muted-foreground/70'}`}
@@ -744,7 +765,7 @@ function ArchivedSection({ entries, onRestore, onOpenNote }: {
               </span>
               <div className="min-w-0 flex-1">
                 <div className={`text-sm text-muted-foreground ${entry.item.checked ? 'line-through' : ''}`}>
-                  <TextWithMentions text={entry.item.text} />
+                  <TextWithMentions text={entry.item.text} onOpenLink={(l) => openLink(l, onOpenNote)} />
                   {entry.date && <span className="ml-2 text-[11px] text-muted-foreground/60">{entry.date}</span>}
                 </div>
                 {entry.item.receipts.length > 0 && (
@@ -778,7 +799,7 @@ function ArchivedSection({ entries, onRestore, onOpenNote }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, onComposeTodo }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   const [sessions, setSessions] = useState<Record<string, string>>({})
@@ -1194,7 +1215,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer }:
                     onToggleComment={() => setCommentKey(commentKey === item.key ? null : item.key)}
                     onComment={(message) => commentOnItem(item.key, message)}
                     onOpenInChat={onOpenInChat}
-                    onAddSub={() => setSubDraftFor(subDraftFor === item.key ? null : item.key)}
+                    onAddSub={() => (onComposeTodo
+                      ? onComposeTodo({ kind: 'sub', parentKey: item.key, parentText: item.text })
+                      : setSubDraftFor(subDraftFor === item.key ? null : item.key))}
                     childRows={(item.children.length > 0 || subDraftFor === item.key) && (
                       <div className="mt-1 flex flex-col border-l border-border/60 pl-1">
                         {item.children.map((child, ci) => (
@@ -1241,7 +1264,20 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer }:
                 )
               })
             )}
-            {blocks !== null && <AddItemRow onAdd={(text) => void addItem(text)} />}
+            {blocks !== null && (onComposeTodo ? (
+              // Routes into the composer below with the "To-do" chip set —
+              // one input, destination announced.
+              <button
+                type="button"
+                onClick={() => onComposeTodo({ kind: 'todo' })}
+                className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-muted-foreground/70 hover:bg-accent/40 hover:text-foreground"
+              >
+                <Plus className="size-4 shrink-0" />
+                Add a to-do…
+              </button>
+            ) : (
+              <AddItemRow onAdd={(text) => void addItem(text)} />
+            ))}
           </div>
 
           {/* The stream — recent chat threads */}

@@ -270,13 +270,14 @@ async function driveTurn(
     sessionId: string,
     message: string,
     subUseCase: string,
+    modelOverride?: { provider: string; model: string },
 ): Promise<TodoRunResult> {
     const { sessions, turnEventBus } = await resolveDeps();
     const watcher = watchSettles(turnEventBus);
     try {
         let sent: { turnId: string };
         try {
-            const { model, provider } = await getBackgroundTaskAgentModel();
+            const { model, provider } = modelOverride ?? await getBackgroundTaskAgentModel();
             sent = await withUseCase(
                 { useCase: 'todo_item_agent', subUseCase },
                 () => sessions.sendMessage(
@@ -323,7 +324,11 @@ async function driveTurn(
  * (typing @rowboat, the run chip, retry). Fire-and-forget from IPC:
  * progress and completion arrive on the todo bus.
  */
-export async function runTodoItem(key: string, context?: string): Promise<TodoRunResult> {
+export async function runTodoItem(
+    key: string,
+    context?: string,
+    opts?: { model?: { provider: string; model: string } },
+): Promise<TodoRunResult> {
     const norm = normalizeKey(key);
     if (runningItems.has(norm)) {
         log.log(`"${truncate(norm, 60)}" — skip: already running`);
@@ -342,7 +347,7 @@ export async function runTodoItem(key: string, context?: string): Promise<TodoRu
         const { sessions } = await resolveDeps();
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
         const { sessionId } = await ensureSession(sessions, item.key, title);
-        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context, parent?.text), 'manual');
+        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context, parent?.text), 'manual', opts?.model);
     } finally {
         runningItems.delete(norm);
     }

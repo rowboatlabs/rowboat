@@ -366,6 +366,43 @@ export async function setChecked(key: string, checked: boolean): Promise<boolean
 }
 
 // ---------------------------------------------------------------------------
+// Attachments — files given to a to-do at creation. Copied into the
+// workspace so the links on the item's line survive the source moving;
+// the agent reads them like any workspace file.
+// ---------------------------------------------------------------------------
+
+const ATTACHMENTS_DIR = path.join(WorkDir, 'todo', 'attachments');
+
+/** Copy files into todo/attachments and return links for the item's line. */
+export async function importTodoAttachments(
+    files: { path: string; name: string }[],
+): Promise<TodoLink[]> {
+    if (files.length === 0) return [];
+    if (!fsSync.existsSync(ATTACHMENTS_DIR)) fsSync.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const links: TodoLink[] = [];
+    for (const file of files) {
+        const base = file.name.replace(/[^\w.\- ]+/g, '_') || 'attachment';
+        let target = path.join(ATTACHMENTS_DIR, base);
+        for (let n = 1; fsSync.existsSync(target); n++) {
+            const ext = path.extname(base);
+            target = path.join(ATTACHMENTS_DIR, `${path.basename(base, ext)}-${n}${ext}`);
+        }
+        try {
+            await fs.copyFile(file.path, target);
+            links.push({ label: file.name, path: `todo/attachments/${path.basename(target)}` });
+        } catch (err) {
+            log.log(`attachment copy failed for ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    return links;
+}
+
+/** Serialize links for inclusion in an item's line text. */
+export function linksToText(links: TodoLink[]): string {
+    return links.map(l => `[${l.label}](${l.url ?? l.path ?? ''})`).join(' ');
+}
+
+// ---------------------------------------------------------------------------
 // Archive
 // ---------------------------------------------------------------------------
 

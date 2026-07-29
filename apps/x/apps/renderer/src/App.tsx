@@ -4421,6 +4421,19 @@ function App() {
   // copied onto the fresh tab at flush time.
   const homeSelectedModelRef = useRef<{ provider: string; model: string } | null>(null)
   const homeReasoningEffortRef = useRef<'low' | 'medium' | 'high' | null>(null)
+  // Destination chip: when set, the Home composer writes to the to-do list
+  // instead of the chat. Entered via the list's ＋ affordances, announced by
+  // the chip + tint, cleared on send/Escape/✕.
+  const [homeComposeTarget, setHomeComposeTarget] = useState<
+    | { kind: 'todo' }
+    | { kind: 'sub'; parentKey: string; parentText: string }
+    | null
+  >(null)
+  const [homeComposerFocusSignal, setHomeComposerFocusSignal] = useState(0)
+  const composeTodoOnHome = useCallback((target: { kind: 'todo' } | { kind: 'sub'; parentKey: string; parentText: string }) => {
+    setHomeComposeTarget(target)
+    setHomeComposerFocusSignal((n) => n + 1)
+  }, [])
   const [pendingHomeSubmit, setPendingHomeSubmit] = useState<{
     message: PromptInputMessage
     mentions?: FileMention[]
@@ -4440,17 +4453,36 @@ function App() {
   ) => {
     const text = message.text?.trim() ?? ''
     if (!text && stagedAttachments.length === 0) return
-    // The composer's task door: a bare @rowboat message is a delegated
-    // to-do, not a chat. Attachments/mentions force the chat path — the
-    // list can't carry them.
-    if (/(^|\s)@rowboat\b/i.test(text) && stagedAttachments.length === 0 && !(mentions?.length)) {
-      void window.ipc.invoke('todo:addItem', { text, run: true })
+    // Destination chip set → this is a to-do (or a step), not a chat. The
+    // composer's attachments become links on the line; its model selection
+    // rides along for the run when the item is delegated.
+    const target = homeComposeTargetRef.current
+    if (target) {
+      if (!text) return
+      const payload = {
+        text,
+        run: /(^|\s)@rowboat\b/i.test(text),
+        ...(stagedAttachments.length > 0
+          ? { attachments: stagedAttachments.map((a) => ({ path: a.path, name: a.filename })) }
+          : {}),
+        ...(homeSelectedModelRef.current ? { model: homeSelectedModelRef.current } : {}),
+      }
+      if (target.kind === 'sub') {
+        void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, ...payload })
+      } else {
+        void window.ipc.invoke('todo:addItem', payload)
+      }
+      setHomeComposeTarget(null)
       return
     }
+    // Chat mode has NO routing rules: mentions here just address the
+    // assistant. Tasks are born via the chip, the list, or by asking.
     setIsChatSidebarOpen(true)
     handleNewChatTabInSidebar()
     setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode })
   }, [handleNewChatTabInSidebar])
+  const homeComposeTargetRef = useRef(homeComposeTarget)
+  useEffect(() => { homeComposeTargetRef.current = homeComposeTarget }, [homeComposeTarget])
 
   useEffect(() => {
     if (!pendingHomeSubmit) return
@@ -7060,8 +7092,19 @@ function App() {
                           onSelectedModelChange={(m) => { homeSelectedModelRef.current = m ?? null }}
                           onReasoningEffortChange={(effort) => { homeReasoningEffortRef.current = effort ?? null }}
                           workDir={null}
+                          focusSignal={homeComposerFocusSignal}
+                          contextChip={homeComposeTarget ? {
+                            label: homeComposeTarget.kind === 'sub'
+                              ? `Step of: ${homeComposeTarget.parentText.slice(0, 40)}`
+                              : 'To-do',
+                            onDismiss: () => setHomeComposeTarget(null),
+                          } : undefined}
+                          placeholder={homeComposeTarget
+                            ? (homeComposeTarget.kind === 'sub' ? 'Add a step… @rowboat hands it off' : 'Add a to-do… @rowboat hands it off')
+                            : undefined}
                         />
                       }
+                      onComposeTodo={composeTodoOnHome}
                       onOpenNote={(path) => navigateToFile(path)}
                       onOpenInChat={(sessionId) => {
                         // Bind the dock (not the full-screen chat) to the

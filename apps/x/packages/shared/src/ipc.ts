@@ -2451,6 +2451,18 @@ const ipcSchemas = {
       text: z.string(),
       // Fire the item's run immediately (composer delegate / @rowboat typed).
       run: z.boolean(),
+      // Files given at creation — copied into todo/attachments and linked
+      // on the item's line.
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      // Composer model selection — overrides the todo agent's model when
+      // the item runs now.
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2507,6 +2519,14 @@ const ipcSchemas = {
       parentKey: z.string(),
       text: z.string(),
       run: z.boolean(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
     }),
     res: z.object({
       success: z.boolean(),
