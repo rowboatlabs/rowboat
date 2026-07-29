@@ -114,7 +114,7 @@ export type AppView =
   | 'graph'
   | 'task'
   | 'suggested-topics'
-  | 'meetings'
+  | 'calendar'
   | 'live-notes'
   | 'email'
   | 'workspace'
@@ -129,7 +129,7 @@ export type AppView =
 // so PostHog cohorts can answer "how many people have ever used meetings".
 const FIRST_USE_VIEWS: Partial<Record<AppView, string>> = {
   email: 'has_used_email',
-  meetings: 'has_used_meetings',
+  calendar: 'has_used_calendar',
   'live-notes': 'has_used_live_notes',
   'bg-tasks': 'has_used_bg_agents',
   apps: 'has_used_apps',

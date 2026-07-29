@@ -115,9 +115,9 @@ The desktop client's own updates — distinct from the in-app apps feature, whic
 - `client_updated` — main (`apps/main/src/ipc.ts`), `{ from, to }`: first launch on a newer version (fires once per update, whatever the restart path; downgrades restamp silently and don't fire)
 ### `view_opened` — feature-importance funnel
 
-One event per view the user lands on, fired centrally from the `currentViewState` effect in `apps/renderer/src/App.tsx`. `view` is one of: `chat`, `file`, `graph`, `task`, `suggested-topics`, `meetings`, `live-notes`, `email`, `workspace`, `knowledge-view`, `chat-history`, `home`, `code`, `bg-tasks`, `apps`. Keyed on the view *type*, so switching files or threads inside a view doesn't re-fire.
+One event per view the user lands on, fired centrally from the `currentViewState` effect in `apps/renderer/src/App.tsx`. `view` is one of: `chat`, `file`, `graph`, `task`, `suggested-topics`, `calendar`, `live-notes`, `email`, `workspace`, `knowledge-view`, `chat-history`, `home`, `code`, `bg-tasks`, `apps`. Keyed on the view *type*, so switching files or threads inside a view doesn't re-fire.
 
-This is the top of every feature funnel: unique users on `view = 'email'` ÷ all users = how many people even open email. First visit to a key view also sets a one-shot person property (`has_used_email`, `has_used_meetings`, `has_used_live_notes`, `has_used_bg_agents`, `has_used_apps`, `has_used_code`) for cohort building.
+This is the top of every feature funnel: unique users on `view = 'email'` ÷ all users = how many people even open email. First visit to a key view also sets a one-shot person property (`has_used_email`, `has_used_calendar`, `has_used_live_notes`, `has_used_bg_agents`, `has_used_apps`, `has_used_code`) for cohort building.
 
 ### Feature action events
 
@@ -138,7 +138,7 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 - `email_instructions_saved` — standing email-agent instructions saved
 - `email_sync_triggered` — manual refresh button
 
-**Meetings** (`App.tsx`, `components/meetings-view.tsx`):
+**Meetings / calendar agenda** (`App.tsx`, `components/calendar/agenda-view.tsx`):
 
 - `meeting_recording_started` — `{ has_calendar_event }` — transcription actually began (all entry points: meetings view, home, sidebar, popup funnel through one call site)
 - `meeting_recording_stopped` — `{ duration_seconds }`
@@ -216,7 +216,7 @@ Persistent across sessions for the same user. Set via `posthog.people.set` or as
 | `{provider}_connected` | renderer | One of `gmail`, `calendar`, `slack`, `rowboat` |
 | `total_notes` | renderer (init) | Workspace size signal |
 | `has_used_search`, `has_used_voice` | renderer | One-shot first-use flags |
-| `has_used_email`, `has_used_meetings`, `has_used_live_notes`, `has_used_bg_agents`, `has_used_apps`, `has_used_code` | renderer (`view_opened`) | One-shot first-use flags per feature view |
+| `has_used_email`, `has_used_calendar`, `has_used_live_notes`, `has_used_bg_agents`, `has_used_apps`, `has_used_code` | renderer (`view_opened`) | One-shot first-use flags per feature view |
 | `has_created_bg_agent` | renderer | One-shot: user set up a background agent |
 | `llm_provider_flavors` | main | Sorted array of connected provider flavors incl. `rowboat`/`codex` from auth state (e.g. `["openai","openrouter","rowboat"]`). Synced on every launch and after any provider/assistant change (`packages/core/src/analytics/model-providers.ts`) |
 | `llm_provider_count` | main | Size of `llm_provider_flavors` |

@@ -56,7 +56,8 @@ markdown files in the workspace) and then open-note / open-item to show them.
 - ` + "`kind: \"session\"`" + ` + ` + "`sessionId`" + ` (from read-view chat-history)
 
 ### open-view — just switch the screen
-` + "`view`" + `: ` + "`home | email | meetings | live-notes | bg-tasks | chat-history | knowledge | workspace | code | bases | graph | apps`" + `
+` + "`view`" + `: ` + "`home | email | calendar | meetings | live-notes | bg-tasks | chat-history | knowledge | workspace | code | bases | graph | apps`" + `
+(` + "`meetings`" + ` opens the calendar's agenda list — calendar and meetings are one view.)
 Use when the user asks to "go to"/"show" a view without a question to answer.
 
 ## Answering from Rowboat apps (any app — match by description)

@@ -1,19 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar, ChevronDown, ChevronRight, Clock, ExternalLink, FileText, Loader2, MapPin, Mic, Sparkles, Square, UserPlus, UserRound, UsersRound, Video, X } from 'lucide-react'
+import { Calendar, ChevronDown, ChevronRight, FileText, Loader2, MapPin, Mic, Sparkles, UserPlus, UsersRound, Video } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
-import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverTrigger } from '@/components/ui/popover'
 import { SettingsDialog } from '@/components/settings-dialog'
+import { EventDetailsPopover } from '@/components/calendar/event-details-popover'
 import { formatRelativeTime } from '@/lib/relative-time'
 import * as analytics from '@/lib/analytics'
-import { extractConferenceLink } from '@/lib/calendar-event'
+import {
+  addDays,
+  formatEventTimeRangeCompact,
+  isEventNow,
+  localDateKey,
+  meetingPlatformLabel,
+  startOfDay,
+  triggerMeetingCapture,
+  type UpcomingEvent,
+} from '@/lib/calendar-events'
 import { cn } from '@/lib/utils'
+import { useCalendarEvents } from '@/hooks/use-calendar-events'
 import type { MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
 
 const MEETINGS_ROOT = 'knowledge/Meetings'
-const CALENDAR_DIR = 'calendar_sync'
 const UPCOMING_MAX_DAYS = 4 // today + next 3
 
 declare global {
@@ -56,161 +65,14 @@ type MeetingNoteRow = {
   mtimeMs: number
 }
 
-type MeetingsViewProps = {
-  onOpenNote: (path: string) => void
-  onTakeMeetingNotes: () => void
-  meetingState: MeetingTranscriptionState
-  meetingSummarizing?: boolean
-}
-
 function isMeetingPath(path: string | undefined): boolean {
   return typeof path === 'string' && (path === MEETINGS_ROOT || path.startsWith(`${MEETINGS_ROOT}/`))
-}
-
-function isCalendarPath(path: string | undefined): boolean {
-  return typeof path === 'string' && (path === CALENDAR_DIR || path.startsWith(`${CALENDAR_DIR}/`))
-}
-
-type RawCalendarEvent = {
-  id?: string
-  summary?: string
-  start?: { dateTime?: string; date?: string }
-  end?: { dateTime?: string; date?: string }
-  location?: string
-  description?: string
-  htmlLink?: string
-  status?: string
-  creator?: CalendarPerson
-  organizer?: CalendarPerson
-  attendees?: CalendarAttendee[]
-  conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
-  hangoutLink?: string
-  conferenceLink?: string
-}
-
-type CalendarPerson = {
-  email?: string
-  displayName?: string
-  self?: boolean
-}
-
-type CalendarAttendee = CalendarPerson & {
-  responseStatus?: string
-  optional?: boolean
-}
-
-type DescriptionPart =
-  | { type: 'text'; text: string }
-  | { type: 'link'; text: string; href: string }
-
-type UpcomingEvent = {
-  id: string
-  summary: string
-  start: Date
-  end: Date | null
-  isAllDay: boolean
-  location: string | null
-  description: string | null
-  htmlLink: string | null
-  conferenceLink: string | null
-  creator: CalendarPerson | null
-  organizer: CalendarPerson | null
-  attendees: CalendarAttendee[]
-  source: string // workspace path to the calendar_sync JSON
-  rawStart: { dateTime?: string; date?: string } | undefined
-  rawEnd: { dateTime?: string; date?: string } | undefined
-  dateKey: string // YYYY-MM-DD (local)
 }
 
 type DayGroup = {
   dateKey: string
   date: Date // local start-of-day
   events: UpcomingEvent[]
-}
-
-function startOfDay(d: Date): Date {
-  const out = new Date(d)
-  out.setHours(0, 0, 0, 0)
-  return out
-}
-
-function addDays(d: Date, n: number): Date {
-  const out = new Date(d)
-  out.setDate(out.getDate() + n)
-  return out
-}
-
-function localDateKey(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-// Parse an all-day calendar date string ("YYYY-MM-DD") into a local Date at midnight.
-function parseAllDayDate(s: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
-  if (!m) return null
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-}
-
-function normalizeEvent(raw: RawCalendarEvent, sourcePath: string): UpcomingEvent | null {
-  if (raw.status === 'cancelled') return null
-  const declined = raw.attendees?.find((a) => a.self)?.responseStatus === 'declined'
-  if (declined) return null
-
-  const allDayStart = raw.start?.date
-  const timedStart = raw.start?.dateTime
-  const isAllDay = !timedStart && Boolean(allDayStart)
-
-  let start: Date | null = null
-  let end: Date | null = null
-  if (timedStart) {
-    start = new Date(timedStart)
-    end = raw.end?.dateTime ? new Date(raw.end.dateTime) : null
-  } else if (allDayStart) {
-    start = parseAllDayDate(allDayStart)
-    // Google's all-day end is exclusive (next day at 00:00) — keep as-is.
-    end = raw.end?.date ? parseAllDayDate(raw.end.date) : null
-  }
-  if (!start || Number.isNaN(start.getTime())) return null
-
-  const conferenceLink = extractConferenceLink(raw as unknown as Record<string, unknown>) ?? null
-
-  return {
-    id: raw.id ?? sourcePath,
-    summary: raw.summary?.trim() || '(No title)',
-    start,
-    end,
-    isAllDay,
-    location: raw.location?.trim() || null,
-    description: raw.description?.trim() || null,
-    htmlLink: raw.htmlLink ?? null,
-    conferenceLink,
-    creator: raw.creator ?? null,
-    organizer: raw.organizer ?? null,
-    attendees: raw.attendees ?? [],
-    source: sourcePath,
-    rawStart: raw.start,
-    rawEnd: raw.end,
-    dateKey: localDateKey(start),
-  }
-}
-
-function triggerMeetingCapture(event: UpcomingEvent, openConference: boolean) {
-  window.__pendingCalendarEvent = {
-    summary: event.summary,
-    start: event.rawStart,
-    end: event.rawEnd,
-    location: event.location ?? undefined,
-    htmlLink: event.htmlLink ?? undefined,
-    conferenceLink: event.conferenceLink ?? undefined,
-    source: event.source,
-  }
-  if (openConference && event.conferenceLink) {
-    window.open(event.conferenceLink, '_blank')
-  }
-  window.dispatchEvent(new Event('calendar-block:join-meeting'))
 }
 
 // Always show today (anchor). For days within the window after today, include
@@ -231,166 +93,6 @@ function buildDayWindow(now: Date): DayGroup[] {
     const date = addDays(today, i)
     return { dateKey: localDateKey(date), date, events: [] }
   })
-}
-
-function formatEventTimeRange(event: UpcomingEvent): string {
-  if (event.isAllDay) return 'All day'
-  const start = event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  if (!event.end) return start
-  // If start and end are on different days, show date+time on both ends.
-  const sameDay = localDateKey(event.start) === localDateKey(event.end)
-  if (!sameDay) {
-    const startLong = event.start.toLocaleString([], { month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
-    const endLong = event.end.toLocaleString([], { month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
-    return `${startLong} – ${endLong}`
-  }
-  const end = event.end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  return `${start} – ${end}`
-}
-
-// Compact range for the upcoming list: drops the leading meridiem when both
-// ends share it ("9:00 – 11:00 AM" instead of "9:00 AM – 11:00 AM").
-function formatEventTimeRangeCompact(event: UpcomingEvent): string {
-  if (event.isAllDay) return 'All day'
-  const startStr = event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  if (!event.end) return startStr
-  const sameDay = localDateKey(event.start) === localDateKey(event.end)
-  if (!sameDay) return formatEventTimeRange(event)
-  const endStr = event.end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  const meridiemRe = /\s*[AP]M$/i
-  const startMer = startStr.match(meridiemRe)?.[0]?.trim().toUpperCase()
-  const endMer = endStr.match(meridiemRe)?.[0]?.trim().toUpperCase()
-  if (startMer && endMer && startMer === endMer) {
-    return `${startStr.replace(meridiemRe, '')} – ${endStr}`
-  }
-  return `${startStr} – ${endStr}`
-}
-
-// Whether a timed event is happening right now.
-function isEventNow(event: UpcomingEvent): boolean {
-  if (event.isAllDay) return false
-  const now = Date.now()
-  const start = event.start.getTime()
-  const end = event.end ? event.end.getTime() : start + 30 * 60 * 1000
-  return start <= now && now < end
-}
-
-// Human label for the conferencing provider behind an event's join link.
-function meetingPlatformLabel(link: string | null): string | null {
-  if (!link) return null
-  if (/zoom\.us|zoomgov\.com/i.test(link)) return 'Zoom'
-  if (/teams\.(?:microsoft|live)\.com/i.test(link)) return 'Teams'
-  if (/meet\.google\.com/i.test(link)) return 'Meet'
-  return 'Video call'
-}
-
-function formatEventDetailTime(event: UpcomingEvent): string {
-  if (!event.isAllDay) {
-    const date = event.start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
-    return `${date}, ${formatEventTimeRange(event)}`
-  }
-
-  const start = event.start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
-  if (!event.end) return `${start}, all day`
-
-  const exclusiveEnd = addDays(event.end, -1)
-  if (localDateKey(exclusiveEnd) === localDateKey(event.start)) return `${start}, all day`
-
-  const end = exclusiveEnd.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
-  return `${start} – ${end}, all day`
-}
-
-function personLabel(person: CalendarPerson | null | undefined): string | null {
-  if (!person) return null
-  return person.displayName?.trim() || person.email?.trim() || null
-}
-
-function attendeeLabel(attendee: CalendarAttendee): string | null {
-  const label = personLabel(attendee)
-  if (!label) return null
-  if (attendee.self) return `${label} (you)`
-  return label
-}
-
-function normalizeDescriptionParts(parts: DescriptionPart[]): DescriptionPart[] {
-  const normalized: DescriptionPart[] = []
-  for (const part of parts) {
-    const text = part.text.replace(/\n{3,}/g, '\n\n')
-    if (!text) continue
-    const previous = normalized[normalized.length - 1]
-    if (previous?.type === 'text' && part.type === 'text') {
-      previous.text += text
-    } else if (part.type === 'link') {
-      normalized.push({ ...part, text })
-    } else {
-      normalized.push({ type: 'text', text })
-    }
-  }
-  return normalized
-}
-
-function isSafeDescriptionHref(value: string): boolean {
-  try {
-    const url = new URL(value, window.location.href)
-    return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'mailto:'
-  } catch {
-    return false
-  }
-}
-
-function linkifyText(value: string): DescriptionPart[] {
-  const parts: DescriptionPart[] = []
-  const urlRe = /\bhttps?:\/\/[^\s<>"')\]]+|\bwww\.[^\s<>"')\]]+/gi
-  let lastIndex = 0
-  for (const match of value.matchAll(urlRe)) {
-    const raw = match[0]
-    const index = match.index ?? 0
-    if (index > lastIndex) parts.push({ type: 'text', text: value.slice(lastIndex, index) })
-    const href = raw.startsWith('www.') ? `https://${raw}` : raw
-    parts.push({ type: 'link', text: raw, href })
-    lastIndex = index + raw.length
-  }
-  if (lastIndex < value.length) parts.push({ type: 'text', text: value.slice(lastIndex) })
-  return parts
-}
-
-function parseDescriptionParts(value: string): DescriptionPart[] {
-  const withLineBreaks = value.replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\/\s*(p|div|li|tr|h[1-6])\s*>/gi, '\n')
-  if (typeof DOMParser === 'undefined') {
-    return normalizeDescriptionParts(linkifyText(withLineBreaks.replace(/<[^>]*>/g, '').trim()))
-  }
-  const doc = new DOMParser().parseFromString(withLineBreaks, 'text/html')
-  const parts: DescriptionPart[] = []
-
-  const visit = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      parts.push(...linkifyText(node.textContent ?? ''))
-      return
-    }
-    if (!(node instanceof HTMLElement)) return
-    if (node.tagName === 'A') {
-      const href = node.getAttribute('href') ?? ''
-      const text = node.textContent?.trim() || href
-      if (href && isSafeDescriptionHref(href)) {
-        parts.push({ type: 'link', text, href })
-        return
-      }
-    }
-    if (node.tagName === 'BR') {
-      parts.push({ type: 'text', text: '\n' })
-      return
-    }
-    node.childNodes.forEach(visit)
-    if (/^(P|DIV|LI|TR|H[1-6])$/.test(node.tagName)) {
-      parts.push({ type: 'text', text: '\n' })
-    }
-  }
-
-  doc.body.childNodes.forEach(visit)
-  return normalizeDescriptionParts(parts).map((part, index, all) => {
-    if (index === 0 || index === all.length - 1) return { ...part, text: part.text.trim() }
-    return part
-  }).filter((part) => part.text.length > 0)
 }
 
 // Hand the unmatched attendee off to the Copilot to research + create a note.
@@ -565,124 +267,31 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
 }
 
 function UpcomingEvents({ onOpenNote }: { onOpenNote: (path: string) => void }) {
-  const [events, setEvents] = useState<UpcomingEvent[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [refreshTick, setRefreshTick] = useState(0)
-  // Calendar sync uses the native Google OAuth connection.
-  const [calendarConnected, setCalendarConnected] = useState<boolean | null>(null)
+  const { events: allEvents, loading, error, connected: calendarConnected } = useCalendarEvents()
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    const check = async () => {
-      try {
-        const oauthState = await window.ipc.invoke('oauth:getState', null)
-        if (!cancelled) setCalendarConnected(oauthState.config?.google?.connected ?? false)
-      } catch {
-        if (!cancelled) setCalendarConnected(false)
-      }
-    }
-    void check()
-    const cleanupOAuthConnect = window.ipc.on('oauth:didConnect', () => { void check() })
-    return () => {
-      cancelled = true
-      cleanupOAuthConnect()
-    }
-  }, [])
-
-  const loadEvents = useCallback(async () => {
-    setLoading(true)
-    try {
-      const exists = await window.ipc.invoke('workspace:exists', { path: CALENDAR_DIR })
-      if (!exists.exists) {
-        setEvents([])
-        setError(null)
-        return
-      }
-      const entries = await window.ipc.invoke('workspace:readdir', {
-        path: CALENDAR_DIR,
-        opts: { recursive: false, includeHidden: false, includeStats: false },
-      })
-      const jsonEntries = entries.filter((e) => e.kind === 'file' && e.name.endsWith('.json'))
-
-      const now = new Date()
-      const todayStart = startOfDay(now)
-      const windowEnd = addDays(todayStart, UPCOMING_MAX_DAYS) // exclusive
-
-      const settled = await Promise.allSettled(
-        jsonEntries.map(async (entry): Promise<UpcomingEvent | null> => {
-          const result = await window.ipc.invoke('workspace:readFile', {
-            path: entry.path,
-            encoding: 'utf8',
-          })
-          const raw = JSON.parse(result.data) as RawCalendarEvent
-          const ev = normalizeEvent(raw, entry.path)
-          if (!ev) return null
-          // Event must overlap the [now, windowEnd) range — i.e. not already ended,
-          // and not start after the window closes.
-          const effectiveEnd = ev.end ?? (ev.isAllDay ? addDays(ev.start, 1) : ev.start)
-          if (effectiveEnd <= now) return null
-          if (ev.start >= windowEnd) return null
-          return ev
-        }),
-      )
-
-      const collected: UpcomingEvent[] = []
-      for (const r of settled) {
-        if (r.status === 'fulfilled' && r.value) collected.push(r.value)
-      }
-      collected.sort((a, b) => {
-        if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1
-        return a.start.getTime() - b.start.getTime()
-      })
-      setEvents(collected)
-      setError(null)
-    } catch (err) {
-      console.error('Failed to load upcoming events:', err)
-      setError('Could not load upcoming events.')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadEvents()
-  }, [loadEvents, refreshTick])
-
-  useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout> | null = null
-    const scheduleReload = () => {
-      if (timeout) clearTimeout(timeout)
-      timeout = setTimeout(() => {
-        timeout = null
-        setRefreshTick((t) => t + 1)
-      }, 250)
-    }
-    const cleanup = window.ipc.on('workspace:didChange', (event) => {
-      switch (event.type) {
-        case 'created':
-        case 'changed':
-        case 'deleted':
-          if (isCalendarPath(event.path)) scheduleReload()
-          break
-        case 'moved':
-          if (isCalendarPath(event.from) || isCalendarPath(event.to)) scheduleReload()
-          break
-        case 'bulkChanged':
-          if (!event.paths || event.paths.some(isCalendarPath)) scheduleReload()
-          break
-      }
+  // The hook returns every synced event; keep only those overlapping the
+  // [now, now + UPCOMING_MAX_DAYS) window, all-day first then by start. The
+  // hook's minute tick produces a fresh array, so "ended" filtering stays
+  // current between calendar syncs.
+  const events = useMemo(() => {
+    const now = new Date()
+    const todayStart = startOfDay(now)
+    const windowEnd = addDays(todayStart, UPCOMING_MAX_DAYS) // exclusive
+    const collected = allEvents.filter((ev) => {
+      // Event must overlap the [now, windowEnd) range — i.e. not already ended,
+      // and not start after the window closes.
+      const effectiveEnd = ev.end ?? (ev.isAllDay ? addDays(ev.start, 1) : ev.start)
+      if (effectiveEnd <= now) return false
+      if (ev.start >= windowEnd) return false
+      return true
     })
-    // Refresh every minute so the "now" highlight, day labels, and "ended"
-    // filtering stay current without waiting on a calendar sync.
-    const tick = setInterval(() => setRefreshTick((t) => t + 1), 60 * 1000)
-    return () => {
-      cleanup()
-      clearInterval(tick)
-      if (timeout) clearTimeout(timeout)
-    }
-  }, [])
+    collected.sort((a, b) => {
+      if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1
+      return a.start.getTime() - b.start.getTime()
+    })
+    return collected
+  }, [allEvents])
 
   const visibleDays = useMemo(() => {
     const window = buildDayWindow(new Date())
@@ -903,138 +512,6 @@ function UpcomingEventItem({ event, isLast, isPrepTarget, onOpenNote }: { event:
   )
 }
 
-function EventDetailsPopover({ event, onClose }: { event: UpcomingEvent; onClose: () => void }) {
-  const organizer = personLabel(event.organizer) ?? personLabel(event.creator)
-  const attendees = event.attendees.map(attendeeLabel).filter((label): label is string => Boolean(label))
-  const descriptionParts = event.description ? parseDescriptionParts(event.description) : []
-  const handleMeetingCapture = (openConference: boolean) => {
-    onClose()
-    triggerMeetingCapture(event, openConference)
-  }
-
-  return (
-    <PopoverContent
-      align="start"
-      side="bottom"
-      sideOffset={6}
-      className="w-[min(380px,calc(100vw-32px))] rounded-lg p-0 shadow-xl"
-      style={{
-        backgroundColor: 'var(--muted, #f4f4f5)',
-        borderColor: 'var(--border, #e4e4e7)',
-        color: 'var(--popover-foreground, #09090b)',
-      }}
-    >
-      <div className="flex items-center justify-end gap-1 border-b px-3 py-2" style={{ borderColor: 'var(--border, #e4e4e7)' }}>
-        {event.htmlLink ? (
-          <button
-            type="button"
-            onClick={() => window.open(event.htmlLink!, '_blank')}
-            className="inline-flex size-8 items-center justify-center rounded-md transition-colors"
-            style={{ color: 'var(--muted-foreground, #71717a)' }}
-            aria-label="Open in Google Calendar"
-            title="Open in Google Calendar"
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--background, #ffffff)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-          >
-            <ExternalLink className="size-4" />
-          </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex size-8 items-center justify-center rounded-md transition-colors"
-          style={{ color: 'var(--muted-foreground, #71717a)' }}
-          aria-label="Close event details"
-          title="Close"
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--background, #ffffff)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-        >
-          <X className="size-4" />
-        </button>
-      </div>
-      <div className="space-y-4 px-5 py-4">
-        <div className="flex gap-3">
-          <span
-            aria-hidden
-            className="mt-1.5 h-3 w-3 shrink-0 rounded-sm"
-            style={{ background: 'var(--primary, #18181b)' }}
-          />
-          <div className="min-w-0">
-            <h4 className="break-words text-[20px] font-normal leading-6" style={{ color: 'var(--foreground, #09090b)' }}>
-              {event.summary}
-            </h4>
-          </div>
-        </div>
-
-        <EventDetailRow icon={<Clock className="size-4" />} value={formatEventDetailTime(event)} />
-        {event.location ? <EventDetailRow icon={<MapPin className="size-4" />} value={event.location} /> : null}
-        {organizer ? <EventDetailRow icon={<UserRound className="size-4" />} value={`Organizer: ${organizer}`} /> : null}
-        {attendees.length > 0 ? (
-          <EventDetailRow
-            icon={<UsersRound className="size-4" />}
-            value={attendees.slice(0, 8).join(', ') + (attendees.length > 8 ? `, +${attendees.length - 8} more` : '')}
-          />
-        ) : null}
-
-        {event.conferenceLink ? (
-          <div className="flex gap-3">
-            <Video className="mt-1 size-4 shrink-0" style={{ color: 'var(--muted-foreground, #71717a)' }} />
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" onClick={() => handleMeetingCapture(true)}>
-                Join & take notes
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => handleMeetingCapture(false)}>
-                Take notes only
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex gap-3">
-            <Mic className="mt-1 size-4 shrink-0" style={{ color: 'var(--muted-foreground, #71717a)' }} />
-            <Button type="button" size="sm" variant="outline" onClick={() => handleMeetingCapture(false)}>
-              Take notes
-            </Button>
-          </div>
-        )}
-
-        {descriptionParts.length > 0 ? (
-          <div className="flex gap-3">
-            <span className="mt-1 size-4 shrink-0" />
-            <div className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-sm leading-5" style={{ color: 'var(--foreground, #27272a)' }}>
-              {descriptionParts.map((part, index) => {
-                if (part.type === 'text') return <span key={index}>{part.text}</span>
-                return (
-                  <a
-                    key={index}
-                    href={part.href}
-                    onClick={(e) => {
-                      e.preventDefault()
-                      window.open(part.href, '_blank')
-                    }}
-                    className="underline underline-offset-2"
-                    style={{ color: 'var(--primary, #18181b)' }}
-                  >
-                    {part.text}
-                  </a>
-                )
-              })}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </PopoverContent>
-  )
-}
-
-function EventDetailRow({ icon, value }: { icon: React.ReactNode; value: string }) {
-  return (
-    <div className="flex gap-3 text-sm leading-5">
-      <span className="mt-0.5 shrink-0" style={{ color: 'var(--muted-foreground, #71717a)' }}>{icon}</span>
-      <span className="min-w-0 break-words" style={{ color: 'var(--foreground, #27272a)' }}>{value}</span>
-    </div>
-  )
-}
-
 function SplitJoinButton({ onJoinAndNotes, onNotesOnly }: {
   onJoinAndNotes: () => void
   onNotesOnly: () => void
@@ -1130,7 +607,7 @@ function formatDateLabel(label: string): string {
   })
 }
 
-function getMeetingButtonLabel(state: MeetingTranscriptionState): string {
+export function getMeetingButtonLabel(state: MeetingTranscriptionState): string {
   switch (state) {
     case 'connecting':
       return 'Starting...'
@@ -1144,7 +621,11 @@ function getMeetingButtonLabel(state: MeetingTranscriptionState): string {
   }
 }
 
-export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, meetingSummarizing = false }: MeetingsViewProps) {
+// The calendar's list mode: the upcoming-events cards followed by the past
+// meeting-notes table. Rendered inside CalendarView's content container (which
+// provides the width cap and horizontal padding); the "Take meeting notes"
+// button lives in the calendar header.
+export function AgendaView({ onOpenNote }: { onOpenNote: (path: string) => void }) {
   const [notes, setNotes] = useState<MeetingNoteRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -1240,37 +721,9 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
     }
   }, [loadNotes])
 
-  const isBusy = meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing
-  const isRecording = meetingState === 'recording'
-
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
-      <div className="mx-auto w-full max-w-[1120px] shrink-0 px-[30px] pt-[34px] pb-5">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-[24px] font-[650] tracking-[-0.02em] text-[#0d0e11] dark:text-[#f4f5f7]">Meetings</h2>
-          <Button
-            type="button"
-            size="sm"
-            variant={isRecording ? 'destructive' : 'default'}
-            disabled={isBusy}
-            onClick={onTakeMeetingNotes}
-          >
-            {meetingSummarizing || meetingState === 'connecting' || meetingState === 'stopping' ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : isRecording ? (
-              <Square className="mr-2 size-3.5" />
-            ) : (
-              <Mic className="mr-2 size-4" />
-            )}
-            {meetingSummarizing ? 'Generating notes...' : getMeetingButtonLabel(meetingState)}
-          </Button>
-	        </div>
-        <p className="mt-1 text-[14px] text-black/50 dark:text-white/[0.52]">
-          Upcoming events and meeting notes.
-        </p>
-      </div>
-      <div className="flex-1 overflow-auto">
-        <div className="mx-auto w-full max-w-[1120px] px-[30px] pb-12">
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="pb-12">
         <UpcomingEvents onOpenNote={onOpenNote} />
         <div className="pt-6">
         {loading ? (
@@ -1327,7 +780,6 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
             </table>
           </div>
         )}
-        </div>
         </div>
       </div>
     </div>

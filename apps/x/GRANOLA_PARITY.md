@@ -94,7 +94,7 @@ Two separate feature families exist in `apps/x`; only the second is Granola-adja
 | Auto-stop heuristics | ✅ (partial) | silence RMS backstop, calendar-end gating, system-track ended/muted — `useMeetingTranscription.ts:378-549` |
 | Calendar sync | ✅ | Google OAuth via `googleapis`, `packages/core/src/knowledge/sync_calendar.ts`, per-event JSON in `~/.rowboat/calendar_sync/` |
 | Pre-meeting notification | ✅ (system toast) | `packages/core/src/knowledge/notify_calendar_meetings.ts` — polls every 30s, notifies ~1 min before, deep-links `rowboat://action?type=join-and-take-meeting-notes` |
-| Meetings screen | ✅ | `apps/renderer/src/components/meetings-view.tsx` — "Coming up" (+Join / Take-notes buttons, inline prep) + past-notes table |
+| Meetings screen | ✅ | `apps/renderer/src/components/calendar/agenda-view.tsx` (calendar Agenda mode) — "Coming up" (+Join / Take-notes buttons, inline prep) + past-notes table |
 | Transcript rendering | ✅ | `apps/renderer/src/extensions/transcript-block.tsx` (TipTap, colored speakers, collapsible) |
 | Meeting prep briefs | ✅ | `meeting_prep_scheduler.ts`, `meeting_prep_brief.ts` (Granola has this too) |
 | Permissions flows | ✅ | mic `ipc.ts:2090-2106`; screen recording check/open-settings `ipc.ts:2003-2018`; Info.plist strings `forge.config.cjs:201-204`; entitlements OK |

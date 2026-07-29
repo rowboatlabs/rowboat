@@ -250,6 +250,7 @@ const summarizeFilterUpdates = (updates: Record<string, unknown>): string => {
 const APP_VIEW_LABELS: Record<string, string> = {
   home: 'home',
   email: 'email',
+  calendar: 'calendar',
   meetings: 'meetings',
   'live-notes': 'live notes',
   'bg-tasks': 'background agents',

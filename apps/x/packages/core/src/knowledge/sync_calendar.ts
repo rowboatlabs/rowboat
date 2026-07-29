@@ -139,7 +139,8 @@ async function publishCalendarSyncEvent(
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'calendar_sync');
 const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
-const LOOKBACK_DAYS = 7;
+const LOOKBACK_DAYS = 60;
+const LOOKAHEAD_DAYS = 60;
 const REQUIRED_SCOPES = [
     'https://www.googleapis.com/auth/calendar.events.readonly',
 ];
@@ -297,16 +298,16 @@ async function processAttachments(drive: drive.Drive, event: cal.Schema$Event, s
     return savedCount;
 }
 
-async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackDays: number) {
+async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackDays: number, lookaheadDays: number) {
     // Calculate window
     const now = new Date();
     const lookbackMs = lookbackDays * 24 * 60 * 60 * 1000;
-    const twoWeeksForwardMs = 14 * 24 * 60 * 60 * 1000;
+    const lookaheadMs = lookaheadDays * 24 * 60 * 60 * 1000;
 
     const timeMin = new Date(now.getTime() - lookbackMs).toISOString();
-    const timeMax = new Date(now.getTime() + twoWeeksForwardMs).toISOString();
+    const timeMax = new Date(now.getTime() + lookaheadMs).toISOString();
 
-    console.log(`Syncing calendar from ${timeMin} to ${timeMax} (lookback: ${lookbackDays} days)...`);
+    console.log(`Syncing calendar from ${timeMin} to ${timeMax} (lookback: ${lookbackDays} days, lookahead: ${lookaheadDays} days)...`);
 
     const calendar = google.calendar({ version: 'v3', auth });
     const drive = google.drive({ version: 'v3', auth });
@@ -334,15 +335,23 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
     };
 
     try {
-        const res = await calendar.events.list({
-            calendarId: 'primary',
-            timeMin: timeMin,
-            timeMax: timeMax,
-            singleEvents: true,
-            orderBy: 'startTime'
-        });
-
-        const events = res.data.items || [];
+        // Paginate: singleEvents expansion over a wide window can exceed the
+        // per-page cap (default 250), silently truncating without a pageToken loop.
+        const events: cal.Schema$Event[] = [];
+        let pageToken: string | undefined;
+        do {
+            const res = await calendar.events.list({
+                calendarId: 'primary',
+                timeMin: timeMin,
+                timeMax: timeMax,
+                singleEvents: true,
+                orderBy: 'startTime',
+                maxResults: 2500,
+                pageToken,
+            });
+            events.push(...(res.data.items || []));
+            pageToken = res.data.nextPageToken ?? undefined;
+        } while (pageToken);
         const currentEventIds = new Set<string>();
 
         if (events.length === 0) {
@@ -453,7 +462,7 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
     }
 }
 
-async function performSync(syncDir: string, lookbackDays: number) {
+async function performSync(syncDir: string, lookbackDays: number, lookaheadDays: number) {
     try {
 
         if (!fs.existsSync(SYNC_DIR)) {
@@ -467,7 +476,7 @@ async function performSync(syncDir: string, lookbackDays: number) {
         }
 
         console.log("Authorization successful. Starting sync...");
-        await syncCalendarWindow(auth, syncDir, lookbackDays);
+        await syncCalendarWindow(auth, syncDir, lookbackDays, lookaheadDays);
         console.log("Sync completed.");
     } catch (error) {
         console.error("Error during sync:", error);
@@ -490,7 +499,7 @@ export async function init() {
             if (!hasCredentials) {
                 console.log("Google OAuth credentials not available or missing required Calendar/Drive scopes. Sleeping...");
             } else {
-                await performSync(SYNC_DIR, LOOKBACK_DAYS);
+                await performSync(SYNC_DIR, LOOKBACK_DAYS, LOOKAHEAD_DAYS);
             }
         } catch (error) {
             console.error("Error in main loop:", error);

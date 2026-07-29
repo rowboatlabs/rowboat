@@ -6,6 +6,7 @@ import {
   AppWindow,
   ArrowUpRight,
   Bot,
+  Calendar as CalendarIcon,
   ChevronRight,
   Code2,
   FileText,
@@ -187,7 +188,9 @@ type SidebarContentPanelProps = {
   onSelectFile: (path: string, kind: "file" | "dir") => void
   knowledgeActions: KnowledgeActions
   bgTaskSummaries?: TaskSummary[]
+  /** Opens the calendar's agenda mode — kept for meeting-centric CTAs (credit rewards). */
   onOpenMeetings?: () => void
+  onOpenCalendar?: () => void
   onOpenCode?: () => void
   onOpenBgTasks?: () => void
   onOpenApps?: () => void
@@ -209,7 +212,7 @@ type SidebarContentPanelProps = {
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'workspaces' | null
+  activeNav?: 'home' | 'email' | 'calendar' | 'code' | 'knowledge' | 'agents' | 'apps' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -446,6 +449,7 @@ export function SidebarContentPanel({
   knowledgeActions,
   bgTaskSummaries = [],
   onOpenMeetings,
+  onOpenCalendar,
   onOpenCode,
   onOpenBgTasks,
   onOpenApps,
@@ -887,14 +891,14 @@ export function SidebarContentPanel({
               )}
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  data-tour-id="nav-meetings"
-                  isActive={activeNav === 'meetings'}
-                  onClick={onOpenMeetings}
+                  data-tour-id="nav-calendar"
+                  isActive={activeNav === 'calendar'}
+                  onClick={onOpenCalendar}
                   className={meetingSublabel ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <Mic className={cn('size-4 shrink-0', meetingSublabel && 'mt-1', meetingIsRecording && 'text-red-500')} />
+                  <CalendarIcon className={cn('size-4 shrink-0', meetingSublabel && 'mt-1', meetingIsRecording && 'text-red-500')} />
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Meetings</span>
+                    <span className="truncate">Calendar</span>
                     {meetingSublabel && (
                       <span className={cn(
                         'truncate text-[11px]',

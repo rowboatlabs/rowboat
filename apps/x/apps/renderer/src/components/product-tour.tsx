@@ -23,7 +23,7 @@ import tourClipDone from '@/assets/tour/done.mp3'
 export type TourNavTarget =
   | 'home'
   | 'email'
-  | 'meetings'
+  | 'calendar'
   | 'code'
   | 'knowledge'
   | 'agents'
@@ -71,12 +71,12 @@ const TOUR_STEPS: TourStep[] = [
   },
   {
     id: 'meetings',
-    targetId: 'nav-meetings',
-    navigate: 'meetings',
+    targetId: 'nav-calendar',
+    navigate: 'calendar',
     hat: 'headphones',
     vignette: 'meetings',
-    title: 'Meetings',
-    text: 'Record or join meetings, and get transcripts and notes automatically — prep briefs show up before your calls, too.',
+    title: 'Calendar & Meetings',
+    text: 'Browse your calendar, record or join meetings, and get transcripts and notes automatically — prep briefs show up before your calls, too.',
   },
   {
     id: 'code',
