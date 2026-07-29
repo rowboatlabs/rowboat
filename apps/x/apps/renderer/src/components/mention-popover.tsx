@@ -172,7 +172,7 @@ export function MentionPopover({
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <Command shouldFilter={false}>
+        <Command shouldFilter={false} value={entries[selectedIndex] ?? ''}>
           <CommandList>
             {entries.length === 0 ? (
               <CommandEmpty>No files found</CommandEmpty>
@@ -183,7 +183,7 @@ export function MentionPopover({
                   value={path}
                   onSelect={() => onSelect(path, path === ROWBOAT_MENTION_SENTINEL ? 'rowboat' : wikiLabel(path))}
                   className={index === selectedIndex ? 'bg-accent' : ''}
-                  onMouseEnter={() => setSelectedIndex(index)}
+                  onMouseMove={() => setSelectedIndex(index)}
                 >
                   {path === ROWBOAT_MENTION_SENTINEL ? (
                     <>
