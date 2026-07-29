@@ -1,3 +1,4 @@
+import { DEV_SERVER_URL } from './dev-server.js';
 import { app, BrowserWindow, screen } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -150,7 +151,7 @@ export function showMeetingPopup(meeting: DetectedMeeting): void {
     if (app.isPackaged) {
         win.loadURL("app://-/index.html#meeting-detected");
     } else {
-        win.loadURL("http://localhost:5173/#meeting-detected");
+        win.loadURL(`${DEV_SERVER_URL}/#meeting-detected`);
     }
 
     dismissTimer = setTimeout(() => closeMeetingPopup(), FALLBACK_DISMISS_MS);

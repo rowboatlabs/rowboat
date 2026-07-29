@@ -38,6 +38,7 @@ import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-vi
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
+import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
 import { CodeChat } from '@/components/code/code-chat';
@@ -675,6 +676,14 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
   nodes.flatMap(n => n.kind === 'file' ? [n.path] : (n.children ? collectFilePaths(n.children) : []))
 
 /** A snapshot of which view the user is on */
+// Where the Home composer's next send goes — set by the list's ＋/reply
+// affordances, shown as a destination chip. Null = plain assistant chat.
+export type HomeComposeTarget =
+  | { kind: 'todo'; prefill?: string }
+  | { kind: 'sub'; parentKey: string; parentText: string; prefill?: string }
+  | { kind: 'comment'; key: string; itemText: string; quote?: string }
+  | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
+
 type ViewState =
   | { type: 'chat'; runId: string | null }
   | { type: 'file'; path: string }
@@ -896,6 +905,9 @@ function App() {
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
   // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
+  // Home surface: the to-do list is the primary tab; the legacy dashboard
+  // stays reachable via its Overview toggle.
+  const [homeTab, setHomeTab] = useState<'todos' | 'overview'>('todos')
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
   // Search query pushed into the email view's search box (e.g. the assistant's
@@ -3571,9 +3583,13 @@ function App() {
         .invoke('turnLimits:getSettings', null)
         .then((settings) => settings.chatMaxModelCalls)
         .catch(() => undefined)
+      // A to-do item's session keeps its own agent on continuation — typing
+      // in that chat steers the item's work, it doesn't summon the copilot.
+      const sessionAgentId = runs.find((r) => r.id === currentRunId)?.agentId
+      const effectiveAgentId = sessionAgentId === 'todo-item-agent' ? sessionAgentId : agentId
       const sendConfig = {
         agent: {
-          agentId,
+          agentId: effectiveAgentId,
           overrides: {
             ...(selected ? { model: { provider: selected.provider, model: selected.model } } : {}),
             composition: {
@@ -4492,6 +4508,92 @@ function App() {
     )
     setPendingPaletteSubmit(null)
   }, [pendingPaletteSubmit])
+
+  // Home composer → a fresh dock chat. Same settle-then-flush dance as the
+  // palette: the fresh tab's null runId must be visible to handlePromptSubmit
+  // before the message goes out. Model/effort picked on the Home composer are
+  // copied onto the fresh tab at flush time.
+  const homeSelectedModelRef = useRef<{ provider: string; model: string } | null>(null)
+  const homeReasoningEffortRef = useRef<'low' | 'medium' | 'high' | null>(null)
+  // Destination chip: when set, the Home composer writes to the to-do list
+  // instead of the chat. Entered via the list's ＋ affordances, announced by
+  // the chip + tint, cleared on send/Escape/✕.
+  const [homeComposeTarget, setHomeComposeTarget] = useState<HomeComposeTarget | null>(null)
+  const [homeComposerFocusSignal, setHomeComposerFocusSignal] = useState(0)
+  const [homeComposerPreset, setHomeComposerPreset] = useState<string | undefined>(undefined)
+  const composeTodoOnHome = useCallback((target: HomeComposeTarget) => {
+    setHomeComposeTarget(target)
+    if ((target.kind === 'todo' || target.kind === 'sub') && target.prefill) {
+      // Mid-thought handoff from an inline row — carry the typed text along.
+      setHomeComposerPreset(target.prefill.endsWith(' ') ? target.prefill : `${target.prefill} `)
+    }
+    setHomeComposerFocusSignal((n) => n + 1)
+  }, [])
+  const [pendingHomeSubmit, setPendingHomeSubmit] = useState<{
+    message: PromptInputMessage
+    mentions?: FileMention[]
+    attachments: StagedAttachment[]
+    searchEnabled?: boolean
+    codeMode?: 'claude' | 'codex'
+    permissionMode?: PermissionMode
+  } | null>(null)
+
+  const handleHomeComposerSubmit = useCallback((
+    message: PromptInputMessage,
+    mentions?: FileMention[],
+    stagedAttachments: StagedAttachment[] = [],
+    searchEnabled?: boolean,
+    codeMode?: 'claude' | 'codex',
+    permissionMode?: PermissionMode,
+  ) => {
+    const text = message.text?.trim() ?? ''
+    if (!text && stagedAttachments.length === 0) return
+    // Destination chip set → this is a to-do (or a step), not a chat. The
+    // composer's attachments become links on the line; its model selection
+    // rides along for the run when the item is delegated.
+    const target = homeComposeTargetRef.current
+    if (target) {
+      if (!text) return
+      const attachments = stagedAttachments.length > 0
+        ? stagedAttachments.map((a) => ({ path: a.path, name: a.filename }))
+        : undefined
+      const model = homeSelectedModelRef.current ?? undefined
+      if (target.kind === 'comment') {
+        void window.ipc.invoke('todo:comment', { key: target.key, message: text, attachments, model, permissionMode })
+      } else if (target.kind === 'chatReply') {
+        void window.ipc.invoke('todo:chatReply', { sessionId: target.sessionId, message: text, attachments, model, permissionMode })
+      } else if (target.kind === 'sub') {
+        void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
+      } else {
+        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
+      }
+      setHomeComposeTarget(null)
+      return
+    }
+    // Chat mode has NO routing rules: mentions here just address the
+    // assistant. Tasks are born via the chip, the list, or by asking.
+    setIsChatSidebarOpen(true)
+    handleNewChatTabInSidebar()
+    setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode })
+  }, [handleNewChatTabInSidebar])
+  const homeComposeTargetRef = useRef(homeComposeTarget)
+  useEffect(() => { homeComposeTargetRef.current = homeComposeTarget }, [homeComposeTarget])
+
+  useEffect(() => {
+    if (!pendingHomeSubmit) return
+    const tabId = activeChatTabIdRef.current
+    if (homeSelectedModelRef.current) selectedModelByTabRef.current.set(tabId, homeSelectedModelRef.current)
+    if (homeReasoningEffortRef.current) reasoningEffortByTabRef.current.set(tabId, homeReasoningEffortRef.current)
+    void handlePromptSubmitRef.current?.(
+      pendingHomeSubmit.message,
+      pendingHomeSubmit.mentions,
+      pendingHomeSubmit.attachments,
+      pendingHomeSubmit.searchEnabled,
+      pendingHomeSubmit.codeMode,
+      pendingHomeSubmit.permissionMode,
+    )
+    setPendingHomeSubmit(null)
+  }, [pendingHomeSubmit])
 
   // Listener for "Edit with Copilot" events from the live-note panel.
   useEffect(() => {
@@ -7072,19 +7174,90 @@ function App() {
                 />
               ) : isHomeOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <HomeView
-                    tree={tree}
-                    runs={runs}
-                    bgTaskSummaries={bgTaskSummaries}
-                    onOpenEmail={() => openEmailView()}
-                    onOpenMeetings={openMeetingsView}
-                    onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                    onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                    onOpenNote={(path) => navigateToFile(path)}
-                    onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                    onTakeMeetingNotes={() => { void handleToggleMeeting() }}
-                    onOpenChat={handleNewChatTab}
-                  />
+                  {homeTab === 'todos' ? (
+                    <TodoView
+                      composer={
+                        <ChatInputWithMentions
+                          knowledgeFiles={knowledgeFiles}
+                          recentFiles={recentWikiFiles}
+                          visibleFiles={visibleKnowledgeFiles}
+                          onSubmit={handleHomeComposerSubmit}
+                          isProcessing={false}
+                          runId={null}
+                          presetMessage={homeComposerPreset}
+                          onPresetMessageConsumed={() => setHomeComposerPreset(undefined)}
+                          onSelectedModelChange={(m) => { homeSelectedModelRef.current = m ?? null }}
+                          onReasoningEffortChange={(effort) => { homeReasoningEffortRef.current = effort ?? null }}
+                          workDir={null}
+                          focusSignal={homeComposerFocusSignal}
+                          contextChip={homeComposeTarget ? {
+                            label: homeComposeTarget.kind === 'sub'
+                              ? `Step of: ${homeComposeTarget.parentText.slice(0, 40)}`
+                              : homeComposeTarget.kind === 'comment'
+                                ? `Reply: ${homeComposeTarget.itemText.slice(0, 40)}`
+                                : homeComposeTarget.kind === 'chatReply'
+                                  ? `Reply: ${homeComposeTarget.title.slice(0, 40)}`
+                                  : 'To-do',
+                            icon: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply' ? 'reply' : 'todo',
+                            quote: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply'
+                              ? homeComposeTarget.quote
+                              : undefined,
+                            onDismiss: () => setHomeComposeTarget(null),
+                          } : undefined}
+                          placeholder={homeComposeTarget
+                            ? (homeComposeTarget.kind === 'sub'
+                                ? 'Add a step… @rowboat hands it off'
+                                : homeComposeTarget.kind === 'comment'
+                                  ? 'Tell @rowboat what to change…'
+                                  : homeComposeTarget.kind === 'chatReply'
+                                    ? 'Reply…'
+                                    : 'Add a to-do… @rowboat hands it off')
+                            : undefined}
+                        />
+                      }
+                      onComposeTodo={composeTodoOnHome}
+                      composeTarget={homeComposeTarget}
+                      onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
+                      onOpenNote={(path) => navigateToFile(path)}
+                      onOpenInChat={(sessionId) => {
+                        // Bind the dock (not the full-screen chat) to the
+                        // item's session — same pattern as ChatSidebar's
+                        // onSelectRun.
+                        const existingTab = chatTabs.find((t) => t.runId === sessionId)
+                        if (existingTab) {
+                          switchChatTab(existingTab.id)
+                        } else {
+                          setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: sessionId } : t))
+                          void loadRun(sessionId)
+                        }
+                        setIsChatSidebarOpen(true)
+                      }}
+                      onShowOverview={() => setHomeTab('overview')}
+                    />
+                  ) : (
+                    <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setHomeTab('todos')}
+                        className="absolute right-6 top-4 z-10 rounded-md border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+                      >
+                        ← To-dos
+                      </button>
+                      <HomeView
+                        tree={tree}
+                        runs={runs}
+                        bgTaskSummaries={bgTaskSummaries}
+                        onOpenEmail={() => openEmailView()}
+                        onOpenMeetings={openMeetingsView}
+                        onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                        onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                        onOpenNote={(path) => navigateToFile(path)}
+                        onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                        onTakeMeetingNotes={() => { void handleToggleMeeting() }}
+                        onOpenChat={handleNewChatTab}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : isSuggestedTopicsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

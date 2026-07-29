@@ -7,6 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
+import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -644,6 +645,10 @@ const ipcSchemas = {
   },
   'bg-task-agent:events': {
     req: BackgroundTaskAgentEvent,
+    res: z.null(),
+  },
+  'todo:events': {
+    req: TodoEvent,
     res: z.null(),
   },
   // The unified model catalog (core/models/catalog.ts): every connected
@@ -2449,6 +2454,287 @@ const ipcSchemas = {
         isActive: z.boolean(),
         objective: z.string(),
       })),
+    }),
+  },
+  // Todo (home to-do list) channels
+  'todo:get': {
+    req: z.null(),
+    res: z.object({
+      list: TodoListSchema,
+      // Keys of items with a run currently in flight — ephemeral state, never
+      // in the file; the renderer overlays spinners from this + todo:events.
+      running: z.array(z.string()),
+      // Item key → sessionId for items whose thread exists; "open in chat"
+      // binds the chat dock to that session.
+      sessions: z.record(z.string(), z.string()),
+      // Pending planner suggestions (todo/suggestions.md) — accepted onto
+      // the list or declined, never auto-added.
+      suggestions: z.array(z.string()),
+    }),
+  },
+  // Full-model save from the renderer. Core re-normalizes keys and merges
+  // against disk so receipts that landed after the renderer's last read
+  // survive stale saves.
+  'todo:save': {
+    req: z.object({
+      list: TodoListSchema,
+    }),
+    res: z.object({
+      success: z.boolean(),
+      list: TodoListSchema.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'todo:addItem': {
+    req: z.object({
+      text: z.string(),
+      // Fire the item's run immediately (composer delegate / @rowboat typed).
+      run: z.boolean(),
+      // Files given at creation — copied into todo/attachments and linked
+      // on the item's line.
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      // Composer model selection — overrides the todo agent's model when
+      // the item runs now.
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Fire a run for one item, identified by its normalized line text.
+  // Fire-and-forget: progress and completion arrive on todo:events.
+  'todo:runItem': {
+    req: z.object({
+      key: z.string(),
+      context: z.string().optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Home-stream chat threads: a plain message from the home composer starts
+  // a copilot session; replies continue it. Events ride todo:events keyed
+  // `chat:<sessionId>`.
+  'todo:startChat': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      sessionId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'todo:chatReply': {
+    req: z.object({
+      sessionId: z.string(),
+      message: z.string(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The compact bubble lens over any session (stream threads).
+  'todo:getSessionConversation': {
+    req: z.object({
+      sessionId: z.string(),
+    }),
+    res: z.object({
+      bubbles: z.array(TodoChatBubbleSchema),
+    }),
+  },
+  // Add a sub-item under an existing top-level item (one level only).
+  'todo:addSubItem': {
+    req: z.object({
+      parentKey: z.string(),
+      text: z.string(),
+      run: z.boolean(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Compact conversation view of an item's session: each turn's user message
+  // and the agent's final reply (with todo-report links). Derived, not stored.
+  'todo:getConversation': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      sessionId: z.string().nullable(),
+      bubbles: z.array(TodoChatBubbleSchema),
+    }),
+  },
+  // Inline comment on an item — the next user message in its session
+  // (answers a pending ask-human question when one is waiting). Reopens a
+  // checked item. Fire-and-forget like todo:runItem.
+  'todo:comment': {
+    req: z.object({
+      key: z.string(),
+      message: z.string(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Archive checked items (receipts intact) to todo/archive/<YYYY-MM>.md.
+  'todo:clearCompleted': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+      archived: z.number().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Dismiss = move to the archive (never delete); restorable from the
+  // "Done & dismissed" section. wasProposed lets the renderer offer the
+  // "don't suggest things like this" teaching affordance.
+  'todo:dismiss': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      wasProposed: z.boolean().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Accept a pending suggestion: it leaves the tray and joins the list
+  // (with its via-rowboat badge); recorded as a positive 'kept' signal.
+  'todo:acceptSuggestion': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Decline a pending suggestion: leaves the tray, recorded as 'dismissed'.
+  'todo:declineSuggestion': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The planner's Home-surface controls: on/off + frequency presets.
+  'todo:getPlanner': {
+    req: z.null(),
+    res: z.object({
+      slug: z.string().nullable(),
+      active: z.boolean(),
+      frequency: z.enum(['morning', 'twice', 'thrice']),
+    }),
+  },
+  'todo:setPlanner': {
+    req: z.object({
+      active: z.boolean().optional(),
+      frequency: z.enum(['morning', 'twice', 'thrice']).optional(),
+    }),
+    res: z.object({
+      slug: z.string().nullable(),
+      active: z.boolean(),
+      frequency: z.enum(['morning', 'twice', 'thrice']),
+    }),
+  },
+  // "Don't suggest things like this" — writes a rule into the Your-rules
+  // section of todo/preferences.md and records the signal.
+  'todo:teach': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Recent archived items (done + dismissed), newest first.
+  'todo:listArchived': {
+    req: z.null(),
+    res: z.object({
+      items: z.array(z.object({
+        month: z.string(),
+        blockIndex: z.number(),
+        date: z.string().nullable(),
+        item: TodoItemSchema,
+      })),
+    }),
+  },
+  // Permanently delete an archived item — the one true delete, only
+  // reachable from the archive. Same handle contract as todo:restore.
+  'todo:deleteArchived': {
+    req: z.object({
+      month: z.string(),
+      blockIndex: z.number(),
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Bring an archived item back onto the list (unchecked). The
+  // (month, blockIndex) handle comes from todo:listArchived; key guards
+  // against staleness.
+  'todo:restore': {
+    req: z.object({
+      month: z.string(),
+      blockIndex: z.number(),
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
     }),
   },
   // Background-task channels

@@ -1,3 +1,4 @@
+import { DEV_SERVER_URL } from './dev-server.js';
 import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
@@ -139,6 +140,26 @@ import {
   listLiveNotes,
 } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
+import { runTodoItem, commentOnTodoItem, startHomeChat, replyHomeChat, runningItemKeys } from '@x/core/dist/todo/runner.js';
+import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
+import { getConversation as getTodoConversation, deriveConversation as deriveSessionConversation } from '@x/core/dist/todo/conversation.js';
+import { recordPlannerSignal, addYourRule as addPlannerRule, listSuggestions as listTodoSuggestions, takeSuggestion as takeTodoSuggestion } from '@x/core/dist/todo/planner-memory.js';
+import { getPlannerConfig, setPlannerConfig } from '@x/core/dist/todo/planner-task.js';
+import { findItem as findTodoItem } from '@x/core/dist/todo/fileops.js';
+import { todoBus } from '@x/core/dist/todo/bus.js';
+import {
+  readTodo,
+  saveTodo,
+  addItem as addTodoItem,
+  addSubItem as addTodoSubItem,
+  clearCompleted as clearTodoCompleted,
+  dismissItem as dismissTodoItem,
+  listArchived as listTodoArchived,
+  restoreItem as restoreTodoItem,
+  deleteArchived as deleteTodoArchived,
+  importTodoAttachments,
+  linksToText as todoLinksToText,
+} from '@x/core/dist/todo/fileops.js';
 import { backgroundTaskBus } from '@x/core/dist/background-tasks/bus.js';
 import {
   fetchTask,
@@ -846,6 +867,14 @@ export function startBackgroundTaskAgentWatcher(): void {
   if (backgroundTaskAgentWatcher) return;
   backgroundTaskAgentWatcher = backgroundTaskBus.subscribe((event) => {
     broadcastToWindows('bg-task-agent:events', event);
+  });
+}
+
+let todoWatcher: (() => void) | null = null;
+export function startTodoWatcher(): void {
+  if (todoWatcher) return;
+  todoWatcher = todoBus.subscribe((event) => {
+    broadcastToWindows('todo:events', event);
   });
 }
 
@@ -2514,7 +2543,7 @@ export function setupIpcHandlers() {
       if (app.isPackaged) {
         win.loadURL('app://-/index.html#video-popout');
       } else {
-        win.loadURL('http://localhost:5173/#video-popout');
+        win.loadURL(`${DEV_SERVER_URL}/#video-popout`);
       }
       return {};
     },
@@ -2622,6 +2651,183 @@ export function setupIpcHandlers() {
     'live-note:listNotes': async () => {
       const notes = await listLiveNotes();
       return { notes };
+    },
+    // Todo (home to-do list) handlers
+    'todo:get': async () => {
+      const list = await readTodo();
+      return {
+        list,
+        running: runningItemKeys(),
+        sessions: await getTodoSessionIndex(),
+        suggestions: await listTodoSuggestions(),
+      };
+    },
+    'todo:acceptSuggestion': async (_event, args) => {
+      try {
+        const taken = await takeTodoSuggestion(args.text);
+        if (!taken) return { success: false, error: 'Suggestion no longer exists' };
+        // Accepting confers task-ness: the item joins the list (badge kept),
+        // and it is a positive taste signal. Delegated text still waits for
+        // the user's explicit go — accepting is not running.
+        await addTodoItem(taken, { proposed: true });
+        void recordPlannerSignal('kept', taken).catch(() => {});
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:declineSuggestion': async (_event, args) => {
+      try {
+        const taken = await takeTodoSuggestion(args.text);
+        if (!taken) return { success: false, error: 'Suggestion no longer exists' };
+        void recordPlannerSignal('dismissed', taken).catch(() => {});
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:getPlanner': async () => {
+      return getPlannerConfig();
+    },
+    'todo:setPlanner': async (_event, args) => {
+      return setPlannerConfig(args);
+    },
+    'todo:save': async (_event, args) => {
+      try {
+        const list = await saveTodo(args.list);
+        return { success: true, list };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:addItem': async (_event, args) => {
+      try {
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
+        const item = await addTodoItem(text);
+        if (args.run || item.delegated) {
+          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+        }
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:runItem': async (_event, args) => {
+      try {
+        void runTodoItem(args.key, args.context).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:startChat': async (_event, args) => {
+      try {
+        const result = await startHomeChat(args.text);
+        return result.sessionId
+          ? { success: true, sessionId: result.sessionId }
+          : { success: false, error: result.error ?? 'Failed to start chat' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:chatReply': async (_event, args) => {
+      try {
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const message = links.length > 0 ? `${args.message}\n\nAttached: ${todoLinksToText(links)}` : args.message;
+        void replyHomeChat(args.sessionId, message, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:getSessionConversation': async (_event, args) => {
+      const { bubbles } = await deriveSessionConversation(container.resolve<ISessions>('sessions'), args.sessionId);
+      return { bubbles };
+    },
+    'todo:addSubItem': async (_event, args) => {
+      try {
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
+        const child = await addTodoSubItem(args.parentKey, text);
+        if (!child) return { success: false, error: 'Parent not found' };
+        if (args.run || child.delegated) {
+          void runTodoItem(child.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+        }
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:getConversation': async (_event, args) => {
+      return getTodoConversation(container.resolve<ISessions>('sessions'), args.key);
+    },
+    'todo:comment': async (_event, args) => {
+      try {
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const message = links.length > 0 ? `${args.message}\n\nAttached: ${todoLinksToText(links)}` : args.message;
+        void commentOnTodoItem(args.key, message, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:clearCompleted': async () => {
+      try {
+        const archived = await clearTodoCompleted();
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true, archived };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:dismiss': async (_event, args) => {
+      try {
+        // Dismissing a planner proposal is a learning signal.
+        const found = await findTodoItem(args.key).catch(() => null);
+        const ok = await dismissTodoItem(args.key);
+        if (ok && found?.item.proposed) {
+          void recordPlannerSignal('dismissed', found.item.text).catch(() => {});
+        }
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true, wasProposed: !!found?.item.proposed } : { success: false, error: 'Item not found' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:teach': async (_event, args) => {
+      try {
+        await addPlannerRule(`Don't suggest items like: "${args.text}"`);
+        void recordPlannerSignal('taught', args.text).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:listArchived': async () => {
+      return { items: await listTodoArchived() };
+    },
+    'todo:deleteArchived': async (_event, args) => {
+      try {
+        const ok = await deleteTodoArchived(args.month, args.blockIndex, args.key);
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true } : { success: false, error: 'Item moved — refresh and retry' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:restore': async (_event, args) => {
+      try {
+        const ok = await restoreTodoItem(args.month, args.blockIndex, args.key);
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true } : { success: false, error: 'Item moved — refresh and retry' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
     },
     // Bg-task handlers
     'bg-task:run': async (_event, args) => {

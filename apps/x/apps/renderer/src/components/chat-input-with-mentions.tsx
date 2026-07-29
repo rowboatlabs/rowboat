@@ -16,7 +16,9 @@ import {
   FolderOpen,
   Globe,
   ImagePlus,
+  ListTodo,
   LoaderIcon,
+  MessageCircle,
   Lock,
   Mic,
   MoreHorizontal,
@@ -249,6 +251,9 @@ interface ChatInputInnerProps {
    * them server-side regardless, so the composer must not pretend otherwise.
    */
   codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
+  contextChip?: { label: string; icon?: 'todo' | 'reply'; quote?: string; onDismiss: () => void }
+  placeholder?: string
+  focusSignal?: number
 }
 
 function ChatInputInner({
@@ -279,6 +284,9 @@ function ChatInputInner({
   workDir = null,
   onWorkDirChange,
   codeSessionLock = null,
+  contextChip,
+  placeholder,
+  focusSignal,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -643,8 +651,13 @@ function ChatInputInner({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
+      return
     }
-  }, [handleSubmit])
+    if (e.key === 'Escape' && contextChip) {
+      e.preventDefault()
+      contextChip.onDismiss()
+    }
+  }, [handleSubmit, contextChip])
 
   useEffect(() => {
     if (!isActive) return
@@ -683,7 +696,13 @@ function ChatInputInner({
   const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
-    <div data-tour-id="chat-composer" className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
+    <div
+      data-tour-id="chat-composer"
+      className={cn(
+        'rowboat-chat-input rounded-lg border bg-background shadow-none',
+        contextChip ? 'border-primary/40 ring-1 ring-primary/25' : 'border-border',
+      )}
+    >
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
           {attachments.map((attachment) => {
@@ -786,12 +805,37 @@ function ChatInputInner({
       ) : (
         /* ── Normal input ── */
         <>
+      {contextChip && (
+        <div className="px-4 pt-3">
+          <div className="flex items-center">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-0.5 text-xs font-semibold text-primary-foreground">
+              {contextChip.icon === 'reply' ? <MessageCircle className="h-3 w-3" /> : <ListTodo className="h-3 w-3" />}
+              {contextChip.label}
+              <button
+                type="button"
+                onClick={contextChip.onDismiss}
+                aria-label="Back to chat"
+                className="rounded-full opacity-70 hover:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          </div>
+          {contextChip.quote && (
+            /* WhatsApp-style quoted context: what you're replying to, right
+               above where you type. */
+            <div className="mt-1.5 line-clamp-2 border-l-2 border-border pl-2 text-xs text-muted-foreground">
+              {contextChip.quote}
+            </div>
+          )}
+        </div>
+      )}
       <div className="px-4 pt-4 pb-2">
         <PromptInputTextarea
-          placeholder="Type your message..."
+          placeholder={placeholder ?? 'Type your message...'}
           onKeyDown={handleKeyDown}
           autoFocus={isActive}
-          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}` : undefined}
+          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}:${focusSignal ?? 0}` : undefined}
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
@@ -1414,6 +1458,14 @@ export interface ChatInputWithMentionsProps {
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
   codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
+  /** Destination chip: the composer is visibly writing somewhere other than
+   * the chat (e.g. "To-do"). Rendered above the input with a dismiss ✕;
+   * Escape also dismisses. */
+  contextChip?: { label: string; icon?: 'todo' | 'reply'; quote?: string; onDismiss: () => void }
+  /** Placeholder override (pairs with contextChip). */
+  placeholder?: string
+  /** Bump to focus the input from outside (e.g. the list's ＋ affordance). */
+  focusSignal?: number
 }
 
 export function ChatInputWithMentions({
@@ -1447,6 +1499,9 @@ export function ChatInputWithMentions({
   workDir,
   onWorkDirChange,
   codeSessionLock,
+  contextChip,
+  placeholder,
+  focusSignal,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -1478,6 +1533,9 @@ export function ChatInputWithMentions({
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
         codeSessionLock={codeSessionLock}
+        contextChip={contextChip}
+        placeholder={placeholder}
+        focusSignal={focusSignal}
       />
     </PromptInputProvider>
   )

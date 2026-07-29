@@ -202,6 +202,9 @@ const HISTORICAL_KEY_ORDER = [
     "run-background-task-agent",
     "launch-code-task",
     "notify-user",
+    "todo-add",
+    "todo-propose",
+    "todo-report",
     "spawn-agent",
 ];
 

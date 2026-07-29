@@ -23,6 +23,9 @@ export const COPILOT_BASE_TOOLS: readonly string[] = [
     "web-search",
     "fetch-url",
     "save-to-memory",
+    // "Add X to my list" must work in any chat — the to-do list is the home
+    // surface and list-writing has no skill signal to trigger on.
+    "todo-add",
     "executeCommand",
     "spawn-agent",
     "code_agent_run",
