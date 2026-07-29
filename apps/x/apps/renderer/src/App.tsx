@@ -31,7 +31,7 @@ import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { EmailView } from '@/components/email-view';
-import { WorkspaceView } from '@/components/workspace-view';
+import { WorkspaceView, WORKSPACE_CHATS_CHANGED } from '@/components/workspace-view';
 import { CodingRunBlock } from '@/components/coding-run';
 import { SubAgentBlock } from '@/components/sub-agent-block';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
@@ -144,7 +144,10 @@ import { useTheme } from '@/contexts/theme-context'
 import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
+type LinkedFolder = z.infer<typeof workspace.LinkedFolder>
 type RunEventType = z.infer<typeof RunEvent>
+
+const LINKED_FOLDER_PREFIX = workspace.LINKED_FOLDER_PREFIX
 
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
@@ -629,6 +632,32 @@ function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
 
     return [{ ...node, children: flattenedSourceChildren }]
   })
+}
+
+/**
+ * Show linked folders (workspaces that live outside WorkDir) alongside the real
+ * subfolders of knowledge/Workspace. Their children are loaded on demand by the
+ * workspace view — a linked folder can be an entire repo, so the recursive walk
+ * that builds this tree deliberately stops at the root.
+ */
+function graftLinkedFolders(nodes: TreeNode[], folders: LinkedFolder[]): TreeNode[] {
+  if (folders.length === 0) return nodes
+  const linkedNodes: TreeNode[] = folders.map((folder) => ({
+    name: folder.name,
+    path: `${LINKED_FOLDER_PREFIX}/${folder.id}`,
+    kind: 'dir' as const,
+    children: [],
+    loaded: false,
+  }))
+  const workspaceNode = nodes.find((n) => n.path === WORKSPACE_ROOT)
+  if (!workspaceNode) {
+    // knowledge/Workspace doesn't exist on disk yet — the linked folders are
+    // still workspaces, so surface the parent for them to hang off.
+    return [...nodes, { name: 'Workspace', path: WORKSPACE_ROOT, kind: 'dir', children: linkedNodes, loaded: true }]
+  }
+  return nodes.map((n) =>
+    n === workspaceNode ? { ...n, children: [...(n.children ?? []), ...linkedNodes] } : n,
+  )
 }
 
 /** Extract YYYY-MM-DD from filenames like "meeting-2026-03-17T05-01-47.md" */
@@ -2021,6 +2050,9 @@ function App() {
         path: `config/workdir-${runId}.json`,
         data: JSON.stringify(value ? { path: value } : {}, null, 2),
       })
+      // Nothing watches config/, so tell an open workspace view itself — this
+      // chat just joined (or left) one of its folders.
+      window.dispatchEvent(new Event(WORKSPACE_CHATS_CHANGED))
     } catch (err) {
       console.error('Failed to persist work directory for run', runId, err)
     }
@@ -2446,10 +2478,10 @@ function App() {
     }
   }, [runId, processingRunIds])
 
-  // Load directory tree (knowledge + bases)
+  // Load directory tree (knowledge + bases + linked folders)
   const loadDirectory = useCallback(async () => {
     try {
-      const [knowledgeResult, basesResult] = await Promise.all([
+      const [knowledgeResult, basesResult, foldersResult] = await Promise.all([
         window.ipc.invoke('workspace:readdir', {
           path: 'knowledge',
           opts: { recursive: true, includeHidden: false, includeStats: true }
@@ -2458,8 +2490,12 @@ function App() {
           path: 'bases',
           opts: { recursive: false, includeHidden: false, includeStats: true }
         }).catch(() => [] as DirEntry[]),
+        window.ipc.invoke('workspace:listFolders', null).catch(() => ({ folders: [] })),
       ])
-      const knowledgeTree = flattenMeetingsTree(buildTree(knowledgeResult))
+      const knowledgeTree = graftLinkedFolders(
+        flattenMeetingsTree(buildTree(knowledgeResult)),
+        foldersResult.folders,
+      )
       const basesChildren: TreeNode[] = (basesResult as DirEntry[])
         .filter((e) => e.name.endsWith('.base'))
         .map((e) => ({ ...e, kind: 'file' as const }))
@@ -6234,14 +6270,27 @@ function App() {
       }
     },
     copyPath: (path: string) => {
-      const fullPath = workspaceRoot ? `${workspaceRoot}/${path}` : path
-      navigator.clipboard.writeText(fullPath).catch(() => {
-        const textarea = document.createElement('textarea')
-        textarea.value = fullPath
-        document.body.appendChild(textarea)
-        textarea.select()
-        document.execCommand('copy')
-        document.body.removeChild(textarea)
+      // Linked folders live outside WorkDir, so ask the main process where the
+      // path actually points rather than assuming the workspace root.
+      const resolve = async (): Promise<string> => {
+        if (path.startsWith(`${LINKED_FOLDER_PREFIX}/`)) {
+          try {
+            return (await window.ipc.invoke('workspace:toAbsolute', { path })).path
+          } catch {
+            return path
+          }
+        }
+        return workspaceRoot ? `${workspaceRoot}/${path}` : path
+      }
+      void resolve().then((fullPath) => {
+        navigator.clipboard.writeText(fullPath).catch(() => {
+          const textarea = document.createElement('textarea')
+          textarea.value = fullPath
+          document.body.appendChild(textarea)
+          textarea.select()
+          document.execCommand('copy')
+          document.body.removeChild(textarea)
+        })
       })
     },
     revealInFileManager: (path: string, isDir: boolean) => {
@@ -7336,6 +7385,7 @@ function App() {
                     onNavigate={(path) => { void navigateToView({ type: 'workspace', path: path === WORKSPACE_ROOT ? undefined : path }) }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onCreateWorkspace={async (name) => { await knowledgeActions.createWorkspace(name) }}
+                    onWorkspacesChanged={async () => { setTree(await loadDirectory()) }}
                     onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                   />
                 </div>

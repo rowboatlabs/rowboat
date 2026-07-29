@@ -8,6 +8,7 @@ import { WorkDir } from '../config/config.js';
 import { rewriteWikiLinksForRenamedKnowledgeFile } from './wiki-link-rewrite.js';
 import { commitAll } from '../knowledge/version_history.js';
 import { withFileLock } from '../knowledge/file-lock.js';
+import { absToLinkedPath, isLinkedPath, resolveLinkedPath } from './linked-folders.js';
 
 // ============================================================================
 // Path Utilities
@@ -34,11 +35,17 @@ export function assertSafeRelPath(relPath: string): void {
  * Resolve a workspace-relative path to an absolute path
  * Ensures the resolved path stays within the workspace boundary
  * Empty string represents the root directory
+ *
+ * `@folder/<id>/…` paths address a linked folder (a workspace living outside
+ * WorkDir) and are bounded by that folder's root instead — see linked-folders.ts.
  */
 export function resolveWorkspacePath(relPath: string): string {
   // Empty string means root directory
   if (relPath === '') {
     return WorkDir;
+  }
+  if (isLinkedPath(relPath)) {
+    return resolveLinkedPath(relPath)!;
   }
   assertSafeRelPath(relPath);
   const resolved = path.resolve(WorkDir, relPath);
@@ -50,12 +57,13 @@ export function resolveWorkspacePath(relPath: string): string {
 
 /**
  * Convert absolute path to workspace-relative POSIX path
- * Returns null if path is outside workspace boundary
+ * Paths inside a linked folder come back as `@folder/<id>/…`.
+ * Returns null if path is outside every workspace boundary
  */
 export function absToRelPosix(absPath: string): string | null {
   const normalized = path.normalize(absPath);
   if (!normalized.startsWith(WorkDir + path.sep) && normalized !== WorkDir) {
-    return null;
+    return absToLinkedPath(normalized);
   }
   const relPath = path.relative(WorkDir, normalized);
   return relPath.split(path.sep).join('/');
@@ -384,6 +392,15 @@ export async function copy(
   return { ok: true as const };
 }
 
+// Moving a file to the OS trash needs Electron's shell, which core does not
+// depend on — the main process registers the implementation at boot.
+type TrashItem = (absPath: string) => Promise<void>;
+let trashItem: TrashItem | null = null;
+
+export function registerTrashHandler(handler: TrashItem): void {
+  trashItem = handler;
+}
+
 export async function remove(
   relPath: string,
   opts?: z.infer<typeof RemoveOptions>
@@ -392,6 +409,17 @@ export async function remove(
   const trash = opts?.trash !== false; // default true
 
   const stats = await fs.lstat(filePath);
+
+  // Deletions inside a linked folder go to the OS trash: WorkDir/.trash is on
+  // a different volume as often as not (the rename would fail with EXDEV), and
+  // a user's own project folder shouldn't leak files into Rowboat's workdir.
+  if (trash && isLinkedPath(relPath)) {
+    if (!trashItem) {
+      throw new Error('Trash is unavailable — delete this file from your file manager instead');
+    }
+    await trashItem(filePath);
+    return { ok: true as const };
+  }
 
   if (trash) {
     // Move to trash: ~/.workspace/.trash/<timestamp>-<name>

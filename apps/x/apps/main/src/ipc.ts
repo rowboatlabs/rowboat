@@ -9,7 +9,7 @@ import {
   disconnectProvider,
   listProviders,
 } from './oauth-handler.js';
-import { watcher as watcherCore, workspace } from '@x/core';
+import { watcher as watcherCore, workspace, linkedFolders } from '@x/core';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
@@ -34,6 +34,7 @@ import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
 import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
+import { listByWorkDir as listSessionsByWorkDir } from '@x/core/dist/runtime/sessions/by-workdir.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
@@ -908,6 +909,10 @@ export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
+  // Deletions inside a linked folder go to the OS trash — core can't reach
+  // Electron's shell, so hand it the implementation.
+  workspace.registerTrashHandler((absPath) => shell.trashItem(absPath));
+
   // Relay backend-confirmed credit grants (first-time-action rewards) to all
   // windows so the UI can update balances and celebrate.
   subscribeCreditActivations((event) => broadcastToWindows('credits:didActivate', event));
@@ -1134,6 +1139,35 @@ export function setupIpcHandlers() {
     'workspace:remove': async (_event, args) => {
       return workspace.remove(args.path, args.opts);
     },
+    'workspace:toAbsolute': async (_event, args) => {
+      return { path: workspace.resolveWorkspacePath(args.path) };
+    },
+    'workspace:listFolders': async () => {
+      return { folders: linkedFolders.listLinkedFolders() };
+    },
+    'workspace:addFolder': async (event, args) => {
+      let chosen = args.path;
+      if (!chosen) {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const result = await dialog.showOpenDialog(win!, {
+          title: 'Choose a folder to add as a workspace',
+          defaultPath: os.homedir(),
+          buttonLabel: 'Add folder',
+          properties: ['openDirectory', 'createDirectory'],
+        });
+        if (result.canceled || result.filePaths.length === 0) {
+          return { folder: null };
+        }
+        chosen = result.filePaths[0];
+      }
+      return { folder: await linkedFolders.addLinkedFolder(chosen!, args.name) };
+    },
+    'workspace:renameFolder': async (_event, args) => {
+      return { folder: await linkedFolders.renameLinkedFolder(args.id, args.name) };
+    },
+    'workspace:removeFolder': async (_event, args) => {
+      return linkedFolders.removeLinkedFolder(args.id);
+    },
     'gmail:getImportant': async (_event, args) => {
       return listImportantThreads({ cursor: args.cursor, limit: args.limit });
     },
@@ -1271,7 +1305,23 @@ export function setupIpcHandlers() {
       return runsCore.listRuns(args.cursor);
     },
     'runs:listByWorkDir': async (_event, args) => {
-      return runsCore.listRunsByWorkDir(args.dir);
+      // Chats are sessions now; the legacy runs/*.jsonl logs this used to scan
+      // are migrated away at boot, so the session index is the only source.
+      await sessionsIndexReady;
+      const sessions = container.resolve<ISessions>('sessions').listSessions();
+      return listSessionsByWorkDir(args.dir, sessions
+        // A session the index couldn't load carries empty timestamps, which
+        // the response schema rejects — one of those would otherwise fail the
+        // whole call and blank the panel. It has no title or date to show
+        // anyway, so leave it out.
+        .filter((s) => !s.error && s.createdAt)
+        .map((s) => ({
+          id: s.sessionId,
+          ...(s.title ? { title: s.title } : {}),
+          createdAt: s.createdAt,
+          modifiedAt: s.updatedAt || s.createdAt,
+          ...(s.lastAgentId ? { agentId: s.lastAgentId } : {}),
+        })));
     },
     'runs:delete': async (_event, args) => {
       await runsCore.deleteRun(args.runId);

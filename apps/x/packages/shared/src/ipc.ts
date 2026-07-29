@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
+import { RelPath, Encoding, Stat, DirEntry, LinkedFolder, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
 import { LlmProvider, ModelRef, ReasoningEffort } from './models.js';
@@ -169,6 +169,47 @@ const ipcSchemas = {
     req: z.object({
       path: RelPath,
       opts: RemoveOptions.optional(),
+    }),
+    res: z.object({
+      ok: z.literal(true),
+    }),
+  },
+  'workspace:toAbsolute': {
+    req: z.object({
+      path: RelPath,
+    }),
+    res: z.object({
+      path: z.string(),
+    }),
+  },
+  'workspace:listFolders': {
+    req: z.null(),
+    res: z.object({
+      folders: z.array(LinkedFolder),
+    }),
+  },
+  'workspace:addFolder': {
+    req: z.object({
+      // Absolute path on disk. Omit to open the folder picker.
+      path: z.string().optional(),
+      name: z.string().optional(),
+    }),
+    res: z.object({
+      folder: LinkedFolder.nullable(),
+    }),
+  },
+  'workspace:renameFolder': {
+    req: z.object({
+      id: z.string(),
+      name: z.string(),
+    }),
+    res: z.object({
+      folder: LinkedFolder,
+    }),
+  },
+  'workspace:removeFolder': {
+    req: z.object({
+      id: z.string(),
     }),
     res: z.object({
       ok: z.literal(true),

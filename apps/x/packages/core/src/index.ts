@@ -1,6 +1,9 @@
 // Workspace filesystem operations
 export * as workspace from './workspace/workspace.js';
 
+// Workspaces that live outside WorkDir (folders the user pointed Rowboat at)
+export * as linkedFolders from './workspace/linked-folders.js';
+
 // Workspace watcher
 export * as watcher from './workspace/watcher.js';
 
