@@ -1029,9 +1029,12 @@ export const PromptInputTextarea = ({
   }, []);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
-    // If mention popover is open, let it handle navigation keys
+    // If mention popover is open, let it handle navigation keys. Prevent the
+    // browser defaults here too: in the frame between "@" appearing and the
+    // popover's document listener attaching, an early Tab would otherwise
+    // move focus out of the textarea entirely.
     if (activeMention && !mentionDismissed && ["ArrowDown", "ArrowUp", "Tab"].includes(e.key)) {
-      // Don't prevent default here - the popover handles this via document listener
+      e.preventDefault();
       return;
     }
 
