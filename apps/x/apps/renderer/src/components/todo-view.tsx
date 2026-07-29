@@ -327,6 +327,11 @@ function CommentComposer({ onSend, onCancel }: {
 
 const MAX_BUBBLES = 6
 
+// Hard ceiling for the Conversations stream — active threads (running or
+// unread) win the slots, but nothing pushes the section past this. The rest
+// live in "View all".
+const STREAM_CAP = 8
+
 function Bubble({ b, onOpenNote, onRetry }: {
   b: TodoChatBubble
   onOpenNote: (path: string) => void
@@ -819,8 +824,10 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   return stripBubbleMarkup(last.text) || links
 }
 
-function ConversationsSection({ threads, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
+function ConversationsSection({ threads, total = 0, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
   threads: StreamThread[]
+  /** Threads that exist beyond the cap — the footer says so when > shown. */
+  total?: number
   running: Set<string>
   /** Runs suspended on a permission prompt, keyed `chat:<sessionId>`. */
   needsApproval?: Record<string, string>
@@ -987,7 +994,9 @@ function ConversationsSection({ threads, running, needsApproval, conversations, 
             onClick={onViewAll}
             className="flex w-full items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-muted-foreground/70 hover:text-foreground"
           >
-            View all →
+            {total > threads.length
+              ? `latest ${threads.length} of ${total} — view all →`
+              : 'View all →'}
           </button>
         )}
       </div>
@@ -1107,6 +1116,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const [subDraftFor, setSubDraftFor] = useState<string | null>(null)
   // The stream: recent chat threads (non-todo sessions).
   const [streamThreads, setStreamThreads] = useState<StreamThread[]>([])
+  // How many threads exist beyond the cap — for the section's footer line.
+  const [streamTotal, setStreamTotal] = useState(0)
   const [streamConvs, setStreamConvs] = useState<Record<string, TodoChatBubble[]>>({})
   const [expandedThread, setExpandedThread] = useState<string | null>(null)
   const [chatReplyFor, setChatReplyFor] = useState<string | null>(null)
@@ -1150,8 +1161,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
     setSessions(res.sessions)
     setSuggestions(res.suggestions)
     void window.ipc.invoke('todo:listArchived', null).then((r) => setArchived(r.items)).catch(() => {})
-    // The stream: recent non-todo sessions — but active ones (running, or
-    // changed since the user last looked) never fall off the cap.
+    // The stream: recent non-todo sessions. STREAM_CAP is a hard ceiling —
+    // active threads (running, or changed since the user last looked) win
+    // the slots, everything else is in "View all".
     void window.ipc.invoke('sessions:list', {}).then(({ sessions: all }) => {
       const todoSessionIds = new Set(Object.values(res.sessions))
       setSessionUpdatedAt(Object.fromEntries(all.map((s) => [s.sessionId, s.updatedAt])))
@@ -1161,10 +1173,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
       const isActive = (s: (typeof candidates)[number]) =>
         res.running.includes(`chat:${s.sessionId}`) || s.updatedAt > seenBaselineRef.current
       const active = candidates.filter(isActive)
-      const rest = candidates.filter((s) => !isActive(s)).slice(0, Math.max(0, 8 - active.length))
+      const rest = candidates.filter((s) => !isActive(s))
       const threads = [...active, ...rest]
+        .slice(0, STREAM_CAP)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .map((s) => ({ sessionId: s.sessionId, title: s.title ?? 'New chat', updatedAt: s.updatedAt }))
+      setStreamTotal(candidates.length)
       setStreamThreads(threads)
       for (const t of threads) {
         if (streamConvFetchedRef.current[t.sessionId] !== t.updatedAt) {
@@ -1841,6 +1855,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
           {/* The stream — recent chat threads */}
           <ConversationsSection
             threads={streamThreads}
+            total={streamTotal}
             running={running}
             needsApproval={needsApproval}
             conversations={streamConvs}
