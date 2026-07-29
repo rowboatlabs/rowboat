@@ -6,6 +6,7 @@ import { getMaxEmails } from '../config/gmail_sync_config.js';
 import { OutlookClientFactory, GraphError } from './outlook-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
+import { formatTimestampForModel } from '@x/shared/dist/time.js';
 import { classifyThread } from './classify_thread.js';
 import {
     SYNC_DIR,
@@ -419,7 +420,7 @@ async function parseConversationSnapshot(
     const earlier = parsed.slice(0, -1);
     const earlierSummary = earlier
         .map((msg) => {
-            const date = msg.date ? ` (${msg.date})` : '';
+            const date = msg.date ? ` (${formatTimestampForModel(msg.date)})` : '';
             const body = (msg.body ?? '').replace(/\s+/g, ' ').slice(0, 500).trim();
             return `${msg.from}${date}: ${body}`;
         })
@@ -603,7 +604,7 @@ async function processConversation(conversationId: string): Promise<SyncedThread
             const rawContent = msg.body?.content ?? '';
             const body = normalizeBody(isHtml ? htmlToMarkdownBody(rawContent) : plainTextBody(rawContent));
             mdContent += `### From: ${formatAddress(msg.from) || 'Unknown'}\n`;
-            mdContent += `**Date:** ${msg.receivedDateTime || 'Unknown'}\n\n`;
+            mdContent += `**Date:** ${msg.receivedDateTime ? formatTimestampForModel(msg.receivedDateTime) : 'Unknown'}\n\n`;
             mdContent += `${body}\n\n`;
 
             if (msg.hasAttachments && msg.id) {
