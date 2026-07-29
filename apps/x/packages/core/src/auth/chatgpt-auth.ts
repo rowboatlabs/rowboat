@@ -385,5 +385,10 @@ export async function signOutChatGPT(): Promise<void> {
         }
     }
     await clearStore();
+    // Signing out disconnects the codex provider: drop the model selections
+    // that reference it (same dangling-ref cleanup as removing any
+    // provider). Lazy import — models/catalog imports this module.
+    const { clearCodexSelections } = await import('../models/chatgpt-selection.js');
+    await clearCodexSelections();
     console.log('[ChatGPTAuth] Signed out');
 }

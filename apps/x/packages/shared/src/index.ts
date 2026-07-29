@@ -22,5 +22,6 @@ export * as notificationSettings from './notification-settings.js';
 export * as turnLimits from './turn-limits.js';
 export * as codeSessions from './code-sessions.js';
 export * as channels from './channels.js';
+export * as time from './time.js';
 export * as rowboatApp from './rowboat-app.js';
 export { PrefixLogger };

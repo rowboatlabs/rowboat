@@ -198,7 +198,9 @@ function compactWorkDirPath(path: string) {
 export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
 
 const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: string; Icon: typeof Phone }> = [
-  { preset: 'voice', label: 'Voice call', description: 'Just talk — nothing is shared, the mascot hovers while you work', Icon: AudioLines },
+  // 'voice' was dropped from the menu (the quick-ask bar with its voice
+  // toggle covers the talk-without-devices case); the preset itself stays
+  // valid for programmatic callers.
   { preset: 'video', label: 'Video call', description: 'Camera on, face to face — it sees your expressions', Icon: Video },
   { preset: 'practice', label: 'Practice session', description: 'Rehearse a pitch or interview with live coaching', Icon: Presentation },
 ]
@@ -549,12 +551,11 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
-  // Selecting a model affects the *next* run created from this tab (frozen
-  // once a run exists) AND persists as the app default so background agents
-  // and new tabs follow the last pick. The models-config-changed dispatch
-  // re-fetches the shared store too — that re-read lands on the same
-  // selection (selectedModel is untouched, the live lists come from the
-  // useProviderModels cache), so it's visually a no-op.
+  // Selecting a model here is PER-CHAT: it affects the next run created
+  // from this tab (frozen once a run exists) and nothing else. The config's
+  // assistantModel is the durable default — new tabs and background work
+  // always start from it, and only the settings Assistant picker (or a
+  // provider connect's initial selection) writes it.
   const handleModelChange = useCallback((model: SelectedModel | null) => {
     if (lockedModel) return
     // null = the sentinel row, which the composer never renders (no
@@ -562,9 +563,6 @@ function ChatInputInner({
     if (!model) return
     setSelectedModel(model)
     onSelectedModelChange?.(model)
-    void window.ipc.invoke('models:updateConfig', { defaultSelection: { provider: model.provider, model: model.model } })
-      .then(() => { window.dispatchEvent(new Event('models-config-changed')) })
-      .catch(() => { toast.error('Failed to save default model') })
   }, [lockedModel, onSelectedModelChange])
 
   // Effort is per-turn and unpersisted; ModelSelector reports '' when the

@@ -24,32 +24,18 @@ let handlers: Record<string, (args: unknown) => Promise<unknown>> = {}
 }
 
 function serveTwoProviders(): void {
-  handlers['oauth:getState'] = async () => ({ config: { rowboat: { connected: false } } })
-  handlers['llm:getDefaultModel'] = async () => ({ provider: 'openai', model: 'gpt-5.4' })
   handlers['models:list'] = async () => ({
     providers: [
-      { id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5.4' }] },
-      { id: 'anthropic', name: 'Anthropic', models: [{ id: 'claude-opus-4-8' }] },
+      { id: 'openai', flavor: 'openai', status: 'ok', models: [{ id: 'gpt-5.4' }] },
+      { id: 'anthropic', flavor: 'anthropic', status: 'ok', models: [{ id: 'claude-opus-4-8' }] },
     ],
-  })
-  handlers['workspace:readFile'] = async () => ({
-    data: JSON.stringify({
-      provider: { flavor: 'openai' },
-      model: 'gpt-5.4',
-      providers: {
-        openai: { apiKey: 'sk-a', model: 'gpt-5.4' },
-        anthropic: { apiKey: 'sk-b', model: 'claude-opus-4-8' },
-      },
-    }),
+    defaultModel: { provider: 'openai', model: 'gpt-5.4' },
   })
 }
 
 async function openMenu(): Promise<void> {
-  const trigger = screen.getByRole('button')
-  // Radix opens the menu from the trigger's keydown handler in jsdom
-  // (pointerdown would ALSO toggle — one gesture only).
-  fireEvent.keyDown(trigger, { key: 'Enter' })
-  await waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull())
+  fireEvent.click(screen.getByRole('button'))
+  await waitFor(() => expect(document.querySelector('[cmdk-root]')).not.toBeNull())
 }
 
 beforeEach(() => {
@@ -135,7 +121,7 @@ describe('ModelSelector', () => {
       />,
     )
     await openMenu()
-    fireEvent.change(screen.getByPlaceholderText('Search models…'), {
+    fireEvent.change(screen.getByPlaceholderText('Search models and providers…'), {
       target: { value: 'openrouter/meituan/longcat-2.0' },
     })
     fireEvent.click(await screen.findByText('Use "openrouter/meituan/longcat-2.0"'))
@@ -155,39 +141,68 @@ describe('ModelSelector', () => {
       />,
     )
     await openMenu()
-    // Wait for the store snapshot (the default provider comes from it).
-    await screen.findByText('claude-opus-4-8')
-    fireEvent.change(screen.getByPlaceholderText('Search models…'), { target: { value: 'my-local-model' } })
+    // Wait for the store snapshot (split mode opens on the default
+    // provider's group, so its model is what renders first).
+    await screen.findByText('gpt-5.4')
+    fireEvent.change(screen.getByPlaceholderText('Search models and providers…'), { target: { value: 'my-local-model' } })
     fireEvent.click(await screen.findByText('Use "my-local-model"'))
     expect(onChange).toHaveBeenCalledWith({ provider: 'openai', model: 'my-local-model' })
   })
 
-  it('liveCredentials live-fetches a provider that is not saved anywhere', async () => {
+  it('split view: ArrowRight switches provider and Enter selects from the new group', async () => {
     serveTwoProviders()
-    // openrouter is absent from models.json AND the static catalog — only
-    // the form's typed credentials can produce its list.
-    handlers['models:listForProvider'] = async () => ({
-      success: true,
-      models: ['meituan/longcat-2.0', 'qwen/qwen-3'],
-    })
     const onChange = vi.fn()
+    render(<ModelSelector variant="field" value={null} onChange={onChange} defaultOption={{ label: 'x' }} />)
+    await openMenu()
+    await screen.findByText('gpt-5.4')
+
+    // Regression: swapping the provider column used to orphan cmdk's
+    // internal highlight, making Enter a no-op until ↑/↓ was pressed.
+    const input = screen.getByPlaceholderText('Search models and providers…')
+    fireEvent.keyDown(input, { key: 'ArrowRight' })
+    await screen.findByText('claude-opus-4-8')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onChange).toHaveBeenCalledWith({ provider: 'anthropic', model: 'claude-opus-4-8' })
+  })
+
+  it('search matches provider names and shows that provider\'s whole group', async () => {
+    serveTwoProviders()
     render(
-      <ModelSelector
-        variant="field"
-        value={null}
-        onChange={onChange}
-        providerFilter="openrouter"
-        liveCredentials={{ flavor: 'openrouter', apiKey: 'sk-or-typed', baseURL: '' }}
-        allowCustom
-        defaultOption={{ label: 'Auto (recommended)' }}
-      />,
+      <ModelSelector variant="field" value={null} onChange={() => {}} defaultOption={{ label: 'x' }} />,
     )
     await openMenu()
-    // 600ms debounce in useProviderModels before the fetch fires.
-    const row = await screen.findByText('meituan/longcat-2.0', undefined, { timeout: 3000 })
+    await screen.findByText('gpt-5.4')
+    // "anthropic" matches no model id — but it matches the provider, so its
+    // group stays visible in full while others filter away.
+    fireEvent.change(screen.getByPlaceholderText('Search models and providers…'), { target: { value: 'anthropic' } })
+    await screen.findByText('claude-opus-4-8')
     expect(screen.queryByText('gpt-5.4')).toBeNull()
-    fireEvent.click(row)
-    expect(onChange).toHaveBeenCalledWith({ provider: 'openrouter', model: 'meituan/longcat-2.0' })
+    expect(screen.queryByText('No models match')).toBeNull()
+  })
+
+  it('renders a failed provider group as an error row with Retry (refreshing that provider)', async () => {
+    handlers['models:list'] = async (args) => {
+      const refreshed = (args as { refreshProvider?: string } | null)?.refreshProvider === 'ollama'
+      return {
+        providers: [
+          { id: 'openai', flavor: 'openai', status: 'ok', models: [{ id: 'gpt-5.4' }] },
+          refreshed
+            ? { id: 'ollama', flavor: 'ollama', status: 'ok', models: [{ id: 'llama3' }] }
+            : { id: 'ollama', flavor: 'ollama', status: 'error', error: 'connection refused', models: [] },
+        ],
+        defaultModel: { provider: 'openai', model: 'gpt-5.4' },
+      }
+    }
+    render(<ModelSelector variant="field" value={null} onChange={() => {}} defaultOption={{ label: 'x' }} />)
+    await openMenu()
+    // Split mode opens on the default provider (openai); the failed
+    // provider shows an error dot in the column — select it to see the row.
+    fireEvent.click(await screen.findByRole('tab', { name: /Ollama/ }))
+    const retry = await screen.findByText('Retry')
+    expect(screen.getByText('connection refused')).toBeInTheDocument()
+    fireEvent.click(retry)
+    // The retried fetch recovers the group's models.
+    await screen.findByText('llama3')
   })
 
   it('staticOptions renders only the supplied rows and round-trips ids and null', async () => {
@@ -209,7 +224,7 @@ describe('ModelSelector', () => {
     await openMenu()
     // Only the caller's rows — nothing from the shared catalog store.
     expect(screen.queryByText('gpt-5.4')).toBeNull()
-    expect(screen.queryByText('claude-opus-4-8', { selector: '[role="menuitemradio"] span' })).not.toBeNull()
+    expect(screen.queryByText('claude-opus-4-8', { selector: '[role="option"] span' })).not.toBeNull()
     // Colliding "Opus" labels are disambiguated by their raw id.
     expect(screen.getAllByText('Opus')).toHaveLength(2)
 
@@ -217,7 +232,7 @@ describe('ModelSelector', () => {
     expect(onChange).toHaveBeenCalledWith({ provider: '', model: 'sonnet' })
 
     await openMenu()
-    fireEvent.click(screen.getByText('Default (recommended)', { selector: '[role="menuitemradio"] span' }))
+    fireEvent.click(screen.getByText('Default (recommended)', { selector: '[role="option"] span' }))
     expect(onChange).toHaveBeenCalledWith(null)
   })
 
@@ -235,7 +250,7 @@ describe('ModelSelector', () => {
       />,
     )
     await openMenu()
-    fireEvent.change(screen.getByPlaceholderText('Search models…'), { target: { value: 'my-custom-model' } })
+    fireEvent.change(screen.getByPlaceholderText('Search models and providers…'), { target: { value: 'my-custom-model' } })
     const custom = await screen.findByText('Use "my-custom-model"')
     fireEvent.click(custom)
     expect(onChange).toHaveBeenCalledWith({ provider: 'anthropic', model: 'my-custom-model' })

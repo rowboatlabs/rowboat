@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
 import { finalizeDeepgramStream } from '@/lib/deepgram-finalize';
 import { useRowboatAccount } from '@/hooks/useRowboatAccount';
+import { fetchRowboatConfig } from '@/hooks/use-rowboat-config';
 
 export type MeetingTranscriptionState = 'idle' | 'connecting' | 'recording' | 'stopping';
 
@@ -258,14 +259,19 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
             detectHeadphones(),
             // 2. Set up Deepgram WebSocket (account refresh + connect + wait for open)
             (async () => {
-                const account = await refreshRowboatAccount();
+                // Token from account refresh; websocket URL from the
+                // sign-in-independent bootstrap config store.
+                const [account, rowboatConfig] = await Promise.all([
+                    refreshRowboatAccount(),
+                    fetchRowboatConfig(),
+                ]);
                 let ws: WebSocket;
                 if (
                     account?.signedIn &&
                     account.accessToken &&
-                    account.config?.websocketApiUrl
+                    rowboatConfig?.websocketApiUrl
                 ) {
-                    const listenUrl = buildDeepgramListenUrl(account.config.websocketApiUrl, DEEPGRAM_PARAMS);
+                    const listenUrl = buildDeepgramListenUrl(rowboatConfig.websocketApiUrl, DEEPGRAM_PARAMS);
                     console.log('[meeting] Using Rowboat WebSocket');
                     ws = new WebSocket(listenUrl, ['bearer', account.accessToken]);
                 } else {

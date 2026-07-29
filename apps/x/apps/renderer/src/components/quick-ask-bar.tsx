@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Command, CornerDownLeft, Mic, Plus } from 'lucide-react'
+import { ArrowUpRight, Command, CornerDownLeft, Mic, MonitorUp, Plus, Volume2 } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -115,17 +115,59 @@ export function QuickAskBar() {
     setDraft('')
   }, [])
 
-  const dismiss = useCallback(() => {
-    void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
+  // Optional toggles (the standup's "voice and screen share as opt-ins").
+  // voiceOut: answers to bar questions are spoken aloud. sharing: the app
+  // window's screen capture runs and frames ride along with bar submits —
+  // the ACTUAL state comes back over quick-ask:options-state (a denied
+  // permission must never leave a lying badge).
+  const [voiceOut, setVoiceOut] = useState(false)
+  const [sharing, setSharing] = useState(false)
+  const pushOptions = useCallback((voiceOutput: boolean, screenShare: boolean) => {
+    void window.ipc.invoke('quickAsk:setOptions', { voiceOutput, screenShare }).catch(() => {})
   }, [])
+  useEffect(() => {
+    return window.ipc.on('quick-ask:options-state', (s) => {
+      setSharing(s.screenSharing)
+      setVoiceOut(s.voiceOutput)
+    })
+  }, [])
+  const toggleVoiceOut = useCallback(() => {
+    const next = !voiceOut
+    setVoiceOut(next)
+    pushOptions(next, sharing)
+  }, [voiceOut, sharing, pushOptions])
+  const toggleShare = useCallback(() => {
+    const next = !sharing
+    setSharing(next)
+    pushOptions(voiceOut, next)
+  }, [voiceOut, sharing, pushOptions])
+  // The bar owns the share's consent surface — when it goes away (blur,
+  // Esc, jump to the app), the share it started must stop with it. Nothing
+  // may keep capturing the screen with no indicator in sight.
+  const stopShareIfOn = useCallback(() => {
+    if (!sharing) return
+    setSharing(false)
+    pushOptions(voiceOut, false)
+  }, [sharing, voiceOut, pushOptions])
+  useEffect(() => {
+    const onBlur = () => stopShareIfOn()
+    window.addEventListener('blur', onBlur)
+    return () => window.removeEventListener('blur', onBlur)
+  }, [stopShareIfOn])
+
+  const dismiss = useCallback(() => {
+    stopShareIfOn()
+    void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
+  }, [stopShareIfOn])
 
   // Jump to the full conversation: the question already lives in the app's
   // active chat (the bar relays into it), so focusing the app window lands
   // on this exact exchange. The bar gets out of the way.
   const openInApp = useCallback(() => {
+    stopShareIfOn()
     void window.ipc.invoke('quickAsk:openChat', null).catch(() => {})
     void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
-  }, [])
+  }, [stopShareIfOn])
 
   // Fresh conversation for the next question: resets the app's active chat
   // (in the background) and clears the panel. The bar stays up.
@@ -273,7 +315,7 @@ export function QuickAskBar() {
               shape edge to see (the previous half-ellipse showed its rim) */}
           <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.2),transparent_55%)]" />
           <Mic
-            className={`relative h-5 w-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] ${
+            className={`relative h-[18px] w-[18px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] ${
               recording ? 'text-emerald-100' : 'text-sky-100'
             }`}
           />
@@ -284,7 +326,7 @@ export function QuickAskBar() {
           value={inputValue}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={recording ? 'Listening…' : 'Ask Rowboat anything…'}
-          className="h-full min-w-0 flex-1 bg-transparent text-xl font-light outline-none placeholder:text-neutral-500"
+          className="h-full min-w-0 flex-1 bg-transparent text-lg font-light outline-none placeholder:text-neutral-500"
         />
         {micDenied ? (
           <button
@@ -298,14 +340,80 @@ export function QuickAskBar() {
           <span className="flex shrink-0 items-center gap-3">
             {/* Same layered construction as the mic orb: gradient base,
                 inset hairline, radial top sheen. */}
-            <span className="relative flex items-center gap-2 overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] px-3.5 py-2 text-sm text-neutral-200 ring-1 ring-inset ring-white/15">
+            <span className="relative flex items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] px-3 py-1.5 text-[13px] text-neutral-200 ring-1 ring-inset ring-white/15">
               <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
+              {/* Platform label (Windows says right Ctrl; the right-cmd
+                  position is the Win key there) at main's smaller glyph size. */}
               <span className="relative">{IS_MAC ? 'Hold right' : 'Hold right Ctrl'}</span>
-              {IS_MAC && <Command className="relative h-4 w-4 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />}
+              {IS_MAC && <Command className="relative h-3.5 w-3.5 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />}
             </span>
-            <span className="text-sm text-neutral-400">to speak</span>
+            <span className="text-[13px] text-neutral-400">to speak</span>
           </span>
         )}
+        {/* Optional toggles: speak answers aloud, share the screen. Same
+            layered chrome as the send button; a lit tint marks active. The
+            hover hints are tiny in-capsule labels UNDER each button — a real
+            tooltip can't open downward here (the window ends ~24px below,
+            and with liquid glass the window must stay exactly capsule-sized),
+            so the label lives in that 24px instead. */}
+        {/* Hint placement depends on the surface: expanded, the panel above
+            gives a normal tooltip room to open upward; collapsed, the window
+            is exactly the capsule, so a tiny in-capsule label sits in the
+            ~24px under the button instead. */}
+        <span className="relative shrink-0">
+          <Tooltip open={expanded ? undefined : false}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggleVoiceOut}
+                aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
+                className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
+                  voiceOut
+                    ? 'bg-gradient-to-b from-sky-400/30 to-sky-600/10 text-sky-100 ring-sky-300/30'
+                    : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
+                }`}
+              >
+                <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
+                <Volume2 className="relative h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}
+            </TooltipContent>
+          </Tooltip>
+          {!expanded && (
+            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
+              {voiceOut ? 'Click to mute' : 'Speak answers aloud'}
+            </span>
+          )}
+        </span>
+        <span className="relative shrink-0">
+          <Tooltip open={expanded ? undefined : false}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggleShare}
+                aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
+                className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
+                  sharing
+                    ? 'bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 text-emerald-100 ring-emerald-300/30'
+                    : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
+                }`}
+              >
+                <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
+                <MonitorUp className="relative h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
+            </TooltipContent>
+          </Tooltip>
+          {!expanded && (
+            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
+              {sharing ? 'Stop sharing' : 'Share your screen'}
+            </span>
+          )}
+        </span>
         <button
           type="submit"
           disabled={!draft.trim()}

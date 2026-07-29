@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Separator } from "@/components/ui/separator"
 import { useBilling } from "@/hooks/useBilling"
+import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { CreditRewards } from "@/components/settings/credit-rewards"
 import { toast } from "sonner"
 import { getBillingPlanData, type BillingUsageBucket } from "@x/shared/dist/billing.js"
@@ -56,7 +57,7 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
   const [connectionLoading, setConnectionLoading] = useState(true)
   const [disconnecting, setDisconnecting] = useState(false)
   const [connecting, setConnecting] = useState(false)
-  const [appUrl, setAppUrl] = useState<string | null>(null)
+  const appUrl = useRowboatConfig()?.appUrl ?? null
   const { billing, isLoading: billingLoading, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
   const hasPaidSubscription = currentPlan?.category === 'starter' || currentPlan?.category === 'pro'
@@ -79,14 +80,6 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
       checkConnection()
     }
   }, [dialogOpen, checkConnection])
-
-  useEffect(() => {
-    if (isRowboatConnected) {
-      window.ipc.invoke('account:getRowboat', null)
-        .then((account) => setAppUrl(account.config?.appUrl ?? null))
-        .catch(() => {})
-    }
-  }, [isRowboatConnected])
 
   useEffect(() => {
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {

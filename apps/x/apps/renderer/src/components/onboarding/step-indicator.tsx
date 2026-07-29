@@ -1,18 +1,14 @@
 import * as React from "react"
 import { CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Step, OnboardingPath } from "./use-onboarding-state"
+import type { Step } from "./use-onboarding-state"
 
-const ROWBOAT_STEPS = [
+// Both paths share one sequence now: screen 1 handles Rowboat sign-in, and
+// screen 2 ("Providers") serves everyone — first provider for key users,
+// optional extras for signed-in users.
+const STEPS = [
   { step: 0 as Step, label: "Welcome" },
-  { step: 2 as Step, label: "Connect" },
-  { step: 3 as Step, label: "Code" },
-  { step: 4 as Step, label: "Done" },
-]
-
-const BYOK_STEPS = [
-  { step: 0 as Step, label: "Welcome" },
-  { step: 1 as Step, label: "Model" },
+  { step: 1 as Step, label: "Providers" },
   { step: 2 as Step, label: "Connect" },
   { step: 3 as Step, label: "Code" },
   { step: 4 as Step, label: "Done" },
@@ -20,11 +16,10 @@ const BYOK_STEPS = [
 
 interface StepIndicatorProps {
   currentStep: Step
-  path: OnboardingPath
 }
 
-export function StepIndicator({ currentStep, path }: StepIndicatorProps) {
-  const steps = path === 'byok' ? BYOK_STEPS : ROWBOAT_STEPS
+export function StepIndicator({ currentStep }: StepIndicatorProps) {
+  const steps = STEPS
   const currentIndex = steps.findIndex(s => s.step === currentStep)
 
   return (

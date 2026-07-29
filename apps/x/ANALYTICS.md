@@ -28,7 +28,7 @@ Emitted whenever ai-sdk returns token usage (one event per LLM call, not per run
 | `sub_use_case` | string? | Refines `use_case` — see taxonomy table below |
 | `agent_name` | string? | Present when the call goes through an agent run (`createRun`); omitted for direct `generateText`/`generateObject` |
 | `model` | string | e.g. `claude-sonnet-4-6` |
-| `provider` | string | `rowboat` = cloud LLM gateway; otherwise the BYOK provider (`openai`, `anthropic`, `ollama`, etc.) |
+| `provider` | string | The provider FLAVOR: `rowboat` = cloud LLM gateway, `codex` = ChatGPT subscription, else the BYOK flavor (`openai`, `anthropic`, `ollama`, …). Call sites pass instance ids; `captureLlmUsage` maps id → flavor so charts never fracture if user-named provider instances ship (ids never leave the app) |
 | `input_tokens` | number | |
 | `output_tokens` | number | |
 | `total_tokens` | number | |
@@ -83,6 +83,14 @@ Emitted from **both** processes:
 Emitted on rowboat disconnect. No properties. Followed immediately by `posthog.reset()`.
 
 Emit points: `apps/main/src/oauth-handler.ts:369` and `apps/renderer/src/hooks/useAnalyticsIdentity.ts:82`.
+
+### Model-provider lifecycle
+
+Privacy rules (enforced in `packages/core/src/analytics/model-providers.ts`): only provider **flavors** are captured — never instance ids (future-proofing for user-named instances), never `apiKey`/`headers`, and never `baseURL` (local endpoints can carry internal hostnames). Model ids are allowed.
+
+- `llm_provider_connected` / `llm_provider_disconnected` — `{ flavor }` — one event family across every surface. BYOK fires from `FSModelConfigRepo.setProvider` (new entries only — key rotation is not a connect) / `removeProvider`; `rowboat` from sign-in/out (`apps/main/src/oauth-handler.ts`); `codex` from ChatGPT sign-in/out (`apps/main/src/ipc.ts`).
+- `llm_initial_model_selected` — `{ flavor, model, recommended, task_overrides_seeded, source: 'connect' | 'onboarding' | 'sign_in' }` — a connect seeded the assistant model (only when none was configured). `recommended: false` = first-listed fallback; the hit rate measures backend recommendation quality. `task_overrides_seeded` counts the per-task recommendations written alongside (the server-controlled lite-tier task models — 0 when the provider has none). Emit points: `apps/renderer/src/components/settings/providers-section.tsx` (connect/onboarding) and `packages/core/src/models/rowboat-selection.ts` / `chatgpt-selection.ts` (sign-in).
+- `models_config_migrated` — `{ had_assistant, materialized_overrides, provider_count }` — one-shot per install at the models.json v1 → v2 boot migration (`FSModelConfigRepo.ensureConfig`); rollout health for the schema change.
 
 ### Other events (pre-existing, not added by the LLM-usage work)
 
@@ -210,6 +218,9 @@ Persistent across sessions for the same user. Set via `posthog.people.set` or as
 | `has_used_search`, `has_used_voice` | renderer | One-shot first-use flags |
 | `has_used_email`, `has_used_meetings`, `has_used_live_notes`, `has_used_bg_agents`, `has_used_apps`, `has_used_code` | renderer (`view_opened`) | One-shot first-use flags per feature view |
 | `has_created_bg_agent` | renderer | One-shot: user set up a background agent |
+| `llm_provider_flavors` | main | Sorted array of connected provider flavors incl. `rowboat`/`codex` from auth state (e.g. `["openai","openrouter","rowboat"]`). Synced on every launch and after any provider/assistant change (`packages/core/src/analytics/model-providers.ts`) |
+| `llm_provider_count` | main | Size of `llm_provider_flavors` |
+| `assistant_model`, `assistant_model_flavor` | main | The configured primary model (complements `llm_usage`, which reports actual usage). Absent until an assistant is configured |
 
 ## How to add a new event
 
