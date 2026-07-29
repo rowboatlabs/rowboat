@@ -98,12 +98,16 @@ export async function ensureMorningPlannerTask(): Promise<void> {
         const { items } = await listTasks({});
         const exists = items.some(t => t.name.toLowerCase().includes('planner') || t.slug.includes('planner'));
         if (!exists) {
-            await createTask({
+            const { slug } = await createTask({
                 name: PLANNER_NAME,
                 instructions: PLANNER_INSTRUCTIONS,
                 triggers: { windows: [{ startTime: '06:30', endTime: '09:30' }] },
             });
-            log.log('seeded the morning planner background task');
+            // Dormant until the user opts in from Home's Suggest dropdown —
+            // an untouched feature must never spend tokens on a schedule.
+            // The manual ✦ Suggest button works regardless.
+            await patchTask(slug, { active: false });
+            log.log('seeded the morning planner background task (off until opted in)');
         }
         const dir = path.dirname(SEEDED_MARKER);
         if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });

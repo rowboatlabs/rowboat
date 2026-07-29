@@ -1592,26 +1592,30 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                   </button>
                   {plannerMenuOpen && (
                     <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-border bg-background p-3 shadow-md">
-                      <label className="flex cursor-pointer items-center justify-between text-sm">
-                        Suggest automatically
-                        <input
-                          type="checkbox"
-                          checked={planner.active}
-                          onChange={(e) => {
-                            void window.ipc.invoke('todo:setPlanner', { active: e.target.checked }).then(setPlanner)
-                          }}
-                          className="size-4 accent-primary"
-                        />
-                      </label>
-                      <div className={`mt-2.5 flex flex-col gap-1.5 text-sm ${planner.active ? '' : 'pointer-events-none opacity-40'}`}>
+                      <div className="text-sm font-medium">Suggest automatically</div>
+                      {/* Off is the default — the schedule spends tokens only
+                          after an explicit opt-in. ✦ Suggest always works. */}
+                      <div className="mt-2 flex flex-col gap-1.5 text-sm">
+                        <label className="flex cursor-pointer items-center gap-2">
+                          <input
+                            type="radio"
+                            name="planner-frequency"
+                            checked={!planner.active}
+                            onChange={() => {
+                              void window.ipc.invoke('todo:setPlanner', { active: false }).then(setPlanner)
+                            }}
+                            className="size-3.5 accent-primary"
+                          />
+                          Don't run on its own
+                        </label>
                         {([['morning', 'Every morning (6:30–9:30)'], ['twice', 'Morning & midday'], ['thrice', 'Morning, midday & evening']] as const).map(([value, label]) => (
                           <label key={value} className="flex cursor-pointer items-center gap-2">
                             <input
                               type="radio"
                               name="planner-frequency"
-                              checked={planner.frequency === value}
+                              checked={planner.active && planner.frequency === value}
                               onChange={() => {
-                                void window.ipc.invoke('todo:setPlanner', { frequency: value }).then(setPlanner)
+                                void window.ipc.invoke('todo:setPlanner', { active: true, frequency: value }).then(setPlanner)
                               }}
                               className="size-3.5 accent-primary"
                             />
@@ -1620,7 +1624,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                         ))}
                       </div>
                       <div className="mt-2.5 text-[11px] text-muted-foreground">
-                        Suggestions wait for your accept — nothing is added or run on its own.
+                        Off by default. The ✦ Suggest button always works; suggestions wait for your accept either way.
                       </div>
                     </div>
                   )}
