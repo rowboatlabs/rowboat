@@ -5,34 +5,25 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
-import { ChatEmptyState } from '@/components/chat-empty-state'
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from '@/components/ai-elements/conversation'
 import {
   Message,
   MessageContent,
   MessageCopyButton,
   MessageResponse,
 } from '@/components/ai-elements/message'
-import { TurnActivityIndicator } from '@/components/turn-activity-indicator'
-import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
+import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
-import { PermissionRequest } from '@/components/ai-elements/permission-request'
-import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
 import { TerminalOutput } from '@/components/terminal-output'
-import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from '@/components/chat-input-with-mentions'
+import { type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
+import { ChatSessionPane, ChatSessionComposer } from '@/components/chat-session'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
 import type { ChatPaneSize } from '@/contexts/theme-context'
@@ -47,11 +38,9 @@ import {
   getComposioConnectCardData,
   getToolDisplayName,
   getToolErrorText,
-  groupConversationItems,
   isChatMessage,
   isErrorMessage,
   isToolCall,
-  isToolGroup,
   isTurnUsageMessage,
   normalizeToolInput,
   normalizeToolOutput,
@@ -633,125 +622,29 @@ export function ChatSidebar({
               <div className="relative min-h-0 flex-1">
                 {chatTabs.map((tab) => {
                   const isActive = tab.id === activeChatTabId
-                  const tabState = getTabState(tab.id)
-                  const tabHasConversation = tabState.conversation.length > 0 || Boolean(tabState.currentAssistantMessage)
                   return (
-                    <div
+                    <ChatSessionPane
                       // Keyed by chat identity — see App's chat panel key.
                       key={tab.chatId}
-                      className={cn(
-                        'min-h-0 h-full flex-col',
-                        isActive
-                          ? 'flex'
-                          : 'pointer-events-none invisible absolute inset-0 flex'
-                      )}
-                      data-chat-tab-panel={tab.id}
-                      aria-hidden={!isActive}
-                      >
-                        <Conversation
-                          anchorMessageId={viewportAnchors[tab.id]?.messageId}
-                          anchorRequestKey={viewportAnchors[tab.id]?.requestKey}
-                          className="relative flex-1"
-                      >
-                        <ConversationContent className={cn(
-                          'mx-auto w-full max-w-4xl px-3',
-                          tabHasConversation ? 'pb-28' : 'pb-0',
-                          !tabHasConversation && isMaximized && 'min-h-full items-center justify-center',
-                        )}>
-                          {!tabHasConversation ? (
-                            <ChatEmptyState
-                              wide={isMaximized}
-                              onPickPrompt={setLocalPresetMessage}
-                            />
-                          ) : (
-                            <>
-                              {groupConversationItems(
-                                tabState.conversation,
-                                (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
-                              ).map((item) => {
-                                if (isToolGroup(item)) {
-                                  return (
-                                    <ToolGroupComponent
-                                      key={item.groupId}
-                                      group={item}
-                                      isToolOpen={(toolId) => isToolOpenForTab?.(tab.id, toolId) ?? false}
-                                      onToolOpenChange={(toolId, open) => onToolOpenChangeForTab?.(tab.id, toolId, open)}
-                                    />
-                                  )
-                                }
-                                const autoDecision = isToolCall(item)
-                                  ? tabState.autoPermissionDecisions.get(item.id)
-                                  : undefined
-                                const rendered = renderConversationItem(
-                                  item,
-                                  tab.id,
-                                  autoDecision?.decision === 'allow'
-                                    ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
-                                    : undefined,
-                                )
-                                if (isToolCall(item)) {
-                                  const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
-                                  const permRequest = tabState.allPermissionRequests.get(item.id)
-                                  if (deniedAutoDecision || (permRequest && onPermissionResponse)) {
-                                    const response = tabState.permissionResponses.get(item.id) || null
-                                    return (
-                                      <React.Fragment key={item.id}>
-                                        {deniedAutoDecision && (
-                                          <AutoPermissionDecision
-                                            toolCall={deniedAutoDecision.toolCall}
-                                            permission={deniedAutoDecision.permission}
-                                            decision={deniedAutoDecision.decision}
-                                            reason={deniedAutoDecision.reason}
-                                          />
-                                        )}
-                                        {permRequest && onPermissionResponse && (
-                                          <PermissionRequest
-                                            toolCall={permRequest.toolCall}
-                                            permission={permRequest.permission}
-                                            onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing && !isWaitingOnHuman}
-                                            response={response}
-                                          />
-                                        )}
-                                        {rendered}
-                                      </React.Fragment>
-                                    )
-                                  }
-                                }
-                                return rendered
-                              })}
-
-                              {onAskHumanResponse && Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
-                                <AskHumanRequest
-                                  key={request.toolCallId}
-                                  query={request.query}
-                                  onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                  isProcessing={isActive && isProcessing && !isWaitingOnHuman}
-                                />
-                              ))}
-
-                              {tabState.currentAssistantMessage && (
-                                <Message from="assistant">
-                                  <MessageContent>
-                                    <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
-                                  </MessageContent>
-                                </Message>
-                              )}
-
-                              {isActive && isProcessing && (
-                                <Message from="assistant">
-                                  <MessageContent>
-                                    <TurnActivityIndicator isReasoning={isReasoning} />
-                                  </MessageContent>
-                                </Message>
-                              )}
-                            </>
-                            )}
-                          </ConversationContent>
-                          <ConversationScrollButton />
-                        </Conversation>
-                      </div>
+                      tab={tab}
+                      isActive={isActive}
+                      tabState={getTabState(tab.id)}
+                      viewportAnchor={viewportAnchors[tab.id]}
+                      onPickPrompt={setLocalPresetMessage}
+                      isToolOpenForTab={(tabId, toolId) => isToolOpenForTab?.(tabId, toolId) ?? false}
+                      setToolOpenForTab={(tabId, toolId, open) => onToolOpenChangeForTab?.(tabId, toolId, open)}
+                      renderItem={renderConversationItem}
+                      onPermissionResponse={onPermissionResponse}
+                      onAskHumanResponse={onAskHumanResponse}
+                      activeIsWorking={isProcessing && !isWaitingOnHuman}
+                      activeIsProcessing={isProcessing}
+                      activeIsReasoning={isReasoning}
+                      contentClassName="px-3"
+                      centerEmptyState={isMaximized}
+                      emptyStateWide={isMaximized}
+                      streamingRenderer="plain"
+                      askHumanShowOptions={false}
+                    />
                   )
                 })}
               </div>
@@ -761,51 +654,47 @@ export function ChatSidebar({
                 <div className="mx-auto w-full max-w-4xl px-3">
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId
-                    const tabState = getTabState(tab.id)
                     return (
-                      <div
+                      <ChatSessionComposer
                         // Composer instance per chat — see App's composer key.
                         key={tab.chatId}
-                        className={isActive ? 'block' : 'hidden'}
-                        data-chat-input-panel={tab.id}
-                        aria-hidden={!isActive}
-                      >
-                        <ChatInputWithMentions
-                          knowledgeFiles={knowledgeFiles}
-                          recentFiles={recentFiles}
-                          visibleFiles={visibleFiles}
-                          onSubmit={onSubmit}
-                          onStop={onStop}
-                          isProcessing={isActive && isProcessing}
-                          isStopping={isActive && isStopping}
-                          isActive={isActive}
-                          presetMessage={isActive ? (localPresetMessage ?? presetMessage) : undefined}
-                          onPresetMessageConsumed={isActive ? () => {
-                            setLocalPresetMessage(undefined)
-                            onPresetMessageConsumed?.()
-                          } : undefined}
-                          runId={tabState.runId}
-                          initialDraft={getInitialDraft?.(tab.id)}
-                          onDraftChange={onDraftChangeForTab ? (text) => onDraftChangeForTab(tab.id, text) : undefined}
-                          onSelectedModelChange={onSelectedModelChangeForTab ? (m) => onSelectedModelChangeForTab(tab.id, m) : undefined}
-                          onReasoningEffortChange={onReasoningEffortChangeForTab ? (effort) => onReasoningEffortChangeForTab(tab.id, effort) : undefined}
-                          workDir={workDirByTab[tab.id] ?? null}
-                          onWorkDirChange={onWorkDirChangeForTab ? (v) => onWorkDirChangeForTab(tab.id, v) : undefined}
-                          codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
-                          isRecording={isActive && isRecording}
-                          recordingText={isActive ? recordingText : undefined}
-                          recordingState={isActive ? recordingState : undefined}
-                          audioLevelsRef={audioLevelsRef}
-                          onStartRecording={isActive ? onStartRecording : undefined}
-                          onSubmitRecording={isActive ? onSubmitRecording : undefined}
-                          onCancelRecording={isActive ? onCancelRecording : undefined}
-                          voiceAvailable={isActive && voiceAvailable}
-                          inCall={inCall}
-                          onStartCall={isActive ? onStartCall : undefined}
-                          onEndCall={isActive ? onEndCall : undefined}
-                          callAvailable={callAvailable}
-                        />
-                      </div>
+                        tab={tab}
+                        isActive={isActive}
+                        tabState={getTabState(tab.id)}
+                        knowledgeFiles={knowledgeFiles}
+                        recentFiles={recentFiles}
+                        visibleFiles={visibleFiles}
+                        onSubmit={onSubmit}
+                        onStop={onStop}
+                        activeIsProcessing={isProcessing}
+                        isStopping={isStopping}
+                        presetMessage={localPresetMessage ?? presetMessage}
+                        onPresetMessageConsumed={() => {
+                          setLocalPresetMessage(undefined)
+                          onPresetMessageConsumed?.()
+                        }}
+                        codeSessionLocks={codeSessionLocks}
+                        initialDraft={getInitialDraft?.(tab.id)}
+                        onDraftChange={(tabId, text) => onDraftChangeForTab?.(tabId, text)}
+                        onSelectedModelChange={(t, m) => onSelectedModelChangeForTab?.(t.id, m)}
+                        onReasoningEffortChange={(t, effort) => onReasoningEffortChangeForTab?.(t.id, effort)}
+                        workDirByTab={workDirByTab}
+                        onWorkDirChange={(tabId, v) => onWorkDirChangeForTab?.(tabId, v)}
+                        recordingOverrides={{
+                          isRecording: isActive && isRecording,
+                          recordingText: isActive ? recordingText : undefined,
+                          recordingState: isActive ? recordingState : undefined,
+                          audioLevelsRef,
+                          onStartRecording: isActive ? onStartRecording : undefined,
+                        }}
+                        onSubmitRecording={onSubmitRecording}
+                        onCancelRecording={onCancelRecording}
+                        voiceAvailable={voiceAvailable}
+                        inCall={inCall}
+                        onStartCall={onStartCall}
+                        onEndCall={onEndCall}
+                        callAvailable={callAvailable}
+                      />
                     )
                   })}
                 </div>

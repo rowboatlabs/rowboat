@@ -23,7 +23,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { useSmoothedText } from '@/hooks/useSmoothedText'
 import type { useVoiceMode } from '@/hooks/useVoiceMode'
 import { ChatEmptyState } from './chat-empty-state'
-import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './chat-input-with-mentions'
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from './chat-input-with-mentions'
 import { type ChatTab } from './tab-bar'
 import {
   type ChatTabViewState,
@@ -54,11 +54,27 @@ export interface ChatSessionPaneProps {
     tabId: string,
     options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
   ) => React.ReactNode
-  onPermissionResponse: (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => void | Promise<void>
-  onAskHumanResponse: (toolCallId: string, subflow: string[], response: string) => void | Promise<void>
+  /** Optional: without it, pending permission requests render no approve/deny card (side-pane chat may omit the handler). */
+  onPermissionResponse?: (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => void | Promise<void>
+  /** Optional: without it, pending ask-human requests are not rendered (side-pane chat may omit the handler). */
+  onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void | Promise<void>
   activeIsWorking: boolean
   activeIsProcessing: boolean
   activeIsReasoning: boolean
+  /** Extra classes appended to ConversationContent (the side-pane chat adds `px-3`). */
+  contentClassName?: string
+  /** Vertically center the empty state (default true). The side-pane chat only centers when maximized. */
+  centerEmptyState?: boolean
+  /** `wide` flag for ChatEmptyState (default true). The side-pane chat is wide only when maximized. */
+  emptyStateWide?: boolean
+  /**
+   * How the in-flight assistant message is rendered. 'smooth' (default, App)
+   * animates via useSmoothedText and strips <voice> tags; 'plain' (side-pane
+   * chat) renders the raw text directly.
+   */
+  streamingRenderer?: 'smooth' | 'plain'
+  /** Render quick-reply option buttons on ask-human requests (default true). The side-pane chat renders free-text only. */
+  askHumanShowOptions?: boolean
 }
 
 export function ChatSessionPane({
@@ -75,11 +91,19 @@ export function ChatSessionPane({
   activeIsWorking,
   activeIsProcessing,
   activeIsReasoning,
+  contentClassName,
+  centerEmptyState = true,
+  emptyStateWide = true,
+  streamingRenderer = 'smooth',
+  askHumanShowOptions = true,
 }: ChatSessionPaneProps) {
   const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
-  const tabConversationContentClassName = tabHasConversation
-    ? "mx-auto w-full max-w-4xl pb-28"
-    : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
+  const tabConversationContentClassName = cn(
+    'mx-auto w-full max-w-4xl',
+    contentClassName,
+    tabHasConversation ? 'pb-28' : 'pb-0',
+    !tabHasConversation && centerEmptyState && 'min-h-full items-center justify-center',
+  )
   return (
     <div
       className={cn(
@@ -99,7 +123,7 @@ export function ChatSessionPane({
         <ConversationContent className={tabConversationContentClassName}>
           {!tabHasConversation ? (
             <ChatEmptyState
-              wide
+              wide={emptyStateWide}
               onPickPrompt={onPickPrompt}
             />
           ) : (
@@ -131,7 +155,7 @@ export function ChatSessionPane({
                 if (isToolCall(item)) {
                   const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
                   const permRequest = tabState.allPermissionRequests.get(item.id)
-                  if (deniedAutoDecision || permRequest) {
+                  if (deniedAutoDecision || (permRequest && onPermissionResponse)) {
                     const response = tabState.permissionResponses.get(item.id) || null
                     return (
                       <React.Fragment key={item.id}>
@@ -143,7 +167,7 @@ export function ChatSessionPane({
                             reason={deniedAutoDecision.reason}
                           />
                         )}
-                        {permRequest && (
+                        {permRequest && onPermissionResponse && (
                           <PermissionRequest
                             toolCall={permRequest.toolCall}
                             permission={permRequest.permission}
@@ -161,11 +185,11 @@ export function ChatSessionPane({
                 return rendered
               })}
 
-              {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
+              {onAskHumanResponse && Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
                 <AskHumanRequest
                   key={request.toolCallId}
                   query={request.query}
-                  options={request.options}
+                  options={askHumanShowOptions ? request.options : undefined}
                   onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
                   isProcessing={isActive && activeIsWorking}
                 />
@@ -174,7 +198,11 @@ export function ChatSessionPane({
               {tabState.currentAssistantMessage && (
                 <Message from="assistant">
                   <MessageContent>
-                    <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
+                    {streamingRenderer === 'plain' ? (
+                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
+                    ) : (
+                      <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
+                    )}
                   </MessageContent>
                 </Message>
               )}
@@ -210,29 +238,48 @@ export interface ChatSessionComposerProps {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => void | Promise<void>
-  onStop: () => void | Promise<void>
+  onStop?: () => void | Promise<void>
   activeIsProcessing: boolean
-  isStopping: boolean
+  isStopping?: boolean
   presetMessage: string | undefined
   onPresetMessageConsumed: () => void
   codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
   initialDraft: string | undefined
   onDraftChange: (tabId: string, text: string) => void
-  selectedModelByTabRef: React.RefObject<Map<string, { provider: string; model: string }>>
-  reasoningEffortByTabRef: React.RefObject<Map<string, 'low' | 'medium' | 'high'>>
+  /** Ref-style model tracking keyed by chatId (App). Either this or onSelectedModelChange. */
+  selectedModelByTabRef?: React.RefObject<Map<string, { provider: string; model: string }>>
+  /** Ref-style effort tracking keyed by chatId (App). Either this or onReasoningEffortChange. */
+  reasoningEffortByTabRef?: React.RefObject<Map<string, 'low' | 'medium' | 'high'>>
+  /** Callback-style model reporting (side-pane chat); receives the tab so the caller picks its key. */
+  onSelectedModelChange?: (tab: ChatTab, model: SelectedModel | null) => void
+  /** Callback-style effort reporting (side-pane chat). */
+  onReasoningEffortChange?: (tab: ChatTab, effort: ReasoningEffortLevel | null) => void
   workDirByTab: Record<string, string | null>
   onWorkDirChange: (tabId: string, value: string | null) => void
-  isRecording: boolean
-  voiceOwner: string | null
-  voice: Pick<ReturnType<typeof useVoiceMode>, 'state' | 'interimText' | 'audioLevelsRef'>
-  onStartRecording: (holderId: string) => void
-  onSubmitRecording: () => void | Promise<void>
-  onCancelRecording: () => void
-  voiceAvailable: boolean
-  inCall: boolean
-  onStartCall: (preset: CallPreset) => void
-  onEndCall: () => void
-  ttsAvailable: boolean
+  isRecording?: boolean
+  voiceOwner?: string | null
+  voice?: Pick<ReturnType<typeof useVoiceMode>, 'state' | 'interimText' | 'audioLevelsRef'>
+  onStartRecording?: (holderId: string) => void
+  /**
+   * Pre-resolved per-tab recording props (side-pane chat): passed straight
+   * through to the input instead of deriving them from voiceOwner/voice.
+   */
+  recordingOverrides?: {
+    isRecording?: boolean
+    recordingText?: string
+    recordingState?: 'connecting' | 'listening' | 'stopping'
+    audioLevelsRef?: React.MutableRefObject<number[]>
+    onStartRecording?: () => void
+  }
+  onSubmitRecording?: () => void | Promise<void>
+  onCancelRecording?: () => void
+  voiceAvailable?: boolean
+  inCall?: boolean
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  ttsAvailable?: boolean
+  /** Pre-resolved call availability (side-pane chat); defaults to voiceAvailable && ttsAvailable. */
+  callAvailable?: boolean
 }
 
 export function ChatSessionComposer({
@@ -253,12 +300,15 @@ export function ChatSessionComposer({
   onDraftChange,
   selectedModelByTabRef,
   reasoningEffortByTabRef,
+  onSelectedModelChange,
+  onReasoningEffortChange,
   workDirByTab,
   onWorkDirChange,
   isRecording,
   voiceOwner,
   voice,
   onStartRecording,
+  recordingOverrides,
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
@@ -266,7 +316,9 @@ export function ChatSessionComposer({
   onStartCall,
   onEndCall,
   ttsAvailable,
+  callAvailable,
 }: ChatSessionComposerProps) {
+  const ownsVoice = voiceOwner != null && voiceOwner === tab.chatId
   return (
     <div
       className={isActive ? 'block' : 'hidden'}
@@ -289,33 +341,45 @@ export function ChatSessionComposer({
         initialDraft={initialDraft}
         onDraftChange={(text) => onDraftChange(tab.id, text)}
         onSelectedModelChange={(m) => {
-          if (m) {
-            selectedModelByTabRef.current.set(tab.chatId, m)
-          } else {
-            selectedModelByTabRef.current.delete(tab.chatId)
+          if (selectedModelByTabRef) {
+            if (m) {
+              selectedModelByTabRef.current.set(tab.chatId, m)
+            } else {
+              selectedModelByTabRef.current.delete(tab.chatId)
+            }
           }
+          onSelectedModelChange?.(tab, m)
         }}
         onReasoningEffortChange={(effort) => {
-          if (effort) {
-            reasoningEffortByTabRef.current.set(tab.chatId, effort)
-          } else {
-            reasoningEffortByTabRef.current.delete(tab.chatId)
+          if (reasoningEffortByTabRef) {
+            if (effort) {
+              reasoningEffortByTabRef.current.set(tab.chatId, effort)
+            } else {
+              reasoningEffortByTabRef.current.delete(tab.chatId)
+            }
           }
+          onReasoningEffortChange?.(tab, effort)
         }}
         workDir={workDirByTab[tab.id] ?? null}
         onWorkDirChange={(v) => onWorkDirChange(tab.id, v)}
-        isRecording={isRecording && voiceOwner === tab.chatId}
-        recordingText={voiceOwner === tab.chatId ? voice.interimText : undefined}
-        recordingState={voiceOwner === tab.chatId ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
-        audioLevelsRef={voice.audioLevelsRef}
-        onStartRecording={isActive ? () => onStartRecording(tab.chatId) : undefined}
+        isRecording={recordingOverrides ? recordingOverrides.isRecording : (isRecording && ownsVoice)}
+        recordingText={recordingOverrides ? recordingOverrides.recordingText : (ownsVoice ? voice?.interimText : undefined)}
+        recordingState={recordingOverrides ? recordingOverrides.recordingState : (ownsVoice && voice ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening') : undefined)}
+        audioLevelsRef={recordingOverrides ? recordingOverrides.audioLevelsRef : voice?.audioLevelsRef}
+        onStartRecording={
+          recordingOverrides
+            ? recordingOverrides.onStartRecording
+            : isActive && onStartRecording
+              ? () => onStartRecording(tab.chatId)
+              : undefined
+        }
         onSubmitRecording={isActive ? onSubmitRecording : undefined}
         onCancelRecording={isActive ? onCancelRecording : undefined}
         voiceAvailable={isActive && voiceAvailable}
         inCall={inCall}
         onStartCall={isActive ? onStartCall : undefined}
         onEndCall={isActive ? onEndCall : undefined}
-        callAvailable={voiceAvailable && ttsAvailable}
+        callAvailable={callAvailable ?? (voiceAvailable && ttsAvailable)}
       />
     </div>
   )
