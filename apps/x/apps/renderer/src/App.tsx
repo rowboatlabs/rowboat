@@ -7124,6 +7124,7 @@ function App() {
                       }
                       onComposeTodo={composeTodoOnHome}
                       composeTarget={homeComposeTarget}
+                      onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                       onOpenNote={(path) => navigateToFile(path)}
                       onOpenInChat={(sessionId) => {
                         // Bind the dock (not the full-screen chat) to the

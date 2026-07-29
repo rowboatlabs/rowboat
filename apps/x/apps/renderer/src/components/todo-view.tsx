@@ -21,6 +21,8 @@ type TodoViewProps = {
   composer?: React.ReactNode
   /** Route a ＋/reply affordance into the composer with a destination chip. */
   onComposeTodo?: (target: ComposeTarget) => void
+  /** "View all →" in the Conversations section — the chat history view. */
+  onOpenChatHistory?: () => void
   /** The composer's current destination (from App) — drives the spotlight
    * connecting the source row to the composer while a reply is composed. */
   composeTarget?: ComposeTarget | null
@@ -673,7 +675,7 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   return last.text || links
 }
 
-function ConversationsSection({ threads, running, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
+function ConversationsSection({ threads, running, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
   threads: StreamThread[]
   running: Set<string>
   conversations: Record<string, TodoChatBubble[]>
@@ -685,6 +687,10 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
   dimAll?: boolean
   /** Threads that advanced since the user last looked — unread dots. */
   changedSessionIds?: Set<string>
+  /** Hide from Home (attention filter — the session stays in history). */
+  onHide?: (sessionId: string) => void
+  /** Everything, in the chat history view. */
+  onViewAll?: () => void
   onToggle: (sessionId: string) => void
   onReply: (sessionId: string) => void
   onSendReply: (sessionId: string, message: string) => void
@@ -754,6 +760,18 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
                     <ArrowUpRight className="size-3.5" />
                   </button>
                 </IconTip>
+                {onHide && (
+                  <IconTip label="Hide from Home — stays in your chat history">
+                    <button
+                      type="button"
+                      onClick={() => onHide(t.sessionId)}
+                      aria-label="Hide from Home"
+                      className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </IconTip>
+                )}
               </div>
               {isOpen && (
                 <div className="flex flex-col gap-1.5 pb-1 pl-5 pt-1">
@@ -796,6 +814,15 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
             </div>
           )
         })}
+        {onViewAll && (
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="flex w-full items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-muted-foreground/70 hover:text-foreground"
+          >
+            View all →
+          </button>
+        )}
       </div>
     </div>
   )
@@ -876,7 +903,7 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, onComposeTodo, composeTarget }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, onComposeTodo, composeTarget, onOpenChatHistory }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   const [sessions, setSessions] = useState<Record<string, string>>({})
@@ -894,6 +921,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const [triageFilter, setTriageFilter] = useState<'needs_you' | 'running' | 'done' | null>(null)
   const [sessionUpdatedAt, setSessionUpdatedAt] = useState<Record<string, string>>({})
   const [seenBaseline, setSeenBaseline] = useState<string>(() => localStorage.getItem('todo.seenBaseline') ?? new Date(0).toISOString())
+  const seenBaselineRef = useRef(seenBaseline)
+  useEffect(() => { seenBaselineRef.current = seenBaseline }, [seenBaseline])
+  // Threads hidden from Home — an attention filter, never a record: the
+  // sessions stay whole in chat history; losing this file just makes
+  // threads reappear.
+  const hiddenThreadsRef = useRef<Set<string>>(new Set())
 
   const blocksRef = useRef<TodoBlock[] | null>(null)
   const dirtyRef = useRef(false)
@@ -912,14 +945,20 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
     setRunning(new Set(res.running))
     setSessions(res.sessions)
     void window.ipc.invoke('todo:listArchived', null).then((r) => setArchived(r.items)).catch(() => {})
-    // The stream: every session that isn't a to-do thread, newest first.
+    // The stream: recent non-todo sessions — but active ones (running, or
+    // changed since the user last looked) never fall off the cap.
     void window.ipc.invoke('sessions:list', {}).then(({ sessions: all }) => {
       const todoSessionIds = new Set(Object.values(res.sessions))
       setSessionUpdatedAt(Object.fromEntries(all.map((s) => [s.sessionId, s.updatedAt])))
-      const threads = all
-        .filter((s) => !todoSessionIds.has(s.sessionId))
+      const candidates = all
+        .filter((s) => !todoSessionIds.has(s.sessionId) && !hiddenThreadsRef.current.has(s.sessionId))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .slice(0, 8)
+      const isActive = (s: (typeof candidates)[number]) =>
+        res.running.includes(`chat:${s.sessionId}`) || s.updatedAt > seenBaselineRef.current
+      const active = candidates.filter(isActive)
+      const rest = candidates.filter((s) => !isActive(s)).slice(0, Math.max(0, 8 - active.length))
+      const threads = [...active, ...rest]
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .map((s) => ({ sessionId: s.sessionId, title: s.title ?? 'New chat', updatedAt: s.updatedAt }))
       setStreamThreads(threads)
       for (const t of threads) {
@@ -982,8 +1021,27 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   useEffect(() => { expandedThreadRef.current = expandedThread }, [expandedThread])
 
   useEffect(() => {
-    void refetch()
+    // Load the hidden-threads filter, then the data (so the first stream
+    // render already respects it).
+    void window.ipc.invoke('workspace:readFile', { path: 'config/home-hidden-threads.json' })
+      .then((r) => {
+        const parsed: unknown = JSON.parse(r.data)
+        if (Array.isArray(parsed)) {
+          hiddenThreadsRef.current = new Set(parsed.filter((x): x is string => typeof x === 'string'))
+        }
+      })
+      .catch(() => {})
+      .finally(() => void refetch())
   }, [refetch])
+
+  const hideThread = useCallback((sessionId: string) => {
+    hiddenThreadsRef.current.add(sessionId)
+    setStreamThreads((t) => t.filter((x) => x.sessionId !== sessionId))
+    void window.ipc.invoke('workspace:writeFile', {
+      path: 'config/home-hidden-threads.json',
+      data: JSON.stringify([...hiddenThreadsRef.current].slice(-200), null, 2),
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const off = window.ipc.on('todo:events', (event: TodoEventType) => {
@@ -1385,6 +1443,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
             spotlightSessionId={spotSession}
             dimAll={spotKey !== null}
             changedSessionIds={new Set(streamThreads.filter((t) => t.updatedAt > seenBaseline).map((t) => t.sessionId))}
+            onHide={hideThread}
+            onViewAll={onOpenChatHistory}
             onToggle={toggleThread}
             onReply={(sid) => (onComposeTodo
               ? onComposeTodo({ kind: 'chatReply', sessionId: sid, title: streamThreads.find((t) => t.sessionId === sid)?.title ?? 'conversation', quote: lastBubbleText(streamConvs[sid]) })
