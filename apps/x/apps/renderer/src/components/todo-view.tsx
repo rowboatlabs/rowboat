@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, ChevronDown, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, ChevronDown, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
@@ -961,6 +961,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const [archived, setArchived] = useState<ArchivedEntry[]>([])
   const [showCallout, setShowCallout] = useState(false)
   const [plannerIntroSeen, setPlannerIntroSeen] = useState(() => !!localStorage.getItem('todo.plannerIntroSeen'))
+  // The suggestion tray + the planner's Home controls.
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [planner, setPlanner] = useState<{ slug: string | null; active: boolean; frequency: 'morning' | 'twice' | 'thrice' } | null>(null)
+  const [suggesting, setSuggesting] = useState(false)
+  const [plannerMenuOpen, setPlannerMenuOpen] = useState(false)
   const [commentKey, setCommentKey] = useState<string | null>(null)
   const [subDraftFor, setSubDraftFor] = useState<string | null>(null)
   // The stream: recent chat threads (non-todo sessions).
@@ -1006,6 +1011,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
     adopt(res.list)
     setRunning(new Set(res.running))
     setSessions(res.sessions)
+    setSuggestions(res.suggestions)
     void window.ipc.invoke('todo:listArchived', null).then((r) => setArchived(r.items)).catch(() => {})
     // The stream: recent non-todo sessions — but active ones (running, or
     // changed since the user last looked) never fall off the cap.
@@ -1094,6 +1100,52 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
       })
       .catch(() => {})
       .finally(() => void refetch())
+  }, [refetch])
+
+  useEffect(() => {
+    void window.ipc.invoke('todo:getPlanner', null).then(setPlanner).catch(() => {})
+  }, [])
+
+  const runPlannerNow = useCallback(async () => {
+    if (!planner?.slug || suggesting) return
+    setSuggesting(true)
+    const before = suggestions.length
+    try {
+      const res = await window.ipc.invoke('bg-task:run', {
+        slug: planner.slug,
+        context: 'On-demand refresh from the Home surface — focus on what changed since your last run (new mail, meeting notes, calendar). Same bar as always: few and good, zero is fine.',
+      })
+      await refetch()
+      if (!res.success) {
+        toast.error('Suggestion run failed', { description: res.error ?? 'Check Background agents for details.' })
+      }
+    } finally {
+      setSuggesting(false)
+      // A beat for the refetch above; compare via fresh fetch result.
+      void window.ipc.invoke('todo:get', null).then((r) => {
+        if (r.suggestions.length <= before) toast('Nothing new worth suggesting', { description: 'Rowboat looked and came back empty-handed — that\'s a feature.' })
+      }).catch(() => {})
+    }
+  }, [planner, suggesting, suggestions.length, refetch])
+
+  const acceptSuggestion = useCallback(async (text: string) => {
+    await window.ipc.invoke('todo:acceptSuggestion', { text })
+    await refetch()
+  }, [refetch])
+
+  const declineSuggestion = useCallback(async (text: string) => {
+    await window.ipc.invoke('todo:declineSuggestion', { text })
+    await refetch()
+    toast('Suggestion declined', {
+      action: {
+        label: "Don't suggest things like this",
+        onClick: () => {
+          void window.ipc.invoke('todo:teach', { text }).then(() => {
+            toast.success('Noted — rule added to todo/preferences.md')
+          })
+        },
+      },
+    })
   }, [refetch])
 
   const hideThread = useCallback((sessionId: string) => {
@@ -1339,6 +1391,63 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
               {triagePill('done', 'done', doneCount, 'text-muted-foreground')}
             </div>
             <div className="ml-auto flex items-center gap-2">
+              {planner?.slug && (
+                <div className="relative flex items-center">
+                  <IconTip label="Ask Rowboat for suggestions now">
+                    <button
+                      type="button"
+                      onClick={() => void runPlannerNow()}
+                      disabled={suggesting}
+                      className="flex items-center gap-1.5 rounded-l-md border border-r-0 border-border px-2 py-1 text-xs font-medium text-muted-foreground enabled:hover:bg-accent enabled:hover:text-foreground disabled:opacity-60"
+                    >
+                      {suggesting ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                      Suggest
+                    </button>
+                  </IconTip>
+                  <button
+                    type="button"
+                    onClick={() => setPlannerMenuOpen((v) => !v)}
+                    aria-label="Suggestion settings"
+                    className="rounded-r-md border border-border px-1 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <ChevronDown className="size-3.5" />
+                  </button>
+                  {plannerMenuOpen && (
+                    <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-border bg-background p-3 shadow-md">
+                      <label className="flex cursor-pointer items-center justify-between text-sm">
+                        Suggest automatically
+                        <input
+                          type="checkbox"
+                          checked={planner.active}
+                          onChange={(e) => {
+                            void window.ipc.invoke('todo:setPlanner', { active: e.target.checked }).then(setPlanner)
+                          }}
+                          className="size-4 accent-primary"
+                        />
+                      </label>
+                      <div className={`mt-2.5 flex flex-col gap-1.5 text-sm ${planner.active ? '' : 'pointer-events-none opacity-40'}`}>
+                        {([['morning', 'Every morning (6:30–9:30)'], ['twice', 'Morning & midday'], ['thrice', 'Morning, midday & evening']] as const).map(([value, label]) => (
+                          <label key={value} className="flex cursor-pointer items-center gap-2">
+                            <input
+                              type="radio"
+                              name="planner-frequency"
+                              checked={planner.frequency === value}
+                              onChange={() => {
+                                void window.ipc.invoke('todo:setPlanner', { frequency: value }).then(setPlanner)
+                              }}
+                              className="size-3.5 accent-primary"
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                      <div className="mt-2.5 text-[11px] text-muted-foreground">
+                        Suggestions wait for your accept — nothing is added or run on its own.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               {hasCompleted && (
                 <button
                   type="button"
@@ -1381,10 +1490,10 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
 
           {/* First-proposals explainer — shown once, ever */}
           {!plannerIntroSeen
-            && itemBlocks.some(({ block }) => block.kind === 'item' && block.item.proposed && !block.item.checked) && (
+            && (suggestions.length > 0 || itemBlocks.some(({ block }) => block.kind === 'item' && block.item.proposed && !block.item.checked)) && (
             <div className="flex items-center gap-2 border-y border-border/60 px-1 py-2 text-[13px] text-muted-foreground">
               <Bot className="size-3.5 shrink-0" />
-              <span className="flex-1">Rowboat suggested items from your mail and calendar (marked "via rowboat"). Keep what's useful — dismissing teaches it what not to suggest, and nothing runs until you say go.</span>
+              <span className="flex-1">Rowboat has suggestions from your mail and calendar — accept the useful ones to add them to your list; declining teaches it what not to suggest. Nothing is added or run without you.</span>
               <button
                 type="button"
                 onClick={() => { localStorage.setItem('todo.plannerIntroSeen', '1'); setPlannerIntroSeen(true) }}
@@ -1542,6 +1651,44 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
               <AddItemRow onAdd={(text) => void addItem(text)} />
             ))}
           </div>
+
+          {/* The suggestion tray — proposals awaiting your accept. Never
+              part of the list until you say so. */}
+          {suggestions.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Suggested</div>
+              <div>
+                {suggestions.map((text) => (
+                  <div key={text} className="group/sugg flex items-center gap-2.5 border-b border-border/40 px-2 py-2 last:border-0">
+                    <Sparkles className="size-3.5 shrink-0 text-muted-foreground/60" />
+                    <span className="min-w-0 flex-1 text-sm">
+                      <TextWithMentions text={text} onOpenLink={(l) => openLink(l, onOpenNote)} />
+                    </span>
+                    <IconTip label="Add to your list">
+                      <button
+                        type="button"
+                        onClick={() => void acceptSuggestion(text)}
+                        aria-label="Accept suggestion"
+                        className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <Check className="size-3" /> Add
+                      </button>
+                    </IconTip>
+                    <IconTip label="Decline — Rowboat learns from this">
+                      <button
+                        type="button"
+                        onClick={() => void declineSuggestion(text)}
+                        aria-label="Decline suggestion"
+                        className="shrink-0 rounded-md p-1 text-muted-foreground/50 hover:bg-accent hover:text-foreground"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </IconTip>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* The stream — recent chat threads */}
           <ConversationsSection

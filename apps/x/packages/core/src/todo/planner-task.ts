@@ -1,7 +1,7 @@
 import fsSync from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { createTask, listTasks } from '../background-tasks/fileops.js';
+import { createTask, listTasks, patchTask } from '../background-tasks/fileops.js';
 import { ensurePreferencesFile, PREFS_REL_PATH, FEEDBACK_REL_PATH } from './planner-memory.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 
@@ -33,7 +33,56 @@ Process, in order:
 5. NEVER propose: routine email replies (the Email surface already pre-drafts those), meetings (the calendar shows them), anything an existing background agent already handles, newsletters or automated notifications, or restatements of information with no action.
 6. Cap: at most 3 proposals. One or two great items beat three decent ones. ZERO is a good outcome — if nothing clears the bar, end quietly with a "nothing needed" summary. The test for every candidate: does putting this on the list change what the user does today?
 7. Phrase each item the way the user would write it — short, concrete, starting with a verb. Include @rowboat in the text ONLY to offer internal prep you could do yourself (research, outline, compile, summarize — never anything outward-facing); it waits for the user's go either way.
-8. Report via todo-propose — your only pen on the list. Never use todo-add, never edit todo.md directly, never start runs.`;
+8. Submit via todo-propose — your only pen. Proposals land in a suggestion tray on the home surface where the user accepts or declines each one; nothing touches the list or runs without their accept. Never use todo-add, never edit todo.md directly, never start runs.`;
+
+// Frequency presets the Home surface offers — each maps to daily windows.
+export type PlannerFrequency = 'morning' | 'twice' | 'thrice';
+
+const FREQUENCY_WINDOWS: Record<PlannerFrequency, { startTime: string; endTime: string }[]> = {
+    morning: [{ startTime: '06:30', endTime: '09:30' }],
+    twice: [
+        { startTime: '06:30', endTime: '09:30' },
+        { startTime: '13:00', endTime: '15:00' },
+    ],
+    thrice: [
+        { startTime: '06:30', endTime: '09:30' },
+        { startTime: '13:00', endTime: '15:00' },
+        { startTime: '17:30', endTime: '19:30' },
+    ],
+};
+
+async function findPlannerSlug(): Promise<string | null> {
+    const { items } = await listTasks({});
+    const hit = items.find(t => t.slug.includes('planner') || t.name.toLowerCase().includes('planner'));
+    return hit?.slug ?? null;
+}
+
+export interface PlannerConfig {
+    slug: string | null;
+    active: boolean;
+    frequency: PlannerFrequency;
+}
+
+/** The Home surface's view of the planner: on/off + how often. */
+export async function getPlannerConfig(): Promise<PlannerConfig> {
+    const slug = await findPlannerSlug();
+    if (!slug) return { slug: null, active: false, frequency: 'morning' };
+    const { items } = await listTasks({});
+    const task = items.find(t => t.slug === slug);
+    const windows = task?.triggers?.windows?.length ?? 1;
+    const frequency: PlannerFrequency = windows >= 3 ? 'thrice' : windows === 2 ? 'twice' : 'morning';
+    return { slug, active: task?.active ?? false, frequency };
+}
+
+export async function setPlannerConfig(input: { active?: boolean; frequency?: PlannerFrequency }): Promise<PlannerConfig> {
+    const slug = await findPlannerSlug();
+    if (!slug) return { slug: null, active: false, frequency: 'morning' };
+    const patch: Record<string, unknown> = {};
+    if (input.active !== undefined) patch.active = input.active;
+    if (input.frequency) patch.triggers = { windows: FREQUENCY_WINDOWS[input.frequency] };
+    await patchTask(slug, patch);
+    return getPlannerConfig();
+}
 
 /**
  * Seed the planner task once. Existing users get it on next boot; a user

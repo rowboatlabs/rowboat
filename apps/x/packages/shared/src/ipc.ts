@@ -2431,6 +2431,9 @@ const ipcSchemas = {
       // Item key → sessionId for items whose thread exists; "open in chat"
       // binds the chat dock to that session.
       sessions: z.record(z.string(), z.string()),
+      // Pending planner suggestions (todo/suggestions.md) — accepted onto
+      // the list or declined, never auto-added.
+      suggestions: z.array(z.string()),
     }),
   },
   // Full-model save from the renderer. Core re-normalizes keys and merges
@@ -2593,6 +2596,47 @@ const ipcSchemas = {
       success: z.boolean(),
       wasProposed: z.boolean().optional(),
       error: z.string().optional(),
+    }),
+  },
+  // Accept a pending suggestion: it leaves the tray and joins the list
+  // (with its via-rowboat badge); recorded as a positive 'kept' signal.
+  'todo:acceptSuggestion': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Decline a pending suggestion: leaves the tray, recorded as 'dismissed'.
+  'todo:declineSuggestion': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The planner's Home-surface controls: on/off + frequency presets.
+  'todo:getPlanner': {
+    req: z.null(),
+    res: z.object({
+      slug: z.string().nullable(),
+      active: z.boolean(),
+      frequency: z.enum(['morning', 'twice', 'thrice']),
+    }),
+  },
+  'todo:setPlanner': {
+    req: z.object({
+      active: z.boolean().optional(),
+      frequency: z.enum(['morning', 'twice', 'thrice']).optional(),
+    }),
+    res: z.object({
+      slug: z.string().nullable(),
+      active: z.boolean(),
+      frequency: z.enum(['morning', 'twice', 'thrice']),
     }),
   },
   // "Don't suggest things like this" — writes a rule into the Your-rules

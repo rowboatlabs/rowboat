@@ -46,7 +46,7 @@ export const todoTools: z.infer<typeof BuiltinToolsSchema> = {
     },
     'todo-propose': {
         permission: "none",
-        description: "PROPOSE items for the user's to-do list (the morning planner's ONLY pen). Proposed items carry a visible 'via rowboat' marker and NEVER start work — even with @rowboat in the text, the run waits for the user's explicit go. Duplicates of existing items and previously dismissed suggestions are skipped automatically. Propose few and good: 2–3 at most, zero is a valid outcome.",
+        description: "PROPOSE items for the user (the planner's ONLY pen). Proposals land in a suggestion tray on the home surface — NOT on the user's list — where the user accepts or declines each one; nothing runs and nothing clutters the plan until they accept. Duplicates of list items, existing suggestions, and previously dismissed suggestions are skipped automatically. Propose few and good: 2–3 at most, zero is a valid outcome.",
         inputSchema: z.object({
             items: z.array(z.object({
                 text: z.string().describe("The item's line text, phrased as the user would write it. Include @rowboat only when offering to do the work yourself (internal prep only — research, outlines, summaries; never anything outward-facing)."),
@@ -54,11 +54,11 @@ export const todoTools: z.infer<typeof BuiltinToolsSchema> = {
         }),
         execute: async ({ items }: { items: { text: string }[] }) => {
             try {
-                const { addItem, getItem, normalizeKey } = await import("../../../todo/fileops.js");
-                const { stickyDismissedKeys, recordPlannerSignal } = await import("../../../todo/planner-memory.js");
+                const { getItem, normalizeKey } = await import("../../../todo/fileops.js");
+                const { stickyDismissedKeys, recordPlannerSignal, addSuggestions } = await import("../../../todo/planner-memory.js");
                 const { todoBus } = await import("../../../todo/bus.js");
                 const sticky = await stickyDismissedKeys();
-                const added: string[] = [];
+                const candidates: string[] = [];
                 const skipped: { text: string; reason: string }[] = [];
                 for (const entry of items) {
                     const key = normalizeKey(entry.text);
@@ -70,10 +70,10 @@ export const todoTools: z.infer<typeof BuiltinToolsSchema> = {
                         skipped.push({ text: entry.text, reason: 'already on the list' });
                         continue;
                     }
-                    const item = await addItem(entry.text, { proposed: true });
-                    await recordPlannerSignal('proposed', item.text);
-                    added.push(item.text);
+                    candidates.push(entry.text);
                 }
+                const added = await addSuggestions(candidates);
+                for (const text of added) await recordPlannerSignal('proposed', text);
                 todoBus.publish({ type: 'list_changed' });
                 return { success: true, added, ...(skipped.length > 0 ? { skipped } : {}) };
             } catch (err) {

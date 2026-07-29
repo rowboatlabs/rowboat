@@ -95,6 +95,67 @@ export async function stickyDismissedKeys(): Promise<Set<string>> {
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// The suggestion tray — todo/suggestions.md. Proposals live HERE, outside
+// the user's plan, until accepted: accepting is the act that turns a
+// suggestion into an obligation (and the 'kept' signal); declining records
+// 'dismissed'. The list itself never gets machine clutter.
+// ---------------------------------------------------------------------------
+
+const SUGGESTIONS_PATH = path.join(WorkDir, 'todo', 'suggestions.md');
+export const SUGGESTIONS_REL_PATH = 'todo/suggestions.md';
+
+const SUGGESTION_LINE_RE = /^- (.*\S)\s*$/;
+
+export async function listSuggestions(): Promise<string[]> {
+    try {
+        const raw = await fs.readFile(SUGGESTIONS_PATH, 'utf-8');
+        return raw.split('\n')
+            .map((l) => SUGGESTION_LINE_RE.exec(l)?.[1]?.trim())
+            .filter((t): t is string => !!t);
+    } catch {
+        return [];
+    }
+}
+
+async function writeSuggestions(texts: string[]): Promise<void> {
+    const dir = path.dirname(SUGGESTIONS_PATH);
+    if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });
+    const body = texts.map((t) => `- ${t}`).join('\n');
+    await fs.writeFile(SUGGESTIONS_PATH, body ? `${body}\n` : '', 'utf-8');
+}
+
+/** Add suggestions (deduped against the tray). Returns what was added. */
+export async function addSuggestions(texts: string[]): Promise<string[]> {
+    return withFileLock(SUGGESTIONS_PATH, async () => {
+        const current = await listSuggestions();
+        const have = new Set(current.map(normalizeKey));
+        const added: string[] = [];
+        for (const raw of texts) {
+            const text = raw.replace(/\s+/g, ' ').trim();
+            if (!text || have.has(normalizeKey(text))) continue;
+            have.add(normalizeKey(text));
+            current.push(text);
+            added.push(text);
+        }
+        if (added.length > 0) await writeSuggestions(current);
+        return added;
+    });
+}
+
+/** Remove one suggestion from the tray. Returns its text when found. */
+export async function takeSuggestion(text: string): Promise<string | null> {
+    return withFileLock(SUGGESTIONS_PATH, async () => {
+        const key = normalizeKey(text);
+        const current = await listSuggestions();
+        const idx = current.findIndex((t) => normalizeKey(t) === key);
+        if (idx === -1) return null;
+        const [taken] = current.splice(idx, 1);
+        await writeSuggestions(current);
+        return taken;
+    });
+}
+
 export async function ensurePreferencesFile(): Promise<void> {
     if (!fsSync.existsSync(PREFS_PATH)) {
         const dir = path.dirname(PREFS_PATH);

@@ -142,7 +142,8 @@ import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
 import { runTodoItem, commentOnTodoItem, startHomeChat, replyHomeChat, runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
 import { getConversation as getTodoConversation, deriveConversation as deriveSessionConversation } from '@x/core/dist/todo/conversation.js';
-import { recordPlannerSignal, addYourRule as addPlannerRule } from '@x/core/dist/todo/planner-memory.js';
+import { recordPlannerSignal, addYourRule as addPlannerRule, listSuggestions as listTodoSuggestions, takeSuggestion as takeTodoSuggestion } from '@x/core/dist/todo/planner-memory.js';
+import { getPlannerConfig, setPlannerConfig } from '@x/core/dist/todo/planner-task.js';
 import { findItem as findTodoItem } from '@x/core/dist/todo/fileops.js';
 import { todoBus } from '@x/core/dist/todo/bus.js';
 import {
@@ -2631,7 +2632,44 @@ export function setupIpcHandlers() {
     // Todo (home to-do list) handlers
     'todo:get': async () => {
       const list = await readTodo();
-      return { list, running: runningItemKeys(), sessions: await getTodoSessionIndex() };
+      return {
+        list,
+        running: runningItemKeys(),
+        sessions: await getTodoSessionIndex(),
+        suggestions: await listTodoSuggestions(),
+      };
+    },
+    'todo:acceptSuggestion': async (_event, args) => {
+      try {
+        const taken = await takeTodoSuggestion(args.text);
+        if (!taken) return { success: false, error: 'Suggestion no longer exists' };
+        // Accepting confers task-ness: the item joins the list (badge kept),
+        // and it is a positive taste signal. Delegated text still waits for
+        // the user's explicit go — accepting is not running.
+        await addTodoItem(taken, { proposed: true });
+        void recordPlannerSignal('kept', taken).catch(() => {});
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:declineSuggestion': async (_event, args) => {
+      try {
+        const taken = await takeTodoSuggestion(args.text);
+        if (!taken) return { success: false, error: 'Suggestion no longer exists' };
+        void recordPlannerSignal('dismissed', taken).catch(() => {});
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:getPlanner': async () => {
+      return getPlannerConfig();
+    },
+    'todo:setPlanner': async (_event, args) => {
+      return setPlannerConfig(args);
     },
     'todo:save': async (_event, args) => {
       try {
