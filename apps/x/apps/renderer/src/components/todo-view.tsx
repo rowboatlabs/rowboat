@@ -19,13 +19,17 @@ type TodoViewProps = {
    * through the app's chat machinery). Falls back to a basic input. */
   composer?: React.ReactNode
   /** Route a ＋/reply affordance into the composer with a destination chip. */
-  onComposeTodo?: (target:
-    | { kind: 'todo' }
-    | { kind: 'sub'; parentKey: string; parentText: string }
-    | { kind: 'comment'; key: string; itemText: string }
-    | { kind: 'chatReply'; sessionId: string; title: string }
-  ) => void
+  onComposeTodo?: (target: ComposeTarget) => void
+  /** The composer's current destination (from App) — drives the spotlight
+   * connecting the source row to the composer while a reply is composed. */
+  composeTarget?: ComposeTarget | null
 }
+
+type ComposeTarget =
+  | { kind: 'todo' }
+  | { kind: 'sub'; parentKey: string; parentText: string }
+  | { kind: 'comment'; key: string; itemText: string; quote?: string }
+  | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
 
 const ROWBOAT_MENTION_RE = /(^|\s)@rowboat\b/i
 const CHIP = 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-4'
@@ -341,7 +345,7 @@ function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetr
   )
 }
 
-function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
+function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
   item: TodoItem
   isRunning: boolean
   commentOpen: boolean
@@ -353,6 +357,8 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
   changed?: boolean
   /** Triage filter active and this row doesn't match. */
   dimmed?: boolean
+  /** The composer is replying to this row — lift it gently. */
+  spotlight?: boolean
   /** Rendered sub-item rows (built by the parent view) + sub composer. */
   childRows?: React.ReactNode
   /** Top-level only: open the "add sub-task" input. */
@@ -386,7 +392,9 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
   const showGoChip = item.delegated && !item.checked && !isRunning && item.receipts.length === 0
 
   return (
-    <div className={`group/todo relative flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-opacity hover:bg-accent/40 ${dimmed ? 'opacity-35' : ''}`}>
+    <div className={`group/todo relative flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-[opacity,transform,box-shadow] duration-200 hover:bg-accent/40 ${dimmed ? 'opacity-35' : ''} ${
+      spotlight ? 'scale-[1.01] bg-card shadow-md ring-1 ring-primary/25 motion-reduce:transform-none' : ''
+    }`}>
       {changed && (
         <span
           title="Changed since you last looked"
@@ -646,12 +654,16 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   return last.text || links
 }
 
-function ConversationsSection({ threads, running, conversations, expanded, replyFor, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
+function ConversationsSection({ threads, running, conversations, expanded, replyFor, spotlightSessionId, dimAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
   threads: StreamThread[]
   running: Set<string>
   conversations: Record<string, TodoChatBubble[]>
   expanded: string | null
   replyFor: string | null
+  /** The composer is replying to this thread — lift it, dim siblings. */
+  spotlightSessionId?: string | null
+  /** The composer's destination is in the other section — dim this one. */
+  dimAll?: boolean
   onToggle: (sessionId: string) => void
   onReply: (sessionId: string) => void
   onSendReply: (sessionId: string, message: string) => void
@@ -660,7 +672,7 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
 }) {
   if (threads.length === 0) return null
   return (
-    <div className="flex flex-col gap-1">
+    <div className={`flex flex-col gap-1 transition-opacity duration-200 ${dimAll ? 'opacity-60' : ''}`}>
       <div className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Conversations</div>
       <div className="rounded-xl border border-border bg-card px-4 py-2">
         {threads.map((t) => {
@@ -668,8 +680,14 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
           const isOpen = expanded === t.sessionId
           const bubbles = conversations[t.sessionId] ?? []
           const preview = previewLine(bubbles)
+          const isSpot = spotlightSessionId === t.sessionId
           return (
-            <div key={t.sessionId} className="group/thread border-b border-border/40 py-1.5 last:border-b-0">
+            <div
+              key={t.sessionId}
+              className={`group/thread border-b border-border/40 py-1.5 transition-[opacity,transform,box-shadow] duration-200 last:border-b-0 ${
+                isSpot ? 'scale-[1.005] rounded-lg bg-accent/30 px-2 ring-1 ring-primary/20 motion-reduce:transform-none' : ''
+              } ${spotlightSessionId && !isSpot ? 'opacity-40' : ''}`}
+            >
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -804,7 +822,7 @@ function ArchivedSection({ entries, onRestore, onOpenNote }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, onComposeTodo }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, onComposeTodo, composeTarget }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   const [sessions, setSessions] = useState<Record<string, string>>({})
@@ -1074,6 +1092,18 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
     const sid = sessions[key]
     return !!sid && (sessionUpdatedAt[sid] ?? '') > seenBaseline
   }
+
+  // ---- Spotlight: connect the composer's destination to its source row ----
+  const spotKey = composeTarget?.kind === 'comment' ? composeTarget.key
+    : composeTarget?.kind === 'sub' ? composeTarget.parentKey
+    : null
+  const spotSession = composeTarget?.kind === 'chatReply' ? composeTarget.sessionId : null
+  const blockContainsSpot = (i: TodoItem) => i.key === spotKey || i.children.some((c) => c.key === spotKey)
+  const lastBubbleText = (bubbles: TodoChatBubble[] | undefined): string | undefined => {
+    const last = bubbles?.[bubbles.length - 1]
+    if (!last) return undefined
+    return last.kind === 'error' ? `failed: ${last.text}` : last.text
+  }
   const changedItems = allItems.filter((i) => isChanged(i.key))
   const changedNeedsYou = changedItems.filter(needsYou).length
   const changedFinished = changedItems.length - changedNeedsYou
@@ -1168,7 +1198,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
           )}
 
           {/* The list */}
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
+          <div className={`rounded-xl border border-border bg-card px-4 py-3 transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
             {blocks === null ? (
               <div className="px-2 py-6 text-center text-sm text-muted-foreground">Loading…</div>
             ) : (
@@ -1188,7 +1218,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     item={item}
                     depth={0}
                     changed={isChanged(item.key)}
-                    dimmed={triageFilter !== null && !blockMatches(item)}
+                    dimmed={(triageFilter !== null && !blockMatches(item)) || (spotKey !== null && !blockContainsSpot(item))}
+                    spotlight={item.key === spotKey}
                     isRunning={running.has(item.key)}
                     onToggle={(checked) => {
                       const next = [...blocksRef.current!]
@@ -1218,7 +1249,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     sessionId={sessions[item.key] ?? null}
                     bubbles={conversations[item.key] ?? []}
                     onToggleComment={() => (onComposeTodo
-                      ? onComposeTodo({ kind: 'comment', key: item.key, itemText: item.text })
+                      ? onComposeTodo({ kind: 'comment', key: item.key, itemText: item.text, quote: lastBubbleText(conversations[item.key]) })
                       : setCommentKey(commentKey === item.key ? null : item.key))}
                     onComment={(message) => commentOnItem(item.key, message)}
                     onOpenInChat={onOpenInChat}
@@ -1234,6 +1265,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                             depth={1}
                             changed={isChanged(child.key)}
                             dimmed={triageFilter !== null && !triageMatch(child)}
+                            spotlight={child.key === spotKey}
                             isRunning={running.has(child.key)}
                             onToggle={(checked) => updateChild(index, ci, (c) => ({ ...c, checked }))}
                             onCommitText={(text) => {
@@ -1255,7 +1287,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                             sessionId={sessions[child.key] ?? null}
                             bubbles={conversations[child.key] ?? []}
                             onToggleComment={() => (onComposeTodo
-                              ? onComposeTodo({ kind: 'comment', key: child.key, itemText: child.text })
+                              ? onComposeTodo({ kind: 'comment', key: child.key, itemText: child.text, quote: lastBubbleText(conversations[child.key]) })
                               : setCommentKey(commentKey === child.key ? null : child.key))}
                             onComment={(message) => commentOnItem(child.key, message)}
                             onOpenInChat={onOpenInChat}
@@ -1296,9 +1328,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
             conversations={streamConvs}
             expanded={expandedThread}
             replyFor={chatReplyFor}
+            spotlightSessionId={spotSession}
+            dimAll={spotKey !== null}
             onToggle={toggleThread}
             onReply={(sid) => (onComposeTodo
-              ? onComposeTodo({ kind: 'chatReply', sessionId: sid, title: streamThreads.find((t) => t.sessionId === sid)?.title ?? 'conversation' })
+              ? onComposeTodo({ kind: 'chatReply', sessionId: sid, title: streamThreads.find((t) => t.sessionId === sid)?.title ?? 'conversation', quote: lastBubbleText(streamConvs[sid]) })
               : setChatReplyFor(chatReplyFor === sid ? null : sid))}
             onSendReply={sendChatReply}
             onOpenNote={onOpenNote}

@@ -249,7 +249,7 @@ interface ChatInputInnerProps {
    * them server-side regardless, so the composer must not pretend otherwise.
    */
   codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
-  contextChip?: { label: string; icon?: 'todo' | 'reply'; onDismiss: () => void }
+  contextChip?: { label: string; icon?: 'todo' | 'reply'; quote?: string; onDismiss: () => void }
   placeholder?: string
   focusSignal?: number
 }
@@ -804,19 +804,28 @@ function ChatInputInner({
         /* ── Normal input ── */
         <>
       {contextChip && (
-        <div className="flex items-center px-4 pt-3">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-            {contextChip.icon === 'reply' ? <MessageCircle className="h-3 w-3" /> : <ListTodo className="h-3 w-3" />}
-            {contextChip.label}
-            <button
-              type="button"
-              onClick={contextChip.onDismiss}
-              aria-label="Back to chat"
-              className="rounded-full hover:bg-primary/15"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
+        <div className="px-4 pt-3">
+          <div className="flex items-center">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              {contextChip.icon === 'reply' ? <MessageCircle className="h-3 w-3" /> : <ListTodo className="h-3 w-3" />}
+              {contextChip.label}
+              <button
+                type="button"
+                onClick={contextChip.onDismiss}
+                aria-label="Back to chat"
+                className="rounded-full hover:bg-primary/15"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          </div>
+          {contextChip.quote && (
+            /* WhatsApp-style quoted context: what you're replying to, right
+               above where you type. */
+            <div className="mt-1.5 line-clamp-2 border-l-2 border-primary/30 pl-2 text-xs text-muted-foreground">
+              {contextChip.quote}
+            </div>
+          )}
         </div>
       )}
       <div className="px-4 pt-4 pb-2">
@@ -1450,7 +1459,7 @@ export interface ChatInputWithMentionsProps {
   /** Destination chip: the composer is visibly writing somewhere other than
    * the chat (e.g. "To-do"). Rendered above the input with a dismiss ✕;
    * Escape also dismisses. */
-  contextChip?: { label: string; icon?: 'todo' | 'reply'; onDismiss: () => void }
+  contextChip?: { label: string; icon?: 'todo' | 'reply'; quote?: string; onDismiss: () => void }
   /** Placeholder override (pairs with contextChip). */
   placeholder?: string
   /** Bump to focus the input from outside (e.g. the list's ＋ affordance). */

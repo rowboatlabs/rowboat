@@ -681,8 +681,8 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
 export type HomeComposeTarget =
   | { kind: 'todo' }
   | { kind: 'sub'; parentKey: string; parentText: string }
-  | { kind: 'comment'; key: string; itemText: string }
-  | { kind: 'chatReply'; sessionId: string; title: string }
+  | { kind: 'comment'; key: string; itemText: string; quote?: string }
+  | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
 
 type ViewState =
   | { type: 'chat'; runId: string | null }
@@ -7106,6 +7106,9 @@ function App() {
                                   ? `Reply: ${homeComposeTarget.title.slice(0, 40)}`
                                   : 'To-do',
                             icon: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply' ? 'reply' : 'todo',
+                            quote: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply'
+                              ? homeComposeTarget.quote
+                              : undefined,
                             onDismiss: () => setHomeComposeTarget(null),
                           } : undefined}
                           placeholder={homeComposeTarget
@@ -7120,6 +7123,7 @@ function App() {
                         />
                       }
                       onComposeTodo={composeTodoOnHome}
+                      composeTarget={homeComposeTarget}
                       onOpenNote={(path) => navigateToFile(path)}
                       onOpenInChat={(sessionId) => {
                         // Bind the dock (not the full-screen chat) to the
