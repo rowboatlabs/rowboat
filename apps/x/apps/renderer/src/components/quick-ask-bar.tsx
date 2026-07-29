@@ -306,15 +306,15 @@ export function QuickAskBar() {
           className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all duration-300 ${
             recording
               ? 'animate-pulse bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-[0_0_26px_rgba(52,211,153,0.55)] ring-emerald-600/30'
-              : 'bg-gradient-to-b from-emerald-400/90 to-emerald-600/85 shadow-[0_0_22px_rgba(52,211,153,0.38)] ring-emerald-600/25'
+              : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] shadow-[0_2px_10px_rgba(0,0,0,0.12)] ring-black/10'
           }`}
         >
           {/* top sheen — a radial fade from the top center, so there is no
               shape edge to see (the previous half-ellipse showed its rim) */}
           <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.2),transparent_55%)]" />
           <Mic
-            className={`relative h-[18px] w-[18px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.25)] ${
-              recording ? 'text-white' : 'text-white'
+            className={`relative h-[18px] w-[18px] ${
+              recording ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.25)]' : 'text-neutral-700'
             }`}
           />
         </span>
