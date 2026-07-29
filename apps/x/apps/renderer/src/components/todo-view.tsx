@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, Check, ChevronDown, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, ChevronDown, FileText, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
@@ -98,10 +98,10 @@ function openLink(link: TodoLink, onOpenNote: (path: string) => void) {
   else if (link.path) onOpenNote(link.path)
 }
 
-// Render @rowboat mentions as chips and [label](target) links as buttons
-// inside a read-only text row.
+// Render @rowboat mentions as chips, [label](target) links as buttons, and
+// light inline markdown (**bold**, `code`) inside a read-only text row.
 function TextWithMentions({ text, onOpenLink }: { text: string; onOpenLink?: (link: TodoLink) => void }) {
-  const parts = text.split(/(@rowboat|\[[^\]]+\]\([^)]+\))/i)
+  const parts = text.split(/(@rowboat|\[[^\]]+\]\([^)]+\)|\*\*[^*\n]+\*\*|`[^`\n]+`)/i)
   return (
     <>
       {parts.map((part, i) => {
@@ -112,6 +112,12 @@ function TextWithMentions({ text, onOpenLink }: { text: string; onOpenLink?: (li
               rowboat
             </span>
           )
+        }
+        const bold = /^\*\*([^*\n]+)\*\*$/.exec(part)
+        if (bold) return <strong key={i}>{bold[1]}</strong>
+        const code = /^`([^`\n]+)`$/.exec(part)
+        if (code) {
+          return <code key={i} className="rounded bg-muted px-1 font-mono text-[0.92em]">{code[1]}</code>
         }
         const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(part)
         if (link) {
@@ -134,6 +140,53 @@ function TextWithMentions({ text, onOpenLink }: { text: string; onOpenLink?: (li
       })}
     </>
   )
+}
+
+// The agent references files with ```filepath fences (one path per line) —
+// render those as clickable file chips, any other fence as a code block,
+// and the text between through TextWithMentions.
+function BubbleText({ text, onOpenNote }: { text: string; onOpenNote: (path: string) => void }) {
+  const fence = /```([\w-]*)[ \t]*\n?([\s\S]*?)```/g
+  const nodes: React.ReactNode[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  let k = 0
+  const pushText = (seg: string) => {
+    const trimmed = seg.replace(/^\n/, '').replace(/\n$/, '')
+    if (trimmed) nodes.push(<TextWithMentions key={k++} text={trimmed} onOpenLink={(l) => openLink(l, onOpenNote)} />)
+  }
+  while ((m = fence.exec(text)) !== null) {
+    if (m.index > last) pushText(text.slice(last, m.index))
+    const lang = (m[1] ?? '').toLowerCase()
+    const body = m[2].replace(/\n$/, '')
+    if (lang === 'filepath') {
+      const paths = body.split('\n').map((s) => s.trim()).filter(Boolean)
+      nodes.push(
+        <span key={k++} className="my-1 flex flex-wrap gap-1.5">
+          {paths.map((p, j) => (
+            <button
+              key={j}
+              type="button"
+              title={p}
+              onClick={() => onOpenNote(p)}
+              className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
+            >
+              <FileText className="size-3" /> {p.split('/').pop()}
+            </button>
+          ))}
+        </span>,
+      )
+    } else {
+      nodes.push(
+        <pre key={k++} className="my-1 overflow-x-auto rounded-md bg-muted px-2 py-1.5 font-mono text-[12px] leading-relaxed">
+          {body}
+        </pre>,
+      )
+    }
+    last = m.index + m[0].length
+  }
+  if (last < text.length) pushText(text.slice(last))
+  return <>{nodes}</>
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +351,7 @@ function Bubble({ b, onOpenNote, onRetry }: {
         }`}
       >
         <span className="mr-1.5 text-[12px] font-bold">{isUser ? 'you' : 'rowboat'}</span>
-        {b.kind === 'error' ? `failed: ${b.text}` : b.text}
+        {b.kind === 'error' ? `failed: ${b.text}` : <BubbleText text={b.text} onOpenNote={onOpenNote} />}
         {b.kind === 'error' && onRetry && (
           <button
             type="button"
@@ -744,13 +797,26 @@ function lastResponseTail(bubbles: TodoChatBubble[]): TodoChatBubble[] {
   return tail.slice(-3)
 }
 
+/** Collapse bubble markup for one-line previews: filepath fences become
+ * their filenames, other fences a [code] marker, inline markers drop. */
+function stripBubbleMarkup(text: string): string {
+  return text
+    .replace(/```filepath[ \t]*\n?([\s\S]*?)```/g, (_all, body: string) =>
+      body.split('\n').map((s) => s.trim()).filter(Boolean).map((p) => p.split('/').pop()).join(', '))
+    .replace(/```[\w-]*[ \t]*\n?[\s\S]*?```/g, '[code]')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function previewLine(bubbles: TodoChatBubble[]): string {
   const last = bubbles[bubbles.length - 1]
   if (!last) return ''
-  if (last.role === 'user') return `You: ${last.text}`
+  if (last.role === 'user') return `You: ${stripBubbleMarkup(last.text)}`
   if (last.kind === 'error') return `failed: ${last.text}`
   const links = last.links.map((l) => l.label).join(', ')
-  return last.text || links
+  return stripBubbleMarkup(last.text) || links
 }
 
 function ConversationsSection({ threads, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
