@@ -966,6 +966,22 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const [planner, setPlanner] = useState<{ slug: string | null; active: boolean; frequency: 'morning' | 'twice' | 'thrice' } | null>(null)
   const [suggesting, setSuggesting] = useState(false)
   const [plannerMenuOpen, setPlannerMenuOpen] = useState(false)
+  const plannerMenuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!plannerMenuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!plannerMenuRef.current?.contains(e.target as Node)) setPlannerMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPlannerMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [plannerMenuOpen])
   const [commentKey, setCommentKey] = useState<string | null>(null)
   const [subDraftFor, setSubDraftFor] = useState<string | null>(null)
   // The stream: recent chat threads (non-todo sessions).
@@ -1392,7 +1408,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
             </div>
             <div className="ml-auto flex items-center gap-2">
               {planner?.slug && (
-                <div className="relative flex items-center">
+                <div ref={plannerMenuRef} className="relative flex items-center">
                   <IconTip label="Ask Rowboat for suggestions now">
                     <button
                       type="button"
