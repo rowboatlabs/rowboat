@@ -245,6 +245,15 @@ export function QuickAskBar() {
           background-color: rgba(255, 255, 255, 0.6) !important;
           border-color: rgba(0, 0, 0, 0.12) !important;
         }
+        /* Charcoal code blocks: shiki paints the body's LIGHT theme bg as an
+           inline style, so only an !important rule can restyle it. Tokens
+           use the dark palette via the .dark scope on the markdown. */
+        .qa-root [data-streamdown="code-block-body"] {
+          background-color: #202124 !important;
+        }
+        .qa-root [data-streamdown="code-block"] {
+          border-color: rgba(0, 0, 0, 0.3) !important;
+        }
       `}</style>
       {asked && (
         <div className="relative flex min-h-0 flex-1 flex-col border-b border-black/5 px-7 pb-3 pt-5">
@@ -284,7 +293,7 @@ export function QuickAskBar() {
                  off a .dark ancestor, so this flips code to its dark palette
                  (matching the charcoal block bg) without darkening the rest
                  of the light panel — the prose classes here are explicit. */
-              <Streamdown className="dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:bg-neutral-800 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
+              <Streamdown className="dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
                 {answer.text}
               </Streamdown>
             ) : (
