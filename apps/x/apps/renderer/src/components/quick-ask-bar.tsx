@@ -46,8 +46,13 @@ export function QuickAskBar() {
   // corner areas OUTSIDE the border-radius — white spurs at every corner.
   // Clear every layer so only the rounded capsule is visible.
   useEffect(() => {
-    // The bar window skips the app's ThemeProvider — the default (light)
-    // tokens are exactly what this light design wants; nothing to claim.
+    // The bar window skips the app's ThemeProvider — claim the LIGHT tokens
+    // explicitly. Removing 'dark' matters: the pre-light-redesign code added
+    // it, and the window persists across HMR, so a stale 'dark' class left
+    // code blocks rendering dark-theme tokens (near-white text) on the
+    // light panel.
+    document.documentElement.classList.remove('dark')
+    document.documentElement.classList.add('light')
     document.documentElement.style.background = 'transparent'
     document.body.style.background = 'transparent'
     // The document must never scroll: during window resize transitions the
@@ -275,7 +280,7 @@ export function QuickAskBar() {
                 answer instead of persisting as a header. */}
             <div className="mb-2 text-sm font-medium text-neutral-500">{asked}</div>
             {answer?.text ? (
-              <Streamdown className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
+              <Streamdown className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:bg-white/70 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
                 {answer.text}
               </Streamdown>
             ) : (
