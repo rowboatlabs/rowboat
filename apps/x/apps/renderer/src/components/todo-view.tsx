@@ -30,8 +30,8 @@ type TodoViewProps = {
 }
 
 type ComposeTarget =
-  | { kind: 'todo' }
-  | { kind: 'sub'; parentKey: string; parentText: string }
+  | { kind: 'todo'; prefill?: string }
+  | { kind: 'sub'; parentKey: string; parentText: string; prefill?: string }
   | { kind: 'comment'; key: string; itemText: string; quote?: string }
   | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
 
@@ -201,12 +201,19 @@ function ReceiptRow({ item, onOpenNote, onRetry, onOpenThread }: {
 // One item row — checkbox, editable text, chips, receipts, dismiss
 // ---------------------------------------------------------------------------
 
-function SubComposer({ onSubmit, onCancel }: {
+function SubComposer({ onSubmit, onCancel, onHandoff }: {
   onSubmit: (text: string) => void
   onCancel: () => void
+  onHandoff?: (text: string) => void
 }) {
   const [text, setText] = useState('')
   const mention = useMention(text, setText)
+  useEffect(() => {
+    if (onHandoff && mentionsRowboat(text)) {
+      onHandoff(text)
+      setText('')
+    }
+  }, [text, onHandoff])
   return (
     <div className="relative mt-1 flex items-center gap-2 rounded-lg border border-dashed border-border px-2.5 py-1.5">
       {mention.show && <MentionPopup onPick={mention.complete} />}
@@ -646,9 +653,17 @@ function Composer({ onSubmit }: { onSubmit: (text: string, kind: 'task' | 'chat'
 
 // The to-do door, where to-dos live: a slim always-there row at the end of
 // the list. Enter appends the line — no model, no modes.
-function AddItemRow({ onAdd }: { onAdd: (text: string) => void }) {
+function AddItemRow({ onAdd, onHandoff }: { onAdd: (text: string) => void; onHandoff?: (text: string) => void }) {
   const [text, setText] = useState('')
   const mention = useMention(text, setText)
+  // Delegation is a message to the agent — the moment the mention lands,
+  // composition moves to the full composer where model/attachments apply.
+  useEffect(() => {
+    if (onHandoff && mentionsRowboat(text)) {
+      onHandoff(text)
+      setText('')
+    }
+  }, [text, onHandoff])
   return (
     <div className="relative mt-1 flex items-center gap-2.5 rounded-lg px-2 py-1.5">
       {mention.show && <MentionPopup onPick={mention.complete} />}
@@ -1598,8 +1613,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     onOpenInChat={onOpenInChat}
                     onAddSub={() => {
                       setRowCollapsed(item.key, false)
-                      if (onComposeTodo) onComposeTodo({ kind: 'sub', parentKey: item.key, parentText: item.text })
-                      else setSubDraftFor(subDraftFor === item.key ? null : item.key)
+                      setSubDraftFor(subDraftFor === item.key ? null : item.key)
                     }}
                     childRows={(item.children.length > 0 || subDraftFor === item.key) && (
                       <div className="ml-1 mt-1 flex flex-col border-l-2 border-border pl-3">
@@ -1644,6 +1658,10 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                           <SubComposer
                             onSubmit={(text) => void addSub(item.key, text)}
                             onCancel={() => setSubDraftFor(null)}
+                            onHandoff={onComposeTodo ? (text) => {
+                              setSubDraftFor(null)
+                              onComposeTodo({ kind: 'sub', parentKey: item.key, parentText: item.text, prefill: text })
+                            } : undefined}
                           />
                         )}
                       </div>
@@ -1652,20 +1670,15 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                 )
               })
             )}
-            {blocks !== null && (onComposeTodo ? (
-              // Routes into the composer below with the "To-do" chip set —
-              // one input, destination announced.
-              <button
-                type="button"
-                onClick={() => onComposeTodo({ kind: 'todo' })}
-                className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-muted-foreground/70 hover:bg-accent/40 hover:text-foreground"
-              >
-                <Plus className="size-4 shrink-0" />
-                Add a to-do…
-              </button>
-            ) : (
-              <AddItemRow onAdd={(text) => void addItem(text)} />
-            ))}
+            {blocks !== null && (
+              // Plain to-dos are typed in place — no chat chrome. Typing
+              // @rowboat hands the text off to the composer below, where
+              // model and attachments apply to the delegated run.
+              <AddItemRow
+                onAdd={(text) => void addItem(text)}
+                onHandoff={onComposeTodo ? (text) => onComposeTodo({ kind: 'todo', prefill: text }) : undefined}
+              />
+            )}
           </div>
 
           {/* The suggestion tray — proposals awaiting your accept. Never

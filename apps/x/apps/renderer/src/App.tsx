@@ -679,8 +679,8 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
 // Where the Home composer's next send goes — set by the list's ＋/reply
 // affordances, shown as a destination chip. Null = plain assistant chat.
 export type HomeComposeTarget =
-  | { kind: 'todo' }
-  | { kind: 'sub'; parentKey: string; parentText: string }
+  | { kind: 'todo'; prefill?: string }
+  | { kind: 'sub'; parentKey: string; parentText: string; prefill?: string }
   | { kind: 'comment'; key: string; itemText: string; quote?: string }
   | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
 
@@ -4434,8 +4434,13 @@ function App() {
   // the chip + tint, cleared on send/Escape/✕.
   const [homeComposeTarget, setHomeComposeTarget] = useState<HomeComposeTarget | null>(null)
   const [homeComposerFocusSignal, setHomeComposerFocusSignal] = useState(0)
+  const [homeComposerPreset, setHomeComposerPreset] = useState<string | undefined>(undefined)
   const composeTodoOnHome = useCallback((target: HomeComposeTarget) => {
     setHomeComposeTarget(target)
+    if ((target.kind === 'todo' || target.kind === 'sub') && target.prefill) {
+      // Mid-thought handoff from an inline row — carry the typed text along.
+      setHomeComposerPreset(target.prefill.endsWith(' ') ? target.prefill : `${target.prefill} `)
+    }
     setHomeComposerFocusSignal((n) => n + 1)
   }, [])
   const [pendingHomeSubmit, setPendingHomeSubmit] = useState<{
@@ -7093,6 +7098,8 @@ function App() {
                           onSubmit={handleHomeComposerSubmit}
                           isProcessing={false}
                           runId={null}
+                          presetMessage={homeComposerPreset}
+                          onPresetMessageConsumed={() => setHomeComposerPreset(undefined)}
                           onSelectedModelChange={(m) => { homeSelectedModelRef.current = m ?? null }}
                           onReasoningEffortChange={(effort) => { homeReasoningEffortRef.current = effort ?? null }}
                           workDir={null}
