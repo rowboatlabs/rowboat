@@ -676,6 +676,14 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
   nodes.flatMap(n => n.kind === 'file' ? [n.path] : (n.children ? collectFilePaths(n.children) : []))
 
 /** A snapshot of which view the user is on */
+// Where the Home composer's next send goes — set by the list's ＋/reply
+// affordances, shown as a destination chip. Null = plain assistant chat.
+export type HomeComposeTarget =
+  | { kind: 'todo' }
+  | { kind: 'sub'; parentKey: string; parentText: string }
+  | { kind: 'comment'; key: string; itemText: string }
+  | { kind: 'chatReply'; sessionId: string; title: string }
+
 type ViewState =
   | { type: 'chat'; runId: string | null }
   | { type: 'file'; path: string }
@@ -4424,13 +4432,9 @@ function App() {
   // Destination chip: when set, the Home composer writes to the to-do list
   // instead of the chat. Entered via the list's ＋ affordances, announced by
   // the chip + tint, cleared on send/Escape/✕.
-  const [homeComposeTarget, setHomeComposeTarget] = useState<
-    | { kind: 'todo' }
-    | { kind: 'sub'; parentKey: string; parentText: string }
-    | null
-  >(null)
+  const [homeComposeTarget, setHomeComposeTarget] = useState<HomeComposeTarget | null>(null)
   const [homeComposerFocusSignal, setHomeComposerFocusSignal] = useState(0)
-  const composeTodoOnHome = useCallback((target: { kind: 'todo' } | { kind: 'sub'; parentKey: string; parentText: string }) => {
+  const composeTodoOnHome = useCallback((target: HomeComposeTarget) => {
     setHomeComposeTarget(target)
     setHomeComposerFocusSignal((n) => n + 1)
   }, [])
@@ -4459,18 +4463,18 @@ function App() {
     const target = homeComposeTargetRef.current
     if (target) {
       if (!text) return
-      const payload = {
-        text,
-        run: /(^|\s)@rowboat\b/i.test(text),
-        ...(stagedAttachments.length > 0
-          ? { attachments: stagedAttachments.map((a) => ({ path: a.path, name: a.filename })) }
-          : {}),
-        ...(homeSelectedModelRef.current ? { model: homeSelectedModelRef.current } : {}),
-      }
-      if (target.kind === 'sub') {
-        void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, ...payload })
+      const attachments = stagedAttachments.length > 0
+        ? stagedAttachments.map((a) => ({ path: a.path, name: a.filename }))
+        : undefined
+      const model = homeSelectedModelRef.current ?? undefined
+      if (target.kind === 'comment') {
+        void window.ipc.invoke('todo:comment', { key: target.key, message: text, attachments, model })
+      } else if (target.kind === 'chatReply') {
+        void window.ipc.invoke('todo:chatReply', { sessionId: target.sessionId, message: text, attachments, model })
+      } else if (target.kind === 'sub') {
+        void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model })
       } else {
-        void window.ipc.invoke('todo:addItem', payload)
+        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model })
       }
       setHomeComposeTarget(null)
       return
@@ -7096,11 +7100,22 @@ function App() {
                           contextChip={homeComposeTarget ? {
                             label: homeComposeTarget.kind === 'sub'
                               ? `Step of: ${homeComposeTarget.parentText.slice(0, 40)}`
-                              : 'To-do',
+                              : homeComposeTarget.kind === 'comment'
+                                ? `Reply: ${homeComposeTarget.itemText.slice(0, 40)}`
+                                : homeComposeTarget.kind === 'chatReply'
+                                  ? `Reply: ${homeComposeTarget.title.slice(0, 40)}`
+                                  : 'To-do',
+                            icon: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply' ? 'reply' : 'todo',
                             onDismiss: () => setHomeComposeTarget(null),
                           } : undefined}
                           placeholder={homeComposeTarget
-                            ? (homeComposeTarget.kind === 'sub' ? 'Add a step… @rowboat hands it off' : 'Add a to-do… @rowboat hands it off')
+                            ? (homeComposeTarget.kind === 'sub'
+                                ? 'Add a step… @rowboat hands it off'
+                                : homeComposeTarget.kind === 'comment'
+                                  ? 'Tell @rowboat what to change…'
+                                  : homeComposeTarget.kind === 'chatReply'
+                                    ? 'Reply…'
+                                    : 'Add a to-do… @rowboat hands it off')
                             : undefined}
                         />
                       }

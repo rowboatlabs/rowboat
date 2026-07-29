@@ -366,7 +366,11 @@ export interface HomeChatResult {
     error?: string;
 }
 
-async function driveChatTurn(sessionId: string, message: string): Promise<HomeChatResult> {
+async function driveChatTurn(
+    sessionId: string,
+    message: string,
+    modelOverride?: { provider: string; model: string },
+): Promise<HomeChatResult> {
     const key = `chat:${sessionId}`;
     if (runningItems.has(key)) {
         return { sessionId, turnId: null, error: 'Already running' };
@@ -377,7 +381,7 @@ async function driveChatTurn(sessionId: string, message: string): Promise<HomeCh
     try {
         let sent: { turnId: string };
         try {
-            const { model, provider } = await getDefaultModelAndProvider();
+            const { model, provider } = modelOverride ?? await getDefaultModelAndProvider();
             sent = await withUseCase(
                 { useCase: 'copilot_chat', subUseCase: 'home_stream' },
                 () => sessions.sendMessage(
@@ -433,8 +437,12 @@ export async function startHomeChat(text: string): Promise<HomeChatResult> {
 }
 
 /** An inline reply on a stream thread — the next user message in it. */
-export async function replyHomeChat(sessionId: string, message: string): Promise<HomeChatResult> {
-    return driveChatTurn(sessionId, message);
+export async function replyHomeChat(
+    sessionId: string,
+    message: string,
+    opts?: { model?: { provider: string; model: string } },
+): Promise<HomeChatResult> {
+    return driveChatTurn(sessionId, message, opts?.model);
 }
 
 /**
@@ -443,7 +451,11 @@ export async function replyHomeChat(sessionId: string, message: string): Promise
  * as the next user message in the item's session (reopening a checked
  * item). Never a separate history: the chat surface shows the same session.
  */
-export async function commentOnTodoItem(key: string, message: string): Promise<TodoRunResult> {
+export async function commentOnTodoItem(
+    key: string,
+    message: string,
+    opts?: { model?: { provider: string; model: string } },
+): Promise<TodoRunResult> {
     const norm = normalizeKey(key);
     if (runningItems.has(norm)) {
         return { key: norm, sessionId: null, turnId: null, summary: null, error: 'Already running' };
@@ -491,7 +503,7 @@ export async function commentOnTodoItem(key: string, message: string): Promise<T
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
         const { sessionId, isNew } = await ensureSession(sessions, item.key, title);
         const text = isNew ? buildFirstMessage(item.text, message, parent?.text) : message;
-        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, text, 'comment');
+        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, text, 'comment', opts?.model);
     } finally {
         runningItems.delete(norm);
     }

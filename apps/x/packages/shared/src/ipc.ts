@@ -2498,6 +2498,14 @@ const ipcSchemas = {
     req: z.object({
       sessionId: z.string(),
       message: z.string(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2551,6 +2559,14 @@ const ipcSchemas = {
     req: z.object({
       key: z.string(),
       message: z.string(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
     }),
     res: z.object({
       success: z.boolean(),

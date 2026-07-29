@@ -18,8 +18,13 @@ type TodoViewProps = {
   /** The real assistant composer, mounted by App (full features, submits
    * through the app's chat machinery). Falls back to a basic input. */
   composer?: React.ReactNode
-  /** Route a ＋ affordance into the composer with a destination chip. */
-  onComposeTodo?: (target: { kind: 'todo' } | { kind: 'sub'; parentKey: string; parentText: string }) => void
+  /** Route a ＋/reply affordance into the composer with a destination chip. */
+  onComposeTodo?: (target:
+    | { kind: 'todo' }
+    | { kind: 'sub'; parentKey: string; parentText: string }
+    | { kind: 'comment'; key: string; itemText: string }
+    | { kind: 'chatReply'; sessionId: string; title: string }
+  ) => void
 }
 
 const ROWBOAT_MENTION_RE = /(^|\s)@rowboat\b/i
@@ -1212,7 +1217,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     commentOpen={commentKey === item.key}
                     sessionId={sessions[item.key] ?? null}
                     bubbles={conversations[item.key] ?? []}
-                    onToggleComment={() => setCommentKey(commentKey === item.key ? null : item.key)}
+                    onToggleComment={() => (onComposeTodo
+                      ? onComposeTodo({ kind: 'comment', key: item.key, itemText: item.text })
+                      : setCommentKey(commentKey === item.key ? null : item.key))}
                     onComment={(message) => commentOnItem(item.key, message)}
                     onOpenInChat={onOpenInChat}
                     onAddSub={() => (onComposeTodo
@@ -1247,7 +1254,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                             commentOpen={commentKey === child.key}
                             sessionId={sessions[child.key] ?? null}
                             bubbles={conversations[child.key] ?? []}
-                            onToggleComment={() => setCommentKey(commentKey === child.key ? null : child.key)}
+                            onToggleComment={() => (onComposeTodo
+                              ? onComposeTodo({ kind: 'comment', key: child.key, itemText: child.text })
+                              : setCommentKey(commentKey === child.key ? null : child.key))}
                             onComment={(message) => commentOnItem(child.key, message)}
                             onOpenInChat={onOpenInChat}
                           />
@@ -1288,7 +1297,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
             expanded={expandedThread}
             replyFor={chatReplyFor}
             onToggle={toggleThread}
-            onReply={(sid) => setChatReplyFor(chatReplyFor === sid ? null : sid)}
+            onReply={(sid) => (onComposeTodo
+              ? onComposeTodo({ kind: 'chatReply', sessionId: sid, title: streamThreads.find((t) => t.sessionId === sid)?.title ?? 'conversation' })
+              : setChatReplyFor(chatReplyFor === sid ? null : sid))}
             onSendReply={sendChatReply}
             onOpenNote={onOpenNote}
             onOpenInChat={onOpenInChat}

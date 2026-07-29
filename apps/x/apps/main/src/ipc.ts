@@ -2672,7 +2672,9 @@ export function setupIpcHandlers() {
     },
     'todo:chatReply': async (_event, args) => {
       try {
-        void replyHomeChat(args.sessionId, args.message).catch(() => {});
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const message = links.length > 0 ? `${args.message}\n\nAttached: ${todoLinksToText(links)}` : args.message;
+        void replyHomeChat(args.sessionId, message, args.model ? { model: args.model } : undefined).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -2702,7 +2704,9 @@ export function setupIpcHandlers() {
     },
     'todo:comment': async (_event, args) => {
       try {
-        void commentOnTodoItem(args.key, args.message).catch(() => {});
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const message = links.length > 0 ? `${args.message}\n\nAttached: ${todoLinksToText(links)}` : args.message;
+        void commentOnTodoItem(args.key, message, args.model ? { model: args.model } : undefined).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

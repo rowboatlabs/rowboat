@@ -18,6 +18,7 @@ import {
   ImagePlus,
   ListTodo,
   LoaderIcon,
+  MessageCircle,
   Lock,
   Mic,
   MoreHorizontal,
@@ -248,7 +249,7 @@ interface ChatInputInnerProps {
    * them server-side regardless, so the composer must not pretend otherwise.
    */
   codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
-  contextChip?: { label: string; onDismiss: () => void }
+  contextChip?: { label: string; icon?: 'todo' | 'reply'; onDismiss: () => void }
   placeholder?: string
   focusSignal?: number
 }
@@ -805,7 +806,7 @@ function ChatInputInner({
       {contextChip && (
         <div className="flex items-center px-4 pt-3">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-            <ListTodo className="h-3 w-3" />
+            {contextChip.icon === 'reply' ? <MessageCircle className="h-3 w-3" /> : <ListTodo className="h-3 w-3" />}
             {contextChip.label}
             <button
               type="button"
@@ -1449,7 +1450,7 @@ export interface ChatInputWithMentionsProps {
   /** Destination chip: the composer is visibly writing somewhere other than
    * the chat (e.g. "To-do"). Rendered above the input with a dismiss ✕;
    * Escape also dismisses. */
-  contextChip?: { label: string; onDismiss: () => void }
+  contextChip?: { label: string; icon?: 'todo' | 'reply'; onDismiss: () => void }
   /** Placeholder override (pairs with contextChip). */
   placeholder?: string
   /** Bump to focus the input from outside (e.g. the list's ＋ affordance). */
