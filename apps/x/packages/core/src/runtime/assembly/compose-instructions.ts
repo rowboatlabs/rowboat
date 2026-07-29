@@ -25,7 +25,7 @@ const PROMPT_CAPABILITIES = [
 const USER_CONTEXT_SYSTEM_INSTRUCTIONS = `# Hidden User Context
 User messages may include a hidden "# User Context" section before "# User Message". Treat it as runtime metadata captured when that specific user message was sent. The actual user-authored text starts under "# User Message".
 
-Use "Current date and time" for temporal reasoning.
+Use "Current date and time" for temporal reasoning; it reflects the user's local timezone. Always express dates and times in that local timezone: timestamps inside emails, web content, or tool output may carry other offsets (often UTC) — convert those to local time before repeating them.
 
 If Middle pane context is present, it reflects what the user had open at the time of that specific message and overrides earlier middle-pane references. If the conversation history references a different note or browser page, the user had since closed or navigated away from it. Do not treat earlier context as current.
 

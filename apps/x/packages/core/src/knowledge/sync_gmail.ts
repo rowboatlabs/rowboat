@@ -7,6 +7,7 @@ import { getMaxEmails } from '../config/gmail_sync_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
+import { formatTimestampForModel } from '@x/shared/dist/time.js';
 import { classifyThread, getUserEmail } from './classify_thread.js';
 import {
     SYNC_DIR,
@@ -511,7 +512,7 @@ async function parseThreadSnapshot(
     const earlier = visibleMessages.slice(0, -1);
     const earlierSummary = earlier
         .map((msg) => {
-            const date = msg.date ? ` (${msg.date})` : '';
+            const date = msg.date ? ` (${formatTimestampForModel(msg.date)})` : '';
             const body = msg.body.replace(/\s+/g, ' ').slice(0, 500).trim();
             return `${msg.from}${date}: ${body}`;
         })
@@ -680,7 +681,7 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
             const date = headers.find(h => h.name === 'Date')?.value || 'Unknown';
 
             mdContent += `### From: ${from}\n`;
-            mdContent += `**Date:** ${date}\n\n`;
+            mdContent += `**Date:** ${formatTimestampForModel(date)}\n\n`;
 
             if (msg.payload) {
                 const body = getBody(msg.payload);

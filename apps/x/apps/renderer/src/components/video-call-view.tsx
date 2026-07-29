@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Mic, MicOff, Minimize2, MonitorUp, PhoneOff, Presentation, Square, User, Video, VideoOff } from 'lucide-react'
 
 import { MascotFaceIcon, TalkingHead } from '@/components/talking-head'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { TTSState } from '@/hooks/useVoiceTTS'
 import { cn } from '@/lib/utils'
 
-export type VideoCallStatus = 'listening' | 'thinking' | 'speaking'
+export type VideoCallStatus = 'idle' | 'listening' | 'thinking' | 'speaking'
+
+export type PttStatus = 'idle' | 'held' | 'locked'
 
 interface VideoCallViewProps {
   /** Live camera stream from useVideoMode — attached to the user's tile. */
@@ -28,6 +31,12 @@ interface VideoCallViewProps {
   /** Live TTS output level — drives the mascot's mouth animation. */
   getTtsLevel: () => number
   status: VideoCallStatus
+  /** Push-to-talk gate: 'held' while the key/button is down, 'locked' after
+   *  a quick tap (hands-free until the next tap). */
+  pttStatus: PttStatus
+  /** Press/release edges of the on-screen talk button. */
+  onPttDown: () => void
+  onPttUp: () => void
   /** Live transcript of the user's in-progress utterance. */
   interimText?: string
   /** The assistant line currently being spoken aloud. */
@@ -36,7 +45,8 @@ interface VideoCallViewProps {
 }
 
 const STATUS_DISPLAY: Record<VideoCallStatus, { label: string; dotClass: string }> = {
-  listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
+  idle: { label: 'Hold right ⌘ to talk · press & release it to go hands-free', dotClass: 'bg-neutral-500' },
+  listening: { label: 'Listening — release to send', dotClass: 'bg-green-500 animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
 }
@@ -63,6 +73,9 @@ export function VideoCallView({
   ttsState,
   getTtsLevel,
   status,
+  pttStatus,
+  onPttDown,
+  onPttUp,
   interimText,
   assistantCaption,
   onLeave,
@@ -98,16 +111,6 @@ export function VideoCallView({
           Practice session
         </span>
       )}
-      <button
-        type="button"
-        onClick={onMinimize}
-        className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-neutral-800 text-white/80 transition-colors hover:bg-neutral-700 hover:text-white"
-        aria-label="Minimize call (shares your screen)"
-        title="Minimize — shares your screen so it can help you work"
-      >
-        <Minimize2 className="h-4 w-4" />
-      </button>
-
       {/* Participant tiles */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-4 pb-2 md:grid-cols-2">
         {/* User */}
@@ -161,7 +164,7 @@ export function VideoCallView({
           <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
             Rowboat
           </span>
-          {status !== 'listening' && (
+          {(status === 'thinking' || status === 'speaking') && (
             <button
               type="button"
               onClick={onInterrupt}
@@ -195,13 +198,18 @@ export function VideoCallView({
 
       {/* Control bar */}
       <div className="flex items-center justify-center gap-4 pb-5">
-        <span className="flex items-center gap-2 rounded-full bg-neutral-800 px-3 py-1.5 text-xs font-medium text-white/90">
-          {/* Muted overrides "Listening" — the green pulse would be a lie.
-              Thinking/speaking still show: output continues while muted. */}
-          {micMuted && status === 'listening' ? (
+        <span className="flex h-10 items-center gap-2 rounded-full bg-neutral-800 px-4 text-xs font-medium text-white/90">
+          {/* Muted overrides the PTT hint — pressing to talk does nothing
+              while muted. Thinking/speaking still show: output continues. */}
+          {micMuted && (status === 'idle' || status === 'listening') ? (
             <>
               <span className="block h-2 w-2 rounded-full bg-red-500" />
               Muted
+            </>
+          ) : pttStatus === 'locked' ? (
+            <>
+              <span className="block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              Hands-free — press right ⌘ again to send
             </>
           ) : (
             <>
@@ -210,64 +218,128 @@ export function VideoCallView({
             </>
           )}
         </span>
-        <button
-          type="button"
-          onClick={onToggleMic}
-          className={cn(
-            'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
-            micMuted
-              ? 'bg-red-600 text-white hover:bg-red-500'
-              : 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
-          )}
-          aria-label={micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
-          title={micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}
-        >
-          {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-        </button>
-        <button
-          type="button"
-          onClick={onToggleCamera}
-          className={cn(
-            'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
-            cameraOn
-              ? 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
-              : 'bg-red-600 text-white hover:bg-red-500'
-          )}
-          aria-label={cameraOn ? 'Turn off camera' : 'Turn on camera'}
-          title={cameraOn ? 'Turn off camera' : 'Turn on camera'}
-        >
-          {cameraOn ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-        </button>
-        <button
-          type="button"
-          onClick={onToggleScreenShare}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white/90 transition-colors hover:bg-neutral-700"
-          aria-label="Present your screen"
-          title="Present your screen"
-        >
-          <MonitorUp className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setMascotVisible((v) => !v)}
-          className="relative flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white/90 transition-colors hover:bg-neutral-700"
-          aria-label={mascotVisible ? 'Hide mascot' : 'Show mascot'}
-        >
-          <MascotFaceIcon />
-          {!mascotVisible && (
-            <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span className="block h-[1.5px] w-6 -rotate-45 rounded-full bg-white/80" />
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={onLeave}
-          className="flex h-10 w-14 items-center justify-center rounded-full bg-red-600 text-white transition-colors hover:bg-red-500"
-          aria-label="End call"
-        >
-          <PhoneOff className="h-5 w-5" />
-        </button>
+        {/* On-screen push-to-talk: hold to talk, quick tap to lock
+            hands-free — mirrors the Right ⌘ key. Pointer capture keeps the
+            release edge even if the cursor slides off mid-hold. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.currentTarget.setPointerCapture(e.pointerId)
+                onPttDown()
+              }}
+              onPointerUp={onPttUp}
+              onPointerCancel={onPttUp}
+              disabled={micMuted}
+              className={cn(
+                'flex h-10 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors select-none',
+                pttStatus !== 'idle'
+                  ? 'bg-green-600 text-white hover:bg-green-500'
+                  : 'bg-neutral-800 text-white/90 hover:bg-neutral-700',
+                micMuted && 'opacity-50'
+              )}
+              aria-label={pttStatus === 'idle' ? 'Hold to talk' : pttStatus === 'locked' ? 'Tap to send' : 'Release to send'}
+            >
+              <Mic className="h-4 w-4" />
+              {pttStatus === 'idle' ? 'Hold to talk' : pttStatus === 'locked' ? 'Tap to send' : 'Release to send'}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="z-[110]">Hold to talk (tap to go hands-free) — or hold the right ⌘ key</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleMic}
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
+                micMuted
+                  ? 'bg-red-600 text-white hover:bg-red-500'
+                  : 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
+              )}
+              aria-label={micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
+            >
+              {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="z-[110]">{micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleCamera}
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
+                cameraOn
+                  ? 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
+                  : 'bg-red-600 text-white hover:bg-red-500'
+              )}
+              aria-label={cameraOn ? 'Turn off camera' : 'Turn on camera'}
+            >
+              {cameraOn ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="z-[110]">{cameraOn ? 'Turn off camera' : 'Turn on camera'}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleScreenShare}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white/90 transition-colors hover:bg-neutral-700"
+              aria-label="Share your screen"
+            >
+              <MonitorUp className="h-5 w-5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="z-[110]">Share your screen</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setMascotVisible((v) => !v)}
+              className="relative flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white/90 transition-colors hover:bg-neutral-700"
+              aria-label={mascotVisible ? 'Hide mascot' : 'Show mascot'}
+            >
+              <MascotFaceIcon />
+              {!mascotVisible && (
+                <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="block h-[1.5px] w-6 -rotate-45 rounded-full bg-white/80" />
+                </span>
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="z-[110]">{mascotVisible ? 'Hide mascot' : 'Show mascot'}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onMinimize}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white/90 transition-colors hover:bg-neutral-700"
+              aria-label="Minimize to the floating pill (shares your screen)"
+            >
+              <Minimize2 className="h-5 w-5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="z-[110]">Minimize — keep working with the floating pill</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onLeave}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-red-600 text-white transition-colors hover:bg-red-500"
+              aria-label="End call"
+            >
+              <PhoneOff className="h-5 w-5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="z-[110]">End call</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   )

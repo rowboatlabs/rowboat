@@ -4,9 +4,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
 import { runWhenPossible } from '../runtime/assembly/headless-app.js';
-import { getKgModel } from '../models/defaults.js';
-import container from '../di/container.js';
-import type { IModelConfigRepo } from '../models/repo.js';
+import { getKgModel, resolveProviderConfig } from '../models/defaults.js';
 import { createLanguageModel } from '../models/models.js';
 import { inlineTask } from '@x/shared';
 import { captureLlmUsage } from '../analytics/usage.js';
@@ -611,9 +609,9 @@ export async function processRowboatInstruction(
  * Returns a schedule object or null for one-time tasks.
  */
 export async function classifySchedule(instruction: string): Promise<InlineTaskSchedule | null> {
-    const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-    const config = await repo.getConfig();
-    const model = createLanguageModel(config.provider, config.model);
+    const selection = await getKgModel();
+    const providerConfig = await resolveProviderConfig(selection.provider);
+    const model = createLanguageModel(providerConfig, selection.model);
 
     const now = new Date();
     const defaultEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -660,8 +658,8 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
         captureLlmUsage({
             useCase: 'knowledge_sync',
             subUseCase: 'inline_task_classify',
-            model: config.model,
-            provider: config.provider.flavor,
+            model: selection.model,
+            provider: selection.provider,
             usage: result.usage,
         });
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import {
   Dialog,
   DialogContent,
@@ -10,12 +10,7 @@ import {
 import { Button } from "@/components/ui/button"
 import type { BillingErrorMatch } from "@/lib/billing-error"
 import * as analytics from "@/lib/analytics"
-
-interface BillingRowboatAccount {
-  config?: {
-    appUrl?: string | null
-  } | null
-}
+import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 
 interface BillingErrorDialogProps {
   open: boolean
@@ -24,15 +19,7 @@ interface BillingErrorDialogProps {
 }
 
 export function BillingErrorDialog({ open, match, onOpenChange }: BillingErrorDialogProps) {
-  const [appUrl, setAppUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    window.ipc
-      .invoke('account:getRowboat', null)
-      .then((account: BillingRowboatAccount) => setAppUrl(account.config?.appUrl ?? null))
-      .catch(() => {})
-  }, [open])
+  const appUrl = useRowboatConfig()?.appUrl ?? null
 
   useEffect(() => {
     if (open && match) analytics.billingErrorShown(match.kind)

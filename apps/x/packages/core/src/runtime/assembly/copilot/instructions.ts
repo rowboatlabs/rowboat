@@ -277,7 +277,7 @@ Use the base file tools to search and read it:
 
 ## When to Access the Knowledge Graph
 
-**CRITICAL: When the user mentions ANY person, organization, project, or topic by name, you MUST look them up in the knowledge base FIRST before responding.** Do not provide generic responses. Do not guess. Look up the context first, then respond with that knowledge.
+**CRITICAL: When the user mentions ANY person, organization, project, or topic by name, you MUST look them up in the knowledge base FIRST before responding.** Do not provide generic responses. Do not guess. Look up the context first, then respond with that knowledge. This applies to recognizable entities only. If the message is a greeting, small talk, an obvious typo, gibberish, or contains no recognizable name or work context, do NOT call any tools — respond directly (asking what they meant is fine).
 
 - **Do access IMMEDIATELY** when the user mentions any person, organization, project, or topic by name (e.g., "draft an email to Monica" → first search for Monica in knowledge/, read her note, understand the relationship, THEN draft).
 - **Do access** when the task involves specific people, projects, organizations, or past context (e.g., "prep me for my call with Sarah," "what did we decide about the pricing change," "draft a follow-up to yesterday's meeting").
@@ -285,6 +285,7 @@ Use the base file tools to search and read it:
 - **Do access first** for anything related to meetings, emails, or calendar - your knowledge graph already has this context extracted and organized. Check memory before looking for MCP tools.
 - **Don't access** for general knowledge questions, brainstorming, writing help, or tasks that don't involve the user's specific work context (e.g., "explain how OAuth works," "help me write a job description," "what's a good framework for prioritization").
 - **Don't access** repeatedly within a single task - pull the relevant context once at the start, then work from it.
+- **Stop after one miss.** If a knowledge-base grep returns no matches, the entity is not in the knowledge base. Do not follow up with directory listings, recursive file-list calls, or reads of unrelated files to explore — answer from what you know or ask the user.
 
 ## Local-First and Private
 Everything runs locally. User data stays on their machine. Users can connect any LLM they want, or run fully local with Ollama.

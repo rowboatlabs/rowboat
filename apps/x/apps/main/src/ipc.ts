@@ -26,6 +26,8 @@ const execFileAsync = promisify(execFile);
 // Active powerSaveBlocker id while Caffeinate is toggled on; null when off.
 let caffeinateBlockerId: number | null = null;
 
+import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
+import { getQuickAskWindow, hideQuickAsk, showQuickAsk, resizeQuickAsk } from './quick-ask.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -33,15 +35,14 @@ import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
-import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
+import { getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
-import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
-import { listCodexModels } from '@x/core/dist/models/codex.js';
 import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
@@ -71,6 +72,7 @@ import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/confi
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
+import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
 import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
@@ -437,12 +439,20 @@ const activeTtsStreams = new Map<string, AbortController>();
 let videoPopoutWin: BrowserWindow | null = null;
 let lastVideoPopoutState: {
   ttsState: 'idle' | 'synthesizing' | 'speaking';
-  status: 'listening' | 'thinking' | 'speaking' | null;
+  status: 'idle' | 'listening' | 'thinking' | 'speaking' | null;
   cameraOn: boolean;
   micMuted: boolean;
   screenSharing: boolean;
   interimText: string | null;
+  pttLocked: boolean;
+  responseText: string | null;
+  questionText: string | null;
 } | null = null;
+
+// Popout window height bounds: the base pill, and the ceiling with the
+// response panel expanded (renderer-driven via video:popoutResize).
+const POPOUT_BASE_HEIGHT = 218;
+const POPOUT_MAX_HEIGHT = 500;
 
 // Match only real app windows — getAllWindows() can also contain the popout
 // itself and hidden utility windows (e.g. PDF-export renderers), which must
@@ -452,9 +462,21 @@ function findMainAppWindow(): BrowserWindow | undefined {
     if (w === videoPopoutWin || w.isDestroyed()) return false;
     const url = w.webContents.getURL();
     const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
-    return isAppWindow && !url.includes('#video-popout');
+    // Every utility window loads the same bundle with a hash route
+    // (#video-popout, #quick-ask, #meeting-detected) — only the hashless
+    // window is the real app. Matching just video-popout let the quick-ask
+    // relay pick the quick-ask window ITSELF as the "app window" and send
+    // the question right back to it (bar stuck on "Thinking…").
+    return isAppWindow && !url.includes('#');
   });
 }
+
+// Global PTT key events go to the app window (it owns the PTT state
+// machine) — the popout only mirrors state pushed back to it.
+initPtt(() => {
+  const main = findMainAppWindow();
+  return main ? [main] : [];
+});
 
 /**
  * Register all IPC handlers with type safety and runtime validation
@@ -906,14 +928,11 @@ export function setupIpcHandlers() {
       // Dev builds never register a login item (it would point at the dev
       // Electron binary), so report off.
       if (!app.isPackaged) return { openAtLogin: false };
-      return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+      return { openAtLogin: isLoginItemEnabled() };
     },
     'app:setLoginItemSettings': async (_event, args) => {
       if (app.isPackaged) {
-        app.setLoginItemSettings({
-          openAtLogin: args.openAtLogin,
-          ...(process.platform === 'win32' ? { args: ['--hidden'] } : {}),
-        });
+        setLoginItemEnabled(args.openAtLogin);
         // The user has expressed an explicit choice — never re-apply the
         // first-run default over it.
         saveAppSettings({ loginItemRegistered: true });
@@ -932,7 +951,84 @@ export function setupIpcHandlers() {
     'voice:setCallActive': async (_event, args) => {
       voiceCallActive = args.active;
       updateSelfCaptureState();
+      // The global PTT key hook runs only while a call needs it.
+      void setPttActive('call', args.active);
       return { success: true as const };
+    },
+    'ptt:getStatus': async () => {
+      return getPttStatus();
+    },
+    'ptt:retryHook': async () => {
+      return retryPttHook();
+    },
+    'ptt:openInputMonitoringSettings': async () => {
+      return openInputMonitoringSettings();
+    },
+    'app:relaunch': async () => {
+      app.relaunch();
+      app.exit(0);
+      return {};
+    },
+    'app:openPrivacySettings': async (_event, args) => {
+      if (process.platform !== 'darwin') return { success: false };
+      const anchors = {
+        microphone: 'Privacy_Microphone',
+        camera: 'Privacy_Camera',
+        'screen-recording': 'Privacy_ScreenCapture',
+        'input-monitoring': 'Privacy_ListenEvent',
+      } as const;
+      try {
+        await shell.openExternal(
+          `x-apple.systempreferences:com.apple.preference.security?${anchors[args.section]}`,
+        );
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    // --- Quick-ask bar relays ---
+    'quickAsk:submit': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:submit', args);
+      return {};
+    },
+    'quickAsk:hide': async () => {
+      hideQuickAsk();
+      return {};
+    },
+    'quickAsk:show': async () => {
+      showQuickAsk();
+      return {};
+    },
+    'quickAsk:newChat': async () => {
+      findMainAppWindow()?.webContents.send('quick-ask:new-chat', null);
+      return {};
+    },
+    'quickAsk:setOptions': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:set-options', args);
+      return {};
+    },
+    'quickAsk:optionsState': async (_event, args) => {
+      getQuickAskWindow()?.webContents.send('quick-ask:options-state', args);
+      return {};
+    },
+    'quickAsk:openChat': async () => {
+      const main = findMainAppWindow();
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+        app.focus({ steal: true });
+        main.webContents.send('quick-ask:open-chat', null);
+      }
+      return {};
+    },
+    'quickAsk:resize': async (_event, args) => {
+      resizeQuickAsk(args.height);
+      return {};
+    },
+    'quickAsk:state': async (_event, args) => {
+      getQuickAskWindow()?.webContents.send('quick-ask:state', args);
+      return {};
     },
     'meeting:notifyNotesReady': async (_event, args) => {
       // Granola-style re-entry point: the note refreshed in place, but the
@@ -1250,22 +1346,8 @@ export function setupIpcHandlers() {
         return { success: false, error: message };
       }
     },
-    'models:list': async () => {
-      const base = (await isSignedIn())
-        ? await listGatewayModels()
-        : await listOnboardingModels();
-      // ChatGPT-subscription (codex) models are additive and independent of
-      // Rowboat sign-in; their failure must never break the main list.
-      try {
-        const chatgpt = await getChatGPTStatus();
-        if (chatgpt.signedIn) {
-          const codex = await listCodexModels();
-          return { providers: [...base.providers, ...codex.providers] };
-        }
-      } catch (error) {
-        console.warn('[Codex] Listing subscription models failed:', error);
-      }
-      return base;
+    'models:list': async (_event, args) => {
+      return await getModelCatalog({ refreshProvider: args?.refreshProvider });
     },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
@@ -1288,9 +1370,38 @@ export function setupIpcHandlers() {
       console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
       return result;
     },
-    'models:saveConfig': async (_event, args) => {
+    'models:getConfig': async () => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-      await repo.setConfig(args);
+      const cfg = await repo.getConfig().catch(() => null);
+      const tasks = cfg?.taskModels ?? {};
+      return {
+        providers: Object.entries(cfg?.providers ?? {}).map(([id, entry]) => ({
+          id,
+          flavor: entry.flavor,
+          ...(entry.baseURL ? { baseURL: entry.baseURL } : {}),
+          hasApiKey: Boolean(entry.apiKey),
+        })),
+        assistantModel: cfg?.assistantModel ?? null,
+        taskModels: {
+          knowledgeGraph: tasks.knowledgeGraph ?? null,
+          meetingNotes: tasks.meetingNotes ?? null,
+          liveNoteAgent: tasks.liveNoteAgent ?? null,
+          autoPermissionDecision: tasks.autoPermissionDecision ?? null,
+          chatTitle: tasks.chatTitle ?? null,
+          backgroundTask: tasks.backgroundTask ?? null,
+          subagent: tasks.subagent ?? null,
+        },
+        deferBackgroundTasks: cfg?.deferBackgroundTasks === true,
+      };
+    },
+    'models:setProvider': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.setProvider(args.id, args.provider);
+      return { success: true };
+    },
+    'models:removeProvider': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.removeProvider(args.id);
       return { success: true };
     },
     'models:updateConfig': async (_event, args) => {
@@ -1324,6 +1435,7 @@ export function setupIpcHandlers() {
         // Model lists gate on sign-in state (composer picker, models:list) —
         // push the change so they refresh without polling.
         broadcastToWindows('chatgpt:statusChanged', { signedIn: true });
+        captureProviderConnected('codex');
       }
       return result;
     },
@@ -1335,6 +1447,7 @@ export function setupIpcHandlers() {
       try {
         await signOutChatGPT();
         broadcastToWindows('chatgpt:statusChanged', { signedIn: false });
+        captureProviderDisconnected('codex');
         return { success: true };
       } catch (error) {
         console.error('[ChatGPTAuth] Sign-out failed:', error);
@@ -1344,17 +1457,20 @@ export function setupIpcHandlers() {
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();
       if (!signedIn) {
-        return { signedIn: false, accessToken: null, config: null };
+        return { signedIn: false, accessToken: null };
       }
-
-      const config = await getRowboatConfig();
-
       try {
         const accessToken = await getAccessToken();
-        return { signedIn: true, accessToken, config };
+        return { signedIn: true, accessToken };
       } catch {
-        return { signedIn: true, accessToken: null, config };
+        return { signedIn: true, accessToken: null };
       }
+    },
+    // Unauthenticated /v1/config bootstrap, independent of sign-in (signed-out
+    // BYOK users need its model recommendations when connecting a provider).
+    // getRowboatConfig caches once per app run; best-effort null on failure.
+    'rowboat:getConfig': async () => {
+      return await getRowboatConfig().catch(() => null);
     },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
@@ -2327,7 +2443,7 @@ export function setupIpcHandlers() {
 
       const workArea = screen.getPrimaryDisplay().workArea;
       const width = 340;
-      const height = 184;
+      const height = POPOUT_BASE_HEIGHT;
       const ipcDir = path.dirname(fileURLToPath(import.meta.url));
       const preloadPath = app.isPackaged
         ? path.join(ipcDir, '../preload/dist/preload.js')
@@ -2339,6 +2455,16 @@ export function setupIpcHandlers() {
         y: workArea.y + 24,
         frame: false,
         resizable: false,
+        // Never let macOS fullscreen/tile the pill: creating a window while
+        // the app window is in a native-fullscreen Space can otherwise open
+        // it AS a fullscreen window (the pill swallowing the whole screen).
+        fullscreenable: false,
+        minimizable: false,
+        maximizable: false,
+        // NSPanel (macOS): auxiliary windows may join other apps' fullscreen
+        // Spaces — a plain window can't, which made the pill vanish whenever
+        // the user's current app was fullscreen.
+        ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
         alwaysOnTop: true,
         skipTaskbar: true,
         show: false,
@@ -2351,13 +2477,12 @@ export function setupIpcHandlers() {
           preload: preloadPath,
         },
       });
-      // Float above other apps on every workspace. Deliberately NOT
-      // `visibleOnFullScreen: true`: on macOS that flag hides the app's Dock
-      // icon for as long as such a window exists (the app becomes an
-      // "agent" app), which reads as Rowboat having vanished. The trade-off
-      // is the popout won't hover over other apps' fullscreen Spaces.
+      // Float above other apps on every workspace, INCLUDING fullscreen
+      // Spaces. `skipTransformProcessType` keeps the Dock icon: without it,
+      // `visibleOnFullScreen` turns the app into a macOS "agent" app for as
+      // long as the window exists (reads as Rowboat having vanished).
       win.setAlwaysOnTop(true, 'floating');
-      win.setVisibleOnAllWorkspaces(true);
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
       win.webContents.once('did-finish-load', () => {
         if (lastVideoPopoutState) {
           win.webContents.send('video:popout-state', lastVideoPopoutState);
@@ -2381,6 +2506,14 @@ export function setupIpcHandlers() {
       lastVideoPopoutState = args;
       if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
         videoPopoutWin.webContents.send('video:popout-state', args);
+      }
+      return {};
+    },
+    'video:popoutResize': async (_event, args) => {
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
+        const clamped = Math.max(POPOUT_BASE_HEIGHT, Math.min(POPOUT_MAX_HEIGHT, Math.round(args.height)));
+        const [width] = videoPopoutWin.getSize();
+        videoPopoutWin.setSize(width, clamped);
       }
       return {};
     },

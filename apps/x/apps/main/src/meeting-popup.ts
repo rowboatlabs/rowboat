@@ -127,17 +127,14 @@ export function showMeetingPopup(meeting: DetectedMeeting): void {
     // meeting apps on every workspace — the whole point of the popup is to be
     // seen while the user is IN the meeting, wherever that is.
     win.setAlwaysOnTop(true, "screen-saver");
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    // visibleOnFullScreen flips the app's activation policy to "accessory":
-    // the Dock icon disappears and the app can no longer take foreground
-    // focus — clicking "Take Notes" then hands focus to whatever is next in
-    // the window stack instead of Rowboat. Restore the policy immediately:
-    // the popup keeps its fullscreen-auxiliary collection behavior (it's a
-    // non-activating panel, same trick as Zoom's floating controls), while
-    // Rowboat stays a regular app.
-    if (process.platform === "darwin") {
-        void app.dock?.show();
-    }
+    // `skipTransformProcessType` keeps the Dock icon (same as the video
+    // popout and quick-ask bar): without it, visibleOnFullScreen flips the
+    // app's activation policy to "accessory" — the Dock icon disappears and
+    // an app.dock.show() repair is unreliable (the policy comes back, so
+    // Cmd-Tab works, but the Dock tile often never re-registers until
+    // relaunch). The popup keeps its fullscreen-auxiliary behavior — it's a
+    // non-activating panel, same trick as Zoom's floating controls.
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     win.webContents.once("did-finish-load", () => {
         if (win.isDestroyed()) return;
         win.webContents.send("meetingDetect:payload", payload);
