@@ -46,10 +46,8 @@ export function QuickAskBar() {
   // corner areas OUTSIDE the border-radius — white spurs at every corner.
   // Clear every layer so only the rounded capsule is visible.
   useEffect(() => {
-    // The bar window skips the app's ThemeProvider, so theme CSS variables
-    // default to LIGHT — inline code rendered as white pills with white
-    // text. The bar is permanently dark; claim the dark tokens.
-    document.documentElement.classList.add('dark')
+    // The bar window skips the app's ThemeProvider — the default (light)
+    // tokens are exactly what this light design wants; nothing to claim.
     document.documentElement.style.background = 'transparent'
     document.body.style.background = 'transparent'
     // The document must never scroll: during window resize transitions the
@@ -230,7 +228,7 @@ export function QuickAskBar() {
       // No CSS shadow here: it would paint into the window's square corner
       // zones (the only area it isn't clipped) as dark smudges — the native
       // window shadow already provides the depth.
-      className={`qa-root flex h-screen w-screen select-none flex-col overflow-hidden border border-white/10 bg-[#1a1b1e]/95 text-white ${
+      className={`qa-root flex h-screen w-screen select-none flex-col overflow-hidden border border-black/10 bg-[#f6f6f7]/95 text-neutral-900 ${
         expanded ? 'rounded-[44px]' : 'rounded-full'
       }`}
     >
@@ -239,19 +237,19 @@ export function QuickAskBar() {
           translucent skin over it. Plain CSS so no re-render is needed. */}
       <style>{`
         html[data-liquid-glass="1"] .qa-root {
-          background-color: rgba(12, 12, 16, 0.18) !important;
-          border-color: rgba(255, 255, 255, 0.18) !important;
+          background-color: rgba(255, 255, 255, 0.45) !important;
+          border-color: rgba(0, 0, 0, 0.12) !important;
         }
       `}</style>
       {asked && (
-        <div className="relative flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
+        <div className="relative flex min-h-0 flex-1 flex-col border-b border-black/5 px-7 pb-3 pt-5">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={newChat}
                 aria-label="New chat"
-                className="absolute right-14 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.04] text-neutral-400 ring-1 ring-inset ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+                className="absolute right-14 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
               >
                 <Plus className="h-3.5 w-3.5" />
               </button>
@@ -264,20 +262,20 @@ export function QuickAskBar() {
                 type="button"
                 onClick={openInApp}
                 aria-label="Open in Rowboat"
-                className="absolute right-5 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.04] text-neutral-400 ring-1 ring-inset ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+                className="absolute right-5 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
               >
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Open in Rowboat</TooltipContent>
           </Tooltip>
-          <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
+          <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-800">
             <div ref={panelContentRef}>
             {/* Inside the scroll area — the question scrolls away with the
                 answer instead of persisting as a header. */}
-            <div className="mb-2 text-sm font-medium text-neutral-400">{asked}</div>
+            <div className="mb-2 text-sm font-medium text-neutral-500">{asked}</div>
             {answer?.text ? (
-              <Streamdown className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-white/10 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-100">
+              <Streamdown className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
                 {answer.text}
               </Streamdown>
             ) : (
@@ -288,7 +286,7 @@ export function QuickAskBar() {
             {answer?.processing && answer.text && <span className="animate-pulse">▍</span>}
             </div>
           </div>
-          <div className="mt-2 shrink-0 text-[11px] text-neutral-600">
+          <div className="mt-2 shrink-0 text-[11px] text-neutral-500">
             Also in your Rowboat chat · Esc to {answer?.processing ? 'dismiss' : 'clear'}
           </div>
         </div>
@@ -307,16 +305,16 @@ export function QuickAskBar() {
         <span
           className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all duration-300 ${
             recording
-              ? 'animate-pulse bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 shadow-[0_0_18px_rgba(52,211,153,0.35)] ring-white/20'
-              : 'bg-gradient-to-b from-sky-400/25 via-blue-500/15 to-indigo-500/10 shadow-[0_0_16px_rgba(96,165,250,0.25)] ring-white/15'
+              ? 'animate-pulse bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 shadow-[0_0_18px_rgba(52,211,153,0.3)] ring-emerald-500/25'
+              : 'bg-gradient-to-b from-sky-400/25 via-blue-500/15 to-indigo-500/10 shadow-[0_0_16px_rgba(96,165,250,0.25)] ring-sky-500/20'
           }`}
         >
           {/* top sheen — a radial fade from the top center, so there is no
               shape edge to see (the previous half-ellipse showed its rim) */}
           <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.2),transparent_55%)]" />
           <Mic
-            className={`relative h-[18px] w-[18px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] ${
-              recording ? 'text-emerald-100' : 'text-sky-100'
+            className={`relative h-[18px] w-[18px] drop-shadow-[0_1px_1px_rgba(0,0,0,0.12)] ${
+              recording ? 'text-emerald-600' : 'text-sky-600'
             }`}
           />
         </span>
@@ -326,13 +324,13 @@ export function QuickAskBar() {
           value={inputValue}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={recording ? 'Listening…' : 'Ask Rowboat anything…'}
-          className="h-full min-w-0 flex-1 bg-transparent text-lg font-light outline-none placeholder:text-neutral-500"
+          className="h-full min-w-0 flex-1 bg-transparent text-lg font-light outline-none placeholder:text-neutral-400"
         />
         {micDenied ? (
           <button
             type="button"
             onClick={() => void window.ipc.invoke('app:openPrivacySettings', { section: 'microphone' }).catch(() => {})}
-            className="shrink-0 text-[11px] text-red-400 underline-offset-2 hover:underline"
+            className="shrink-0 text-[11px] text-red-600 underline-offset-2 hover:underline"
           >
             Mic blocked — open System Settings
           </button>
@@ -340,14 +338,14 @@ export function QuickAskBar() {
           <span className="flex shrink-0 items-center gap-3">
             {/* Same layered construction as the mic orb: gradient base,
                 inset hairline, radial top sheen. */}
-            <span className="relative flex items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] px-3 py-1.5 text-[13px] text-neutral-200 ring-1 ring-inset ring-white/15">
+            <span className="relative flex items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-b from-black/[0.05] to-black/[0.02] px-3 py-1.5 text-[13px] text-neutral-700 ring-1 ring-inset ring-black/10">
               <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
               {/* Platform label (Windows says right Ctrl; the right-cmd
                   position is the Win key there) at main's smaller glyph size. */}
               <span className="relative">{IS_MAC ? 'Hold right' : 'Hold right Ctrl'}</span>
-              {IS_MAC && <Command className="relative h-3.5 w-3.5 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />}
+              {IS_MAC && <Command className="relative h-3.5 w-3.5 text-sky-600 drop-shadow-[0_1px_1px_rgba(0,0,0,0.12)]" />}
             </span>
-            <span className="text-[13px] text-neutral-400">to speak</span>
+            <span className="text-[13px] text-neutral-500">to speak</span>
           </span>
         )}
         {/* Optional toggles: speak answers aloud, share the screen. Same
@@ -369,8 +367,8 @@ export function QuickAskBar() {
                 aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
                 className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
                   voiceOut
-                    ? 'bg-gradient-to-b from-sky-400/30 to-sky-600/10 text-sky-100 ring-sky-300/30'
-                    : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
+                    ? 'bg-gradient-to-b from-sky-400/30 to-sky-500/10 text-sky-700 ring-sky-500/30'
+                    : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 hover:text-neutral-800'
                 }`}
               >
                 <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
@@ -382,7 +380,7 @@ export function QuickAskBar() {
             </TooltipContent>
           </Tooltip>
           {!expanded && (
-            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
+            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
               {voiceOut ? 'Click to mute' : 'Speak answers aloud'}
             </span>
           )}
@@ -396,8 +394,8 @@ export function QuickAskBar() {
                 aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
                 className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
                   sharing
-                    ? 'bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 text-emerald-100 ring-emerald-300/30'
-                    : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
+                    ? 'bg-gradient-to-b from-emerald-400/30 to-emerald-500/10 text-emerald-700 ring-emerald-500/30'
+                    : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 hover:text-neutral-800'
                 }`}
               >
                 <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
@@ -409,7 +407,7 @@ export function QuickAskBar() {
             </TooltipContent>
           </Tooltip>
           {!expanded && (
-            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
+            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-neutral-900 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
               {sharing ? 'Stop sharing' : 'Share your screen'}
             </span>
           )}
@@ -418,10 +416,10 @@ export function QuickAskBar() {
           type="submit"
           disabled={!draft.trim()}
           aria-label="Send"
-          className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-100 ring-1 ring-inset ring-white/15 transition-all hover:from-white/[0.16] disabled:opacity-40"
+          className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-700 ring-1 ring-inset ring-black/10 transition-all hover:from-black/[0.08] disabled:opacity-40"
         >
           <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
-          <CornerDownLeft className="relative h-5 w-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />
+          <CornerDownLeft className="relative h-5 w-5" />
         </button>
       </form>
     </div>

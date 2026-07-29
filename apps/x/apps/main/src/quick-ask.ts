@@ -117,9 +117,10 @@ async function applyLiquidGlass(win: BrowserWindow) {
   try {
     const { default: liquidGlass } = await import('electron-liquid-glass');
     liquidGlass.addView(win.getNativeWindowHandle(), {
-      // Matches the CSS capsule radius (44 design px × 0.9 zoom).
+      // Matches the CSS capsule radius (44 design px × 0.9 zoom). Light
+      // tint to pair with the bar's light skin.
       cornerRadius: 40,
-      tintColor: '#1a1b1e33',
+      tintColor: '#ffffff55',
     });
     await win.webContents.executeJavaScript(
       "document.documentElement.dataset.liquidGlass = '1'",
