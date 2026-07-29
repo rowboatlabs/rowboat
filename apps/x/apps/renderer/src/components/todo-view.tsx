@@ -1431,7 +1431,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                       else setSubDraftFor(subDraftFor === item.key ? null : item.key)
                     }}
                     childRows={(item.children.length > 0 || subDraftFor === item.key) && (
-                      <div className="mt-1 flex flex-col border-l border-border/60 pl-1">
+                      <div className="ml-1 mt-1 flex flex-col border-l-2 border-border pl-3">
                         {item.children.map((child, ci) => (
                           <ItemRow
                             key={`${index}:${ci}:${child.key}`}

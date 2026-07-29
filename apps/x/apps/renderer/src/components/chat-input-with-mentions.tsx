@@ -822,7 +822,7 @@ function ChatInputInner({
           {contextChip.quote && (
             /* WhatsApp-style quoted context: what you're replying to, right
                above where you type. */
-            <div className="mt-1.5 line-clamp-2 border-l-2 border-primary/30 pl-2 text-xs text-muted-foreground">
+            <div className="mt-1.5 line-clamp-2 border-l-2 border-border pl-2 text-xs text-muted-foreground">
               {contextChip.quote}
             </div>
           )}
