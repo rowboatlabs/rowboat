@@ -233,7 +233,7 @@ export function QuickAskBar() {
       // No CSS shadow here: it would paint into the window's square corner
       // zones (the only area it isn't clipped) as dark smudges — the native
       // window shadow already provides the depth.
-      className={`qa-root flex h-screen w-screen select-none flex-col overflow-hidden border border-black/10 bg-[#fcfcfd]/95 text-neutral-900 ${
+      className={`qa-root flex h-screen w-screen select-none flex-col overflow-hidden border border-black/10 bg-white/[0.97] text-neutral-900 ${
         expanded ? 'rounded-[44px]' : 'rounded-full'
       }`}
     >
@@ -242,7 +242,7 @@ export function QuickAskBar() {
           translucent skin over it. Plain CSS so no re-render is needed. */}
       <style>{`
         html[data-liquid-glass="1"] .qa-root {
-          background-color: rgba(255, 255, 255, 0.6) !important;
+          background-color: rgba(255, 255, 255, 0.75) !important;
           border-color: rgba(0, 0, 0, 0.12) !important;
         }
         /* Charcoal code blocks. Streamdown's own dark rule is
