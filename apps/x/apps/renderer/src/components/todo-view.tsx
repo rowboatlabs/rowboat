@@ -422,7 +422,9 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
         />
       )}
       {!item.checked && item.receipts.some((r) => r.kind === 'question') && (
-        <span className="absolute -left-3 bottom-2 top-2 w-[2px] rounded bg-amber-500/80" />
+        /* Needs-you tick: short, beside the title only — never tall enough
+           to read as a structural rail. */
+        <span title="Rowboat needs an answer from you" className="absolute -left-3 top-[9px] h-4 w-[2.5px] rounded bg-amber-500/80" />
       )}
       {collapsible && onToggleCollapsed && (
         <IconTip label={isCollapsed ? 'Expand' : 'Collapse'}>
