@@ -367,7 +367,7 @@ export function QuickAskBar() {
                 aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
                 className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
                   voiceOut
-                    ? 'bg-gradient-to-b from-sky-400/30 to-sky-500/10 text-sky-700 ring-sky-500/30'
+                    ? 'bg-gradient-to-b from-sky-400/60 to-sky-500/30 text-sky-800 ring-sky-500/50 shadow-[0_0_14px_rgba(56,189,248,0.45)]'
                     : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 hover:text-neutral-800'
                 }`}
               >
@@ -394,7 +394,7 @@ export function QuickAskBar() {
                 aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
                 className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
                   sharing
-                    ? 'bg-gradient-to-b from-emerald-400/30 to-emerald-500/10 text-emerald-700 ring-emerald-500/30'
+                    ? 'bg-gradient-to-b from-emerald-400/60 to-emerald-500/30 text-emerald-800 ring-emerald-500/50 shadow-[0_0_14px_rgba(52,211,153,0.45)]'
                     : 'bg-gradient-to-b from-black/[0.05] to-black/[0.02] text-neutral-500 ring-black/10 hover:text-neutral-800'
                 }`}
               >
