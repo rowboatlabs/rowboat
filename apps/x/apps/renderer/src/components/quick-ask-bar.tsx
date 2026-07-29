@@ -324,7 +324,7 @@ export function QuickAskBar() {
           value={inputValue}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={recording ? 'Listening…' : 'Ask Rowboat anything…'}
-          className="h-full min-w-0 flex-1 bg-transparent text-lg font-light outline-none placeholder:text-neutral-400"
+          className="h-full min-w-0 flex-1 bg-transparent text-lg font-light outline-none placeholder:text-neutral-500"
         />
         {micDenied ? (
           <button
