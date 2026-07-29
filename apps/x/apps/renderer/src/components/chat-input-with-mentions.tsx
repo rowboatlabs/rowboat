@@ -806,14 +806,14 @@ function ChatInputInner({
       {contextChip && (
         <div className="px-4 pt-3">
           <div className="flex items-center">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-0.5 text-xs font-semibold text-primary-foreground">
               {contextChip.icon === 'reply' ? <MessageCircle className="h-3 w-3" /> : <ListTodo className="h-3 w-3" />}
               {contextChip.label}
               <button
                 type="button"
                 onClick={contextChip.onDismiss}
                 aria-label="Back to chat"
-                className="rounded-full hover:bg-primary/15"
+                className="rounded-full opacity-70 hover:opacity-100"
               >
                 <X className="h-3 w-3" />
               </button>

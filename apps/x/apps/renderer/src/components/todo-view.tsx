@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, ChevronDown, CircleAlert, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, ChevronDown, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
 
@@ -148,7 +148,7 @@ function ReceiptRow({ item, onOpenNote, onRetry, onOpenThread }: {
 }) {
   if (item.receipts.length === 0) return null
   return (
-    <div className="mt-1 flex flex-col gap-1">
+    <div className="mt-0.5 flex flex-col gap-0.5">
       {item.receipts.map((r, i) => {
         if (r.kind === 'question') {
           return (
@@ -157,35 +157,35 @@ function ReceiptRow({ item, onOpenNote, onRetry, onOpenThread }: {
               type="button"
               onClick={onOpenThread}
               title="Answer in the thread"
-              className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-left text-[13px] text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+              className="flex items-baseline gap-1.5 text-left text-[12.5px] text-amber-600 hover:underline dark:text-amber-400"
             >
-              <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+              <span className="select-none text-muted-foreground/50">↳</span>
               <span><span className="font-medium">needs you:</span> {r.text}</span>
             </button>
           )
         }
         if (r.kind === 'error') {
           return (
-            <div key={i} className="flex items-center gap-1.5 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[13px] text-red-600 dark:text-red-400">
-              <CircleAlert className="size-3.5 shrink-0" />
+            <div key={i} className="flex items-baseline gap-1.5 text-[12.5px] text-red-600 dark:text-red-400">
+              <span className="select-none text-muted-foreground/50">↳</span>
               <span className="min-w-0 flex-1 truncate" title={r.text}>failed: {r.text}</span>
-              <button type="button" onClick={onRetry} className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium hover:bg-red-500/15">
-                <RotateCcw className="size-3" /> retry
+              <button type="button" onClick={onRetry} className="shrink-0 font-medium hover:underline">
+                retry
               </button>
             </div>
           )
         }
         return (
-          <div key={i} className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/60 px-2.5 py-1.5 text-[13px] text-muted-foreground">
-            <span className="select-none text-muted-foreground/60">→</span>
+          <div key={i} className="flex flex-wrap items-baseline gap-1.5 text-[12.5px] text-muted-foreground">
+            <span className="select-none text-muted-foreground/50">↳</span>
             {r.links.map((l, j) => (
               <button
                 key={j}
                 type="button"
                 onClick={() => openLink(l, onOpenNote)}
-                className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
+                className="font-medium text-foreground hover:underline"
               >
-                <ArrowUpRight className="size-3" /> {l.label}
+                {l.label}
               </button>
             ))}
             {r.text && <span className="min-w-0">{r.text}</span>}
@@ -271,25 +271,25 @@ function Bubble({ b, onOpenNote, onRetry }: {
   onOpenNote: (path: string) => void
   onRetry?: () => void
 }) {
-  if (b.role === 'user') {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3 py-1.5 text-[13px] text-primary-foreground">
-          {b.text}
-        </div>
-      </div>
-    )
-  }
+  // Flat message rows, Slack-style: avatar + name, no chat bubbles.
+  const isUser = b.role === 'user'
   return (
-    <div className="flex items-end gap-1.5">
-      <Bot className="mb-1.5 size-3.5 shrink-0 text-muted-foreground" />
-      <div
-        className={`max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md px-3 py-1.5 text-[13px] ${
-          b.kind === 'error'
-            ? 'bg-red-500/10 text-red-600 dark:text-red-400'
-            : 'bg-muted text-foreground'
+    <div className="flex gap-2">
+      <span
+        className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md text-[10px] font-bold ${
+          isUser ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'
         }`}
       >
+        {isUser ? 'A' : 'R'}
+      </span>
+      <div
+        className={`min-w-0 whitespace-pre-wrap text-[13px] ${
+          b.kind === 'error'
+            ? 'text-red-600 dark:text-red-400'
+            : 'text-foreground'
+        }`}
+      >
+        <span className="mr-1.5 text-[12px] font-bold">{isUser ? 'you' : 'rowboat'}</span>
         {b.kind === 'error' ? `failed: ${b.text}` : b.text}
         {b.kind === 'error' && onRetry && (
           <button
@@ -412,14 +412,17 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
   const collapsedPreview = isCollapsed && bubbles.length > 0 ? previewLine(bubbles) : null
 
   return (
-    <div className={`group/todo relative flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-[opacity,transform,box-shadow] duration-200 hover:bg-accent/40 ${dimmed ? 'opacity-35' : ''} ${
-      spotlight ? 'scale-[1.01] bg-card shadow-md ring-1 ring-primary/25 motion-reduce:transform-none' : ''
+    <div className={`group/todo relative flex items-start gap-2.5 px-2 py-2 transition-[opacity,transform,box-shadow] duration-200 hover:bg-accent/30 ${depth === 0 ? 'border-b border-border/40' : 'rounded-lg'} ${dimmed ? 'opacity-35' : ''} ${
+      spotlight ? 'scale-[1.005] bg-card shadow-md ring-1 ring-primary/25 motion-reduce:transform-none' : ''
     }`}>
       {changed && (
         <span
           title="Changed since you last looked"
-          className="absolute -left-1 top-[13px] size-1.5 rounded-full bg-primary"
+          className="absolute -left-1 top-[15px] size-1.5 rounded-full bg-primary"
         />
+      )}
+      {!item.checked && item.receipts.some((r) => r.kind === 'question') && (
+        <span className="absolute -left-3 bottom-2 top-2 w-[2px] rounded bg-amber-500/80" />
       )}
       {collapsible && onToggleCollapsed && (
         <IconTip label={isCollapsed ? 'Expand' : 'Collapse'}>
@@ -461,7 +464,7 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
         ) : (
           <div
             onClick={() => { if (!item.checked) { setDraft(item.text); setEditing(true) } }}
-            className={`cursor-text text-sm ${item.checked ? 'text-muted-foreground line-through' : ''}`}
+            className={`cursor-text text-sm ${item.checked ? 'text-muted-foreground line-through' : changed ? 'font-semibold' : ''}`}
           >
             <TextWithMentions text={item.text} onOpenLink={(l) => openLink(l, onOpenNote)} />
             {item.children.length > 0 && (
@@ -502,13 +505,14 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
             <button
               type="button"
               onClick={onToggleCollapsed}
-              className={`block w-full truncate text-left text-[12px] ${
+              className={`block w-full truncate text-left text-[12.5px] ${
                 bubbles[bubbles.length - 1]?.kind === 'error'
                   ? 'text-red-600/80 dark:text-red-400/80'
-                  : 'text-muted-foreground/70'
+                  : 'text-muted-foreground'
               } hover:text-foreground`}
             >
-              {collapsedPreview}
+              <span className="text-muted-foreground/50">↳ </span>
+              {bubbles.length} repl{bubbles.length === 1 ? 'y' : 'ies'} · {collapsedPreview}
             </button>
           )
         ) : (
@@ -533,58 +537,56 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, depth = 0, 
           </>
         )}
       </div>
-      {onAddSub && depth === 0 && (
-        <IconTip label="Add a sub-task">
+      {/* One floating action tray on hover — Slack's grammar: zero
+          resting clutter, one surface to learn. */}
+      <div className="absolute -top-3 right-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/todo:flex">
+        {!showConversation && (
+          <IconTip label="Reply — tell @rowboat something about this">
+            <button
+              type="button"
+              onClick={onToggleComment}
+              aria-label="Reply to this item"
+              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          </IconTip>
+        )}
+        {onAddSub && depth === 0 && (
+          <IconTip label="Add a sub-task">
+            <button
+              type="button"
+              onClick={onAddSub}
+              aria-label="Add a sub-task"
+              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <ListPlus className="size-3.5" />
+            </button>
+          </IconTip>
+        )}
+        {sessionId && (
+          <IconTip label="Open the full conversation in the sidebar">
+            <button
+              type="button"
+              onClick={() => onOpenInChat(sessionId)}
+              aria-label="Open the full conversation in the sidebar"
+              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <ArrowUpRight className="size-3.5" />
+            </button>
+          </IconTip>
+        )}
+        <IconTip label="Dismiss — moves to Done & dismissed, restorable">
           <button
             type="button"
-            onClick={onAddSub}
-            aria-label="Add a sub-task"
-            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
+            onClick={onDismiss}
+            aria-label="Dismiss"
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
-            <ListPlus className="size-3.5" />
+            <X className="size-3.5" />
           </button>
         </IconTip>
-      )}
-      {/* ＋ is the standing way to comment on any item; once bubbles are
-          shown, the in-thread "+ reply" chip takes over that job. */}
-      {!showConversation && (
-        <IconTip label="Reply — tell @rowboat something about this">
-          <button
-            type="button"
-            onClick={onToggleComment}
-            aria-label="Reply to this item"
-            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
-          >
-            <Plus className="size-3.5" />
-          </button>
-        </IconTip>
-      )}
-      {/* The arrow appears only once a thread exists — then there is
-          something to open in the sidebar. */}
-      {sessionId && (
-        <IconTip label="Open the full conversation in the sidebar">
-          <button
-            type="button"
-            onClick={() => onOpenInChat(sessionId)}
-            aria-label="Open the full conversation in the sidebar"
-            className={`mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 transition-opacity hover:bg-accent hover:text-foreground ${
-              showConversation || isRunning ? '' : 'opacity-0 group-hover/todo:opacity-100'
-            }`}
-          >
-            <ArrowUpRight className="size-3.5" />
-          </button>
-        </IconTip>
-      )}
-      <IconTip label="Dismiss — moves to Done & dismissed, restorable">
-        <button
-          type="button"
-          onClick={onDismiss}
-          aria-label="Dismiss"
-          className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100"
-        >
-          <X className="size-3.5" />
-        </button>
-      </IconTip>
+      </div>
     </div>
   )
 }
@@ -742,7 +744,7 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
   return (
     <div className={`flex flex-col gap-1 transition-opacity duration-200 ${dimAll ? 'opacity-60' : ''}`}>
       <div className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Conversations</div>
-      <div className="rounded-xl border border-border bg-card px-4 py-2">
+      <div>
         {threads.map((t) => {
           const isRunning = running.has(`chat:${t.sessionId}`)
           const isOpen = expanded === t.sessionId
@@ -752,7 +754,7 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
           return (
             <div
               key={t.sessionId}
-              className={`group/thread border-b border-border/40 py-1.5 transition-[opacity,transform,box-shadow] duration-200 last:border-b-0 ${
+              className={`group/thread relative border-b border-border/40 py-1.5 transition-[opacity,transform,box-shadow] duration-200 last:border-b-0 ${
                 isSpot ? 'scale-[1.005] rounded-lg bg-accent/30 px-2 ring-1 ring-primary/20 motion-reduce:transform-none' : ''
               } ${spotlightSessionId && !isSpot ? 'opacity-40' : ''}`}
             >
@@ -770,7 +772,7 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
                   )}
                   <span className="flex items-center gap-2">
                     <MessageCircle className="size-3.5 shrink-0 text-muted-foreground/60" />
-                    <span className="min-w-0 flex-1 truncate text-sm">{t.title}</span>
+                    <span className={`min-w-0 flex-1 truncate text-sm ${changedSessionIds?.has(t.sessionId) ? 'font-semibold' : ''}`}>{t.title}</span>
                   </span>
                   {/* One glance = where this ended up. Click = the peek. */}
                   {preview && !isOpen && (
@@ -779,40 +781,41 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
                 </button>
                 {isRunning && <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
                 <span className="shrink-0 text-[11px] text-muted-foreground/60">{relativeTime(t.updatedAt)}</span>
-                {/* Reply straight from the row — the composer's quote card
-                    shows what you're replying to, so no expand needed. */}
-                <IconTip label="Reply">
-                  <button
-                    type="button"
-                    onClick={() => onReply(t.sessionId)}
-                    aria-label="Reply"
-                    className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </IconTip>
-                <IconTip label="Open the full thread in the sidebar">
-                  <button
-                    type="button"
-                    onClick={() => onOpenInChat(t.sessionId)}
-                    aria-label="Open the full thread in the sidebar"
-                    className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
-                  >
-                    <ArrowUpRight className="size-3.5" />
-                  </button>
-                </IconTip>
-                {onHide && (
-                  <IconTip label="Hide from Home — stays in your chat history">
+                {/* Same floating tray as items — one grammar everywhere. */}
+                <div className="absolute -top-3 right-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/thread:flex">
+                  <IconTip label="Reply">
                     <button
                       type="button"
-                      onClick={() => onHide(t.sessionId)}
-                      aria-label="Hide from Home"
-                      className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
+                      onClick={() => onReply(t.sessionId)}
+                      aria-label="Reply"
+                      className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
-                      <X className="size-3.5" />
+                      <Plus className="size-3.5" />
                     </button>
                   </IconTip>
-                )}
+                  <IconTip label="Open the full thread in the sidebar">
+                    <button
+                      type="button"
+                      onClick={() => onOpenInChat(t.sessionId)}
+                      aria-label="Open the full thread in the sidebar"
+                      className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <ArrowUpRight className="size-3.5" />
+                    </button>
+                  </IconTip>
+                  {onHide && (
+                    <IconTip label="Hide from Home — stays in your chat history">
+                      <button
+                        type="button"
+                        onClick={() => onHide(t.sessionId)}
+                        aria-label="Hide from Home"
+                        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </IconTip>
+                  )}
+                </div>
               </div>
               {isOpen && (
                 <div className="flex flex-col gap-1.5 pb-1 pl-5 pt-1">
@@ -880,7 +883,7 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   const [open, setOpen] = useState(false)
   if (entries.length === 0) return null
   return (
-    <div className="rounded-xl border border-border bg-card/60 px-4 py-2.5">
+    <div className="border-t border-border/60 px-1 py-2.5">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -1283,17 +1286,17 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
       <button
         type="button"
         onClick={() => setTriageFilter(triageFilter === filter ? null : filter)}
-        className={`${CHIP} border transition-colors ${
-          triageFilter === filter ? 'border-primary/40 bg-primary/10 text-primary' : `border-border ${tone} hover:bg-accent`
+        className={`rounded px-1 text-[12px] transition-colors ${
+          triageFilter === filter ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
         }`}
       >
-        {count} {label}
+        <span className={`font-semibold ${tone}`}>{count}</span> {label}
       </button>
     )
   )
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-muted/30">
+    <div className="flex h-full flex-col overflow-hidden bg-background">
       <div className="flex-1 overflow-y-auto px-9 py-7">
         <div className="mx-auto flex max-w-[720px] flex-col gap-4">
 
@@ -1327,8 +1330,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
 
           {/* While you were away — dismissable catch-up */}
           {changedItems.length > 0 && (
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm">
-              <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+            <div className="flex items-center gap-2 border-y border-border/60 px-1 py-2 text-[13px] text-muted-foreground">
+              <span className="size-1.5 shrink-0 rounded-full bg-foreground" />
               <span className="flex-1">
                 While you were away:
                 {changedFinished > 0 && ` ${changedFinished} item${changedFinished === 1 ? '' : 's'} got updates`}
@@ -1362,7 +1365,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
           )}
 
           {/* The list */}
-          <div className={`rounded-xl border border-border bg-card px-4 py-3 transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
+          <div className={`transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
+            <div className="px-1 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Tasks</div>
             {blocks === null ? (
               <div className="px-2 py-6 text-center text-sm text-muted-foreground">Loading…</div>
             ) : (
@@ -1384,8 +1388,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     changed={isChanged(item.key)}
                     dimmed={(triageFilter !== null && !blockMatches(item)) || (spotKey !== null && !blockContainsSpot(item))}
                     spotlight={item.key === spotKey}
-                    collapsed={!!collapsedRows[item.key]}
-                    onToggleCollapsed={() => setRowCollapsed(item.key, !collapsedRows[item.key])}
+                    collapsed={collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0}
+                    onToggleCollapsed={() => setRowCollapsed(item.key, !(collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0))}
                     isRunning={running.has(item.key)}
                     onToggle={(checked) => {
                       const next = [...blocksRef.current!]
@@ -1436,8 +1440,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                             changed={isChanged(child.key)}
                             dimmed={triageFilter !== null && !triageMatch(child)}
                             spotlight={child.key === spotKey}
-                            collapsed={!!collapsedRows[child.key]}
-                            onToggleCollapsed={() => setRowCollapsed(child.key, !collapsedRows[child.key])}
+                            collapsed={collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0}
+                            onToggleCollapsed={() => setRowCollapsed(child.key, !(collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0))}
                             isRunning={running.has(child.key)}
                             onToggle={(checked) => updateChild(index, ci, (c) => ({ ...c, checked }))}
                             onCommitText={(text) => {
@@ -1542,7 +1546,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
       {/* The assistant composer — pinned to the bottom like any chat
           surface; everything above scrolls. Tasks are born in the list's
           add-row or by @rowboat mention. */}
-      <div className="shrink-0 px-9 pb-5 pt-2">
+      <div className="shrink-0 border-t border-border/40 bg-background px-9 pb-5 pt-3">
         <div className="mx-auto max-w-[720px]">
           {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
         </div>
