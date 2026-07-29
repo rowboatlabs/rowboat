@@ -280,7 +280,11 @@ export function QuickAskBar() {
                 answer instead of persisting as a header. */}
             <div className="mb-2 text-sm font-medium text-neutral-500">{asked}</div>
             {answer?.text ? (
-              <Streamdown className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:bg-white/70 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
+              /* `.dark` scoped to the markdown only: shiki's token colors key
+                 off a .dark ancestor, so this flips code to its dark palette
+                 (matching the charcoal block bg) without darkening the rest
+                 of the light panel — the prose classes here are explicit. */
+              <Streamdown className="dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:bg-neutral-800 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
                 {answer.text}
               </Streamdown>
             ) : (
