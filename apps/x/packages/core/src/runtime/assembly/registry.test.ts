@@ -14,6 +14,7 @@ describe("agent registry", () => {
                 "rowboatx",
                 "live-note-agent",
                 "background-task-agent",
+                "todo-item-agent",
                 "note_creation",
                 "note_curation",
                 "note_tagging_agent",
