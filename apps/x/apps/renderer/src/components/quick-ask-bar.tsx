@@ -245,11 +245,15 @@ export function QuickAskBar() {
           background-color: rgba(255, 255, 255, 0.6) !important;
           border-color: rgba(0, 0, 0, 0.12) !important;
         }
-        /* Charcoal code blocks: shiki paints the body's LIGHT theme bg as an
-           inline style, so only an !important rule can restyle it. Tokens
-           use the dark palette via the .dark scope on the markdown. */
+        /* Charcoal code blocks. Streamdown's own dark rule is
+           background: var(--shiki-dark-bg) !important inside Tailwind's
+           utilities layer — layered !important outranks any override we
+           write, and with the variable undefined it computed to transparent
+           (the washed-out grey). Supplying the variable lets THEIR rule
+           paint the charcoal. */
         .qa-root [data-streamdown="code-block-body"] {
-          background-color: #202124 !important;
+          --shiki-dark-bg: #202124;
+          background-color: #202124;
         }
         .qa-root [data-streamdown="code-block"] {
           border-color: rgba(0, 0, 0, 0.3) !important;
