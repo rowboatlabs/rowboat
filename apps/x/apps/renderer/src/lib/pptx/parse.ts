@@ -335,7 +335,7 @@ function parseRunProps(rPr: XmlNode | undefined): Omit<TextRun, 'text'> {
   return out
 }
 
-function parseParagraph(p: XmlNode): Paragraph {
+export function parseParagraph(p: XmlNode): Paragraph {
   const kids = childrenOf(p)
   const pPr = childByLocal(kids, 'pPr')
   const algn = pPr ? attr(pPr, 'algn') : undefined
