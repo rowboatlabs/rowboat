@@ -44,6 +44,10 @@ const FRAME_HEIGHT = 560;
 const PINNED_WIDTH = 400;
 const PINNED_BASE_HEIGHT = 320;
 const PINNED_MAX_HEIGHT = 560;
+// Tucked presentation of the pinned role: just the mascot + status chip +
+// caption, everything else on hover.
+const TUCKED_WIDTH = 250;
+const TUCKED_HEIGHT = 250;
 // Uniform downscale: the window shrinks and the page zooms by the SAME
 // factor, so every proportion of the design survives exactly — unlike
 // hand-shrinking individual sizes, which broke the alignment.
@@ -52,6 +56,13 @@ const scaled = (v: number) => Math.round(v * SCALE);
 
 let quickAskWin: BrowserWindow | null = null;
 let mode: CompanionMode = 'hidden';
+// Pinned presentation: full pill vs tucked down to just the mascot.
+let pinnedCollapsed = false;
+// A tuck was requested from the summoned bar: the NEXT pin starts collapsed,
+// placed near where the bar's mascot stood (bottom of the cursor's display)
+// instead of the pill's canonical top-right. Time-boxed so a tuck the app
+// declined (voice not configured, race) can't leak into an unrelated call.
+let tuckPendingAt = 0;
 
 // Last call state pushed by the app window — replayed when the window
 // (re)loads, so the pill never renders from a blank guess.
@@ -76,8 +87,16 @@ export function getCompanionMode(): CompanionMode {
   return mode;
 }
 
+export function isPinnedCollapsed(): boolean {
+  return pinnedCollapsed;
+}
+
+export function markTuckPending() {
+  tuckPendingAt = Date.now();
+}
+
 function pushMode(win: BrowserWindow) {
-  win.webContents.send('quick-ask:mode', { mode });
+  win.webContents.send('quick-ask:mode', { mode, collapsed: pinnedCollapsed });
 }
 
 function createWindow(): BrowserWindow {
@@ -202,9 +221,11 @@ export function hideQuickAsk() {
 
 export function toggleQuickAsk() {
   let win = getQuickAskWindow();
-  // While a call pill is up, the shortcut focuses it (the composer is right
-  // there) instead of toggling a second surface into existence.
+  // While a call pill is up, the shortcut brings the text back — expanding
+  // a tucked mascot and focusing — instead of toggling a second surface
+  // into existence.
   if (mode === 'pinned' && win) {
+    if (pinnedCollapsed) setPinnedCollapsed(false);
     win.focus();
     return;
   }
@@ -236,10 +257,21 @@ export function showQuickAsk() {
  */
 export function setCompanionPinned(pinned: boolean) {
   if (pinned) {
+    if (mode === 'pinned') {
+      tuckPendingAt = 0;
+      return;
+    }
     let win = getQuickAskWindow();
     if (!win) win = createWindow();
+    const fromTuck = Date.now() - tuckPendingAt < 5000;
+    tuckPendingAt = 0;
     mode = 'pinned';
-    positionPinned(win);
+    pinnedCollapsed = fromTuck;
+    if (fromTuck) {
+      positionTucked(win);
+    } else {
+      positionPinned(win);
+    }
     pushMode(win);
     // showInactive: appearing must not steal focus from the app the user
     // switched to — that would be a focus grab mid-work.
@@ -247,6 +279,8 @@ export function setCompanionPinned(pinned: boolean) {
   } else {
     if (mode !== 'pinned') return;
     mode = 'hidden';
+    pinnedCollapsed = false;
+    tuckPendingAt = 0;
     const win = getQuickAskWindow();
     if (win) {
       pushMode(win);
@@ -255,10 +289,50 @@ export function setCompanionPinned(pinned: boolean) {
   }
 }
 
+/**
+ * Pill ⇄ tucked-mascot presentation of the pinned role. Resizes in place,
+ * preserving the window's right edge and whichever vertical edge hugs the
+ * nearer screen edge — the mascot shrinks/grows where it stands instead of
+ * jumping to a canonical corner.
+ */
+export function setPinnedCollapsed(collapsed: boolean) {
+  const win = getQuickAskWindow();
+  if (!win || mode !== 'pinned' || pinnedCollapsed === collapsed) return;
+  pinnedCollapsed = collapsed;
+  const b = win.getBounds();
+  const wa = screen.getDisplayMatching(b).workArea;
+  const w = scaled(collapsed ? TUCKED_WIDTH : PINNED_WIDTH);
+  const h = scaled(collapsed ? TUCKED_HEIGHT : PINNED_BASE_HEIGHT);
+  const inTopHalf = b.y + b.height / 2 < wa.y + wa.height / 2;
+  let x = b.x + b.width - w;
+  let y = inTopHalf ? b.y : b.y + b.height - h;
+  x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
+  y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
+  win.setBounds({ x, y, width: w, height: h });
+  pushMode(win);
+}
+
+function positionTucked(win: BrowserWindow) {
+  // Tuck from the summoned bar: the mascot stays with the user — bottom
+  // right of the CURSOR's display, near where it stood beside the card —
+  // rather than teleporting to the pill's canonical top-right.
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const wa = display.workArea;
+  const w = scaled(TUCKED_WIDTH);
+  const h = scaled(TUCKED_HEIGHT);
+  win.setBounds({
+    x: wa.x + wa.width - w - 24,
+    y: wa.y + wa.height - h - 48,
+    width: w,
+    height: h,
+  });
+  win.setHasShadow(false);
+}
+
 /** Renderer-driven pill height (response panel open/folded). Pinned only. */
 export function resizeCompanionPinned(height: number) {
   const win = getQuickAskWindow();
-  if (!win || mode !== 'pinned') return;
+  if (!win || mode !== 'pinned' || pinnedCollapsed) return;
   const clamped = scaled(Math.max(PINNED_BASE_HEIGHT, Math.min(PINNED_MAX_HEIGHT, Math.round(height))));
   const bounds = win.getBounds();
   win.setBounds({ ...bounds, height: clamped });

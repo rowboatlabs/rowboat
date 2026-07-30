@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowUpRight,
   ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronUp,
   Maximize2,
   Mic,
@@ -140,17 +142,29 @@ export function QuickAskBar() {
   // every transition; fetched once to cover the load race. 'hidden' renders
   // as summoned — the window is invisible then anyway.
   const [mode, setMode] = useState<CompanionMode>('summoned')
+  // Pinned presentation: full pill vs tucked down to just the mascot. Main
+  // owns this (it resizes the window); pushes keep us in sync.
+  const [collapsed, setCollapsed] = useState(false)
   useEffect(() => {
     const cleanup = window.ipc.on('quick-ask:mode', (m) => {
       setMode(m.mode === 'hidden' ? 'summoned' : m.mode)
+      setCollapsed(m.collapsed)
     })
     void window.ipc
       .invoke('quickAsk:getMode', null)
-      .then((m) => setMode(m.mode === 'hidden' ? 'summoned' : m.mode))
+      .then((m) => {
+        setMode(m.mode === 'hidden' ? 'summoned' : m.mode)
+        setCollapsed(m.collapsed)
+      })
       .catch(() => {})
     return cleanup
   }, [])
   const pinned = mode === 'pinned'
+
+  const requestCollapsed = useCallback((next: boolean) => {
+    setCollapsed(next)
+    void window.ipc.invoke('quickAsk:setPinnedCollapsed', { collapsed: next }).catch(() => {})
+  }, [])
 
   // Call state mirrored from the app window, which owns the call engine —
   // this window only renders it (same contract as the old popout).
@@ -264,6 +278,7 @@ export function QuickAskBar() {
   const [recording, setRecording] = useState(false)
   const recordingRef = useRef(false)
   const [voiceAvailable, setVoiceAvailable] = useState(false)
+  const [ttsAvailable, setTtsAvailable] = useState(false)
   useEffect(() => {
     Promise.all([
       window.ipc.invoke('voice:getConfig', null),
@@ -272,8 +287,18 @@ export function QuickAskBar() {
       .then(([config, oauthState]) => {
         const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
         setVoiceAvailable(!!config.deepgram || rowboatConnected)
+        setTtsAvailable(!!config.elevenlabs || rowboatConnected)
       })
-      .catch(() => setVoiceAvailable(false))
+      .catch(() => {
+        setVoiceAvailable(false)
+        setTtsAvailable(false)
+      })
+  }, [])
+  // Tucking starts a voice call — same gate as the call button.
+  const callAvailable = voiceAvailable && ttsAvailable
+
+  const tuck = useCallback(() => {
+    void window.ipc.invoke('quickAsk:tuck', null).catch(() => {})
   }, [])
 
   const startRecording = useCallback(() => {
@@ -406,14 +431,24 @@ export function QuickAskBar() {
   }, [asked, pinned, sendAction, startRecording, submitRecording, cancelRecording, reset, dismiss])
 
   // Pinned role: the call pill (old #video-popout), with the real composer
-  // as its typed input. The window is pill-sized in this mode — no
-  // transparent stage.
+  // as its typed input — or, tucked, just the mascot (voice-to-voice). The
+  // window is content-sized in this mode — no transparent stage.
   if (pinned) {
+    if (collapsed) {
+      return (
+        <TuckedMascot
+          state={callState}
+          sendAction={sendAction}
+          onExpand={() => requestCollapsed(false)}
+        />
+      )
+    }
     return (
       <>
         <PinnedPill
           state={callState}
           sendAction={sendAction}
+          onCollapse={() => requestCollapsed(true)}
           composer={
             <ChatInputWithMentions
               knowledgeFiles={knowledgeFiles}
@@ -449,10 +484,11 @@ export function QuickAskBar() {
           window instead of clipping at its rectangular edge (which read as
           a grey rectangle around the card). */}
       <div className="flex shrink-0 items-end gap-1 px-6 pb-5">
+      <div className="relative min-w-0 flex-1">
       {/* Light skin (#810): near-white card, hairline dark border, dark
           text. The window's native shadow is off (it would outline the
           whole transparent frame) — the card draws its own. */}
-      <div className="qa-card min-w-0 flex-1 shrink-0 overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)]">
+      <div className="qa-card w-full overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)]">
         {/* Charcoal code blocks. Streamdown's own dark rule is
             background: var(--shiki-dark-bg) !important inside Tailwind's
             utilities layer — layered !important outranks any override we
@@ -603,11 +639,38 @@ export function QuickAskBar() {
         </div>
       </div>
 
+      {/* Tuck handle on the card's mascot-side edge: push the text into the
+          mascot → voice-to-voice (starts the voice-preset call). Dimmed —
+          never hidden — when voice isn't configured, so the feature stays
+          discoverable without dead-end clicks. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={callAvailable ? tuck : undefined}
+            aria-label="Tuck into the mascot — voice-to-voice"
+            aria-disabled={!callAvailable}
+            className={`absolute -right-3 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-colors ${
+              callAvailable ? 'hover:bg-neutral-50 hover:text-neutral-900' : 'cursor-default opacity-40'
+            }`}
+          >
+            <ChevronsRight className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {callAvailable
+            ? 'Tuck into the mascot — talk instead of type'
+            : 'Voice-to-voice needs voice input & output configured in Settings'}
+        </TooltipContent>
+      </Tooltip>
+      </div>
+
       {/* The mascot, full silhouette on the transparent stage — the same
           TalkingHead the product tour and call tiles render. Thinking
           bubbles while a question is processing; gentle bob otherwise.
           pointer-events-none: clicks on it neither dismiss nor do anything
-          (hush/tuck gestures come with the voice-rule work). */}
+          (hush gestures come with the voice-rule work; the tuck handle on
+          the card is the way in). */}
       <div className="pointer-events-none w-[124px] shrink-0 select-none" aria-hidden="true">
         <TalkingHead ttsState={processing ? 'synthesizing' : 'idle'} getLevel={zeroLevel} size={124} />
       </div>
@@ -642,10 +705,13 @@ const noDragRegion = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 function PinnedPill({
   state,
   sendAction,
+  onCollapse,
   composer,
 }: {
   state: CallState
   sendAction: (action: PopoutAction) => void
+  /** Tuck the pill down to just the mascot (voice-to-voice presentation). */
+  onCollapse: () => void
   composer: React.ReactNode
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -884,6 +950,15 @@ function PinnedPill({
         >
           <Maximize2 className="h-3.5 w-3.5" />
         </button>
+        <button
+          type="button"
+          onClick={onCollapse}
+          className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-700 text-white/90 transition-colors hover:bg-neutral-600"
+          aria-label="Tuck down to just the mascot"
+          title="Tuck down to just the mascot — the call keeps going"
+        >
+          <ChevronsRight className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {/* The current exchange, readable in the pill: the question plus its
@@ -927,6 +1002,159 @@ function PinnedPill({
           (the app attaches them to any submit while a call is live). */}
       <div className="shrink-0" style={noDragRegion}>
         {composer}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The tucked presentation of the pinned role: just the mascot, floating on
+ * a transparent window — voice-to-voice with the call engine. The mascot is
+ * the drag handle (Electron drag regions swallow clicks, so gestures live
+ * on hover controls instead): hover reveals hold-to-talk, expand, and
+ * end-call. A live screen share keeps its consent badge here — the mascot
+ * must never hide an active share. Interim speech and the spoken reply's
+ * tail run as a one-line caption under the mascot.
+ */
+function TuckedMascot({
+  state,
+  sendAction,
+  onExpand,
+}: {
+  state: CallState
+  sendAction: (action: PopoutAction) => void
+  onExpand: () => void
+}) {
+  // No TTS audio pipeline in this window — synthesize the mouth level, same
+  // as the pill's mascot tile.
+  const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
+
+  // One-line caption: the user's in-flight utterance wins; otherwise the
+  // tail of the reply while it's being spoken (markdown stripped).
+  const replyTail =
+    state.ttsState !== 'idle' || state.status === 'thinking'
+      ? (state.responseText ?? '')
+          .replace(/[#*_`>[\]]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(-90)
+      : ''
+  const caption = state.interimText || replyTail
+
+  const statusDisplay = state.status ? STATUS_DISPLAY[state.status] : null
+
+  return (
+    <div
+      className="group relative flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden pb-2"
+      style={dragRegion}
+    >
+      <style>{`
+        @keyframes tucked-pop {
+          0% { opacity: 0; transform: scale(0.5); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+
+      {/* Hover controls — the mascot itself is the drag handle. */}
+      <div
+        className="absolute inset-x-0 top-1 z-10 flex items-center justify-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100"
+        style={noDragRegion}
+      >
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId)
+            sendAction('ptt-down')
+          }}
+          onPointerUp={() => sendAction('ptt-up')}
+          onPointerCancel={() => sendAction('ptt-up')}
+          disabled={state.micMuted}
+          className={`flex h-6 select-none items-center gap-1 rounded-full px-2 text-[10px] font-medium shadow-md transition-colors ${
+            state.status === 'listening' || state.pttLocked
+              ? 'bg-green-600 text-white hover:bg-green-500'
+              : 'bg-neutral-800/90 text-white/90 hover:bg-neutral-700'
+          } ${state.micMuted ? 'opacity-50' : ''}`}
+          aria-label="Hold to talk — or hold the right ⌘ key from any app"
+          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
+        >
+          <Mic className="h-3 w-3" />
+          {state.pttLocked ? 'Tap to send' : state.status === 'listening' ? 'Release to send' : 'Hold to talk'}
+        </button>
+        <button
+          type="button"
+          onClick={onExpand}
+          className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-800/90 text-white/90 shadow-md transition-colors hover:bg-neutral-700"
+          aria-label="Bring the text back"
+          title="Bring the text back (⌥⇧Space works too)"
+        >
+          <ChevronsLeft className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => sendAction('end-call')}
+          className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white shadow-md transition-colors hover:bg-red-500"
+          aria-label="End call"
+          title="End call"
+        >
+          <PhoneOff className="h-3 w-3" />
+        </button>
+      </div>
+
+      {/* Consent badge: a tucked share call must still show it's sharing. */}
+      {state.screenSharing && (
+        <span className="pointer-events-none absolute left-1/2 top-8 z-10 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md">
+          <span className={`block h-1.5 w-1.5 rounded-full bg-white ${state.micMuted ? '' : 'animate-pulse'}`} />
+          {state.micMuted ? 'Sharing paused' : 'Sharing screen'}
+        </span>
+      )}
+      {(state.status === 'speaking' || state.status === 'thinking') && (
+        <button
+          type="button"
+          onClick={() => sendAction('stop-speaking')}
+          className="absolute right-2 top-8 z-10 flex items-center gap-1 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white opacity-0 shadow-md transition-opacity hover:bg-red-500 group-hover:opacity-100"
+          style={noDragRegion}
+          aria-label="Stop the assistant"
+          title={state.status === 'speaking' ? 'Stop speaking' : 'Stop responding'}
+        >
+          <Square className="h-2.5 w-2.5 fill-current" />
+          Stop
+        </button>
+      )}
+
+      <div style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+        <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={132} />
+      </div>
+
+      {/* Caption + status chip, readable over any desktop. */}
+      <div className="flex h-4 max-w-full items-center px-2">
+        {caption && (
+          <span className="truncate rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{caption}</span>
+        )}
+      </div>
+      <div className="mt-1 flex h-5 items-center">
+        <span className="flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white">
+          {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
+            <>
+              <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
+              Muted
+            </>
+          ) : state.pttLocked ? (
+            <>
+              <span className="block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+              Hands-free
+            </>
+          ) : statusDisplay ? (
+            <>
+              <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
+              {statusDisplay.label}
+            </>
+          ) : (
+            <>
+              <span className="block h-1.5 w-1.5 rounded-full bg-neutral-500" />
+              Connecting…
+            </>
+          )}
+        </span>
       </div>
     </div>
   )

@@ -31,9 +31,12 @@ import {
   getPopoutState,
   getQuickAskWindow,
   hideQuickAsk,
+  isPinnedCollapsed,
+  markTuckPending,
   pushPopoutState,
   resizeCompanionPinned,
   setCompanionPinned,
+  setPinnedCollapsed,
   showQuickAsk,
 } from './quick-ask.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
@@ -1027,7 +1030,19 @@ export function setupIpcHandlers() {
       return {};
     },
     'quickAsk:getMode': async () => {
-      return { mode: getCompanionMode() };
+      return { mode: getCompanionMode(), collapsed: isPinnedCollapsed() };
+    },
+    'quickAsk:tuck': async () => {
+      // The next pin starts collapsed near the bar's mascot; the app window
+      // decides HOW to get there (start a voice call, or minimize a live
+      // call to the floating surface).
+      markTuckPending();
+      findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
+      return {};
+    },
+    'quickAsk:setPinnedCollapsed': async (_event, args) => {
+      setPinnedCollapsed(args.collapsed);
+      return {};
     },
     'quickAsk:hide': async () => {
       hideQuickAsk();

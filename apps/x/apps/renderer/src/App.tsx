@@ -1933,6 +1933,21 @@ function App() {
     })
   }, [])
 
+  // Tuck relay: the bar pushed its text into the mascot — voice-to-voice.
+  // This is the voice call preset's long-promised "floating mascot pill"
+  // surface: start one (it opens minimized → callSurface 'popout' → the
+  // companion pins collapsed). If a call is already live, just minimize it
+  // to the floating surface instead of starting a second one.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:tuck', () => {
+      if (inCallRef.current) {
+        setCallMinimized(true)
+        return
+      }
+      if (voiceAvailable && ttsAvailable) void startCall('voice')
+    })
+  }, [voiceAvailable, ttsAvailable, startCall])
+
   // Mirror the in-flight answer back to the bar while a quick-ask turn is
   // live: streaming text while generating, the final assistant message when
   // done (which also ends the mirror). Reads the LIVE chat state — the

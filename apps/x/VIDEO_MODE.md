@@ -223,6 +223,20 @@ over `quick-ask:mode` (`'summoned' | 'pinned'`).
   not be shown or messaged. Right ⌘ pressed while the pill has focus also
   relays as ptt-down/ptt-up actions (no Input Monitoring needed for that
   case).
+- **Tucked (mascot-only voice-to-voice)**: the pinned pill can collapse to
+  just the mascot (`quickAsk:setPinnedCollapsed`; presentation state is
+  pushed with `quick-ask:mode`). The mascot is the drag handle; hover
+  reveals hold-to-talk / bring-text-back / end-call; a one-line caption
+  shows interim speech and the spoken reply's tail; an active screen share
+  KEEPS its consent badge. The summoned bar's tuck handle (») enters this
+  state via `quickAsk:tuck` → `quick-ask:tuck` → the app starts the
+  `voice`-preset call (which opens minimized → floating surface) or, if a
+  call is already live, minimizes it. Tucking from the bar places the
+  mascot bottom-right of the cursor's display (it stays with the user);
+  collapsing an existing pill shrinks it in place toward its nearest
+  corner. ⌥⇧Space while tucked brings the text back; tuck/untuck never
+  ends the call — only the end-call control does. This is the `voice`
+  preset's "floating mascot pill" surface, finally shipped.
 
 ## Permissions
 

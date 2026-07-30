@@ -1147,15 +1147,40 @@ const ipcSchemas = {
     res: z.object({}),
   },
   // The companion window's current role: summoned Spotlight bar, pinned
-  // call pill, or hidden. Pushed on every transition; the invoke covers the
-  // load race (the window may finish loading after a transition fired).
+  // call pill, or hidden. `collapsed` is the pinned pill tucked down to just
+  // the mascot (voice-to-voice). Pushed on every transition; the invoke
+  // covers the load race (the window may finish loading after a transition
+  // fired).
   'quickAsk:getMode': {
     req: z.null(),
-    res: z.object({ mode: z.enum(['hidden', 'summoned', 'pinned']) }),
+    res: z.object({
+      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      collapsed: z.boolean(),
+    }),
   },
   'quick-ask:mode': {
-    req: z.object({ mode: z.enum(['hidden', 'summoned', 'pinned']) }),
+    req: z.object({
+      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      collapsed: z.boolean(),
+    }),
     res: z.null(),
+  },
+  // Bar → main → app window: tuck the text into the mascot. The app starts
+  // the voice-preset call (mascot-only floating surface) — or, if a call is
+  // already live, just minimizes it to the floating surface.
+  'quickAsk:tuck': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  'quick-ask:tuck': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Pill ⇄ tucked-mascot presentation of the pinned role (main resizes the
+  // window in place and re-pushes quick-ask:mode).
+  'quickAsk:setPinnedCollapsed': {
+    req: z.object({ collapsed: z.boolean() }),
+    res: z.object({}),
   },
   // App window → main: open the bar (the discoverability toast's "Try it").
   'quickAsk:show': {
