@@ -13,7 +13,9 @@ import { useSessionChat } from '@/hooks/useSessionChat';
 import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
 import { ChatSessionPane, ChatSessionComposer } from './components/chat-session';
-import { type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
+// Value import: the Home to-do surface mounts a standalone composer directly
+// (not tab-bound); chat tabs render theirs through ChatSessionComposer.
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { ImageFileViewer } from '@/components/image-file-viewer';
