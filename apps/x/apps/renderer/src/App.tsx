@@ -14,7 +14,6 @@ import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
 import { ChatSessionPane, ChatSessionComposer } from './components/chat-session';
 import { type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
-import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { ImageFileViewer } from '@/components/image-file-viewer';
@@ -32,8 +31,6 @@ import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
-import { CodingRunBlock } from '@/components/coding-run';
-import { SubAgentBlock } from '@/components/sub-agent-block';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
@@ -45,21 +42,10 @@ import { CodeChat } from '@/components/code/code-chat';
 import { ResizableRightPane } from '@/components/code/resizable-right-pane';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
-  Message,
-  MessageContent,
-  MessageCopyButton,
-  MessageResponse,
-} from '@/components/ai-elements/message';
-import {
   type PromptInputMessage,
   type FileMention,
 } from '@/components/ai-elements/prompt-input';
 
-import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
-import { WebSearchResult } from '@/components/ai-elements/web-search-result';
-import { AppActionCard } from '@/components/ai-elements/app-action-card';
-import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
-import { TerminalOutput } from '@/components/terminal-output';
 import { ToolPermissionAutoDecisionEvent, ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -72,7 +58,6 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
-import { BillingErrorNotice } from "@/components/billing-error-notice"
 import { CreditCelebration } from "@/components/credit-celebration"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
@@ -87,9 +72,6 @@ import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
-import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
-import { defaultRemarkPlugins } from 'streamdown'
-import remarkBreaks from 'remark-breaks'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import { CaffeinateIndicator } from '@/components/caffeinate-indicator'
 import {
@@ -99,20 +81,12 @@ import {
   type ConversationItem,
   type ToolCall,
   createEmptyChatTabViewState,
-  getWebSearchCardData,
-  getAppActionCardData,
-  getComposioConnectCardData,
   getToolDisplayName,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
   isToolCall,
-  isTurnUsageMessage,
   normalizeToolInput,
-  normalizeToolOutput,
-  parseAttachedFiles,
-  REASONING_EFFORT_LABELS,
-  toToolState,
 } from '@/lib/chat-conversation'
 import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
@@ -130,7 +104,6 @@ import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 import { playAckCue, playAlertCue, playPopCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
-import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -138,38 +111,6 @@ type RunEventType = z.infer<typeof RunEvent>
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
   loaded?: boolean
-}
-
-const streamdownComponents = { pre: MarkdownPreOverride }
-
-// Render user messages with markdown so bullets, bold, links, etc. survive the
-// round-trip from the input textarea. `remarkBreaks` turns single newlines
-// into <br> so typed line breaks are preserved without requiring blank lines.
-const userMessageRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks]
-
-function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
-  const ref = useRef<HTMLPreElement>(null)
-  const stickToBottom = useRef(true)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (el && stickToBottom.current) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [children])
-
-  const handleScroll = useCallback(() => {
-    const el = ref.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-    stickToBottom.current = atBottom
-  }, [])
-
-  return (
-    <pre ref={ref} onScroll={handleScroll} className={className}>
-      {children}
-    </pre>
-  )
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
@@ -6709,194 +6650,6 @@ function App() {
     }
   }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePaths])
 
-  const renderConversationItem = (
-    item: ConversationItem,
-    tabId: string,
-    options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
-  ) => {
-    if (isChatMessage(item)) {
-      if (item.role === 'user') {
-        if (item.attachments && item.attachments.length > 0) {
-          return (
-            <Message key={item.id} from={item.role} data-message-id={item.id}>
-              <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
-                <ChatMessageAttachments attachments={item.attachments} />
-              </MessageContent>
-              {item.content && (
-                <div className="flex flex-col items-end">
-                  <MessageContent>
-                    <MessageResponse
-                      components={streamdownComponents}
-                      remarkPlugins={userMessageRemarkPlugins}
-                    >
-                      {item.content}
-                    </MessageResponse>
-                  </MessageContent>
-                  <MessageCopyButton text={item.content} className="mt-0.5" />
-                </div>
-              )}
-            </Message>
-          )
-        }
-        const { message, files } = parseAttachedFiles(item.content)
-        return (
-          <Message key={item.id} from={item.role} data-message-id={item.id}>
-            <div className="flex flex-col items-end">
-              <MessageContent>
-                {files.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {files.map((filePath, index) => (
-                      <span
-                        key={index}
-                        className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
-                      >
-                        @{wikiLabel(filePath)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <MessageResponse
-                  components={streamdownComponents}
-                  remarkPlugins={userMessageRemarkPlugins}
-                >
-                  {message}
-                </MessageResponse>
-              </MessageContent>
-              <MessageCopyButton text={message} className="mt-0.5" />
-            </div>
-          </Message>
-        )
-      }
-      return (
-        <Message key={item.id} from={item.role} data-message-id={item.id}>
-          <MessageContent>
-            <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
-          </MessageContent>
-        </Message>
-      )
-    }
-
-    if (isToolCall(item)) {
-      if (item.name === 'code_agent_run') {
-        return (
-          <CodingRunBlock
-            key={item.id}
-            item={item}
-            open={isToolOpenForTab(tabId, item.id)}
-            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-            onPermissionDecision={(decision) => {
-              if (item.pendingCodePermission) {
-                handleCodePermissionResponse(item.id, item.pendingCodePermission.requestId, decision)
-              }
-            }}
-          />
-        )
-      }
-      if (item.name === 'spawn-agent') {
-        return (
-          <SubAgentBlock
-            key={item.id}
-            item={item}
-            open={isToolOpenForTab(tabId, item.id)}
-            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-          />
-        )
-      }
-      const appActionData = getAppActionCardData(item)
-      if (appActionData) {
-        return <AppActionCard key={item.id} data={appActionData} status={item.status} />
-      }
-      const webSearchData = getWebSearchCardData(item)
-      if (webSearchData) {
-        return (
-          <WebSearchResult
-            key={item.id}
-            query={webSearchData.query}
-            results={webSearchData.results}
-            status={item.status}
-            title={webSearchData.title}
-          />
-        )
-      }
-      const composioConnectData = getComposioConnectCardData(item)
-      if (composioConnectData) {
-        // Skip rendering if this is a duplicate "already connected" card
-        if (composioConnectData.hidden) return null
-        return (
-          <ComposioConnectCard
-            key={item.id}
-            toolkitSlug={composioConnectData.toolkitSlug}
-            toolkitDisplayName={composioConnectData.toolkitDisplayName}
-            status={item.status}
-            alreadyConnected={composioConnectData.alreadyConnected}
-            onConnected={handleComposioConnected}
-          />
-        )
-      }
-      const toolTitle = getToolDisplayName(item)
-      const errorText = item.status === 'error' ? 'Tool error' : ''
-      const output = normalizeToolOutput(item.result, item.status)
-      const input = normalizeToolInput(item.input)
-      return (
-        <Tool
-          key={item.id}
-          open={isToolOpenForTab(tabId, item.id)}
-          onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-          autoPermissionDetail={options?.autoPermissionDetail}
-        >
-          <ToolHeader
-            title={toolTitle}
-            type={`tool-${item.name}`}
-            state={toToolState(item.status)}
-          />
-          <ToolContent>
-            {item.streamingOutput ? (
-              <AutoScrollPre className="max-h-80 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap text-foreground/90">
-                <TerminalOutput raw={item.streamingOutput} />
-              </AutoScrollPre>
-            ) : (
-              <ToolTabbedContent input={input} output={output} errorText={errorText} />
-            )}
-          </ToolContent>
-        </Tool>
-      )
-    }
-
-    if (isTurnUsageMessage(item)) {
-      return (
-        <div key={item.id} className="-mt-6 -ml-1 flex items-center justify-start gap-1" data-message-id={item.id}>
-          <TokenUsageMenu
-            usage={item.usage}
-            scope="turn"
-            modelCallCount={item.modelCallCount}
-            align="start"
-          />
-          {item.reasoningEffort && (
-            <span className="text-xs text-muted-foreground/70">
-              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
-            </span>
-          )}
-        </div>
-      )
-    }
-
-    if (isErrorMessage(item)) {
-      const billingMatch = matchBillingError(item.message)
-      if (billingMatch) {
-        return <BillingErrorNotice key={item.id} id={item.id} match={billingMatch} />
-      }
-      return (
-        <Message key={item.id} from="assistant" data-message-id={item.id}>
-          <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
-            <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
-          </MessageContent>
-        </Message>
-      )
-    }
-
-    return null
-  }
-
   // The active chat's view state, backed by the sessions hook (legacy
   // standalone states remain only as the pre-load fallback until stage 7).
   const activeChatTabState = React.useMemo<ChatTabViewState>(() => (
@@ -7669,9 +7422,10 @@ function App() {
                         onPickPrompt={setPresetMessage}
                         isToolOpenForTab={isToolOpenForTab}
                         setToolOpenForTab={setToolOpenForTab}
-                        renderItem={renderConversationItem}
                         onPermissionResponse={handlePermissionResponse}
                         onAskHumanResponse={handleAskHumanResponse}
+                        onCodePermissionResponse={handleCodePermissionResponse}
+                        onComposioConnected={handleComposioConnected}
                         activeIsWorking={activeIsWorking}
                         activeIsProcessing={activeIsProcessing}
                         activeIsReasoning={activeIsReasoning}
