@@ -247,7 +247,7 @@ export function hideQuickAsk() {
   if (win?.isVisible()) win.hide();
 }
 
-export function toggleQuickAsk() {
+export function toggleQuickAsk(viaShortcut = true) {
   let win = getQuickAskWindow();
   // While a call pill is up, the shortcut brings the text back — expanding
   // a tucked mascot and focusing — instead of toggling a second surface
@@ -270,12 +270,19 @@ export function toggleQuickAsk() {
   // to type. The renderer focuses its input on window focus.
   win.show();
   win.focus();
+  // Hold-to-talk: a chord summon starts capturing immediately (the renderer
+  // detects the release once it has focus). Skip on first-ever creation —
+  // the page is still loading, and by the time it's up the chord is long
+  // released.
+  if (!win.webContents.isLoading()) {
+    win.webContents.send('quick-ask:summoned', { viaShortcut });
+  }
 }
 
 /** Show (never hide) — the discoverability toast's "Try it" action. */
 export function showQuickAsk() {
   if (mode === 'pinned') return;
-  if (!getQuickAskWindow()?.isVisible()) toggleQuickAsk();
+  if (!getQuickAskWindow()?.isVisible()) toggleQuickAsk(false);
 }
 
 /**

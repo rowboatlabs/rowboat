@@ -340,6 +340,81 @@ export function QuickAskBar() {
     setRecording(false)
   }, [voice])
 
+  // Hold-⌥⇧Space-to-talk (the Wispr gesture): a chord summon starts
+  // capturing IMMEDIATELY — one gesture from anywhere to a spoken question.
+  // Electron's global shortcut can't see the key-UP, so the release is
+  // detected here once the window has focus: any chord key's keyup (Space /
+  // Alt / Shift), or any event whose modifier state shows Alt+Shift are no
+  // longer held, finalizes and submits. A quick TAP falls out for free —
+  // nothing was said, the transcript comes back empty, and an empty
+  // transcript doesn't submit, leaving the composer focused for typing.
+  // Typing, Esc, or blur cancels; a hard cap ends a stuck session.
+  const chordRef = useRef(false)
+  const capStartedAtRef = useRef<number | null>(null)
+  const voiceAvailableRef = useRef(false)
+  useEffect(() => {
+    voiceAvailableRef.current = voiceAvailable
+  }, [voiceAvailable])
+  const endChord = useCallback(
+    (how: 'submit' | 'cancel') => {
+      if (!chordRef.current) return
+      chordRef.current = false
+      if (how === 'submit') void submitRecording()
+      else cancelRecording()
+    },
+    [submitRecording, cancelRecording],
+  )
+  useEffect(() => {
+    return window.ipc.on('quick-ask:summoned', ({ viaShortcut }) => {
+      if (!viaShortcut || pinned || recordingRef.current || !voiceAvailableRef.current) return
+      chordRef.current = true
+      startRecording()
+    })
+  }, [pinned, startRecording])
+  useEffect(() => {
+    const CHORD_CODES = ['Space', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight']
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (chordRef.current && CHORD_CODES.includes(e.code)) endChord('submit')
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!chordRef.current) return
+      if (e.key === 'Escape') {
+        endChord('cancel')
+        return
+      }
+      // A non-chord key means they're typing — get out of the way.
+      if (!CHORD_CODES.includes(e.code)) endChord('cancel')
+    }
+    const onMouseMove = (e: MouseEvent) => {
+      // Backup release signal: the chord's modifiers are no longer held
+      // (its keyups were delivered before this window took focus).
+      if (chordRef.current && !e.getModifierState('Alt') && !e.getModifierState('Shift')) {
+        endChord('submit')
+      }
+    }
+    const onBlur = () => endChord('cancel')
+    document.addEventListener('keyup', onKeyUp)
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('blur', onBlur)
+    const cap = setInterval(() => {
+      // Stuck-session cap: no release signal for 45s means we missed it.
+      if (chordRef.current && capStartedAtRef.current && Date.now() - capStartedAtRef.current > 45_000) {
+        endChord('submit')
+      }
+    }, 5_000)
+    return () => {
+      document.removeEventListener('keyup', onKeyUp)
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('blur', onBlur)
+      clearInterval(cap)
+    }
+  }, [endChord])
+  useEffect(() => {
+    capStartedAtRef.current = recording ? Date.now() : null
+  }, [recording])
+
   // Optional toggles. voiceOut: answers to bar questions are spoken aloud.
   // sharing: the app window's screen capture runs and frames ride along with
   // bar submits — the ACTUAL state comes back over quick-ask:options-state

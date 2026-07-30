@@ -1146,6 +1146,14 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
+  // Main → bar: the window was just summoned. viaShortcut distinguishes the
+  // global chord (⌥⇧Space — hold-to-talk starts capturing immediately) from
+  // programmatic shows (the discoverability toast), which must not touch
+  // the mic.
+  'quick-ask:summoned': {
+    req: z.object({ viaShortcut: z.boolean() }),
+    res: z.null(),
+  },
   // The companion window's current role: summoned Spotlight bar, pinned
   // call pill, or hidden. `collapsed` is the pinned pill tucked down to just
   // the mascot (voice-to-voice). Pushed on every transition; the invoke
