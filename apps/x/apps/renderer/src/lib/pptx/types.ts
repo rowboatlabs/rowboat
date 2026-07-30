@@ -44,6 +44,86 @@ export interface Paragraph {
   runs: TextRun[]
 }
 
+// ------------------------------------------------------------- display model
+//
+// Everything below the "display" line is derived presentation data (theme
+// colors, inherited text styles, fills, rotation). The serializer never reads
+// it — its validation derives from raw XML via `parseParagraph`, which stays
+// byte-anchored — so display resolution can improve without touching the
+// write-back invariants.
+
+export type Fill =
+  | { kind: 'solid'; hex: string; alpha?: number }
+  | { kind: 'gradient'; stops: GradientStop[]; angleDeg: number }
+  | { kind: 'none' }
+
+export interface GradientStop {
+  /** 0..1 position along the gradient. */
+  pos: number
+  hex: string
+  alpha?: number
+}
+
+export interface LineStyle {
+  hex: string
+  widthEmu: number
+  dash: 'solid' | 'dash' | 'dot'
+  alpha?: number
+}
+
+export interface PresetGeometry {
+  /** OOXML preset name (`rect`, `roundRect`, `ellipse`, `line`, …) or `custom`. */
+  preset: string
+  /** Adjust values from `a:avLst`, e.g. `{ adj: 16667 }`. */
+  adj: Record<string, number>
+}
+
+/** Visual properties shared by every shape kind; display only. */
+export interface ShapeVisual {
+  fill?: Fill
+  line?: LineStyle
+  geom?: PresetGeometry
+  /** Degrees clockwise. */
+  rotDeg?: number
+  flipH?: boolean
+  flipV?: boolean
+}
+
+export interface ResolvedRunStyle {
+  sizePt: number
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  colorHex: string
+}
+
+export type ResolvedBullet =
+  | { kind: 'none' }
+  | { kind: 'char'; char: string }
+  | { kind: 'auto'; scheme: string; startAt: number }
+
+export interface ParagraphDisplay {
+  level: number
+  marLEmu: number
+  indentEmu: number
+  /** Resolved fallback used when the paragraph itself declares no algn. */
+  align?: TextAlign
+  bullet: ResolvedBullet
+  /** Fully resolved style per ORIGINAL run index (explicit rPr over cascade). */
+  runs: ResolvedRunStyle[]
+  /** The cascade result at this level, for runs with no original anchor. */
+  defaultRun: ResolvedRunStyle
+}
+
+export interface TextDisplay {
+  /** By ORIGINAL paragraph index, matching the as-parsed `paragraphs`. */
+  paragraphs: ParagraphDisplay[]
+  /** Level-0 cascade result, for wholly new content. */
+  defaultRun: ResolvedRunStyle
+}
+
+// ------------------------------------------------------------------- shapes
+
 interface ShapeBase {
   /** `p:cNvPr@id` when present, else a synthesized `idx:<n>`. */
   id: string
@@ -51,11 +131,20 @@ interface ShapeBase {
   slideXmlPath: string
   nodePath: NodePath
   xfrmEmu: RectEmu
+  /** Display-only visual properties (fill, line, geometry, rotation). */
+  visual?: ShapeVisual
 }
 
 export interface TextShape extends ShapeBase {
   type: 'text'
   paragraphs: Paragraph[]
+  /** Display-only resolved text styling (theme + inheritance cascade). */
+  display?: TextDisplay
+}
+
+/** A `p:sp` without a txBody, or a `p:cxnSp` — pure geometry, no text. */
+export interface DrawingShape extends ShapeBase {
+  type: 'drawing'
 }
 
 export interface ImageShape extends ShapeBase {
@@ -80,7 +169,7 @@ export interface PlaceholderShape extends ShapeBase {
   kind: PlaceholderKind
 }
 
-export type Shape = TextShape | ImageShape | PlaceholderShape
+export type Shape = TextShape | ImageShape | PlaceholderShape | DrawingShape
 
 export interface Slide {
   id: string

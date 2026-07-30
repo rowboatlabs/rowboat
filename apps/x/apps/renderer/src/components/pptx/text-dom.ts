@@ -13,10 +13,50 @@
  */
 
 import type { EditedParagraph, EditedTextRun, RunFormatOverrides } from '@/lib/pptx/serialize'
-import type { Paragraph, TextAlign, TextRun, TextShape } from '@/lib/pptx/types'
+import type {
+  Paragraph,
+  ResolvedRunStyle,
+  TextAlign,
+  TextRun,
+  TextShape,
+} from '@/lib/pptx/types'
 import { EMU_PER_PT } from './edit-model'
 
 export const DEFAULT_TEXT_PT = 18
+
+/**
+ * The style a run renders with: explicit rPr props first, then the resolved
+ * inheritance cascade (looked up by ORIGINAL indices via the run's provenance,
+ * so styling survives text edits), then hard defaults.
+ */
+export function displayRunStyle(
+  shape: TextShape,
+  paraIndex: number,
+  runIndex: number,
+  run: TextRun,
+): ResolvedRunStyle {
+  const er = run as EditedTextRun
+  const dp = shape.display?.paragraphs[er.srcPara ?? paraIndex]
+  const dr = dp?.runs[er.srcRun ?? runIndex] ?? dp?.defaultRun ?? shape.display?.defaultRun
+  return {
+    sizePt: run.sizePt ?? dr?.sizePt ?? DEFAULT_TEXT_PT,
+    bold: run.bold ?? dr?.bold ?? false,
+    italic: run.italic ?? dr?.italic ?? false,
+    underline: run.underline ?? dr?.underline ?? false,
+    colorHex: run.colorHex ?? dr?.colorHex ?? '000000',
+  }
+}
+
+/** Resolved paragraph alignment: the paragraph's own, else the cascade's. */
+export function displayAlign(
+  shape: TextShape,
+  paraIndex: number,
+  para: Paragraph,
+): TextAlign | undefined {
+  if (para.align) return para.align
+  const ep = para as EditedParagraph
+  return shape.display?.paragraphs[ep.srcPara ?? paraIndex]?.align
+}
 
 export interface TextOverlayHandle {
   root: HTMLDivElement
@@ -36,17 +76,13 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function runFontPx(run: Pick<TextRun, 'sizePt'>, scale: number): number {
-  return (run.sizePt ?? DEFAULT_TEXT_PT) * EMU_PER_PT * scale
-}
-
-function runCss(run: TextRun, scale: number): string {
+function runCss(style: ResolvedRunStyle, scale: number): string {
   return (
-    `font-weight:${run.bold ? 700 : 400};` +
-    `font-style:${run.italic ? 'italic' : 'normal'};` +
-    `text-decoration:${run.underline ? 'underline' : 'none'};` +
-    `font-size:${runFontPx(run, scale)}px;` +
-    `color:#${run.colorHex ?? '000000'};` +
+    `font-weight:${style.bold ? 700 : 400};` +
+    `font-style:${style.italic ? 'italic' : 'normal'};` +
+    `text-decoration:${style.underline ? 'underline' : 'none'};` +
+    `font-size:${style.sizePt * EMU_PER_PT * scale}px;` +
+    `color:#${style.colorHex};` +
     `line-height:1.2`
   )
 }
@@ -74,15 +110,18 @@ export function buildEditableHtml(shape: TextShape, scale: number): string {
           const srcRun = er.srcRun ?? ri
           const prov = ` data-op="${srcPara}" data-or="${srcRun}"`
           if (run.text === '\n') return `<br data-cp="${pi}" data-cr="${ri}"${prov}>`
+          // Visual CSS is the RESOLVED style; the data attributes stay raw so
+          // extraction never bakes inherited values into write-back edits.
           return (
             `<span data-cp="${pi}" data-cr="${ri}"${prov}${runDataAttrs(run)}` +
-            ` style="${runCss(run, scale)}">${escapeHtml(run.text)}</span>`
+            ` style="${runCss(displayRunStyle(shape, pi, ri, run), scale)}">${escapeHtml(run.text)}</span>`
           )
         })
         .join('')
+      const align = displayAlign(shape, pi, para)
       return (
         `<div data-cp="${pi}" data-op="${paraSrc}" data-algn="${para.align ?? ''}"` +
-        ` style="margin:0;text-align:${alignToCss(para.align)}">${inner || '<br>'}</div>`
+        ` style="margin:0;text-align:${alignToCss(align)}">${inner || '<br>'}</div>`
       )
     })
     .join('')

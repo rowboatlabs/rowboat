@@ -293,6 +293,10 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const handleGeometryCommit = useCallback(
     (shape: Shape, rect: RectEmuBox) => {
       if (!slide) return
+      // The serializer writes geometry only for sp/pic/cxnSp. graphicFrame and
+      // group placeholders would fail the whole save closed, so their drags
+      // snap back instead of committing.
+      if (shape.type === 'placeholder' && shape.kind !== 'video') return
       const key = shapeKeyOf(slide.xmlPath, shape.nodePath)
       pushEdits(
         withShapeEdit(editSetRef.current, key, seedFor(slide.xmlPath, shape), (draft) => {

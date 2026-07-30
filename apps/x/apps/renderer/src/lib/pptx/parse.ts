@@ -14,19 +14,35 @@
 import JSZip from 'jszip'
 import { XMLParser } from 'fast-xml-parser'
 import type {
+  DrawingShape,
   ImageShape,
   NodePath,
   Paragraph,
+  ParagraphDisplay,
   PlaceholderKind,
   PlaceholderShape,
   RectEmu,
+  ResolvedRunStyle,
   Shape,
   Slide,
   SlideDeck,
   TextAlign,
+  TextDisplay,
   TextRun,
   TextShape,
 } from './types'
+import { DEFAULT_THEME, clrMapOfMaster, parseTheme, schemeColorHex, type Theme } from './theme'
+import {
+  keptRunNodesOf,
+  layersOf,
+  levelStyleFromPPr,
+  mergeLevelStyles,
+  parseListStyle,
+  runLayerFromRPr,
+  txStyleKindFor,
+  type ParsedListStyle,
+} from './textstyle'
+import { shapeVisualOf } from './geometry'
 
 const ATTRS = ':@'
 const ATTR_PREFIX = '@_'
@@ -49,10 +65,11 @@ export function parseXml(xml: string): XmlNode[] {
 }
 
 /** Strips the namespace prefix: `p:sp` -> `sp`. Prefixes are not guaranteed. */
-function local(name: string): string {
+export function localNameOf(name: string): string {
   const i = name.indexOf(':')
   return i >= 0 ? name.slice(i + 1) : name
 }
+const local = localNameOf
 
 export function tagNameOf(node: XmlNode): string | null {
   for (const k of Object.keys(node)) {
@@ -72,7 +89,7 @@ function attrsOf(node: XmlNode): Record<string, string> {
   return (node[ATTRS] as Record<string, string> | undefined) ?? {}
 }
 
-function attr(node: XmlNode, name: string): string | undefined {
+export function attr(node: XmlNode, name: string): string | undefined {
   const a = attrsOf(node)
   const direct = a[ATTR_PREFIX + name]
   if (direct !== undefined) return String(direct)
@@ -95,14 +112,14 @@ function prefixedAttr(node: XmlNode, name: string): string | undefined {
   return undefined
 }
 
-function childByLocal(nodes: XmlNode[], name: string): XmlNode | undefined {
+export function childByLocal(nodes: XmlNode[], name: string): XmlNode | undefined {
   return nodes.find((n) => {
     const t = tagNameOf(n)
     return t !== null && local(t) === name
   })
 }
 
-function childrenByLocal(nodes: XmlNode[], name: string): XmlNode[] {
+export function childrenByLocal(nodes: XmlNode[], name: string): XmlNode[] {
   return nodes.filter((n) => {
     const t = tagNameOf(n)
     return t !== null && local(t) === name
@@ -110,7 +127,7 @@ function childrenByLocal(nodes: XmlNode[], name: string): XmlNode[] {
 }
 
 /** Follows a chain of local names down from a node. */
-function descend(node: XmlNode, ...path: string[]): XmlNode | undefined {
+export function descend(node: XmlNode, ...path: string[]): XmlNode | undefined {
   let current: XmlNode | undefined = node
   for (const step of path) {
     if (!current) return undefined
@@ -150,7 +167,7 @@ function textOf(node: XmlNode): string {
   return decodeNumericRefs(out)
 }
 
-function num(value: string | undefined): number | undefined {
+export function num(value: string | undefined): number | undefined {
   if (value === undefined) return undefined
   const n = Number(value)
   return Number.isFinite(n) ? n : undefined
@@ -306,25 +323,108 @@ function collectPlaceholderRects(doc: XmlNode[], into: InheritedRects): void {
   }
 }
 
-/** Walks slide -> layout -> master, letting the nearer part win. */
-async function loadInheritedRects(
+/** Placeholder list styles collected from a layout or master part. */
+interface PhListStyles {
+  byIdx: Map<string, ParsedListStyle>
+  byType: Map<string, ParsedListStyle>
+}
+
+/** Everything a slide inherits from its layout/master/theme chain. */
+interface SlideStyleContext {
+  rects: InheritedRects
+  theme: Theme
+  layoutPh: PhListStyles
+  masterPh: PhListStyles
+  masterTx: { title?: ParsedListStyle; body?: ParsedListStyle; other?: ParsedListStyle }
+  presDefault?: ParsedListStyle
+}
+
+function emptyPhListStyles(): PhListStyles {
+  return { byIdx: new Map(), byType: new Map() }
+}
+
+function collectPlaceholderListStyles(doc: XmlNode[], theme: Theme, into: PhListStyles): void {
+  const spTree = (() => {
+    const root = childByLocal(doc, 'sldLayout') ?? childByLocal(doc, 'sldMaster')
+    return root ? descend(root, 'cSld', 'spTree') : undefined
+  })()
+  if (!spTree) return
+  for (const node of childrenOf(spTree)) {
+    const tag = tagNameOf(node)
+    if (!tag || local(tag) !== 'sp') continue
+    const key = phKeyOf(node)
+    if (!key) continue
+    const lstStyle = descend(node, 'txBody', 'lstStyle')
+    if (!lstStyle) continue
+    const parsed = parseListStyle(lstStyle, theme)
+    if (key.idx !== undefined) into.byIdx.set(key.idx, parsed)
+    into.byType.set(normalizePhType(key.type), parsed)
+  }
+}
+
+/**
+ * Walks slide -> layout -> master -> theme, letting the nearer part win.
+ * Cached per layout path: decks reuse a handful of layouts across many slides.
+ */
+async function loadSlideContext(
   zip: JSZip,
   slideRels: Map<string, Relationship>,
-): Promise<InheritedRects> {
-  const out: InheritedRects = { byIdx: new Map(), byType: new Map() }
-  const layoutPath = relTargetOfType(slideRels, '/slideLayout')
-  if (!layoutPath) return out
+  presDefaultNode: XmlNode | undefined,
+  cache: Map<string, SlideStyleContext>,
+): Promise<SlideStyleContext> {
+  const layoutPath = relTargetOfType(slideRels, '/slideLayout') ?? ''
+  const cached = cache.get(layoutPath)
+  if (cached) return cached
 
-  const layoutFile = zip.file(layoutPath)
-  if (!layoutFile) return out
-  const layoutDoc = parseXml(await layoutFile.async('string'))
+  const out: SlideStyleContext = {
+    rects: { byIdx: new Map(), byType: new Map() },
+    theme: DEFAULT_THEME,
+    layoutPh: emptyPhListStyles(),
+    masterPh: emptyPhListStyles(),
+    masterTx: {},
+  }
 
-  // Master first so the layout's own values overwrite it.
-  const layoutRels = await readRels(zip, layoutPath)
-  const masterPath = relTargetOfType(layoutRels, '/slideMaster')
-  const masterFile = masterPath ? zip.file(masterPath) : null
-  if (masterFile) collectPlaceholderRects(parseXml(await masterFile.async('string')), out)
-  collectPlaceholderRects(layoutDoc, out)
+  const layoutFile = layoutPath ? zip.file(layoutPath) : null
+  if (layoutFile) {
+    const layoutDoc = parseXml(await layoutFile.async('string'))
+    const layoutRels = await readRels(zip, layoutPath)
+    const masterPath = relTargetOfType(layoutRels, '/slideMaster')
+    const masterFile = masterPath ? zip.file(masterPath) : null
+    let masterDoc: XmlNode[] | null = null
+    if (masterFile && masterPath) {
+      masterDoc = parseXml(await masterFile.async('string'))
+
+      // Theme first: every list style below resolves colors against it.
+      const masterRels = await readRels(zip, masterPath)
+      const themePath = relTargetOfType(masterRels, '/theme')
+      const themeFile = themePath ? zip.file(themePath) : null
+      if (themeFile) out.theme = parseTheme(parseXml(await themeFile.async('string')))
+      const clrMap = clrMapOfMaster(masterDoc)
+      if (clrMap) out.theme = { ...out.theme, clrMap }
+    }
+
+    if (masterDoc) {
+      // Master first so the layout's own values overwrite the rects.
+      collectPlaceholderRects(masterDoc, out.rects)
+      collectPlaceholderListStyles(masterDoc, out.theme, out.masterPh)
+      const master = childByLocal(masterDoc, 'sldMaster')
+      const txStyles = master ? childByLocal(childrenOf(master), 'txStyles') : undefined
+      if (txStyles) {
+        const kids = childrenOf(txStyles)
+        out.masterTx = {
+          title: parseListStyle(childByLocal(kids, 'titleStyle'), out.theme),
+          body: parseListStyle(childByLocal(kids, 'bodyStyle'), out.theme),
+          other: parseListStyle(childByLocal(kids, 'otherStyle'), out.theme),
+        }
+      }
+    }
+    collectPlaceholderRects(layoutDoc, out.rects)
+    collectPlaceholderListStyles(layoutDoc, out.theme, out.layoutPh)
+  }
+
+  if (presDefaultNode) out.presDefault = parseListStyle(presDefaultNode, out.theme)
+
+  cache.set(layoutPath, out)
   return out
 }
 
@@ -421,7 +521,7 @@ function isVideoPic(node: XmlNode): boolean {
 interface ShapeContext {
   slideXmlPath: string
   rels: Map<string, Relationship>
-  inherited: InheritedRects
+  styles: SlideStyleContext
   zip: JSZip
   blobUrls: string[]
 }
@@ -433,11 +533,85 @@ function resolveRect(node: XmlNode, ctx: ShapeContext): RectEmu {
   const key = phKeyOf(node)
   if (!key) return own
   if (key.idx !== undefined) {
-    const byIdx = ctx.inherited.byIdx.get(key.idx)
+    const byIdx = ctx.styles.rects.byIdx.get(key.idx)
     if (byIdx) return { ...byIdx }
   }
-  const byType = ctx.inherited.byType.get(normalizePhType(key.type))
+  const byType = ctx.styles.rects.byType.get(normalizePhType(key.type))
   return byType ? { ...byType } : own
+}
+
+// ------------------------------------------------------------ text display
+
+const HARD_DEFAULT_SIZE_PT = 18
+
+/**
+ * Resolves the display styling for one text shape: run rPr -> paragraph
+ * defRPr -> shape lstStyle -> layout placeholder -> master placeholder ->
+ * master txStyles (by placeholder type) -> presentation default. Display
+ * only — the model paragraphs the serializer validates are untouched.
+ */
+function resolveTextDisplay(
+  spNode: XmlNode,
+  txBody: XmlNode,
+  ctx: ShapeContext,
+): TextDisplay {
+  const { theme } = ctx.styles
+  const key = phKeyOf(spNode)
+  const phType = key ? normalizePhType(key.type) : undefined
+
+  const shapeLst = parseListStyle(childByLocal(childrenOf(txBody), 'lstStyle'), theme)
+  const layoutPh =
+    (key?.idx !== undefined ? ctx.styles.layoutPh.byIdx.get(key.idx) : undefined) ??
+    (phType ? ctx.styles.layoutPh.byType.get(phType) : undefined)
+  const masterPh =
+    (key?.idx !== undefined ? ctx.styles.masterPh.byIdx.get(key.idx) : undefined) ??
+    (phType ? ctx.styles.masterPh.byType.get(phType) : undefined)
+  const masterTx = ctx.styles.masterTx[txStyleKindFor(key?.type, key !== null)]
+
+  const fallbackColor = schemeColorHex(theme, 'tx1')
+
+  const resolveLevel = (own: ReturnType<typeof levelStyleFromPPr>, lvl: number) =>
+    mergeLevelStyles([
+      own,
+      ...layersOf(shapeLst, lvl),
+      ...layersOf(layoutPh, lvl),
+      ...layersOf(masterPh, lvl),
+      ...layersOf(masterTx, lvl),
+      ...layersOf(ctx.styles.presDefault, lvl),
+    ])
+
+  const runStyleOf = (
+    explicit: ReturnType<typeof runLayerFromRPr>,
+    merged: ReturnType<typeof mergeLevelStyles>,
+  ): ResolvedRunStyle => ({
+    sizePt: explicit.sizePt ?? merged.sizePt ?? HARD_DEFAULT_SIZE_PT,
+    bold: explicit.bold ?? merged.bold ?? false,
+    italic: explicit.italic ?? merged.italic ?? false,
+    underline: explicit.underline ?? merged.underline ?? false,
+    colorHex: explicit.colorHex ?? merged.colorHex ?? fallbackColor,
+  })
+
+  const paragraphs: ParagraphDisplay[] = []
+  for (const pNode of childrenByLocal(childrenOf(txBody), 'p')) {
+    const pPr = childByLocal(childrenOf(pNode), 'pPr')
+    const level = Math.min(8, Math.max(0, num(pPr ? attr(pPr, 'lvl') : undefined) ?? 0))
+    const merged = resolveLevel(levelStyleFromPPr(pPr, theme), level)
+    const defaultRun = runStyleOf({}, merged)
+    const runs = keptRunNodesOf(pNode).map((item) =>
+      item.kind === 'br' ? defaultRun : runStyleOf(runLayerFromRPr(item.rPr, theme), merged),
+    )
+    paragraphs.push({
+      level,
+      marLEmu: merged.marLEmu ?? 0,
+      indentEmu: merged.indentEmu ?? 0,
+      align: merged.align,
+      bullet: merged.bullet ?? { kind: 'none' },
+      runs,
+      defaultRun,
+    })
+  }
+
+  return { paragraphs, defaultRun: runStyleOf({}, resolveLevel({}, 0)) }
 }
 
 async function shapeFromNode(
@@ -458,13 +632,15 @@ async function shapeFromNode(
   }
 
   if (name === 'sp') {
+    const visual = shapeVisualOf(node, ctx.styles.theme)
     const txBody = childByLocal(childrenOf(node), 'txBody')
     if (!txBody) {
-      // A shape with geometry but no text — an arrow, a divider, a background box.
-      return { ...base, type: 'placeholder', kind: 'unknown' } satisfies PlaceholderShape
+      // A shape with geometry but no text — an arrow, a divider, a colored box.
+      return { ...base, type: 'drawing', visual } satisfies DrawingShape
     }
     const paragraphs = childrenByLocal(childrenOf(txBody), 'p').map(parseParagraph)
-    return { ...base, type: 'text', paragraphs } satisfies TextShape
+    const display = resolveTextDisplay(node, txBody, ctx)
+    return { ...base, type: 'text', paragraphs, visual, display } satisfies TextShape
   }
 
   if (name === 'pic') {
@@ -485,7 +661,8 @@ async function shapeFromNode(
     const blob = new Blob([bytes], { type: mimeFor(mediaPath) })
     const blobUrl = URL.createObjectURL(blob)
     ctx.blobUrls.push(blobUrl)
-    return { ...base, type: 'image', blobUrl, mediaPath } satisfies ImageShape
+    const visual = shapeVisualOf(node, ctx.styles.theme)
+    return { ...base, type: 'image', blobUrl, mediaPath, visual } satisfies ImageShape
   }
 
   if (name === 'graphicFrame') {
@@ -497,8 +674,10 @@ async function shapeFromNode(
   }
 
   if (name === 'cxnSp') {
-    // Connectors (lines/arrows) have geometry but nothing we draw yet.
-    return { ...base, type: 'placeholder', kind: 'unknown' } satisfies PlaceholderShape
+    // Connectors: lines/arrows with real stroke styling.
+    const visual = shapeVisualOf(node, ctx.styles.theme)
+    if (!visual.geom) visual.geom = { preset: 'straightConnector1', adj: {} }
+    return { ...base, type: 'drawing', visual } satisfies DrawingShape
   }
 
   return null
@@ -509,11 +688,13 @@ async function parseSlide(
   xmlPath: string,
   xml: string,
   blobUrls: string[],
+  presDefaultNode: XmlNode | undefined,
+  styleCache: Map<string, SlideStyleContext>,
 ): Promise<Slide> {
   const doc = parseXml(xml)
   const rels = await readRels(zip, xmlPath)
-  const inherited = await loadInheritedRects(zip, rels)
-  const ctx: ShapeContext = { slideXmlPath: xmlPath, rels, inherited, zip, blobUrls }
+  const styles = await loadSlideContext(zip, rels, presDefaultNode, styleCache)
+  const ctx: ShapeContext = { slideXmlPath: xmlPath, rels, styles, zip, blobUrls }
 
   const sldIndex = doc.findIndex((n) => {
     const t = tagNameOf(n)
@@ -592,6 +773,8 @@ export async function parsePptx(bytes: Uint8Array): Promise<SlideDeck> {
     slidePaths.push(...found)
   }
 
+  const presDefaultNode = childByLocal(childrenOf(pres), 'defaultTextStyle')
+  const styleCache = new Map<string, SlideStyleContext>()
   const blobUrls: string[] = []
   const slideXml: Record<string, string> = {}
   const slides: Slide[] = []
@@ -600,7 +783,7 @@ export async function parsePptx(bytes: Uint8Array): Promise<SlideDeck> {
     if (!file) continue
     const xml = await file.async('string')
     slideXml[path] = xml
-    slides.push(await parseSlide(zip, path, xml, blobUrls))
+    slides.push(await parseSlide(zip, path, xml, blobUrls, presDefaultNode, styleCache))
   }
 
   return { slideSizeEmu, slides, source: { zip, slideXml } }

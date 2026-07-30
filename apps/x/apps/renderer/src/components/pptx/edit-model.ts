@@ -124,9 +124,11 @@ export function acceptsFormatting(edit: ShapeEdit | undefined): boolean {
 // ------------------------------------------------------------------ deriving
 
 function applyOverrides(run: Record<string, unknown>, set: RunFormatOverrides): void {
-  if (set.bold !== undefined) run.bold = set.bold || undefined
-  if (set.italic !== undefined) run.italic = set.italic || undefined
-  if (set.underline !== undefined) run.underline = set.underline || undefined
+  // Explicit false is preserved: display resolution treats undefined as
+  // "inherit", so clearing bold on an inherited-bold run must stay `false`.
+  if (set.bold !== undefined) run.bold = set.bold
+  if (set.italic !== undefined) run.italic = set.italic
+  if (set.underline !== undefined) run.underline = set.underline
   if (set.sizePt !== undefined) run.sizePt = set.sizePt
   if (set.colorHex !== undefined) run.colorHex = set.colorHex
 }

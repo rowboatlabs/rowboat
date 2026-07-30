@@ -13,8 +13,18 @@ import {
   ShapesIcon,
   TableIcon,
 } from 'lucide-react'
-import type { PlaceholderKind, Shape, Slide, TextShape } from '@/lib/pptx/types'
+import type {
+  Fill,
+  LineStyle,
+  PlaceholderKind,
+  PresetGeometry,
+  Shape,
+  Slide,
+  TextShape,
+} from '@/lib/pptx/types'
 import type { EditedParagraph } from '@/lib/pptx/serialize'
+import { isLinePreset } from '@/lib/pptx/geometry'
+import { autoNumText } from '@/lib/pptx/textstyle'
 import {
   EMU_PER_INCH,
   EMU_PER_PT,
@@ -24,7 +34,13 @@ import {
   type RectEmuBox,
   type ShapeKey,
 } from './edit-model'
-import { DEFAULT_TEXT_PT, alignToCss, type TextOverlayHandle } from './text-dom'
+import {
+  DEFAULT_TEXT_PT,
+  alignToCss,
+  displayAlign,
+  displayRunStyle,
+  type TextOverlayHandle,
+} from './text-dom'
 import { TextEditOverlay } from './text-overlay'
 
 const PLACEHOLDER_META: Record<PlaceholderKind, { label: string; Icon: typeof ShapesIcon }> = {
@@ -125,6 +141,109 @@ function rectStyle(rect: RectEmuBox, scale: number): CSSProperties {
 const isEmptyText = (shape: TextShape): boolean =>
   shape.paragraphs.every((p) => p.runs.every((r) => r.text.trim() === ''))
 
+// ------------------------------------------------------------ shape visuals
+
+function cssColor(hex: string, alpha?: number): string {
+  if (alpha === undefined) return `#${hex}`
+  const r = parseInt(hex.slice(0, 2), 16)
+  const g = parseInt(hex.slice(2, 4), 16)
+  const b = parseInt(hex.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function fillCss(fill: Fill | undefined): CSSProperties {
+  if (!fill || fill.kind === 'none') return {}
+  if (fill.kind === 'solid') return { backgroundColor: cssColor(fill.hex, fill.alpha) }
+  // OOXML angles: 0° points right, clockwise. CSS: 0° points up, clockwise.
+  const stops = fill.stops
+    .map((s) => `${cssColor(s.hex, s.alpha)} ${Math.round(s.pos * 100)}%`)
+    .join(', ')
+  return { backgroundImage: `linear-gradient(${fill.angleDeg + 90}deg, ${stops})` }
+}
+
+const DASH_CSS: Record<LineStyle['dash'], string> = {
+  solid: 'solid',
+  dash: 'dashed',
+  dot: 'dotted',
+}
+
+function lineCss(line: LineStyle | undefined, scale: number): CSSProperties {
+  if (!line) return {}
+  const w = Math.max(1, line.widthEmu * scale)
+  return { border: `${w}px ${DASH_CSS[line.dash]} ${cssColor(line.hex, line.alpha)}` }
+}
+
+function radiusCss(
+  geom: PresetGeometry | undefined,
+  rect: RectEmuBox,
+  scale: number,
+): CSSProperties {
+  if (!geom) return {}
+  if (geom.preset === 'ellipse') return { borderRadius: '50%' }
+  if (geom.preset === 'roundRect') {
+    const adj = geom.adj.adj ?? 16667
+    const r = Math.min(rect.w, rect.h) * (adj / 100000) * scale
+    return { borderRadius: `${Math.max(0, r)}px` }
+  }
+  return {}
+}
+
+/** Rotation and flips as a CSS transform fragment, applied about the center. */
+function visualTransform(shape: Shape): string {
+  const v = shape.visual
+  if (!v) return ''
+  const parts: string[] = []
+  if (v.rotDeg) parts.push(`rotate(${v.rotDeg}deg)`)
+  if (v.flipH) parts.push('scaleX(-1)')
+  if (v.flipV) parts.push('scaleY(-1)')
+  return parts.join(' ')
+}
+
+function composeTransform(...parts: Array<string | undefined>): string | undefined {
+  const s = parts.filter(Boolean).join(' ')
+  return s === '' ? undefined : s
+}
+
+/** A preset drawn as one stroked segment (`line`, connectors). */
+function LineShapeView({
+  rect,
+  scale,
+  line,
+  style,
+  onPointerDown,
+}: {
+  rect: RectEmuBox
+  scale: number
+  line: LineStyle | undefined
+  style: CSSProperties
+  onPointerDown: (e: ReactPointerEvent) => void
+}) {
+  const w = Math.max(rect.w * scale, 1)
+  const h = Math.max(rect.h * scale, 1)
+  const strokeW = Math.max(1, (line?.widthEmu ?? 9525) * scale)
+  const dashArray =
+    line?.dash === 'dash' ? `${strokeW * 3} ${strokeW * 2}` : line?.dash === 'dot' ? `${strokeW} ${strokeW * 1.5}` : undefined
+  return (
+    <svg
+      onPointerDown={onPointerDown}
+      style={{ ...style, overflow: 'visible' }}
+      width={w}
+      height={h}
+      className="select-none"
+    >
+      <line
+        x1={0}
+        y1={0}
+        x2={rect.w * scale}
+        y2={rect.h * scale}
+        stroke={line ? cssColor(line.hex, line.alpha) : '#666666'}
+        strokeWidth={strokeW}
+        strokeDasharray={dashArray}
+      />
+    </svg>
+  )
+}
+
 interface ShapeViewProps {
   shape: Shape
   rect: RectEmuBox
@@ -145,13 +264,14 @@ function ShapeView({ shape, rect, scale, selected, transform, onPointerDown }: S
         alt=""
         draggable={false}
         onPointerDown={onPointerDown}
-        style={{ ...style, cursor }}
+        style={{ ...style, cursor, ...lineCss(shape.visual?.line, scale) }}
         className="object-contain select-none"
       />
     )
   }
 
   if (shape.type === 'placeholder') {
+    // Only content we genuinely can't draw keeps the dashed treatment.
     const { label, Icon } = PLACEHOLDER_META[shape.kind]
     return (
       <div
@@ -165,7 +285,66 @@ function ShapeView({ shape, rect, scale, selected, transform, onPointerDown }: S
     )
   }
 
+  const geom = shape.visual?.geom
+  if (shape.type === 'drawing') {
+    if (geom && isLinePreset(geom.preset)) {
+      return (
+        <LineShapeView
+          rect={rect}
+          scale={scale}
+          line={shape.visual?.line}
+          style={{ ...style, cursor }}
+          onPointerDown={onPointerDown}
+        />
+      )
+    }
+    return (
+      <div
+        onPointerDown={onPointerDown}
+        style={{
+          ...style,
+          cursor,
+          ...fillCss(shape.visual?.fill),
+          ...lineCss(shape.visual?.line, scale),
+          ...radiusCss(geom, rect, scale),
+        }}
+        className="select-none"
+      />
+    )
+  }
+
+  return (
+    <TextShapeView
+      shape={shape}
+      rect={rect}
+      scale={scale}
+      style={style}
+      selected={selected}
+      onPointerDown={onPointerDown}
+    />
+  )
+}
+
+function TextShapeView({
+  shape,
+  rect,
+  scale,
+  style,
+  selected,
+  onPointerDown,
+}: {
+  shape: TextShape
+  rect: RectEmuBox
+  scale: number
+  style: CSSProperties
+  selected: boolean
+  onPointerDown: (e: ReactPointerEvent) => void
+}) {
   const ptToPx = (pt: number) => pt * EMU_PER_PT * scale
+  // Auto-number counters accumulate down the shape; deeper levels reset when
+  // a shallower numbered paragraph appears.
+  const counters: Record<number, number> = {}
+
   return (
     <div
       onPointerDown={onPointerDown}
@@ -175,40 +354,89 @@ function ShapeView({ shape, rect, scale, selected, transform, onPointerDown }: S
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
+        ...fillCss(shape.visual?.fill),
+        ...lineCss(shape.visual?.line, scale),
+        ...radiusCss(shape.visual?.geom, rect, scale),
       }}
-      className="overflow-hidden"
+      className="group/pptx-shape overflow-hidden"
     >
       {isEmptyText(shape) ? (
-        <span className="select-none text-neutral-400" style={{ fontSize: ptToPx(DEFAULT_TEXT_PT) }}>
+        <span
+          className={`select-none text-neutral-400 transition-opacity ${
+            selected ? 'opacity-70' : 'opacity-0 group-hover/pptx-shape:opacity-50'
+          }`}
+          style={{ fontSize: ptToPx(shape.display?.defaultRun.sizePt ?? DEFAULT_TEXT_PT) }}
+        >
           Add text
         </span>
       ) : (
-        shape.paragraphs.map((para, pi) => (
-          <p
-            key={pi}
-            style={{
-              textAlign: alignToCss(para.align),
-              margin: 0,
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {para.runs.map((run, ri) => (
-              <span
-                key={ri}
-                style={{
-                  fontWeight: run.bold ? 700 : undefined,
-                  fontStyle: run.italic ? 'italic' : undefined,
-                  textDecoration: run.underline ? 'underline' : undefined,
-                  fontSize: ptToPx(run.sizePt ?? DEFAULT_TEXT_PT),
-                  color: run.colorHex ? `#${run.colorHex}` : '#000',
-                  lineHeight: 1.2,
-                }}
-              >
-                {run.text}
-              </span>
-            ))}
-          </p>
-        ))
+        shape.paragraphs.map((para, pi) => {
+          const dp = shape.display?.paragraphs[(para as EditedParagraph).srcPara ?? pi]
+          const hasText = para.runs.some((r) => r.text.trim() !== '')
+
+          let bulletText: string | null = null
+          if (dp && hasText) {
+            if (dp.bullet.kind === 'char') bulletText = dp.bullet.char
+            else if (dp.bullet.kind === 'auto') {
+              for (const k of Object.keys(counters)) {
+                if (Number(k) > dp.level) delete counters[Number(k)]
+              }
+              counters[dp.level] = (counters[dp.level] ?? dp.bullet.startAt - 1) + 1
+              bulletText = autoNumText(dp.bullet.scheme, counters[dp.level])
+            }
+          }
+
+          const marLPx = (dp?.marLEmu ?? 0) * scale
+          const indentPx = (dp?.indentEmu ?? 0) * scale
+          const bulletStyle = dp?.defaultRun ?? shape.display?.defaultRun
+
+          return (
+            <p
+              key={pi}
+              style={{
+                textAlign: alignToCss(displayAlign(shape, pi, para)),
+                margin: 0,
+                whiteSpace: 'pre-wrap',
+                paddingLeft: marLPx > 0 ? marLPx : undefined,
+                textIndent: indentPx !== 0 ? indentPx : undefined,
+              }}
+            >
+              {bulletText !== null && (
+                <span
+                  style={{
+                    display: 'inline-block',
+                    textIndent: 0,
+                    minWidth: indentPx < 0 ? -indentPx : undefined,
+                    marginRight: indentPx < 0 ? undefined : '0.35em',
+                    fontSize: ptToPx(bulletStyle?.sizePt ?? DEFAULT_TEXT_PT),
+                    color: `#${bulletStyle?.colorHex ?? '000000'}`,
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {bulletText}
+                </span>
+              )}
+              {para.runs.map((run, ri) => {
+                const rs = displayRunStyle(shape, pi, ri, run)
+                return (
+                  <span
+                    key={ri}
+                    style={{
+                      fontWeight: rs.bold ? 700 : 400,
+                      fontStyle: rs.italic ? 'italic' : 'normal',
+                      textDecoration: rs.underline ? 'underline' : 'none',
+                      fontSize: ptToPx(rs.sizePt),
+                      color: `#${rs.colorHex}`,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {run.text}
+                  </span>
+                )
+              })}
+            </p>
+          )
+        })
       )}
     </div>
   )
@@ -414,7 +642,10 @@ export function SlideCanvas({
                   key={reactKey}
                   shape={shape}
                   scale={scale}
-                  style={rectStyle(shape.xfrmEmu, scale)}
+                  style={{
+                    ...rectStyle(shape.xfrmEmu, scale),
+                    transform: composeTransform(visualTransform(shape)),
+                  }}
                   onAttach={onOverlayAttach}
                   onCommit={(next) => onTextCommit(shape, next)}
                 />
@@ -427,7 +658,7 @@ export function SlideCanvas({
                 rect={liveRect(key, shape)}
                 scale={scale}
                 selected={selectedKey === key}
-                transform={liveTransform(key)}
+                transform={composeTransform(liveTransform(key), visualTransform(shape))}
                 onPointerDown={(e) => beginGesture(shape, 'move', 'se', e)}
               />
             )
@@ -437,7 +668,10 @@ export function SlideCanvas({
             <SelectionFrame
               rect={liveRect(selectedKey as ShapeKey, selectedShape)}
               scale={scale}
-              transform={liveTransform(selectedKey as ShapeKey)}
+              transform={composeTransform(
+                liveTransform(selectedKey as ShapeKey),
+                visualTransform(selectedShape),
+              )}
               onHandleDown={(handle, e) => beginGesture(selectedShape, 'resize', handle, e)}
             />
           )}
