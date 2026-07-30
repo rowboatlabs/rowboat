@@ -779,6 +779,7 @@ export function QuickAskBar() {
           ttsState={callCard ? callState.ttsState : processing ? 'synthesizing' : 'idle'}
           getLevel={callCard ? synthLevel : zeroLevel}
           size={124}
+          hat={callCard ? 'cowboy' : undefined}
         />
       </div>
       </div>
@@ -934,7 +935,8 @@ function PinnedPill({
         </div>
         )}
         <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg bg-neutral-800">
-          <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={voiceOnly ? 96 : 84} />
+          {/* On a call = hat on (the companion's on-duty signal). */}
+          <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={voiceOnly ? 96 : 84} hat="cowboy" />
           <span className="absolute bottom-1 left-1.5 rounded bg-black/50 px-1 py-px text-[10px] text-white">
             Rowboat
           </span>
@@ -1171,51 +1173,6 @@ function TuckedMascot({
         }
       `}</style>
 
-      {/* Hover controls — the mascot itself is the drag handle. */}
-      <div
-        className="absolute inset-x-0 top-1 z-10 flex items-center justify-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100"
-        style={noDragRegion}
-      >
-        <button
-          type="button"
-          onPointerDown={(e) => {
-            e.currentTarget.setPointerCapture(e.pointerId)
-            sendAction('ptt-down')
-          }}
-          onPointerUp={() => sendAction('ptt-up')}
-          onPointerCancel={() => sendAction('ptt-up')}
-          disabled={state.micMuted}
-          className={`flex h-6 select-none items-center gap-1 rounded-full px-2 text-[10px] font-medium shadow-md transition-colors ${
-            state.status === 'listening' || state.pttLocked
-              ? 'bg-green-600 text-white hover:bg-green-500'
-              : 'bg-neutral-800/90 text-white/90 hover:bg-neutral-700'
-          } ${state.micMuted ? 'opacity-50' : ''}`}
-          aria-label="Hold to talk — or hold the right ⌘ key from any app"
-          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
-        >
-          <Mic className="h-3 w-3" />
-          {state.pttLocked ? 'Tap to send' : state.status === 'listening' ? 'Release to send' : 'Hold to talk'}
-        </button>
-        <button
-          type="button"
-          onClick={onExpand}
-          className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-800/90 text-white/90 shadow-md transition-colors hover:bg-neutral-700"
-          aria-label="Bring the text back"
-          title="Bring the text back (⌥⇧Space works too)"
-        >
-          <ChevronsLeft className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => sendAction('end-call')}
-          className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white shadow-md transition-colors hover:bg-red-500"
-          aria-label="End call"
-          title="End call"
-        >
-          <PhoneOff className="h-3 w-3" />
-        </button>
-      </div>
-
       {/* Consent badge: a tucked share call must still show it's sharing. */}
       {state.screenSharing && (
         <span className="pointer-events-none absolute left-1/2 top-8 z-10 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md">
@@ -1237,8 +1194,66 @@ function TuckedMascot({
         </button>
       )}
 
+      {/* On duty = cowboy hat on; the controls are enamel pins on the hat
+          band, drawn in the artwork's own ink and always visible. They ride
+          inside TalkingHead's bobbing container (hatOverlay) so they never
+          detach from the hat. Pin art is small; each sits in a 26px no-drag
+          hit target that grows on hover. */}
       <div style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
-        <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={132} />
+        <TalkingHead
+          ttsState={state.ttsState}
+          getLevel={getLevel}
+          size={132}
+          hat="cowboy"
+          hatOverlay={
+            <div style={noDragRegion}>
+              <button
+                type="button"
+                onClick={onExpand}
+                aria-label="Bring the text back"
+                title="Bring the text back (⌥⇧Space works too)"
+                className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                style={{ left: '40%', top: '17.5%' }}
+              >
+                <span className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-sky-500 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
+                  <ChevronsLeft className="h-2.5 w-2.5 text-white" />
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => sendAction('toggle-mic')}
+                aria-label={state.micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
+                title={state.micMuted ? 'Unmute' : 'Mute — pauses your mic'}
+                className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                style={{ left: '50%', top: '17.3%' }}
+              >
+                <span
+                  className={`flex h-[15px] w-[15px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125 ${
+                    state.micMuted ? 'bg-red-600' : 'bg-amber-400'
+                  }`}
+                >
+                  {state.micMuted ? (
+                    <MicOff className="h-2.5 w-2.5 text-white" />
+                  ) : (
+                    <Mic className="h-2.5 w-2.5 text-[#17171B]" />
+                  )}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => sendAction('end-call')}
+                aria-label="End call"
+                title="End call"
+                className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                style={{ left: '60%', top: '17.5%' }}
+              >
+                <span className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
+                  <PhoneOff className="h-2.5 w-2.5 text-white" />
+                </span>
+              </button>
+            </div>
+          }
+        />
       </div>
 
       {/* Caption + status chip, readable over any desktop. */}
@@ -1247,8 +1262,32 @@ function TuckedMascot({
           <span className="truncate rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{caption}</span>
         )}
       </div>
-      <div className="mt-1 flex h-5 items-center">
-        <span className="flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white">
+      {/* The status chip IS the talk button: press-and-hold to talk, quick
+          tap to lock hands-free — same gestures as the pill's PTT button,
+          always visible. Pointer capture keeps the release edge even if the
+          cursor slides off mid-hold. */}
+      <div className="mt-1 flex h-6 items-center" style={noDragRegion}>
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            if (state.micMuted) return
+            e.currentTarget.setPointerCapture(e.pointerId)
+            sendAction('ptt-down')
+          }}
+          onPointerUp={() => {
+            if (!state.micMuted) sendAction('ptt-up')
+          }}
+          onPointerCancel={() => {
+            if (!state.micMuted) sendAction('ptt-up')
+          }}
+          aria-label="Hold to talk — or hold the right ⌘ key from any app"
+          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
+          className={`flex select-none items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium text-white shadow-md transition-colors ${
+            state.status === 'listening' || state.pttLocked
+              ? 'bg-green-600 hover:bg-green-500'
+              : 'bg-black/60 hover:bg-black/75'
+          } ${state.micMuted ? 'opacity-60' : ''}`}
+        >
           {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
             <>
               <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
@@ -1256,13 +1295,18 @@ function TuckedMascot({
             </>
           ) : state.pttLocked ? (
             <>
-              <span className="block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-              Hands-free
+              <span className="block h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+              Tap to send
+            </>
+          ) : state.status === 'listening' ? (
+            <>
+              <span className="block h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+              Release to send
             </>
           ) : statusDisplay ? (
             <>
               <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
-              {statusDisplay.label}
+              {state.status === 'idle' ? 'Hold right ⌘ — or hold me' : statusDisplay.label}
             </>
           ) : (
             <>
@@ -1270,7 +1314,7 @@ function TuckedMascot({
               Connecting…
             </>
           )}
-        </span>
+        </button>
       </div>
     </div>
   )
