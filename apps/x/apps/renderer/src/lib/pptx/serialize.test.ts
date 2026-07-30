@@ -412,3 +412,98 @@ describe('writeDeck', () => {
     ).rejects.toThrow(/unknown slide/)
   })
 })
+
+// ------------------------------------------------- numeric character refs
+
+// fast-xml-parser decodes only the five named XML entities, so NCRs arrive as
+// literal text in BOTH element content and attributes.
+const NCR_SLIDE_XML =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
+  '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"' +
+  ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+  '<p:cSld><p:spTree>' +
+  '<p:sp><p:nvSpPr><p:cNvPr id="2" name="NCR"/></p:nvSpPr>' +
+  '<p:spPr><a:xfrm><a:off x="10" y="20"/><a:ext cx="100" cy="200"/></a:xfrm></p:spPr>' +
+  '<p:txBody><a:bodyPr/><a:lstStyle/>' +
+  '<a:p><a:pPr marL="342900" indent="-342900"><a:buChar char="&#x2022;"/></a:pPr>' +
+  '<a:r><a:rPr lang="en-US"/><a:t>It&#8217;s a &#x2022; bullet</a:t></a:r>' +
+  '</a:p></p:txBody></p:sp>' +
+  '</p:spTree></p:cSld></p:sld>'
+
+async function loadNcrDeck() {
+  const zip = new JSZip()
+  zip.file('ppt/presentation.xml', PRESENTATION_XML)
+  zip.file('ppt/_rels/presentation.xml.rels', PRESENTATION_RELS)
+  zip.file('ppt/slides/slide1.xml', NCR_SLIDE_XML)
+  const deck = await parsePptx(await zip.generateAsync({ type: 'uint8array' }))
+  return { deck, shape: deck.slides[0].shapes[0] as TextShape }
+}
+
+describe('numeric character references', () => {
+  it('models &#8217; and &#x2022; in run text as the real characters', async () => {
+    const { shape } = await loadNcrDeck()
+    expect(shape.paragraphs[0].runs[0].text).toBe('It’s a • bullet')
+  })
+
+  it('decodes an NCR in an attribute, so buChar resolves to a real bullet', async () => {
+    const { shape } = await loadNcrDeck()
+    expect(shape.display?.paragraphs[0].bullet).toEqual({ kind: 'char', char: '•' })
+  })
+
+  it('leaves an unedited write-back byte-identical', async () => {
+    expect(updateSlideXml(NCR_SLIDE_XML, [])).toBe(NCR_SLIDE_XML)
+
+    const { deck } = await loadNcrDeck()
+    const out = await writeDeck(deck, new Map())
+    const raw = await (await JSZip.loadAsync(out)).files['ppt/slides/slide1.xml'].async('string')
+    // The decoded model never leaks back out: the original NCR bytes survive.
+    expect(raw).toBe(NCR_SLIDE_XML)
+  })
+
+  it('keeps the validation derivation in step, so a text edit still splices in place', async () => {
+    const { shape } = await loadNcrDeck()
+    // The deep-equal check compares the decoded model against a derivation of
+    // the raw XML; if only one side decoded, this would fall back to a rebuild.
+    const edit: ShapeTextEdit = {
+      kind: 'text',
+      nodePath: shape.nodePath,
+      original: shape.paragraphs,
+      next: [{ align: shape.paragraphs[0].align, srcPara: 0, runs: [{ text: 'Prabal’s • text' }] }],
+    }
+    const out = updateSlideXml(NCR_SLIDE_XML, [edit])
+    // Only the a:t content moved; the pPr, the buChar NCR and the rPr are intact.
+    expect(out).toBe(
+      NCR_SLIDE_XML.replace(
+        '<a:t>It&#8217;s a &#x2022; bullet</a:t>',
+        '<a:t>Prabal’s • text</a:t>',
+      ),
+    )
+    expect(out).toContain('<a:buChar char="&#x2022;"/>')
+  })
+
+  it('re-encodes an edited run to valid XML that reparses to the same text', async () => {
+    const { deck, shape } = await loadNcrDeck()
+    const next = 'Ampersand & <angle> ’ • done'
+    const out = await writeDeck(
+      deck,
+      new Map([
+        [
+          'ppt/slides/slide1.xml',
+          [
+            {
+              kind: 'text',
+              nodePath: shape.nodePath,
+              original: shape.paragraphs,
+              next: [{ align: shape.paragraphs[0].align, srcPara: 0, runs: [{ text: next }] }],
+            } satisfies ShapeTextEdit,
+          ],
+        ],
+      ]),
+    )
+    const raw = await (await JSZip.loadAsync(out)).files['ppt/slides/slide1.xml'].async('string')
+    expect(raw).toContain('<a:t>Ampersand &amp; &lt;angle&gt; ’ • done</a:t>')
+
+    const shape2 = (await parsePptx(out)).slides[0].shapes[0] as TextShape
+    expect(shape2.paragraphs[0].runs[0].text).toBe(next)
+  })
+})

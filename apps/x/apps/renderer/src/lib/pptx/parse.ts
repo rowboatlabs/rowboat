@@ -89,13 +89,22 @@ function attrsOf(node: XmlNode): Record<string, string> {
   return (node[ATTRS] as Record<string, string> | undefined) ?? {}
 }
 
+/**
+ * Attribute value, with numeric character references decoded — the parser
+ * leaves them literal in attributes just as it does in text, so `buChar
+ * char="&#x2022;"` would otherwise render as that markup instead of a bullet.
+ * Read-only: the serializer scans raw bytes and never reads attributes through
+ * here, so write-back is unaffected.
+ */
 export function attr(node: XmlNode, name: string): string | undefined {
   const a = attrsOf(node)
   const direct = a[ATTR_PREFIX + name]
-  if (direct !== undefined) return String(direct)
+  if (direct !== undefined) return decodeNumericRefs(String(direct))
   // Fall back to a local-name match so unusual prefixes still resolve.
   for (const [k, v] of Object.entries(a)) {
-    if (local(k.slice(ATTR_PREFIX.length)) === local(name)) return String(v)
+    if (local(k.slice(ATTR_PREFIX.length)) === local(name)) {
+      return decodeNumericRefs(String(v))
+    }
   }
   return undefined
 }
