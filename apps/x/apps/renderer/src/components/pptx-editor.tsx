@@ -28,7 +28,7 @@ import {
   type RectEmuBox,
   type ShapeKey,
 } from '@/components/pptx/edit-model'
-import { SlideCanvas } from '@/components/pptx/canvas'
+import { SlideCanvas, SlideThumbnail } from '@/components/pptx/canvas'
 import {
   EditorToolbar,
   MAX_ZOOM,
@@ -646,9 +646,10 @@ export function PptxEditor({ path }: PptxEditorProps) {
               <SlideCard
                 key={s.xmlPath}
                 index={i}
+                slide={s}
+                sizeEmu={deck.slideSizeEmu}
                 title={slideTitle(s)}
                 active={i === activeIndex}
-                aspect={deck.slideSizeEmu.w / deck.slideSizeEmu.h}
                 onSelect={() => {
                   setActiveIndex(i)
                   setSelectedKey(null)
@@ -693,20 +694,25 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
 // --------------------------------------------------------------- slide rail
 
+/** Rail width (w-56 = 224) minus nav padding, button padding, badge + gap. */
+const THUMB_WIDTH_PX = 160
+
 interface SlideCardProps {
   index: number
+  slide: Slide
+  sizeEmu: { w: number; h: number }
   title: string | null
   active: boolean
-  aspect: number
   onSelect: () => void
 }
 
-function SlideCard({ index, title, active, aspect, onSelect }: SlideCardProps) {
+function SlideCard({ index, slide, sizeEmu, title, active, onSelect }: SlideCardProps) {
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-current={active ? 'true' : undefined}
+      aria-label={`Slide ${index + 1}${title ? `: ${title}` : ''}`}
       className={`group flex items-start gap-2 rounded-md border p-2 text-left transition-colors ${
         active
           ? 'border-ring bg-accent text-accent-foreground'
@@ -721,14 +727,11 @@ function SlideCard({ index, title, active, aspect, onSelect }: SlideCardProps) {
         {index + 1}
       </span>
       <span
-        className={`flex min-w-0 flex-1 items-center rounded-sm border bg-muted/40 px-1.5 py-1 transition-colors ${
-          active ? 'border-ring/50' : 'border-border/60 group-hover:border-border'
+        className={`min-w-0 flex-1 overflow-hidden rounded-sm ring-1 transition-shadow ${
+          active ? 'ring-[var(--ring)]' : 'ring-border/60 group-hover:ring-border'
         }`}
-        style={{ aspectRatio: String(aspect) }}
       >
-        <span className="line-clamp-3 text-[11px] leading-tight text-foreground/80">
-          {title ?? <span className="text-muted-foreground">Untitled slide</span>}
-        </span>
+        <SlideThumbnail slide={slide} sizeEmu={sizeEmu} widthPx={THUMB_WIDTH_PX} />
       </span>
     </button>
   )

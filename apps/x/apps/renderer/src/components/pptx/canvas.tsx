@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useLayoutEffect,
   useRef,
@@ -474,6 +475,48 @@ function SelectionFrame({
     </div>
   )
 }
+
+// --------------------------------------------------------------- thumbnail
+
+const thumbNoop = () => {}
+
+/**
+ * A miniature of one slide, rendered through the same ShapeView pipeline as
+ * the canvas so the rail shows the real slide and tracks live edits. Fully
+ * inert: pointer-events none, no selection chrome, no text overlay. Memoized —
+ * applyEditSet keeps untouched slides referentially stable, so only an edited
+ * slide's thumbnail re-renders.
+ */
+export const SlideThumbnail = memo(function SlideThumbnail({
+  slide,
+  sizeEmu,
+  widthPx,
+}: {
+  slide: Slide
+  sizeEmu: { w: number; h: number }
+  widthPx: number
+}) {
+  const scale = widthPx / sizeEmu.w
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none relative select-none overflow-hidden bg-white"
+      style={{ width: widthPx, height: sizeEmu.h * scale }}
+    >
+      {slide.shapes.map((shape, i) => (
+        <ShapeView
+          key={`${shape.id}:${i}`}
+          shape={shape}
+          rect={shape.xfrmEmu}
+          scale={scale}
+          selected={false}
+          transform={composeTransform(visualTransform(shape))}
+          onPointerDown={thumbNoop}
+        />
+      ))}
+    </div>
+  )
+})
 
 // ------------------------------------------------------------------ canvas
 
