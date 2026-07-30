@@ -2,52 +2,59 @@ import {
   Component,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type MouseEvent as ReactMouseEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
-import {
-  BarChart3Icon,
-  ExternalLinkIcon,
-  FilmIcon,
-  GroupIcon,
-  Loader2Icon,
-  PresentationIcon,
-  ShapesIcon,
-  TableIcon,
-} from 'lucide-react'
+import { ExternalLinkIcon, Loader2Icon, PresentationIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { disposeDeck, parsePptx } from '@/lib/pptx/parse'
+import { writeDeck, type EditedParagraph, type RunFormatOverrides } from '@/lib/pptx/serialize'
+import type { NodePath, Paragraph, Shape, Slide, SlideDeck, TextAlign, TextShape } from '@/lib/pptx/types'
 import {
-  normalizeParagraphs,
-  writeDeck,
-  type EditedParagraph,
-  type EditedTextRun,
-  type ShapeTextEdit,
-} from '@/lib/pptx/serialize'
-import type {
-  PlaceholderKind,
-  Shape,
-  Slide,
-  SlideDeck,
-  TextRun,
-  TextShape,
-} from '@/lib/pptx/types'
+  EMPTY_EDIT_SET,
+  EMU_PER_PX,
+  acceptsFormatting,
+  applyEditSet,
+  hasEdits,
+  runKeyOf,
+  shapeKeyOf,
+  structureMatches,
+  toSlideEdits,
+  withShapeEdit,
+  type EditSet,
+  type RectEmuBox,
+  type ShapeKey,
+} from '@/components/pptx/edit-model'
+import { SlideCanvas } from '@/components/pptx/canvas'
+import {
+  EditorToolbar,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  ZOOM_STEPS,
+  type SaveStatus,
+} from '@/components/pptx/toolbar'
+import {
+  DEFAULT_TEXT_PT,
+  aggregateFormat,
+  aggregateFormatOfParagraphs,
+  applyAlignToBlocks,
+  applyFormatToSpans,
+  selectedParagraphBlocks,
+  selectedRunSpans,
+  type TextOverlayHandle,
+} from '@/components/pptx/text-dom'
 
 interface PptxEditorProps {
   path: string
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
-type SaveStatus = 'clean' | 'saving' | 'saved' | 'error'
 
 const SAVE_DEBOUNCE_MS = 800
-/** 914400 EMU per inch / 72 pt per inch. */
-const EMU_PER_PT = 12700
-const DEFAULT_TEXT_PT = 18
+const MAX_HISTORY = 100
 
 function base64ToUint8Array(base64: string): Uint8Array {
   const binary = atob(base64)
@@ -71,25 +78,6 @@ function baseName(path: string): string {
   return segs[segs.length - 1] || path
 }
 
-function alignToCss(align: string | undefined): 'left' | 'center' | 'right' | 'justify' {
-  return align === 'ctr' ? 'center' : align === 'r' ? 'right' : align === 'just' ? 'justify' : 'left'
-}
-
-function rectStyle(shape: Shape, scale: number): CSSProperties {
-  return {
-    position: 'absolute',
-    left: shape.xfrmEmu.x * scale,
-    top: shape.xfrmEmu.y * scale,
-    width: shape.xfrmEmu.w * scale,
-    height: shape.xfrmEmu.h * scale,
-  }
-}
-
-/** Stable identity for a shape across state updates: slide + node path. */
-function editKeyOf(slide: Slide, shape: Shape): string {
-  return `${slide.xmlPath}#${shape.nodePath.join('.')}`
-}
-
 /** First non-empty line of text on a slide, used to label its rail card. */
 function slideTitle(slide: Slide): string | null {
   for (const shape of slide.shapes) {
@@ -102,55 +90,76 @@ function slideTitle(slide: Slide): string | null {
   return null
 }
 
-const PLACEHOLDER_META: Record<PlaceholderKind, { label: string; Icon: typeof ShapesIcon }> = {
-  chart: { label: 'Chart', Icon: BarChart3Icon },
-  smartart: { label: 'Diagram', Icon: ShapesIcon },
-  table: { label: 'Table', Icon: TableIcon },
-  group: { label: 'Group', Icon: GroupIcon },
-  video: { label: 'Video', Icon: FilmIcon },
-  unknown: { label: 'Shape', Icon: ShapesIcon },
+function findShape(slide: Slide | null, key: ShapeKey | null): Shape | undefined {
+  if (!slide || !key) return undefined
+  return slide.shapes.find((s) => shapeKeyOf(slide.xmlPath, s.nodePath) === key)
+}
+
+function baseParagraphsOf(
+  base: SlideDeck | null,
+  slidePath: string,
+  nodePath: NodePath,
+): Paragraph[] | undefined {
+  const slide = base?.slides.find((s) => s.xmlPath === slidePath)
+  const shape = slide?.shapes.find((s) => s.nodePath.join('.') === nodePath.join('.'))
+  return shape?.type === 'text' ? shape.paragraphs : undefined
+}
+
+/** Structure + text only; formatting is compared separately. */
+function textSignature(paras: readonly { runs: readonly { text: string }[] }[]): string {
+  return JSON.stringify(paras.map((p) => p.runs.map((r) => r.text)))
 }
 
 export function PptxEditor({ path }: PptxEditorProps) {
   const [loadState, setLoadState] = useState<LoadState>('loading')
-  const [deck, setDeck] = useState<SlideDeck | null>(null)
+  const [baseDeck, setBaseDeck] = useState<SlideDeck | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
-  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null)
+  const [selectedKey, setSelectedKey] = useState<ShapeKey | null>(null)
+  const [editingKey, setEditingKey] = useState<ShapeKey | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('clean')
-  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [zoomMode, setZoomMode] = useState<'fit' | number>('fit')
+  const [zoomPercent, setZoomPercent] = useState(100)
+  const [selectionTick, setSelectionTick] = useState(0)
 
-  // Held separately from state so save/cleanup closures always see the live
-  // deck. Not cleared on unmount: an in-flight save may still be serializing.
-  const deckRef = useRef<SlideDeck | null>(null)
-  /** slideXmlPath → (nodePath key → edit). `original` is always the as-parsed model. */
-  const editsRef = useRef<Map<string, Map<string, ShapeTextEdit>>>(new Map())
+  const [history, setHistory] = useState<EditSet[]>([EMPTY_EDIT_SET])
+  const [histIndex, setHistIndex] = useState(0)
+  const editSet = history[histIndex] ?? EMPTY_EDIT_SET
+
+  const rootRef = useRef<HTMLDivElement>(null)
+  const baseDeckRef = useRef<SlideDeck | null>(null)
+  const editSetRef = useRef<EditSet>(EMPTY_EDIT_SET)
+  const histIndexRef = useRef(0)
+  const overlayRef = useRef<TextOverlayHandle | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savingRef = useRef(false)
   const pendingRef = useRef(false)
   const dirtyRef = useRef(false)
   const lastWrittenRef = useRef<string | null>(null)
 
-  // Serialize the deck (original bytes + accumulated edits) and write it back.
-  // `path` is constant for this mount (App keys the component by path), so a
-  // late-firing save can only ever write its own document.
+  useEffect(() => {
+    editSetRef.current = editSet
+  }, [editSet])
+  useEffect(() => {
+    histIndexRef.current = histIndex
+  }, [histIndex])
+
+  // ------------------------------------------------------------- persistence
+
   const persist = useCallback(async () => {
-    const deckNow = deckRef.current
-    if (!deckNow) return
+    const base = baseDeckRef.current
+    if (!base) return
     if (savingRef.current) {
       pendingRef.current = true
       return
     }
     savingRef.current = true
     try {
-      const editsBySlide = new Map<string, ShapeTextEdit[]>()
-      for (const [slidePath, shapeEdits] of editsRef.current) {
-        if (shapeEdits.size > 0) editsBySlide.set(slidePath, [...shapeEdits.values()])
-      }
-      if (editsBySlide.size === 0) {
+      const edits = editSetRef.current
+      if (!hasEdits(edits) && lastWrittenRef.current === null) {
         setSaveStatus('clean')
         return
       }
-      const bytes = await writeDeck(deckNow, editsBySlide)
+      const bytes = await writeDeck(base, toSlideEdits(edits))
       const b64 = uint8ArrayToBase64(bytes)
       if (b64 !== lastWrittenRef.current) {
         await window.ipc.invoke('workspace:writeFile', {
@@ -167,7 +176,6 @@ export function PptxEditor({ path }: PptxEditorProps) {
       setSaveStatus('error')
     } finally {
       savingRef.current = false
-      // A commit landed while we were saving — flush it.
       if (pendingRef.current) {
         pendingRef.current = false
         scheduleSave()
@@ -177,16 +185,29 @@ export function PptxEditor({ path }: PptxEditorProps) {
   }, [path])
 
   const scheduleSave = useCallback(() => {
+    dirtyRef.current = true
+    setSaveStatus('saving')
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       void persist()
     }, SAVE_DEBOUNCE_MS)
   }, [persist])
 
-  // Flush pending edits when navigating away or unmounting. Declared BEFORE
-  // the load effect so this cleanup runs before the deck's blob URLs are
-  // revoked (writeDeck reads the zip, not the blob URLs, so even an async
-  // in-flight serialization stays valid).
+  /** Commits a new edit set: pushes onto the undo stack and schedules a save. */
+  const pushEdits = useCallback(
+    (next: EditSet) => {
+      setHistory((h) => {
+        const trimmed = [...h.slice(0, histIndexRef.current + 1), next]
+        return trimmed.length > MAX_HISTORY ? trimmed.slice(trimmed.length - MAX_HISTORY) : trimmed
+      })
+      setHistIndex((i) => Math.min(i + 1, MAX_HISTORY - 1))
+      editSetRef.current = next
+      scheduleSave()
+    },
+    [scheduleSave],
+  )
+
+  // Flush pending edits on unmount / path change, before blob URLs are revoked.
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -195,80 +216,368 @@ export function PptxEditor({ path }: PptxEditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
 
-  // App.tsx keys this component by path, so a different file arrives as a fresh
-  // mount with fresh state — no synchronous resets needed here.
+  // App.tsx keys this component by path, so a different file is a fresh mount.
   useEffect(() => {
     let cancelled = false
-
     ;(async () => {
       try {
         const result = await window.ipc.invoke('workspace:readFile', { path, encoding: 'base64' })
         const parsed = await parsePptx(base64ToUint8Array(result.data))
         if (cancelled) {
-          // Nobody will render these; release them now.
           disposeDeck(parsed)
           return
         }
-        deckRef.current = parsed
-        setDeck(parsed)
+        baseDeckRef.current = parsed
+        setBaseDeck(parsed)
         setLoadState('ready')
       } catch (err) {
         console.error('Failed to open pptx:', err)
         if (!cancelled) setLoadState('error')
       }
     })()
-
     return () => {
       cancelled = true
-      if (deckRef.current) disposeDeck(deckRef.current)
+      if (baseDeckRef.current) disposeDeck(baseDeckRef.current)
     }
   }, [path])
 
-  const commitEdit = useCallback(
-    (slide: Slide, shape: TextShape, next: EditedParagraph[] | null) => {
-      setEditingKey(null)
-      if (!next) return
-      if (normalizeParagraphs(next) === normalizeParagraphs(shape.paragraphs)) return
+  // ------------------------------------------------------------ derived deck
 
-      const slideEdits = editsRef.current.get(slide.xmlPath) ?? new Map<string, ShapeTextEdit>()
-      editsRef.current.set(slide.xmlPath, slideEdits)
-      const key = shape.nodePath.join('.')
-      const existing = slideEdits.get(key)
-      slideEdits.set(key, {
-        nodePath: shape.nodePath,
-        // First edit of this shape: its current paragraphs ARE the as-parsed
-        // original. Later edits keep the first capture.
-        original: existing?.original ?? shape.paragraphs,
-        next,
-      })
+  const deck = useMemo(
+    () => (baseDeck ? applyEditSet(baseDeck, editSet) : null),
+    [baseDeck, editSet],
+  )
+  const slide = deck?.slides[activeIndex] ?? null
+  const selectedShape = findShape(slide, selectedKey)
+  const shapeEdit = selectedKey ? editSet[selectedKey] : undefined
 
-      setDeck(
-        (d) =>
-          d && {
-            ...d,
-            slides: d.slides.map((s) =>
-              s !== slide
-                ? s
-                : { ...s, shapes: s.shapes.map((sh) => (sh !== shape ? sh : { ...sh, paragraphs: next })) },
-            ),
-          },
-      )
-      dirtyRef.current = true
-      setSaveStatus('saving')
-      scheduleSave()
-    },
-    [scheduleSave],
+  // ------------------------------------------------------------ undo / redo
+
+  const canUndo = histIndex > 0
+  const canRedo = histIndex < history.length - 1
+
+  const undo = useCallback(() => {
+    if (histIndexRef.current <= 0) return
+    const next = histIndexRef.current - 1
+    histIndexRef.current = next
+    editSetRef.current = history[next] ?? EMPTY_EDIT_SET
+    setHistIndex(next)
+    setEditingKey(null)
+    scheduleSave()
+  }, [history, scheduleSave])
+
+  const redo = useCallback(() => {
+    if (histIndexRef.current >= history.length - 1) return
+    const next = histIndexRef.current + 1
+    histIndexRef.current = next
+    editSetRef.current = history[next] ?? EMPTY_EDIT_SET
+    setHistIndex(next)
+    setEditingKey(null)
+    scheduleSave()
+  }, [history, scheduleSave])
+
+  // ----------------------------------------------------------- edit commits
+
+  const seedFor = useCallback(
+    (slidePath: string, shape: Shape) => ({
+      slidePath,
+      nodePath: shape.nodePath,
+      original:
+        shape.type === 'text'
+          ? baseParagraphsOf(baseDeckRef.current, slidePath, shape.nodePath)
+          : undefined,
+    }),
+    [],
   )
 
-  const slide = deck?.slides[activeIndex] ?? null
+  const handleGeometryCommit = useCallback(
+    (shape: Shape, rect: RectEmuBox) => {
+      if (!slide) return
+      const key = shapeKeyOf(slide.xmlPath, shape.nodePath)
+      pushEdits(
+        withShapeEdit(editSetRef.current, key, seedFor(slide.xmlPath, shape), (draft) => {
+          draft.geometry = rect
+        }),
+      )
+    },
+    [slide, pushEdits, seedFor],
+  )
+
+  const handleTextCommit = useCallback(
+    (shape: TextShape, next: EditedParagraph[] | null) => {
+      setEditingKey(null)
+      if (!next || !slide) return
+      const key = shapeKeyOf(slide.xmlPath, shape.nodePath)
+      const original = baseParagraphsOf(baseDeckRef.current, slide.xmlPath, shape.nodePath)
+      if (!original) return
+
+      // The text edit carries ORIGINAL formatting so it stays on the
+      // in-place splice path; formatting travels as formatRuns / aligns.
+      const textNext: EditedParagraph[] = next.map((p) => ({
+        align: p.srcPara !== undefined ? original[p.srcPara]?.align : p.align,
+        srcPara: p.srcPara,
+        runs: p.runs.map((r) => {
+          const src =
+            r.srcPara !== undefined && r.srcRun !== undefined
+              ? original[r.srcPara]?.runs[r.srcRun]
+              : undefined
+          return {
+            text: r.text,
+            srcPara: r.srcPara,
+            srcRun: r.srcRun,
+            bold: src?.bold,
+            italic: src?.italic,
+            underline: src?.underline,
+            sizePt: src?.sizePt,
+            colorHex: src?.colorHex,
+          }
+        }),
+      }))
+
+      const structural = !structureMatches(original, textNext)
+      const textChanged = textSignature(textNext) !== textSignature(original)
+
+      // Formatting is only addressable while the structure still lines up.
+      const formats: Record<string, RunFormatOverrides> = {}
+      const aligns: Record<string, TextAlign> = {}
+      if (!structural) {
+        next.forEach((p, pi) => {
+          const srcPara = original[pi]
+          if (!srcPara) return
+          if (p.align && p.align !== srcPara.align) aligns[String(pi)] = p.align
+          p.runs.forEach((r, ri) => {
+            if (r.text === '\n') return
+            const src = srcPara.runs[ri]
+            if (!src) return
+            const delta: RunFormatOverrides = {}
+            if (Boolean(r.bold) !== Boolean(src.bold)) delta.bold = Boolean(r.bold)
+            if (Boolean(r.italic) !== Boolean(src.italic)) delta.italic = Boolean(r.italic)
+            if (Boolean(r.underline) !== Boolean(src.underline)) delta.underline = Boolean(r.underline)
+            if ((r.sizePt ?? null) !== (src.sizePt ?? null) && r.sizePt !== undefined) {
+              delta.sizePt = r.sizePt
+            }
+            if ((r.colorHex ?? null) !== (src.colorHex ?? null) && r.colorHex !== undefined) {
+              delta.colorHex = r.colorHex
+            }
+            if (Object.keys(delta).length > 0) formats[runKeyOf(pi, ri)] = delta
+          })
+        })
+      }
+
+      const previous = editSetRef.current[key]
+      const hadFormatting =
+        Boolean(previous?.formats && Object.keys(previous.formats).length) ||
+        Boolean(previous?.aligns && Object.keys(previous.aligns).length)
+      const nothingChanged =
+        !textChanged &&
+        Object.keys(formats).length === 0 &&
+        Object.keys(aligns).length === 0 &&
+        !hadFormatting
+      if (nothingChanged) return
+
+      if (structural && hadFormatting) {
+        toast.info('Formatting was reset on this text box because its structure changed.')
+      }
+
+      pushEdits(
+        withShapeEdit(editSetRef.current, key, seedFor(slide.xmlPath, shape), (draft) => {
+          draft.original = original
+          draft.text = textChanged || structural ? textNext : undefined
+          if (structural) {
+            // A rebuilt <a:p> range would overlap formatting splices.
+            draft.formats = undefined
+            draft.aligns = undefined
+          } else {
+            draft.formats = Object.keys(formats).length > 0 ? formats : undefined
+            draft.aligns = Object.keys(aligns).length > 0 ? aligns : undefined
+          }
+        }),
+      )
+    },
+    [slide, pushEdits, seedFor],
+  )
+
+  // ------------------------------------------------------------ formatting
+
+  const canFormat =
+    selectedShape?.type === 'text' && acceptsFormatting(shapeEdit) && slide !== null
+
+  const formatDisabledReason = !selectedShape
+    ? 'Select a text box first'
+    : selectedShape.type !== 'text'
+      ? 'This shape has no text'
+      : !acceptsFormatting(shapeEdit)
+        ? 'Formatting is unavailable after changing this text box’s structure'
+        : null
+
+  // Reads live DOM while editing so the toolbar mirrors the caret's run.
+  // `selectionTick` is what forces the recompute.
+  void selectionTick
+  const activeFormat: RunFormatOverrides | null = !canFormat
+    ? null
+    : overlayRef.current
+      ? aggregateFormat(selectedRunSpans(overlayRef.current.root), overlayRef.current.scale)
+      : aggregateFormatOfParagraphs((selectedShape as TextShape).paragraphs)
+
+  const activeAlign: TextAlign | null = !canFormat
+    ? null
+    : overlayRef.current
+      ? ((selectedParagraphBlocks(overlayRef.current.root)[0]?.getAttribute('data-algn') ||
+          'l') as TextAlign)
+      : ((selectedShape as TextShape).paragraphs[0]?.align ?? 'l')
+
+  const applyFormat = useCallback(
+    (set: RunFormatOverrides) => {
+      if (!slide || !selectedKey) return
+      const shape = findShape(slide, selectedKey)
+      if (shape?.type !== 'text') return
+
+      const overlay = overlayRef.current
+      if (overlay) {
+        // Editing: mutate the spans; the commit on blur turns this into edits.
+        applyFormatToSpans(selectedRunSpans(overlay.root), set, overlay.scale)
+        setSelectionTick((t) => t + 1)
+        dirtyRef.current = true
+        return
+      }
+
+      const original = baseParagraphsOf(baseDeckRef.current, slide.xmlPath, shape.nodePath)
+      if (!original) return
+      pushEdits(
+        withShapeEdit(editSetRef.current, selectedKey, seedFor(slide.xmlPath, shape), (draft) => {
+          draft.original = original
+          const formats = { ...(draft.formats ?? {}) }
+          original.forEach((p, pi) =>
+            p.runs.forEach((r, ri) => {
+              if (r.text === '\n') return
+              const key = runKeyOf(pi, ri)
+              formats[key] = { ...formats[key], ...set }
+            }),
+          )
+          draft.formats = formats
+        }),
+      )
+    },
+    [slide, selectedKey, pushEdits, seedFor],
+  )
+
+  const applyAlign = useCallback(
+    (align: TextAlign) => {
+      if (!slide || !selectedKey) return
+      const shape = findShape(slide, selectedKey)
+      if (shape?.type !== 'text') return
+
+      const overlay = overlayRef.current
+      if (overlay) {
+        applyAlignToBlocks(selectedParagraphBlocks(overlay.root), align)
+        setSelectionTick((t) => t + 1)
+        dirtyRef.current = true
+        return
+      }
+
+      const original = baseParagraphsOf(baseDeckRef.current, slide.xmlPath, shape.nodePath)
+      if (!original) return
+      pushEdits(
+        withShapeEdit(editSetRef.current, selectedKey, seedFor(slide.xmlPath, shape), (draft) => {
+          draft.original = original
+          const aligns = { ...(draft.aligns ?? {}) }
+          original.forEach((_, pi) => {
+            aligns[String(pi)] = align
+          })
+          draft.aligns = aligns
+        }),
+      )
+    },
+    [slide, selectedKey, pushEdits, seedFor],
+  )
+
+  const stepFontSize = useCallback(
+    (delta: number) => {
+      const current = activeFormat?.sizePt ?? DEFAULT_TEXT_PT
+      const next = Math.min(400, Math.max(1, Math.round(current + delta)))
+      applyFormat({ sizePt: next })
+    },
+    [activeFormat, applyFormat],
+  )
+
+  // Keep the toolbar in step with the caret while editing.
+  useEffect(() => {
+    if (!editingKey) return
+    const onSelectionChange = () => setSelectionTick((t) => t + 1)
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [editingKey])
+
+  // ------------------------------------------------------------------ zoom
+
+  const zoomTo = useCallback(
+    (direction: 1 | -1) => {
+      const current = Math.round(zoomPercent)
+      const next =
+        direction > 0
+          ? (ZOOM_STEPS.find((z) => z > current + 0.5) ?? MAX_ZOOM)
+          : ([...ZOOM_STEPS].reverse().find((z) => z < current - 0.5) ?? MIN_ZOOM)
+      setZoomMode(next)
+    },
+    [zoomPercent],
+  )
+
+  const handleScaleChange = useCallback((_scale: number, percent: number) => {
+    setZoomPercent(percent)
+  }, [])
+
+  // -------------------------------------------------------------- keyboard
+
+  const handleKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && e.key.toLowerCase() === 'z') {
+        // Inside the text overlay the browser owns undo.
+        if (editingKey) return
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+        return
+      }
+      if (e.key === 'Escape') {
+        if (editingKey) return // the overlay commits and clears it
+        if (selectedKey) {
+          e.preventDefault()
+          setSelectedKey(null)
+        }
+        return
+      }
+      if (editingKey || !selectedKey || !slide) return
+
+      const nudge: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      }
+      const dir = nudge[e.key]
+      if (!dir) return
+      const shape = findShape(slide, selectedKey)
+      if (!shape) return
+      e.preventDefault()
+      const step = EMU_PER_PX * (e.shiftKey ? 10 : 1)
+      handleGeometryCommit(shape, {
+        x: Math.round(shape.xfrmEmu.x + dir[0] * step),
+        y: Math.round(shape.xfrmEmu.y + dir[1] * step),
+        w: shape.xfrmEmu.w,
+        h: shape.xfrmEmu.h,
+      })
+    },
+    [editingKey, selectedKey, slide, undo, redo, handleGeometryCommit],
+  )
+
+  // ---------------------------------------------------------------- render
 
   const openExternally = useCallback(() => {
     void window.ipc.invoke('shell:openPath', { path })
   }, [path])
 
-  if (loadState === 'error') {
-    return <FailurePanel path={path} onOpen={openExternally} />
-  }
+  if (loadState === 'error') return <FailurePanel path={path} onOpen={openExternally} />
 
   if (loadState === 'loading' || !deck) {
     return (
@@ -291,58 +600,87 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
   return (
     <EditorErrorBoundary path={path} onOpen={openExternally}>
-      <div className="flex h-full w-full min-h-0 bg-background">
-        <nav
-          aria-label="Slides"
-          className="flex w-56 shrink-0 flex-col gap-2 overflow-y-auto border-r border-border bg-card/40 p-3"
-        >
-          {deck.slides.map((s, i) => (
-            <SlideCard
-              key={s.xmlPath}
-              index={i}
-              title={slideTitle(s)}
-              active={i === activeIndex}
-              aspect={deck.slideSizeEmu.w / deck.slideSizeEmu.h}
-              onSelect={() => {
-                setActiveIndex(i)
-                setSelectedShapeId(null)
-              }}
-            />
-          ))}
-        </nav>
+      <div
+        ref={rootRef}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        // The text overlay stops pointer events, so this only fires for the
+        // chrome and the canvas — where shortcuts need to reach us.
+        onPointerDown={() => rootRef.current?.focus({ preventScroll: true })}
+        className="flex h-full w-full min-h-0 flex-col bg-background outline-none"
+      >
+        <EditorToolbar
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={undo}
+          onRedo={redo}
+          zoomPercent={zoomPercent}
+          isFitZoom={zoomMode === 'fit'}
+          onZoomIn={() => zoomTo(1)}
+          onZoomOut={() => zoomTo(-1)}
+          onZoomFit={() => setZoomMode('fit')}
+          format={activeFormat}
+          formatDisabledReason={formatDisabledReason}
+          onToggleBold={() => applyFormat({ bold: !activeFormat?.bold })}
+          onToggleItalic={() => applyFormat({ italic: !activeFormat?.italic })}
+          onToggleUnderline={() => applyFormat({ underline: !activeFormat?.underline })}
+          onFontSizeStep={stepFontSize}
+          onColorChange={(hex) => applyFormat({ colorHex: hex })}
+          align={activeAlign}
+          onAlign={applyAlign}
+          slideNumber={activeIndex + 1}
+          slideCount={deck.slides.length}
+          saveStatus={saveStatus}
+        />
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-            <PresentationIcon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate text-sm font-medium text-foreground" title={path}>
-              {baseName(path)}
-            </span>
-            <span className="ml-auto flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
-              {saveStatus !== 'clean' && (
-                <span className={saveStatus === 'error' ? 'text-destructive' : undefined}>
-                  {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : 'Save failed'}
-                </span>
-              )}
-              <span>
-                Slide {activeIndex + 1} of {deck.slides.length}
+        <div className="flex min-h-0 flex-1">
+          <nav
+            aria-label="Slides"
+            className="flex w-56 shrink-0 flex-col gap-2 overflow-y-auto border-r border-border bg-card/40 p-3"
+          >
+            {deck.slides.map((s, i) => (
+              <SlideCard
+                key={s.xmlPath}
+                index={i}
+                title={slideTitle(s)}
+                active={i === activeIndex}
+                aspect={deck.slideSizeEmu.w / deck.slideSizeEmu.h}
+                onSelect={() => {
+                  setActiveIndex(i)
+                  setSelectedKey(null)
+                  setEditingKey(null)
+                }}
+              />
+            ))}
+          </nav>
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5">
+              <PresentationIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate text-sm font-medium text-foreground" title={path}>
+                {baseName(path)}
               </span>
-            </span>
-          </header>
+            </header>
 
-          {slide && (
-            <SlideCanvas
-              slide={slide}
-              sizeEmu={deck.slideSizeEmu}
-              selectedShapeId={selectedShapeId}
-              onSelectShape={setSelectedShapeId}
-              editingKey={editingKey}
-              onStartEdit={(shape) => {
-                setSelectedShapeId(shape.id)
-                setEditingKey(editKeyOf(slide, shape))
-              }}
-              onCommitEdit={(shape, next) => commitEdit(slide, shape, next)}
-            />
-          )}
+            {slide && (
+              <SlideCanvas
+                slide={slide}
+                sizeEmu={deck.slideSizeEmu}
+                zoomMode={zoomMode}
+                onScaleChange={handleScaleChange}
+                selectedKey={selectedKey}
+                editingKey={editingKey}
+                onSelect={setSelectedKey}
+                onStartEdit={setEditingKey}
+                onGeometryCommit={handleGeometryCommit}
+                onOverlayAttach={(h) => {
+                  overlayRef.current = h
+                  setSelectionTick((t) => t + 1)
+                }}
+                onTextCommit={handleTextCommit}
+              />
+            )}
+          </div>
         </div>
       </div>
     </EditorErrorBoundary>
@@ -365,17 +703,23 @@ function SlideCard({ index, title, active, aspect, onSelect }: SlideCardProps) {
       type="button"
       onClick={onSelect}
       aria-current={active ? 'true' : undefined}
-      className={`flex items-start gap-2 rounded-md border p-2 text-left transition-colors ${
+      className={`group flex items-start gap-2 rounded-md border p-2 text-left transition-colors ${
         active
           ? 'border-ring bg-accent text-accent-foreground'
-          : 'border-border bg-background hover:bg-accent/50'
+          : 'border-border bg-background hover:border-ring/40 hover:bg-accent/50'
       }`}
     >
-      <span className="mt-0.5 w-4 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+      <span
+        className={`mt-0.5 w-4 shrink-0 text-right text-[11px] tabular-nums ${
+          active ? 'text-foreground' : 'text-muted-foreground'
+        }`}
+      >
         {index + 1}
       </span>
       <span
-        className="flex min-w-0 flex-1 items-center rounded-sm border border-border/60 bg-muted/40 px-1.5 py-1"
+        className={`flex min-w-0 flex-1 items-center rounded-sm border bg-muted/40 px-1.5 py-1 transition-colors ${
+          active ? 'border-ring/50' : 'border-border/60 group-hover:border-border'
+        }`}
         style={{ aspectRatio: String(aspect) }}
       >
         <span className="line-clamp-3 text-[11px] leading-tight text-foreground/80">
@@ -383,392 +727,6 @@ function SlideCard({ index, title, active, aspect, onSelect }: SlideCardProps) {
         </span>
       </span>
     </button>
-  )
-}
-
-// ------------------------------------------------------------------ canvas
-
-interface SlideCanvasProps {
-  slide: Slide
-  sizeEmu: { w: number; h: number }
-  selectedShapeId: string | null
-  onSelectShape: (id: string | null) => void
-  editingKey: string | null
-  onStartEdit: (shape: TextShape) => void
-  onCommitEdit: (shape: TextShape, next: EditedParagraph[] | null) => void
-}
-
-function SlideCanvas({
-  slide,
-  sizeEmu,
-  selectedShapeId,
-  onSelectShape,
-  editingKey,
-  onStartEdit,
-  onCommitEdit,
-}: SlideCanvasProps) {
-  const frameRef = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(0)
-
-  // Fit the deck's EMU page into whatever space the pane has, preserving aspect.
-  useLayoutEffect(() => {
-    const el = frameRef.current
-    if (!el) return
-    const fit = () => {
-      const { width, height } = el.getBoundingClientRect()
-      if (width <= 0 || height <= 0) return
-      setScale(Math.min(width / sizeEmu.w, height / sizeEmu.h))
-    }
-    fit()
-    const observer = new ResizeObserver(fit)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [sizeEmu.w, sizeEmu.h])
-
-  return (
-    <div
-      ref={frameRef}
-      className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-6"
-      onClick={() => onSelectShape(null)}
-    >
-      {scale > 0 && (
-        <div
-          className="relative overflow-hidden rounded-md bg-white shadow-lg ring-1 ring-border"
-          style={{ width: sizeEmu.w * scale, height: sizeEmu.h * scale }}
-        >
-          {slide.shapes.map((shape, i) => {
-            // Ids repeat across some decks; pair with position for uniqueness.
-            const reactKey = `${shape.id}:${i}`
-            if (shape.type === 'text' && editingKey === editKeyOf(slide, shape)) {
-              return (
-                <TextEditOverlay
-                  key={reactKey}
-                  shape={shape}
-                  scale={scale}
-                  style={rectStyle(shape, scale)}
-                  onCommit={(next) => onCommitEdit(shape, next)}
-                />
-              )
-            }
-            return (
-              <ShapeView
-                key={reactKey}
-                shape={shape}
-                scale={scale}
-                selected={shape.id === selectedShapeId}
-                onSelect={(e) => {
-                  e.stopPropagation()
-                  onSelectShape(shape.id)
-                  if (shape.type === 'text') onStartEdit(shape)
-                }}
-              />
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-interface ShapeViewProps {
-  shape: Shape
-  scale: number
-  selected: boolean
-  onSelect: (e: ReactMouseEvent) => void
-}
-
-function ShapeView({ shape, scale, selected, onSelect }: ShapeViewProps) {
-  const style = rectStyle(shape, scale)
-  const ring = selected ? 'outline outline-2 outline-offset-1 outline-[var(--ring)]' : ''
-
-  if (shape.type === 'image') {
-    return (
-      <img
-        src={shape.blobUrl}
-        alt=""
-        draggable={false}
-        onClick={onSelect}
-        style={style}
-        className={`object-contain ${ring}`}
-      />
-    )
-  }
-
-  if (shape.type === 'placeholder') {
-    const { label, Icon } = PLACEHOLDER_META[shape.kind]
-    return (
-      <div
-        onClick={onSelect}
-        style={style}
-        className={`flex items-center justify-center gap-1.5 rounded-sm border border-dashed border-neutral-400/70 bg-neutral-500/5 ${ring}`}
-      >
-        <Icon className="size-3.5 shrink-0 text-neutral-500" />
-        <span className="truncate text-[11px] text-neutral-500">{label}</span>
-      </div>
-    )
-  }
-
-  return <TextShapeView shape={shape} scale={scale} style={style} ring={ring} onSelect={onSelect} />
-}
-
-interface TextShapeViewProps {
-  shape: TextShape
-  scale: number
-  style: CSSProperties
-  ring: string
-  onSelect: (e: ReactMouseEvent) => void
-}
-
-function TextShapeView({ shape, scale, style, ring, onSelect }: TextShapeViewProps) {
-  // Point sizes are relative to the deck page, so they scale with it.
-  const ptToPx = (pt: number) => pt * EMU_PER_PT * scale
-
-  return (
-    <div
-      onClick={onSelect}
-      style={{ ...style, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
-      className={`cursor-text overflow-hidden ${ring}`}
-    >
-      {shape.paragraphs.map((para, pi) => (
-        <p
-          key={pi}
-          style={{
-            textAlign: alignToCss(para.align),
-            margin: 0,
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {para.runs.map((run, ri) => (
-            <span
-              key={ri}
-              style={{
-                fontWeight: run.bold ? 700 : undefined,
-                fontStyle: run.italic ? 'italic' : undefined,
-                textDecoration: run.underline ? 'underline' : undefined,
-                fontSize: ptToPx(run.sizePt ?? DEFAULT_TEXT_PT),
-                color: run.colorHex ? `#${run.colorHex}` : '#000',
-                lineHeight: 1.2,
-              }}
-            >
-              {run.text}
-            </span>
-          ))}
-        </p>
-      ))}
-    </div>
-  )
-}
-
-// ----------------------------------------------------------- editing overlay
-
-/**
- * Rendered HTML for the contentEditable overlay. Every run carries its CURRENT
- * coordinates (data-cp/data-cr — for style lookup at extraction time) and,
- * when known, its ORIGINAL provenance (data-op/data-or — indexes into the
- * shape's as-parsed paragraphs, which the serializer uses to reuse rPr/pPr
- * bytes). When a browser splits a block or span on Enter, it clones these
- * attributes onto both halves — exactly the inheritance we want.
- */
-function buildEditableHtml(shape: TextShape, scale: number): string {
-  const escapeHtml = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
-  return shape.paragraphs
-    .map((para, pi) => {
-      const ep = para as EditedParagraph
-      const paraSrc = 'srcPara' in ep ? ep.srcPara : pi
-      const paraProv = paraSrc !== undefined ? ` data-op="${paraSrc}"` : ''
-      const inner = para.runs
-        .map((run, ri) => {
-          const er = run as EditedTextRun
-          const runSrcPara = 'srcPara' in er ? er.srcPara : pi
-          const runSrcRun = 'srcRun' in er ? er.srcRun : ri
-          const prov =
-            runSrcPara !== undefined && runSrcRun !== undefined
-              ? ` data-op="${runSrcPara}" data-or="${runSrcRun}"`
-              : ''
-          if (run.text === '\n') return `<br data-cp="${pi}" data-cr="${ri}"${prov}>`
-          const px = (run.sizePt ?? DEFAULT_TEXT_PT) * EMU_PER_PT * scale
-          const style =
-            `font-weight:${run.bold ? 700 : 400};font-style:${run.italic ? 'italic' : 'normal'};` +
-            `text-decoration:${run.underline ? 'underline' : 'none'};font-size:${px}px;` +
-            `color:#${run.colorHex ?? '000000'};line-height:1.2`
-          return `<span data-cp="${pi}" data-cr="${ri}"${prov} style="${style}">${escapeHtml(run.text)}</span>`
-        })
-        .join('')
-      return `<div data-cp="${pi}"${paraProv} style="margin:0;text-align:${alignToCss(para.align)}">${inner || '<br>'}</div>`
-    })
-    .join('')
-}
-
-function numAttr(el: Element, name: string): number | undefined {
-  const v = el.getAttribute(name)
-  if (v === null) return undefined
-  const n = Number(v)
-  return Number.isInteger(n) && n >= 0 ? n : undefined
-}
-
-/** contentEditable output → model text. NBSP and CRLF normalized, zero-widths dropped. */
-function normText(s: string): string {
-  return s.replace(/\u00A0/g, ' ').replace(/\r\n?/g, '\n').replace(/[\u200B\uFEFF]/g, '')
-}
-
-/** Reads the committed paragraphs back out of the overlay's DOM. */
-function extractParagraphs(root: HTMLElement, shape: TextShape): EditedParagraph[] {
-  const paras: EditedParagraph[] = []
-  let loose: EditedTextRun[] = []
-
-  const flushLoose = () => {
-    if (loose.length) paras.push({ align: undefined, runs: loose, srcPara: undefined })
-    loose = []
-  }
-
-  const runFromStyledNode = (el: Element): EditedTextRun | null => {
-    const text = normText(el.textContent ?? '')
-    if (!text) return null
-    const cp = numAttr(el, 'data-cp')
-    const cr = numAttr(el, 'data-cr')
-    const base: TextRun | undefined =
-      cp !== undefined && cr !== undefined ? shape.paragraphs[cp]?.runs[cr] : undefined
-    return {
-      text,
-      bold: base?.bold,
-      italic: base?.italic,
-      underline: base?.underline,
-      sizePt: base?.sizePt,
-      colorHex: base?.colorHex,
-      srcPara: numAttr(el, 'data-op'),
-      srcRun: numAttr(el, 'data-or'),
-    }
-  }
-
-  const collectInline = (container: Node, into: EditedTextRun[]) => {
-    container.childNodes.forEach((n) => {
-      if (n.nodeType === Node.TEXT_NODE) {
-        const t = normText(n.nodeValue ?? '')
-        if (t) into.push({ text: t })
-      } else if (n instanceof Element) {
-        if (n.tagName === 'BR') {
-          into.push({ text: '\n', srcPara: numAttr(n, 'data-op'), srcRun: numAttr(n, 'data-or') })
-        } else if (n.tagName === 'SPAN' && n.getAttribute('data-cr') !== null) {
-          const r = runFromStyledNode(n)
-          if (r) into.push(r)
-        } else {
-          // Pasted markup or browser-inserted wrappers: keep the text, styled
-          // by whatever rPr the serializer's fallback picks.
-          collectInline(n, into)
-        }
-      }
-    })
-  }
-
-  root.childNodes.forEach((n) => {
-    if (n instanceof Element && (n.tagName === 'DIV' || n.tagName === 'P')) {
-      flushLoose()
-      const runs: EditedTextRun[] = []
-      collectInline(n, runs)
-
-      // `<div><br></div>` is contentEditable's empty paragraph.
-      const onlyBr =
-        n.childNodes.length === 1 && n.firstChild instanceof Element && n.firstChild.tagName === 'BR'
-      let finalRuns = onlyBr ? [] : runs
-      // Browsers keep a placeholder <br> at the end of non-empty blocks.
-      if (!onlyBr && finalRuns.length > 1) {
-        const lastRun = finalRuns[finalRuns.length - 1]
-        const lastChild = n.lastChild
-        if (
-          lastRun.text === '\n' &&
-          lastRun.srcRun === undefined &&
-          lastChild instanceof Element &&
-          lastChild.tagName === 'BR' &&
-          lastChild.getAttribute('data-cr') === null
-        ) {
-          finalRuns = finalRuns.slice(0, -1)
-        }
-      }
-
-      const cp = numAttr(n, 'data-cp')
-      paras.push({
-        align: cp !== undefined ? shape.paragraphs[cp]?.align : undefined,
-        runs: finalRuns,
-        srcPara: numAttr(n, 'data-op'),
-      })
-    } else if (n.nodeType === Node.TEXT_NODE) {
-      const t = normText(n.nodeValue ?? '')
-      if (t) loose.push({ text: t })
-    } else if (n instanceof Element) {
-      if (n.tagName === 'BR') {
-        loose.push({ text: '\n', srcPara: numAttr(n, 'data-op'), srcRun: numAttr(n, 'data-or') })
-      } else if (n.tagName === 'SPAN' && n.getAttribute('data-cr') !== null) {
-        const r = runFromStyledNode(n)
-        if (r) loose.push(r)
-      } else {
-        collectInline(n, loose)
-      }
-    }
-  })
-  flushLoose()
-
-  // Everything replaced by unanchored content (e.g. select-all + type): keep
-  // the first original paragraph's formatting rather than none at all.
-  if (paras.length > 0 && paras.every((p) => p.srcPara === undefined) && shape.paragraphs.length > 0) {
-    paras[0] = { ...paras[0], srcPara: 0, align: paras[0].align ?? shape.paragraphs[0].align }
-  }
-  if (paras.length === 0) {
-    paras.push({ align: shape.paragraphs[0]?.align, runs: [], srcPara: 0 })
-  }
-  return paras
-}
-
-interface TextEditOverlayProps {
-  shape: TextShape
-  scale: number
-  style: CSSProperties
-  onCommit: (next: EditedParagraph[] | null) => void
-}
-
-function TextEditOverlay({ shape, scale, style, onCommit }: TextEditOverlayProps) {
-  const ref = useRef<HTMLDivElement>(null)
-  const committedRef = useRef(false)
-  const html = useMemo(() => buildEditableHtml(shape, scale), [shape, scale])
-
-  const commit = useCallback(() => {
-    if (committedRef.current) return
-    committedRef.current = true
-    onCommit(ref.current ? extractParagraphs(ref.current, shape) : null)
-  }, [onCommit, shape])
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.focus()
-    const sel = window.getSelection()
-    if (sel) {
-      sel.selectAllChildren(el)
-      sel.collapseToEnd()
-    }
-  }, [])
-
-  return (
-    <div
-      ref={ref}
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck={false}
-      dangerouslySetInnerHTML={{ __html: html }}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault()
-          commit()
-        }
-        // Keep app-level shortcuts away from typing.
-        e.stopPropagation()
-      }}
-      onClick={(e) => e.stopPropagation()}
-      style={{ ...style, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
-      className="cursor-text overflow-hidden whitespace-pre-wrap outline-2 outline-offset-1 outline-[var(--ring)]"
-    />
   )
 }
 
