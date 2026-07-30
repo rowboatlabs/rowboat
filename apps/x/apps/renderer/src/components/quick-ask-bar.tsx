@@ -930,7 +930,16 @@ export function QuickAskBar() {
           handle on the card is the gesture). */}
       <div className="pointer-events-none w-[124px] shrink-0 select-none" aria-hidden="true">
         <TalkingHead
-          ttsState={callCard ? callState.ttsState : processing ? 'synthesizing' : 'idle'}
+          ttsState={
+            callCard
+              ? callState.status === 'thinking' && callState.ttsState === 'idle'
+                ? 'synthesizing'
+                : callState.ttsState
+              : processing
+                ? 'synthesizing'
+                : 'idle'
+          }
+          rowing={callCard ? callState.status === 'thinking' : processing}
           getLevel={callCard ? synthLevel : zeroLevel}
           size={124}
           hat={callCard ? 'cowboy' : undefined}
@@ -1089,8 +1098,15 @@ function PinnedPill({
         </div>
         )}
         <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg bg-neutral-800">
-          {/* On a call = hat on (the companion's on-duty signal). */}
-          <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={voiceOnly ? 96 : 84} hat="cowboy" />
+          {/* On a call = hat on (the companion's on-duty signal); thinking
+              = rowing hard to fetch the answer, bubbles trailing. */}
+          <TalkingHead
+            ttsState={state.status === 'thinking' && state.ttsState === 'idle' ? 'synthesizing' : state.ttsState}
+            rowing={state.status === 'thinking'}
+            getLevel={getLevel}
+            size={voiceOnly ? 96 : 84}
+            hat="cowboy"
+          />
           <span className="absolute bottom-1 left-1.5 rounded bg-black/50 px-1 py-px text-[10px] text-white">
             Rowboat
           </span>
@@ -1301,6 +1317,11 @@ function TuckedMascot({
   // as the pill's mascot tile.
   const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
 
+  // The mic and Stop are exclusive states of ONE control: while a turn is
+  // in flight the mic is dead anyway, so the hat's single pin morphs
+  // mic → Stop and back.
+  const busy = state.status === 'thinking' || state.status === 'speaking'
+
   // One-line caption: the user's in-flight utterance wins; otherwise the
   // tail of the reply while it's being spoken (markdown stripped).
   const replyTail =
@@ -1327,20 +1348,6 @@ function TuckedMascot({
         }
       `}</style>
 
-      {/* Dismiss: ends the voice session and closes the mascot — a live
-          session can't be hidden while it keeps listening (same consent
-          rule as screen share). */}
-      <button
-        type="button"
-        onClick={() => sendAction('end-call')}
-        aria-label="End the voice session and close"
-        title="End & close"
-        className="absolute right-1.5 top-1.5 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white/90 shadow-md transition-colors hover:bg-red-600 hover:text-white"
-        style={noDragRegion}
-      >
-        <X className="h-3 w-3" />
-      </button>
-
       {/* Consent badge: a tucked share call must still show it's sharing. */}
       {state.screenSharing && (
         <span className="pointer-events-none absolute left-1/2 top-8 z-10 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md">
@@ -1357,78 +1364,90 @@ function TuckedMascot({
           space below the ripples that read as a big gap. */}
       <div className="-mb-4" style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
         <TalkingHead
-          ttsState={state.ttsState}
+          // Thinking = ROWING: the mascot paddles hard to fetch the answer
+          // (fast bob + oar strokes, TalkingHead's own rowing mode), with
+          // thought bubbles mapped in while the LLM works.
+          ttsState={state.status === 'thinking' && state.ttsState === 'idle' ? 'synthesizing' : state.ttsState}
+          rowing={state.status === 'thinking'}
           getLevel={getLevel}
           size={132}
           hat="cowboy"
           hatOverlay={
-            /* no-drag must sit on EACH button: Electron punches drag-region
-               holes from an element's painted bounds, and a zero-size
-               wrapper excludes nothing — pins inside the mascot's drag
-               region would start a window drag instead of clicking. */
+            /* Hat = voice, boat = surface. ONE pin on the hat: the mic,
+               which morphs into Stop while a turn is in flight (they're
+               exclusive — the mic is dead while the assistant works) and
+               back when the turn ends. « (bring the text back) rides the
+               boat's left edge; ✕ (end & close) rides its right. no-drag
+               sits on EACH button: Electron punches drag-region holes from
+               painted bounds, and a zero-size wrapper excludes nothing. */
             <div>
+              {busy ? (
+                <button
+                  type="button"
+                  onClick={() => sendAction('stop-speaking')}
+                  aria-label="Stop the assistant"
+                  title="Stop — cut the reply short (the session keeps going)"
+                  className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                  style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
+                >
+                  <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110">
+                    <Square className="h-2.5 w-2.5 fill-current text-white" />
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    if (state.micMuted) return
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                    sendAction('ptt-down')
+                  }}
+                  onPointerUp={() => {
+                    if (!state.micMuted) sendAction('ptt-up')
+                  }}
+                  onPointerCancel={() => {
+                    if (!state.micMuted) sendAction('ptt-up')
+                  }}
+                  aria-label="Hold to talk — tap for hands-free"
+                  title="Hold to talk (tap for hands-free) — or hold the right ⌘ key"
+                  className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                  style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
+                >
+                  <span
+                    className={`flex h-[18px] w-[18px] select-none items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
+                      state.status === 'listening' || state.pttLocked ? 'bg-green-500' : 'bg-amber-400'
+                    }`}
+                  >
+                    <Mic
+                      className={`h-3 w-3 ${
+                        state.status === 'listening' || state.pttLocked ? 'text-white' : 'text-[#17171B]'
+                      }`}
+                    />
+                  </span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onExpand}
                 aria-label="Bring the text back"
                 title="Bring the text back (⌥⇧Space works too)"
-                className="group/pin absolute flex appearance-none border-0 bg-transparent p-0 h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-                style={{ ...noDragRegion, left: '40%', top: '17.5%' }}
+                className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                style={{ ...noDragRegion, left: '18%', top: '68%' }}
               >
-                <span className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-sky-500 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
+                <span className="flex h-[16px] w-[16px] items-center justify-center rounded-full bg-sky-500 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
                   <ChevronsLeft className="h-2.5 w-2.5 text-white" />
                 </span>
               </button>
-              {/* The gold mic pin IS the press-to-talk: hold it to listen
-                  (exactly like holding right ⌘ — same PTT machine, same
-                  quick-tap-for-hands-free), green while live. Slightly
-                  bigger than its neighbors: it's the primary control.
-                  Pointer capture keeps the release even if the cursor
-                  slides off mid-hold. */}
               <button
                 type="button"
-                onPointerDown={(e) => {
-                  if (state.micMuted) return
-                  e.currentTarget.setPointerCapture(e.pointerId)
-                  sendAction('ptt-down')
-                }}
-                onPointerUp={() => {
-                  if (!state.micMuted) sendAction('ptt-up')
-                }}
-                onPointerCancel={() => {
-                  if (!state.micMuted) sendAction('ptt-up')
-                }}
-                aria-label="Hold to talk — tap for hands-free"
-                title="Hold to talk (tap for hands-free) — or hold the right ⌘ key"
-                className="group/pin absolute flex appearance-none border-0 bg-transparent p-0 h-[30px] w-[30px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-                style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
+                onClick={() => sendAction('end-call')}
+                aria-label="End the voice session and close"
+                title="End & close (a live session can't be hidden while it keeps listening)"
+                className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                style={{ ...noDragRegion, left: '82%', top: '68%' }}
               >
-                <span
-                  className={`flex h-[18px] w-[18px] select-none items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
-                    state.status === 'listening' || state.pttLocked ? 'bg-green-500' : 'bg-amber-400'
-                  }`}
-                >
-                  <Mic
-                    className={`h-3 w-3 ${
-                      state.status === 'listening' || state.pttLocked ? 'text-white' : 'text-[#17171B]'
-                    }`}
-                  />
-                </span>
-              </button>
-              {/* Red pin = Stop: cut the speech short, session keeps going.
-                  Lit when there's something to stop, dimmed otherwise. */}
-              <button
-                type="button"
-                onClick={() => sendAction('stop-speaking')}
-                aria-label="Stop the assistant"
-                title="Stop — cut the reply short (the session keeps going)"
-                className={`group/pin absolute flex appearance-none border-0 bg-transparent p-0 h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center ${
-                  state.status === 'speaking' || state.status === 'thinking' ? '' : 'opacity-50'
-                }`}
-                style={{ ...noDragRegion, left: '61%', top: '17.5%' }}
-              >
-                <span className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
-                  <Square className="h-2 w-2 fill-current text-white" />
+                <span className="flex h-[16px] w-[16px] items-center justify-center rounded-full bg-neutral-700 shadow-sm ring-2 ring-[#17171B] transition-colors transition-transform group-hover/pin:scale-125 group-hover/pin:bg-red-600">
+                  <X className="h-2.5 w-2.5 text-white" />
                 </span>
               </button>
             </div>
