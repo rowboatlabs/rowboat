@@ -17,6 +17,7 @@ import {
   Video,
   VideoOff,
   Volume2,
+  X,
 } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 // The raw sonner Toaster, NOT the app's ui/sonner wrapper: the wrapper
@@ -1326,6 +1327,20 @@ function TuckedMascot({
         }
       `}</style>
 
+      {/* Dismiss: ends the voice session and closes the mascot — a live
+          session can't be hidden while it keeps listening (same consent
+          rule as screen share). */}
+      <button
+        type="button"
+        onClick={() => sendAction('end-call')}
+        aria-label="End the voice session and close"
+        title="End & close"
+        className="absolute right-1.5 top-1.5 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white/90 shadow-md transition-colors hover:bg-red-600 hover:text-white"
+        style={noDragRegion}
+      >
+        <X className="h-3 w-3" />
+      </button>
+
       {/* Consent badge: a tucked share call must still show it's sharing. */}
       {state.screenSharing && (
         <span className="pointer-events-none absolute left-1/2 top-8 z-10 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md">
@@ -1362,36 +1377,56 @@ function TuckedMascot({
                   <ChevronsLeft className="h-2.5 w-2.5 text-white" />
                 </span>
               </button>
+              {/* The gold mic pin IS the press-to-talk: hold it to listen
+                  (exactly like holding right ⌘ — same PTT machine, same
+                  quick-tap-for-hands-free), green while live. Slightly
+                  bigger than its neighbors: it's the primary control.
+                  Pointer capture keeps the release even if the cursor
+                  slides off mid-hold. */}
               <button
                 type="button"
-                onClick={() => sendAction('toggle-mic')}
-                aria-label={state.micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
-                title={state.micMuted ? 'Unmute' : 'Mute — pauses your mic'}
-                className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                onPointerDown={(e) => {
+                  if (state.micMuted) return
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  sendAction('ptt-down')
+                }}
+                onPointerUp={() => {
+                  if (!state.micMuted) sendAction('ptt-up')
+                }}
+                onPointerCancel={() => {
+                  if (!state.micMuted) sendAction('ptt-up')
+                }}
+                aria-label="Hold to talk — tap for hands-free"
+                title="Hold to talk (tap for hands-free) — or hold the right ⌘ key"
+                className="group/pin absolute flex h-[30px] w-[30px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
                 style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
               >
                 <span
-                  className={`flex h-[15px] w-[15px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125 ${
-                    state.micMuted ? 'bg-red-600' : 'bg-amber-400'
+                  className={`flex h-[18px] w-[18px] select-none items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
+                    state.status === 'listening' || state.pttLocked ? 'bg-green-500' : 'bg-amber-400'
                   }`}
                 >
-                  {state.micMuted ? (
-                    <MicOff className="h-2.5 w-2.5 text-white" />
-                  ) : (
-                    <Mic className="h-2.5 w-2.5 text-[#17171B]" />
-                  )}
+                  <Mic
+                    className={`h-3 w-3 ${
+                      state.status === 'listening' || state.pttLocked ? 'text-white' : 'text-[#17171B]'
+                    }`}
+                  />
                 </span>
               </button>
+              {/* Red pin = Stop: cut the speech short, session keeps going.
+                  Lit when there's something to stop, dimmed otherwise. */}
               <button
                 type="button"
-                onClick={() => sendAction('end-call')}
-                aria-label="End the voice session and close"
-                title="End the voice session & close (a live session can't be hidden while it keeps listening)"
-                className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-                style={{ ...noDragRegion, left: '60%', top: '17.5%' }}
+                onClick={() => sendAction('stop-speaking')}
+                aria-label="Stop the assistant"
+                title="Stop — cut the reply short (the session keeps going)"
+                className={`group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center ${
+                  state.status === 'speaking' || state.status === 'thinking' ? '' : 'opacity-50'
+                }`}
+                style={{ ...noDragRegion, left: '61%', top: '17.5%' }}
               >
                 <span className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
-                  <PhoneOff className="h-2.5 w-2.5 text-white" />
+                  <Square className="h-2 w-2 fill-current text-white" />
                 </span>
               </button>
             </div>
@@ -1405,35 +1440,10 @@ function TuckedMascot({
           <span className="truncate rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{caption}</span>
         )}
       </div>
-      {/* The status chip IS the talk button: press-and-hold to talk, quick
-          tap to lock hands-free — same gestures as the pill's PTT button,
-          always visible. Pointer capture keeps the release edge even if the
-          cursor slides off mid-hold. While the assistant thinks/speaks, an
-          ALWAYS-VISIBLE Stop rides alongside — hover-only proved
-          undiscoverable, and "stop talking so I can say the next thing" is
-          the most urgent control this surface has. */}
-      <div className="mt-1 flex h-6 items-center gap-1.5" style={noDragRegion}>
-        <button
-          type="button"
-          onPointerDown={(e) => {
-            if (state.micMuted) return
-            e.currentTarget.setPointerCapture(e.pointerId)
-            sendAction('ptt-down')
-          }}
-          onPointerUp={() => {
-            if (!state.micMuted) sendAction('ptt-up')
-          }}
-          onPointerCancel={() => {
-            if (!state.micMuted) sendAction('ptt-up')
-          }}
-          aria-label="Hold to talk — or hold the right ⌘ key from any app"
-          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
-          className={`flex select-none items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium text-white shadow-md transition-colors ${
-            state.status === 'listening' || state.pttLocked
-              ? 'bg-green-600 hover:bg-green-500'
-              : 'bg-black/60 hover:bg-black/75'
-          } ${state.micMuted ? 'opacity-60' : ''}`}
-        >
+      {/* Pure status line — the CONTROLS are the pins (gold mic = hold to
+          talk, red = stop) and the ✕ (end & close). */}
+      <div className="mt-1 flex h-6 items-center">
+        <span className="flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-white shadow-md">
           {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
             <>
               <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
@@ -1441,18 +1451,18 @@ function TuckedMascot({
             </>
           ) : state.pttLocked ? (
             <>
-              <span className="block h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-              Tap to send
+              <span className="block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+              Hands-free — tap the mic to send
             </>
           ) : state.status === 'listening' ? (
             <>
-              <span className="block h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+              <span className="block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
               Release to send
             </>
           ) : statusDisplay ? (
             <>
               <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
-              {state.status === 'idle' ? 'Hold right ⌘ — or hold me' : statusDisplay.label}
+              {state.status === 'idle' ? 'Hold the mic — or right ⌘' : statusDisplay.label}
             </>
           ) : (
             <>
@@ -1460,19 +1470,7 @@ function TuckedMascot({
               Connecting…
             </>
           )}
-        </button>
-        {(state.status === 'speaking' || state.status === 'thinking') && (
-          <button
-            type="button"
-            onClick={() => sendAction('stop-speaking')}
-            aria-label="Stop the assistant"
-            title={state.status === 'speaking' ? 'Stop speaking' : 'Stop responding'}
-            className="flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-medium text-white shadow-md transition-colors hover:bg-red-500"
-          >
-            <Square className="h-2.5 w-2.5 fill-current" />
-            Stop
-          </button>
-        )}
+        </span>
       </div>
     </div>
   )
