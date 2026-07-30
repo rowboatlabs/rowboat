@@ -627,3 +627,34 @@ describe('buildSessionChatState', () => {
     expect(state.isReasoning).toBe(false)
   })
 })
+
+describe('lastSelection', () => {
+  it('surfaces the LATEST turn\'s resolved model and reasoning effort', () => {
+    const first = reduceTurn([created(T1, S1)])
+    const laterCreated = created('turn-2', S1)
+    laterCreated.config = { ...laterCreated.config, reasoningEffort: 'high' }
+    laterCreated.agent = {
+      ...laterCreated.agent,
+      resolved: {
+        ...laterCreated.agent.resolved,
+        model: { provider: 'anthropic', model: 'claude-fixture' },
+      },
+    }
+    const second = reduceTurn([laterCreated])
+    const state = buildSessionChatState([first, second], emptyOverlay())
+    expect(state.lastSelection).toEqual({
+      provider: 'anthropic',
+      model: 'claude-fixture',
+      effort: 'high',
+    })
+  })
+
+  it('omits effort when the turn ran on auto', () => {
+    const state = buildSessionChatState([reduceTurn([created(T1, S1)])], emptyOverlay())
+    expect(state.lastSelection).toEqual({ provider: 'openai', model: 'gpt-fixture' })
+  })
+
+  it('is null for a session with no turns', () => {
+    expect(buildSessionChatState([], emptyOverlay()).lastSelection).toBeNull()
+  })
+})

@@ -12,9 +12,10 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
-import { ChatEmptyState } from './components/chat-empty-state';
+import { ChatSessionPane, ChatSessionComposer } from './components/chat-session';
+// Value import: the Home to-do surface mounts a standalone composer directly
+// (not tab-bound); chat tabs render theirs through ChatSessionComposer.
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
-import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { ImageFileViewer } from '@/components/image-file-viewer';
@@ -32,8 +33,6 @@ import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
-import { CodingRunBlock } from '@/components/coding-run';
-import { SubAgentBlock } from '@/components/sub-agent-block';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
@@ -45,31 +44,10 @@ import { CodeChat } from '@/components/code/code-chat';
 import { ResizableRightPane } from '@/components/code/resizable-right-pane';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from '@/components/ai-elements/conversation';
-import {
-  Message,
-  MessageContent,
-  MessageCopyButton,
-  MessageResponse,
-} from '@/components/ai-elements/message';
-import {
   type PromptInputMessage,
   type FileMention,
 } from '@/components/ai-elements/prompt-input';
 
-import { TurnActivityIndicator } from '@/components/turn-activity-indicator';
-import { useSmoothedText } from './hooks/useSmoothedText';
-import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
-import { WebSearchResult } from '@/components/ai-elements/web-search-result';
-import { AppActionCard } from '@/components/ai-elements/app-action-card';
-import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
-import { PermissionRequest } from '@/components/ai-elements/permission-request';
-import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision';
-import { TerminalOutput } from '@/components/terminal-output';
-import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { ToolPermissionAutoDecisionEvent, ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -82,7 +60,6 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
-import { BillingErrorNotice } from "@/components/billing-error-notice"
 import { CreditCelebration } from "@/components/credit-celebration"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
@@ -97,9 +74,6 @@ import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
-import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
-import { defaultRemarkPlugins } from 'streamdown'
-import remarkBreaks from 'remark-breaks'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import { CaffeinateIndicator } from '@/components/caffeinate-indicator'
 import {
@@ -109,28 +83,19 @@ import {
   type ConversationItem,
   type ToolCall,
   createEmptyChatTabViewState,
-  getWebSearchCardData,
-  getAppActionCardData,
-  getComposioConnectCardData,
   getToolDisplayName,
-  groupConversationItems,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
   isToolCall,
-  isToolGroup,
-  isTurnUsageMessage,
   normalizeToolInput,
-  normalizeToolOutput,
-  parseAttachedFiles,
-  REASONING_EFFORT_LABELS,
-  toToolState,
 } from '@/lib/chat-conversation'
 import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { CALL_VOICE_HOLDER, acquireVoice, releaseVoice, useVoiceOwner, voiceOwnerId } from '@/lib/voice-ownership'
 import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { VideoCallView } from '@/components/video-call-view'
@@ -141,7 +106,6 @@ import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 import { playAckCue, playAlertCue, playPopCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
-import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -149,43 +113,6 @@ type RunEventType = z.infer<typeof RunEvent>
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
   loaded?: boolean
-}
-
-const streamdownComponents = { pre: MarkdownPreOverride }
-
-// Render user messages with markdown so bullets, bold, links, etc. survive the
-// round-trip from the input textarea. `remarkBreaks` turns single newlines
-// into <br> so typed line breaks are preserved without requiring blank lines.
-const userMessageRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks]
-
-function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
-  const smoothText = useSmoothedText(text)
-  return <MessageResponse components={components}>{smoothText}</MessageResponse>
-}
-
-function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
-  const ref = useRef<HTMLPreElement>(null)
-  const stickToBottom = useRef(true)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (el && stickToBottom.current) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [children])
-
-  const handleScroll = useCallback(() => {
-    const el = ref.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-    stickToBottom.current = atBottom
-  }, [])
-
-  return (
-    <pre ref={ref} onScroll={handleScroll} className={className}>
-      {children}
-    </pre>
-  )
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
@@ -1212,6 +1139,9 @@ function App() {
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice
+  // Which chat (or the call engine) holds the mic — render gating for the
+  // per-chat recording UI reads this instead of "is this the active tab".
+  const voiceOwner = useVoiceOwner()
 
   // Calls: one engine (hands-free voice loop + forced read-aloud TTS + frame
   // capture), started via presets that only differ in device defaults. The
@@ -1329,19 +1259,29 @@ function App() {
     void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
   }, [permissionDialog])
 
-  const handleStartRecording = useCallback(() => {
+  // Steal handler for PTT: another holder is taking the mic — drop the
+  // in-flight recording without releasing ownership (the thief owns it now).
+  const cancelPttForSteal = useCallback(() => {
+    voice.cancel()
+    setIsRecording(false)
+    isRecordingRef.current = false
+  }, [voice])
+
+  const handleStartRecording = useCallback((holderId: string) => {
     // A live call owns the mic — ignore push-to-talk while one is running.
     if (inCallRef.current) return
+    acquireVoice(holderId, cancelPttForSteal)
     setIsRecording(true)
     isRecordingRef.current = true
     void voice.start().then((result) => {
       if (result === 'mic-denied') {
         setIsRecording(false)
         isRecordingRef.current = false
+        releaseVoice(holderId)
         setPermissionDialog('microphone')
       }
     })
-  }, [voice])
+  }, [voice, cancelPttForSteal])
 
   const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
@@ -1356,6 +1296,8 @@ function App() {
     const text = await voice.submit()
     setIsRecording(false)
     isRecordingRef.current = false
+    const holder = voiceOwnerId()
+    if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
     if (text) {
       pendingVoiceInputRef.current = true
       handlePromptSubmitRef.current?.({ text, files: [] })
@@ -1366,6 +1308,8 @@ function App() {
     voice.cancel()
     setIsRecording(false)
     isRecordingRef.current = false
+    const holder = voiceOwnerId()
+    if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
   }, [voice])
 
   // Start a call. Presets only differ in device defaults — the engine
@@ -1381,10 +1325,16 @@ function App() {
 
   const startCall = useCallback(async (preset: CallPreset) => {
     if (inCallRef.current) return
+    // The call engine owns the mic for the call's whole duration; any live
+    // push-to-talk recording is stolen (cancelled cleanly) here. Nothing
+    // steals FROM a call — handleStartRecording defers while in-call — so
+    // the call's own onStolen is defensively a no-op.
+    acquireVoice(CALL_VOICE_HOLDER, () => {})
     const camera = preset === 'video' || preset === 'practice'
     const ok = await video.start({ camera })
     if (!ok) {
       // Camera denied/unavailable — stay out of the call, and say why.
+      releaseVoice(CALL_VOICE_HOLDER)
       if (camera) setPermissionDialog('camera')
       return
     }
@@ -1466,6 +1416,7 @@ function App() {
     setCallMinimized(false)
     inCallRef.current = false
     setInCall(false)
+    releaseVoice(CALL_VOICE_HOLDER)
   }, [video, setPttState])
 
   // The user-mute half that lives in the video pipeline: stop sampling
@@ -1984,9 +1935,15 @@ function App() {
   const [runs, setRuns] = useState<RunListItem[]>([])
 
   // Chat tab state
-  const [chatTabs, setChatTabs] = useState<ChatTab[]>([{ id: 'default-chat-tab', runId: null }])
+  const [chatTabs, setChatTabs] = useState<ChatTab[]>(() => [{ id: 'default-chat-tab', runId: null, chatId: crypto.randomUUID() }])
   const chatTabsRef = useRef(chatTabs)
   chatTabsRef.current = chatTabs
+  // A tab's current chat identity (see ChatTab.chatId). Session-scoped maps
+  // below are keyed by chatId, not tab id, so rebinding a tab to another
+  // session can never leak the previous chat's draft/model/effort into it.
+  const chatIdForTab = useCallback((tabId: string) => (
+    chatTabsRef.current.find((t) => t.id === tabId)?.chatId ?? tabId
+  ), [])
   const [activeChatTabId, setActiveChatTabId] = useState('default-chat-tab')
   const [chatViewStateByTab, setChatViewStateByTab] = useState<Record<string, ChatTabViewState>>({
     'default-chat-tab': createEmptyChatTabViewState(),
@@ -2007,12 +1964,13 @@ function App() {
   const activeChatTabIdRef = useRef(activeChatTabId)
   activeChatTabIdRef.current = activeChatTabId
   const setChatDraftForTab = useCallback((tabId: string, text: string) => {
+    const chatId = chatIdForTab(tabId)
     if (text) {
-      chatDraftsRef.current.set(tabId, text)
+      chatDraftsRef.current.set(chatId, text)
     } else {
-      chatDraftsRef.current.delete(tabId)
+      chatDraftsRef.current.delete(chatId)
     }
-  }, [])
+  }, [chatIdForTab])
   // Persist a run's work directory to its per-run sidecar config file. The agent
   // runtime reads this same file (config/workdir-<runId>.json) on each turn.
   const persistRunWorkDir = useCallback(async (runId: string, value: string | null) => {
@@ -2166,7 +2124,10 @@ function App() {
       runId,
       conversation,
       currentAssistantMessage,
-      sessionUsage: {},
+      // The legacy mirrors this snapshot is built from never carried usage,
+      // so inactive tabs showed zero tokens; take it from the live session
+      // store instead.
+      sessionUsage: sessionChat.chatState?.sessionUsage ?? {},
       pendingAskHumanRequests: new Map(pendingAskHumanRequests),
       allPermissionRequests: new Map(allPermissionRequests),
       permissionResponses: new Map(permissionResponses),
@@ -2178,6 +2139,7 @@ function App() {
     runId,
     conversation,
     currentAssistantMessage,
+    sessionChat.chatState,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
@@ -3004,8 +2966,11 @@ function App() {
     setPermissionResponses(new Map())
     setAutoPermissionDecisions(new Map())
     try {
-      // Restore the session's per-chat work directory into the active tab.
-      const tabId = activeChatTabIdRef.current
+      // Restore the session's per-chat work directory into the tab BOUND to
+      // this run when one exists — targeting the active tab is racy under
+      // fast switching (the guard below narrows but can't close the gap).
+      const tabId = chatTabsRef.current.find((t) => t.runId === id)?.id
+        ?? activeChatTabIdRef.current
       const wd = await loadRunWorkDir(id)
       if (loadRunRequestIdRef.current !== requestId) return
       setWorkDirByTab((prev) => ({ ...prev, [tabId]: wd }))
@@ -3549,7 +3514,7 @@ function App() {
       let currentRunId = runId
       let isNewRun = false
       let newRunCreatedAt: string | null = null
-      const selected = selectedModelByTabRef.current.get(submitTabId)
+      const selected = selectedModelByTabRef.current.get(chatIdForTab(submitTabId))
       if (!currentRunId) {
         const createdSession = await window.ipc.invoke('sessions:create', {})
         currentRunId = createdSession.sessionId
@@ -3575,7 +3540,7 @@ function App() {
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
-      const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
+      const reasoningEffort = reasoningEffortByTabRef.current.get(chatIdForTab(submitTabId))
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.
@@ -3967,7 +3932,8 @@ function App() {
       return
     }
     setChatTabs((prev) => prev.map((t) => (
-      t.id === activeChatTabIdRef.current ? { ...t, runId: rowboatSessionId } : t
+      // Rebinding to a different session = a different chat identity.
+      t.id === activeChatTabIdRef.current ? { ...t, runId: rowboatSessionId, chatId: crypto.randomUUID() } : t
     )))
     loadRun(rowboatSessionId)
   }, [switchChatTab, loadRun])
@@ -3977,6 +3943,8 @@ function App() {
     const idx = chatTabs.findIndex(t => t.id === tabId)
     if (idx === -1) return
     saveChatScrollForTab(tabId)
+    // Resolve before the tab list changes — chat-keyed maps below.
+    const closingChatId = chatIdForTab(tabId)
     const nextTabs = chatTabs.filter(t => t.id !== tabId)
     setChatTabs(nextTabs)
     setChatViewStateByTab(prev => {
@@ -3985,9 +3953,9 @@ function App() {
       delete next[tabId]
       return next
     })
-    chatDraftsRef.current.delete(tabId)
-    selectedModelByTabRef.current.delete(tabId)
-    reasoningEffortByTabRef.current.delete(tabId)
+    chatDraftsRef.current.delete(closingChatId)
+    selectedModelByTabRef.current.delete(closingChatId)
+    reasoningEffortByTabRef.current.delete(closingChatId)
     chatScrollTopByTabRef.current.delete(tabId)
     setWorkDirByTab((prev) => {
       if (!(tabId in prev)) return prev
@@ -4438,8 +4406,8 @@ function App() {
 
   const handleNewChatTab = useCallback(() => {
     // Single-chat model: reset the one conversation in place instead of
-    // opening a new tab.
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null }])
+    // opening a new tab. Fresh chatId = fresh chat-session instance.
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId: crypto.randomUUID() }])
     dismissBrowserOverlay()
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
@@ -4465,7 +4433,7 @@ function App() {
 
   // Sidebar variant: reset the chat in place without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null }])
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId: crypto.randomUUID() }])
     handleNewChat()
   }, [handleNewChat])
 
@@ -5290,7 +5258,8 @@ function App() {
             setActiveChatTabId(existingTab.id)
           } else {
             setChatTabs((prev) => prev.map((tab) => (
-              tab.id === activeChatTabIdRef.current ? { ...tab, runId: targetRunId } : tab
+              // Rebinding to a different session = a different chat identity.
+              tab.id === activeChatTabIdRef.current ? { ...tab, runId: targetRunId, chatId: crypto.randomUUID() } : tab
             )))
           }
           await loadRun(targetRunId)
@@ -6683,194 +6652,6 @@ function App() {
     }
   }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePaths])
 
-  const renderConversationItem = (
-    item: ConversationItem,
-    tabId: string,
-    options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
-  ) => {
-    if (isChatMessage(item)) {
-      if (item.role === 'user') {
-        if (item.attachments && item.attachments.length > 0) {
-          return (
-            <Message key={item.id} from={item.role} data-message-id={item.id}>
-              <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
-                <ChatMessageAttachments attachments={item.attachments} />
-              </MessageContent>
-              {item.content && (
-                <div className="flex flex-col items-end">
-                  <MessageContent>
-                    <MessageResponse
-                      components={streamdownComponents}
-                      remarkPlugins={userMessageRemarkPlugins}
-                    >
-                      {item.content}
-                    </MessageResponse>
-                  </MessageContent>
-                  <MessageCopyButton text={item.content} className="mt-0.5" />
-                </div>
-              )}
-            </Message>
-          )
-        }
-        const { message, files } = parseAttachedFiles(item.content)
-        return (
-          <Message key={item.id} from={item.role} data-message-id={item.id}>
-            <div className="flex flex-col items-end">
-              <MessageContent>
-                {files.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {files.map((filePath, index) => (
-                      <span
-                        key={index}
-                        className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
-                      >
-                        @{wikiLabel(filePath)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <MessageResponse
-                  components={streamdownComponents}
-                  remarkPlugins={userMessageRemarkPlugins}
-                >
-                  {message}
-                </MessageResponse>
-              </MessageContent>
-              <MessageCopyButton text={message} className="mt-0.5" />
-            </div>
-          </Message>
-        )
-      }
-      return (
-        <Message key={item.id} from={item.role} data-message-id={item.id}>
-          <MessageContent>
-            <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
-          </MessageContent>
-        </Message>
-      )
-    }
-
-    if (isToolCall(item)) {
-      if (item.name === 'code_agent_run') {
-        return (
-          <CodingRunBlock
-            key={item.id}
-            item={item}
-            open={isToolOpenForTab(tabId, item.id)}
-            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-            onPermissionDecision={(decision) => {
-              if (item.pendingCodePermission) {
-                handleCodePermissionResponse(item.id, item.pendingCodePermission.requestId, decision)
-              }
-            }}
-          />
-        )
-      }
-      if (item.name === 'spawn-agent') {
-        return (
-          <SubAgentBlock
-            key={item.id}
-            item={item}
-            open={isToolOpenForTab(tabId, item.id)}
-            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-          />
-        )
-      }
-      const appActionData = getAppActionCardData(item)
-      if (appActionData) {
-        return <AppActionCard key={item.id} data={appActionData} status={item.status} />
-      }
-      const webSearchData = getWebSearchCardData(item)
-      if (webSearchData) {
-        return (
-          <WebSearchResult
-            key={item.id}
-            query={webSearchData.query}
-            results={webSearchData.results}
-            status={item.status}
-            title={webSearchData.title}
-          />
-        )
-      }
-      const composioConnectData = getComposioConnectCardData(item)
-      if (composioConnectData) {
-        // Skip rendering if this is a duplicate "already connected" card
-        if (composioConnectData.hidden) return null
-        return (
-          <ComposioConnectCard
-            key={item.id}
-            toolkitSlug={composioConnectData.toolkitSlug}
-            toolkitDisplayName={composioConnectData.toolkitDisplayName}
-            status={item.status}
-            alreadyConnected={composioConnectData.alreadyConnected}
-            onConnected={handleComposioConnected}
-          />
-        )
-      }
-      const toolTitle = getToolDisplayName(item)
-      const errorText = item.status === 'error' ? 'Tool error' : ''
-      const output = normalizeToolOutput(item.result, item.status)
-      const input = normalizeToolInput(item.input)
-      return (
-        <Tool
-          key={item.id}
-          open={isToolOpenForTab(tabId, item.id)}
-          onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-          autoPermissionDetail={options?.autoPermissionDetail}
-        >
-          <ToolHeader
-            title={toolTitle}
-            type={`tool-${item.name}`}
-            state={toToolState(item.status)}
-          />
-          <ToolContent>
-            {item.streamingOutput ? (
-              <AutoScrollPre className="max-h-80 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap text-foreground/90">
-                <TerminalOutput raw={item.streamingOutput} />
-              </AutoScrollPre>
-            ) : (
-              <ToolTabbedContent input={input} output={output} errorText={errorText} />
-            )}
-          </ToolContent>
-        </Tool>
-      )
-    }
-
-    if (isTurnUsageMessage(item)) {
-      return (
-        <div key={item.id} className="-mt-6 -ml-1 flex items-center justify-start gap-1" data-message-id={item.id}>
-          <TokenUsageMenu
-            usage={item.usage}
-            scope="turn"
-            modelCallCount={item.modelCallCount}
-            align="start"
-          />
-          {item.reasoningEffort && (
-            <span className="text-xs text-muted-foreground/70">
-              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
-            </span>
-          )}
-        </div>
-      )
-    }
-
-    if (isErrorMessage(item)) {
-      const billingMatch = matchBillingError(item.message)
-      if (billingMatch) {
-        return <BillingErrorNotice key={item.id} id={item.id} match={billingMatch} />
-      }
-      return (
-        <Message key={item.id} from="assistant" data-message-id={item.id}>
-          <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
-            <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
-          </MessageContent>
-        </Message>
-      )
-    }
-
-    return null
-  }
-
   // The active chat's view state, backed by the sessions hook (legacy
   // standalone states remain only as the pre-load fallback until stage 7).
   const activeChatTabState = React.useMemo<ChatTabViewState>(() => (
@@ -7630,124 +7411,27 @@ function App() {
                 <div className="relative min-h-0 flex-1">
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId
-                    const tabState = getChatTabStateForRender(tab.id)
-                    const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
-                    const tabConversationContentClassName = tabHasConversation
-                      ? "mx-auto w-full max-w-4xl pb-28"
-                      : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
                     return (
-                      <div
-                        key={tab.id}
-                        className={cn(
-                          'min-h-0 h-full flex-col',
-                          isActive
-                            ? 'flex'
-                            : 'pointer-events-none invisible absolute inset-0 flex'
-                        )}
-                        data-chat-tab-panel={tab.id}
-                        aria-hidden={!isActive}
-                      >
-                        <Conversation
-                          anchorMessageId={chatViewportAnchorByTab[tab.id]?.messageId}
-                          anchorRequestKey={chatViewportAnchorByTab[tab.id]?.requestKey}
-                          className="relative flex-1"
-                        >
-                          <ConversationContent className={tabConversationContentClassName}>
-                            {!tabHasConversation ? (
-                              <ChatEmptyState
-                                wide
-                                onPickPrompt={setPresetMessage}
-                              />
-                            ) : (
-                              <>
-                                {groupConversationItems(
-                                  tabState.conversation,
-                                  (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
-                                ).map(item => {
-                                  if (isToolGroup(item)) {
-                                    return (
-                                      <ToolGroupComponent
-                                        key={item.groupId}
-                                        group={item}
-                                        isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
-                                        onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
-                                      />
-                                    )
-                                  }
-                                  const autoDecision = isToolCall(item)
-                                    ? tabState.autoPermissionDecisions.get(item.id)
-                                    : undefined
-                                  const rendered = renderConversationItem(
-                                    item,
-                                    tab.id,
-                                    autoDecision?.decision === 'allow'
-                                      ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
-                                      : undefined,
-                                  )
-                                  if (isToolCall(item)) {
-                                    const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
-                                    const permRequest = tabState.allPermissionRequests.get(item.id)
-                                    if (deniedAutoDecision || permRequest) {
-                                      const response = tabState.permissionResponses.get(item.id) || null
-                                      return (
-                                        <React.Fragment key={item.id}>
-                                          {deniedAutoDecision && (
-                                            <AutoPermissionDecision
-                                              toolCall={deniedAutoDecision.toolCall}
-                                              permission={deniedAutoDecision.permission}
-                                              decision={deniedAutoDecision.decision}
-                                              reason={deniedAutoDecision.reason}
-                                            />
-                                          )}
-                                          {permRequest && (
-                                            <PermissionRequest
-                                              toolCall={permRequest.toolCall}
-                                              permission={permRequest.permission}
-                                              onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                              onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                              isProcessing={isActive && activeIsWorking}
-                                              response={response}
-                                            />
-                                          )}
-                                          {rendered}
-                                        </React.Fragment>
-                                      )
-                                    }
-                                  }
-                                  return rendered
-                                })}
-
-                                {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
-                                  <AskHumanRequest
-                                    key={request.toolCallId}
-                                    query={request.query}
-                                    options={request.options}
-                                    onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                    isProcessing={isActive && activeIsWorking}
-                                  />
-                                ))}
-
-                                {tabState.currentAssistantMessage && (
-                                  <Message from="assistant">
-                                    <MessageContent>
-                                      <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
-                                    </MessageContent>
-                                  </Message>
-                                )}
-
-                                {isActive && activeIsProcessing && (
-                                  <Message from="assistant">
-                                    <MessageContent>
-                                      <TurnActivityIndicator isReasoning={activeIsReasoning} />
-                                    </MessageContent>
-                                  </Message>
-                                )}
-                              </>
-                            )}
-                          </ConversationContent>
-                          <ConversationScrollButton />
-                        </Conversation>
-                      </div>
+                      <ChatSessionPane
+                        // Keyed by CHAT identity: rebinding this tab to a
+                        // different session remounts the panel (fresh
+                        // scroll/DOM state); first-send runId binding does not.
+                        key={tab.chatId}
+                        tab={tab}
+                        isActive={isActive}
+                        tabState={getChatTabStateForRender(tab.id)}
+                        viewportAnchor={chatViewportAnchorByTab[tab.id]}
+                        onPickPrompt={setPresetMessage}
+                        isToolOpenForTab={isToolOpenForTab}
+                        setToolOpenForTab={setToolOpenForTab}
+                        onPermissionResponse={handlePermissionResponse}
+                        onAskHumanResponse={handleAskHumanResponse}
+                        onCodePermissionResponse={handleCodePermissionResponse}
+                        onComposioConnected={handleComposioConnected}
+                        activeIsWorking={activeIsWorking}
+                        activeIsProcessing={activeIsProcessing}
+                        activeIsReasoning={activeIsReasoning}
+                      />
                     )
                   })}
                 </div>
@@ -7757,59 +7441,44 @@ function App() {
                   <div className="mx-auto w-full max-w-4xl px-4">
                     {chatTabs.map((tab) => {
                       const isActive = tab.id === activeChatTabId
-                      const tabState = getChatTabStateForRender(tab.id)
                       return (
-                        <div
-                          key={tab.id}
-                          className={isActive ? 'block' : 'hidden'}
-                          data-chat-input-panel={tab.id}
-                          aria-hidden={!isActive}
-                        >
-                          <ChatInputWithMentions
-                            knowledgeFiles={knowledgeFiles}
-                            recentFiles={recentWikiFiles}
-                            visibleFiles={visibleKnowledgeFiles}
-                            onSubmit={handlePromptSubmit}
-                            onStop={handleStop}
-                            isProcessing={isActive && activeIsProcessing}
-                            isStopping={isActive && isStopping}
-                            isActive={isActive}
-                            presetMessage={isActive ? presetMessage : undefined}
-                            onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
-                            runId={tabState.runId}
-                            codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
-                            initialDraft={chatDraftsRef.current.get(tab.id)}
-                            onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
-                            onSelectedModelChange={(m) => {
-                              if (m) {
-                                selectedModelByTabRef.current.set(tab.id, m)
-                              } else {
-                                selectedModelByTabRef.current.delete(tab.id)
-                              }
-                            }}
-                            onReasoningEffortChange={(effort) => {
-                              if (effort) {
-                                reasoningEffortByTabRef.current.set(tab.id, effort)
-                              } else {
-                                reasoningEffortByTabRef.current.delete(tab.id)
-                              }
-                            }}
-                            workDir={workDirByTab[tab.id] ?? null}
-                            onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
-                            isRecording={isActive && isRecording}
-                            recordingText={isActive ? voice.interimText : undefined}
-                            recordingState={isActive ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
-                            audioLevelsRef={voice.audioLevelsRef}
-                            onStartRecording={isActive ? handleStartRecording : undefined}
-                            onSubmitRecording={isActive ? handleSubmitRecording : undefined}
-                            onCancelRecording={isActive ? handleCancelRecording : undefined}
-                            voiceAvailable={isActive && voiceAvailable}
-                            inCall={inCall}
-                            onStartCall={isActive ? startCall : undefined}
-                            onEndCall={isActive ? endCall : undefined}
-                            callAvailable={voiceAvailable && ttsAvailable}
-                          />
-                        </div>
+                        <ChatSessionComposer
+                          // Composer instance per CHAT (see chat panel key
+                          // above): a rebound tab gets a fresh composer, so
+                          // attachments/toggles/selection can't leak across
+                          // sessions; first-send binding keeps the instance.
+                          key={tab.chatId}
+                          tab={tab}
+                          isActive={isActive}
+                          tabState={getChatTabStateForRender(tab.id)}
+                          knowledgeFiles={knowledgeFiles}
+                          recentFiles={recentWikiFiles}
+                          visibleFiles={visibleKnowledgeFiles}
+                          onSubmit={handlePromptSubmit}
+                          onStop={handleStop}
+                          activeIsProcessing={activeIsProcessing}
+                          isStopping={isStopping}
+                          presetMessage={presetMessage}
+                          onPresetMessageConsumed={() => setPresetMessage(undefined)}
+                          codeSessionLocks={codeSessionLocks}
+                          initialDraft={chatDraftsRef.current.get(tab.chatId)}
+                          onDraftChange={setChatDraftForTab}
+                          selectedModelByTabRef={selectedModelByTabRef}
+                          reasoningEffortByTabRef={reasoningEffortByTabRef}
+                          workDirByTab={workDirByTab}
+                          onWorkDirChange={setTabWorkDir}
+                          isRecording={isRecording}
+                          voiceOwner={voiceOwner}
+                          voice={voice}
+                          onStartRecording={handleStartRecording}
+                          onSubmitRecording={handleSubmitRecording}
+                          onCancelRecording={handleCancelRecording}
+                          voiceAvailable={voiceAvailable}
+                          inCall={inCall}
+                          onStartCall={startCall}
+                          onEndCall={endCall}
+                          ttsAvailable={ttsAvailable}
+                        />
                       )
                     })}
                   </div>
@@ -7854,7 +7523,7 @@ function App() {
                     switchChatTab(existingTab.id)
                     return
                   }
-                  setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid } : t)))
+                  setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid, chatId: crypto.randomUUID() } : t)))
                   loadRun(rid)
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
@@ -7874,20 +7543,20 @@ function App() {
                 runId={runId}
                 presetMessage={presetMessage}
                 onPresetMessageConsumed={() => setPresetMessage(undefined)}
-                getInitialDraft={(tabId) => chatDraftsRef.current.get(tabId)}
+                getInitialDraft={(tabId) => chatDraftsRef.current.get(chatIdForTab(tabId))}
                 onDraftChangeForTab={setChatDraftForTab}
                 onSelectedModelChangeForTab={(tabId, m) => {
                   if (m) {
-                    selectedModelByTabRef.current.set(tabId, m)
+                    selectedModelByTabRef.current.set(chatIdForTab(tabId), m)
                   } else {
-                    selectedModelByTabRef.current.delete(tabId)
+                    selectedModelByTabRef.current.delete(chatIdForTab(tabId))
                   }
                 }}
                 onReasoningEffortChangeForTab={(tabId, effort) => {
                   if (effort) {
-                    reasoningEffortByTabRef.current.set(tabId, effort)
+                    reasoningEffortByTabRef.current.set(chatIdForTab(tabId), effort)
                   } else {
-                    reasoningEffortByTabRef.current.delete(tabId)
+                    reasoningEffortByTabRef.current.delete(chatIdForTab(tabId))
                   }
                 }}
                 workDirByTab={workDirByTab}
@@ -7919,7 +7588,7 @@ function App() {
                 recordingText={voice.interimText}
                 recordingState={voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'}
                 audioLevelsRef={voice.audioLevelsRef}
-                onStartRecording={handleStartRecording}
+                onStartRecording={() => handleStartRecording(chatIdForTab(activeChatTabIdRef.current))}
                 onSubmitRecording={handleSubmitRecording}
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
