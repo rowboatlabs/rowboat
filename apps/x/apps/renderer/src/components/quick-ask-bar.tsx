@@ -1353,7 +1353,9 @@ function TuckedMascot({
           inside TalkingHead's bobbing container (hatOverlay) so they never
           detach from the hat. Pin art is small; each sits in a 26px no-drag
           hit target that grows on hover. */}
-      <div style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+      {/* -mb pulls the caption/chip up under the boat: the SVG box has dead
+          space below the ripples that read as a big gap. */}
+      <div className="-mb-4" style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
         <TalkingHead
           ttsState={state.ttsState}
           getLevel={getLevel}
@@ -1370,7 +1372,7 @@ function TuckedMascot({
                 onClick={onExpand}
                 aria-label="Bring the text back"
                 title="Bring the text back (⌥⇧Space works too)"
-                className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                className="group/pin absolute flex appearance-none border-0 bg-transparent p-0 h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
                 style={{ ...noDragRegion, left: '40%', top: '17.5%' }}
               >
                 <span className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-sky-500 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
@@ -1398,7 +1400,7 @@ function TuckedMascot({
                 }}
                 aria-label="Hold to talk — tap for hands-free"
                 title="Hold to talk (tap for hands-free) — or hold the right ⌘ key"
-                className="group/pin absolute flex h-[30px] w-[30px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                className="group/pin absolute flex appearance-none border-0 bg-transparent p-0 h-[30px] w-[30px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
                 style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
               >
                 <span
@@ -1420,7 +1422,7 @@ function TuckedMascot({
                 onClick={() => sendAction('stop-speaking')}
                 aria-label="Stop the assistant"
                 title="Stop — cut the reply short (the session keeps going)"
-                className={`group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center ${
+                className={`group/pin absolute flex appearance-none border-0 bg-transparent p-0 h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center ${
                   state.status === 'speaking' || state.status === 'thinking' ? '' : 'opacity-50'
                 }`}
                 style={{ ...noDragRegion, left: '61%', top: '17.5%' }}
@@ -1442,7 +1444,7 @@ function TuckedMascot({
       </div>
       {/* Pure status line — the CONTROLS are the pins (gold mic = hold to
           talk, red = stop) and the ✕ (end & close). */}
-      <div className="mt-1 flex h-6 items-center">
+      <div className="flex h-6 items-center">
         <span className="flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-white shadow-md">
           {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
             <>
