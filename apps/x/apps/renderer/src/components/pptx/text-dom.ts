@@ -15,11 +15,13 @@
 import type { EditedParagraph, EditedTextRun, RunFormatOverrides } from '@/lib/pptx/serialize'
 import type {
   Paragraph,
+  ParagraphDisplay,
   ResolvedRunStyle,
   TextAlign,
   TextRun,
   TextShape,
 } from '@/lib/pptx/types'
+import { autoNumText } from '@/lib/pptx/textstyle'
 import { EMU_PER_PT } from './edit-model'
 
 export const DEFAULT_TEXT_PT = 18
@@ -95,10 +97,48 @@ function runDataAttrs(run: TextRun): string {
 }
 
 /**
+ * The paragraph's bullet, styled exactly as `TextShapeView` draws it. Marked
+ * `contenteditable="false"` and `data-bullet` so it is inert to typing and
+ * skipped by `extractParagraphs` — it is layout, never content.
+ */
+function bulletHtml(
+  shape: TextShape,
+  para: Paragraph,
+  dp: ParagraphDisplay | undefined,
+  indentPx: number,
+  scale: number,
+  counters: Record<number, number>,
+): string {
+  if (!dp || !para.runs.some((r) => r.text.trim() !== '')) return ''
+  let text: string
+  if (dp.bullet.kind === 'char') {
+    text = dp.bullet.char
+  } else if (dp.bullet.kind === 'auto') {
+    for (const k of Object.keys(counters)) {
+      if (Number(k) > dp.level) delete counters[Number(k)]
+    }
+    counters[dp.level] = (counters[dp.level] ?? dp.bullet.startAt - 1) + 1
+    text = autoNumText(dp.bullet.scheme, counters[dp.level])
+  } else {
+    return ''
+  }
+  const style = dp.defaultRun ?? shape.display?.defaultRun
+  const css =
+    'display:inline-block;text-indent:0;' +
+    (indentPx < 0 ? `min-width:${-indentPx}px;` : 'margin-right:0.35em;') +
+    `font-size:${(style?.sizePt ?? DEFAULT_TEXT_PT) * EMU_PER_PT * scale}px;` +
+    `color:#${style?.colorHex ?? '000000'};line-height:1.2`
+  return `<span data-bullet="1" contenteditable="false" style="${css}">${escapeHtml(text)}</span>`
+}
+
+/**
  * Builds the overlay's initial HTML. Provenance already on the shape (from an
  * uncommitted edit) wins, so re-opening a box still points at the source runs.
  */
 export function buildEditableHtml(shape: TextShape, scale: number): string {
+  // Auto-number counters accumulate down the shape, exactly as the rendered
+  // view does, so the editable shows the same numbers.
+  const counters: Record<number, number> = {}
   return shape.paragraphs
     .map((para, pi) => {
       const ep = para as EditedParagraph
@@ -119,9 +159,21 @@ export function buildEditableHtml(shape: TextShape, scale: number): string {
         })
         .join('')
       const align = displayAlign(shape, pi, para)
+      // Mirror the rendered paragraph box exactly — padding, indent and the
+      // bullet. The bullet is an inline box that takes real horizontal space,
+      // so leaving it out reflows every line and the point the user clicked
+      // stops mapping to the word they clicked.
+      const dp = shape.display?.paragraphs[paraSrc]
+      const marLPx = (dp?.marLEmu ?? 0) * scale
+      const indentPx = (dp?.indentEmu ?? 0) * scale
+      const boxCss =
+        (marLPx > 0 ? `padding-left:${marLPx}px;` : '') +
+        (indentPx !== 0 ? `text-indent:${indentPx}px;` : '')
       return (
         `<div data-cp="${pi}" data-op="${paraSrc}" data-algn="${para.align ?? ''}"` +
-        ` style="margin:0;text-align:${alignToCss(align)}">${inner || '<br>'}</div>`
+        ` style="margin:0;${boxCss}text-align:${alignToCss(align)}">` +
+        bulletHtml(shape, para, dp, indentPx, scale, counters) +
+        `${inner || '<br>'}</div>`
       )
     })
     .join('')
@@ -243,6 +295,8 @@ export function extractParagraphs(
         const t = normText(n.nodeValue ?? '')
         if (t) into.push({ text: t })
       } else if (n instanceof Element) {
+        // Bullets are drawn for layout only; they are not part of the text.
+        if (n.hasAttribute('data-bullet')) return
         if (n.tagName === 'BR') {
           into.push({ text: '\n', srcPara: numAttr(n, 'data-op'), srcRun: numAttr(n, 'data-or') })
         } else if (isRunSpan(n)) {
@@ -289,6 +343,7 @@ export function extractParagraphs(
       const t = normText(n.nodeValue ?? '')
       if (t) loose.push({ text: t })
     } else if (n instanceof Element) {
+      if (n.hasAttribute('data-bullet')) return
       if (n.tagName === 'BR') {
         loose.push({ text: '\n', srcPara: numAttr(n, 'data-op'), srcRun: numAttr(n, 'data-or') })
       } else if (isRunSpan(n)) {
@@ -310,6 +365,167 @@ export function extractParagraphs(
     paras.push({ align: shape.paragraphs[0]?.align, runs: [], srcPara: 0 })
   }
   return paras
+}
+
+// ------------------------------------------------------------ caret placing
+
+interface CaretSpot {
+  node: Node
+  offset: number
+}
+
+/**
+ * Caret spot for a viewport point. `caretPositionFromPoint` is the standard
+ * API; `caretRangeFromPoint` is the deprecated WebKit-era one Blink still
+ * carries, kept as the fallback.
+ */
+function caretSpotAt(x: number, y: number): CaretSpot | null {
+  if (typeof document.caretPositionFromPoint === 'function') {
+    const pos = document.caretPositionFromPoint(x, y)
+    if (pos) return { node: pos.offsetNode, offset: pos.offset }
+  }
+  if (typeof document.caretRangeFromPoint === 'function') {
+    const range = document.caretRangeFromPoint(x, y)
+    if (range) return { node: range.startContainer, offset: range.startOffset }
+  }
+  return null
+}
+
+/**
+ * Closest character position inside `root` to a viewport point, measured
+ * against the text's own rects. This is what keeps a near-miss — the click
+ * landed in a paragraph's indent, or in the empty band a vertically centered
+ * text block leaves above and below itself — from collapsing to the start of
+ * the box instead of the word next to the pointer.
+ */
+function nearestTextSpot(root: HTMLElement, x: number, y: number): CaretSpot | null {
+  const walker = textWalker(root)
+  const probe = document.createRange()
+  let best: CaretSpot | null = null
+  let bestDist = Infinity
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const text = node as Text
+    for (let i = 0; i < text.length; i++) {
+      probe.setStart(text, i)
+      probe.setEnd(text, i + 1)
+      const rect = probe.getBoundingClientRect()
+      if (rect.width === 0 && rect.height === 0) continue
+      const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0
+      const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0
+      const dist = dx * dx + dy * dy
+      if (dist < bestDist) {
+        bestDist = dist
+        // Land on whichever side of the glyph the pointer is nearer.
+        best = { node: text, offset: x > (rect.left + rect.right) / 2 ? i + 1 : i }
+      }
+    }
+  }
+  return best
+}
+
+/** Where a click should leave the caret when the editor opens. */
+export interface CaretTarget {
+  /** Viewport coordinates of the click. */
+  x: number
+  y: number
+  /** Double-click: select the word under the pointer rather than collapse. */
+  selectWord: boolean
+}
+
+const WORD_CHAR = /[\p{L}\p{N}_]/u
+
+/** Walks editable text only — bullets are layout, never a caret target. */
+function textWalker(root: Node): TreeWalker {
+  return document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) =>
+      node.parentElement?.closest('[data-bullet]')
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT,
+  })
+}
+
+/** Text nodes of the paragraph block holding `node`, in document order. */
+function paragraphTextNodes(root: HTMLElement, node: Text): Text[] {
+  const block = node.parentElement?.closest<HTMLElement>('div[data-cp]') ?? root
+  const walker = textWalker(block)
+  const out: Text[] = []
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) out.push(n as Text)
+  return out
+}
+
+/**
+ * The word around a spot, as a range. Spans run boundaries, because PowerPoint
+ * splits runs mid-word freely (language tags, spell-check state), and a
+ * double-click should still take the whole word.
+ */
+function wordRangeAt(root: HTMLElement, node: Text, offset: number): Range | null {
+  const nodes = paragraphTextNodes(root, node)
+  const home = nodes.indexOf(node)
+  if (home < 0) return null
+  const starts: number[] = []
+  let flat = ''
+  for (const n of nodes) {
+    starts.push(flat.length)
+    flat += n.data
+  }
+  const at = starts[home] + offset
+  let from = at
+  let to = at
+  while (from > 0 && WORD_CHAR.test(flat[from - 1])) from--
+  while (to < flat.length && WORD_CHAR.test(flat[to])) to++
+  // Landed on a space or punctuation: there is no word to take.
+  if (from === to) return null
+  const locate = (i: number): [Text, number] => {
+    for (let k = nodes.length - 1; k >= 0; k--) {
+      if (i >= starts[k]) return [nodes[k], i - starts[k]]
+    }
+    return [nodes[0], 0]
+  }
+  const [startNode, startOffset] = locate(from)
+  const [endNode, endOffset] = locate(to)
+  const range = document.createRange()
+  range.setStart(startNode, startOffset)
+  range.setEnd(endNode, endOffset)
+  return range
+}
+
+/**
+ * Resolves a click into a selection inside `root` — the word for a
+ * double-click, otherwise a caret.
+ *
+ * Call this BEFORE focusing the editable. `focus()` scrolls the element into
+ * view, and the canvas frame it lives in is a scrollable `overflow:hidden`
+ * box, so focusing first slides the text out from under the coordinates the
+ * click was captured at; the hit test then misses the glyphs and collapses to
+ * the very start of the box.
+ */
+export function caretSelectionAtPoint(root: HTMLElement, target: CaretTarget): Range | null {
+  const { x, y } = target
+  let spot = caretSpotAt(x, y)
+  // A hit test that misses the glyphs answers with the containing element, and
+  // taking that offset verbatim is the other way the caret ends up at 0. A hit
+  // on the bullet is no good either — it is inert.
+  const inBullet = (n: Node) =>
+    ((n instanceof Element ? n : n.parentElement)?.closest('[data-bullet]') ?? null) !== null
+  if (
+    spot === null ||
+    !root.contains(spot.node) ||
+    spot.node.nodeType !== Node.TEXT_NODE ||
+    inBullet(spot.node)
+  ) {
+    spot = nearestTextSpot(root, x, y)
+  }
+  if (spot === null || !root.contains(spot.node)) return null
+  const text = spot.node as Text
+  const offset = Math.min(spot.offset, text.length)
+  if (target.selectWord) {
+    const word = wordRangeAt(root, text, offset)
+    if (word !== null) return word
+  }
+  const range = document.createRange()
+  range.setStart(text, offset)
+  range.collapse(true)
+  return range
 }
 
 // ------------------------------------------------------------ DOM writing

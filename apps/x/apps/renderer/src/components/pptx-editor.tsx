@@ -29,6 +29,7 @@ import {
   type ShapeKey,
 } from '@/components/pptx/edit-model'
 import { SlideCanvas, SlideThumbnail } from '@/components/pptx/canvas'
+import { PresentationOverlay } from '@/components/pptx/presentation'
 import {
   EditorToolbar,
   MAX_ZOOM,
@@ -120,6 +121,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const [zoomMode, setZoomMode] = useState<'fit' | number>('fit')
   const [zoomPercent, setZoomPercent] = useState(100)
   const [selectionTick, setSelectionTick] = useState(0)
+  const [presenting, setPresenting] = useState(false)
 
   const [history, setHistory] = useState<EditSet[]>([EMPTY_EDIT_SET])
   const [histIndex, setHistIndex] = useState(0)
@@ -530,6 +532,13 @@ export function PptxEditor({ path }: PptxEditorProps) {
     setZoomPercent(percent)
   }, [])
 
+  // ------------------------------------------------------------ presentation
+
+  // `activeIndex` is untouched while presenting, so leaving lands back on the
+  // slide the editor was on; the overlay hands focus back as it unmounts.
+  const startPresenting = useCallback(() => setPresenting(true), [])
+  const stopPresenting = useCallback(() => setPresenting(false), [])
+
   // -------------------------------------------------------------- keyboard
 
   const handleKeyDown = useCallback(
@@ -632,6 +641,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
           onColorChange={(hex) => applyFormat({ colorHex: hex })}
           align={activeAlign}
           onAlign={applyAlign}
+          onPlay={startPresenting}
           slideNumber={activeIndex + 1}
           slideCount={deck.slides.length}
           saveStatus={saveStatus}
@@ -687,6 +697,15 @@ export function PptxEditor({ path }: PptxEditorProps) {
             )}
           </div>
         </div>
+
+        {presenting && (
+          <PresentationOverlay
+            slides={deck.slides}
+            sizeEmu={deck.slideSizeEmu}
+            startIndex={activeIndex}
+            onExit={stopPresenting}
+          />
+        )}
       </div>
     </EditorErrorBoundary>
   )

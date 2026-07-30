@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
@@ -40,6 +41,7 @@ import {
   alignToCss,
   displayAlign,
   displayRunStyle,
+  type CaretTarget,
   type TextOverlayHandle,
 } from './text-dom'
 import { TextEditOverlay } from './text-overlay'
@@ -78,6 +80,11 @@ interface Gesture {
   /** Set when the pointer went down on an already-selected text box. */
   wantsEdit: boolean
 }
+
+/** Pointer travel a press may drift and still count as a click, not a drag. */
+const CLICK_SLOP_PX = 4
+/** Window in which a second press is part of a double-click. */
+const DOUBLE_CLICK_MS = 400
 
 const snapToGrid = (emu: number): number => Math.round(emu / GRID_EMU) * GRID_EMU
 
@@ -252,9 +259,19 @@ interface ShapeViewProps {
   selected: boolean
   transform?: string
   onPointerDown: (e: ReactPointerEvent) => void
+  /** Text shapes only: opens the editor with the caret at the click point. */
+  onDoubleClick?: (e: ReactMouseEvent) => void
 }
 
-function ShapeView({ shape, rect, scale, selected, transform, onPointerDown }: ShapeViewProps) {
+function ShapeView({
+  shape,
+  rect,
+  scale,
+  selected,
+  transform,
+  onPointerDown,
+  onDoubleClick,
+}: ShapeViewProps) {
   const style: CSSProperties = { ...rectStyle(rect, scale), transform }
   const cursor = selected ? 'move' : 'default'
 
@@ -322,6 +339,7 @@ function ShapeView({ shape, rect, scale, selected, transform, onPointerDown }: S
       style={style}
       selected={selected}
       onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
     />
   )
 }
@@ -333,6 +351,7 @@ function TextShapeView({
   style,
   selected,
   onPointerDown,
+  onDoubleClick,
 }: {
   shape: TextShape
   rect: RectEmuBox
@@ -340,6 +359,7 @@ function TextShapeView({
   style: CSSProperties
   selected: boolean
   onPointerDown: (e: ReactPointerEvent) => void
+  onDoubleClick?: (e: ReactMouseEvent) => void
 }) {
   const ptToPx = (pt: number) => pt * EMU_PER_PT * scale
   // Auto-number counters accumulate down the shape; deeper levels reset when
@@ -349,6 +369,7 @@ function TextShapeView({
   return (
     <div
       onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
       style={{
         ...style,
         cursor: selected ? 'move' : 'text',
@@ -558,6 +579,10 @@ export function SlideCanvas({
   const [gesture, setGestureState] = useState<Gesture | null>(null)
   const scaleRef = useRef(0)
   scaleRef.current = scale
+  // Where the caret should land when the next editing session opens.
+  const [caretPoint, setCaretPoint] = useState<CaretTarget | null>(null)
+  // Last press, for spotting the second half of a double-click.
+  const lastPressRef = useRef<{ t: number; x: number; y: number } | null>(null)
 
   const setGesture = useCallback((next: Gesture | null) => {
     gestureRef.current = next
@@ -586,6 +611,15 @@ export function SlideCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sizeEmu.w, sizeEmu.h, zoomMode])
 
+  /** Opens the text editor with the caret where the click landed. */
+  const enterEdit = useCallback(
+    (key: ShapeKey, clientX: number, clientY: number, selectWord: boolean) => {
+      setCaretPoint({ x: clientX, y: clientY, selectWord })
+      onStartEdit(key)
+    },
+    [onStartEdit],
+  )
+
   const beginGesture = useCallback(
     (shape: Shape, mode: 'move' | 'resize', handle: HandleId, e: ReactPointerEvent) => {
       e.stopPropagation()
@@ -595,6 +629,21 @@ export function SlideCanvas({
       onSelect(key)
       // Editing already: let the overlay keep the pointer.
       if (editingKey === key) return
+
+      if (mode === 'move' && shape.type === 'text') {
+        const last = lastPressRef.current
+        const isSecondPress =
+          last !== null &&
+          e.timeStamp - last.t >= 0 &&
+          e.timeStamp - last.t < DOUBLE_CLICK_MS &&
+          Math.abs(e.clientX - last.x) <= CLICK_SLOP_PX &&
+          Math.abs(e.clientY - last.y) <= CLICK_SLOP_PX
+        lastPressRef.current = { t: e.timeStamp, x: e.clientX, y: e.clientY }
+        // The second press of a double-click belongs to onDoubleClick: starting
+        // a gesture here would swallow it, because the pointerup swaps this
+        // shape for the overlay before the dblclick is ever dispatched.
+        if (isSecondPress) return
+      }
       ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
       setGesture({
         key,
@@ -611,6 +660,21 @@ export function SlideCanvas({
     [slide.xmlPath, selectedKey, editingKey, onSelect, setGesture],
   )
 
+  const handleDoubleClick = useCallback(
+    (shape: TextShape, e: ReactMouseEvent) => {
+      e.stopPropagation()
+      const key = shapeKeyOf(slide.xmlPath, shape.nodePath)
+      if (editingKey === key) return
+      // Any gesture the presses left behind would fight the overlay.
+      setGesture(null)
+      lastPressRef.current = null
+      onSelect(key)
+      // Double-click takes the word, the way it does in any other editor.
+      enterEdit(key, e.clientX, e.clientY, true)
+    },
+    [slide.xmlPath, editingKey, onSelect, enterEdit, setGesture],
+  )
+
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
       const g = gestureRef.current
@@ -619,7 +683,9 @@ export function SlideCanvas({
       const dx = snapToGrid((e.clientX - g.startX) / s)
       const dy = snapToGrid((e.clientY - g.startY) / s)
       const moved =
-        g.moved || Math.abs(e.clientX - g.startX) > 3 || Math.abs(e.clientY - g.startY) > 3
+        g.moved ||
+        Math.abs(e.clientX - g.startX) > CLICK_SLOP_PX ||
+        Math.abs(e.clientY - g.startY) > CLICK_SLOP_PX
       const rect =
         g.mode === 'move'
           ? { ...g.startRect, x: g.startRect.x + dx, y: g.startRect.y + dy }
@@ -643,9 +709,9 @@ export function SlideCanvas({
       if (shape && changed) onGeometryCommit(shape, g.rect)
     } else if (g.wantsEdit) {
       // A click that didn't drag, on a box that was already selected.
-      onStartEdit(g.key)
+      enterEdit(g.key, g.startX, g.startY, false)
     }
-  }, [slide, onGeometryCommit, onStartEdit, setGesture])
+  }, [slide, onGeometryCommit, enterEdit, setGesture])
 
   const selectedShape = slide.shapes.find(
     (s) => shapeKeyOf(slide.xmlPath, s.nodePath) === selectedKey,
@@ -689,6 +755,7 @@ export function SlideCanvas({
                     ...rectStyle(shape.xfrmEmu, scale),
                     transform: composeTransform(visualTransform(shape)),
                   }}
+                  caretAt={caretPoint}
                   onAttach={onOverlayAttach}
                   onCommit={(next) => onTextCommit(shape, next)}
                 />
@@ -703,6 +770,9 @@ export function SlideCanvas({
                 selected={selectedKey === key}
                 transform={composeTransform(liveTransform(key), visualTransform(shape))}
                 onPointerDown={(e) => beginGesture(shape, 'move', 'se', e)}
+                onDoubleClick={
+                  shape.type === 'text' ? (e) => handleDoubleClick(shape, e) : undefined
+                }
               />
             )
           })}

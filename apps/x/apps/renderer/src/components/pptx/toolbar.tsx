@@ -6,6 +6,7 @@ import {
   BoldIcon,
   ItalicIcon,
   MinusIcon,
+  PlayIcon,
   PlusIcon,
   Redo2Icon,
   UnderlineIcon,
@@ -111,6 +112,8 @@ export interface ToolbarProps {
   align: TextAlign | null
   onAlign: (align: TextAlign) => void
 
+  onPlay: () => void
+
   slideNumber: number
   slideCount: number
   saveStatus: SaveStatus
@@ -135,6 +138,7 @@ export function EditorToolbar({
   onColorChange,
   align,
   onAlign,
+  onPlay,
   slideNumber,
   slideCount,
   saveStatus,
@@ -288,6 +292,9 @@ export function EditorToolbar({
       </Group>
 
       <div className="ml-auto flex items-center gap-3 pl-2">
+        <ToolButton label="Play from this slide" onClick={onPlay}>
+          <PlayIcon className="size-4" />
+        </ToolButton>
         <SavePill status={saveStatus} />
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
           Slide {slideNumber} of {slideCount}
