@@ -33,6 +33,7 @@ export const providerDisplayNames: Record<string, string> = {
   ollama: 'Ollama',
   openrouter: 'OpenRouter',
   aigateway: 'AI Gateway',
+  atlascloud: 'Atlas Cloud',
   'openai-compatible': 'OpenAI-Compatible',
   rowboat: 'Rowboat',
   // Matches what other subscription clients call this provider; the auth

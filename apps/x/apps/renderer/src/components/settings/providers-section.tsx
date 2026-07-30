@@ -29,7 +29,7 @@ import {
 // Providers manage CREDENTIALS only — model choices live in
 // ModelSelectionSection above this section.
 
-type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "atlascloud" | "ollama" | "openai-compatible"
 
 interface ProviderMeta {
   id: string
@@ -53,13 +53,14 @@ const TASK_LABELS: Record<string, string> = {
   chatTitle: "Chat titles",
 }
 
-const BYOK_CATALOG: Array<{ flavor: ByokFlavor; name: string; tagline: string; icon: React.ElementType; needsKey: boolean; needsEndpoint: boolean; optionalKey?: boolean; manualModel?: boolean }> = [
+const BYOK_CATALOG: Array<{ flavor: ByokFlavor; name: string; tagline: string; icon: React.ElementType; needsKey: boolean; needsEndpoint: boolean; optionalKey?: boolean; manualModel?: boolean; defaultModel?: string }> = [
   { flavor: "openai", name: "OpenAI", tagline: "GPT models", icon: OpenAIIcon, needsKey: true, needsEndpoint: false },
   { flavor: "anthropic", name: "Anthropic", tagline: "Claude models", icon: AnthropicIcon, needsKey: true, needsEndpoint: false },
   { flavor: "google", name: "Gemini", tagline: "Google AI Studio", icon: GoogleIcon, needsKey: true, needsEndpoint: false },
   { flavor: "ollama", name: "Ollama", tagline: "Run models locally", icon: OllamaIcon, needsKey: false, needsEndpoint: true },
   { flavor: "openrouter", name: "OpenRouter", tagline: "One key, many models", icon: OpenRouterIcon, needsKey: true, needsEndpoint: false },
   { flavor: "aigateway", name: "AI Gateway (Vercel)", tagline: "Vercel's AI Gateway", icon: VercelIcon, needsKey: true, needsEndpoint: false },
+  { flavor: "atlascloud", name: "Atlas Cloud", tagline: "OpenAI-compatible models", icon: GenericApiIcon, needsKey: true, needsEndpoint: true, defaultModel: "deepseek-ai/deepseek-v4-pro" },
   { flavor: "openai-compatible", name: "OpenAI-Compatible", tagline: "Custom OpenAI-compatible endpoint", icon: GenericApiIcon, needsKey: true, optionalKey: true, needsEndpoint: true, manualModel: true },
 ]
 
@@ -67,6 +68,7 @@ const DEFAULT_BASE_URLS: Partial<Record<ByokFlavor, string>> = {
   ollama: "http://localhost:11434",
   "openai-compatible": "http://localhost:1234/v1",
   aigateway: "https://ai-gateway.vercel.sh/v1",
+  atlascloud: "https://api.atlascloud.ai/v1",
 }
 
 function flavorMeta(flavor: string) {
@@ -370,7 +372,9 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
       const listRes = await window.ipc.invoke("models:listForProvider", { provider: providerEntry })
       const list = listRes.success ? listRes.models ?? [] : []
       const typed = manualModel.trim()
-      const model = typed || (selectInitialModel(flavor, list, modelRecommendations) ?? "")
+      const model = typed
+        || (meta.defaultModel && list.includes(meta.defaultModel) ? meta.defaultModel : null)
+        || (selectInitialModel(flavor, list, modelRecommendations) ?? "")
       if (!listRes.success && !model) {
         setStep({ kind: "error", flavor, message: listRes.error || "Could not load the provider's model list." })
         return
