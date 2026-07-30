@@ -482,6 +482,8 @@ async function processInlineTasks(): Promise<void> {
                 const { summary: result } = await runWhenPossible({
                     agentId: INLINE_TASK_AGENT,
                     message,
+                    useCase: 'knowledge_sync',
+                    subUseCase: 'inline_task_run',
                     ...asRunModelOptions(await getKgModel()),
                 });
                 if (result) {
@@ -561,6 +563,8 @@ export async function processRowboatInstruction(
     const { summary: rawResponse } = await runWhenPossible({
         agentId: INLINE_TASK_AGENT,
         message,
+        useCase: 'knowledge_sync',
+        subUseCase: 'inline_task_run',
         ...asRunModelOptions(await getKgModel()),
     });
     if (!rawResponse) {

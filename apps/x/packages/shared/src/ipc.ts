@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UseCase } from './analytics.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
@@ -557,6 +558,8 @@ const ipcSchemas = {
       input: UserMessage,
       config: z.object({
         agent: RequestedAgent,
+        useCase: UseCase.optional(),
+        subUseCase: z.string().optional(),
         autoPermission: z.boolean().optional(),
         maxModelCalls: z.number().int().positive().optional(),
         reasoningEffort: ReasoningEffort.optional(),

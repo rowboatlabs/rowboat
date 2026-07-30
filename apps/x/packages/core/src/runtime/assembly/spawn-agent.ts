@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { TurnAnalytics } from "@x/shared/dist/analytics.js";
 import {
     DEFAULT_MAX_MODEL_CALLS,
     type JsonValue,
@@ -118,6 +119,7 @@ export async function runSpawnedAgent(
         opts.services ?? (await resolveServices());
 
     let parentModel: z.infer<typeof ModelDescriptor> | undefined;
+    let parentAnalytics: TurnAnalytics = { useCase: "copilot_chat" };
     try {
         const parent = reduceTurn(
             (await turnRuntime.getTurn(opts.parentTurnId)).events,
@@ -130,6 +132,7 @@ export async function runSpawnedAgent(
             return spawnError("sub-agents cannot spawn further sub-agents");
         }
         parentModel = parentAgent.resolved.model;
+        parentAnalytics = parent.definition.analytics ?? parentAnalytics;
     } catch {
         // Parent unreadable (legacy runs path): fall back to app defaults.
         parentModel = undefined;
@@ -194,6 +197,7 @@ export async function runSpawnedAgent(
         handle = await headlessRunner.start({
             agent,
             message: input.task,
+            ...parentAnalytics,
             maxModelCalls,
             ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
             signal: opts.signal,

@@ -55,6 +55,8 @@ Process new items and use the user context above to identify yourself when draft
         await runWhenPossible({
             agentId: agentName,
             message,
+            useCase: 'knowledge_sync',
+            subUseCase: 'pre_built',
             ...asRunModelOptions(await getKgModel()),
         });
 

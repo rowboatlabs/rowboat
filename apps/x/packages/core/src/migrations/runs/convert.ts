@@ -392,6 +392,12 @@ function buildTurn(
         },
         context: previousTurnId ? { previousTurnId } : [],
         input: plan.input,
+        analytics: {
+            useCase: start.useCase ?? "copilot_chat",
+            ...(start.subUseCase
+                ? { subUseCase: start.subUseCase }
+                : {}),
+        },
         config: {
             autoPermission: start.permissionMode === "auto",
             humanAvailable: true,

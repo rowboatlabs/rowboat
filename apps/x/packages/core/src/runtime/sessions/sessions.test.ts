@@ -59,6 +59,7 @@ function createdEvent(turnId: string, input: CreateTurnInput): TEvent {
         agent: { requested: input.agent, resolved: FIXTURE_AGENT },
         context: input.context,
         input: input.input,
+        analytics: input.analytics,
         config: {
             autoPermission: input.config.autoPermission ?? false,
             humanAvailable: input.config.humanAvailable,
@@ -366,6 +367,8 @@ describe("sendMessage (13.3)", () => {
         const sessionId = await sessions.createSession();
         const { turnId } = await sessions.sendMessage(sessionId, user("Fix the bug in parser"), {
             agent: { agentId: "copilot", overrides: { model: { provider: "x", model: "y" } } },
+            useCase: "todo_item_agent",
+            subUseCase: "manual",
             autoPermission: true,
             maxModelCalls: 5,
         });
@@ -375,6 +378,10 @@ describe("sendMessage (13.3)", () => {
             sessionId,
             context: [],
             input: user("Fix the bug in parser"),
+            analytics: {
+                useCase: "todo_item_agent",
+                subUseCase: "manual",
+            },
             config: { humanAvailable: true, autoPermission: true, maxModelCalls: 5 },
         });
 

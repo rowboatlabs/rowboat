@@ -2,7 +2,6 @@ import type { LiveNote, LiveNoteTriggerType } from '@x/shared/dist/live-note.js'
 import { fetchLiveNote, patchLiveNote, readNoteBody } from './fileops.js';
 import { getLiveNoteAgentModel } from '../../models/defaults.js';
 import { startHeadlessAgent, startWhenPossible } from '../../runtime/assembly/headless-app.js';
-import { withUseCase } from '../../analytics/use_case.js';
 import { buildTriggerBlock } from '../../runtime/assembly/build-trigger-block.js';
 import { liveNoteBus } from './bus.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
@@ -124,20 +123,16 @@ export async function runLiveNoteAgent(
         // here would deadlock the turn. Only autonomous triggers
         // (cron/window/event) defer.
         const start = trigger === 'manual' ? startHeadlessAgent : startWhenPossible;
-        // The use-case context propagates to every tool the agent calls; the
-        // granular trigger doubles as the sub-use-case (manual / cron /
-        // window / event) so dashboards can break down what woke the agent.
-        const handle = await withUseCase(
-            { useCase: 'live_note_agent', subUseCase: trigger },
-            () => start({
-                agentId: 'live-note-agent',
-                message: buildMessage(filePath, live, trigger, context),
-                model,
-                ...(provider ? { provider } : {}),
-                ...(effort ? { reasoningEffort: effort } : {}),
-                throwOnError: true,
-            }),
-        );
+        const handle = await start({
+            agentId: 'live-note-agent',
+            message: buildMessage(filePath, live, trigger, context),
+            useCase: 'live_note_agent',
+            subUseCase: trigger,
+            model,
+            ...(provider ? { provider } : {}),
+            ...(effort ? { reasoningEffort: effort } : {}),
+            throwOnError: true,
+        });
         const agentRun = { id: handle.turnId };
 
         log.log(`${filePath} — start trigger=${trigger} runId=${agentRun.id}`);

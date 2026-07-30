@@ -1,7 +1,10 @@
 import { LlmStepStreamEvent } from "./llm-step-events.js";
 import { Message, ToolCallPart } from "./message.js";
 import { CodeRunEvent as CodeRunEventSchema, PermissionAsk } from "./code-mode.js";
+import { UseCase } from "./analytics.js";
 import z from "zod";
+
+export { UseCase } from "./analytics.js";
 
 const BaseRunEvent = z.object({
     runId: z.string(),
@@ -25,16 +28,7 @@ export const StartEvent = BaseRunEvent.extend({
     permissionMode: z.enum(["manual", "auto"]).optional(),
     // useCase/subUseCase tag the run for analytics. Optional on read so legacy
     // run files written before these fields existed still parse cleanly.
-    useCase: z.enum([
-        "copilot_chat",
-        "live_note_agent",
-        "background_task_agent",
-        "meeting_note",
-        "knowledge_sync",
-        "code_session",
-        "app_llm_generate",
-        "app_copilot_run",
-    ]).optional(),
+    useCase: UseCase.optional(),
     subUseCase: z.string().optional(),
 });
 
@@ -214,17 +208,6 @@ export const AskHumanResponsePayload = AskHumanResponseEvent.pick({
     toolCallId: true,
     response: true,
 });
-
-export const UseCase = z.enum([
-    "copilot_chat",
-    "live_note_agent",
-    "background_task_agent",
-    "meeting_note",
-    "knowledge_sync",
-    "code_session",
-    "app_llm_generate",
-    "app_copilot_run",
-]);
 
 export const Run = z.object({
     id: z.string(),

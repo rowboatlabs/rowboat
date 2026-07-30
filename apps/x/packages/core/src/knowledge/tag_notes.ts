@@ -100,6 +100,8 @@ async function tagNoteBatch(
     const { turnId, state } = await runWhenPossible({
         agentId: NOTE_TAGGING_AGENT,
         message,
+        useCase: 'knowledge_sync',
+        subUseCase: 'tag_notes',
         ...asRunModelOptions(await getKgModel()),
         throwOnError: true,
     });
