@@ -115,7 +115,10 @@ export const backgroundTaskTools: z.infer<typeof BuiltinToolsSchema> = {
                     (partial as { projectId?: string }).projectId = r.projectId;
                     warning = r.warning;
                 }
-                const result = await patchTask(slug, partial, clearModel ? ['model', 'provider'] : []);
+                // Effort pairs with the model override — clearing the model must clear
+                // it too, or an orphaned effort would override the category
+                // selection's own effort on the next run.
+                const result = await patchTask(slug, partial, clearModel ? ['model', 'provider', 'effort'] : []);
                 return { success: true, task: result, ...(warning ? { warning } : {}) };
             } catch (err) {
                 return { success: false, error: err instanceof Error ? err.message : String(err) };

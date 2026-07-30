@@ -370,7 +370,10 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
       const listRes = await window.ipc.invoke("models:listForProvider", { provider: providerEntry })
       const list = listRes.success ? listRes.models ?? [] : []
       const typed = manualModel.trim()
-      const model = typed || (selectInitialModel(flavor, list, modelRecommendations) ?? "")
+      // A hand-typed id is a bare choice (effort Auto); the recommendation
+      // path may carry a recommended effort alongside the model.
+      const choice = typed ? { model: typed } : selectInitialModel(flavor, list, modelRecommendations)
+      const model = choice?.model ?? ""
       if (!listRes.success && !model) {
         setStep({ kind: "error", flavor, message: listRes.error || "Could not load the provider's model list." })
         return
@@ -394,15 +397,19 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
       if (!hasAssistantNow) {
         // Task recommendations ride along the seeding moment as visible
         // overrides (validated against the live list; only differences).
-        const taskModels = selectInitialTaskModels(flavor, flavor, list, modelRecommendations, model)
+        const taskModels = selectInitialTaskModels(flavor, flavor, list, modelRecommendations, choice ?? { model })
         await window.ipc.invoke("models:updateConfig", {
-          assistantModel: { provider: flavor, model },
+          assistantModel: {
+            provider: flavor,
+            model,
+            ...(choice?.effort ? { effort: choice.effort } : {}),
+          },
           ...(Object.keys(taskModels).length > 0 ? { taskModels } : {}),
         })
         analytics.llmInitialModelSelected({
           flavor,
           model,
-          recommended: model === normalizeModelRecommendation(modelRecommendations, flavor)?.assistantModel,
+          recommended: model === normalizeModelRecommendation(modelRecommendations, flavor)?.assistantModel.model,
           taskOverridesSeeded: Object.keys(taskModels).length,
           source: analyticsSource,
         })

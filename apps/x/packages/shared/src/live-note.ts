@@ -50,6 +50,7 @@ export type LiveNote = {
     triggers?: Triggers;
     model?: string;
     provider?: string;
+    effort?: "low" | "medium" | "high";
     lastAttemptAt?: string;
     lastRunAt?: string;
     lastRunId?: string;
@@ -74,6 +75,7 @@ export const LiveNoteSchema = z.object({
     triggers: TriggersSchema.optional().describe('When the agent fires. Omit for manual-only.'),
     model: z.string().optional().describe('ADVANCED — leave unset. Per-note LLM model override (e.g. "anthropic/claude-sonnet-4.6"). Only set when the user explicitly asked for a specific model for THIS note. The global default already picks a tuned model for live-note runs; overriding usually makes things worse, not better.'),
     provider: z.string().optional().describe('ADVANCED — leave unset. Per-note provider name override (e.g. "openai", "anthropic"). Almost always omitted; the global default flows through correctly.'),
+    effort: z.enum(['low', 'medium', 'high']).optional().describe('ADVANCED — leave unset. Reasoning effort paired with the per-note model override; unset means Auto (provider default). Only meaningful alongside `model`.'),
     lastAttemptAt: z.string().optional().describe('Runtime-managed — never write this yourself. Bumped at the start of every agent run; used by the scheduler for backoff so failures do not retry-storm.'),
     lastRunAt: z.string().optional().describe('Runtime-managed — never write this yourself. Bumped only when an agent run *succeeds*; used as the cycle anchor for cron / window triggers and as the freshness timestamp shown in the UI.'),
     lastRunId: z.string().optional().describe('Runtime-managed — never write this yourself. The id of the most recent run (success or failure); used by the live-note:stop handler.'),

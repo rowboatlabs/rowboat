@@ -5,6 +5,7 @@ import { WorkDir } from '../config/config.js';
 import { createLanguageModel } from '../models/models.js';
 import { generateObjectSafe } from '../models/structured.js';
 import { getKgModel, resolveProviderConfig } from '../models/defaults.js';
+import { directCallReasoningOptions } from '../models/reasoning.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 
@@ -134,9 +135,10 @@ export async function syncCustomLabelsFromInstructions(instructions: string): Pr
         return { labels: getEmailLabels() };
     }
 
-    const { model: modelId, provider } = await getKgModel();
+    const { model: modelId, provider, effort } = await getKgModel();
     const config = await resolveProviderConfig(provider);
     const model = createLanguageModel(config, modelId);
+    const reasoning = await directCallReasoningOptions(config.flavor, modelId, effort);
 
     const builtinList = BUILTIN_EMAIL_LABELS.map(l => `- ${l.id} ("${l.name}"): ${l.description}`).join('\n');
 
@@ -160,6 +162,7 @@ export async function syncCustomLabelsFromInstructions(instructions: string): Pr
         prompt: text,
         schema: ExtractedLabels,
         retry: true,
+        generateOptions: reasoning,
     }));
 
     captureLlmUsage({

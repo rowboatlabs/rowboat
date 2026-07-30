@@ -611,8 +611,9 @@ function DetailsTab({
                 variant="field"
                 inheritDefault={{ label: '(global default)' }}
                 allowCustom
-                value={modelOverrideToRef(draft.model, draft.provider)}
-                onChange={(ref) => setDraft({ ...draft, ...refToModelOverride(ref) })}
+                effortSelectable
+                value={modelOverrideToRef(draft.model, draft.provider, draft.effort)}
+                onChange={(selection) => setDraft({ ...draft, ...refToModelOverride(selection) })}
               />
             </div>
             <div className="mt-4">

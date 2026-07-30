@@ -105,6 +105,9 @@ async function materializeAgent(folder: string, agentFile: string): Promise<stri
         const sel = await getDefaultModelAndProvider();
         task.model = sel.model;
         task.provider = sel.provider;
+        // Effort travels with the pinned model (the pairing rule suppresses
+        // the category selection's effort once task.model is set).
+        if (sel.effort) task.effort = sel.effort;
     } catch { /* no model config — leave the category default */ }
     await fs.mkdir(taskDir, { recursive: true });
     await fs.writeFile(taskYaml, stringifyYaml(task), 'utf-8');

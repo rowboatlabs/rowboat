@@ -8,7 +8,7 @@ import { ChatHeader } from '@/components/chat-header'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { type ChatTab } from '@/components/tab-bar'
-import { type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from '@/components/chat-input-with-mentions'
+import { type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from '@/components/chat-input-with-mentions'
 import { ChatSessionPane, ChatSessionComposer } from '@/components/chat-session'
 import { useTabMeta } from '@/lib/tab-meta'
 import { useSidebar } from '@/components/ui/sidebar'
@@ -83,8 +83,10 @@ interface ChatSidebarProps {
   onPresetMessageConsumed?: () => void
   getInitialDraft?: (tabId: string) => string | undefined
   onDraftChangeForTab?: (tabId: string, text: string) => void
-  onSelectedModelChangeForTab?: (tabId: string, model: SelectedModel | null) => void
-  onReasoningEffortChangeForTab?: (tabId: string, effort: ReasoningEffortLevel | null) => void
+  onSelectionChangeForTab?: (tabId: string, selection: ModelSelection | null) => void
+  getInitialSelection?: (tabId: string) => ModelSelection | null
+  /** Last-turn selection for the ACTIVE tab's session (single store — see App). */
+  restoredSelectionForActive?: ModelSelection | null
   workDirByTab?: Record<string, string | null>
   /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
   codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
@@ -155,8 +157,9 @@ export function ChatSidebar({
   onPresetMessageConsumed,
   getInitialDraft,
   onDraftChangeForTab,
-  onSelectedModelChangeForTab,
-  onReasoningEffortChangeForTab,
+  onSelectionChangeForTab,
+  getInitialSelection,
+  restoredSelectionForActive,
   workDirByTab = {},
   codeSessionLocks = {},
   pinnedToCodeSession = null,
@@ -467,8 +470,9 @@ export function ChatSidebar({
                         codeSessionLocks={codeSessionLocks}
                         initialDraft={getInitialDraft?.(tab.id)}
                         onDraftChange={(tabId, text) => onDraftChangeForTab?.(tabId, text)}
-                        onSelectedModelChange={(t, m) => onSelectedModelChangeForTab?.(t.id, m)}
-                        onReasoningEffortChange={(t, effort) => onReasoningEffortChangeForTab?.(t.id, effort)}
+                        onSelectionChange={(t, selection) => onSelectionChangeForTab?.(t.id, selection)}
+                        initialSelection={getInitialSelection?.(tab.id) ?? null}
+                        restoredSelection={isActive ? restoredSelectionForActive : undefined}
                         workDirByTab={workDirByTab}
                         onWorkDirChange={(tabId, v) => onWorkDirChangeForTab?.(tabId, v)}
                         recordingOverrides={{

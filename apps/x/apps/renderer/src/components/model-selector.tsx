@@ -1,14 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { Brain, Check, ChevronDown } from 'lucide-react'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Command,
@@ -17,10 +11,10 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import { useModels, type ModelPickerGroup, type ModelRef } from '@/hooks/use-models'
+import { useModels, type ModelPickerGroup, type ModelRef, type ModelSelection } from '@/hooks/use-models'
 import { cn } from '@/lib/utils'
 
-export type { ModelRef } from '@/hooks/use-models'
+export type { ModelRef, ModelSelection } from '@/hooks/use-models'
 
 export type ReasoningEffortLevel = 'low' | 'medium' | 'high'
 
@@ -41,12 +35,38 @@ export const providerDisplayNames: Record<string, string> = {
 }
 
 // '' = auto (provider default). Ordered as shown in the picker.
-const REASONING_EFFORT_OPTIONS: Array<{ value: '' | ReasoningEffortLevel; label: string; hint: string }> = [
-  { value: '', label: 'Auto', hint: 'Provider default' },
-  { value: 'low', label: 'Fast', hint: 'Minimal thinking' },
-  { value: 'medium', label: 'Balanced', hint: 'Moderate thinking' },
-  { value: 'high', label: 'Thorough', hint: 'Deep thinking, costs more' },
+// `short` is the compact form shown inline after the model name (trigger
+// pill and list rows), hermes-style ("Fable 5 Med"); Auto renders nothing.
+const REASONING_EFFORT_OPTIONS: Array<{ value: '' | ReasoningEffortLevel; label: string; short: string; hint: string }> = [
+  { value: '', label: 'Auto', short: '', hint: 'Provider default' },
+  { value: 'low', label: 'Fast', short: 'Fast', hint: 'Minimal thinking' },
+  { value: 'medium', label: 'Balanced', short: 'Bal', hint: 'Moderate thinking' },
+  { value: 'high', label: 'Thorough', short: 'Thoro', hint: 'Deep thinking, costs more' },
 ]
+
+// Effort submenu panel geometry (px). Width matches hermes' w-52 submenu;
+// the height estimate only feeds the viewport clamp, not layout.
+const SUB_PANEL_WIDTH = 208
+const SUB_PANEL_GAP = 4
+const SUB_PANEL_EST_HEIGHT = 180
+// How long the grace triangle stays armed after leaving the anchor row.
+// Radix menus keep theirs alive while the pointer stays inside the polygon;
+// a generous expiry approximates that without per-move re-arming.
+const SUB_GRACE_MS = 500
+
+interface Point { x: number; y: number }
+
+// Standard sign-based point-in-triangle test.
+function pointInTriangle(p: Point, a: Point, b: Point, c: Point): boolean {
+  const sign = (p1: Point, p2: Point, p3: Point) =>
+    (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y)
+  const d1 = sign(p, a, b)
+  const d2 = sign(p, b, c)
+  const d3 = sign(p, c, a)
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0
+  return !(hasNeg && hasPos)
+}
 
 function getModelDisplayName(model: string) {
   return model.split('/').pop() || model
@@ -65,10 +85,18 @@ function getModelDisplayName(model: string) {
 // collapses to one flat list filtered across ALL providers (model ids and
 // provider names both match). Scoped/static pickers stay flat.
 export interface ModelSelectorProps {
-  /** Current selection; null follows the app default / the sentinel. */
-  value: ModelRef | null
-  /** null only ever fires when defaultOption is set (sentinel picked). */
-  onChange: (value: ModelRef | null) => void
+  /**
+   * Current selection — model AND effort as one value (effort absent =
+   * Auto); null follows the app default / the sentinel.
+   */
+  value: ModelSelection | null
+  /**
+   * Fires with the complete selection on every commit: a plain row click
+   * carries no effort (Auto), an effort-submenu click carries its level,
+   * and on a locked chat an effort pick re-fires the locked ref with the
+   * new effort. null only ever fires when a sentinel row is picked.
+   */
+  onChange: (value: ModelSelection | null) => void
   /**
    * Pinned top entry ("Same as Assistant") that selects null. When set, a
    * null value renders this label instead of the app default model.
@@ -115,13 +143,14 @@ export interface ModelSelectorProps {
   /** Frozen selection: renders a static label + tooltip instead of the dropdown. */
   lockedModel?: ModelRef | null
   /**
-   * Reasoning effort ('' = auto). The control renders only for models the
-   * catalog flags as reasoning-capable. When the effective model loses
-   * reasoning support, '' is reported up so a stale effort never outlives
-   * its model. Omit onEffortChange to hide the effort control entirely.
+   * Enables the effort submenu: hovering a reasoning-capable model row
+   * opens a side panel (hermes-style) listing effort levels — clicking one
+   * commits that model AND effort in one shot; clicking the row itself
+   * commits the model with effort Auto. The committed pair arrives via
+   * onChange. Works in both pill and field variants; on locked chats the
+   * frozen model still allows effort-only picks.
    */
-  effort?: '' | ReasoningEffortLevel
-  onEffortChange?: (effort: '' | ReasoningEffortLevel) => void
+  effortSelectable?: boolean
 }
 
 // cmdk item value for the defaultOption sentinel row. Never a valid model
@@ -141,17 +170,28 @@ function parseCustomModel(text: string, providerFilter: string | undefined, defa
   return { provider: defaultModel?.provider ?? '', model: text }
 }
 
-// Adapters for surfaces that persist a per-item override as two optional
-// strings (BackgroundTask.model/provider, LiveNote.model/provider) where
-// unset = inherit the global default. A model without a provider is legal
-// (the runtime pairs it with the default provider), so '' round-trips to
-// undefined and a null ref clears both fields.
-export function modelOverrideToRef(model: string | undefined, provider: string | undefined): ModelRef | null {
-  return model ? { provider: provider ?? '', model } : null
+// Adapters for surfaces that persist a per-item override as optional
+// strings (BackgroundTask.model/provider/effort, LiveNote equivalents)
+// where unset = inherit the global default. A model without a provider is
+// legal (the runtime pairs it with the default provider), so '' round-trips
+// to undefined and a null ref clears every field — effort included, since
+// model and effort are one explicit pair.
+export function modelOverrideToRef(
+  model: string | undefined,
+  provider: string | undefined,
+  effort?: ReasoningEffortLevel,
+): ModelSelection | null {
+  return model ? { provider: provider ?? '', model, ...(effort ? { effort } : {}) } : null
 }
 
-export function refToModelOverride(ref: ModelRef | null): { model: string | undefined; provider: string | undefined } {
-  return { model: ref?.model || undefined, provider: ref?.provider || undefined }
+export function refToModelOverride(
+  selection: ModelSelection | null,
+): { model: string | undefined; provider: string | undefined; effort: ReasoningEffortLevel | undefined } {
+  return {
+    model: selection?.model || undefined,
+    provider: selection?.provider || undefined,
+    effort: selection?.model ? selection.effort : undefined,
+  }
 }
 
 export function ModelSelector({
@@ -165,8 +205,7 @@ export function ModelSelector({
   staticOptions,
   triggerTitle,
   lockedModel = null,
-  effort = '',
-  onEffortChange,
+  effortSelectable = false,
 }: ModelSelectorProps) {
   const { groups: allGroups, reasoningByKey, defaultModel, catalogByProvider, refresh } = useModels()
 
@@ -206,8 +245,70 @@ export function ModelSelector({
     ? (groups.find((g) => g.id === activeProviderId) ?? groups[0])
     : null
 
+  // Hover-opened effort submenu (hermes-style): one floating panel anchored
+  // to the hovered model row, portalled to <body> because PopoverContent is
+  // overflow-hidden. Position is captured from the row's rect at open time;
+  // list scroll and query changes close it rather than tracking movement.
+  const [sub, setSub] = useState<{ key: string; provider: string; model: string; top: number; left: number } | null>(null)
+  const subPanelRef = useRef<HTMLDivElement | null>(null)
+  const subCloseTimer = useRef<number | null>(null)
+  const cancelSubClose = useCallback(() => {
+    if (subCloseTimer.current !== null) {
+      window.clearTimeout(subCloseTimer.current)
+      subCloseTimer.current = null
+    }
+  }, [])
+  // Delayed close so the pointer can travel row → panel without flicker
+  // (generous enough to cover a slow diagonal through the grace triangle).
+  const scheduleSubClose = useCallback(() => {
+    cancelSubClose()
+    subCloseTimer.current = window.setTimeout(() => setSub(null), 300)
+  }, [cancelSubClose])
+  useEffect(() => cancelSubClose, [cancelSubClose])
+  // Grace-intent triangle (what Radix DropdownMenuSub does natively): when
+  // the pointer leaves the anchor row heading toward its open panel, the
+  // triangle between the exit point and the panel's near edge is a dead
+  // zone — rows crossed inside it neither re-anchor nor close the panel.
+  // Without this, a diagonal move toward the panel sweeps the submenu onto
+  // the row below (the bug hermes never sees because Radix handles it).
+  const graceRef = useRef<{ apex: Point; top: Point; bottom: Point; expires: number } | null>(null)
+  const inGraceArea = useCallback((x: number, y: number) => {
+    const g = graceRef.current
+    if (!g) return false
+    if (performance.now() > g.expires) {
+      graceRef.current = null
+      return false
+    }
+    return pointInTriangle({ x, y }, g.apex, g.top, g.bottom)
+  }, [])
+  const armGrace = useCallback((x: number, y: number) => {
+    const rect = subPanelRef.current?.getBoundingClientRect()
+    if (!rect) return
+    // The panel edge facing the rows, padded a little vertically so the
+    // triangle isn't razor-thin at the corners.
+    const nearX = x <= rect.left ? rect.left : rect.right
+    graceRef.current = {
+      apex: { x, y },
+      top: { x: nearX, y: rect.top - 8 },
+      bottom: { x: nearX, y: rect.bottom + 8 },
+      expires: performance.now() + SUB_GRACE_MS,
+    }
+  }, [])
+  const openSub = useCallback((row: HTMLElement, provider: string, model: string) => {
+    cancelSubClose()
+    const rect = row.getBoundingClientRect()
+    // Right of the row, flipped left when the viewport edge is close; top
+    // clamped so the panel never renders off-screen.
+    const left = rect.right + SUB_PANEL_GAP + SUB_PANEL_WIDTH > window.innerWidth
+      ? rect.left - SUB_PANEL_WIDTH - SUB_PANEL_GAP
+      : rect.right + SUB_PANEL_GAP
+    const top = Math.max(8, Math.min(rect.top, window.innerHeight - SUB_PANEL_EST_HEIGHT - 8))
+    setSub({ key: `${provider}/${model}`, provider, model, top, left })
+  }, [cancelSubClose])
+
   const handleOpenChange = useCallback((next: boolean) => {
     setOpen(next)
+    setSub(null)
     if (next) {
       // Per-opening state: fresh search, provider column on the selection's
       // (else the assistant's) provider — groups[0] is already the
@@ -222,6 +323,7 @@ export function ModelSelector({
   // Switch the split view's provider column and re-anchor the keyboard
   // highlight on the new group's first row (see commandValue above).
   const switchProvider = useCallback((g: ModelPickerGroup) => {
+    setSub(null)
     setActiveProviderId(g.id)
     setCommandValue(
       g.models.length > 0
@@ -269,10 +371,14 @@ export function ModelSelector({
       ? DEFAULT_OPTION_KEY
       : (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
 
-  const select = useCallback((ref: ModelRef | null) => {
+  // Model and effort commit together as ONE value: a plain row click means
+  // Auto (no effort key), an effort-submenu click carries its level — so
+  // switching models never drags a stale effort along.
+  const select = useCallback((ref: ModelRef | null, effortLevel: '' | ReasoningEffortLevel = '') => {
     if (lockedModel) return
+    setSub(null)
     setOpen(false)
-    onChange(ref)
+    onChange(ref ? { ...ref, ...(effortLevel ? { effort: effortLevel } : {}) } : null)
   }, [lockedModel, onChange])
 
   // Reasoning effort applies to the model the next message will actually use:
@@ -283,31 +389,145 @@ export function ModelSelector({
     : (value ? `${value.provider}/${value.model}` : '')
       || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
   const reasoningAvailable = reasoningByKey[effectiveModelKey] === true
+  const effortControl = reasoningAvailable && effortSelectable
+  // The effort shown on the trigger and ticked in panels — always the
+  // value's own effort. A stale effort on a non-reasoning model is not
+  // auto-cleared here: the pair semantics make it unreachable via the UI,
+  // and the runtime's capability mapping fails closed anyway.
+  const shownEffort: '' | ReasoningEffortLevel = value?.effort ?? ''
 
-  const handleEffortChange = useCallback((raw: string) => {
-    onEffortChange?.(raw === 'low' || raw === 'medium' || raw === 'high' ? raw : '')
-  }, [onEffortChange])
+  // Effort radio row for the locked-model popover only (model frozen, effort
+  // still adjustable): commits the locked ref with the new effort as one
+  // selection. The main picker uses the per-row hover submenu instead.
+  const renderEffortFooter = () => effortControl && lockedModel && (
+    <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Brain className="h-3 w-3 shrink-0" />
+        Reasoning
+      </span>
+      <div className="flex items-center gap-0.5">
+        {REASONING_EFFORT_OPTIONS.map((option) => (
+          <button
+            key={option.value || 'auto'}
+            type="button"
+            title={option.hint}
+            onClick={() => onChange({
+              provider: lockedModel.provider,
+              model: lockedModel.model,
+              ...(option.value ? { effort: option.value } : {}),
+            })}
+            className={cn(
+              'rounded-full px-2 py-0.5 text-xs transition-colors',
+              shownEffort === option.value
+                ? 'bg-accent text-accent-foreground'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 
-  // Switching to a model without reasoning support drops a stale selection —
-  // otherwise the next message would carry an effort the model rejects.
-  useEffect(() => {
-    if (!reasoningAvailable && effort !== '') {
-      onEffortChange?.('')
-    }
-  }, [reasoningAvailable, effort, onEffortChange])
+  // Non-auto effort surfaces on the trigger the same way the list rows show
+  // it: model name followed by the grayed short form ("claude-fable-5 Thoro").
+  const renderEffortBadge = () => effortControl && shownEffort !== '' && (
+    <span className="shrink-0 text-xs text-muted-foreground">
+      {REASONING_EFFORT_OPTIONS.find((o) => o.value === shownEffort)?.short}
+    </span>
+  )
 
   const renderModelItem = (providerId: string, model: string, secondary?: string) => {
     const key = `${providerId}/${model}`
+    // Hovering a reasoning-capable row opens the effort submenu (hermes
+    // pattern); hovering any other row schedules it closed so the panel
+    // always tracks the row under the pointer. Both re-check on every move
+    // (not just enter) so a pointer that parks on a row past the grace
+    // expiry still takes effect without needing to re-enter the row.
+    const canEffort = effortSelectable && reasoningByKey[key] === true
+    const isSelected = selectedKey === key
+    const onHover = canEffort
+      ? (e: ReactMouseEvent<HTMLDivElement>) => {
+          if (inGraceArea(e.clientX, e.clientY)) return
+          graceRef.current = null
+          if (sub?.key === key) {
+            cancelSubClose()
+            return
+          }
+          openSub(e.currentTarget, providerId, model)
+        }
+      : (e: ReactMouseEvent<HTMLDivElement>) => {
+          if (inGraceArea(e.clientX, e.clientY)) return
+          scheduleSubClose()
+        }
     return (
       <CommandItem
         key={key}
         value={key}
         onSelect={() => select({ provider: providerId, model })}
+        onMouseEnter={onHover}
+        onMouseMove={onHover}
+        onMouseLeave={canEffort
+          ? (e) => {
+              // Arm the dead zone toward the open panel, then let the close
+              // timer race the pointer's travel (panel entry cancels it).
+              if (sub?.key === key) armGrace(e.clientX, e.clientY)
+              scheduleSubClose()
+            }
+          : undefined}
       >
-        <Check className={cn('size-3.5 shrink-0', selectedKey === key ? 'opacity-100' : 'opacity-0')} />
+        <Check className={cn('size-3.5 shrink-0', isSelected ? 'opacity-100' : 'opacity-0')} />
         <span className="truncate">{model}</span>
+        {isSelected && canEffort && shownEffort !== '' && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {REASONING_EFFORT_OPTIONS.find((o) => o.value === shownEffort)?.short}
+          </span>
+        )}
         {secondary && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{secondary}</span>}
       </CommandItem>
+    )
+  }
+
+  // The floating effort panel. Portalled to <body> (PopoverContent clips);
+  // the popover is modal, so pointer-events must be re-enabled explicitly
+  // and PopoverContent's onInteractOutside must ignore clicks landing here.
+  const renderEffortSubPanel = () => {
+    if (!open || !sub) return null
+    // The panel's ticked level: the value's own effort for the currently
+    // selected model, and Auto — the level a plain row click commits — for
+    // any other row, mirroring hermes' per-model default pre-selection.
+    const subEffort = selectedKey === sub.key ? shownEffort : ''
+    return createPortal(
+      <div
+        ref={subPanelRef}
+        style={{ position: 'fixed', top: sub.top, left: sub.left, width: SUB_PANEL_WIDTH, pointerEvents: 'auto' }}
+        className="z-50 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        onMouseEnter={() => {
+          graceRef.current = null
+          cancelSubClose()
+        }}
+        onMouseLeave={scheduleSubClose}
+      >
+        <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Effort
+        </div>
+        {REASONING_EFFORT_OPTIONS.map((option) => (
+          <button
+            key={option.value || 'auto'}
+            type="button"
+            title={option.hint}
+            onClick={() => select({ provider: sub.provider, model: sub.model }, option.value)}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+          >
+            <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            {subEffort === option.value && (
+              <Check className="size-3.5 shrink-0" />
+            )}
+          </button>
+        ))}
+      </div>,
+      document.body,
     )
   }
 
@@ -332,57 +552,50 @@ export function ModelSelector({
     </CommandItem>
   )
 
+  if (lockedModel) {
+    // The model is frozen but effort (per-message) is still adjustable: the
+    // locked label becomes a popover holding just the effort row. Without an
+    // effort control it stays the old static label + tooltip.
+    return effortControl ? (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <span className="min-w-0 truncate text-foreground/80">{getModelDisplayName(lockedModel.model)}</span>
+            {renderEffortBadge()}
+            <ChevronDown className="h-3 w-3 shrink-0" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-72 p-0 overflow-hidden">
+          <div className="px-3 py-2 text-xs text-muted-foreground">
+            {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — model is fixed for this chat
+          </div>
+          {renderEffortFooter()}
+        </PopoverContent>
+      </Popover>
+    ) : (
+      <Tooltip delayDuration={TOOLTIP_DELAY_MS}>
+        <TooltipTrigger asChild>
+          <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
+            <span className="min-w-0 truncate">{getModelDisplayName(lockedModel.model)}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  // modal: the settings Dialog's scroll-lock cancels wheel events over
+  // content portalled outside its subtree — a modal popover brings its
+  // own lock layer that permits scrolling within (Radix's supported
+  // fix for popover-inside-dialog; matches the old DropdownMenu's
+  // modality). Keyboard scrolling was never affected (cmdk uses
+  // programmatic scrollIntoView).
   return (
-    <>
-      {reasoningAvailable && onEffortChange && (
-        <DropdownMenu>
-          <Tooltip delayDuration={TOOLTIP_DELAY_MS}>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <Brain className="h-3 w-3 shrink-0" />
-                  {effort !== '' && (
-                    <span>{REASONING_EFFORT_OPTIONS.find((o) => o.value === effort)?.label}</span>
-                  )}
-                  <ChevronDown className="h-3 w-3 shrink-0" />
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="top">Reasoning effort — applies to your next message</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup value={effort} onValueChange={handleEffortChange}>
-              {REASONING_EFFORT_OPTIONS.map((option) => (
-                <DropdownMenuRadioItem key={option.value || 'auto'} value={option.value}>
-                  <span>{option.label}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">{option.hint}</span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-      {lockedModel ? (
-        <Tooltip delayDuration={TOOLTIP_DELAY_MS}>
-          <TooltipTrigger asChild>
-            <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
-              <span className="min-w-0 truncate">{getModelDisplayName(lockedModel.model)}</span>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
-          </TooltipContent>
-        </Tooltip>
-      ) : (
-        // modal: the settings Dialog's scroll-lock cancels wheel events over
-        // content portalled outside its subtree — a modal popover brings its
-        // own lock layer that permits scrolling within (Radix's supported
-        // fix for popover-inside-dialog; matches the old DropdownMenu's
-        // modality). Keyboard scrolling was never affected (cmdk uses
-        // programmatic scrollIntoView).
         <Popover open={open} onOpenChange={handleOpenChange} modal>
           <PopoverTrigger asChild>
             {variant === 'field' ? (
@@ -399,6 +612,7 @@ export function ModelSelector({
                       ? (staticOptions ? staticLabelFor(value.model) : value.model)
                       : (sentinel?.label || defaultModel?.model || 'Select a model')}
                   </span>
+                  {renderEffortBadge()}
                   {value && !providerFilter && !staticOptions && (
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {providerDisplayNames[value.provider] || value.provider}
@@ -413,17 +627,28 @@ export function ModelSelector({
                 title={triggerTitle}
                 className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                <span className="min-w-0 truncate">
+                {/* Name in foreground vs muted effort — same hierarchy as the
+                    list rows, else the two read as one undifferentiated label. */}
+                <span className="min-w-0 truncate text-foreground/80">
                   {staticOptions
                     ? (value ? staticLabelFor(value.model) : (sentinel?.label ?? 'Model'))
                     : getModelDisplayName(value?.model || defaultModel?.model || 'Model')}
                 </span>
+                {renderEffortBadge()}
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             )}
           </PopoverTrigger>
           <PopoverContent
             align={variant === 'field' ? 'start' : 'end'}
+            // The effort panel lives outside the popover subtree (body
+            // portal), so Radix would treat clicks on it as outside
+            // interactions and dismiss the picker mid-click.
+            onInteractOutside={(e) => {
+              if (subPanelRef.current && e.target instanceof Node && subPanelRef.current.contains(e.target)) {
+                e.preventDefault()
+              }
+            }}
             className={cn(
               'p-0 overflow-hidden',
               splitMode
@@ -460,7 +685,11 @@ export function ModelSelector({
                 <CommandInput
                   autoFocus
                   value={query}
-                  onValueChange={setQuery}
+                  onValueChange={(v) => {
+                    setQuery(v)
+                    // Typing refilters the rows the panel was anchored to.
+                    setSub(null)
+                  }}
                   placeholder="Search models and providers…"
                 />
                 {splitMode && activeGroup ? (
@@ -489,7 +718,7 @@ export function ModelSelector({
                         </button>
                       ))}
                     </div>
-                    <CommandList className="max-h-80 flex-1">
+                    <CommandList className="max-h-80 flex-1" onScroll={() => setSub(null)}>
                       <CommandGroup>
                         {renderSentinelItem()}
                         {standaloneDefault && standaloneDefault.provider === activeGroup.id &&
@@ -503,7 +732,7 @@ export function ModelSelector({
                     </CommandList>
                   </div>
                 ) : (
-                  <CommandList className="max-h-80">
+                  <CommandList className="max-h-80" onScroll={() => setSub(null)}>
                     {sentinel && !queryValue && (
                       <CommandGroup>{renderSentinelItem()}</CommandGroup>
                     )}
@@ -568,8 +797,7 @@ export function ModelSelector({
               </Command>
             )}
           </PopoverContent>
+          {renderEffortSubPanel()}
         </Popover>
-      )}
-    </>
   )
 }

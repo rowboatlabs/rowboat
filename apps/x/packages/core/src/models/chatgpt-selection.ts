@@ -26,19 +26,23 @@ export async function applyCodexInitialSelection(): Promise<void> {
         const catalog = await listCodexModels();
         const ids = catalog.providers[0]?.models.map((m) => m.id) ?? [];
         const recommendations = (await getRowboatConfig().catch(() => null))?.modelRecommendations;
-        const model = selectInitialModel("codex", ids, recommendations);
-        if (model) {
+        const choice = selectInitialModel("codex", ids, recommendations);
+        if (choice) {
             // Task recommendations ride along the seeding moment (codex has
             // none today; the path is uniform across providers).
-            const taskModels = selectInitialTaskModels("codex", "codex", ids, recommendations, model);
+            const taskModels = selectInitialTaskModels("codex", "codex", ids, recommendations, choice);
             await repo.updateConfig({
-                assistantModel: { provider: "codex", model },
+                assistantModel: {
+                    provider: "codex",
+                    model: choice.model,
+                    ...(choice.effort ? { effort: choice.effort } : {}),
+                },
                 ...(Object.keys(taskModels).length > 0 ? { taskModels } : {}),
             });
             capture("llm_initial_model_selected", {
                 flavor: "codex",
-                model,
-                recommended: model === normalizeModelRecommendation(recommendations, "codex")?.assistantModel,
+                model: choice.model,
+                recommended: choice.model === normalizeModelRecommendation(recommendations, "codex")?.assistantModel.model,
                 task_overrides_seeded: Object.keys(taskModels).length,
                 source: "sign_in",
             });

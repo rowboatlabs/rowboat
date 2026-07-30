@@ -278,8 +278,13 @@ async function driveTurn(
     try {
         let sent: { turnId: string };
         try {
-            // Chat parity: the assistant model unless the composer overrode it.
-            const { model, provider } = modelOverride ?? await getDefaultModelAndProvider();
+            // Chat parity: the assistant selection (model + effort) unless the
+            // composer overrode the model — an override carries no effort of
+            // its own yet (todo:* sends a bare ref; effort rides only with
+            // the assistant pair, per the pairing rule).
+            const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
+                modelOverride ?? await getDefaultModelAndProvider();
+            const { model, provider } = selection;
             sent = await withUseCase(
                 { useCase: 'todo_item_agent', subUseCase },
                 () => sessions.sendMessage(
@@ -290,6 +295,7 @@ async function driveTurn(
                             agentId: 'todo-item-agent',
                             overrides: { model: { provider, model } },
                         },
+                        ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
                         autoPermission,
                     },
                 ),
@@ -412,7 +418,10 @@ async function driveChatTurn(
     try {
         let sent: { turnId: string };
         try {
-            const { model, provider } = modelOverride ?? await getDefaultModelAndProvider();
+            // Same selection semantics as runTodoItem above.
+            const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
+                modelOverride ?? await getDefaultModelAndProvider();
+            const { model, provider } = selection;
             sent = await withUseCase(
                 { useCase: 'copilot_chat', subUseCase: 'home_stream' },
                 () => sessions.sendMessage(
@@ -423,6 +432,7 @@ async function driveChatTurn(
                             agentId: 'copilot',
                             overrides: { model: { provider, model } },
                         },
+                        ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
                         autoPermission,
                     },
                 ),

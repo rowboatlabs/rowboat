@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { getKgModel } from '../models/defaults.js';
+import { asRunModelOptions, getKgModel } from '../models/defaults.js';
 import { runWhenPossible, toolInputPaths } from '../runtime/assembly/headless-app.js';
 import { getErrorDetails } from '../application/lib/errors.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
@@ -409,7 +409,7 @@ async function createNotesFromBatch(
     const { turnId, state } = await runWhenPossible({
         agentId: NOTE_CREATION_AGENT,
         message,
-        ...(await getKgModel()),
+        ...asRunModelOptions(await getKgModel()),
         throwOnError: true,
     });
 
@@ -967,7 +967,7 @@ export async function curateNotes(): Promise<void> {
             await runWhenPossible({
                 agentId: CURATION_AGENT,
                 message,
-                ...(await getKgModel()),
+                ...asRunModelOptions(await getKgModel()),
                 throwOnError: true,
             });
             curated++;

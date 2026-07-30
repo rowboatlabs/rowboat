@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { runWhenPossible } from '../runtime/assembly/headless-app.js';
-import { getKgModel } from '../models/defaults.js';
+import { asRunModelOptions, getKgModel } from '../models/defaults.js';
 import {
     loadConfig,
     loadState,
@@ -55,7 +55,7 @@ Process new items and use the user context above to identify yourself when draft
         await runWhenPossible({
             agentId: agentName,
             message,
-            ...(await getKgModel()),
+            ...asRunModelOptions(await getKgModel()),
         });
 
         // Update last run time

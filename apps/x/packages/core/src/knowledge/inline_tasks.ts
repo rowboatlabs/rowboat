@@ -4,7 +4,8 @@ import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
 import { runWhenPossible } from '../runtime/assembly/headless-app.js';
-import { getKgModel, resolveProviderConfig } from '../models/defaults.js';
+import { asRunModelOptions, getKgModel, resolveProviderConfig } from '../models/defaults.js';
+import { directCallReasoningOptions } from '../models/reasoning.js';
 import { createLanguageModel } from '../models/models.js';
 import { inlineTask } from '@x/shared';
 import { captureLlmUsage } from '../analytics/usage.js';
@@ -481,7 +482,7 @@ async function processInlineTasks(): Promise<void> {
                 const { summary: result } = await runWhenPossible({
                     agentId: INLINE_TASK_AGENT,
                     message,
-                    ...(await getKgModel()),
+                    ...asRunModelOptions(await getKgModel()),
                 });
                 if (result) {
                     if (task.targetId) {
@@ -560,7 +561,7 @@ export async function processRowboatInstruction(
     const { summary: rawResponse } = await runWhenPossible({
         agentId: INLINE_TASK_AGENT,
         message,
-        ...(await getKgModel()),
+        ...asRunModelOptions(await getKgModel()),
     });
     if (!rawResponse) {
         return { instruction, schedule: null, scheduleLabel: null, response: null };
@@ -612,6 +613,7 @@ export async function classifySchedule(instruction: string): Promise<InlineTaskS
     const selection = await getKgModel();
     const providerConfig = await resolveProviderConfig(selection.provider);
     const model = createLanguageModel(providerConfig, selection.model);
+    const reasoning = await directCallReasoningOptions(providerConfig.flavor, selection.model, selection.effort);
 
     const now = new Date();
     const defaultEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -653,6 +655,7 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
             model,
             instructions: systemPrompt,
             prompt: instruction,
+            ...reasoning,
         }));
 
         captureLlmUsage({

@@ -150,6 +150,10 @@ export async function runBackgroundTask(
         const selection = await getBackgroundTaskAgentModel();
         const model = task.model || selection.model;
         const provider = task.provider ?? (task.model ? undefined : selection.provider);
+        // Effort pairs with whichever source supplied the model: an explicit
+        // task effort always wins; otherwise the category selection's effort
+        // applies only when the task didn't pin its own model.
+        const effort = task.effort ?? (task.model ? undefined : selection.effort);
         // Manual runs are user-requested (the Run button, or the copilot's
         // run-background-task-agent tool mid-chat) and must NOT wait for
         // chat-idle: the requesting chat turn holds the chat-activity lock,
@@ -167,6 +171,7 @@ export async function runBackgroundTask(
                 message: buildMessage(slug, task, trigger, context, codeProject),
                 model,
                 ...(provider ? { provider } : {}),
+                ...(effort ? { reasoningEffort: effort } : {}),
                 throwOnError: true,
             }),
         );
