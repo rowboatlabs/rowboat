@@ -16,9 +16,13 @@ import {
   Volume2,
 } from 'lucide-react'
 import { Streamdown } from 'streamdown'
+// The raw sonner Toaster, NOT the app's ui/sonner wrapper: the wrapper
+// calls useTheme(), which throws outside ThemeProvider — and this window
+// deliberately has no ThemeProvider. A render crash here paints the whole
+// transparent frame as a giant white sheet.
+import { Toaster as SonnerToaster } from 'sonner'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Toaster } from '@/components/ui/sonner'
 import { TalkingHead } from '@/components/talking-head'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { stripKnowledgePrefix } from '@/lib/wiki-links'
@@ -425,7 +429,7 @@ export function QuickAskBar() {
             />
           }
         />
-        <Toaster />
+        <SonnerToaster theme="dark" />
       </>
     )
   }
@@ -589,7 +593,7 @@ export function QuickAskBar() {
           />
         </div>
       </div>
-      <Toaster />
+      <SonnerToaster theme="light" />
     </div>
   )
 }
