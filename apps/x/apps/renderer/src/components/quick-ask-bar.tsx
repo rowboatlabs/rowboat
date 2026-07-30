@@ -701,6 +701,24 @@ export function QuickAskBar() {
           )}
           {callCard && (
             <>
+              {(callState.status === 'speaking' || callState.status === 'thinking') && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => sendAction('stop-speaking')}
+                      aria-label="Stop the assistant"
+                      className="flex h-7 items-center gap-1 rounded-full bg-red-500/15 px-2.5 text-[11px] font-medium text-red-600 ring-1 ring-inset ring-red-500/30 transition-colors hover:bg-red-500/25"
+                    >
+                      <Square className="h-2.5 w-2.5 fill-current" />
+                      Stop
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {callState.status === 'speaking' ? 'Stop speaking' : 'Stop responding'}
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -1315,20 +1333,6 @@ function TuckedMascot({
           {state.micMuted ? 'Sharing paused' : 'Sharing screen'}
         </span>
       )}
-      {(state.status === 'speaking' || state.status === 'thinking') && (
-        <button
-          type="button"
-          onClick={() => sendAction('stop-speaking')}
-          className="absolute right-2 top-8 z-10 flex items-center gap-1 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white opacity-0 shadow-md transition-opacity hover:bg-red-500 group-hover:opacity-100"
-          style={noDragRegion}
-          aria-label="Stop the assistant"
-          title={state.status === 'speaking' ? 'Stop speaking' : 'Stop responding'}
-        >
-          <Square className="h-2.5 w-2.5 fill-current" />
-          Stop
-        </button>
-      )}
-
       {/* On duty = cowboy hat on; the controls are enamel pins on the hat
           band, drawn in the artwork's own ink and always visible. They ride
           inside TalkingHead's bobbing container (hatOverlay) so they never
@@ -1381,8 +1385,8 @@ function TuckedMascot({
               <button
                 type="button"
                 onClick={() => sendAction('end-call')}
-                aria-label="End call"
-                title="End call"
+                aria-label="End the voice session and close"
+                title="End the voice session & close (a live session can't be hidden while it keeps listening)"
                 className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
                 style={{ ...noDragRegion, left: '60%', top: '17.5%' }}
               >
@@ -1404,8 +1408,11 @@ function TuckedMascot({
       {/* The status chip IS the talk button: press-and-hold to talk, quick
           tap to lock hands-free — same gestures as the pill's PTT button,
           always visible. Pointer capture keeps the release edge even if the
-          cursor slides off mid-hold. */}
-      <div className="mt-1 flex h-6 items-center" style={noDragRegion}>
+          cursor slides off mid-hold. While the assistant thinks/speaks, an
+          ALWAYS-VISIBLE Stop rides alongside — hover-only proved
+          undiscoverable, and "stop talking so I can say the next thing" is
+          the most urgent control this surface has. */}
+      <div className="mt-1 flex h-6 items-center gap-1.5" style={noDragRegion}>
         <button
           type="button"
           onPointerDown={(e) => {
@@ -1454,6 +1461,18 @@ function TuckedMascot({
             </>
           )}
         </button>
+        {(state.status === 'speaking' || state.status === 'thinking') && (
+          <button
+            type="button"
+            onClick={() => sendAction('stop-speaking')}
+            aria-label="Stop the assistant"
+            title={state.status === 'speaking' ? 'Stop speaking' : 'Stop responding'}
+            className="flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-medium text-white shadow-md transition-colors hover:bg-red-500"
+          >
+            <Square className="h-2.5 w-2.5 fill-current" />
+            Stop
+          </button>
+        )}
       </div>
     </div>
   )
