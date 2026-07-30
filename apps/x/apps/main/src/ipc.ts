@@ -34,6 +34,7 @@ import {
   hideQuickAsk,
   isPinnedCollapsed,
   markTuckPending,
+  pushChatContext,
   pushPopoutState,
   resizeCompanionPinned,
   setCompanionPinned,
@@ -1047,6 +1048,14 @@ export function setupIpcHandlers() {
     },
     'quickAsk:setPinnedCollapsed': async (_event, args) => {
       setPinnedCollapsed(args.collapsed);
+      return {};
+    },
+    'quickAsk:chatContext': async (_event, args) => {
+      pushChatContext(args);
+      return {};
+    },
+    'quickAsk:selectChat': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:select-chat', args);
       return {};
     },
     'quickAsk:hide': async () => {

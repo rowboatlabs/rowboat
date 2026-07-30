@@ -4516,6 +4516,34 @@ function App() {
     })
   }, [handleNewChatTabInSidebar])
 
+  // Companion-bar chat context: which chat a bar submit lands in (shown as
+  // the bar's destination chip) plus recents for its switcher. Pushed on
+  // every tab/run change; main caches and replays it on bar load.
+  useEffect(() => {
+    const activeTab = chatTabs.find((t) => t.id === activeChatTabId)
+    void window.ipc
+      .invoke('quickAsk:chatContext', {
+        activeRunId: activeTab?.runId ?? null,
+        activeTitle: activeTab ? getChatTabTitle(activeTab) : null,
+        recent: runs.slice(0, 10).map((r) => ({ id: r.id, title: r.title || '(Untitled chat)' })),
+      })
+      .catch(() => {})
+  }, [chatTabs, activeChatTabId, runs, getChatTabTitle])
+
+  // The bar's chip switcher picked a chat: bind the active tab to it — the
+  // same pattern as the sidebar's recent-chats list.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:select-chat', ({ runId: rid }) => {
+      const existingTab = chatTabs.find((t) => t.runId === rid)
+      if (existingTab) {
+        switchChatTab(existingTab.id)
+        return
+      }
+      setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid } : t)))
+      void loadRun(rid)
+    })
+  }, [chatTabs, activeChatTabId, switchChatTab, loadRun])
+
   // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
   // queues the message; the pending-submit effect (below) flushes it once state has settled
   // so handlePromptSubmit sees the new tab's null runId.

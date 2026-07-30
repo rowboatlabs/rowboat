@@ -6,6 +6,7 @@ import {
   ChevronsRight,
   ChevronUp,
   Maximize2,
+  MessageCircle,
   Mic,
   MicOff,
   MonitorUp,
@@ -25,6 +26,12 @@ import { Streamdown } from 'streamdown'
 import { Toaster as SonnerToaster } from 'sonner'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { TalkingHead } from '@/components/talking-head'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { stripKnowledgePrefix } from '@/lib/wiki-links'
@@ -281,6 +288,26 @@ export function QuickAskBar() {
     setAsked(null)
     setAnswer(null)
   }, [])
+
+  // Destination-chat context: which chat submits land in (title chip) plus
+  // recents for the chip's switcher. Pushed by the app window; cached in
+  // main and replayed on load.
+  const [chatContext, setChatContext] = useState<{
+    activeRunId: string | null
+    activeTitle: string | null
+    recent: { id: string; title: string }[]
+  } | null>(null)
+  useEffect(() => {
+    return window.ipc.on('quick-ask:chat-context', (ctx) => setChatContext(ctx))
+  }, [])
+  const selectChat = useCallback(
+    (rid: string) => {
+      // The panel's exchange belongs to the previous chat — clear it.
+      reset()
+      void window.ipc.invoke('quickAsk:selectChat', { runId: rid }).catch(() => {})
+    },
+    [reset],
+  )
 
   // Voice input: the composer's mic button, or hold the platform PTT key
   // (right ⌘ on macOS, right Ctrl on Windows) while the bar is focused.
@@ -635,11 +662,42 @@ export function QuickAskBar() {
                   : (callStatusDisplay?.label ?? 'Voice call')}
             </span>
           ) : (
-            panelAsked && (
-              <span className="mr-auto text-[11px] text-neutral-400">
-                Also in your Rowboat chat · Esc to {panelProcessing ? 'dismiss' : 'clear'}
-              </span>
-            )
+            /* Destination chip: WHICH chat this bar is continuing — click
+               for the recents switcher (opens upward into the transparent
+               stage). Fixes the old trust gap of silently appending to
+               whatever chat happened to be active. */
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="mr-auto flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.04] py-1 pl-2.5 pr-2 text-[11px] font-medium text-neutral-600 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                    >
+                      <MessageCircle className="h-3 w-3 shrink-0" />
+                      <span className="max-w-[220px] truncate">{chatContext?.activeTitle ?? 'New chat'}</span>
+                      <ChevronDown className="h-3 w-3 shrink-0 text-neutral-400" />
+                    </button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  Questions continue this chat — click to switch · Esc {panelProcessing ? 'dismisses' : 'clears'}
+                </TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="start" side="top" className="max-h-72 w-72 overflow-y-auto">
+                {(chatContext?.recent ?? []).map((r) => (
+                  <DropdownMenuItem key={r.id} onSelect={() => selectChat(r.id)}>
+                    <span className={`min-w-0 flex-1 truncate ${r.id === chatContext?.activeRunId ? 'font-semibold' : ''}`}>
+                      {r.title}
+                    </span>
+                    {r.id === chatContext?.activeRunId && (
+                      <span className="shrink-0 text-[10px] text-muted-foreground">current</span>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+                {(chatContext?.recent.length ?? 0) === 0 && <DropdownMenuItem disabled>No recent chats</DropdownMenuItem>}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {callCard && (
             <>
@@ -719,7 +777,9 @@ export function QuickAskBar() {
               </Tooltip>
             </>
           )}
-          {!callCard && asked && (
+          {/* New-chat is always one click (per the chip's promise); jump-to-
+              app too — both meaningful before the first question. */}
+          {!callCard && (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>

@@ -188,6 +188,9 @@ function createWindow(): BrowserWindow {
     if (lastPopoutState) {
       win.webContents.send('video:popout-state', lastPopoutState);
     }
+    if (lastChatContext) {
+      win.webContents.send('quick-ask:chat-context', lastChatContext);
+    }
   });
   if (app.isPackaged) {
     void win.loadURL('app://-/index.html#quick-ask');
@@ -437,6 +440,20 @@ export function pushPopoutState(state: PopoutState) {
 
 export function getPopoutState(): PopoutState | null {
   return lastPopoutState;
+}
+
+// Destination-chat context (title chip + recents switcher), pushed by the
+// app window — cached so a freshly loaded bar renders the right chip.
+type ChatContext = {
+  activeRunId: string | null;
+  activeTitle: string | null;
+  recent: { id: string; title: string }[];
+};
+let lastChatContext: ChatContext | null = null;
+
+export function pushChatContext(ctx: ChatContext) {
+  lastChatContext = ctx;
+  getQuickAskWindow()?.webContents.send('quick-ask:chat-context', ctx);
 }
 
 export function initQuickAsk() {

@@ -70,6 +70,15 @@ const QuickAskSubmitPayload = z.object({
   reasoningEffort: ReasoningEffort.nullable().optional(),
 });
 
+// Which chat the bar's submits land in (title shown as the bar's
+// destination chip) plus recents for its switcher — pushed by the app
+// window whenever tabs/runs change.
+const QuickAskChatContext = z.object({
+  activeRunId: z.string().nullable(),
+  activeTitle: z.string().nullable(),
+  recent: z.array(z.object({ id: z.string(), title: z.string() })),
+});
+
 const KnowledgeSourceScopeSchema = z.object({
   type: z.string(),
   id: z.string(),
@@ -1246,6 +1255,26 @@ const ipcSchemas = {
       voiceOutput: z.boolean(),
       screenSharing: z.boolean(),
     }),
+    res: z.null(),
+  },
+  // App window → main → bar: the destination-chat context (see
+  // QuickAskChatContext). Cached in main and replayed on bar load.
+  'quickAsk:chatContext': {
+    req: QuickAskChatContext,
+    res: z.object({}),
+  },
+  'quick-ask:chat-context': {
+    req: QuickAskChatContext,
+    res: z.null(),
+  },
+  // Bar → main → app window: rebind the bar (= the app's active chat tab)
+  // to one of the recent chats from the chip's switcher.
+  'quickAsk:selectChat': {
+    req: z.object({ runId: z.string() }),
+    res: z.object({}),
+  },
+  'quick-ask:select-chat': {
+    req: z.object({ runId: z.string() }),
     res: z.null(),
   },
   // Bar → main: start a fresh chat for the next question (the app stays in
