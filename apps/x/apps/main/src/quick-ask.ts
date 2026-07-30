@@ -58,6 +58,14 @@ let quickAskWin: BrowserWindow | null = null;
 let mode: CompanionMode = 'hidden';
 // Pinned presentation: full pill vs tucked down to just the mascot.
 let pinnedCollapsed = false;
+// Where this pin came from: 'bar' (the summoned card's tuck handle) or
+// 'pill' (the call engine's normal floating surface). Untuck returns the
+// user to the surface they tucked FROM — a voice call entered via the bar
+// expands back to the bar-style text card, not the video pill.
+let tuckOrigin: 'bar' | 'pill' = 'pill';
+// The expanded surface currently applied to the window geometry (so a
+// device flip mid-call can morph card ⇄ pill in place).
+let appliedExpandedSurface: 'card' | 'pill' = 'pill';
 // A tuck was requested from the summoned bar: the NEXT pin starts collapsed,
 // placed near where the bar's mascot stood (bottom of the cursor's display)
 // instead of the pill's canonical top-right. Time-boxed so a tuck the app
@@ -95,8 +103,23 @@ export function markTuckPending() {
   tuckPendingAt = Date.now();
 }
 
+/**
+ * Which surface the pinned role expands to. Bar-originated voice-only calls
+ * go back to the bar-style text card; anything with live pixels (camera or
+ * share) needs the pill's tiles.
+ */
+export function getExpandedSurface(): 'card' | 'pill' {
+  const s = lastPopoutState;
+  const voiceOnly = !s?.cameraOn && !s?.screenSharing;
+  return tuckOrigin === 'bar' && voiceOnly ? 'card' : 'pill';
+}
+
 function pushMode(win: BrowserWindow) {
-  win.webContents.send('quick-ask:mode', { mode, collapsed: pinnedCollapsed });
+  win.webContents.send('quick-ask:mode', {
+    mode,
+    collapsed: pinnedCollapsed,
+    surface: getExpandedSurface(),
+  });
 }
 
 function createWindow(): BrowserWindow {
@@ -141,12 +164,17 @@ function createWindow(): BrowserWindow {
   if (process.platform === 'darwin') {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   }
-  // Spotlight behavior for the SUMMONED role only: clicking away dismisses.
-  // A pinned pill must survive blur — it floats while the user works.
+  // Spotlight behavior: clicking away dismisses the summoned bar. Call
+  // surfaces survive blur — but the expanded CARD of a voice call is big
+  // and Spotlight-like, so blur tucks it back to the mascot (the call keeps
+  // going; only the text gets out of the way). The pill just persists.
   win.on('blur', () => {
-    if (!win.isDestroyed() && win.isVisible() && mode === 'summoned') {
+    if (win.isDestroyed() || !win.isVisible()) return;
+    if (mode === 'summoned') {
       mode = 'hidden';
       win.hide();
+    } else if (mode === 'pinned' && !pinnedCollapsed && appliedExpandedSurface === 'card') {
+      setPinnedCollapsed(true);
     }
   });
   win.on('closed', () => {
@@ -267,10 +295,12 @@ export function setCompanionPinned(pinned: boolean) {
     tuckPendingAt = 0;
     mode = 'pinned';
     pinnedCollapsed = fromTuck;
+    tuckOrigin = fromTuck ? 'bar' : 'pill';
     if (fromTuck) {
-      positionTucked(win);
+      positionTucked(win, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()));
     } else {
       positionPinned(win);
+      appliedExpandedSurface = 'pill';
     }
     pushMode(win);
     // showInactive: appearing must not steal focus from the app the user
@@ -280,6 +310,7 @@ export function setCompanionPinned(pinned: boolean) {
     if (mode !== 'pinned') return;
     mode = 'hidden';
     pinnedCollapsed = false;
+    tuckOrigin = 'pill';
     tuckPendingAt = 0;
     const win = getQuickAskWindow();
     if (win) {
@@ -290,33 +321,75 @@ export function setCompanionPinned(pinned: boolean) {
 }
 
 /**
- * Pill ⇄ tucked-mascot presentation of the pinned role. Resizes in place,
- * preserving the window's right edge and whichever vertical edge hugs the
- * nearer screen edge — the mascot shrinks/grows where it stands instead of
- * jumping to a canonical corner.
+ * Tucked-mascot ⇄ expanded presentation of the pinned role. The expanded
+ * surface is whatever the user tucked FROM: the pill resizes in place
+ * (preserving the window's right edge and whichever vertical edge hugs the
+ * nearer screen edge); the bar-style card goes back to the bar's canonical
+ * spot — bottom-center of the window's display — and takes focus, because
+ * asking for the text back means the user is about to read or type.
  */
 export function setPinnedCollapsed(collapsed: boolean) {
   const win = getQuickAskWindow();
   if (!win || mode !== 'pinned' || pinnedCollapsed === collapsed) return;
   pinnedCollapsed = collapsed;
+  if (collapsed) {
+    if (appliedExpandedSurface === 'card') {
+      // The wide card's edges mean nothing once it's gone — tuck to the
+      // mascot's canonical corner on this display.
+      positionTucked(win, screen.getDisplayMatching(win.getBounds()));
+    } else {
+      const b = win.getBounds();
+      const wa = screen.getDisplayMatching(b).workArea;
+      const w = scaled(TUCKED_WIDTH);
+      const h = scaled(TUCKED_HEIGHT);
+      const inTopHalf = b.y + b.height / 2 < wa.y + wa.height / 2;
+      let x = b.x + b.width - w;
+      let y = inTopHalf ? b.y : b.y + b.height - h;
+      x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
+      y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
+      win.setBounds({ x, y, width: w, height: h });
+    }
+    pushMode(win);
+    return;
+  }
+  applyExpandedSurface(win, getExpandedSurface());
+  pushMode(win);
+  if (appliedExpandedSurface === 'card') win.focus();
+}
+
+function applyExpandedSurface(win: BrowserWindow, surface: 'card' | 'pill') {
+  appliedExpandedSurface = surface;
+  if (surface === 'card') {
+    // The bar's geometry: tall transparent frame, bottom-center of the
+    // display the window is on.
+    const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+    const w = scaled(FRAME_WIDTH);
+    const h = scaled(FRAME_HEIGHT);
+    win.setBounds({
+      x: Math.round(wa.x + (wa.width - w) / 2),
+      y: Math.round(wa.y + wa.height - h - BOTTOM_MARGIN),
+      width: w,
+      height: h,
+    });
+    win.setHasShadow(false);
+    return;
+  }
   const b = win.getBounds();
   const wa = screen.getDisplayMatching(b).workArea;
-  const w = scaled(collapsed ? TUCKED_WIDTH : PINNED_WIDTH);
-  const h = scaled(collapsed ? TUCKED_HEIGHT : PINNED_BASE_HEIGHT);
+  const w = scaled(PINNED_WIDTH);
+  const h = scaled(PINNED_BASE_HEIGHT);
   const inTopHalf = b.y + b.height / 2 < wa.y + wa.height / 2;
   let x = b.x + b.width - w;
   let y = inTopHalf ? b.y : b.y + b.height - h;
   x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
   y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
   win.setBounds({ x, y, width: w, height: h });
-  pushMode(win);
+  win.setHasShadow(false);
 }
 
-function positionTucked(win: BrowserWindow) {
-  // Tuck from the summoned bar: the mascot stays with the user — bottom
-  // right of the CURSOR's display, near where it stood beside the card —
-  // rather than teleporting to the pill's canonical top-right.
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+function positionTucked(win: BrowserWindow, display: Electron.Display) {
+  // The mascot's canonical corner: bottom right of the given display, near
+  // where it stood beside the card — never teleporting across screens.
   const wa = display.workArea;
   const w = scaled(TUCKED_WIDTH);
   const h = scaled(TUCKED_HEIGHT);
@@ -341,7 +414,18 @@ export function resizeCompanionPinned(height: number) {
 /** Cache + forward the app window's call-state push (video:popoutState). */
 export function pushPopoutState(state: PopoutState) {
   lastPopoutState = state;
-  getQuickAskWindow()?.webContents.send('video:popout-state', state);
+  const win = getQuickAskWindow();
+  if (!win) return;
+  win.webContents.send('video:popout-state', state);
+  // A device flip mid-call (camera/share toggled) can change which surface
+  // the expanded role needs — morph card ⇄ pill in place.
+  if (mode === 'pinned' && !pinnedCollapsed) {
+    const surface = getExpandedSurface();
+    if (surface !== appliedExpandedSurface) {
+      applyExpandedSurface(win, surface);
+      pushMode(win);
+    }
+  }
 }
 
 export function getPopoutState(): PopoutState | null {

@@ -142,24 +142,33 @@ export function QuickAskBar() {
   // every transition; fetched once to cover the load race. 'hidden' renders
   // as summoned — the window is invisible then anyway.
   const [mode, setMode] = useState<CompanionMode>('summoned')
-  // Pinned presentation: full pill vs tucked down to just the mascot. Main
-  // owns this (it resizes the window); pushes keep us in sync.
+  // Pinned presentation: expanded vs tucked down to just the mascot, and
+  // WHICH surface expanded means — untuck returns you to the surface you
+  // tucked from ('card' for bar-originated voice calls, 'pill' for calls
+  // with live pixels). Main owns both (it resizes the window); pushes keep
+  // us in sync.
   const [collapsed, setCollapsed] = useState(false)
+  const [surface, setSurface] = useState<'card' | 'pill'>('pill')
   useEffect(() => {
     const cleanup = window.ipc.on('quick-ask:mode', (m) => {
       setMode(m.mode === 'hidden' ? 'summoned' : m.mode)
       setCollapsed(m.collapsed)
+      setSurface(m.surface)
     })
     void window.ipc
       .invoke('quickAsk:getMode', null)
       .then((m) => {
         setMode(m.mode === 'hidden' ? 'summoned' : m.mode)
         setCollapsed(m.collapsed)
+        setSurface(m.surface)
       })
       .catch(() => {})
     return cleanup
   }, [])
   const pinned = mode === 'pinned'
+  // The bar-style card hosting a LIVE voice call ("bring the text back"
+  // from a bar-originated tuck): same layout, call-aware contents.
+  const callCard = pinned && !collapsed && surface === 'card'
 
   const requestCollapsed = useCallback((next: boolean) => {
     setCollapsed(next)
@@ -190,7 +199,10 @@ export function QuickAskBar() {
 
   // The summoned mascot has no audio pipeline — its mouth stays closed; the
   // thinking bubbles (driven by ttsState) are its only active state here.
+  // During a call-card session the mascot lip-syncs off a synthesized level
+  // instead (the real audio plays in the app window).
   const zeroLevel = useCallback(() => 0, [])
+  const synthLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
 
   // Knowledge files for @-mentions, fetched over IPC (this window has no
   // App-owned tree). Refreshed on every summon — notes change while the bar
@@ -403,7 +415,15 @@ export function QuickAskBar() {
           startRecording()
         }
       } else if (e.key === 'Escape') {
-        if (pinned) return
+        if (pinned) {
+          // Esc never ends a call — on the call card it tucks the text
+          // back into the mascot; on the pill it does nothing.
+          if (surface === 'card' && !collapsed) {
+            e.preventDefault()
+            requestCollapsed(true)
+          }
+          return
+        }
         e.preventDefault()
         if (recordingRef.current) {
           cancelRecording()
@@ -428,21 +448,23 @@ export function QuickAskBar() {
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('keyup', onKeyUp)
     }
-  }, [asked, pinned, sendAction, startRecording, submitRecording, cancelRecording, reset, dismiss])
+  }, [asked, pinned, surface, collapsed, requestCollapsed, sendAction, startRecording, submitRecording, cancelRecording, reset, dismiss])
 
-  // Pinned role: the call pill (old #video-popout), with the real composer
-  // as its typed input — or, tucked, just the mascot (voice-to-voice). The
-  // window is content-sized in this mode — no transparent stage.
-  if (pinned) {
-    if (collapsed) {
-      return (
-        <TuckedMascot
-          state={callState}
-          sendAction={sendAction}
-          onExpand={() => requestCollapsed(false)}
-        />
-      )
-    }
+  // Pinned role, tucked: just the mascot (voice-to-voice).
+  if (pinned && collapsed) {
+    return (
+      <TuckedMascot
+        state={callState}
+        sendAction={sendAction}
+        onExpand={() => requestCollapsed(false)}
+      />
+    )
+  }
+
+  // Pinned role, expanded to the PILL (camera/share calls): the call pill
+  // with the real composer as its typed input. Bar-originated voice calls
+  // fall through to the card layout below instead (callCard).
+  if (pinned && surface === 'pill') {
     return (
       <>
         <PinnedPill
@@ -473,11 +495,22 @@ export function QuickAskBar() {
     )
   }
 
+  // The bar-style card — summoned (no call), or hosting a live voice call
+  // (callCard: "bring the text back" from a bar-originated tuck). Same
+  // layout; the exchange comes from the call's mirror on the call card
+  // (covers spoken turns too), from the quick-ask mirror when summoned.
+  const panelAsked = callCard ? callState.questionText : asked
+  const panelText = callCard ? (callState.responseText ?? '') : (answer?.text ?? '')
+  const panelProcessing = callCard ? callState.status === 'thinking' : processing
+  const panelStatusText = (!callCard && answer?.statusText) || 'Thinking…'
+  const callStatusDisplay = callCard && callState.status ? STATUS_DISPLAY[callState.status] : null
+
   return (
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden">
       {/* The invisible stage: popovers open into this zone; clicking it
-          dismisses the bar (the click-away feel, inside our own window). */}
-      <div className="min-h-0 flex-1" onMouseDown={dismiss} />
+          dismisses the bar — or, on the call card, tucks the text back into
+          the mascot (the call keeps going). */}
+      <div className="min-h-0 flex-1" onMouseDown={callCard ? () => requestCollapsed(true) : dismiss} />
 
       {/* Bottom row: card + the mascot riding alongside on the transparent
           stage. The row is PADDED so the card's CSS shadow fades inside the
@@ -505,52 +538,113 @@ export function QuickAskBar() {
           }
         `}</style>
         {/* Action strip: bar-level controls that aren't the composer's job.
-            Always visible so voice-out/share can be set before asking. */}
+            Summoned: voice-out/share toggles (set before asking). Call
+            card: live-call status + mute + end — the call owns the devices,
+            replies are always spoken. */}
         <div className="flex items-center justify-end gap-2 px-4 pt-3">
-          {asked && (
-            <span className="mr-auto text-[11px] text-neutral-400">
-              Also in your Rowboat chat · Esc to {processing ? 'dismiss' : 'clear'}
+          {callCard ? (
+            <span className="mr-auto flex items-center gap-1.5 text-[11px] font-medium text-neutral-500">
+              <span
+                className={`block h-1.5 w-1.5 rounded-full ${
+                  callState.micMuted
+                    ? 'bg-red-500'
+                    : callStatusDisplay
+                      ? callStatusDisplay.dotClass
+                      : 'bg-neutral-400'
+                }`}
+              />
+              {callState.micMuted
+                ? 'Muted'
+                : callState.pttLocked
+                  ? 'Hands-free — tap ⌘ to send'
+                  : (callStatusDisplay?.label ?? 'Voice call')}
             </span>
+          ) : (
+            panelAsked && (
+              <span className="mr-auto text-[11px] text-neutral-400">
+                Also in your Rowboat chat · Esc to {panelProcessing ? 'dismiss' : 'clear'}
+              </span>
+            )
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleVoiceOut}
-                aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
-                className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
-                  voiceOut
-                    ? 'bg-sky-500/15 text-sky-700 ring-sky-500/30'
-                    : 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
-                }`}
-              >
-                <Volume2 className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleShare}
-                aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
-                className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
-                  sharing
-                    ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/30'
-                    : 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
-                }`}
-              >
-                <MonitorUp className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
-            </TooltipContent>
-          </Tooltip>
-          {asked && (
+          {callCard && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => sendAction('toggle-mic')}
+                    aria-label={callState.micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                      callState.micMuted
+                        ? 'bg-red-500/15 text-red-600 ring-red-500/30'
+                        : 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
+                    }`}
+                  >
+                    {callState.micMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {callState.micMuted ? 'Unmute' : 'Mute — pauses your mic'}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => sendAction('end-call')}
+                    aria-label="End call"
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-white ring-1 ring-inset ring-red-700/30 transition-colors hover:bg-red-500"
+                  >
+                    <PhoneOff className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">End the voice session</TooltipContent>
+              </Tooltip>
+            </>
+          )}
+          {!callCard && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={toggleVoiceOut}
+                    aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                      voiceOut
+                        ? 'bg-sky-500/15 text-sky-700 ring-sky-500/30'
+                        : 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
+                    }`}
+                  >
+                    <Volume2 className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={toggleShare}
+                    aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                      sharing
+                        ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/30'
+                        : 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
+                    }`}
+                  >
+                    <MonitorUp className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
+                </TooltipContent>
+              </Tooltip>
+            </>
+          )}
+          {!callCard && asked && (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -582,25 +676,25 @@ export function QuickAskBar() {
           )}
         </div>
 
-        {asked && (
+        {(panelAsked || panelText) && (
           <div className="max-h-[280px] overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800">
             {/* Inside the scroll area — the question scrolls away with the
                 answer instead of persisting as a header. */}
-            <div className="mb-2 text-sm font-medium text-neutral-500">{asked}</div>
-            {answer?.text ? (
+            {panelAsked && <div className="mb-2 text-sm font-medium text-neutral-500">{panelAsked}</div>}
+            {panelText ? (
               /* `.dark` scoped to the markdown only: shiki's token colors key
                  off a .dark ancestor, so this flips code to its dark palette
                  (matching the charcoal block bg) without darkening the rest
                  of the light panel — the prose classes here are explicit. */
               <Streamdown className="dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
-                {answer.text}
+                {panelText}
               </Streamdown>
             ) : (
-              answer?.processing && (
-                <span className="animate-pulse text-neutral-500">{answer.statusText ?? 'Thinking…'}</span>
+              panelProcessing && (
+                <span className="animate-pulse text-neutral-500">{panelStatusText}</span>
               )
             )}
-            {answer?.processing && answer.text && <span className="animate-pulse">▍</span>}
+            {panelProcessing && panelText && <span className="animate-pulse">▍</span>}
           </div>
         )}
 
@@ -614,10 +708,10 @@ export function QuickAskBar() {
             recentFiles={[]}
             visibleFiles={knowledgeFiles}
             onSubmit={submit}
-            onStop={stop}
-            isProcessing={processing}
+            onStop={callCard ? () => sendAction('stop-speaking') : stop}
+            isProcessing={panelProcessing}
             runId={null}
-            placeholder="Ask Rowboat anything…"
+            placeholder={callCard ? 'Type instead — @ mentions work too…' : 'Ask Rowboat anything…'}
             focusSignal={focusSignal}
             onSelectedModelChange={(m) => {
               modelRef.current = m ?? null
@@ -625,54 +719,67 @@ export function QuickAskBar() {
             onReasoningEffortChange={(effort) => {
               effortRef.current = effort ?? null
             }}
-            isRecording={recording}
-            recordingText={voice.interimText}
+            isRecording={callCard ? undefined : recording}
+            recordingText={callCard ? undefined : voice.interimText}
             recordingState={
-              voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'
+              callCard
+                ? undefined
+                : voice.state === 'submitting'
+                  ? 'stopping'
+                  : voice.state === 'connecting'
+                    ? 'connecting'
+                    : 'listening'
             }
             audioLevelsRef={voice.audioLevelsRef}
-            onStartRecording={startRecording}
-            onSubmitRecording={submitRecording}
-            onCancelRecording={cancelRecording}
-            voiceAvailable={voiceAvailable}
+            onStartRecording={callCard ? undefined : startRecording}
+            onSubmitRecording={callCard ? undefined : submitRecording}
+            onCancelRecording={callCard ? undefined : cancelRecording}
+            voiceAvailable={callCard ? false : voiceAvailable}
           />
         </div>
       </div>
 
       {/* Tuck handle on the card's mascot-side edge: push the text into the
-          mascot → voice-to-voice (starts the voice-preset call). Dimmed —
+          mascot → voice-to-voice. Summoned it STARTS the voice-preset call;
+          on the call card it just tucks (the call keeps going). Dimmed —
           never hidden — when voice isn't configured, so the feature stays
           discoverable without dead-end clicks. */}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            onClick={callAvailable ? tuck : undefined}
+            onClick={callCard ? () => requestCollapsed(true) : callAvailable ? tuck : undefined}
             aria-label="Tuck into the mascot — voice-to-voice"
-            aria-disabled={!callAvailable}
+            aria-disabled={!callCard && !callAvailable}
             className={`absolute -right-3 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-colors ${
-              callAvailable ? 'hover:bg-neutral-50 hover:text-neutral-900' : 'cursor-default opacity-40'
+              callCard || callAvailable ? 'hover:bg-neutral-50 hover:text-neutral-900' : 'cursor-default opacity-40'
             }`}
           >
             <ChevronsRight className="h-3.5 w-3.5" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="top">
-          {callAvailable
-            ? 'Tuck into the mascot — talk instead of type'
-            : 'Voice-to-voice needs voice input & output configured in Settings'}
+          {callCard
+            ? 'Tuck the text away — the call keeps going'
+            : callAvailable
+              ? 'Tuck into the mascot — talk instead of type'
+              : 'Voice-to-voice needs voice input & output configured in Settings'}
         </TooltipContent>
       </Tooltip>
       </div>
 
       {/* The mascot, full silhouette on the transparent stage — the same
-          TalkingHead the product tour and call tiles render. Thinking
-          bubbles while a question is processing; gentle bob otherwise.
-          pointer-events-none: clicks on it neither dismiss nor do anything
-          (hush gestures come with the voice-rule work; the tuck handle on
-          the card is the way in). */}
+          TalkingHead the product tour and call tiles render. On the call
+          card it lip-syncs the spoken reply; summoned it bobs, with
+          thinking bubbles while a question is processing. pointer-events-
+          none: clicks on it neither dismiss nor do anything (the tuck
+          handle on the card is the gesture). */}
       <div className="pointer-events-none w-[124px] shrink-0 select-none" aria-hidden="true">
-        <TalkingHead ttsState={processing ? 'synthesizing' : 'idle'} getLevel={zeroLevel} size={124} />
+        <TalkingHead
+          ttsState={callCard ? callState.ttsState : processing ? 'synthesizing' : 'idle'}
+          getLevel={callCard ? synthLevel : zeroLevel}
+          size={124}
+        />
       </div>
       </div>
       <SonnerToaster theme="light" />

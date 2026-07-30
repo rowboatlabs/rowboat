@@ -28,6 +28,7 @@ let caffeinateBlockerId: number | null = null;
 import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
 import {
   getCompanionMode,
+  getExpandedSurface,
   getPopoutState,
   getQuickAskWindow,
   hideQuickAsk,
@@ -1030,7 +1031,11 @@ export function setupIpcHandlers() {
       return {};
     },
     'quickAsk:getMode': async () => {
-      return { mode: getCompanionMode(), collapsed: isPinnedCollapsed() };
+      return {
+        mode: getCompanionMode(),
+        collapsed: isPinnedCollapsed(),
+        surface: getExpandedSurface(),
+      };
     },
     'quickAsk:tuck': async () => {
       // The next pin starts collapsed near the bar's mascot; the app window

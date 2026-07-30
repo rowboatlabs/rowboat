@@ -1156,12 +1156,18 @@ const ipcSchemas = {
     res: z.object({
       mode: z.enum(['hidden', 'summoned', 'pinned']),
       collapsed: z.boolean(),
+      // Which surface the pinned role expands to: untuck returns you to the
+      // surface you tucked FROM — 'card' (the bar-style text card, for
+      // voice-only calls entered via the bar's tuck) or 'pill' (the call
+      // pill, for camera/share calls).
+      surface: z.enum(['card', 'pill']),
     }),
   },
   'quick-ask:mode': {
     req: z.object({
       mode: z.enum(['hidden', 'summoned', 'pinned']),
       collapsed: z.boolean(),
+      surface: z.enum(['card', 'pill']),
     }),
     res: z.null(),
   },
