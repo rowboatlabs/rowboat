@@ -10,6 +10,7 @@ import { FileCardProvider } from '@/contexts/file-card-context'
 import { type ChatTab } from '@/components/tab-bar'
 import { type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from '@/components/chat-input-with-mentions'
 import { ChatSessionPane, ChatSessionComposer } from '@/components/chat-session'
+import { useTabMeta } from '@/lib/tab-meta'
 import { useSidebar } from '@/components/ui/sidebar'
 import type { ChatPaneSize } from '@/contexts/theme-context'
 import {
@@ -186,6 +187,10 @@ export function ChatSidebar({
   onComposioConnected,
 }: ChatSidebarProps) {
   const { state: sidebarState } = useSidebar()
+  // Content-reported tab meta (see lib/tab-meta.ts): the header title prefers
+  // what the chat content reports for the active tab, with the App-derived
+  // getChatTabTitle prop as the fallback for unclaimed titles.
+  const activeTabMeta = useTabMeta(activeChatTabId)
   const [width, setWidth] = useState(() => getInitialPaneWidth(defaultWidth))
   const [isResizing, setIsResizing] = useState(false)
   const [showContent, setShowContent] = useState(isOpen)
@@ -370,7 +375,8 @@ export function ChatSidebar({
               <ChatHeader
                 activeTitle={(() => {
                   const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId)
-                  return activeTab ? getChatTabTitle(activeTab) : 'New chat'
+                  if (!activeTab) return 'New chat'
+                  return activeTabMeta.title ?? getChatTabTitle(activeTab)
                 })()}
                 onNewChatTab={onNewChatTab}
                 recentRuns={recentRuns}

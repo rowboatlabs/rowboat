@@ -38,6 +38,8 @@ import type { PermissionDecision } from '@x/shared/src/code-mode.js'
 import { ChatEmptyState } from './chat-empty-state'
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from './chat-input-with-mentions'
 import { type ChatTab } from './tab-bar'
+import { useReportTabMeta } from '@/lib/tab-meta'
+import { useSessionTitle } from '@/lib/session-title'
 import {
   type ChatTabViewState,
   type ChatViewportAnchorState,
@@ -161,6 +163,24 @@ export function ChatSessionPane({
   onCodePermissionResponse,
   onComposioConnected,
 }: ChatSessionPaneProps) {
+  // Content-owned tab meta (see lib/tab-meta.ts). Both live instances of a
+  // chat (full-screen App pane + side-pane chat) report the same values, so
+  // the store's dedupe keeps this quiet; the refcount inside useReportTabMeta
+  // keeps one instance's unmount from wiping the other's report.
+  // - title: only claimed once the shared session-title store knows this
+  //   session's title; `undefined` hands the field back to the strip's
+  //   fallback (App's `runs`-derived title, including the optimistic
+  //   first-send title and the 'New chat' / '(Untitled chat)' placeholders).
+  // - busy: claimed only while this pane has a truthy signal. The only signal
+  //   it receives (`activeIsProcessing`) is active-tab-gated, so background
+  //   tabs report `undefined` and App's `isChatTabProcessing` fallback keeps
+  //   driving their busy state.
+  const sessionTitle = useSessionTitle(tab.runId)
+  useReportTabMeta(tab.id, {
+    title: sessionTitle,
+    busy: isActive && activeIsProcessing ? true : undefined,
+  })
+
   const renderConversationItem = (
     item: ConversationItem,
     options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
