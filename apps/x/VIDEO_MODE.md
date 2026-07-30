@@ -217,6 +217,11 @@ over `quick-ask:mode` (`'summoned' | 'pinned'`).
 - The pill captures its **own** camera preview (MediaStreams can't cross
   windows) and synthesizes the mascot mouth level (no audio in that
   window).
+- **Tiles show live pixels; controls show capabilities.** A voice-only
+  call (camera off, no share) renders the pill WITHOUT the "You" tile —
+  mascot + response + composer + controls — so untucking a voice call
+  never reads as a video call the user didn't start. Toggling camera or
+  share morphs the tile/badge in, in place.
 - `video:popoutAction` relays control-bar actions to the app window,
   matched only by real app-window URLs — `getAllWindows()` also contains
   the companion window and hidden utility windows (PDF export) that must

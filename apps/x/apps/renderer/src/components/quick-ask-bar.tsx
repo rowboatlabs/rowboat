@@ -776,12 +776,20 @@ function PinnedPill({
 
   const statusDisplay = state.status ? STATUS_DISPLAY[state.status] : null
 
+  // Tiles show live pixels; controls show capabilities. A voice-only call
+  // (no camera, no share) has no pixels to show, so it gets NO "You" tile —
+  // just the mascot with the text below. Untucking a voice call must never
+  // read as a video call the user didn't start; turning the camera or share
+  // on morphs the tile in, in place.
+  const voiceOnly = !state.cameraOn && !state.screenSharing
+
   return (
     <div
       className="dark relative flex h-screen w-screen select-none flex-col gap-1.5 overflow-hidden rounded-2xl bg-neutral-900 p-1.5 text-white ring-1 ring-inset ring-white/10"
       style={dragRegion}
     >
       <div className="flex min-h-0 flex-1 gap-1.5">
+        {!voiceOnly && (
         <div className="relative flex-1 overflow-hidden rounded-lg bg-neutral-800">
           {state.cameraOn ? (
             <video
@@ -817,8 +825,9 @@ function PinnedPill({
             </span>
           )}
         </div>
+        )}
         <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg bg-neutral-800">
-          <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={84} />
+          <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={voiceOnly ? 96 : 84} />
           <span className="absolute bottom-1 left-1.5 rounded bg-black/50 px-1 py-px text-[10px] text-white">
             Rowboat
           </span>
