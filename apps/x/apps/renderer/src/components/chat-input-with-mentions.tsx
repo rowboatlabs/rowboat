@@ -242,8 +242,15 @@ interface ChatInputInnerProps {
    * locked-chat effort pick. Never null after the seed resolves.
    */
   onSelectionChange?: (selection: ModelSelection | null) => void
-  /** The chat's prior selection (per-tab continuity / latest-turn restore); seeds the state before the settings default does. */
+  /** The chat's prior selection (per-tab continuity within the app run); seeds the state before anything else. */
   initialSelection?: ModelSelection | null
+  /**
+   * A reopened session's last-turn selection: undefined = session still
+   * loading (hold the settings seed), a value = adopt it, null = session
+   * has no turns (fall through to the settings seed). Ignored once the
+   * selection is set.
+   */
+  restoredSelection?: ModelSelection | null
   /** Work directory for this chat (per-chat). Null when none is set. */
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
@@ -284,6 +291,7 @@ function ChatInputInner({
   callAvailable,
   onSelectionChange,
   initialSelection = null,
+  restoredSelection,
   workDir = null,
   onWorkDirChange,
   codeSessionLock = null,
@@ -579,15 +587,26 @@ function ChatInputInner({
     onSelectionChange?.(next)
   }, [lockedModel, onSelectionChange])
 
-  // Settings seed: a new chat starts on the settings pair, adopted once as
-  // the explicit initial selection when the catalog loads (a snapshot — the
-  // state does not track later settings edits).
+  // Seed order for an unset selection: an existing session restores its
+  // last turn's selection (waiting for the session to load rather than
+  // flashing the settings pair); drafts and no-turn sessions adopt the
+  // settings pair once the catalog delivers it. Either way the result is
+  // ONE explicit snapshot — the state never tracks later settings edits.
   useEffect(() => {
-    if (selection !== null || !defaultModel) return
+    if (selection !== null) return
+    if (runId) {
+      if (restoredSelection === undefined) return
+      if (restoredSelection) {
+        setSelection(restoredSelection)
+        onSelectionChange?.(restoredSelection)
+        return
+      }
+    }
+    if (!defaultModel) return
     const seeded: ModelSelection = { ...defaultModel, ...(defaultEffort ? { effort: defaultEffort } : {}) }
     setSelection(seeded)
     onSelectionChange?.(seeded)
-  }, [selection, defaultModel, defaultEffort, onSelectionChange])
+  }, [selection, runId, restoredSelection, defaultModel, defaultEffort, onSelectionChange])
 
   // "New chat" reuses the tab (and this component instance) in place — the
   // runId dropping back to null is the reset signal: clear the selection so
@@ -1475,6 +1494,7 @@ export interface ChatInputWithMentionsProps {
   callAvailable?: boolean
   onSelectionChange?: (selection: ModelSelection | null) => void
   initialSelection?: ModelSelection | null
+  restoredSelection?: ModelSelection | null
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
@@ -1517,6 +1537,7 @@ export function ChatInputWithMentions({
   callAvailable,
   onSelectionChange,
   initialSelection,
+  restoredSelection,
   workDir,
   onWorkDirChange,
   codeSessionLock,
@@ -1551,6 +1572,7 @@ export function ChatInputWithMentions({
         callAvailable={callAvailable}
         onSelectionChange={onSelectionChange}
         initialSelection={initialSelection}
+        restoredSelection={restoredSelection}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
         codeSessionLock={codeSessionLock}

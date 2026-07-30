@@ -522,8 +522,10 @@ export interface ChatSessionComposerProps {
    * included; receives the tab so the caller picks its key (chatId).
    */
   onSelectionChange?: (tab: ChatTab, selection: ModelSelection | null) => void
-  /** The chat's prior selection (per-tab continuity / latest-turn restore). */
+  /** The chat's prior selection (per-tab continuity within the app run). */
   initialSelection?: ModelSelection | null
+  /** A reopened session's last-turn selection (see the composer prop). */
+  restoredSelection?: ModelSelection | null
   workDirByTab: Record<string, string | null>
   onWorkDirChange: (tabId: string, value: string | null) => void
   isRecording?: boolean
@@ -570,6 +572,7 @@ export function ChatSessionComposer({
   onDraftChange,
   onSelectionChange,
   initialSelection = null,
+  restoredSelection,
   workDirByTab,
   onWorkDirChange,
   isRecording,
@@ -610,6 +613,7 @@ export function ChatSessionComposer({
         onDraftChange={(text) => onDraftChange(tab.id, text)}
         onSelectionChange={(selection) => onSelectionChange?.(tab, selection)}
         initialSelection={initialSelection}
+        restoredSelection={restoredSelection}
         workDir={workDirByTab[tab.id] ?? null}
         onWorkDirChange={(v) => onWorkDirChange(tab.id, v)}
         isRecording={recordingOverrides ? recordingOverrides.isRecording : (isRecording && ownsVoice)}

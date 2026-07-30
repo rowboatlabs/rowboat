@@ -85,6 +85,8 @@ interface ChatSidebarProps {
   onDraftChangeForTab?: (tabId: string, text: string) => void
   onSelectionChangeForTab?: (tabId: string, selection: ModelSelection | null) => void
   getInitialSelection?: (tabId: string) => ModelSelection | null
+  /** Last-turn selection for the ACTIVE tab's session (single store — see App). */
+  restoredSelectionForActive?: ModelSelection | null
   workDirByTab?: Record<string, string | null>
   /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
   codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
@@ -157,6 +159,7 @@ export function ChatSidebar({
   onDraftChangeForTab,
   onSelectionChangeForTab,
   getInitialSelection,
+  restoredSelectionForActive,
   workDirByTab = {},
   codeSessionLocks = {},
   pinnedToCodeSession = null,
@@ -469,6 +472,7 @@ export function ChatSidebar({
                         onDraftChange={(tabId, text) => onDraftChangeForTab?.(tabId, text)}
                         onSelectionChange={(t, selection) => onSelectionChangeForTab?.(t.id, selection)}
                         initialSelection={getInitialSelection?.(tab.id) ?? null}
+                        restoredSelection={isActive ? restoredSelectionForActive : undefined}
                         workDirByTab={workDirByTab}
                         onWorkDirChange={(tabId, v) => onWorkDirChangeForTab?.(tabId, v)}
                         recordingOverrides={{

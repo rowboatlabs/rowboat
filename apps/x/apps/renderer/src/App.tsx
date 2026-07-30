@@ -7476,6 +7476,16 @@ function App() {
                             }
                           }}
                           initialSelection={selectionByTabRef.current.get(tab.chatId) ?? null}
+                          // Last-turn restore: the single session store is
+                          // bound to the ACTIVE tab's run, so only that tab
+                          // gets a resolved value; others stay undefined
+                          // (loading) until activated. lastSelection is null
+                          // for a session with no turns (settings seed).
+                          restoredSelection={
+                            isActive && tab.runId && sessionChat.chatState
+                              ? sessionChat.chatState.lastSelection
+                              : undefined
+                          }
                           workDirByTab={workDirByTab}
                           onWorkDirChange={setTabWorkDir}
                           isRecording={isRecording}
@@ -7564,6 +7574,9 @@ function App() {
                   }
                 }}
                 getInitialSelection={(tabId) => selectionByTabRef.current.get(chatIdForTab(tabId)) ?? null}
+                restoredSelectionForActive={
+                  runId && sessionChat.chatState ? sessionChat.chatState.lastSelection : undefined
+                }
                 workDirByTab={workDirByTab}
                 onWorkDirChangeForTab={setTabWorkDir}
                 codeSessionLocks={codeSessionLocks}
