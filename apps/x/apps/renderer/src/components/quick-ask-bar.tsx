@@ -1341,14 +1341,18 @@ function TuckedMascot({
           size={132}
           hat="cowboy"
           hatOverlay={
-            <div style={noDragRegion}>
+            /* no-drag must sit on EACH button: Electron punches drag-region
+               holes from an element's painted bounds, and a zero-size
+               wrapper excludes nothing — pins inside the mascot's drag
+               region would start a window drag instead of clicking. */
+            <div>
               <button
                 type="button"
                 onClick={onExpand}
                 aria-label="Bring the text back"
                 title="Bring the text back (⌥⇧Space works too)"
                 className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-                style={{ left: '40%', top: '17.5%' }}
+                style={{ ...noDragRegion, left: '40%', top: '17.5%' }}
               >
                 <span className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-sky-500 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
                   <ChevronsLeft className="h-2.5 w-2.5 text-white" />
@@ -1360,7 +1364,7 @@ function TuckedMascot({
                 aria-label={state.micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
                 title={state.micMuted ? 'Unmute' : 'Mute — pauses your mic'}
                 className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-                style={{ left: '50%', top: '17.3%' }}
+                style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
               >
                 <span
                   className={`flex h-[15px] w-[15px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125 ${
@@ -1380,7 +1384,7 @@ function TuckedMascot({
                 aria-label="End call"
                 title="End call"
                 className="group/pin absolute flex h-[26px] w-[26px] -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-                style={{ left: '60%', top: '17.5%' }}
+                style={{ ...noDragRegion, left: '60%', top: '17.5%' }}
               >
                 <span className="flex h-[15px] w-[15px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
                   <PhoneOff className="h-2.5 w-2.5 text-white" />
