@@ -3834,7 +3834,7 @@ function App() {
     // selection from the settings pair (the composer re-seeds when its
     // runId prop drops to null; clearing here keeps the map in lockstep).
     setWorkDirByTab(prev => ({ ...prev, [activeChatTabIdRef.current]: null }))
-    selectionByTabRef.current.delete(activeChatTabIdRef.current)
+    selectionByTabRef.current.delete(chatIdForTab(activeChatTabIdRef.current))
   }, [setChatViewportAnchor])
 
   // Chat tab operations
@@ -4434,8 +4434,14 @@ function App() {
   }, [dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen])
 
   // Sidebar variant: reset the chat in place without leaving file/graph context.
-  const handleNewChatTabInSidebar = useCallback(() => {
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId: crypto.randomUUID() }])
+  // A caller with a selection already chosen for the fresh chat (the Home
+  // composer handoff) passes it here so the map entry exists BEFORE the
+  // rebind commit — the remounted composer's initialSelection then shows the
+  // same pair the sends will use, instead of racing the settings seed.
+  const handleNewChatTabInSidebar = useCallback((initialSelection?: ModelSelection | null) => {
+    const chatId = crypto.randomUUID()
+    if (initialSelection) selectionByTabRef.current.set(chatId, initialSelection)
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId }])
     handleNewChat()
   }, [handleNewChat])
 
@@ -4548,7 +4554,7 @@ function App() {
     // Chat mode has NO routing rules: mentions here just address the
     // assistant. Tasks are born via the chip, the list, or by asking.
     setIsChatSidebarOpen(true)
-    handleNewChatTabInSidebar()
+    handleNewChatTabInSidebar(homeSelectionRef.current)
     setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode })
   }, [handleNewChatTabInSidebar])
   const homeComposeTargetRef = useRef(homeComposeTarget)
@@ -7482,7 +7488,9 @@ function App() {
                           // (loading) until activated. lastSelection is null
                           // for a session with no turns (settings seed).
                           restoredSelection={
-                            isActive && tab.runId && sessionChat.chatState
+                            isActive && tab.runId
+                              && sessionChat.sessionId === tab.runId
+                              && sessionChat.chatState
                               ? sessionChat.chatState.lastSelection
                               : undefined
                           }
@@ -7536,7 +7544,7 @@ function App() {
                 chatTabs={chatTabs}
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
-                onNewChatTab={handleNewChatTabInSidebar}
+                onNewChatTab={() => handleNewChatTabInSidebar()}
                 recentRuns={runs}
                 onSelectRun={(rid) => {
                   const existingTab = chatTabs.find((t) => t.runId === rid)
@@ -7575,7 +7583,9 @@ function App() {
                 }}
                 getInitialSelection={(tabId) => selectionByTabRef.current.get(chatIdForTab(tabId)) ?? null}
                 restoredSelectionForActive={
-                  runId && sessionChat.chatState ? sessionChat.chatState.lastSelection : undefined
+                  runId && sessionChat.sessionId === runId && sessionChat.chatState
+                    ? sessionChat.chatState.lastSelection
+                    : undefined
                 }
                 workDirByTab={workDirByTab}
                 onWorkDirChangeForTab={setTabWorkDir}

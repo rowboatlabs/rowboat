@@ -1,16 +1,21 @@
 import { z } from 'zod';
 import { BillingCatalogSchema } from './billing.js';
 import { CreditActivationCatalogEntrySchema } from './credits.js';
-import { ReasoningEffort, StoredReasoningEffort } from './models.js';
+import { ReasoningEffort } from './models.js';
 
 // One recommended slot on the wire: a bare model id (legacy — effort Auto)
-// or { model, effort? }. Effort is lenient like stored config: missing,
-// null, and "auto" all normalize to undefined (= Auto).
+// or { model, effort? }. Effort is MORE lenient than stored config: any
+// unrecognized value (not just null/"auto") normalizes to undefined (= Auto)
+// — a backend experimenting with a new level (e.g. "minimal") must degrade
+// this hint, never fail the whole /v1/config parse that auth and billing
+// also ride on.
 const RecommendedChoice = z.union([
   z.string(),
   z.object({
     model: z.string(),
-    effort: StoredReasoningEffort.optional(),
+    effort: z.unknown().transform((v) =>
+      v === 'low' || v === 'medium' || v === 'high' ? v : undefined,
+    ).optional(),
   }),
 ]);
 

@@ -27,22 +27,6 @@ export function parseReasoningEffort(value: unknown): ReasoningEffortLevel | und
 }
 
 /**
- * Map the canonical reasoning effort to provider-specific request options.
- * Transport-only, like prompt caching: persisted turn events carry only the
- * canonical value; this translation happens at invoke time.
- *
- * Returns undefined when nothing should be sent — unsupported flavor, model
- * not known to reason, or a level the model family cannot express. Unknown
- * capability fails closed for strict flavors (OpenAI/Anthropic/Google reject
- * reasoning parameters on non-reasoning models); OpenRouter-shaped flavors
- * (openrouter, rowboat) are forgiving — OpenRouter drops the field for
- * models that cannot reason — so they map unless the model is known-false.
- *
- * Ollama is deliberately absent: its `think` parameter is applied by the
- * provider-level fetch rewrite (models/local.ts), and openai-compatible
- * endpoints have no safe universal parameter.
- */
-/**
  * Effort options for DIRECT AI SDK calls (generateText/generateObject in the
  * task utilities — chat titles, classifiers, summarizers), mirroring what
  * the turn bridge does centrally: cache-only capability lookup, canonical →
@@ -68,6 +52,30 @@ export async function directCallReasoningOptions(
     };
 }
 
+/**
+ * Map the canonical reasoning effort to provider-specific request options.
+ * Transport-only, like prompt caching: persisted turn events carry only the
+ * canonical value; this translation happens at invoke time.
+ *
+ * Returns undefined when nothing should be sent — unsupported flavor, model
+ * not known to reason, or a level the model family cannot express. Unknown
+ * capability fails closed for strict flavors (OpenAI/Anthropic/Google reject
+ * reasoning parameters on non-reasoning models); OpenRouter-shaped flavors
+ * (openrouter, rowboat) are forgiving — OpenRouter drops the field for
+ * models that cannot reason — so they map unless the model is known-false.
+ *
+ * Ollama is deliberately absent: its `think` parameter is applied by the
+ * provider-level fetch rewrite (models/local.ts), and openai-compatible
+ * endpoints have no safe universal parameter.
+ */
+/**
+ * Effort options for DIRECT AI SDK calls (generateText/generateObject in the
+ * task utilities — chat titles, classifiers, summarizers), mirroring what
+ * the turn bridge does centrally: cache-only capability lookup, canonical →
+ * provider mapping, and the Anthropic output floor. Returns {} when there is
+ * no effort or the model/flavor cannot express it — spread the result into
+ * the call's options as the LAST entry so maxOutputTokens can apply.
+ */
 export function mapReasoningEffort(
     flavor: string,
     modelId: string,

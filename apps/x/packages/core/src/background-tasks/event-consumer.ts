@@ -9,6 +9,8 @@ import { listTasks } from './fileops.js';
 import { runBackgroundTask } from './runner.js';
 
 async function resolveRoutingModel() {
+    // Deliberately effort-free: the routing pass is a cheap yes/no
+    // classifier; the backgroundTask effort applies to the agent RUNS it triggers.
     const { model: modelId, provider } = await getBackgroundTaskAgentModel();
     const config = await resolveProviderConfig(provider);
     return {
