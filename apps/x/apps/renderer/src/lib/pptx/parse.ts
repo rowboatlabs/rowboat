@@ -119,13 +119,35 @@ function descend(node: XmlNode, ...path: string[]): XmlNode | undefined {
   return current
 }
 
+/**
+ * Decodes numeric character references (`&#8217;` / `&#x2019;`) that
+ * fast-xml-parser leaves as literal text (it only decodes the five named XML
+ * entities). Only code points valid in XML 1.0 are decoded; anything else
+ * stays literal. Write-back for untouched runs is unaffected — it copies the
+ * original bytes, never this decoded form.
+ */
+function decodeNumericRefs(s: string): string {
+  if (!s.includes('&#')) return s
+  return s.replace(/&#(x[0-9a-fA-F]+|\d+);/g, (match, code: string) => {
+    const cp = code[0] === 'x' ? parseInt(code.slice(1), 16) : parseInt(code, 10)
+    const valid =
+      cp === 0x9 ||
+      cp === 0xa ||
+      cp === 0xd ||
+      (cp >= 0x20 && cp <= 0xd7ff) ||
+      (cp >= 0xe000 && cp <= 0xfffd) ||
+      (cp >= 0x10000 && cp <= 0x10ffff)
+    return valid ? String.fromCodePoint(cp) : match
+  })
+}
+
 function textOf(node: XmlNode): string {
   let out = ''
   for (const child of childrenOf(node)) {
     const t = child['#text']
     if (typeof t === 'string') out += t
   }
-  return out
+  return decodeNumericRefs(out)
 }
 
 function num(value: string | undefined): number | undefined {

@@ -52,6 +52,7 @@ export interface EditedParagraph {
 }
 
 export interface ShapeTextEdit {
+  kind: 'text'
   /** The shape's node path, from the parsed model. */
   nodePath: NodePath
   /** The shape's paragraphs as originally parsed from the retained XML. */
@@ -59,6 +60,51 @@ export interface ShapeTextEdit {
   /** The committed replacement. */
   next: EditedParagraph[]
 }
+
+/** Addresses one run: paragraph index, then run index within it. */
+export interface RunRef {
+  para: number
+  run: number
+}
+
+/** Formatting to apply. A field left undefined is left untouched in the rPr. */
+export interface RunFormatOverrides {
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  sizePt?: number
+  /** Six-digit RRGGBB; replaces the run's fill with a solid color. */
+  colorHex?: string
+}
+
+export interface FormatRunsEdit {
+  kind: 'formatRuns'
+  nodePath: NodePath
+  /** The shape's paragraphs as originally parsed from the retained XML. */
+  original: Paragraph[]
+  targets: RunRef[]
+  set: RunFormatOverrides
+}
+
+export interface ParagraphAlignEdit {
+  kind: 'paragraphAlign'
+  nodePath: NodePath
+  /** The shape's paragraphs as originally parsed from the retained XML. */
+  original: Paragraph[]
+  paraIndex: number
+  align: TextAlign
+}
+
+export interface ShapeGeometryEdit {
+  kind: 'shapeGeometry'
+  nodePath: NodePath
+  /** New offset in EMU. Rounded to integers. */
+  offEmu?: { x: number; y: number }
+  /** New extent in EMU. Rounded to integers and clamped to >= 1. */
+  extEmu?: { w: number; h: number }
+}
+
+export type SlideEdit = ShapeTextEdit | FormatRunsEdit | ParagraphAlignEdit | ShapeGeometryEdit
 
 // -------------------------------------------------------------- normalizing
 
@@ -347,6 +393,157 @@ function applySplices(s: string, ops: SpliceOp[]): string {
   return out
 }
 
+// ------------------------------------------------- open-tag attribute edits
+
+interface OpenTagInfo {
+  /** Insertion point for new attributes: index of `>`, or of the `/` in `/>`. */
+  closeStart: number
+  selfClosing: boolean
+  attrs: Array<{ name: string; valueStart: number; valueEnd: number; value: string }>
+}
+
+function openTagInfo(s: string, elem: Elem): OpenTagInfo {
+  const { gt, selfClosing } = scanTagEnd(s, elem.start)
+  const closeStart = selfClosing ? gt - 1 : gt
+  const attrs: OpenTagInfo['attrs'] = []
+  let i = elem.start + 1 + elem.name.length
+  while (i < closeStart) {
+    while (i < closeStart && ' \t\r\n'.includes(s[i])) i++
+    if (i >= closeStart) break
+    const nameStart = i
+    while (i < closeStart && !' \t\r\n=/>'.includes(s[i])) i++
+    const name = s.slice(nameStart, i)
+    if (!name) break
+    while (i < closeStart && ' \t\r\n'.includes(s[i])) i++
+    if (s[i] !== '=') fail(`malformed attribute ${name} in <${elem.name}>`)
+    i++
+    while (i < closeStart && ' \t\r\n'.includes(s[i])) i++
+    const quote = s[i]
+    if (quote !== '"' && quote !== "'") fail(`unquoted attribute ${name} in <${elem.name}>`)
+    const valueStart = i + 1
+    const valueEnd = s.indexOf(quote, valueStart)
+    if (valueEnd < 0 || valueEnd >= closeStart) fail(`unterminated attribute ${name}`)
+    attrs.push({ name, valueStart, valueEnd, value: s.slice(valueStart, valueEnd) })
+    i = valueEnd + 1
+  }
+  return { closeStart, selfClosing, attrs }
+}
+
+/**
+ * Ops that set attributes on one open tag: existing values replaced in place,
+ * missing attributes appended (as one insert, preserving the given order)
+ * before the tag close. Attribute order is insignificant in XML, so appending
+ * is safe; nothing outside the open tag is touched. Values must not need
+ * escaping (enums and integers only).
+ */
+function setAttrOps(s: string, elem: Elem, pairs: ReadonlyArray<[string, string]>): SpliceOp[] {
+  const info = openTagInfo(s, elem)
+  const ops: SpliceOp[] = []
+  let inserts = ''
+  for (const [name, value] of pairs) {
+    const existing = info.attrs.find((a) => a.name === name)
+    if (existing) ops.push({ start: existing.valueStart, end: existing.valueEnd, insert: value })
+    else inserts += ` ${name}="${value}"`
+  }
+  if (inserts) ops.push({ start: info.closeStart, end: info.closeStart, insert: inserts })
+  return ops
+}
+
+const DRAWINGML_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+
+/** Prefix bound to the DrawingML namespace on the root element; 'a' if unfound. */
+function drawingPrefixOf(s: string, sldElem: Elem): string {
+  for (const a of openTagInfo(s, sldElem).attrs) {
+    if (a.value === DRAWINGML_NS) {
+      if (a.name === 'xmlns') return ''
+      if (a.name.startsWith('xmlns:')) return a.name.slice(6)
+    }
+  }
+  return 'a'
+}
+
+// -------------------------------------------------------------- rPr rewriting
+
+const FILL_LOCALS = ['noFill', 'solidFill', 'gradFill', 'blipFill', 'pattFill', 'grpFill']
+
+const hasOverride = (set: RunFormatOverrides): boolean =>
+  set.bold !== undefined ||
+  set.italic !== undefined ||
+  set.underline !== undefined ||
+  set.sizePt !== undefined ||
+  set.colorHex !== undefined
+
+/** sz is hundredths of a point, schema-bounded to [1pt, 4000pt]. */
+function szValue(sizePt: number): string {
+  return String(Math.min(400000, Math.max(100, Math.round(sizePt * 100))))
+}
+
+function attrPairsFor(set: RunFormatOverrides): Array<[string, string]> {
+  const pairs: Array<[string, string]> = []
+  if (set.bold !== undefined) pairs.push(['b', set.bold ? '1' : '0'])
+  if (set.italic !== undefined) pairs.push(['i', set.italic ? '1' : '0'])
+  if (set.underline !== undefined) pairs.push(['u', set.underline ? 'sng' : 'none'])
+  if (set.sizePt !== undefined) pairs.push(['sz', szValue(set.sizePt)])
+  return pairs
+}
+
+function solidFillXml(prefix: string, colorHex: string): string {
+  const t = (n: string): string => (prefix ? `${prefix}:${n}` : n)
+  return `<${t('solidFill')}><${t('srgbClr')} val="${colorHex}"/></${t('solidFill')}>`
+}
+
+/**
+ * Ops that rewrite an existing rPr per the overrides: overridden attributes
+ * are set on the open tag, an overridden color replaces the fill-group child
+ * in place (or is inserted after `a:ln`, the only child the schema orders
+ * before it). Every attribute and child the override doesn't own keeps its
+ * bytes.
+ */
+function transformRPrOps(s: string, rPr: Elem, set: RunFormatOverrides): SpliceOp[] {
+  const info = openTagInfo(s, rPr)
+  const ops: SpliceOp[] = []
+  let attrInserts = ''
+  for (const [name, value] of attrPairsFor(set)) {
+    const existing = info.attrs.find((a) => a.name === name)
+    if (existing) ops.push({ start: existing.valueStart, end: existing.valueEnd, insert: value })
+    else attrInserts += ` ${name}="${value}"`
+  }
+
+  if (set.colorHex === undefined) {
+    if (attrInserts) ops.push({ start: info.closeStart, end: info.closeStart, insert: attrInserts })
+    return ops
+  }
+
+  const fill = solidFillXml(prefixOf(rPr.name), set.colorHex)
+  if (rPr.selfClosing) {
+    // `<a:rPr .../>` must reopen to hold the fill; fold new attributes into
+    // the same op so nothing overlaps.
+    ops.push({ start: info.closeStart, end: rPr.end, insert: `${attrInserts}>${fill}</${rPr.name}>` })
+    return ops
+  }
+  if (attrInserts) ops.push({ start: info.closeStart, end: info.closeStart, insert: attrInserts })
+  const children = childElemsOf(s, rPr)
+  const existingFill = children.find((c) => FILL_LOCALS.includes(localOf(c.name)))
+  if (existingFill) {
+    ops.push({ start: existingFill.start, end: existingFill.end, insert: fill })
+  } else {
+    const ln = children.find((c) => localOf(c.name) === 'ln')
+    const at = ln ? ln.end : rPr.contentStart
+    ops.push({ start: at, end: at, insert: fill })
+  }
+  return ops
+}
+
+/** A fresh rPr for a run that had none. `prefix` is the run element's own. */
+function synthesizedRPr(prefix: string, set: RunFormatOverrides): string {
+  const t = (n: string): string => (prefix ? `${prefix}:${n}` : n)
+  const attrs = attrPairsFor(set)
+    .map(([n, v]) => ` ${n}="${v}"`)
+    .join('')
+  if (set.colorHex === undefined) return `<${t('rPr')}${attrs}/>`
+  return `<${t('rPr')}${attrs}>${solidFillXml(prefix, set.colorHex)}</${t('rPr')}>`
+}
+
 // --------------------------------------------------------------- rebuilding
 
 /** `<a:t>` open tag, adding xml:space when edge whitespace must survive. */
@@ -418,87 +615,257 @@ function rebuildParagraphs(
     .join('')
 }
 
+// ------------------------------------------------------------ edit dispatch
+
+interface SlideCtx {
+  /** The slide's raw XML. */
+  s: string
+  doc: XmlNode[]
+  sldElem: Elem
+  /** Element children of p:spTree, in document order. */
+  spTreeShapes: Elem[]
+}
+
+/**
+ * Resolves an edit's node path on both the model and the scanner view, and
+ * cross-checks that they agree on what kind of shape sits there.
+ */
+function locateShape(
+  ctx: SlideCtx,
+  nodePath: NodePath,
+  allowed: readonly string[],
+): { node: XmlNode; elem: Elem } {
+  const node = resolveNodePath(ctx.doc, nodePath) ?? fail('node path no longer resolves')
+  const nodeTag = tagNameOf(node) ?? fail('node path resolves to a text node')
+  if (!allowed.includes(localOf(nodeTag))) fail(`unsupported shape for this edit (<${nodeTag}>)`)
+
+  const parent = resolveNodePath(ctx.doc, nodePath.slice(0, -1)) ?? fail('spTree path broken')
+  const siblings = childrenOf(parent)
+  const last = nodePath[nodePath.length - 1]
+  let ordinal = 0
+  for (let j = 0; j < last; j++) if (tagNameOf(siblings[j]) !== null) ordinal++
+
+  const elem = ctx.spTreeShapes[ordinal] ?? fail('shape ordinal out of range in raw XML')
+  if (localOf(elem.name) !== localOf(nodeTag)) {
+    fail(`raw XML disagrees with model at shape ordinal ${ordinal} (<${elem.name}>)`)
+  }
+  return { node, elem }
+}
+
+/** Shared text-shape validation: original matches model, scanner matches model. */
+function validateTextShape(
+  ctx: SlideCtx,
+  node: XmlNode,
+  elem: Elem,
+  original: Paragraph[],
+): RawParagraph[] {
+  const modelParas = modelParagraphsOfSp(node) ?? fail('shape has no txBody')
+  if (normalizeParagraphs(modelParas) !== normalizeParagraphs(original)) {
+    fail('edit original does not match the retained slide XML — refusing to write')
+  }
+  const txBodyElem = childElemByLocal(ctx.s, elem, 'txBody') ?? fail('raw shape has no txBody')
+  const rawParas = rawParagraphsOf(ctx.s, txBodyElem)
+  if (rawParas.length !== modelParas.length) fail('paragraph count mismatch between scanner and model')
+  for (let i = 0; i < rawParas.length; i++) {
+    const raw = rawParas[i]
+    const model = modelParas[i]
+    if (raw.items.length !== model.runs.length) fail(`run count mismatch in paragraph ${i}`)
+    for (let j = 0; j < raw.items.length; j++) {
+      if ((raw.items[j].kind === 'br') !== isBr(model.runs[j])) {
+        fail(`run kind mismatch at paragraph ${i}, run ${j}`)
+      }
+    }
+  }
+  return rawParas
+}
+
+function textEditOps(ctx: SlideCtx, edit: ShapeTextEdit): SpliceOp[] {
+  if (edit.next.length === 0) fail('a text shape must keep at least one paragraph')
+  const { node, elem } = locateShape(ctx, edit.nodePath, ['sp'])
+  const rawParas = validateTextShape(ctx, node, elem, edit.original)
+
+  const ops: SpliceOp[] = []
+  if (isTextOnlyEdit(edit.original, edit.next)) {
+    for (let i = 0; i < edit.next.length; i++) {
+      for (let j = 0; j < edit.next[i].runs.length; j++) {
+        const nr = edit.next[i].runs[j]
+        const or = edit.original[i].runs[j]
+        if (nr.text === or.text) continue
+        const t = rawParas[i].items[j].t ?? fail('changed run has no <a:t> in raw XML')
+        ops.push({ start: t.contentStart, end: t.contentEnd, insert: escapeXmlText(nr.text) })
+      }
+    }
+  } else {
+    if (rawParas.length === 0) fail('cannot rebuild a txBody with no paragraphs')
+    ops.push({
+      start: rawParas[0].elem.start,
+      end: rawParas[rawParas.length - 1].elem.end,
+      insert: rebuildParagraphs(ctx.s, rawParas, edit.original, edit.next),
+    })
+  }
+  return ops
+}
+
+function formatRunsOps(ctx: SlideCtx, edit: FormatRunsEdit): SpliceOp[] {
+  if (!hasOverride(edit.set) || edit.targets.length === 0) return []
+  let set = edit.set
+  if (set.colorHex !== undefined) {
+    if (!/^[0-9A-Fa-f]{6}$/.test(set.colorHex)) fail(`colorHex must be RRGGBB (got "${set.colorHex}")`)
+    set = { ...set, colorHex: set.colorHex.toUpperCase() }
+  }
+
+  const { node, elem } = locateShape(ctx, edit.nodePath, ['sp'])
+  const rawParas = validateTextShape(ctx, node, elem, edit.original)
+
+  const seen = new Set<string>()
+  const ops: SpliceOp[] = []
+  for (const target of edit.targets) {
+    const key = `${target.para}:${target.run}`
+    if (seen.has(key)) fail(`duplicate format target ${key}`)
+    seen.add(key)
+    const para = edit.original[target.para] ?? fail(`format target paragraph ${target.para} out of range`)
+    const run = para.runs[target.run] ?? fail(`format target run ${key} out of range`)
+    if (isBr(run)) fail('cannot format a line break')
+    const item = rawParas[target.para].items[target.run]
+    if (item.rPr) {
+      ops.push(...transformRPrOps(ctx.s, item.rPr, set))
+    } else {
+      // rPr is the first child of a:r / a:fld; the run always has content
+      // (kept items carry a non-empty <a:t>).
+      ops.push({
+        start: item.elem.contentStart,
+        end: item.elem.contentStart,
+        insert: synthesizedRPr(prefixOf(item.elem.name), set),
+      })
+    }
+  }
+  return ops
+}
+
+function paragraphAlignOps(ctx: SlideCtx, edit: ParagraphAlignEdit): SpliceOp[] {
+  const { node, elem } = locateShape(ctx, edit.nodePath, ['sp'])
+  const rawParas = validateTextShape(ctx, node, elem, edit.original)
+  const para = rawParas[edit.paraIndex] ?? fail(`paragraph ${edit.paraIndex} out of range`)
+
+  // Attribute-level splice on the pPr open tag; children stay byte-identical.
+  if (para.pPr) return setAttrOps(ctx.s, para.pPr, [['algn', edit.align]])
+
+  // No pPr: synthesize one as the FIRST child of a:p (schema position).
+  const t = para.prefix ? `${para.prefix}:` : ''
+  const pPrXml = `<${t}pPr algn="${edit.align}"/>`
+  if (!para.elem.selfClosing) {
+    return [{ start: para.elem.contentStart, end: para.elem.contentStart, insert: pPrXml }]
+  }
+  // `<a:p/>`: reopen it.
+  const info = openTagInfo(ctx.s, para.elem)
+  return [{ start: info.closeStart, end: para.elem.end, insert: `>${pPrXml}</${para.elem.name}>` }]
+}
+
+function shapeGeometryOps(ctx: SlideCtx, edit: ShapeGeometryEdit): SpliceOp[] {
+  if (!edit.offEmu && !edit.extEmu) return []
+  const { elem } = locateShape(ctx, edit.nodePath, ['sp', 'pic', 'cxnSp'])
+  const spPr = childElemByLocal(ctx.s, elem, 'spPr') ?? fail('shape has no spPr')
+
+  const off = edit.offEmu && {
+    x: String(Math.round(edit.offEmu.x)),
+    y: String(Math.round(edit.offEmu.y)),
+  }
+  const ext = edit.extEmu && {
+    cx: String(Math.max(1, Math.round(edit.extEmu.w))),
+    cy: String(Math.max(1, Math.round(edit.extEmu.h))),
+  }
+
+  const xfrm = spPr.selfClosing ? undefined : childElemByLocal(ctx.s, spPr, 'xfrm')
+
+  if (!xfrm || xfrm.selfClosing) {
+    // Inherited (or empty) geometry: synthesize the transform. The schema
+    // requires both off and ext, so partial input cannot be honored here.
+    if (!off || !ext) {
+      fail('shape has no explicit xfrm — geometry edits must provide both offEmu and extEmu')
+    }
+    const aPfx = drawingPrefixOf(ctx.s, ctx.sldElem)
+    const t = (n: string): string => (aPfx ? `${aPfx}:${n}` : n)
+    const inner = `<${t('off')} x="${off.x}" y="${off.y}"/><${t('ext')} cx="${ext.cx}" cy="${ext.cy}"/>`
+    if (xfrm) {
+      // `<a:xfrm/>`: reopen it; its own attributes (rot, flips) are untouched.
+      const info = openTagInfo(ctx.s, xfrm)
+      return [{ start: info.closeStart, end: xfrm.end, insert: `>${inner}</${xfrm.name}>` }]
+    }
+    const xfrmXml = `<${t('xfrm')}>${inner}</${t('xfrm')}>`
+    if (!spPr.selfClosing) {
+      // FIRST child of spPr — CT_ShapeProperties orders xfrm before geometry.
+      return [{ start: spPr.contentStart, end: spPr.contentStart, insert: xfrmXml }]
+    }
+    const info = openTagInfo(ctx.s, spPr)
+    return [{ start: info.closeStart, end: spPr.end, insert: `>${xfrmXml}</${spPr.name}>` }]
+  }
+
+  // Existing xfrm: numeric attribute splices only. rot/flipH/flipV live on the
+  // xfrm open tag, which these ops never touch.
+  const ops: SpliceOp[] = []
+  const offElem = childElemByLocal(ctx.s, xfrm, 'off')
+  const extElem = childElemByLocal(ctx.s, xfrm, 'ext')
+  const aPfx = prefixOf(xfrm.name)
+  const t = (n: string): string => (aPfx ? `${aPfx}:${n}` : n)
+  let insertAtStart = ''
+  if (off) {
+    if (offElem) ops.push(...setAttrOps(ctx.s, offElem, [['x', off.x], ['y', off.y]]))
+    else insertAtStart += `<${t('off')} x="${off.x}" y="${off.y}"/>`
+  }
+  if (ext) {
+    if (extElem) {
+      ops.push(...setAttrOps(ctx.s, extElem, [['cx', ext.cx], ['cy', ext.cy]]))
+    } else if (offElem) {
+      ops.push({ start: offElem.end, end: offElem.end, insert: `<${t('ext')} cx="${ext.cx}" cy="${ext.cy}"/>` })
+    } else {
+      insertAtStart += `<${t('ext')} cx="${ext.cx}" cy="${ext.cy}"/>`
+    }
+  }
+  if (insertAtStart) {
+    ops.push({ start: xfrm.contentStart, end: xfrm.contentStart, insert: insertAtStart })
+  }
+  return ops
+}
+
 // -------------------------------------------------------------- updateSlideXml
 
 /**
- * Applies text edits to one slide's raw XML. Returns the raw string unchanged
- * when there is nothing to change. Throws (leaving the caller's file
- * untouched) on any inconsistency between the model, the edit, and the raw
- * bytes.
+ * Applies edits to one slide's raw XML. Returns the raw string unchanged when
+ * there is nothing to change. Throws (leaving the caller's file untouched) on
+ * any inconsistency between the model, the edit, and the raw bytes.
  */
-export function updateSlideXml(slideXmlRaw: string, edits: readonly ShapeTextEdit[]): string {
+export function updateSlideXml(slideXmlRaw: string, edits: readonly SlideEdit[]): string {
   if (edits.length === 0) return slideXmlRaw
 
   const doc = parseXml(slideXmlRaw)
 
-  // Scanner view of the same document, cross-validated below.
+  // Scanner view of the same document, cross-validated per edit.
   const rootElems = childElementsIn(slideXmlRaw, 0, slideXmlRaw.length)
   const sldElem = rootElems.find((e) => localOf(e.name) === 'sld') ?? fail('no <p:sld> element')
   const cSldElem = childElemByLocal(slideXmlRaw, sldElem, 'cSld') ?? fail('no <p:cSld> element')
   const spTreeElem = childElemByLocal(slideXmlRaw, cSldElem, 'spTree') ?? fail('no <p:spTree> element')
-  const spTreeShapes = childElemsOf(slideXmlRaw, spTreeElem)
+  const ctx: SlideCtx = {
+    s: slideXmlRaw,
+    doc,
+    sldElem,
+    spTreeShapes: childElemsOf(slideXmlRaw, spTreeElem),
+  }
 
   const ops: SpliceOp[] = []
-
   for (const edit of edits) {
-    if (edit.next.length === 0) fail('a text shape must keep at least one paragraph')
-
-    // --- model side: resolve the shape node and re-derive its paragraphs.
-    const node = resolveNodePath(doc, edit.nodePath) ?? fail('node path no longer resolves')
-    const nodeTag = tagNameOf(node) ?? fail('node path resolves to a text node')
-    if (localOf(nodeTag) !== 'sp') fail(`not a text shape (<${nodeTag}>)`)
-
-    const modelParas = modelParagraphsOfSp(node) ?? fail('shape has no txBody')
-    if (normalizeParagraphs(modelParas) !== normalizeParagraphs(edit.original)) {
-      fail('edit original does not match the retained slide XML — refusing to write')
-    }
-
-    // --- locate the same shape in the raw bytes, by element ordinal.
-    const parent = resolveNodePath(doc, edit.nodePath.slice(0, -1)) ?? fail('spTree path broken')
-    const siblings = childrenOf(parent)
-    const last = edit.nodePath[edit.nodePath.length - 1]
-    let ordinal = 0
-    for (let j = 0; j < last; j++) if (tagNameOf(siblings[j]) !== null) ordinal++
-
-    const shapeElem = spTreeShapes[ordinal] ?? fail('shape ordinal out of range in raw XML')
-    if (localOf(shapeElem.name) !== 'sp') {
-      fail(`raw XML disagrees with model at shape ordinal ${ordinal} (<${shapeElem.name}>)`)
-    }
-    const txBodyElem =
-      childElemByLocal(slideXmlRaw, shapeElem, 'txBody') ?? fail('raw shape has no txBody')
-    const rawParas = rawParagraphsOf(slideXmlRaw, txBodyElem)
-
-    // --- cross-validate scanner structure against the model.
-    if (rawParas.length !== modelParas.length) fail('paragraph count mismatch between scanner and model')
-    for (let i = 0; i < rawParas.length; i++) {
-      const raw = rawParas[i]
-      const model = modelParas[i]
-      if (raw.items.length !== model.runs.length) fail(`run count mismatch in paragraph ${i}`)
-      for (let j = 0; j < raw.items.length; j++) {
-        if ((raw.items[j].kind === 'br') !== isBr(model.runs[j])) {
-          fail(`run kind mismatch at paragraph ${i}, run ${j}`)
-        }
-      }
-    }
-
-    // --- choose strategy.
-    if (isTextOnlyEdit(edit.original, edit.next)) {
-      for (let i = 0; i < edit.next.length; i++) {
-        for (let j = 0; j < edit.next[i].runs.length; j++) {
-          const nr = edit.next[i].runs[j]
-          const or = edit.original[i].runs[j]
-          if (nr.text === or.text) continue
-          const t = rawParas[i].items[j].t ?? fail('changed run has no <a:t> in raw XML')
-          ops.push({ start: t.contentStart, end: t.contentEnd, insert: escapeXmlText(nr.text) })
-        }
-      }
-    } else {
-      if (rawParas.length === 0) fail('cannot rebuild a txBody with no paragraphs')
-      ops.push({
-        start: rawParas[0].elem.start,
-        end: rawParas[rawParas.length - 1].elem.end,
-        insert: rebuildParagraphs(slideXmlRaw, rawParas, edit.original, edit.next),
-      })
+    switch (edit.kind) {
+      case 'text':
+        ops.push(...textEditOps(ctx, edit))
+        break
+      case 'formatRuns':
+        ops.push(...formatRunsOps(ctx, edit))
+        break
+      case 'paragraphAlign':
+        ops.push(...paragraphAlignOps(ctx, edit))
+        break
+      case 'shapeGeometry':
+        ops.push(...shapeGeometryOps(ctx, edit))
+        break
     }
   }
 
@@ -515,7 +882,7 @@ export function updateSlideXml(slideXmlRaw: string, edits: readonly ShapeTextEdi
  */
 export async function writeDeck(
   deck: SlideDeck,
-  editsBySlide: ReadonlyMap<string, readonly ShapeTextEdit[]>,
+  editsBySlide: ReadonlyMap<string, readonly SlideEdit[]>,
 ): Promise<Uint8Array> {
   for (const slidePath of editsBySlide.keys()) {
     if (deck.source.slideXml[slidePath] === undefined) {
