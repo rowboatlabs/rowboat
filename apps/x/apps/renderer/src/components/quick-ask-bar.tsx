@@ -939,7 +939,6 @@ export function QuickAskBar() {
                 ? 'synthesizing'
                 : 'idle'
           }
-          rowing={callCard ? callState.status === 'thinking' : processing}
           getLevel={callCard ? synthLevel : zeroLevel}
           size={124}
           hat={callCard ? 'cowboy' : undefined}
@@ -1099,10 +1098,9 @@ function PinnedPill({
         )}
         <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg bg-neutral-800">
           {/* On a call = hat on (the companion's on-duty signal); thinking
-              = rowing hard to fetch the answer, bubbles trailing. */}
+              shows the thought bubbles. */}
           <TalkingHead
             ttsState={state.status === 'thinking' && state.ttsState === 'idle' ? 'synthesizing' : state.ttsState}
-            rowing={state.status === 'thinking'}
             getLevel={getLevel}
             size={voiceOnly ? 96 : 84}
             hat="cowboy"
@@ -1364,11 +1362,10 @@ function TuckedMascot({
           space below the ripples that read as a big gap. */}
       <div className="-mb-4" style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
         <TalkingHead
-          // Thinking = ROWING: the mascot paddles hard to fetch the answer
-          // (fast bob + oar strokes, TalkingHead's own rowing mode), with
-          // thought bubbles mapped in while the LLM works.
+          // Thinking = thought bubbles (the calm version — rowing on every
+          // turn wore thin): status 'thinking' with idle TTS maps to the
+          // 'synthesizing' state, which renders bubbles + raised eyes.
           ttsState={state.status === 'thinking' && state.ttsState === 'idle' ? 'synthesizing' : state.ttsState}
-          rowing={state.status === 'thinking'}
           getLevel={getLevel}
           size={132}
           hat="cowboy"
