@@ -174,6 +174,10 @@ export function QuickAskBar() {
     void window.ipc.invoke('video:popoutAction', { action }).catch(() => {})
   }, [])
 
+  // The summoned mascot has no audio pipeline — its mouth stays closed; the
+  // thinking bubbles (driven by ttsState) are its only active state here.
+  const zeroLevel = useCallback(() => 0, [])
+
   // Knowledge files for @-mentions, fetched over IPC (this window has no
   // App-owned tree). Refreshed on every summon — notes change while the bar
   // is hidden.
@@ -440,10 +444,15 @@ export function QuickAskBar() {
           dismisses the bar (the click-away feel, inside our own window). */}
       <div className="min-h-0 flex-1" onMouseDown={dismiss} />
 
+      {/* Bottom row: card + the mascot riding alongside on the transparent
+          stage. The row is PADDED so the card's CSS shadow fades inside the
+          window instead of clipping at its rectangular edge (which read as
+          a grey rectangle around the card). */}
+      <div className="flex shrink-0 items-end gap-1 px-6 pb-5">
       {/* Light skin (#810): near-white card, hairline dark border, dark
           text. The window's native shadow is off (it would outline the
           whole transparent frame) — the card draws its own. */}
-      <div className="qa-card shrink-0 overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_24px_60px_rgba(0,0,0,0.22),0_4px_16px_rgba(0,0,0,0.12)]">
+      <div className="qa-card min-w-0 flex-1 shrink-0 overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)]">
         {/* Charcoal code blocks. Streamdown's own dark rule is
             background: var(--shiki-dark-bg) !important inside Tailwind's
             utilities layer — layered !important outranks any override we
@@ -593,6 +602,16 @@ export function QuickAskBar() {
           />
         </div>
       </div>
+
+      {/* The mascot, full silhouette on the transparent stage — the same
+          TalkingHead the product tour and call tiles render. Thinking
+          bubbles while a question is processing; gentle bob otherwise.
+          pointer-events-none: clicks on it neither dismiss nor do anything
+          (hush/tuck gestures come with the voice-rule work). */}
+      <div className="pointer-events-none w-[124px] shrink-0 select-none" aria-hidden="true">
+        <TalkingHead ttsState={processing ? 'synthesizing' : 'idle'} getLevel={zeroLevel} size={124} />
+      </div>
+      </div>
       <SonnerToaster theme="light" />
     </div>
   )
@@ -693,7 +712,7 @@ function PinnedPill({
 
   return (
     <div
-      className="dark relative flex h-screen w-screen select-none flex-col gap-1.5 overflow-hidden rounded-2xl bg-neutral-900 p-1.5 text-white"
+      className="dark relative flex h-screen w-screen select-none flex-col gap-1.5 overflow-hidden rounded-2xl bg-neutral-900 p-1.5 text-white ring-1 ring-inset ring-white/10"
       style={dragRegion}
     >
       <div className="flex min-h-0 flex-1 gap-1.5">

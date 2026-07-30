@@ -37,7 +37,7 @@ export type CompanionMode = 'hidden' | 'summoned' | 'pinned';
 // Design-space dimensions (what the renderer lays out against, in CSS px).
 // The summoned frame is deliberately taller than the card: the extra space
 // is the invisible stage for popovers and the growing response panel.
-const FRAME_WIDTH = 680;
+const FRAME_WIDTH = 800;
 const FRAME_HEIGHT = 560;
 // Pinned pill bounds. Height is renderer-driven between base and max
 // (video:popoutResize), same contract as the old popout window.
@@ -185,9 +185,11 @@ function positionPinned(win: BrowserWindow) {
     width,
     height: scaled(PINNED_BASE_HEIGHT),
   });
-  // The pill fills its window, so the native shadow tracks a real edge here
-  // (unlike the summoned frame, where it would outline transparency).
-  win.setHasShadow(true);
+  // No native shadow here either: on a TRANSPARENT window macOS keeps a
+  // stale shadow for the previous shape after bounds changes (ghost grey
+  // outlines hugging old edges — the artifact the old bar fought with
+  // invalidateShadow). The pill's hairline ring is its edge treatment.
+  win.setHasShadow(false);
 }
 
 export function hideQuickAsk() {
