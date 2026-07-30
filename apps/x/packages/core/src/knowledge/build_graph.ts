@@ -409,6 +409,8 @@ async function createNotesFromBatch(
     const { turnId, state } = await runWhenPossible({
         agentId: NOTE_CREATION_AGENT,
         message,
+        useCase: 'knowledge_sync',
+        subUseCase: 'build_graph',
         ...asRunModelOptions(await getKgModel()),
         throwOnError: true,
     });
@@ -967,6 +969,8 @@ export async function curateNotes(): Promise<void> {
             await runWhenPossible({
                 agentId: CURATION_AGENT,
                 message,
+                useCase: 'knowledge_sync',
+                subUseCase: 'curation',
                 ...asRunModelOptions(await getKgModel()),
                 throwOnError: true,
             });

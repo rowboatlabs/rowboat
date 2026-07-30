@@ -5,7 +5,6 @@ import { IAgentScheduleStateRepo } from "./state-repo.js";
 import { AgentScheduleConfig, AgentScheduleEntry } from "@x/shared/dist/agent-schedule.js";
 import { AgentScheduleState, AgentScheduleStateEntry } from "@x/shared/dist/agent-schedule-state.js";
 import { startWhenPossible } from "../runtime/assembly/headless-app.js";
-import { withUseCase } from "../analytics/use_case.js";
 import z from "zod";
 
 const DEFAULT_STARTING_MESSAGE = "go";
@@ -163,14 +162,13 @@ async function runAgent(
         // The signal caps a hung turn at the same TIMEOUT_MS the state-based
         // watchdog uses.
         const startingMessage = entry.startingMessage ?? DEFAULT_STARTING_MESSAGE;
-        const handle = await withUseCase(
-            { useCase: 'copilot_chat', subUseCase: 'scheduled' },
-            () => startWhenPossible({
-                agentId: agentName,
-                message: startingMessage,
-                signal: AbortSignal.timeout(TIMEOUT_MS),
-            }),
-        );
+        const handle = await startWhenPossible({
+            agentId: agentName,
+            message: startingMessage,
+            useCase: 'copilot_chat',
+            subUseCase: 'scheduled',
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
         console.log(`[AgentRunner] Started turn ${handle.turnId} for agent ${agentName}: "${startingMessage}"`);
         void handle.done
             .then((result) => console.log(`[AgentRunner] Turn ${handle.turnId} (${agentName}) settled: ${result.outcome.status}`))

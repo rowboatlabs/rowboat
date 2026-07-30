@@ -284,6 +284,8 @@ async function processAgentNotes(): Promise<void> {
         await runWhenPossible({
             agentId: AGENT_ID,
             message,
+            useCase: 'knowledge_sync',
+            subUseCase: 'agent_notes',
             ...asRunModelOptions(await getKgModel()),
             throwOnError: true,
         });

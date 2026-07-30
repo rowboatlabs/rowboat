@@ -6,6 +6,7 @@ import {
     UserMessage,
 } from "./message.js";
 import { ReasoningEffort } from "./models.js";
+import { TurnAnalytics } from "./analytics.js";
 
 // Durable turn contract for the turn runtime (see
 // packages/core/docs/turn-runtime-design.md). This module is the
@@ -173,6 +174,11 @@ export const TurnCreated = z.object({
     }),
     context: TurnContext,
     input: UserMessage,
+    // Why this turn ran. The orthogonal "which agent ran" dimension is already
+    // durable as agent.resolved.agentId; keeping one canonical copy prevents
+    // analytics agent_name from drifting from the actual resolved agent.
+    // Optional on read for turn files written before durable attribution.
+    analytics: TurnAnalytics.optional(),
     config: z.object({
         autoPermission: z.boolean(),
         humanAvailable: z.boolean(),

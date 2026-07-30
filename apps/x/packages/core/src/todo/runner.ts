@@ -1,5 +1,4 @@
 import { getDefaultModelAndProvider } from '../models/defaults.js';
-import { withUseCase } from '../analytics/use_case.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import type { TurnStreamEvent } from '@x/shared/dist/turns.js';
@@ -285,20 +284,19 @@ async function driveTurn(
             const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
                 modelOverride ?? await getDefaultModelAndProvider();
             const { model, provider } = selection;
-            sent = await withUseCase(
-                { useCase: 'todo_item_agent', subUseCase },
-                () => sessions.sendMessage(
-                    sessionId,
-                    { role: 'user', content: message },
-                    {
-                        agent: {
-                            agentId: 'todo-item-agent',
-                            overrides: { model: { provider, model } },
-                        },
-                        ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
-                        autoPermission,
+            sent = await sessions.sendMessage(
+                sessionId,
+                { role: 'user', content: message },
+                {
+                    agent: {
+                        agentId: 'todo-item-agent',
+                        overrides: { model: { provider, model } },
                     },
-                ),
+                    useCase: 'todo_item_agent',
+                    subUseCase,
+                    ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
+                    autoPermission,
+                },
             );
         } catch (err) {
             if (err instanceof TurnNotSettledError) {
@@ -422,20 +420,19 @@ async function driveChatTurn(
             const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
                 modelOverride ?? await getDefaultModelAndProvider();
             const { model, provider } = selection;
-            sent = await withUseCase(
-                { useCase: 'copilot_chat', subUseCase: 'home_stream' },
-                () => sessions.sendMessage(
-                    sessionId,
-                    { role: 'user', content: message },
-                    {
-                        agent: {
-                            agentId: 'copilot',
-                            overrides: { model: { provider, model } },
-                        },
-                        ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
-                        autoPermission,
+            sent = await sessions.sendMessage(
+                sessionId,
+                { role: 'user', content: message },
+                {
+                    agent: {
+                        agentId: 'copilot',
+                        overrides: { model: { provider, model } },
                     },
-                ),
+                    useCase: 'copilot_chat',
+                    subUseCase: 'home_stream',
+                    ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
+                    autoPermission,
+                },
             );
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);

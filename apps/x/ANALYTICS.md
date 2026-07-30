@@ -24,9 +24,9 @@ Emitted whenever ai-sdk returns token usage (one event per LLM call, not per run
 
 | Property | Type | Notes |
 |---|---|---|
-| `use_case` | enum | `copilot_chat` / `live_note_agent` / `meeting_note` / `knowledge_sync` / `code_session` |
+| `use_case` | enum | Defined by `UseCase` in `packages/shared/src/analytics.ts` |
 | `sub_use_case` | string? | Refines `use_case` — see taxonomy table below |
-| `agent_name` | string? | Present when the call goes through an agent run (`createRun`); omitted for direct `generateText`/`generateObject` |
+| `agent_name` | string? | Present when the call goes through an agent run; derived from the turn's immutable resolved agent id and omitted for direct `generateText`/`generateObject` |
 | `model` | string | e.g. `claude-sonnet-4-6` |
 | `provider` | string | The provider FLAVOR: `rowboat` = cloud LLM gateway, `codex` = ChatGPT subscription, else the BYOK flavor (`openai`, `anthropic`, `ollama`, …). Call sites pass instance ids; `captureLlmUsage` maps id → flavor so charts never fracture if user-named provider instances ship (ids never leave the app) |
 | `input_tokens` | number | |
@@ -35,28 +35,36 @@ Emitted whenever ai-sdk returns token usage (one event per LLM call, not per run
 | `cached_input_tokens` | number? | When the provider reports it |
 | `reasoning_tokens` | number? | When the provider reports it |
 
+For the turn runtime, `{ useCase, subUseCase }` is persisted on
+`turn_created.analytics`. Every advance restores that context and combines it
+with `turn_created.agent.resolved.agentId`, so initial calls, permission
+continuations, and crash recovery all have identical attribution. The Rowboat
+gateway receives the same values through `x-rowboat-use-case`,
+`x-rowboat-sub-use-case`, and `x-rowboat-agent-name`.
+
 #### Use-case taxonomy
 
 Every `llm_usage` emit point in the codebase:
 
 | `use_case` | `sub_use_case` | `agent_name`? | Where | File:line |
 |---|---|---|---|---|
-| `copilot_chat` | (none) | yes | User chat in renderer (turn runtime; the ALS default when no caller set a use case) | `packages/core/src/runtime/turns/bridges/real-usage-reporter.ts` (`reportModelUsage`); legacy runs (code-mode carve-out) still emit from `packages/core/src/runtime/legacy/engine.ts` (`streamLlm` finish-step) |
+| `copilot_chat` | (none) | yes | User chat in renderer (the durable default when no caller sets a use case) | `packages/core/src/runtime/turns/bridges/real-usage-reporter.ts` (`reportModelUsage`); legacy runs (code-mode carve-out) still emit from `packages/core/src/runtime/legacy/engine.ts` (`streamLlm` finish-step) |
 | `copilot_chat` | `scheduled` | yes | Background scheduled agent runner | `packages/core/src/agent-schedule/runner.ts:167` |
 | `copilot_chat` | `file_parse` | inherits | `parseFile` builtin tool inside any chat | `packages/core/src/runtime/tools/domains/parsing.ts:179` |
 | `copilot_chat` | `chat_title` | no | Auto-naming a chat from its first user message (`generateText`) | `packages/core/src/knowledge/generate_title.ts` |
 | `live_note_agent` | `routing` | no | Pass 1 routing classifier (`generateObject`) | `packages/core/src/knowledge/live-note/routing.ts:93` |
-| `live_note_agent` | `manual` | yes | Pass 2 agent run — user clicked Run / called the `run-live-note-agent` tool | `packages/core/src/knowledge/live-note/runner.ts:140` (createRun, `subUseCase: trigger`) |
+| `live_note_agent` | `manual` | yes | Pass 2 agent run — user clicked Run / called the `run-live-note-agent` tool | `packages/core/src/knowledge/live-note/runner.ts` (`startHeadlessAgent`, `subUseCase: trigger`) |
 | `live_note_agent` | `cron` | yes | Pass 2 agent run — cron expression matched | same call site |
 | `live_note_agent` | `window` | yes | Pass 2 agent run — fired inside a configured time-of-day window | same call site |
 | `live_note_agent` | `event` | yes | Pass 2 agent run — Pass 1 routing flagged the note for an incoming event | same call site |
 | `meeting_note` | (none) | no | Meeting transcript summarizer (`generateText`) | `packages/core/src/knowledge/summarize_meeting.ts:161` |
-| `knowledge_sync` | `agent_notes` | yes | Agent notes learning service | `packages/core/src/knowledge/agent_notes.ts:309` (createRun) |
-| `knowledge_sync` | `tag_notes` | yes | Note tagging | `packages/core/src/knowledge/tag_notes.ts:86` (createRun) |
-| `knowledge_sync` | `build_graph` | yes | Knowledge graph note creation | `packages/core/src/knowledge/build_graph.ts:253` (createRun) |
-| `knowledge_sync` | `inline_task_run` | yes | Inline `@rowboat` task execution (two call sites) | `packages/core/src/knowledge/inline_tasks.ts:471, 552` (createRun) |
+| `knowledge_sync` | `agent_notes` | yes | Agent notes learning service | `packages/core/src/knowledge/agent_notes.ts` (`runWhenPossible`) |
+| `knowledge_sync` | `tag_notes` | yes | Note tagging | `packages/core/src/knowledge/tag_notes.ts` (`runWhenPossible`) |
+| `knowledge_sync` | `build_graph` | yes | Knowledge graph note creation | `packages/core/src/knowledge/build_graph.ts` (`runWhenPossible`) |
+| `knowledge_sync` | `curation` | yes | Knowledge-note curation | `packages/core/src/knowledge/build_graph.ts` (`runWhenPossible`) |
+| `knowledge_sync` | `inline_task_run` | yes | Inline `@rowboat` task execution (two call sites) | `packages/core/src/knowledge/inline_tasks.ts` (`runWhenPossible`) |
 | `knowledge_sync` | `inline_task_classify` | no | Inline task scheduling classifier (`generateText`) | `packages/core/src/knowledge/inline_tasks.ts:673` |
-| `knowledge_sync` | `pre_built` | yes | Pre-built scheduled agents | `packages/core/src/pre_built/runner.ts:43` (createRun) |
+| `knowledge_sync` | `pre_built` | yes | Pre-built scheduled agents | `packages/core/src/pre_built/runner.ts` (`runWhenPossible`) |
 | `code_session` | (none) | yes | Code-section coding session in Rowboat mode (direct mode talks to the on-device coding agent and emits no `llm_usage`) | `packages/core/src/code-mode/sessions/service.ts` (createRun) |
 
 ##### `live_note_agent` sub-use-case shape
@@ -230,15 +238,16 @@ Persistent across sessions for the same user. Set via `posthog.people.set` or as
    - Anything else from main → `capture()` from `@x/core/dist/analytics/posthog.js`.
    - Anything else from renderer → add a typed wrapper to `apps/renderer/src/lib/analytics.ts` and call it from the UI code (don't call `posthog.capture()` directly from components).
 3. **If it's a new LLM call site**:
-   - Goes through `createRun`? Pass `useCase` (and optionally `subUseCase`) to the create call. The runtime auto-emits at every `finish-step` — no further code needed.
+   - Goes through the turn runtime? Pass `useCase` (and optionally `subUseCase`) to `sessions.sendMessage` or the headless runner. It is persisted on `turn_created`, and the runtime emits once per completed model call.
+   - Goes through legacy `createRun`? Pass the same fields to the create call.
    - Direct `generateText` / `generateObject`? Call `captureLlmUsage` after the call with `model`, `provider`, `usage` from the result.
-   - Inside a builtin tool? Call `getCurrentUseCase()` from `analytics/use_case.ts` first — the parent run's tag is propagated via `AsyncLocalStorage`. Use `ctx?.useCase ?? 'copilot_chat'` as fallback.
+   - Inside a builtin tool? Call `getCurrentUseCase()` from `analytics/use_case.ts`; the turn runtime restores the persisted context around every advance.
 4. **Update this file in the same PR.** That's the contract — without it, dashboards and downstream consumers drift.
 
 ## How to add a new use-case sub-case
 
 - **New `sub_use_case` under an existing top-level case**: just pick a string and add a row to the taxonomy table above. No code changes beyond the call site.
-- **New top-level `use_case`**: edit the `UseCase` enum in `packages/shared/src/runs.ts` and the matching `UseCase` type in `packages/core/src/analytics/use_case.ts`. Then update this doc.
+- **New top-level `use_case`**: edit the `UseCase` enum in `packages/shared/src/analytics.ts`. Then update this doc.
 
 ## Configuration
 
@@ -265,6 +274,7 @@ If unset, analytics no-op silently — you'll see `[Analytics] POSTHOG_KEY not s
 | `packages/core/src/analytics/posthog.ts` | Main-process client (`capture`, `identify`, `reset`, `shutdown`) |
 | `packages/core/src/analytics/usage.ts` | `captureLlmUsage()` helper |
 | `packages/core/src/analytics/use_case.ts` | `AsyncLocalStorage` for tool-internal LLM call inheritance |
+| `packages/shared/src/analytics.ts` | Shared use-case taxonomy and durable turn analytics schema |
 | `apps/renderer/src/lib/analytics.ts` | Renderer event wrappers |
 | `apps/renderer/src/hooks/useAnalyticsIdentity.ts` | Renderer identify/reset on OAuth events |
 | `apps/main/src/oauth-handler.ts` | Main-side identify/reset/sign-in/sign-out events |

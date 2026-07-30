@@ -1,4 +1,5 @@
 import type { z } from 'zod'
+import type { UseCase } from '@x/shared/src/analytics.js'
 import type { UserMessage } from '@x/shared/src/message.js'
 import type { SessionIndexEntry, SessionState } from '@x/shared/src/sessions.js'
 import type { JsonValue, RequestedAgent, TurnEvent } from '@x/shared/src/turns.js'
@@ -7,6 +8,8 @@ import type { JsonValue, RequestedAgent, TurnEvent } from '@x/shared/src/turns.j
 // testable with a plain fake instead of a window.ipc stub.
 export interface SendMessageConfig {
   agent: z.infer<typeof RequestedAgent>
+  useCase?: UseCase
+  subUseCase?: string
   autoPermission?: boolean
   maxModelCalls?: number
 }

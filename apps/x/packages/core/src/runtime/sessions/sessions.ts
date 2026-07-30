@@ -192,6 +192,12 @@ export class SessionsImpl implements ISessions {
                     ? { previousTurnId: state.latestTurnId }
                     : [],
                 input,
+                analytics: {
+                    useCase: config.useCase ?? "copilot_chat",
+                    ...(config.subUseCase
+                        ? { subUseCase: config.subUseCase }
+                        : {}),
+                },
                 config: {
                     humanAvailable: true,
                     ...(config.autoPermission === undefined
