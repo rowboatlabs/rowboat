@@ -1423,6 +1423,30 @@ function TuckedMascot({
                   </span>
                 </button>
               )}
+              {/* Share pin, left of the mic: one tap and the session sees
+                  the screen (consent badge + macOS indicator light up). The
+                  choice is STICKY — future summons start already sharing
+                  until it's turned off (persisted app-side). */}
+              <button
+                type="button"
+                onClick={() => sendAction('toggle-share')}
+                aria-label={state.screenSharing ? 'Stop sharing your screen' : 'Share your screen'}
+                title={
+                  state.screenSharing
+                    ? 'Sharing your screen — click to stop (stays off for future summons)'
+                    : 'Share your screen — stays on for future summons until turned off'
+                }
+                className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                style={{ ...noDragRegion, left: '39%', top: '17.5%' }}
+              >
+                <span
+                  className={`flex h-[16px] w-[16px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125 ${
+                    state.screenSharing ? 'bg-sky-500' : 'bg-neutral-600'
+                  }`}
+                >
+                  <MonitorUp className="h-2.5 w-2.5 text-white" />
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={onExpand}

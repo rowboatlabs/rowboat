@@ -250,8 +250,19 @@ export function hideQuickAsk() {
   if (win?.isVisible()) win.hide();
 }
 
+// Duplicated from ipc.ts (importing it would be a cycle): the hashless
+// window is the real app; utility windows all load hash routes.
+function findAppWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows().find((w) => {
+    if (w.isDestroyed()) return false;
+    const url = w.webContents.getURL();
+    const isApp = url.startsWith('app://') || url.startsWith('http://localhost');
+    return isApp && !url.includes('#');
+  });
+}
+
 export function toggleQuickAsk(viaShortcut = true) {
-  let win = getQuickAskWindow();
+  const win = getQuickAskWindow();
   // While a call pill is up, the shortcut brings the text back — expanding
   // a tucked mascot and focusing — instead of toggling a second surface
   // into existence.
@@ -265,6 +276,28 @@ export function toggleQuickAsk(viaShortcut = true) {
     win.hide();
     return;
   }
+  // VOICE-FIRST: the shortcut summons the mascot on a live voice session —
+  // the same relay as the card's tuck handle (the app starts the
+  // voice-preset call, and this window pins tucked near the cursor). The
+  // text card is the FALLBACK: programmatic shows (the toast), no app
+  // window to relay to, or the app declining because voice isn't
+  // configured (it calls quickAsk:show, which lands in the card path).
+  if (viaShortcut) {
+    const appWin = findAppWindow();
+    if (appWin) {
+      markTuckPending();
+      appWin.webContents.send('quick-ask:tuck', null);
+      return;
+    }
+  }
+  showSummonedCard(viaShortcut);
+}
+
+function showSummonedCard(viaShortcut: boolean) {
+  // A voice summon that fell back here must not leave its tuck hint armed —
+  // the next unrelated call would start collapsed.
+  tuckPendingAt = 0;
+  let win = getQuickAskWindow();
   if (!win) win = createWindow();
   mode = 'summoned';
   positionSummoned(win);

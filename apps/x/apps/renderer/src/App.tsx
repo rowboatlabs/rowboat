@@ -1230,6 +1230,11 @@ function App() {
   const inCallRef = useRef(false)
   // User explicitly shrank the full-screen call to the floating pill.
   const [callMinimized, setCallMinimized] = useState(false)
+  // A voice session started from the companion (⌥⇧Space summon or the
+  // card's tuck handle): its share toggle is STICKY — opted in once, every
+  // future summon starts already sharing, until toggled off.
+  const companionVoiceRef = useRef(false)
+  const companionVoiceStartingRef = useRef(false)
   // In-call mute: a full input pause, not just audio — mic audio stops
   // reaching Deepgram AND camera/screen frame capture stops, so nothing said
   // or shown while muted ever reaches the assistant. Output is untouched
@@ -1466,6 +1471,7 @@ function App() {
     setCallMinimized(false)
     inCallRef.current = false
     setInCall(false)
+    companionVoiceRef.current = false
   }, [video, setPttState])
 
   // The user-mute half that lives in the video pipeline: stop sampling
@@ -1790,7 +1796,14 @@ function App() {
     return window.ipc.on('video:popout-action', ({ action, text }) => {
       if (action === 'toggle-mic') handleToggleMic()
       else if (action === 'toggle-camera') handleToggleCamera()
-      else if (action === 'toggle-share') void handleToggleScreenShare()
+      else if (action === 'toggle-share') {
+        // Companion voice sessions remember the choice: sharing becomes the
+        // default for future summons until turned off.
+        if (companionVoiceRef.current) {
+          localStorage.setItem('companion-share-sticky', video.screenState !== 'live' ? '1' : '0')
+        }
+        void handleToggleScreenShare()
+      }
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
       else if (action === 'ptt-up') handlePttUp()
@@ -1944,9 +1957,29 @@ function App() {
         setCallMinimized(true)
         return
       }
-      if (voiceAvailable && ttsAvailable) void startCall('voice')
+      if (companionVoiceStartingRef.current) return
+      if (voiceAvailable && ttsAvailable) {
+        companionVoiceRef.current = true
+        companionVoiceStartingRef.current = true
+        void startCall('voice')
+          .then(() => {
+            // Sticky screen share: opted in once from the mascot's share
+            // pin → every summon starts already sharing, until toggled off.
+            if (localStorage.getItem('companion-share-sticky') === '1') {
+              void video.startScreenShare().then((shared) => {
+                if (!shared) setPermissionDialog('screen-recording')
+              })
+            }
+          })
+          .finally(() => {
+            companionVoiceStartingRef.current = false
+          })
+      } else {
+        // Voice-first has no voice — fall back to the text card.
+        void window.ipc.invoke('quickAsk:show', null).catch(() => {})
+      }
     })
-  }, [voiceAvailable, ttsAvailable, startCall])
+  }, [voiceAvailable, ttsAvailable, startCall, video])
 
   // Mirror the in-flight answer back to the bar while a quick-ask turn is
   // live: streaming text while generating, the final assistant message when
