@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, Check, ChevronDown, FileText, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, ChevronDown, FileText, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
@@ -280,7 +280,11 @@ function SubComposer({ onSubmit, onCancel, onHandoff }: {
           if (e.key === 'Enter' && text.trim()) {
             e.preventDefault()
             onSubmit(text.trim())
+            // Stay open, like the main add-row: Enter lands the step and
+            // the cursor is already on the next one. Escape closes.
+            setText('')
           }
+          if (e.key === 'Enter' && !text.trim()) onCancel()
           if (e.key === 'Escape') onCancel()
         }}
         placeholder="Add a step… mention @rowboat to hand it off"
@@ -424,7 +428,7 @@ function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetr
   )
 }
 
-function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, collapsed = false, onToggleCollapsed, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
+function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId, bubbles, depth = 0, changed = false, dimmed = false, spotlight = false, collapsed = false, onToggleCollapsed, childRows, onAddSub, onToggle, onCommitText, onDismiss, onRun, onStop, onOpenNote, onToggleComment, onComment, onOpenInChat, onEnterNext }: {
   item: TodoItem
   isRunning: boolean
   /** The live run is suspended on a permission prompt — approve from the chat. */
@@ -451,10 +455,16 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
   onCommitText: (text: string) => void
   onDismiss: () => void
   onRun: () => void
+  /** Stop the live run — the mistaken-assign escape hatch. */
+  onStop?: () => void
   onOpenNote: (path: string) => void
   onToggleComment: () => void
   onComment: (message: string) => void
   onOpenInChat: (sessionId: string) => void
+  /** Sub-items only: Enter while editing continues the indented list —
+   * commit this line, open the next step's composer (bullet-list muscle
+   * memory). */
+  onEnterNext?: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(item.text)
@@ -525,7 +535,10 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
               onBlur={commit}
               onKeyDown={(e) => {
                 if (e.key === 'Tab' && mention.show) { e.preventDefault(); mention.complete(); return }
-                if (e.key === 'Enter') commit()
+                if (e.key === 'Enter') {
+                  commit()
+                  if (draft.trim() && onEnterNext) onEnterNext()
+                }
                 if (e.key === 'Escape') { setDraft(item.text); setEditing(false) }
               }}
               className="w-full bg-transparent text-sm outline-none"
@@ -564,6 +577,20 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
               <span className={`${CHIP} ml-2 animate-pulse bg-primary/10 text-primary`}>
                 <Loader2 className="size-3 animate-spin" /> working…
               </span>
+            )}
+            {isRunning && onStop && (
+              /* Always visible while running — a mistaken assign must be
+                 stoppable without hunting through a hover tray. */
+              <IconTip label="Stop this run">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onStop() }}
+                  aria-label="Stop this run"
+                  className={`${CHIP} ml-1 border border-border text-muted-foreground hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400`}
+                >
+                  <Square className="size-2.5 fill-current" /> stop
+                </button>
+              </IconTip>
             )}
             {showGoChip && !lastReceipt && (
               <button type="button" onClick={(e) => { e.stopPropagation(); onRun() }} className={`${CHIP} ml-2 border border-border text-muted-foreground hover:bg-accent hover:text-foreground`}>
@@ -623,8 +650,9 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
         )}
       </div>
       {/* One floating action tray on hover — Slack's grammar: zero
-          resting clutter, one surface to learn. */}
-      <div className="absolute -top-3 right-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/todo:flex">
+          resting clutter, one surface to learn. Kept inside the row's own
+          band so it never reads as the previous row's controls. */}
+      <div className="absolute right-1 top-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/todo:flex">
         {!showConversation && (
           <IconTip label="Reply — tell @rowboat something about this">
             <button
@@ -902,8 +930,9 @@ function ConversationsSection({ threads, total = 0, running, needsApproval, conv
                 )}
                 {isRunning && !approvalMsg && <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
                 <span className="shrink-0 text-[11px] text-muted-foreground/60">{relativeTime(t.updatedAt)}</span>
-                {/* Same floating tray as items — one grammar everywhere. */}
-                <div className="absolute -top-3 right-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/thread:flex">
+                {/* Same floating tray as items — one grammar everywhere,
+                    inside the row's own band (never over the previous row). */}
+                <div className="absolute right-1 top-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/thread:flex">
                   <IconTip label="Reply">
                     <button
                       type="button"
@@ -1129,6 +1158,26 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const [seenBaseline, setSeenBaseline] = useState<string>(() => localStorage.getItem('todo.seenBaseline') ?? new Date(0).toISOString())
   const seenBaselineRef = useRef(seenBaseline)
   useEffect(() => { seenBaselineRef.current = seenBaseline }, [seenBaseline])
+  // Per-session read marks: opening a thread (expand, or into the sidebar)
+  // clears its dot immediately — the global baseline only advances on blur.
+  const [sessionSeenAt, setSessionSeenAt] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem('todo.sessionSeenAt') ?? '{}') as Record<string, string> } catch { return {} }
+  })
+  const sessionSeenAtRef = useRef(sessionSeenAt)
+  useEffect(() => { sessionSeenAtRef.current = sessionSeenAt }, [sessionSeenAt])
+  const markSessionSeen = useCallback((sessionId: string) => {
+    setSessionSeenAt((m) => {
+      const next = { ...m, [sessionId]: new Date().toISOString() }
+      // Bounded: drop the oldest marks past 300 — old sessions age out of
+      // the dot logic via the blur baseline anyway.
+      const keys = Object.keys(next)
+      if (keys.length > 300) {
+        for (const k of keys.sort((a, b) => next[a].localeCompare(next[b])).slice(0, keys.length - 300)) delete next[k]
+      }
+      localStorage.setItem('todo.sessionSeenAt', JSON.stringify(next))
+      return next
+    })
+  }, [])
   // Threads hidden from Home — an attention filter, never a record: the
   // sessions stay whole in chat history; losing this file just makes
   // threads reappear.
@@ -1173,7 +1222,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
         .filter((s) => !todoSessionIds.has(s.sessionId) && !hiddenThreadsRef.current.has(s.sessionId))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       const isActive = (s: (typeof candidates)[number]) =>
-        res.running.includes(`chat:${s.sessionId}`) || s.updatedAt > seenBaselineRef.current
+        res.running.includes(`chat:${s.sessionId}`)
+        || (s.updatedAt > seenBaselineRef.current && s.updatedAt > (sessionSeenAtRef.current[s.sessionId] ?? ''))
       const active = candidates.filter(isActive)
       const rest = candidates.filter((s) => !isActive(s))
       const threads = [...active, ...rest]
@@ -1391,13 +1441,21 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   }, [])
 
   const toggleThread = useCallback((sessionId: string) => {
+    // Opening IS reading — the dot clears the moment the thread expands.
+    markSessionSeen(sessionId)
     setExpandedThread((cur) => {
       const next = cur === sessionId ? null : sessionId
       if (next) void fetchStreamConv(next)
       return next
     })
     setChatReplyFor(null)
-  }, [fetchStreamConv])
+  }, [fetchStreamConv, markSessionSeen])
+
+  // Every door into a session marks it read — expand, or off to the sidebar.
+  const openInChat = useCallback((sessionId: string) => {
+    markSessionSeen(sessionId)
+    onOpenInChat(sessionId)
+  }, [markSessionSeen, onOpenInChat])
 
   const startChat = useCallback(async (text: string) => {
     const res = await window.ipc.invoke('todo:startChat', { text })
@@ -1461,7 +1519,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   }, [refetch])
 
   const addSub = useCallback(async (parentKey: string, text: string) => {
-    setSubDraftFor(null)
+    // The composer stays open — Enter lands this step with the cursor
+    // already on the next one (bullet-list muscle memory); Escape ends it.
     if (dirtyRef.current) await saveNowRef.current()
     await window.ipc.invoke('todo:addSubItem', { parentKey, text, run: mentionsRowboat(text) })
     await refetch()
@@ -1503,7 +1562,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
 
   const isChanged = (key: string): boolean => {
     const sid = sessions[key]
-    return !!sid && (sessionUpdatedAt[sid] ?? '') > seenBaseline
+    if (!sid) return false
+    const updatedAt = sessionUpdatedAt[sid] ?? ''
+    return updatedAt > seenBaseline && updatedAt > (sessionSeenAt[sid] ?? '')
   }
 
   // ---- Spotlight: connect the composer's destination to its source row ----
@@ -1726,12 +1787,22 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     dimmed={(triageFilter !== null && !blockMatches(item)) || (spotKey !== null && !blockContainsSpot(item))}
                     spotlight={item.key === spotKey}
                     collapsed={collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0}
-                    onToggleCollapsed={() => setRowCollapsed(item.key, !(collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0))}
+                    onToggleCollapsed={() => {
+                      const wasCollapsed = collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0
+                      // Expanding is reading — clear the row's dot.
+                      if (wasCollapsed && sessions[item.key]) markSessionSeen(sessions[item.key])
+                      setRowCollapsed(item.key, !wasCollapsed)
+                    }}
                     isRunning={running.has(item.key)}
                     needsApproval={needsApproval[item.key] ?? null}
                     onToggle={(checked) => {
                       const next = [...blocksRef.current!]
-                      next[index] = { kind: 'item', item: { ...item, checked } }
+                      // The parent carries its steps, both ways: checking it
+                      // completes them, unchecking reopens them.
+                      next[index] = {
+                        kind: 'item',
+                        item: { ...item, checked, children: item.children.map((c) => (c.checked === checked ? c : { ...c, checked })) },
+                      }
                       mutate(next)
                     }}
                     onCommitText={(text) => {
@@ -1752,6 +1823,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                     }}
                     onDismiss={() => void dismissKey(item.key)}
                     onRun={() => runItem(item.key)}
+                    onStop={() => void window.ipc.invoke('todo:stopRun', { key: item.key })}
                     onOpenNote={onOpenNote}
                     commentOpen={commentKey === item.key}
                     sessionId={sessions[item.key] ?? null}
@@ -1762,7 +1834,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                       else setCommentKey(commentKey === item.key ? null : item.key)
                     }}
                     onComment={(message) => commentOnItem(item.key, message)}
-                    onOpenInChat={onOpenInChat}
+                    onOpenInChat={openInChat}
                     onAddSub={() => {
                       setRowCollapsed(item.key, false)
                       setSubDraftFor(subDraftFor === item.key ? null : item.key)
@@ -1778,7 +1850,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                             dimmed={triageFilter !== null && !triageMatch(child)}
                             spotlight={child.key === spotKey}
                             collapsed={collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0}
-                            onToggleCollapsed={() => setRowCollapsed(child.key, !(collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0))}
+                            onToggleCollapsed={() => {
+                              const wasCollapsed = collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0
+                              if (wasCollapsed && sessions[child.key]) markSessionSeen(sessions[child.key])
+                              setRowCollapsed(child.key, !wasCollapsed)
+                            }}
                             isRunning={running.has(child.key)}
                             needsApproval={needsApproval[child.key] ?? null}
                             onToggle={(checked) => updateChild(index, ci, (c) => ({ ...c, checked }))}
@@ -1796,7 +1872,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                             }}
                             onDismiss={() => void dismissKey(child.key)}
                             onRun={() => runItem(child.key)}
+                            onStop={() => void window.ipc.invoke('todo:stopRun', { key: child.key })}
                             onOpenNote={onOpenNote}
+                            onEnterNext={() => setSubDraftFor(item.key)}
                             commentOpen={commentKey === child.key}
                             sessionId={sessions[child.key] ?? null}
                             bubbles={conversations[child.key] ?? []}
@@ -1804,7 +1882,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                               ? onComposeTodo({ kind: 'comment', key: child.key, itemText: child.text, quote: lastBubbleText(conversations[child.key]) })
                               : setCommentKey(commentKey === child.key ? null : child.key))}
                             onComment={(message) => commentOnItem(child.key, message)}
-                            onOpenInChat={onOpenInChat}
+                            onOpenInChat={openInChat}
                           />
                         ))}
                         {subDraftFor === item.key && (
@@ -1885,7 +1963,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
             replyFor={chatReplyFor}
             spotlightSessionId={spotSession}
             dimAll={spotKey !== null}
-            changedSessionIds={new Set(streamThreads.filter((t) => t.updatedAt > seenBaseline).map((t) => t.sessionId))}
+            changedSessionIds={new Set(streamThreads
+              .filter((t) => t.updatedAt > seenBaseline && t.updatedAt > (sessionSeenAt[t.sessionId] ?? ''))
+              .map((t) => t.sessionId))}
             onHide={hideThread}
             onViewAll={onOpenChatHistory}
             onToggle={toggleThread}
@@ -1894,7 +1974,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
               : setChatReplyFor(chatReplyFor === sid ? null : sid))}
             onSendReply={sendChatReply}
             onOpenNote={onOpenNote}
-            onOpenInChat={onOpenInChat}
+            onOpenInChat={openInChat}
           />
 
           {/* Done & dismissed — the archive, restorable */}
