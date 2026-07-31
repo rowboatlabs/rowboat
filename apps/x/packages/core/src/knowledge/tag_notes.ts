@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { runWhenPossible, toolInputPaths } from '../runtime/assembly/headless-app.js';
-import { getKgModel } from '../models/defaults.js';
+import { asRunModelOptions, getKgModel } from '../models/defaults.js';
 import { getErrorDetails } from '../application/lib/errors.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
@@ -100,7 +100,9 @@ async function tagNoteBatch(
     const { turnId, state } = await runWhenPossible({
         agentId: NOTE_TAGGING_AGENT,
         message,
-        ...(await getKgModel()),
+        useCase: 'knowledge_sync',
+        subUseCase: 'tag_notes',
+        ...asRunModelOptions(await getKgModel()),
         throwOnError: true,
     });
 

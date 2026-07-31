@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { ModelSelector, providerDisplayNames, type ModelRef } from "@/components/model-selector"
+import { ModelSelector, providerDisplayNames, type ModelRef, type ModelSelection } from "@/components/model-selector"
 import { useModels } from "@/hooks/use-models"
 
 // The unified model-selection surface (signed-in and BYOK alike): ONE
@@ -34,8 +34,13 @@ function refLabel(ref: ModelRef): string {
 
 export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
   // The effective assistant model — the same value every picker shows.
-  const { defaultModel, groups } = useModels()
-  const [taskModels, setTaskModels] = useState<Partial<Record<TaskKey, ModelRef | null>>>({})
+  const { defaultModel, defaultEffort, groups } = useModels()
+  const [taskModels, setTaskModels] = useState<Partial<Record<TaskKey, ModelSelection | null>>>({})
+  // The assistant field's value: the stored pair, reassembled from the two
+  // snapshot fields the models store exposes.
+  const assistantSelection: ModelSelection | null = defaultModel
+    ? { ...defaultModel, ...(defaultEffort ? { effort: defaultEffort } : {}) }
+    : null
 
   // Retired-model detection: the saved assistant no longer appears in its
   // provider's live list. Only trusted lists count — a failed fetch or an
@@ -63,23 +68,24 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
     if (dialogOpen) void load()
   }, [dialogOpen, load])
 
-  const setAssistant = useCallback(async (ref: ModelRef | null) => {
-    // No sentinel row on the assistant picker, so ref is never null — the
-    // assistant is the one required selection.
-    if (!ref) return
+  const setAssistant = useCallback(async (selection: ModelSelection | null) => {
+    // No sentinel row on the assistant picker, so the selection is never
+    // null — the assistant is the one required choice. It persists whole
+    // (Auto = no effort key).
+    if (!selection) return
     try {
-      await window.ipc.invoke("models:updateConfig", { assistantModel: ref })
+      await window.ipc.invoke("models:updateConfig", { assistantModel: selection })
       window.dispatchEvent(new Event("models-config-changed"))
     } catch {
       toast.error("Failed to save the Assistant model")
     }
   }, [])
 
-  const setTask = useCallback(async (key: TaskKey, ref: ModelRef | null) => {
+  const setTask = useCallback(async (key: TaskKey, selection: ModelSelection | null) => {
     const previous = taskModels
-    setTaskModels((prev) => ({ ...prev, [key]: ref }))
+    setTaskModels((prev) => ({ ...prev, [key]: selection }))
     try {
-      await window.ipc.invoke("models:updateConfig", { taskModels: { [key]: ref } })
+      await window.ipc.invoke("models:updateConfig", { taskModels: { [key]: selection } })
       window.dispatchEvent(new Event("models-config-changed"))
     } catch {
       toast.error("Failed to save the model")
@@ -106,8 +112,9 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
         </div>
         <ModelSelector
           variant="field"
-          value={defaultModel}
-          onChange={setAssistant}
+          value={assistantSelection}
+          effortSelectable
+          onChange={(selection) => void setAssistant(selection)}
           triggerTitle="Assistant model"
         />
         {assistantUnavailable && defaultModel && (
@@ -152,7 +159,8 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
                   allowCustom
                   inheritDefault={{ label: "Same as Assistant" }}
                   value={override}
-                  onChange={(ref) => void setTask(key, ref)}
+                  effortSelectable
+                  onChange={(selection) => void setTask(key, selection)}
                   triggerTitle={label}
                 />
                 <p className="text-[11px] text-muted-foreground truncate" title={override ? refLabel(override) : inheritText}>

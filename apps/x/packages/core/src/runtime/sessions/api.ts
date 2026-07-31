@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { UseCase } from "@x/shared/dist/analytics.js";
 import type { UserMessage } from "@x/shared/dist/message.js";
 import type {
     SessionIndexEntry,
@@ -14,6 +15,8 @@ import type { Turn } from "../turns/api.js";
 // Per-message configuration; it lands on the turn (sessions store none).
 export interface SendMessageConfig {
     agent: z.infer<typeof RequestedAgent>;
+    useCase?: UseCase;
+    subUseCase?: string;
     autoPermission?: boolean;
     maxModelCalls?: number;
     reasoningEffort?: "low" | "medium" | "high";

@@ -5,7 +5,6 @@ import { getBackgroundTaskAgentModel } from '../models/defaults.js';
 import { startHeadlessAgent, startWhenPossible } from '../runtime/assembly/headless-app.js';
 import { buildTriggerBlock } from '../runtime/assembly/build-trigger-block.js';
 import { backgroundTaskBus } from './bus.js';
-import { withUseCase } from '../analytics/use_case.js';
 import { capture } from '../analytics/posthog.js';
 
 const log = new PrefixLogger('BgTask:Agent');
@@ -150,26 +149,26 @@ export async function runBackgroundTask(
         const selection = await getBackgroundTaskAgentModel();
         const model = task.model || selection.model;
         const provider = task.provider ?? (task.model ? undefined : selection.provider);
+        // Effort pairs with whichever source supplied the model: an explicit
+        // task effort always wins; otherwise the category selection's effort
+        // applies only when the task didn't pin its own model.
+        const effort = task.effort ?? (task.model ? undefined : selection.effort);
         // Manual runs are user-requested (the Run button, or the copilot's
         // run-background-task-agent tool mid-chat) and must NOT wait for
         // chat-idle: the requesting chat turn holds the chat-activity lock,
         // so deferring here would deadlock the turn. Only autonomous
         // triggers (cron/window/event) defer.
         const start = trigger === 'manual' ? startHeadlessAgent : startWhenPossible;
-        // Establish the use-case context for the whole turn so every tool the
-        // agent calls (notably notify-user) reads `background_task_agent` via
-        // getCurrentUseCase(); the AsyncLocalStorage context set here flows
-        // through the turn's async execution chain.
-        const handle = await withUseCase(
-            { useCase: 'background_task_agent', subUseCase: trigger },
-            () => start({
-                agentId: 'background-task-agent',
-                message: buildMessage(slug, task, trigger, context, codeProject),
-                model,
-                ...(provider ? { provider } : {}),
-                throwOnError: true,
-            }),
-        );
+        const handle = await start({
+            agentId: 'background-task-agent',
+            message: buildMessage(slug, task, trigger, context, codeProject),
+            useCase: 'background_task_agent',
+            subUseCase: trigger,
+            model,
+            ...(provider ? { provider } : {}),
+            ...(effort ? { reasoningEffort: effort } : {}),
+            throwOnError: true,
+        });
 
         const runId = handle.turnId;
         // Record this turn in the task's runs.log pointer file (newest first).

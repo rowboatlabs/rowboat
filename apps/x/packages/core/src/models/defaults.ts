@@ -1,9 +1,12 @@
 import z from "zod";
-import { LlmModelConfig, LlmProvider, ModelRef, type TaskModelKey } from "@x/shared/dist/models.js";
+import { LlmModelConfig, LlmProvider, ModelSelection as ModelSelectionSchema, type TaskModelKey } from "@x/shared/dist/models.js";
 import { IModelConfigRepo } from "./repo.js";
 import container from "../di/container.js";
 
-export type ModelSelection = z.infer<typeof ModelRef>;
+// THE canonical selection: provider + model + the effort picked with them,
+// one value threaded from UI through IPC to run creation. Callers forward
+// `effort` verbatim into run options; absent = Auto (send nothing).
+export type ModelSelection = z.infer<typeof ModelSelectionSchema>;
 
 async function readConfig(): Promise<z.infer<typeof LlmModelConfig> | null> {
     try {
@@ -22,13 +25,34 @@ async function readConfig(): Promise<z.infer<typeof LlmModelConfig> | null> {
  * (via initial selection) and by every model pick in the UI; hidden
  * fallback defaults were removed with the v2 config migration.
  */
-export async function getDefaultModelAndProvider(): Promise<{ model: string; provider: string }> {
+export async function getDefaultModelAndProvider(): Promise<ModelSelection> {
     const cfg = await readConfig();
     const assistant = cfg?.assistantModel;
     if (!assistant) {
         throw new Error("No assistant model configured (connect a provider or sign in)");
     }
-    return { model: assistant.model, provider: assistant.provider };
+    return {
+        model: assistant.model,
+        provider: assistant.provider,
+        ...(assistant.effort ? { effort: assistant.effort } : {}),
+    };
+}
+
+/**
+ * A resolved selection as headless-run options: the `effort` stored on the
+ * selection travels as the run option `reasoningEffort`. Spread this instead
+ * of the raw selection (whose `effort` key run options don't know).
+ */
+export function asRunModelOptions(selection: ModelSelection): {
+    model: string;
+    provider: string;
+    reasoningEffort?: "low" | "medium" | "high";
+} {
+    return {
+        model: selection.model,
+        provider: selection.provider,
+        ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
+    };
 }
 
 /**
@@ -66,15 +90,20 @@ export async function resolveProviderConfig(name: string): Promise<z.infer<typeo
 }
 
 /**
- * Per-task model resolution: the explicit taskModels override wins, else the
- * assistant model. No hidden per-task defaults — the v2 migration
- * materialized the historical curated models as visible overrides.
+ * Per-task model resolution: the explicit taskModels override wins (with the
+ * effort stored on it), else the assistant model+effort pair. No hidden
+ * per-task defaults — the v2 migration materialized the historical curated
+ * models as visible overrides.
  */
 async function getCategoryModel(category: TaskModelKey): Promise<ModelSelection> {
     const cfg = await readConfig();
     const override = cfg?.taskModels?.[category];
     if (override) {
-        return { model: override.model, provider: override.provider };
+        return {
+            model: override.model,
+            provider: override.provider,
+            ...(override.effort ? { effort: override.effort } : {}),
+        };
     }
     return getDefaultModelAndProvider();
 }

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, SlidersHorizontal, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -96,6 +96,55 @@ function avatarColor(from?: string): string {
 
 function latestMessage(thread: GmailThread): GmailThreadMessage | undefined {
   return thread.messages[thread.messages.length - 1]
+}
+
+// Date dividers inside the Important subsections. All buckets are calendar
+// buckets: "This week" runs from the most recent Sunday, not a rolling 7
+// days — on a Thursday, last Friday files under Earlier. Yesterday wins over
+// the week bucket when they straddle the Sunday boundary.
+type DateBucket = 'today' | 'yesterday' | 'week' | 'earlier'
+
+const DATE_BUCKET_LABELS: Record<DateBucket, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  week: 'This week',
+  earlier: 'Earlier',
+}
+
+function dateBucketOf(value?: string): DateBucket {
+  if (!value) return 'earlier'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'earlier'
+  const now = new Date()
+  if (date.toDateString() === now.toDateString()) return 'today'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return 'yesterday'
+  const weekStart = new Date(now)
+  weekStart.setDate(now.getDate() - now.getDay())
+  weekStart.setHours(0, 0, 0, 0)
+  if (date.getTime() >= weekStart.getTime()) return 'week'
+  return 'earlier'
+}
+
+function withDateDividers(threads: GmailThread[], renderThread: (thread: GmailThread) => ReactNode): ReactNode[] {
+  const out: ReactNode[] = []
+  let prev: DateBucket | null = null
+  threads.forEach((thread, index) => {
+    const bucket = dateBucketOf(latestMessage(thread)?.date || thread.date)
+    if (bucket !== prev) {
+      prev = bucket
+      // Keyed by position too: threads arrive newest-first, but a stray
+      // out-of-order thread would repeat a bucket.
+      out.push(
+        <div key={`bucket-${bucket}-${index}`} className="gmail-date-divider">
+          {DATE_BUCKET_LABELS[bucket]}
+        </div>,
+      )
+    }
+    out.push(renderThread(thread))
+  })
+  return out
 }
 
 // The label set (chips, filter pills, correction dropdown) comes from the
@@ -3637,7 +3686,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                     {visibleNeedsYou.length}{important.hasReachedEnd ? '' : '+'} thread{visibleNeedsYou.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                {visibleNeedsYou.map((t) => renderRow(t, 'important', t.draft_response ? 'Reply ready' : null))}
+                {withDateDividers(visibleNeedsYou, (t) => renderRow(t, 'important', t.draft_response ? 'Reply ready' : null))}
               </section>
             ) : important.hasReachedEnd && !important.loadingPage ? (
               <div className="gmail-caughtup">You’re caught up — nothing needs a reply.</div>
@@ -3650,7 +3699,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                     {visibleWaiting.length}{important.hasReachedEnd ? '' : '+'} thread{visibleWaiting.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                {visibleWaiting.map((t) => renderRow(t, 'important', waitingChip(t), true))}
+                {withDateDividers(visibleWaiting, (t) => renderRow(t, 'important', waitingChip(t), true))}
               </section>
             )}
             {/* Pages of "Important" feed both sections above, so the sentinel

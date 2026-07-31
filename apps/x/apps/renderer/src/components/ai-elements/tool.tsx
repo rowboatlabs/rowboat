@@ -12,17 +12,10 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ToolUIPart } from "ai";
-import {
-  ChevronDownIcon,
-  CircleCheck,
-  LoaderIcon,
-  ShieldCheckIcon,
-  XCircleIcon,
-} from "lucide-react";
-import { type ComponentProps, type ReactNode, isValidElement, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import type { ToolCall, ToolGroup as ToolGroupType } from "@/lib/chat-conversation";
-import { getToolActionsSummary, getToolDisplayName, getToolErrorText, getToolGroupSummary, toToolState } from "@/lib/chat-conversation";
+import { ChevronDownIcon, LoaderIcon, ShieldCheckIcon } from "lucide-react";
+import { type ComponentProps, type ReactNode, isValidElement, useEffect, useRef, useState } from "react";
+import type { ToolCall, ToolGroup as ToolGroupType, ToolRowSummary } from "@/lib/chat-conversation";
+import { getToolActionsSummary, getToolErrorText, getToolRowSummary, toToolState } from "@/lib/chat-conversation";
 
 const formatToolValue = (value: unknown) => {
   if (typeof value === "string") return value;
@@ -34,309 +27,304 @@ const formatToolValue = (value: unknown) => {
   }
 };
 
-const ToolCode = ({
-  code,
-  className,
-}: {
-  code: string;
-  className?: string;
-}) => (
-  <pre
-    className={cn(
-      "whitespace-pre-wrap text-xs font-mono break-all",
-      className
-    )}
-  >
-    {code || "(empty)"}
-  </pre>
+/* ── Quiet tool rows ─────────────────────────────────────────────────
+ * A tool call is one borderless 13px line: status glyph, medium-weight
+ * verb, muted detail, faint trailing stat. The whole row is the expand
+ * trigger; a settled row leads with the expand chevron (down collapsed,
+ * up while open — same as the group header), while running/failed rows
+ * keep a hover-revealed trailing chevron. Completed rows fade to muted
+ * so a finished read is unremarkable and a failure stands out.
+ *
+ * Every quiet surface in the transcript (generic tools, web search,
+ * permissions, app actions) shares these two classes so the row look is
+ * defined once. Custom surfaces compose them instead of re-deriving.
+ */
+
+// Outer wrapper: negative margins pull adjacent rows through the
+// conversation's gap-8 so consecutive tool lines pack tightly; nested
+// contexts (group children, compact panels) override with my-0.
+export const quietRowContainerClass = "not-prose -my-3 w-full";
+
+// The one-line row itself (also the collapse trigger where clickable).
+export const quietRowTriggerClass =
+  "group/row -mx-1.5 flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-[3px] text-left text-[13px] leading-5 hover:bg-muted/50";
+
+export type ToolProps = ComponentProps<typeof Collapsible>;
+
+export const Tool = ({ className, children, ...props }: ToolProps) => (
+  <Collapsible className={cn(quietRowContainerClass, className)} {...props}>
+    {children}
+  </Collapsible>
 );
 
-export type ToolAutoPermissionDetail = {
-  decision: "allow";
-  reason: string;
-};
+// Fixed-width glyph slot so the verb column doesn't shift as a row moves
+// through running → settled. Shared by the custom quiet surfaces too.
+export const quietRowGlyphSlotClass = "flex size-3 shrink-0 items-center justify-center";
 
-export type ToolProps = ComponentProps<typeof Collapsible> & {
-  autoPermissionDetail?: ToolAutoPermissionDetail;
-};
-
-export const Tool = ({ className, children, autoPermissionDetail, ...props }: ToolProps) => {
-  const toolCard = (
-    <Collapsible
-      className={cn(
-        autoPermissionDetail
-          ? "w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30"
-          : "not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30",
-        className
-      )}
-      {...props}
-    >
-      {children}
-    </Collapsible>
-  );
-
-  if (!autoPermissionDetail) return toolCard;
-
-  return (
-    <div className="not-prose mb-4 w-full">
-      {toolCard}
-      <div className="mt-1 flex justify-end px-3">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex cursor-help items-center gap-1 text-[11px] text-muted-foreground/70">
-              <ShieldCheckIcon className="size-3 text-muted-foreground/70" />
-              Auto-approved
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" align="end" className="max-w-sm">
-            {autoPermissionDetail.reason}
-          </TooltipContent>
-        </Tooltip>
-      </div>
-    </div>
-  );
-};
+// Lead glyph: spinner while running, a red dot on failure, and — once done —
+// the same expand chevron the settled tool-group header uses (down collapsed,
+// up while open), so the slot never reads as a hole where the spinner was.
+const ToolLeadGlyph = ({ state }: { state: ToolUIPart["state"] }) => (
+  <span className={quietRowGlyphSlotClass}>
+    {state === "output-error" ? (
+      <span className="size-1.5 rounded-full bg-red-600 dark:bg-red-500" />
+    ) : state === "output-available" ? (
+      <ChevronDownIcon className="size-3 text-muted-foreground/50 transition-transform group-data-[state=open]/row:rotate-180" />
+    ) : (
+      <LoaderIcon className="size-3 animate-spin text-muted-foreground" />
+    )}
+  </span>
+);
 
 export type ToolHeaderProps = {
+  /** Plain title (legacy callers); prefer `summary` for structured rows. */
   title?: string;
+  summary?: ToolRowSummary;
   type: ToolUIPart["type"];
   state: ToolUIPart["state"];
   className?: string;
-  /** Hide the leading status icon (used for child rows inside a tool group). */
+  /** Hide the leading status glyph (nested rows that carry their own). */
   hideLeadIcon?: boolean;
-};
-
-// Lead icon shown to the left of the tool label: spinner while running, a
-// green check when done, a red cross on error. Shared by ToolHeader (single
-// tools) and the tool-call group.
-const getLeadIcon = (state: ToolUIPart["state"]): ReactNode => {
-  if (state === "output-available") return <CircleCheck className="size-4 shrink-0 text-green-600" />;
-  if (state === "output-error") return <XCircleIcon className="size-4 shrink-0 text-red-600" />;
-  return <LoaderIcon className="size-4 shrink-0 animate-spin text-muted-foreground" />;
+  /** Shield glyph + reason tooltip for auto-approved permission calls. */
+  autoApproved?: { reason: string };
+  /** First line of the error, rendered inline under the row (no click needed). */
+  errorLine?: string;
 };
 
 export const ToolHeader = ({
   className,
   title,
+  summary,
   type,
   state,
   hideLeadIcon,
+  autoApproved,
+  errorLine,
   ...props
 }: ToolHeaderProps) => {
-  const displayTitle = title ?? type.split("-").slice(1).join("-")
+  const row: ToolRowSummary = summary ?? { verb: title ?? type.split("-").slice(1).join("-") };
+  const done = state === "output-available";
+  const failed = state === "output-error";
+  const hoverTitle = [row.verb, row.dimPrefix, row.detail, row.stat].filter(Boolean).join(" ");
 
   return (
-    <CollapsibleTrigger
-      className={cn(
-        "group flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5",
-        className
-      )}
-      {...props}
-    >
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        {!hideLeadIcon && getLeadIcon(state)}
+    <>
+      <CollapsibleTrigger
+        className={cn(quietRowTriggerClass, className)}
+        title={hoverTitle}
+        {...props}
+      >
+        {!hideLeadIcon && <ToolLeadGlyph state={state} />}
         <span
-          className="min-w-0 flex-1 truncate text-left font-medium text-sm"
-          title={displayTitle}
+          className={cn(
+            "shrink-0 font-medium",
+            done ? "text-muted-foreground" : "text-foreground",
+            failed && "text-foreground",
+            row.verbMono && "font-mono text-xs"
+          )}
         >
-          {displayTitle}
+          {row.verb}
         </span>
-      </div>
-      <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-    </CollapsibleTrigger>
-  )
+        {(row.detail || row.dimPrefix) && (
+          <span
+            className={cn(
+              "min-w-0 truncate text-muted-foreground",
+              row.detailMono && "font-mono text-xs"
+            )}
+          >
+            {row.dimPrefix && <span className="text-muted-foreground/50">{row.dimPrefix}</span>}
+            {row.detail}
+          </span>
+        )}
+        {row.diff && (row.diff.added > 0 || row.diff.removed > 0) && (
+          <span className="shrink-0 font-mono text-xs tabular-nums">
+            <span className="text-green-600 dark:text-green-500">+{row.diff.added}</span>{" "}
+            <span className="text-red-600 dark:text-red-500">-{row.diff.removed}</span>
+          </span>
+        )}
+        {row.stat && (
+          <span className={cn("shrink-0 tabular-nums", failed ? "text-red-600 dark:text-red-500" : "text-muted-foreground/60")}>
+            {row.stat}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          {autoApproved && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <ShieldCheckIcon className="size-3 text-muted-foreground/50" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="end" className="max-w-sm">
+                Auto-approved: {autoApproved.reason}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {(hideLeadIcon || !done) && (
+            <ChevronDownIcon className="size-3 text-muted-foreground/50 opacity-0 transition-[opacity,transform] group-hover/row:opacity-100 group-data-[state=open]/row:rotate-180 group-data-[state=open]/row:opacity-100" />
+          )}
+        </span>
+      </CollapsibleTrigger>
+      {failed && errorLine && (
+        <p className="mb-0.5 ml-5 truncate font-mono text-xs text-red-600 dark:text-red-500" title={errorLine}>
+          {errorLine}
+        </p>
+      )}
+    </>
+  );
 };
 
 export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 
-export const ToolContent = ({ className, ...props }: ToolContentProps) => (
+// Expanded detail hangs off a hairline left rule, aligned under the glyph.
+export const ToolContent = ({ className, children, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
       "overflow-hidden text-popover-foreground outline-none data-[state=open]:animate-[collapsible-down_0.09s_ease-out] data-[state=closed]:animate-[collapsible-up_0.08s_ease-in]",
       className
     )}
     {...props}
-  />
+  >
+    <div className="my-1 ml-[2.5px] border-l-2 border-border pl-3">{children}</div>
+  </CollapsibleContent>
 );
 
-/* ── Tabbed content (Parameters / Result) ────────────────────────── */
+/* ── Expanded parameters / result ────────────────────────────────── */
 
-export type ToolTabbedContentProps = {
+export type ToolIODetailsProps = {
   input: ToolUIPart["input"];
   output: ToolUIPart["output"];
   errorText?: ToolUIPart["errorText"];
 };
 
-export const ToolTabbedContent = ({
-  input,
-  output,
-  errorText,
-}: ToolTabbedContentProps) => {
-  const [activeTab, setActiveTab] = useState<"parameters" | "result">("parameters");
+const ToolIOSection = ({ label, children, error }: { label: string; children: ReactNode; error?: boolean }) => (
+  <div className="min-w-0">
+    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+      {label}
+    </p>
+    <div
+      className={cn(
+        "max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-xs",
+        error ? "text-destructive" : "text-muted-foreground"
+      )}
+    >
+      {children}
+    </div>
+  </div>
+);
+
+export const ToolIODetails = ({ input, output, errorText }: ToolIODetailsProps) => {
   const hasOutput = output != null || !!errorText;
 
-  let OutputNode: ReactNode = null;
+  let outputNode: ReactNode = null;
   if (errorText) {
-    OutputNode = <ToolCode code={errorText} className="text-destructive" />;
+    outputNode = errorText;
   } else if (output != null) {
     if (typeof output === "object" && !isValidElement(output)) {
-      OutputNode = <ToolCode code={formatToolValue(output)} />;
+      outputNode = formatToolValue(output);
     } else if (typeof output === "string") {
-      OutputNode = <ToolCode code={output} />;
+      outputNode = output;
     } else {
-      OutputNode = <div>{output as ReactNode}</div>;
+      outputNode = <div>{output as ReactNode}</div>;
     }
   }
 
   return (
-    <div className="border-t">
-      {/* Tabs */}
-      <div className="flex">
-        <button
-          type="button"
-          className={cn(
-            "px-4 py-2 text-xs font-medium transition-colors border-b-2",
-            activeTab === "parameters"
-              ? "border-foreground text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          )}
-          onClick={() => setActiveTab("parameters")}
-        >
-          Parameters
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "px-4 py-2 text-xs font-medium transition-colors border-b-2",
-            activeTab === "result"
-              ? "border-foreground text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          )}
-          onClick={() => setActiveTab("result")}
-        >
-          Result
-        </button>
-      </div>
-
-      {/* Tab content */}
-      <div className="p-3">
-        {activeTab === "parameters" && (
-          <div className="rounded-md border bg-muted/50 p-3 max-h-64 overflow-auto">
-            <ToolCode code={formatToolValue(input ?? {})} />
-          </div>
-        )}
-        {activeTab === "result" && (
-          <div
-            className={cn(
-              "rounded-md border p-3 max-h-64 overflow-auto",
-              errorText ? "bg-destructive/10" : "bg-muted/50"
-            )}
-          >
-            {hasOutput ? (
-              <div className={cn(errorText && "text-destructive")}>
-                {OutputNode}
-              </div>
-            ) : (
-              <span className="text-xs text-muted-foreground">(pending...)</span>
-            )}
-          </div>
-        )}
-      </div>
+    <div className="flex flex-col gap-2 py-0.5">
+      <ToolIOSection label="Parameters">{formatToolValue(input ?? {}) || "(empty)"}</ToolIOSection>
+      {hasOutput ? (
+        <ToolIOSection label={errorText ? "Error" : "Result"} error={!!errorText}>
+          {outputNode}
+        </ToolIOSection>
+      ) : (
+        <ToolIOSection label="Result">(pending...)</ToolIOSection>
+      )}
     </div>
   );
 };
 
+/* ── Tool group ──────────────────────────────────────────────────────
+ * Consecutive plain tool calls share one collapsible header row. While
+ * the turn streams the children stay visible so per-tool labels are
+ * readable in real time; the group auto-collapses once every call has
+ * settled (and loads collapsed from history).
+ */
+
 export type ToolGroupProps = {
-  group: ToolGroupType
-  isToolOpen: (toolId: string) => boolean
-  onToolOpenChange: (toolId: string, open: boolean) => void
-}
+  group: ToolGroupType;
+  isToolOpen: (toolId: string) => boolean;
+  onToolOpenChange: (toolId: string, open: boolean) => void;
+  /** Auto-approved permission info for a child row's shield glyph. */
+  getAutoApproved?: (toolId: string) => { reason: string } | undefined;
+};
 
 const getGroupState = (tools: ToolCall[]): ToolUIPart["state"] => {
-  if (tools.some(t => t.status === 'error')) return 'output-error'
-  if (tools.some(t => t.status === 'running')) return 'input-available'
-  if (tools.some(t => t.status === 'pending')) return 'input-streaming'
-  return 'output-available'
-}
+  if (tools.some((t) => t.status === "error")) return "output-error";
+  if (tools.some((t) => t.status === "running")) return "input-available";
+  if (tools.some((t) => t.status === "pending")) return "input-streaming";
+  return "output-available";
+};
 
-export const ToolGroupComponent = ({ group, isToolOpen, onToolOpenChange }: ToolGroupProps) => {
-  const [open, setOpen] = useState(false)
-  const state = getGroupState(group.items)
-  const isCompleted = state === 'output-available' || state === 'output-error'
-  const runningTool = group.items.find(t => t.status === 'running' || t.status === 'pending')
-  const currentTool = runningTool ?? group.items[group.items.length - 1]
-  const toolCount = group.items.length
-  const ranLabel = `Ran ${toolCount} tool${toolCount !== 1 ? 's' : ''}`
-  const actions = isCompleted ? getToolActionsSummary(group.items) : ''
-  // Plain string used as the AnimatePresence key + tooltip; the rendered node
-  // shows the action summary in a lighter gray than the "Ran N tools" prefix.
+export const ToolGroupComponent = ({ group, isToolOpen, onToolOpenChange, getAutoApproved }: ToolGroupProps) => {
+  const state = getGroupState(group.items);
+  const isCompleted = state === "output-available" || state === "output-error";
+  // Live groups start expanded; history-loaded (already settled) start closed.
+  const [open, setOpen] = useState(!isCompleted);
+  const wasCompleted = useRef(isCompleted);
+  useEffect(() => {
+    if (!wasCompleted.current && isCompleted) setOpen(false);
+    wasCompleted.current = isCompleted;
+  }, [isCompleted]);
+
+  const toolCount = group.items.length;
   const summaryText = isCompleted
-    ? `${ranLabel} · ${actions}`
-    : currentTool ? getToolDisplayName(currentTool) : getToolGroupSummary(group.items)
-  const summaryNode: ReactNode = isCompleted
-    ? <>{ranLabel} <span className="font-normal text-muted-foreground">{`· ${actions}`}</span></>
-    : summaryText
-
-  const leadIcon = getLeadIcon(state)
+    ? `Ran ${toolCount} tool${toolCount !== 1 ? "s" : ""}`
+    : `Running ${toolCount} tool${toolCount !== 1 ? "s" : ""}…`;
+  const actions = isCompleted ? getToolActionsSummary(group.items) : "";
 
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className="not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30"
-    >
-      <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          {leadIcon}
-          <div className="relative min-w-0 flex-1 overflow-hidden" style={{ height: '1.25rem' }}>
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.span
-                key={summaryText}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.18, ease: 'easeOut' }}
-                className="absolute inset-0 truncate text-left font-medium text-sm leading-5"
-                title={summaryText}
-              >
-                {summaryNode}
-              </motion.span>
-            </AnimatePresence>
-          </div>
-        </div>
-        <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+    <Collapsible open={open} onOpenChange={setOpen} className={quietRowContainerClass}>
+      <CollapsibleTrigger
+        className={quietRowTriggerClass}
+        title={actions ? `${summaryText} · ${actions}` : summaryText}
+      >
+        {isCompleted ? (
+          <ChevronDownIcon
+            className={cn("size-3 shrink-0 text-muted-foreground/50 transition-transform", open && "rotate-180")}
+          />
+        ) : (
+          <LoaderIcon className="size-3 shrink-0 animate-spin text-muted-foreground" />
+        )}
+        <span className={cn("shrink-0 font-medium", isCompleted ? "text-muted-foreground" : "text-foreground")}>
+          {summaryText}
+        </span>
+        {actions && <span className="min-w-0 truncate text-muted-foreground/60">· {actions}</span>}
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden data-[state=open]:animate-[collapsible-down_0.09s_ease-out] data-[state=closed]:animate-[collapsible-up_0.08s_ease-in]">
-        <div className="flex flex-col gap-2 p-2">
+        <div className="ml-[5px] flex flex-col border-l border-border/70 pl-2.5">
           {group.items.map((tool) => {
-            const toolState = toToolState(tool.status)
-            const isOpen = isToolOpen(tool.id)
+            const toolState = toToolState(tool.status);
+            const isOpen = isToolOpen(tool.id);
+            const errorText = getToolErrorText(tool);
             return (
-              <Tool
-                key={tool.id}
-                open={isOpen}
-                onOpenChange={(o) => onToolOpenChange(tool.id, o)}
-                className="mb-0 rounded-[20px] border-border/60 bg-transparent hover:border-border/60"
-              >
+              <Tool key={tool.id} open={isOpen} onOpenChange={(o) => onToolOpenChange(tool.id, o)} className="my-0">
                 <ToolHeader
-                  title={getToolDisplayName(tool)}
+                  summary={getToolRowSummary(tool)}
                   type={`tool-${tool.name}`}
                   state={toolState}
-                  className="text-muted-foreground"
-                  hideLeadIcon
+                  autoApproved={getAutoApproved?.(tool.id)}
+                  errorLine={errorText?.split("\n")[0]}
                 />
                 <ToolContent>
-                  <ToolTabbedContent
+                  <ToolIODetails
                     input={tool.input as ToolUIPart["input"]}
                     output={tool.result as ToolUIPart["output"]}
-                    errorText={getToolErrorText(tool)}
+                    errorText={errorText}
                   />
                 </ToolContent>
               </Tool>
-            )
+            );
           })}
         </div>
       </CollapsibleContent>
     </Collapsible>
-  )
-}
+  );
+};

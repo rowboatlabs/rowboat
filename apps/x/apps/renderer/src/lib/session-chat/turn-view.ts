@@ -389,6 +389,10 @@ export type SessionChatState = {
   // Kept separate from processing so permission/ask-human controls remain
   // interactive while the turn is suspended for user input.
   isWaitingOnHuman: boolean
+  // The latest turn's model selection — resolved model + the reasoning
+  // effort it ran with. A reopened session's composer restores its
+  // selection from this (settings only seed brand-new chats).
+  lastSelection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } | null
 }
 
 function toolCallPartOf(tc: ToolCallState) {
@@ -506,7 +510,16 @@ export function buildSessionChatState(
 
   const settled = status === 'completed' || status === 'failed' || status === 'cancelled'
   const waitingOnHuman = allPermissionRequests.size > 0 || pendingAskHumanRequests.size > 0
+  const lastModel = latest?.definition.agent.resolved.model
+  const lastEffort = latest?.definition.config.reasoningEffort
   return {
+    lastSelection: lastModel
+      ? {
+          provider: lastModel.provider,
+          model: lastModel.model,
+          ...(lastEffort ? { effort: lastEffort } : {}),
+        }
+      : null,
     conversation,
     currentAssistantMessage: stripVoiceTags(overlay.text),
     sessionUsage,

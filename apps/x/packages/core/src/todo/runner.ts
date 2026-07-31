@@ -1,5 +1,4 @@
 import { getDefaultModelAndProvider } from '../models/defaults.js';
-import { withUseCase } from '../analytics/use_case.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import type { TurnStreamEvent } from '@x/shared/dist/turns.js';
@@ -278,21 +277,26 @@ async function driveTurn(
     try {
         let sent: { turnId: string };
         try {
-            // Chat parity: the assistant model unless the composer overrode it.
-            const { model, provider } = modelOverride ?? await getDefaultModelAndProvider();
-            sent = await withUseCase(
-                { useCase: 'todo_item_agent', subUseCase },
-                () => sessions.sendMessage(
-                    sessionId,
-                    { role: 'user', content: message },
-                    {
-                        agent: {
-                            agentId: 'todo-item-agent',
-                            overrides: { model: { provider, model } },
-                        },
-                        autoPermission,
+            // Chat parity: the assistant selection (model + effort) unless the
+            // composer overrode the model — an override carries no effort of
+            // its own yet (todo:* sends a bare ref; effort rides only with
+            // the assistant pair, per the pairing rule).
+            const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
+                modelOverride ?? await getDefaultModelAndProvider();
+            const { model, provider } = selection;
+            sent = await sessions.sendMessage(
+                sessionId,
+                { role: 'user', content: message },
+                {
+                    agent: {
+                        agentId: 'todo-item-agent',
+                        overrides: { model: { provider, model } },
                     },
-                ),
+                    useCase: 'todo_item_agent',
+                    subUseCase,
+                    ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
+                    autoPermission,
+                },
             );
         } catch (err) {
             if (err instanceof TurnNotSettledError) {
@@ -412,20 +416,23 @@ async function driveChatTurn(
     try {
         let sent: { turnId: string };
         try {
-            const { model, provider } = modelOverride ?? await getDefaultModelAndProvider();
-            sent = await withUseCase(
-                { useCase: 'copilot_chat', subUseCase: 'home_stream' },
-                () => sessions.sendMessage(
-                    sessionId,
-                    { role: 'user', content: message },
-                    {
-                        agent: {
-                            agentId: 'copilot',
-                            overrides: { model: { provider, model } },
-                        },
-                        autoPermission,
+            // Same selection semantics as runTodoItem above.
+            const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
+                modelOverride ?? await getDefaultModelAndProvider();
+            const { model, provider } = selection;
+            sent = await sessions.sendMessage(
+                sessionId,
+                { role: 'user', content: message },
+                {
+                    agent: {
+                        agentId: 'copilot',
+                        overrides: { model: { provider, model } },
                     },
-                ),
+                    useCase: 'copilot_chat',
+                    subUseCase: 'home_stream',
+                    ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
+                    autoPermission,
+                },
             );
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);

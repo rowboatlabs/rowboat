@@ -328,21 +328,20 @@ export class AcpClient {
     }
 
     // The client side of ACP: the agent calls these on us. These read the CURRENT
-    // handlers off `self` so follow-up prompts can swap them via setHandlers().
+    // handlers off `this` so follow-up prompts can swap them via setHandlers().
     private buildClient(): Client {
-        const self = this;
         return {
-            async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
-                return self.broker.resolve(params);
+            requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+                return this.broker.resolve(params);
             },
-            async sessionUpdate(params: SessionNotification): Promise<void> {
-                self.onEvent(toEvent(params.update));
+            sessionUpdate: async (params: SessionNotification): Promise<void> => {
+                this.onEvent(toEvent(params.update));
             },
-            async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
+            readTextFile: async (params: ReadTextFileRequest): Promise<ReadTextFileResponse> => {
                 const content = await fs.readFile(params.path, 'utf8');
                 return { content };
             },
-            async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
+            writeTextFile: async (params: WriteTextFileRequest): Promise<WriteTextFileResponse> => {
                 await fs.writeFile(params.path, params.content);
                 return {};
             },

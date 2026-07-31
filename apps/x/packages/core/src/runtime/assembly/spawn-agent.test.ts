@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
+import type { TurnAnalytics } from "@x/shared/dist/analytics.js";
 import type { TurnEvent, TurnState } from "@x/shared/dist/turns.js";
 import type { ITurnRuntime } from "../turns/api.js";
 import type {
@@ -25,6 +26,7 @@ const TS = "2026-07-07T10:00:00Z";
 function parentCreated(
     overrides: {
         requested?: z.infer<typeof TurnEvent> extends never ? never : unknown;
+        analytics?: TurnAnalytics;
     } & Record<string, unknown> = {},
 ): Array<z.infer<typeof TurnEvent>> {
     return [
@@ -45,6 +47,7 @@ function parentCreated(
             },
             context: [],
             input: { role: "user", content: "hi" },
+            analytics: overrides.analytics,
             config: {
                 autoPermission: true,
                 humanAvailable: false,
@@ -134,7 +137,14 @@ describe("runSpawnedAgent", () => {
     });
 
     it("runs an inline child on the parent's model and returns the result envelope", async () => {
-        const { services, started } = fakeServices({});
+        const { services, started } = fakeServices({
+            parentEvents: parentCreated({
+                analytics: {
+                    useCase: "knowledge_sync",
+                    subUseCase: "build_graph",
+                },
+            }),
+        });
         const progress: unknown[] = [];
         const result = await runSpawnedAgent(
             { task: "find things", name: "researcher", instructions: "You research." },
@@ -156,6 +166,10 @@ describe("runSpawnedAgent", () => {
         });
         expect(started[0].maxModelCalls).toBe(50);
         expect(started[0].signal).toBe(signal);
+        expect(started[0]).toMatchObject({
+            useCase: "knowledge_sync",
+            subUseCase: "build_graph",
+        });
         expect(progress).toEqual([
             { childTurnId: "child-1", agentName: "researcher", task: "find things" },
         ]);

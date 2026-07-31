@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { runWhenPossible } from '../runtime/assembly/headless-app.js';
-import { getKgModel } from '../models/defaults.js';
+import { asRunModelOptions, getKgModel } from '../models/defaults.js';
 import {
     loadConfig,
     loadState,
@@ -55,7 +55,9 @@ Process new items and use the user context above to identify yourself when draft
         await runWhenPossible({
             agentId: agentName,
             message,
-            ...(await getKgModel()),
+            useCase: 'knowledge_sync',
+            subUseCase: 'pre_built',
+            ...asRunModelOptions(await getKgModel()),
         });
 
         // Update last run time
@@ -73,8 +75,6 @@ Process new items and use the user context above to identify yourself when draft
  * Check all agents and run those that are due
  */
 async function checkAndRunAgents(): Promise<void> {
-    const config = loadConfig();
-
     for (const agentName of PREBUILT_AGENTS) {
         try {
             if (shouldRunAgent(agentName)) {
@@ -133,7 +133,7 @@ export async function init(): Promise<void> {
  * Manually trigger an agent run (useful for testing)
  */
 export async function triggerAgent(agentName: string): Promise<void> {
-    if (!PREBUILT_AGENTS.includes(agentName as any)) {
+    if (!(PREBUILT_AGENTS as readonly string[]).includes(agentName)) {
         throw new Error(`Unknown agent: ${agentName}. Available: ${PREBUILT_AGENTS.join(', ')}`);
     }
     await runAgent(agentName);

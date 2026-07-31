@@ -45,9 +45,8 @@ import { buildTurnConversation, stripVoiceTags } from '@/lib/session-chat/turn-v
 import { stripKnowledgePrefix } from '@/lib/wiki-links'
 import {
   ChatInputWithMentions,
+  type ModelSelection,
   type PermissionMode,
-  type ReasoningEffortLevel,
-  type SelectedModel,
   type StagedAttachment,
 } from '@/components/chat-input-with-mentions'
 import type { FileMention, PromptInputMessage } from '@/components/ai-elements/prompt-input'
@@ -256,13 +255,11 @@ export function QuickAskBar() {
     })
   }, [])
 
-  // Model/effort picked in the bar's composer ride along with each submit —
-  // the app window applies them to the active chat before submitting.
-  // Effort defaults to 'low': hover asks want speed, and the picker is
-  // seeded to match (initialReasoningEffort below) so the UI never shows
-  // "Auto" while fast thinking silently applies.
-  const modelRef = useRef<SelectedModel | null>(null)
-  const effortRef = useRef<ReasoningEffortLevel | null>('low')
+  // The bar composer's ModelSelection (model + effort, one value — main's
+  // unified shape) rides along with each submit; the app window applies it
+  // to the active chat before submitting. Hover asks default to FAST
+  // thinking at the submit boundary when the selection carries no effort.
+  const selectionRef = useRef<ModelSelection | null>(null)
 
   const processing = answer?.processing ?? false
 
@@ -288,8 +285,10 @@ export function QuickAskBar() {
           searchEnabled,
           codeMode,
           permissionMode,
-          model: modelRef.current,
-          reasoningEffort: effortRef.current,
+          model: selectionRef.current
+            ? { provider: selectionRef.current.provider, model: selectionRef.current.model }
+            : null,
+          reasoningEffort: selectionRef.current?.effort ?? 'low',
         })
         .catch(() => {})
     },
@@ -684,13 +683,9 @@ export function QuickAskBar() {
               isProcessing={callState.status === 'thinking'}
               runId={null}
               placeholder="Type instead — @ mentions work too…"
-              onSelectedModelChange={(m) => {
-                modelRef.current = m ?? null
+              onSelectionChange={(sel) => {
+                selectionRef.current = sel ?? null
               }}
-              onReasoningEffortChange={(effort) => {
-                effortRef.current = effort ?? null
-              }}
-              initialReasoningEffort="low"
             />
           }
         />
@@ -1059,13 +1054,9 @@ export function QuickAskBar() {
             runId={null}
             placeholder={callCard ? 'Type instead — @ mentions work too…' : 'Ask Rowboat anything…'}
             focusSignal={focusSignal}
-            onSelectedModelChange={(m) => {
-              modelRef.current = m ?? null
+            onSelectionChange={(sel) => {
+              selectionRef.current = sel ?? null
             }}
-            onReasoningEffortChange={(effort) => {
-              effortRef.current = effort ?? null
-            }}
-            initialReasoningEffort="low"
             isRecording={callCard ? undefined : recording}
             recordingText={callCard ? undefined : voice.interimText}
             recordingState={
