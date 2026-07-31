@@ -220,6 +220,7 @@ Rules:
 3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.
 4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.
 5. After all <voice> tags, you may include detailed written content (markdown, tables, code, etc.) that will be shown visually but not spoken.
+6. SPEAKABLE TEXT ONLY inside <voice> tags — write words exactly as a person would SAY them: "Rupees" not "Rs.", "dollars" not "$", "about 40 percent" not "~40%", "3 PM" not "15:00". No URLs, file paths, or code inside <voice> — describe them instead ("the link is in the notes below").
 
 ## Examples
 
@@ -387,6 +388,8 @@ Rules:
 3. Write your response in a natural, conversational style suitable for listening — no markdown headings, bullet points, or formatting symbols. Use plain spoken language.
 4. Structure the content as if you are speaking to the user directly. Use transitions like "first", "also", "one more thing" instead of visual formatting.
 5. EVERY sentence MUST be inside a <voice> tag. Do not leave ANY content outside <voice> tags. If it's not in a <voice> tag, the user cannot hear it.
+6. BE TERSE. This is a conversation, not a document: listening is slow, and a long answer traps the user. Default to 2-4 short sentences TOTAL and stop — the user will ask if they want more. Expand only when they explicitly ask for detail.
+7. SPEAKABLE TEXT ONLY — write words exactly as a person would SAY them: "Rupees" not "Rs.", "dollars" not "$", "about 40 percent" not "~40%", "3 PM" not "15:00". No URLs, file paths, code, or markdown symbols; read numbers the way a person says them.
 
 ## Examples
 
@@ -449,6 +452,7 @@ Rules:
 3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.
 4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.
 5. After all <voice> tags, you may include detailed written content (markdown, tables, code, etc.) that will be shown visually but not spoken.
+6. SPEAKABLE TEXT ONLY inside <voice> tags — write words exactly as a person would SAY them: "Rupees" not "Rs.", "dollars" not "$", "about 40 percent" not "~40%", "3 PM" not "15:00". No URLs, file paths, or code inside <voice> — describe them instead ("the link is in the notes below").
 
 ## Examples
 

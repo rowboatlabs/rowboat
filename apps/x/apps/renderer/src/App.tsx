@@ -1143,7 +1143,11 @@ function App() {
       if (pttStatusRef.current !== 'idle') break
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
-      if (ttsEnabledRef.current || speakTurnRef.current) {
+      if (
+        (ttsEnabledRef.current || speakTurnRef.current) &&
+        !companionTextModeRef.current &&
+        !suppressSpeechTurnRef.current
+      ) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
         spokeSegmentThisTurnRef.current = true
@@ -1161,6 +1165,11 @@ function App() {
     if (activeIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
+    // Text mode (the companion's expanded card): no fallback read-aloud.
+    if (companionTextModeRef.current || suppressSpeechTurnRef.current) {
+      turn.pending = false
+      return
+    }
     // Speaking this turn: call TTS, or the quick-ask voice toggle.
     if (!(inCallRef.current ? ttsEnabledRef.current : speakTurnRef.current)) {
       turn.pending = false
@@ -1235,6 +1244,12 @@ function App() {
   // future summon starts already sharing, until toggled off.
   const companionVoiceRef = useRef(false)
   const companionVoiceStartingRef = useRef(false)
+  // The companion's expanded CARD is TEXT MODE: replies render as text and
+  // are not spoken (pushed from the bar over quick-ask:text-mode). The
+  // per-turn ref makes the choice stick for a whole turn — a reply to a
+  // text-mode question stays silent even if the user tucks mid-stream.
+  const companionTextModeRef = useRef(false)
+  const suppressSpeechTurnRef = useRef(false)
   // In-call mute: a full input pause, not just audio — mic audio stops
   // reaching Deepgram AND camera/screen frame capture stops, so nothing said
   // or shown while muted ever reaches the assistant. Output is untouched
@@ -1943,6 +1958,22 @@ function App() {
   useEffect(() => {
     return window.ipc.on('quick-ask:stop', () => {
       void stopRunRef.current?.()
+    })
+  }, [])
+
+  // Companion text mode (the expanded card): entering it hushes in-flight
+  // speech and skips the queued voice backlog; while it's on, replies are
+  // text only. Voice comes back when the card tucks away.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:text-mode', ({ textMode }) => {
+      companionTextModeRef.current = textMode
+      if (textMode) {
+        ttsRef.current.cancel()
+        if (voiceSegmentsRef.current) {
+          spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+        }
+        spokeSegmentThisTurnRef.current = true
+      }
     })
   }, [])
 
@@ -3565,6 +3596,9 @@ function App() {
     // outside the bar never start talking.
     speakTurnRef.current =
       !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
+    // A turn submitted from the companion's expanded card is a TEXT turn:
+    // its reply renders silently, even if the user tucks mid-reply.
+    suppressSpeechTurnRef.current = inCallRef.current && companionTextModeRef.current
 
     if (inCallRef.current || speakTurnRef.current) {
       // A new question supersedes whatever of the previous reply was still
@@ -3648,7 +3682,14 @@ function App() {
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
-      const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
+      // Hover-mode turns default to FAST thinking: voice-to-first-word is
+      // the experience, and a long reasoning phase is dead air. An explicit
+      // per-tab effort pick still wins.
+      const reasoningEffort =
+        reasoningEffortByTabRef.current.get(submitTabId) ??
+        ((inCallRef.current && companionVoiceRef.current) || quickAskActiveRef.current
+          ? ('low' as const)
+          : undefined)
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.

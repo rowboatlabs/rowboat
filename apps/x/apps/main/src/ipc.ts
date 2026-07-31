@@ -1054,6 +1054,10 @@ export function setupIpcHandlers() {
       pushChatContext(args);
       return {};
     },
+    'quickAsk:setTextMode': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:text-mode', args);
+      return {};
+    },
     'quickAsk:selectChat': async (_event, args) => {
       findMainAppWindow()?.webContents.send('quick-ask:select-chat', args);
       return {};

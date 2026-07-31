@@ -183,6 +183,12 @@ export function QuickAskBar() {
     void window.ipc.invoke('quickAsk:setPinnedCollapsed', { collapsed: next }).catch(() => {})
   }, [])
 
+  // The expanded card is TEXT MODE: tell the app so replies render silently
+  // there (and any in-flight speech hushes the moment the card opens).
+  useEffect(() => {
+    void window.ipc.invoke('quickAsk:setTextMode', { textMode: callCard }).catch(() => {})
+  }, [callCard])
+
   // Call state mirrored from the app window, which owns the call engine —
   // this window only renders it (same contract as the old popout).
   const [callState, setCallState] = useState<CallState>(IDLE_CALL_STATE)
@@ -831,7 +837,7 @@ export function QuickAskBar() {
         </div>
 
         {(panelAsked || panelText) && (
-          <div className="max-h-[280px] overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800">
+          <div className="max-h-[280px] cursor-text select-text overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800">
             {/* Inside the scroll area — the question scrolls away with the
                 answer instead of persisting as a header. */}
             {panelAsked && <div className="mb-2 text-sm font-medium text-neutral-500">{panelAsked}</div>}
@@ -1263,7 +1269,7 @@ function PinnedPill({
           {responseOpen && (
             <div
               ref={responseRef}
-              className="h-[150px] overflow-y-auto rounded-md bg-neutral-800 px-2 py-1.5 text-[11px] leading-relaxed"
+              className="h-[150px] cursor-text select-text overflow-y-auto rounded-md bg-neutral-800 px-2 py-1.5 text-[11px] leading-relaxed"
             >
               {state.questionText && (
                 <div className="mb-1.5 whitespace-pre-wrap border-l-2 border-sky-500/70 pl-1.5 text-neutral-400">

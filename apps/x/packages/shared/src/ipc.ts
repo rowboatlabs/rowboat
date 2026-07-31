@@ -1205,6 +1205,16 @@ const ipcSchemas = {
     req: z.object({ collapsed: z.boolean() }),
     res: z.object({}),
   },
+  // Bar → main → app window: the companion's expanded card is TEXT MODE —
+  // replies render silently there (entering it hushes in-flight speech).
+  'quickAsk:setTextMode': {
+    req: z.object({ textMode: z.boolean() }),
+    res: z.object({}),
+  },
+  'quick-ask:text-mode': {
+    req: z.object({ textMode: z.boolean() }),
+    res: z.null(),
+  },
   // App window → main: open the bar (the discoverability toast's "Try it").
   'quickAsk:show': {
     req: z.null(),
