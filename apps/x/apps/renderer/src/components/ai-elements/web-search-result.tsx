@@ -5,7 +5,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils";
 import {
   ChevronDownIcon,
   GlobeIcon,
@@ -13,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { quietRowContainerClass, quietRowTriggerClass } from "@/components/ai-elements/tool";
 
 interface WebSearchResultProps {
   query: string;
@@ -144,7 +144,7 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     headerKey = "searching";
     headerContent = (
       <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
-        <LoaderIcon className="size-4 shrink-0 animate-spin" />
+        <LoaderIcon className="size-3 shrink-0 animate-spin" />
         <span className="truncate">Searching the web&hellip;</span>
       </span>
     );
@@ -154,7 +154,7 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     headerKey = `roll-${rollIndex}`;
     headerContent = (
       <span className="flex min-w-0 flex-1 items-center gap-2">
-        <img src={faviconUrl(domain)} alt="" className="size-4 shrink-0 rounded-sm bg-muted/60" />
+        <img src={faviconUrl(domain)} alt="" className="size-3.5 shrink-0 rounded-sm bg-muted/60" />
         <span className="truncate">
           <span className="text-muted-foreground">{domain}</span>
           <span className="text-muted-foreground/50"> &middot; </span>
@@ -177,20 +177,20 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
                 key={domain}
                 src={faviconUrl(domain)}
                 alt=""
-                className="size-5 rounded-full bg-muted object-cover -ml-[5px] first:ml-0"
+                className="size-4 rounded-full bg-muted object-cover -ml-[4px] first:ml-0"
                 style={{ zIndex: stack.length - i }}
               />
             ))}
             {overflow > 0 && (
-              <span className="ml-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground/10 dark:bg-muted text-[10px] font-medium text-muted-foreground">
+              <span className="ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-foreground/10 dark:bg-muted text-[9px] font-medium text-muted-foreground">
                 +{overflow}
               </span>
             )}
           </span>
         ) : (
-          <GlobeIcon className="size-4 shrink-0 text-muted-foreground" />
+          <GlobeIcon className="size-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="truncate text-sm">
+        <span className="truncate">
           {domains.length > 0 ? buildSearchedSummary(domains) : title}
         </span>
       </span>
@@ -198,14 +198,10 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
   }
 
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className="not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30"
-    >
-      <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
+    <Collapsible open={open} onOpenChange={setOpen} className={quietRowContainerClass}>
+      <CollapsibleTrigger className={quietRowTriggerClass}>
         {/* Rolling header: clipped, fixed height so sliding lines stay contained */}
-        <div className="relative min-w-0 flex-1 overflow-hidden" style={{ height: "1.5rem" }}>
+        <div className="relative min-w-0 flex-1 overflow-hidden" style={{ height: "1.25rem" }}>
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.span
               key={headerKey}
@@ -213,32 +209,32 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              className="absolute inset-0 flex items-center text-left font-medium text-sm"
+              className="absolute inset-0 flex items-center text-left"
             >
               {headerContent}
             </motion.span>
           </AnimatePresence>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           {phase === "settled" && domains.length > 0 && (
-            <span className="whitespace-nowrap text-xs text-muted-foreground">
+            <span className="whitespace-nowrap text-muted-foreground/60 tabular-nums">
               {domains.length} source{domains.length !== 1 ? "s" : ""}
             </span>
           )}
-          <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+          <ChevronDownIcon className="size-3 text-muted-foreground/50 opacity-0 transition-[opacity,transform] group-hover/row:opacity-100 group-data-[state=open]/row:rotate-180 group-data-[state=open]/row:opacity-100" />
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden data-[state=open]:animate-[collapsible-down_0.09s_ease-out] data-[state=closed]:animate-[collapsible-up_0.08s_ease-in]">
-        <div className="px-4 pb-3 space-y-3">
+        <div className="my-1 ml-[2.5px] space-y-2 border-l-2 border-border pl-3">
           {/* Query */}
-          <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
-            <GlobeIcon className="size-3.5 shrink-0" />
+          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+            <GlobeIcon className="size-3 shrink-0" />
             <span className="truncate">{query}</span>
           </div>
 
           {/* Results list */}
           {results.length > 0 && (
-            <div className="rounded-md border max-h-64 overflow-y-auto">
+            <div className="max-h-64 overflow-y-auto">
               {results.map((result, index) => {
                 const domain = getDomain(result.url);
                 return (
@@ -251,17 +247,17 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
                       e.preventDefault();
                       window.open(result.url, "_blank");
                     }}
-                    className="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-muted/50 transition-colors border-b last:border-b-0"
+                    className="-mx-1.5 flex items-center justify-between gap-3 rounded-md px-1.5 py-1 text-[13px] transition-colors hover:bg-muted/50"
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
                       <img
                         src={faviconUrl(domain)}
                         alt=""
-                        className="size-4 shrink-0"
+                        className="size-3.5 shrink-0"
                       />
                       <span className="truncate">{result.title}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                    <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                       {domain}
                     </span>
                   </a>
@@ -273,7 +269,7 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
           {/* Status — only while the search is still running. */}
           {isRunning && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <LoaderIcon className="size-3.5 animate-spin" />
+              <LoaderIcon className="size-3 animate-spin" />
               <span>Searching...</span>
             </div>
           )}
