@@ -1382,13 +1382,6 @@ function TuckedMascot({
         }
       `}</style>
 
-      {/* Consent badge: a tucked share call must still show it's sharing. */}
-      {state.screenSharing && (
-        <span className="pointer-events-none absolute left-1/2 top-8 z-10 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md">
-          <span className={`block h-1.5 w-1.5 rounded-full bg-white ${state.micMuted ? '' : 'animate-pulse'}`} />
-          {state.micMuted ? 'Sharing paused' : 'Sharing screen'}
-        </span>
-      )}
       {/* On duty = cowboy hat on; the controls are enamel pins on the hat
           band, drawn in the artwork's own ink and always visible. They ride
           inside TalkingHead's bobbing container (hatOverlay) so they never
@@ -1420,7 +1413,7 @@ function TuckedMascot({
                   onClick={() => sendAction('stop-speaking')}
                   aria-label="Stop the assistant"
                   title="Stop — cut the reply short (the session keeps going)"
-                  className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                  className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
                   style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
                 >
                   <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110">
@@ -1443,7 +1436,7 @@ function TuckedMascot({
                   }}
                   aria-label="Hold to talk — tap for hands-free"
                   title="Hold to talk (tap for hands-free) — or hold the right ⌘ key"
-                  className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                  className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
                   style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
                 >
                   <span
@@ -1460,29 +1453,31 @@ function TuckedMascot({
                 </button>
               )}
               {/* The BOW LIGHT — share pin, front and center on the hull:
-                  lit sky = broadcasting (the light is on, it can see), dim =
-                  off. One tap and the session sees the screen (consent
-                  badge + macOS indicator light up). The choice is STICKY —
-                  future summons start already sharing until it's turned off
-                  (persisted app-side). */}
+                  lit sky + pulsing dot = broadcasting (the lit pin IS the
+                  consent badge, same pattern the old bar's share toggle
+                  used — no floating banner). A quiet hover chip explains
+                  the button; the choice is STICKY — future summons start
+                  already sharing until it's turned off (persisted
+                  app-side). */}
               <button
                 type="button"
                 onClick={() => sendAction('toggle-share')}
                 aria-label={state.screenSharing ? 'Stop sharing your screen' : 'Share your screen'}
-                title={
-                  state.screenSharing
-                    ? 'Sharing your screen — click to stop (stays off for future summons)'
-                    : 'Share your screen — stays on for future summons until turned off'
-                }
-                className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
                 style={{ ...noDragRegion, left: '50%', top: '73%' }}
               >
                 <span
-                  className={`flex h-[18px] w-[18px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
+                  className={`relative flex h-[18px] w-[18px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
                     state.screenSharing ? 'bg-sky-500' : 'bg-neutral-600'
                   }`}
                 >
                   <MonitorUp className="h-3 w-3 text-white" />
+                  {state.screenSharing && (
+                    <span className="absolute -right-1 -top-1 block h-[7px] w-[7px] animate-pulse rounded-full bg-sky-300 ring-1 ring-[#17171B]" />
+                  )}
+                </span>
+                <span className="pointer-events-none absolute left-1/2 top-full mt-0.5 -translate-x-1/2 whitespace-nowrap rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-medium text-white opacity-0 transition-opacity group-hover/pin:opacity-100">
+                  {state.screenSharing ? 'Sharing screen — click to stop' : 'Share your screen'}
                 </span>
               </button>
               <button
@@ -1490,7 +1485,7 @@ function TuckedMascot({
                 onClick={onExpand}
                 aria-label="Bring the text back"
                 title="Bring the text back (⌥⇧Space works too)"
-                className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
                 style={{ ...noDragRegion, left: '18%', top: '68%' }}
               >
                 <span className="flex h-[16px] w-[16px] items-center justify-center rounded-full bg-sky-500 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
@@ -1502,7 +1497,7 @@ function TuckedMascot({
                 onClick={() => sendAction('end-call')}
                 aria-label="End the voice session and close"
                 title="End & close (a live session can't be hidden while it keeps listening)"
-                className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
                 style={{ ...noDragRegion, left: '82%', top: '68%' }}
               >
                 <span className="flex h-[16px] w-[16px] items-center justify-center rounded-full bg-neutral-700 shadow-sm ring-2 ring-[#17171B] transition-colors transition-transform group-hover/pin:scale-125 group-hover/pin:bg-red-600">
