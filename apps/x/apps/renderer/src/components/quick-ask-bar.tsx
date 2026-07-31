@@ -655,8 +655,44 @@ export function QuickAskBar() {
             card: live-call status + mute + end — the call owns the devices,
             replies are always spoken. */}
         <div className="flex items-center justify-end gap-2 px-4 pt-3">
-          {callCard ? (
-            <span className="mr-auto flex items-center gap-1.5 text-[11px] font-medium text-neutral-500">
+          {/* Destination chip: WHICH chat this bar is continuing — click
+              for the recents switcher (opens upward into the transparent
+              stage). Rendered in BOTH card modes: text mode mid-call
+              retargets subsequent questions just like the summoned bar. */}
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={`${callCard ? '' : 'mr-auto '}flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.04] py-1 pl-2.5 pr-2 text-[11px] font-medium text-neutral-600 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900`}
+                  >
+                    <MessageCircle className="h-3 w-3 shrink-0" />
+                    <span className="max-w-[220px] truncate">{chatContext?.activeTitle ?? 'New chat'}</span>
+                    <ChevronDown className="h-3 w-3 shrink-0 text-neutral-400" />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                Questions continue this chat — click to switch · Esc {panelProcessing ? 'dismisses' : 'clears'}
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="start" side="top" className="max-h-72 w-72 overflow-y-auto">
+              {(chatContext?.recent ?? []).map((r) => (
+                <DropdownMenuItem key={r.id} onSelect={() => selectChat(r.id)}>
+                  <span className={`min-w-0 flex-1 truncate ${r.id === chatContext?.activeRunId ? 'font-semibold' : ''}`}>
+                    {r.title}
+                  </span>
+                  {r.id === chatContext?.activeRunId && (
+                    <span className="shrink-0 text-[10px] text-muted-foreground">current</span>
+                  )}
+                </DropdownMenuItem>
+              ))}
+              {(chatContext?.recent.length ?? 0) === 0 && <DropdownMenuItem disabled>No recent chats</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {callCard && (
+            <span className="mr-auto flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-neutral-500">
               <span
                 className={`block h-1.5 w-1.5 rounded-full ${
                   callState.micMuted
@@ -672,43 +708,6 @@ export function QuickAskBar() {
                   ? 'Hands-free — tap ⌘ to send'
                   : (callStatusDisplay?.label ?? 'Voice call')}
             </span>
-          ) : (
-            /* Destination chip: WHICH chat this bar is continuing — click
-               for the recents switcher (opens upward into the transparent
-               stage). Fixes the old trust gap of silently appending to
-               whatever chat happened to be active. */
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="mr-auto flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.04] py-1 pl-2.5 pr-2 text-[11px] font-medium text-neutral-600 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
-                    >
-                      <MessageCircle className="h-3 w-3 shrink-0" />
-                      <span className="max-w-[220px] truncate">{chatContext?.activeTitle ?? 'New chat'}</span>
-                      <ChevronDown className="h-3 w-3 shrink-0 text-neutral-400" />
-                    </button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  Questions continue this chat — click to switch · Esc {panelProcessing ? 'dismisses' : 'clears'}
-                </TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="start" side="top" className="max-h-72 w-72 overflow-y-auto">
-                {(chatContext?.recent ?? []).map((r) => (
-                  <DropdownMenuItem key={r.id} onSelect={() => selectChat(r.id)}>
-                    <span className={`min-w-0 flex-1 truncate ${r.id === chatContext?.activeRunId ? 'font-semibold' : ''}`}>
-                      {r.title}
-                    </span>
-                    {r.id === chatContext?.activeRunId && (
-                      <span className="shrink-0 text-[10px] text-muted-foreground">current</span>
-                    )}
-                  </DropdownMenuItem>
-                ))}
-                {(chatContext?.recent.length ?? 0) === 0 && <DropdownMenuItem disabled>No recent chats</DropdownMenuItem>}
-              </DropdownMenuContent>
-            </DropdownMenu>
           )}
           {callCard && (
             <>
