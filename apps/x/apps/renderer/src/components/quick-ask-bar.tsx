@@ -251,8 +251,11 @@ export function QuickAskBar() {
 
   // Model/effort picked in the bar's composer ride along with each submit —
   // the app window applies them to the active chat before submitting.
+  // Effort defaults to 'low': hover asks want speed, and the picker is
+  // seeded to match (initialReasoningEffort below) so the UI never shows
+  // "Auto" while fast thinking silently applies.
   const modelRef = useRef<SelectedModel | null>(null)
-  const effortRef = useRef<ReasoningEffortLevel | null>(null)
+  const effortRef = useRef<ReasoningEffortLevel | null>('low')
 
   const processing = answer?.processing ?? false
 
@@ -596,6 +599,7 @@ export function QuickAskBar() {
               onReasoningEffortChange={(effort) => {
                 effortRef.current = effort ?? null
               }}
+              initialReasoningEffort="low"
             />
           }
         />
@@ -879,6 +883,7 @@ export function QuickAskBar() {
             onReasoningEffortChange={(effort) => {
               effortRef.current = effort ?? null
             }}
+            initialReasoningEffort="low"
             isRecording={callCard ? undefined : recording}
             recordingText={callCard ? undefined : voice.interimText}
             recordingState={
@@ -1429,10 +1434,12 @@ function TuckedMascot({
                   </span>
                 </button>
               )}
-              {/* Share pin, left of the mic: one tap and the session sees
-                  the screen (consent badge + macOS indicator light up). The
-                  choice is STICKY — future summons start already sharing
-                  until it's turned off (persisted app-side). */}
+              {/* The BOW LIGHT — share pin, front and center on the hull:
+                  lit sky = broadcasting (the light is on, it can see), dim =
+                  off. One tap and the session sees the screen (consent
+                  badge + macOS indicator light up). The choice is STICKY —
+                  future summons start already sharing until it's turned off
+                  (persisted app-side). */}
               <button
                 type="button"
                 onClick={() => sendAction('toggle-share')}
@@ -1442,15 +1449,15 @@ function TuckedMascot({
                     ? 'Sharing your screen — click to stop (stays off for future summons)'
                     : 'Share your screen — stays on for future summons until turned off'
                 }
-                className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
-                style={{ ...noDragRegion, left: '39%', top: '17.5%' }}
+                className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 -translate-x-1/2 -translate-y-1/2"
+                style={{ ...noDragRegion, left: '50%', top: '73%' }}
               >
                 <span
-                  className={`flex h-[16px] w-[16px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125 ${
+                  className={`flex h-[18px] w-[18px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
                     state.screenSharing ? 'bg-sky-500' : 'bg-neutral-600'
                   }`}
                 >
-                  <MonitorUp className="h-2.5 w-2.5 text-white" />
+                  <MonitorUp className="h-3 w-3 text-white" />
                 </span>
               </button>
               <button

@@ -241,6 +241,11 @@ interface ChatInputInnerProps {
    * effort is never frozen on a run — it applies per turn.
    */
   onReasoningEffortChange?: (effort: ReasoningEffortLevel | null) => void
+  /**
+   * Effort the picker starts on ('' = auto, the default). The companion bar
+   * seeds 'low' — hover asks want speed, and the picker should SHOW it.
+   */
+  initialReasoningEffort?: '' | ReasoningEffortLevel
   /** Work directory for this chat (per-chat). Null when none is set. */
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
@@ -281,6 +286,7 @@ function ChatInputInner({
   callAvailable,
   onSelectedModelChange,
   onReasoningEffortChange,
+  initialReasoningEffort = '',
   workDir = null,
   onWorkDirChange,
   codeSessionLock = null,
@@ -301,7 +307,7 @@ function ChatInputInner({
   const [selectedModel, setSelectedModel] = useState<SelectedModel | null>(null)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
   // '' = auto. Effort is per-turn config: reported up, never persisted.
-  const [reasoningEffort, setReasoningEffort] = useState<'' | ReasoningEffortLevel>('')
+  const [reasoningEffort, setReasoningEffort] = useState<'' | ReasoningEffortLevel>(initialReasoningEffort)
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
@@ -1454,6 +1460,8 @@ export interface ChatInputWithMentionsProps {
   callAvailable?: boolean
   onSelectedModelChange?: (model: SelectedModel | null) => void
   onReasoningEffortChange?: (effort: ReasoningEffortLevel | null) => void
+  /** Effort the picker starts on ('' = auto). The companion bar seeds 'low'. */
+  initialReasoningEffort?: '' | ReasoningEffortLevel
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
@@ -1496,6 +1504,7 @@ export function ChatInputWithMentions({
   callAvailable,
   onSelectedModelChange,
   onReasoningEffortChange,
+  initialReasoningEffort,
   workDir,
   onWorkDirChange,
   codeSessionLock,
@@ -1530,6 +1539,7 @@ export function ChatInputWithMentions({
         callAvailable={callAvailable}
         onSelectedModelChange={onSelectedModelChange}
         onReasoningEffortChange={onReasoningEffortChange}
+        initialReasoningEffort={initialReasoningEffort}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
         codeSessionLock={codeSessionLock}
