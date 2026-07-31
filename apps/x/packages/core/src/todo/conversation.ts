@@ -43,6 +43,12 @@ function userBubbleText(raw: string): string | null {
     return context || null;
 }
 
+// Voice-mode replies wrap speakable sentences in <voice>…</voice> — player
+// markup, never prose. Keep the words, drop the tags.
+function stripVoiceTags(text: string): string {
+    return text.replace(/<\/?voice>/g, '').trim();
+}
+
 function reportLinks(input: unknown): TodoLink[] {
     if (!input || typeof input !== 'object') return [];
     const links = (input as { links?: unknown }).links;
@@ -92,9 +98,9 @@ export async function deriveConversation(
             const terminal = state.terminal;
             if (!terminal) continue; // in flight — the spinner covers it
             if (terminal.type === 'turn_completed') {
-                const text = assistantText(terminal.output);
+                const text = stripVoiceTags(assistantText(terminal.output) ?? '');
                 if (text || links.length > 0) {
-                    bubbles.push({ role: 'rowboat', text: text ?? '', links });
+                    bubbles.push({ role: 'rowboat', text, links });
                 }
             } else if (terminal.type === 'turn_failed') {
                 // First line only — provider errors can be multi-line JSON.

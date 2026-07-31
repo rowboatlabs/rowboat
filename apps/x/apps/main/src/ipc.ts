@@ -140,7 +140,7 @@ import {
   listLiveNotes,
 } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
-import { runTodoItem, commentOnTodoItem, startHomeChat, replyHomeChat, runningItemKeys } from '@x/core/dist/todo/runner.js';
+import { runTodoItem, stopTodoRun, commentOnTodoItem, startHomeChat, replyHomeChat, runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
 import { getConversation as getTodoConversation, deriveConversation as deriveSessionConversation } from '@x/core/dist/todo/conversation.js';
 import { recordPlannerSignal, addYourRule as addPlannerRule, listSuggestions as listTodoSuggestions, takeSuggestion as takeTodoSuggestion } from '@x/core/dist/todo/planner-memory.js';
@@ -2720,6 +2720,14 @@ export function setupIpcHandlers() {
       try {
         void runTodoItem(args.key, args.context).catch(() => {});
         return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:stopRun': async (_event, args) => {
+      try {
+        const stopped = await stopTodoRun(args.key);
+        return stopped ? { success: true } : { success: false, error: 'No live run to stop' };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }

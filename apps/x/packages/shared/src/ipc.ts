@@ -2527,6 +2527,18 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  // Stop the live run on one item (or `chat:<sessionId>` thread) — the
+  // mistaken-assign escape hatch. The cancelled turn settles as 'Stopped'
+  // on todo:events, which clears the spinner.
+  'todo:stopRun': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   // Home-stream chat threads: a plain message from the home composer starts
   // a copilot session; replies continue it. Events ride todo:events keyed
   // `chat:<sessionId>`.
