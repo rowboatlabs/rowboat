@@ -1175,8 +1175,9 @@ const ipcSchemas = {
       collapsed: z.boolean(),
       // Which surface the pinned role expands to: untuck returns you to the
       // surface you tucked FROM — 'card' (the bar-style text card, for
-      // voice-only calls entered via the bar's tuck) or 'pill' (the call
-      // pill, for camera/share calls).
+      // bar-originated sessions; screen share keeps the card, its consent
+      // badge rides the card's strip) or 'pill' (only a live CAMERA forces
+      // the pill's tiles).
       surface: z.enum(['card', 'pill']),
     }),
   },

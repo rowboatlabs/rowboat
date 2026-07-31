@@ -104,14 +104,15 @@ export function markTuckPending() {
 }
 
 /**
- * Which surface the pinned role expands to. Bar-originated voice-only calls
- * go back to the bar-style text card; anything with live pixels (camera or
- * share) needs the pill's tiles.
+ * Which surface the pinned role expands to. Bar-originated sessions go back
+ * to the bar-style text card; only a live CAMERA forces the pill — a screen
+ * share shows no pixels in the pill either (just the consent badge, which
+ * the card's strip carries too), so sharing must never hijack the text
+ * pull-out into a video-call surface.
  */
 export function getExpandedSurface(): 'card' | 'pill' {
   const s = lastPopoutState;
-  const voiceOnly = !s?.cameraOn && !s?.screenSharing;
-  return tuckOrigin === 'bar' && voiceOnly ? 'card' : 'pill';
+  return tuckOrigin === 'bar' && !s?.cameraOn ? 'card' : 'pill';
 }
 
 function pushMode(win: BrowserWindow) {

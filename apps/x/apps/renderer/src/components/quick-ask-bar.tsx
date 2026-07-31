@@ -730,6 +730,32 @@ export function QuickAskBar() {
                   </TooltipContent>
                 </Tooltip>
               )}
+              {/* Share consent + control on the card too: expanding while
+                  sharing keeps the TEXT surface (only a live camera forces
+                  the pill), so the lit toggle is the card's share badge —
+                  it must never be possible to share with no indicator in
+                  sight. */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => sendAction('toggle-share')}
+                    aria-label={callState.screenSharing ? 'Stop sharing your screen' : 'Share your screen'}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                      callState.screenSharing
+                        ? 'bg-sky-500/15 text-sky-600 ring-sky-500/30'
+                        : 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
+                    }`}
+                  >
+                    <MonitorUp className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {callState.screenSharing
+                    ? 'Sharing your screen — click to stop'
+                    : 'Share your screen with this session'}
+                </TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
