@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Pin } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Pin, PictureInPicture2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -137,6 +137,8 @@ interface ChatSidebarProps {
   onSelectRun?: (runId: string) => void
   onOpenChatHistory?: () => void
   onOpenFullScreen?: () => void
+  /** Pop the active chat out into the floating companion (text card). */
+  onPopOut?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
   sessionUsage?: TokenUsage
@@ -209,6 +211,7 @@ export function ChatSidebar({
   onSelectRun,
   onOpenChatHistory,
   onOpenFullScreen,
+  onPopOut,
   conversation,
   currentAssistantMessage,
   sessionUsage = {},
@@ -607,6 +610,22 @@ export function ChatSidebar({
                 onSelectRun={onSelectRun}
                 onOpenChatHistory={onOpenChatHistory}
               />
+            )}
+            {onPopOut && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onPopOut}
+                    className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label="Pop out to the floating companion"
+                  >
+                    <PictureInPicture2 className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Pop out — continue this chat in the floating companion</TooltipContent>
+              </Tooltip>
             )}
             {onOpenFullScreen && (
               <Tooltip>

@@ -1196,6 +1196,14 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
+  // App window → main: pop the ACTIVE chat out into the floating companion,
+  // landing on the expanded text card (the mirror of the card's ↗). Starts
+  // a companion session so the popped chat survives blur (tucking to the
+  // mascot instead of dying like a plain summon would).
+  'quickAsk:popOut': {
+    req: z.null(),
+    res: z.object({}),
+  },
   'quick-ask:tuck': {
     req: z.null(),
     res: z.null(),

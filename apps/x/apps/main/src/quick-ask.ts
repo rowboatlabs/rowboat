@@ -70,7 +70,10 @@ let appliedExpandedSurface: 'card' | 'pill' = 'pill';
 // placed near where the bar's mascot stood (bottom of the cursor's display)
 // instead of the pill's canonical top-right. Time-boxed so a tuck the app
 // declined (voice not configured, race) can't leak into an unrelated call.
+// `tuckPendingExpand` flips the landing to the EXPANDED text card instead —
+// the app's "pop this chat out" gesture, where the user was reading text.
 let tuckPendingAt = 0;
+let tuckPendingExpand = false;
 
 // Last call state pushed by the app window — replayed when the window
 // (re)loads, so the pill never renders from a blank guess.
@@ -99,8 +102,27 @@ export function isPinnedCollapsed(): boolean {
   return pinnedCollapsed;
 }
 
-export function markTuckPending() {
+export function markTuckPending(expand = false) {
   tuckPendingAt = Date.now();
+  tuckPendingExpand = expand;
+}
+
+/**
+ * Pop the app's active chat out into the companion. Already pinned: just
+ * expand/focus (the chat is the active tab — the destination chip already
+ * tracks it). Otherwise arm an EXPANDED-card landing and let the caller
+ * relay the tuck to the app (which starts the voice session or falls back
+ * to the plain summoned card when voice isn't configured).
+ */
+export function popOutCompanion(): boolean {
+  const win = getQuickAskWindow();
+  if (mode === 'pinned' && win) {
+    if (pinnedCollapsed) setPinnedCollapsed(false);
+    win.focus();
+    return true;
+  }
+  markTuckPending(true);
+  return false;
 }
 
 /**
@@ -336,20 +358,33 @@ export function setCompanionPinned(pinned: boolean) {
     let win = getQuickAskWindow();
     if (!win) win = createWindow();
     const fromTuck = Date.now() - tuckPendingAt < 5000;
+    const expandFromTuck = fromTuck && tuckPendingExpand;
     tuckPendingAt = 0;
+    tuckPendingExpand = false;
     mode = 'pinned';
-    pinnedCollapsed = fromTuck;
     tuckOrigin = fromTuck ? 'bar' : 'pill';
-    if (fromTuck) {
+    if (expandFromTuck) {
+      // Pop-out landing: the user was READING this chat in the app — arrive
+      // on the expanded text card, focused and ready to type.
+      pinnedCollapsed = false;
+      applyExpandedSurface(win, 'card');
+    } else if (fromTuck) {
+      pinnedCollapsed = true;
       positionTucked(win, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()));
     } else {
+      pinnedCollapsed = false;
       positionPinned(win);
       appliedExpandedSurface = 'pill';
     }
     pushMode(win);
-    // showInactive: appearing must not steal focus from the app the user
-    // switched to — that would be a focus grab mid-work.
-    if (!win.isVisible()) win.showInactive();
+    if (expandFromTuck) {
+      if (!win.isVisible()) win.show();
+      win.focus();
+    } else if (!win.isVisible()) {
+      // showInactive: appearing must not steal focus from the app the user
+      // switched to — that would be a focus grab mid-work.
+      win.showInactive();
+    }
   } else {
     if (mode !== 'pinned') return;
     mode = 'hidden';

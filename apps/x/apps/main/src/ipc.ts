@@ -34,6 +34,7 @@ import {
   hideQuickAsk,
   isPinnedCollapsed,
   markTuckPending,
+  popOutCompanion,
   pushChatContext,
   pushPopoutState,
   resizeCompanionPinned,
@@ -1056,6 +1057,15 @@ export function setupIpcHandlers() {
     },
     'quickAsk:setTextMode': async (_event, args) => {
       findMainAppWindow()?.webContents.send('quick-ask:text-mode', args);
+      return {};
+    },
+    'quickAsk:popOut': async () => {
+      // Already pinned → expanded/focused in place; otherwise arm the
+      // expanded-card landing and run the tuck flow (voice session, or the
+      // app falls back to the plain summoned card without voice).
+      if (!popOutCompanion()) {
+        findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
+      }
       return {};
     },
     'quickAsk:selectChat': async (_event, args) => {

@@ -8001,6 +8001,7 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
+                onPopOut={() => void window.ipc.invoke('quickAsk:popOut', null).catch(() => {})}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
                 sessionUsage={activeChatTabState.sessionUsage}
