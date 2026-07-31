@@ -665,7 +665,7 @@ export function QuickAskBar() {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className={`${callCard ? '' : 'mr-auto '}flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.04] py-1 pl-2.5 pr-2 text-[11px] font-medium text-neutral-600 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900`}
+                    className="flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.04] py-1 pl-2.5 pr-2 text-[11px] font-medium text-neutral-600 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
                   >
                     <MessageCircle className="h-3 w-3 shrink-0" />
                     <span className="max-w-[220px] truncate">{chatContext?.activeTitle ?? 'New chat'}</span>
@@ -691,6 +691,22 @@ export function QuickAskBar() {
               {(chatContext?.recent.length ?? 0) === 0 && <DropdownMenuItem disabled>No recent chats</DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
+          {/* New chat rides RIGHT NEXT to the selector — it's a destination
+              choice too. Works mid-call: the session keeps going, the next
+              questions land in the fresh chat. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={newChat}
+                aria-label="New chat"
+                className={`${callCard ? '' : 'mr-auto '}flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900`}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">New chat</TooltipContent>
+          </Tooltip>
           {callCard && (
             <span className="mr-auto flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-neutral-500">
               <span
@@ -831,37 +847,22 @@ export function QuickAskBar() {
               </Tooltip>
             </>
           )}
-          {/* New-chat is always one click (per the chip's promise); jump-to-
-              app too — both meaningful before the first question. */}
+          {/* Jump-to-app stays on the right — it's a window action, not a
+              destination choice. */}
           {!callCard && (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={newChat}
-                    aria-label="New chat"
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">New chat</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={openInApp}
-                    aria-label="Open in Rowboat"
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
-                  >
-                    <ArrowUpRight className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">Open in Rowboat</TooltipContent>
-              </Tooltip>
-            </>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={openInApp}
+                  aria-label="Open in Rowboat"
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                >
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Open in Rowboat</TooltipContent>
+            </Tooltip>
           )}
         </div>
 
