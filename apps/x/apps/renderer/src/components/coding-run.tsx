@@ -125,7 +125,7 @@ export function CodingRunTimeline({
   if (rows.length === 0) {
     if (error) {
       return (
-        <div className="px-4 py-3">
+        <div className="py-1">
           <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
             <span className="min-w-0 whitespace-pre-wrap break-words">{error}</span>
@@ -133,10 +133,10 @@ export function CodingRunTimeline({
         </div>
       )
     }
-    return <div className="px-4 py-3 text-xs text-muted-foreground">Starting the agent…</div>
+    return <div className="py-1 text-xs text-muted-foreground">Starting the agent…</div>
   }
   return (
-    <div className="flex flex-col gap-2 px-4 py-3">
+    <div className="flex flex-col gap-2 py-1">
       {rows.map((row) => {
         if (row.kind === 'text') {
           return (
@@ -233,17 +233,14 @@ export function CodeRunPermissionRequest({
     setBusy(true)
     onDecide(d)
   }
-  const btn = 'rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50'
+  const btn = 'rounded-full px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50'
   return (
-    <div className="mb-4 rounded-[20px] border border-amber-500/40 bg-amber-500/5 p-4">
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <ShieldQuestion className="size-4 shrink-0 text-amber-600" />
-        Permission needed
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        The agent wants to: <span className="font-medium text-foreground">{ask.title}</span>
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
+    <div className="my-1 flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-[10px] border border-l-2 border-l-amber-500/70 px-3 py-2 text-[13px]">
+      <ShieldQuestion className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+      <span className="min-w-0 flex-1 truncate" title={ask.title}>
+        Allow <span className="font-medium">{ask.title}</span>?
+      </span>
+      <div className="ml-auto flex shrink-0 flex-wrap gap-1.5">
         <button type="button" disabled={busy} onClick={() => decide('allow_once')}
           className={cn(btn, 'bg-foreground text-background hover:bg-foreground/90')}>
           Allow
@@ -283,6 +280,8 @@ export function CodingRunBlock({
     (item.result as { agent?: string } | undefined)?.agent ??
     (item.input as { agent?: string } | undefined)?.agent
   const title = AGENT_LABEL[agent ?? ''] ?? 'Coding agent'
+  const task = (item.input as { task?: string; prompt?: string } | undefined)
+  const taskText = (task?.task ?? task?.prompt ?? '').trim()
   const error = getToolErrorText(item)
   // Timeline source: the durable record (item.codeRunEvents — the settle-time
   // batch, or the legacy path's inline accumulation) wins; while it's absent
@@ -297,7 +296,11 @@ export function CodingRunBlock({
   return (
     <>
       <Tool open={open} onOpenChange={onOpenChange}>
-        <ToolHeader title={title} type="tool-code_agent_run" state={toToolState(item.status)} />
+        <ToolHeader
+          summary={{ verb: title, detail: taskText || undefined }}
+          type="tool-code_agent_run"
+          state={toToolState(item.status)}
+        />
         <ToolContent>
           <CodingRunTimeline events={events} error={error} />
         </ToolContent>

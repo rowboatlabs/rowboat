@@ -15,7 +15,7 @@ import {
   type PromptInputMessage,
   type FileMention,
 } from '@/components/ai-elements/prompt-input'
-import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
+import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolIODetails } from '@/components/ai-elements/tool'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
@@ -46,8 +46,8 @@ import {
   type ConversationItem,
   getAppActionCardData,
   getComposioConnectCardData,
-  getToolDisplayName,
   getToolErrorText,
+  getToolRowSummary,
   getWebSearchCardData,
   groupConversationItems,
   isChatMessage,
@@ -306,7 +306,6 @@ export function ChatSessionPane({
           />
         )
       }
-      const toolTitle = getToolDisplayName(item)
       const errorText = detailedToolErrors
         ? getToolErrorText(item)
         : (item.status === 'error' ? 'Tool error' : '')
@@ -317,16 +316,21 @@ export function ChatSessionPane({
           key={item.id}
           open={isToolOpenForTab(tab.id, item.id)}
           onOpenChange={(open) => setToolOpenForTab(tab.id, item.id, open)}
-          autoPermissionDetail={options?.autoPermissionDetail}
         >
-          <ToolHeader title={toolTitle} type={`tool-${item.name}`} state={toToolState(item.status)} />
+          <ToolHeader
+            summary={getToolRowSummary(item)}
+            type={`tool-${item.name}`}
+            state={toToolState(item.status)}
+            autoApproved={options?.autoPermissionDetail}
+            errorLine={getToolErrorText(item)?.split('\n')[0]}
+          />
           <ToolContent>
             {item.streamingOutput ? (
-              <AutoScrollPre className="max-h-80 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap text-foreground/90">
+              <AutoScrollPre className="max-h-80 overflow-auto py-1 font-mono text-xs whitespace-pre-wrap text-foreground/90">
                 <TerminalOutput raw={item.streamingOutput} />
               </AutoScrollPre>
             ) : (
-              <ToolTabbedContent input={input} output={output} errorText={errorText} />
+              <ToolIODetails input={input} output={output} errorText={errorText} />
             )}
           </ToolContent>
         </Tool>
@@ -334,19 +338,38 @@ export function ChatSessionPane({
     }
 
     if (isTurnUsageMessage(item)) {
+      // Right-aligned, hover-revealed footer for the turn (see the
+      // [data-turn-usage] rules in App.css: shown when the row itself or the
+      // element just above it is hovered, or while the menu is open). The
+      // menu sits last so per-turn actions (copy) slot in before it.
+      // The copy target is the turn's final assistant message — the last one
+      // before this usage marker — copied verbatim, no transformation.
+      const usageIndex = tabState.conversation.findIndex((entry) => entry.id === item.id)
+      const finalOutput = tabState.conversation
+        .slice(0, usageIndex === -1 ? undefined : usageIndex)
+        .reduceRight<string | null>(
+          (found, entry) => found ?? (isChatMessage(entry) && entry.role === 'assistant' ? entry.content : null),
+          null,
+        )
       return (
-        <div key={item.id} className="-mt-6 -ml-1 flex items-center justify-start gap-1" data-message-id={item.id}>
-          <TokenUsageMenu
-            usage={item.usage}
-            scope="turn"
-            modelCallCount={item.modelCallCount}
-            align="start"
-          />
+        <div
+          key={item.id}
+          className="-mt-6 -mr-1 flex items-center justify-end gap-1"
+          data-turn-usage
+          data-message-id={item.id}
+        >
           {item.reasoningEffort && (
             <span className="text-xs text-muted-foreground/70">
               {REASONING_EFFORT_LABELS[item.reasoningEffort]}
             </span>
           )}
+          {finalOutput && <MessageCopyButton text={finalOutput} className="opacity-100" />}
+          <TokenUsageMenu
+            usage={item.usage}
+            scope="turn"
+            modelCallCount={item.modelCallCount}
+            align="end"
+          />
         </div>
       )
     }
@@ -401,7 +424,10 @@ export function ChatSessionPane({
             <>
               {groupConversationItems(
                 tabState.conversation,
-                (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
+                // Only an interactive permission card (ask or denial) breaks a
+                // tool out of a group — auto-approved calls group fine, since
+                // their approval renders as a shield glyph on the row itself.
+                (id) => !!tabState.allPermissionRequests.get(id) || tabState.autoPermissionDecisions.get(id)?.decision === 'deny'
               ).map(item => {
                 if (isToolGroup(item)) {
                   return (
@@ -410,6 +436,10 @@ export function ChatSessionPane({
                       group={item}
                       isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
                       onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
+                      getAutoApproved={(toolId) => {
+                        const decision = tabState.autoPermissionDecisions.get(toolId)
+                        return decision?.decision === 'allow' ? { reason: decision.reason } : undefined
+                      }}
                     />
                   )
                 }

@@ -7,13 +7,13 @@ import {
     isErrorMessage,
     isToolCall,
     isTurnUsageMessage,
-    getToolDisplayName,
     getToolErrorText,
+    getToolRowSummary,
     REASONING_EFFORT_LABELS,
     toToolState,
     normalizeToolOutput,
 } from '@/lib/chat-conversation'
-import { Tool, ToolHeader, ToolContent, ToolTabbedContent } from '@/components/ai-elements/tool'
+import { Tool, ToolHeader, ToolContent, ToolIODetails } from '@/components/ai-elements/tool'
 import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 /**
@@ -82,14 +82,18 @@ export function CompactConversation({ items }: { items: ConversationItem[] }) {
 
 function CompactToolRow({ tool }: { tool: ToolCall }) {
     const [open, setOpen] = useState(false)
-    const title = getToolDisplayName(tool)
     const state = toToolState(tool.status)
     const errorText = getToolErrorText(tool)
     return (
-        <Tool open={open} onOpenChange={setOpen} className="mb-0 text-xs">
-            <ToolHeader title={title} type={`tool-${tool.name}` as `tool-${string}`} state={state} />
+        <Tool open={open} onOpenChange={setOpen} className="my-0 text-xs">
+            <ToolHeader
+                summary={getToolRowSummary(tool)}
+                type={`tool-${tool.name}` as `tool-${string}`}
+                state={state}
+                errorLine={errorText?.split('\n')[0]}
+            />
             <ToolContent>
-                <ToolTabbedContent
+                <ToolIODetails
                     input={tool.input}
                     output={normalizeToolOutput(tool.result, tool.status) ?? undefined}
                     errorText={errorText}
