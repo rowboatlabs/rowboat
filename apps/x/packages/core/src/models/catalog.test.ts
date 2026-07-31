@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   listCodexModels: vi.fn(async () => ({
     providers: [{ id: 'codex', name: 'OpenAI Codex', models: [{ id: 'gpt-5.6-sol', reasoning: true }] }],
   })),
-  listModelsForProvider: vi.fn(async (_config: unknown) => ['live-model-1']),
+  listModelsForProvider: vi.fn<(config: unknown) => Promise<string[]>>(async () => ['live-model-1']),
   listOnboardingModels: vi.fn(async () => ({ providers: [] as Array<{ id: string; name: string; models: Array<{ id: string; name?: string; reasoning?: boolean }> }> })),
   getDefaultModelAndProvider: vi.fn(async () => ({ provider: 'openai', model: 'gpt-5.4' })),
   getConfig: vi.fn(async (): Promise<unknown> => {

@@ -16,7 +16,7 @@ function humanMs(ms: number): string {
 async function processScheduledTasks(): Promise<void> {
     const { items } = await listTasks({ limit: 10_000 });
 
-    let scannedCount = items.length;
+    const scannedCount = items.length;
     let activeCount = 0;
     let pausedCount = 0;
     let firedCount = 0;
