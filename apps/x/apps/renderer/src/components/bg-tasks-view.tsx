@@ -18,7 +18,7 @@ import * as analytics from '@/lib/analytics'
 import type { ConversationItem } from '@/lib/chat-conversation'
 import { fetchAgentRunTranscript } from '@/lib/agent-transcript'
 import { useAgentRunTranscript } from '@/hooks/use-agent-run-transcript'
-import { CompactConversation } from '@/components/compact-conversation'
+import { TurnConversation } from '@/components/turn-conversation'
 import { ModelSelector, modelOverrideToRef, refToModelOverride } from '@/components/model-selector'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import { HtmlFileViewer } from '@/components/html-file-viewer'
@@ -670,7 +670,7 @@ function TabButton({
 
 function SectionRegion({ label, children }: { label?: string; children: React.ReactNode }) {
     return (
-        <div className="border-b border-sidebar-border px-4 py-4 last:border-b-0">
+        <div className="border-b border-border px-4 py-4 last:border-b-0">
             {label && (
                 <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                     {label}
@@ -912,7 +912,7 @@ function SetupTab({
                 />
             </SectionRegion>
 
-            <div className="border-b border-sidebar-border px-4 py-3">
+            <div className="border-b border-border px-4 py-3">
                 <button
                     type="button"
                     onClick={() => setShowAdvanced(!showAdvanced)}
@@ -1061,7 +1061,7 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
                     </p>
                 </div>
             ) : (
-                <div className="divide-y divide-sidebar-border">
+                <div className="divide-y divide-border">
                     {rows.map(row => {
                         const inFlight = row.runId === currentInFlightRunId
                         const isError = !!row.error
@@ -1126,7 +1126,7 @@ function RunTranscriptView({
 
     return (
         <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center gap-2 border-b border-sidebar-border px-3 py-2">
+            <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
                 <button
                     type="button"
                     onClick={onBack}
@@ -1165,7 +1165,7 @@ function RunTranscriptView({
                     )}
                 </div>
 
-                <div className="border-t border-sidebar-border" />
+                <div className="border-t border-border" />
 
                 {/* Transcript */}
                 <div>
@@ -1186,7 +1186,7 @@ function RunTranscriptView({
                         <p className="text-xs italic text-muted-foreground">No messages or tool calls recorded.</p>
                     )}
                     {transcript && !loading && items.length > 0 && (
-                        <CompactConversation items={items} />
+                        <TurnConversation items={items} />
                     )}
                 </div>
             </div>
@@ -1257,9 +1257,9 @@ function ControlSidebar({
             : 'Never'
 
     return (
-        <aside className="flex w-[400px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-sidebar-border bg-sidebar text-sidebar-foreground">
+        <aside className="flex w-[400px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-border bg-background">
             {/* Header */}
-            <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4">
+            <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
                 <ListChecks
                     className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-emerald-600 dark:text-emerald-400'}`}
                 />
@@ -1291,7 +1291,7 @@ function ControlSidebar({
             </div>
 
             {/* Status strip */}
-            <div className="shrink-0 border-b border-sidebar-border px-4 py-3">
+            <div className="shrink-0 border-b border-border px-4 py-3">
                 <div className="grid grid-cols-2 gap-4">
                     <div className="min-w-0">
                         <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Last run</div>
@@ -1314,7 +1314,7 @@ function ControlSidebar({
             </div>
 
             {/* Tabs */}
-            <div className="flex shrink-0 border-b border-sidebar-border px-4">
+            <div className="flex shrink-0 border-b border-border px-4">
                 <TabButton active={tab === 'setup'} onClick={() => setTab('setup')}>Setup</TabButton>
                 <TabButton active={tab === 'runs'} onClick={() => setTab('runs')}>Runs history</TabButton>
             </div>
@@ -1341,10 +1341,10 @@ function ControlSidebar({
             )}
 
             {/* Footer — Edit with Copilot · Save (when dirty) · Run / Stop. */}
-            <div className="flex shrink-0 items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/20 px-4 py-2.5">
+            <div className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-2.5">
                 {isRunning ? (
                     <>
-                        <span className="inline-flex items-center gap-1.5 text-xs text-sidebar-foreground">
+                        <span className="inline-flex items-center gap-1.5 text-xs text-foreground">
                             <Loader2 className="size-3 animate-spin" /> Running
                         </span>
                         <span className="ml-auto" />

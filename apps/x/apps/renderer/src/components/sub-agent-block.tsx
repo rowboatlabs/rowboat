@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
-import { CompactConversation } from '@/components/compact-conversation'
+import { TurnConversation } from '@/components/turn-conversation'
 import { turnStateToTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
 import { toToolState, type ToolCall } from '@/lib/chat-conversation'
 import { useTurn } from '@/hooks/use-turn'
@@ -53,11 +53,13 @@ export function SubAgentBlock({
         state={toToolState(item.status)}
       />
       <ToolContent>
-        <div className="flex flex-col gap-3 py-1">
+        <div className="flex flex-col py-1">
           {transcript ? (
             // The transcript opens with the child's user message — the task —
-            // so no separate task chip is rendered here.
-            <CompactConversation items={transcript.items} />
+            // so no separate task chip is rendered here. Same shared renderer
+            // as the chat transcript, so tool rows, usage footer, and copy
+            // behave identically inside the nested turn.
+            <TurnConversation items={transcript.items} />
           ) : (
             <div className="px-1 text-sm text-muted-foreground">
               {item.subAgent

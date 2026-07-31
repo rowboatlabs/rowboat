@@ -16,7 +16,7 @@ import { LiveNoteSchema, type LiveNote, type Triggers } from '@x/shared/dist/liv
 import { useLiveNoteAgentStatus } from '@/hooks/use-live-note-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { useAgentRunTranscript } from '@/hooks/use-agent-run-transcript'
-import { CompactConversation } from '@/components/compact-conversation'
+import { TurnConversation } from '@/components/turn-conversation'
 
 export type OpenLiveNotePanelDetail = {
   filePath: string
@@ -733,7 +733,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
           <p className="text-xs italic text-muted-foreground">No messages or tool calls recorded.</p>
         )}
         {transcript && !loadingRun && items.length > 0 && (
-          <CompactConversation items={items} />
+          <TurnConversation items={items} />
         )}
       </div>
     </div>
