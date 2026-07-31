@@ -4,8 +4,9 @@ import {
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
+  ChevronsDown,
+  ChevronsUp,
   ChevronUp,
-  History,
   Maximize2,
   MessageCircle,
   Mic,
@@ -34,10 +35,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { reduceTurn } from '@x/shared/src/turns.js'
+
 import { TalkingHead } from '@/components/talking-head'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { isChatMessage } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
+import { buildTurnConversation, stripVoiceTags } from '@/lib/session-chat/turn-view'
 import { stripKnowledgePrefix } from '@/lib/wiki-links'
 import {
   ChatInputWithMentions,
@@ -296,18 +300,17 @@ export function QuickAskBar() {
     void window.ipc.invoke('quickAsk:stop', null).catch(() => {})
   }, [])
 
-  // History peek — EXPLICIT, never forced: nothing is fetched or shown
-  // unless the user clicks the history button (the no-history default is
-  // right for ~90% of asks; this is the corner-case escape hatch).
-  const [history, setHistory] = useState<{ role: 'user' | 'assistant'; content: string }[] | null>(null)
-  const [historyLoading, setHistoryLoading] = useState(false)
+  // History peek — display is EXPLICIT (the no-history default is right for
+  // ~90% of asks), but the DATA is prefetched eagerly on summon/switch so
+  // the click is instant: a local IPC read of a few KB, no downside.
+  const [historyData, setHistoryData] = useState<{ role: 'user' | 'assistant'; content: string }[] | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
 
   const reset = useCallback(() => {
     awaitingRef.current = false
     setAsked(null)
     setAnswer(null)
-    setHistory(null)
-    setHistoryLoading(false)
+    setShowHistory(false)
   }, [])
 
   // Destination-chat context: which chat submits land in (title chip) plus
@@ -337,42 +340,75 @@ export function QuickAskBar() {
   const [prevRunId, setPrevRunId] = useState(activeRunId)
   if (prevRunId !== activeRunId) {
     setPrevRunId(activeRunId)
-    setHistory(null)
-    setHistoryLoading(false)
+    setHistoryData(null)
+    setShowHistory(false)
   }
+
+  // Fetch the last few text exchanges of a session. Session chats hydrate
+  // via sessions:get → getTurn → reduceTurn → buildTurnConversation (the
+  // same path the app's chat uses — the legacy Run.log is EMPTY for them);
+  // pre-session chats fall back to runs:fetch + the log converter.
+  const fetchHistory = useCallback(async (rid: string) => {
+    try {
+      const state = await window.ipc.invoke('sessions:get', { sessionId: rid })
+      const refs = (state.turns ?? []).slice(-4)
+      const turns = await Promise.all(
+        refs.map((r) => window.ipc.invoke('sessions:getTurn', { turnId: r.turnId })),
+      )
+      const items = turns
+        .flatMap((t) => buildTurnConversation(reduceTurn(t.events)))
+        .filter(isChatMessage)
+        .map((m) => ({ role: m.role, content: stripVoiceTags(m.content ?? '').trim() }))
+        .filter((m) => m.content)
+        .slice(-6)
+      if (items.length > 0) return items
+    } catch {
+      // fall through to the legacy path
+    }
+    try {
+      const run = await window.ipc.invoke('runs:fetch', { runId: rid })
+      return runLogToConversation(run.log)
+        .filter(isChatMessage)
+        .map((m) => ({ role: m.role, content: stripVoiceTags(m.content ?? '').trim() }))
+        .filter((m) => m.content)
+        .slice(-6)
+    } catch {
+      return []
+    }
+  }, [])
+
+  // Prefetch on summon/switch so the peek opens instantly.
+  useEffect(() => {
+    if (!activeRunId) return
+    let stale = false
+    void fetchHistory(activeRunId).then((items) => {
+      if (!stale) setHistoryData(items)
+    })
+    return () => {
+      stale = true
+    }
+  }, [activeRunId, fetchHistory])
 
   // Land at the bottom when history opens: newest first in view, scroll UP
   // for older — matching how the chat itself reads.
   const panelScrollRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    if (history !== null && panelScrollRef.current) {
+    if (showHistory && panelScrollRef.current) {
       panelScrollRef.current.scrollTop = panelScrollRef.current.scrollHeight
     }
-  }, [history])
+  }, [showHistory, historyData])
 
   const toggleHistory = useCallback(() => {
-    if (history !== null || historyLoading) {
-      setHistory(null)
-      setHistoryLoading(false)
+    if (showHistory) {
+      setShowHistory(false)
       return
     }
     if (!activeRunId) return
-    setHistoryLoading(true)
-    void window.ipc
-      .invoke('runs:fetch', { runId: activeRunId })
-      .then((run) => {
-        // Text messages only — a peek, not a replica. Tool detail and
-        // everything older lives one ↗ away in the app.
-        const items = runLogToConversation(run.log)
-          .filter(isChatMessage)
-          .filter((m) => m.content?.trim())
-          .slice(-6)
-          .map((m) => ({ role: m.role, content: m.content }))
-        setHistory(items)
-      })
-      .catch(() => setHistory([]))
-      .finally(() => setHistoryLoading(false))
-  }, [history, historyLoading, activeRunId])
+    setShowHistory(true)
+    // Show the prefetched copy immediately, refresh behind it — exchanges
+    // made since the prefetch (including from this bar) must show up.
+    void fetchHistory(activeRunId).then((items) => setHistoryData(items))
+  }, [showHistory, activeRunId, fetchHistory])
 
   // Voice input: the composer's mic button, or hold the platform PTT key
   // (right ⌘ on macOS, right Ctrl on Windows) while the bar is focused.
@@ -762,27 +798,28 @@ export function QuickAskBar() {
             </TooltipTrigger>
             <TooltipContent side="top">New chat</TooltipContent>
           </Tooltip>
-          {/* History peek — explicit, lazy: nothing loads unless clicked. */}
+          {/* History peek — display is explicit (data prefetched, shown
+              only on click). */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={activeRunId ? toggleHistory : undefined}
-                aria-label={history !== null ? 'Hide history' : 'Peek at recent history'}
+                aria-label={showHistory ? 'Hide history' : 'Peek at recent history'}
                 aria-disabled={!activeRunId}
                 className={`${callCard ? '' : 'mr-auto '}flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
-                  history !== null || historyLoading
+                  showHistory
                     ? 'bg-black/[0.08] text-neutral-900 ring-black/15'
                     : activeRunId
                       ? 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
                       : 'cursor-default bg-black/[0.04] text-neutral-300 ring-black/5'
                 }`}
               >
-                <History className="h-3.5 w-3.5" />
+                {showHistory ? <ChevronsDown className="h-3.5 w-3.5" /> : <ChevronsUp className="h-3.5 w-3.5" />}
               </button>
             </TooltipTrigger>
             <TooltipContent side="top">
-              {history !== null
+              {showHistory
                 ? 'Hide history'
                 : activeRunId
                   ? 'Peek at this chat’s recent messages'
@@ -948,21 +985,21 @@ export function QuickAskBar() {
           )}
         </div>
 
-        {(panelAsked || panelText || history !== null || historyLoading) && (
+        {(panelAsked || panelText || showHistory) && (
           <div
             ref={panelScrollRef}
             className="max-h-[280px] cursor-text select-text overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800"
           >
-            {historyLoading && (
+            {showHistory && historyData === null && (
               <div className="mb-2 animate-pulse text-xs text-neutral-400">Loading history…</div>
             )}
-            {history !== null && !historyLoading && (
+            {showHistory && historyData !== null && (
               <div className="mb-1">
-                {history.length === 0 ? (
+                {historyData.length === 0 ? (
                   <div className="mb-2 text-xs text-neutral-400">No earlier messages in this chat.</div>
                 ) : (
                   <div className="opacity-75">
-                    {history.map((m, i) =>
+                    {historyData.map((m, i) =>
                       m.role === 'user' ? (
                         <div key={i} className="mb-1.5 mt-3 text-sm font-medium text-neutral-500 first:mt-0">
                           {m.content}
@@ -978,7 +1015,7 @@ export function QuickAskBar() {
                     )}
                   </div>
                 )}
-                {(panelAsked || panelText) && history.length > 0 && (
+                {(panelAsked || panelText) && historyData.length > 0 && (
                   <div className="my-2 flex items-center gap-2 text-[9px] uppercase tracking-wider text-neutral-400">
                     <span className="h-px flex-1 bg-black/10" />
                     earlier
