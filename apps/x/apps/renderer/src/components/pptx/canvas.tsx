@@ -81,6 +81,8 @@ interface Gesture {
   wantsEdit: boolean
 }
 
+/** Scale at which one EMU maps to one CSS pixel — i.e. 100% zoom at 96 dpi. */
+const CSS_PX_PER_EMU = 96 / EMU_PER_INCH
 /** Pointer travel a press may drift and still count as a click, not a drag. */
 const CLICK_SLOP_PX = 4
 /** Window in which a second press is part of a double-click. */
@@ -507,6 +509,14 @@ const thumbNoop = () => {}
  * inert: pointer-events none, no selection chrome, no text overlay. Memoized —
  * applyEditSet keeps untouched slides referentially stable, so only an edited
  * slide's thumbnail re-renders.
+ *
+ * The slide is laid out at 100% (96 dpi) and the finished render is scaled to
+ * `widthPx`, rather than shrinking every length into the target box directly.
+ * Direct scaling puts body text at ~2px in a 160px-wide rail thumbnail, which
+ * Chromium renders as an invisible smear — most of the slide's content simply
+ * vanishes from the preview. Laying out full size and letting the compositor
+ * shrink the result keeps every run legible, and the outer box is unchanged
+ * because the transform is exactly `widthPx / referenceWidth`.
  */
 export const SlideThumbnail = memo(function SlideThumbnail({
   slide,
@@ -517,24 +527,36 @@ export const SlideThumbnail = memo(function SlideThumbnail({
   sizeEmu: { w: number; h: number }
   widthPx: number
 }) {
-  const scale = widthPx / sizeEmu.w
+  const refW = sizeEmu.w * CSS_PX_PER_EMU
+  const refH = sizeEmu.h * CSS_PX_PER_EMU
+  const zoom = widthPx / refW
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none relative select-none overflow-hidden bg-white"
-      style={{ width: widthPx, height: sizeEmu.h * scale }}
+      className="pointer-events-none select-none overflow-hidden bg-white"
+      style={{ width: widthPx, height: refH * zoom }}
     >
-      {slide.shapes.map((shape, i) => (
-        <ShapeView
-          key={`${shape.id}:${i}`}
-          shape={shape}
-          rect={shape.xfrmEmu}
-          scale={scale}
-          selected={false}
-          transform={composeTransform(visualTransform(shape))}
-          onPointerDown={thumbNoop}
-        />
-      ))}
+      <div
+        className="relative bg-white"
+        style={{
+          width: refW,
+          height: refH,
+          transform: `scale(${zoom})`,
+          transformOrigin: 'top left',
+        }}
+      >
+        {slide.shapes.map((shape, i) => (
+          <ShapeView
+            key={`${shape.id}:${i}`}
+            shape={shape}
+            rect={shape.xfrmEmu}
+            scale={CSS_PX_PER_EMU}
+            selected={false}
+            transform={composeTransform(visualTransform(shape))}
+            onPointerDown={thumbNoop}
+          />
+        ))}
+      </div>
     </div>
   )
 })
@@ -555,8 +577,6 @@ interface SlideCanvasProps {
   onOverlayAttach: (handle: TextOverlayHandle | null) => void
   onTextCommit: (shape: TextShape, next: EditedParagraph[] | null) => void
 }
-
-const CSS_PX_PER_EMU = 96 / EMU_PER_INCH
 
 export function SlideCanvas({
   slide,
