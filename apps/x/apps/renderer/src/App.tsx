@@ -7607,6 +7607,7 @@ function App() {
                 isWaitingOnHuman={activeIsWaitingOnHuman}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
+                onCodePermissionResponse={handleCodePermissionResponse}
                 isToolOpenForTab={isToolOpenForTab}
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}

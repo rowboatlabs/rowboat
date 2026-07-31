@@ -13,6 +13,7 @@ import { ChatSessionPane, ChatSessionComposer } from '@/components/chat-session'
 import { useTabMeta } from '@/lib/tab-meta'
 import { useSidebar } from '@/components/ui/sidebar'
 import type { ChatPaneSize } from '@/contexts/theme-context'
+import type { PermissionDecision } from '@x/shared/src/code-mode.js'
 import {
   type ChatViewportAnchorState,
   type ChatTabViewState,
@@ -102,6 +103,7 @@ interface ChatSidebarProps {
   autoPermissionDecisions?: ChatTabViewState['autoPermissionDecisions']
   onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse) => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
+  onCodePermissionResponse?: (toolCallId: string, requestId: string, decision: PermissionDecision) => void | Promise<void>
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
   onOpenKnowledgeFile?: (path: string) => void
@@ -170,6 +172,7 @@ export function ChatSidebar({
   autoPermissionDecisions = new Map(),
   onPermissionResponse,
   onAskHumanResponse,
+  onCodePermissionResponse,
   isToolOpenForTab,
   onToolOpenChangeForTab,
   onOpenKnowledgeFile,
@@ -411,7 +414,8 @@ export function ChatSidebar({
 
           <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})}>
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="relative min-h-0 flex-1">
+              {/* Pane padding lives here, on the container — the shared chat pane renders identically on every surface. */}
+              <div className="relative min-h-0 flex-1 px-3">
                 {chatTabs.map((tab) => {
                   const isActive = tab.id === activeChatTabId
                   return (
@@ -430,13 +434,7 @@ export function ChatSidebar({
                       activeIsWorking={isProcessing && !isWaitingOnHuman}
                       activeIsProcessing={isProcessing}
                       activeIsReasoning={isReasoning}
-                      contentClassName="px-3"
-                      centerEmptyState={isMaximized}
-                      emptyStateWide={isMaximized}
-                      streamingRenderer="plain"
-                      askHumanShowOptions={false}
-                      richToolCards={false}
-                      detailedToolErrors
+                      onCodePermissionResponse={onCodePermissionResponse}
                       onComposioConnected={onComposioConnected}
                     />
                   )

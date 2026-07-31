@@ -94,19 +94,6 @@ export interface TurnConversationProps {
    */
   isToolOpen?: (toolId: string) => boolean
   onToolOpenChange?: (toolId: string, open: boolean) => void
-  /**
-   * Render the rich tool cards — CodingRunBlock for `code_agent_run`,
-   * SubAgentBlock for `spawn-agent`, and AppActionCard for app actions
-   * (default true). The side-pane chat sets this to false and shows those
-   * tool calls as generic collapsible Tool rows instead.
-   */
-  richToolCards?: boolean
-  /**
-   * Surface the tool's actual error output (via getToolErrorText) on generic
-   * tool rows (side-pane chat). Default false: a plain 'Tool error' label
-   * when the call errored.
-   */
-  detailedToolErrors?: boolean
   /** Live-chat permission state (from ChatTabViewState); omitted on read-only surfaces. */
   permissionRequests?: ChatTabViewState['allPermissionRequests']
   permissionResponses?: ChatTabViewState['permissionResponses']
@@ -126,8 +113,6 @@ export function TurnConversation({
   items,
   isToolOpen: isToolOpenProp,
   onToolOpenChange: onToolOpenChangeProp,
-  richToolCards = true,
-  detailedToolErrors = false,
   permissionRequests = EMPTY_PERMISSION_REQUESTS,
   permissionResponses = EMPTY_PERMISSION_RESPONSES,
   autoPermissionDecisions = EMPTY_AUTO_DECISIONS,
@@ -218,36 +203,34 @@ export function TurnConversation({
     }
 
     if (isToolCall(item)) {
-      if (richToolCards) {
-        if (item.name === 'code_agent_run') {
-          return (
-            <CodingRunBlock
-              key={item.id}
-              item={item}
-              open={isToolOpen(item.id)}
-              onOpenChange={(open) => onToolOpenChange(item.id, open)}
-              onPermissionDecision={(decision) => {
-                if (item.pendingCodePermission) {
-                  onCodePermissionResponse?.(item.id, item.pendingCodePermission.requestId, decision)
-                }
-              }}
-            />
-          )
-        }
-        if (item.name === 'spawn-agent') {
-          return (
-            <SubAgentBlock
-              key={item.id}
-              item={item}
-              open={isToolOpen(item.id)}
-              onOpenChange={(open) => onToolOpenChange(item.id, open)}
-            />
-          )
-        }
-        const appActionData = getAppActionCardData(item)
-        if (appActionData) {
-          return <AppActionCard key={item.id} data={appActionData} status={item.status} />
-        }
+      if (item.name === 'code_agent_run') {
+        return (
+          <CodingRunBlock
+            key={item.id}
+            item={item}
+            open={isToolOpen(item.id)}
+            onOpenChange={(open) => onToolOpenChange(item.id, open)}
+            onPermissionDecision={(decision) => {
+              if (item.pendingCodePermission) {
+                onCodePermissionResponse?.(item.id, item.pendingCodePermission.requestId, decision)
+              }
+            }}
+          />
+        )
+      }
+      if (item.name === 'spawn-agent') {
+        return (
+          <SubAgentBlock
+            key={item.id}
+            item={item}
+            open={isToolOpen(item.id)}
+            onOpenChange={(open) => onToolOpenChange(item.id, open)}
+          />
+        )
+      }
+      const appActionData = getAppActionCardData(item)
+      if (appActionData) {
+        return <AppActionCard key={item.id} data={appActionData} status={item.status} />
       }
       const webSearchData = getWebSearchCardData(item)
       if (webSearchData) {
@@ -276,9 +259,7 @@ export function TurnConversation({
           />
         )
       }
-      const errorText = detailedToolErrors
-        ? getToolErrorText(item)
-        : (item.status === 'error' ? 'Tool error' : '')
+      const errorText = getToolErrorText(item)
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
       return (

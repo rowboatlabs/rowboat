@@ -51,34 +51,7 @@ export interface ChatSessionPaneProps {
   activeIsWorking: boolean
   activeIsProcessing: boolean
   activeIsReasoning: boolean
-  /** Extra classes appended to ConversationContent (the side-pane chat adds `px-3`). */
-  contentClassName?: string
-  /** Vertically center the empty state (default true). The side-pane chat only centers when maximized. */
-  centerEmptyState?: boolean
-  /** `wide` flag for ChatEmptyState (default true). The side-pane chat is wide only when maximized. */
-  emptyStateWide?: boolean
-  /**
-   * How the in-flight assistant message is rendered. 'smooth' (default, App)
-   * animates via useSmoothedText and strips <voice> tags; 'plain' (side-pane
-   * chat) renders the raw text directly.
-   */
-  streamingRenderer?: 'smooth' | 'plain'
-  /** Render quick-reply option buttons on ask-human requests (default true). The side-pane chat renders free-text only. */
-  askHumanShowOptions?: boolean
-  /**
-   * Render the rich tool cards — CodingRunBlock for `code_agent_run`,
-   * SubAgentBlock for `spawn-agent`, and AppActionCard for app actions
-   * (default true, App). The side-pane chat sets this to false and shows those
-   * tool calls as generic collapsible Tool rows instead.
-   */
-  richToolCards?: boolean
-  /**
-   * Surface the tool's actual error output (via getToolErrorText) on generic
-   * tool rows (side-pane chat). Default false (App): a plain 'Tool error'
-   * label when the call errored.
-   */
-  detailedToolErrors?: boolean
-  /** Answer a mid-run permission ask from a `code_agent_run` coding turn (App; used by CodingRunBlock). */
+  /** Answer a mid-run permission ask from a `code_agent_run` coding turn (used by CodingRunBlock). */
   onCodePermissionResponse?: (toolCallId: string, requestId: string, decision: PermissionDecision) => void | Promise<void>
   /** Notified when a ComposioConnectCard finishes connecting a toolkit. */
   onComposioConnected?: (toolkitSlug: string) => void
@@ -97,13 +70,6 @@ export function ChatSessionPane({
   activeIsWorking,
   activeIsProcessing,
   activeIsReasoning,
-  contentClassName,
-  centerEmptyState = true,
-  emptyStateWide = true,
-  streamingRenderer = 'smooth',
-  askHumanShowOptions = true,
-  richToolCards = true,
-  detailedToolErrors = false,
   onCodePermissionResponse,
   onComposioConnected,
 }: ChatSessionPaneProps) {
@@ -128,9 +94,8 @@ export function ChatSessionPane({
   const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
   const tabConversationContentClassName = cn(
     'mx-auto w-full max-w-4xl',
-    contentClassName,
     tabHasConversation ? 'pb-28' : 'pb-0',
-    !tabHasConversation && centerEmptyState && 'min-h-full items-center justify-center',
+    !tabHasConversation && 'min-h-full items-center justify-center',
   )
   return (
     <div
@@ -151,7 +116,7 @@ export function ChatSessionPane({
         <ConversationContent className={tabConversationContentClassName}>
           {!tabHasConversation ? (
             <ChatEmptyState
-              wide={emptyStateWide}
+              wide
               onPickPrompt={onPickPrompt}
             />
           ) : (
@@ -160,8 +125,6 @@ export function ChatSessionPane({
                 items={tabState.conversation}
                 isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
                 onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
-                richToolCards={richToolCards}
-                detailedToolErrors={detailedToolErrors}
                 permissionRequests={tabState.allPermissionRequests}
                 permissionResponses={tabState.permissionResponses}
                 autoPermissionDecisions={tabState.autoPermissionDecisions}
@@ -176,7 +139,7 @@ export function ChatSessionPane({
                 <AskHumanRequest
                   key={request.toolCallId}
                   query={request.query}
-                  options={askHumanShowOptions ? request.options : undefined}
+                  options={request.options}
                   onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
                   isProcessing={isActive && activeIsWorking}
                 />
@@ -185,11 +148,7 @@ export function ChatSessionPane({
               {tabState.currentAssistantMessage && (
                 <Message from="assistant">
                   <MessageContent>
-                    {streamingRenderer === 'plain' ? (
-                      <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
-                    ) : (
-                      <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
-                    )}
+                    <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
                   </MessageContent>
                 </Message>
               )}
