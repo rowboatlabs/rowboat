@@ -8,30 +8,16 @@ import {
 import {
   Message,
   MessageContent,
-  MessageCopyButton,
   MessageResponse,
 } from '@/components/ai-elements/message'
 import {
   type PromptInputMessage,
   type FileMention,
 } from '@/components/ai-elements/prompt-input'
-import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolIODetails } from '@/components/ai-elements/tool'
-import { PermissionRequest } from '@/components/ai-elements/permission-request'
-import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { TurnActivityIndicator } from '@/components/turn-activity-indicator'
-import { WebSearchResult } from '@/components/ai-elements/web-search-result'
-import { AppActionCard } from '@/components/ai-elements/app-action-card'
-import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
-import { CodingRunBlock } from '@/components/coding-run'
-import { SubAgentBlock } from '@/components/sub-agent-block'
-import { TerminalOutput } from '@/components/terminal-output'
-import { ChatMessageAttachments } from '@/components/chat-message-attachments'
-import { BillingErrorNotice } from '@/components/billing-error-notice'
-import { TokenUsageMenu } from '@/components/token-usage-menu'
-import { matchBillingError } from '@/lib/billing-error'
-import { wikiLabel } from '@/lib/wiki-links'
-import { streamdownComponents, userMessageRemarkPlugins } from '@/lib/markdown-render'
+import { TurnConversation } from '@/components/turn-conversation'
+import { streamdownComponents } from '@/lib/markdown-render'
 import { useSmoothedText } from '@/hooks/useSmoothedText'
 import type { useVoiceMode } from '@/hooks/useVoiceMode'
 import type { PermissionDecision } from '@x/shared/src/code-mode.js'
@@ -43,53 +29,11 @@ import { useSessionTitle } from '@/lib/session-title'
 import {
   type ChatTabViewState,
   type ChatViewportAnchorState,
-  type ConversationItem,
-  getAppActionCardData,
-  getComposioConnectCardData,
-  getToolErrorText,
-  getToolRowSummary,
-  getWebSearchCardData,
-  groupConversationItems,
-  isChatMessage,
-  isErrorMessage,
-  isToolCall,
-  isToolGroup,
-  isTurnUsageMessage,
-  normalizeToolInput,
-  normalizeToolOutput,
-  parseAttachedFiles,
-  REASONING_EFFORT_LABELS,
-  toToolState,
 } from '@/lib/chat-conversation'
 
 function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
   const smoothText = useSmoothedText(text)
   return <MessageResponse components={components}>{smoothText}</MessageResponse>
-}
-
-function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
-  const ref = React.useRef<HTMLPreElement>(null)
-  const stickToBottom = React.useRef(true)
-
-  React.useLayoutEffect(() => {
-    const el = ref.current
-    if (el && stickToBottom.current) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [children])
-
-  const handleScroll = React.useCallback(() => {
-    const el = ref.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-    stickToBottom.current = atBottom
-  }, [])
-
-  return (
-    <pre ref={ref} onScroll={handleScroll} className={className}>
-      {children}
-    </pre>
-  )
 }
 
 export interface ChatSessionPaneProps {
@@ -181,216 +125,6 @@ export function ChatSessionPane({
     busy: isActive && activeIsProcessing ? true : undefined,
   })
 
-  const renderConversationItem = (
-    item: ConversationItem,
-    options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
-  ): React.ReactNode => {
-    if (isChatMessage(item)) {
-      if (item.role === 'user') {
-        if (item.attachments && item.attachments.length > 0) {
-          return (
-            <Message key={item.id} from={item.role} data-message-id={item.id}>
-              <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
-                <ChatMessageAttachments attachments={item.attachments} />
-              </MessageContent>
-              {item.content && (
-                <div className="flex flex-col items-end">
-                  <MessageContent>
-                    <MessageResponse
-                      components={streamdownComponents}
-                      remarkPlugins={userMessageRemarkPlugins}
-                    >
-                      {item.content}
-                    </MessageResponse>
-                  </MessageContent>
-                  <MessageCopyButton text={item.content} className="mt-0.5" />
-                </div>
-              )}
-            </Message>
-          )
-        }
-        const { message, files } = parseAttachedFiles(item.content)
-        return (
-          <Message key={item.id} from={item.role} data-message-id={item.id}>
-            <div className="flex flex-col items-end">
-              <MessageContent>
-                {files.length > 0 && (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {files.map((filePath, index) => (
-                      <span
-                        key={index}
-                        className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                      >
-                        @{wikiLabel(filePath)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <MessageResponse
-                  components={streamdownComponents}
-                  remarkPlugins={userMessageRemarkPlugins}
-                >
-                  {message}
-                </MessageResponse>
-              </MessageContent>
-              <MessageCopyButton text={message} className="mt-0.5" />
-            </div>
-          </Message>
-        )
-      }
-      return (
-        <Message key={item.id} from={item.role} data-message-id={item.id}>
-          <MessageContent>
-            <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
-          </MessageContent>
-        </Message>
-      )
-    }
-
-    if (isToolCall(item)) {
-      if (richToolCards) {
-        if (item.name === 'code_agent_run') {
-          return (
-            <CodingRunBlock
-              key={item.id}
-              item={item}
-              open={isToolOpenForTab(tab.id, item.id)}
-              onOpenChange={(open) => setToolOpenForTab(tab.id, item.id, open)}
-              onPermissionDecision={(decision) => {
-                if (item.pendingCodePermission) {
-                  onCodePermissionResponse?.(item.id, item.pendingCodePermission.requestId, decision)
-                }
-              }}
-            />
-          )
-        }
-        if (item.name === 'spawn-agent') {
-          return (
-            <SubAgentBlock
-              key={item.id}
-              item={item}
-              open={isToolOpenForTab(tab.id, item.id)}
-              onOpenChange={(open) => setToolOpenForTab(tab.id, item.id, open)}
-            />
-          )
-        }
-        const appActionData = getAppActionCardData(item)
-        if (appActionData) {
-          return <AppActionCard key={item.id} data={appActionData} status={item.status} />
-        }
-      }
-      const webSearchData = getWebSearchCardData(item)
-      if (webSearchData) {
-        return (
-          <WebSearchResult
-            key={item.id}
-            query={webSearchData.query}
-            results={webSearchData.results}
-            status={item.status}
-            title={webSearchData.title}
-          />
-        )
-      }
-      const composioConnectData = getComposioConnectCardData(item)
-      if (composioConnectData) {
-        // Skip rendering if this is a duplicate "already connected" card
-        if (composioConnectData.hidden) return null
-        return (
-          <ComposioConnectCard
-            key={item.id}
-            toolkitSlug={composioConnectData.toolkitSlug}
-            toolkitDisplayName={composioConnectData.toolkitDisplayName}
-            status={item.status}
-            alreadyConnected={composioConnectData.alreadyConnected}
-            onConnected={onComposioConnected}
-          />
-        )
-      }
-      const errorText = detailedToolErrors
-        ? getToolErrorText(item)
-        : (item.status === 'error' ? 'Tool error' : '')
-      const output = normalizeToolOutput(item.result, item.status)
-      const input = normalizeToolInput(item.input)
-      return (
-        <Tool
-          key={item.id}
-          open={isToolOpenForTab(tab.id, item.id)}
-          onOpenChange={(open) => setToolOpenForTab(tab.id, item.id, open)}
-        >
-          <ToolHeader
-            summary={getToolRowSummary(item)}
-            type={`tool-${item.name}`}
-            state={toToolState(item.status)}
-            autoApproved={options?.autoPermissionDetail}
-            errorLine={getToolErrorText(item)?.split('\n')[0]}
-          />
-          <ToolContent>
-            {item.streamingOutput ? (
-              <AutoScrollPre className="max-h-80 overflow-auto py-1 font-mono text-xs whitespace-pre-wrap text-foreground/90">
-                <TerminalOutput raw={item.streamingOutput} />
-              </AutoScrollPre>
-            ) : (
-              <ToolIODetails input={input} output={output} errorText={errorText} />
-            )}
-          </ToolContent>
-        </Tool>
-      )
-    }
-
-    if (isTurnUsageMessage(item)) {
-      // Right-aligned, hover-revealed footer for the turn (see the
-      // [data-turn-usage] rules in App.css: shown when the row itself or the
-      // element just above it is hovered, or while the menu is open). The
-      // menu sits last so per-turn actions (copy) slot in before it.
-      // The copy target is the turn's final assistant message — the last one
-      // before this usage marker — copied verbatim, no transformation.
-      const usageIndex = tabState.conversation.findIndex((entry) => entry.id === item.id)
-      const finalOutput = tabState.conversation
-        .slice(0, usageIndex === -1 ? undefined : usageIndex)
-        .reduceRight<string | null>(
-          (found, entry) => found ?? (isChatMessage(entry) && entry.role === 'assistant' ? entry.content : null),
-          null,
-        )
-      return (
-        <div
-          key={item.id}
-          className="-mt-6 -mr-1 flex items-center justify-end gap-1"
-          data-turn-usage
-          data-message-id={item.id}
-        >
-          {item.reasoningEffort && (
-            <span className="text-xs text-muted-foreground/70">
-              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
-            </span>
-          )}
-          {finalOutput && <MessageCopyButton text={finalOutput} className="opacity-100" />}
-          <TokenUsageMenu
-            usage={item.usage}
-            scope="turn"
-            modelCallCount={item.modelCallCount}
-            align="end"
-          />
-        </div>
-      )
-    }
-
-    if (isErrorMessage(item)) {
-      const billingMatch = matchBillingError(item.message)
-      if (billingMatch) {
-        return <BillingErrorNotice key={item.id} id={item.id} match={billingMatch} />
-      }
-      return (
-        <Message key={item.id} from="assistant" data-message-id={item.id}>
-          <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
-            <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
-          </MessageContent>
-        </Message>
-      )
-    }
-
-    return null
-  }
-
   const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
   const tabConversationContentClassName = cn(
     'mx-auto w-full max-w-4xl',
@@ -422,68 +156,21 @@ export function ChatSessionPane({
             />
           ) : (
             <>
-              {groupConversationItems(
-                tabState.conversation,
-                // Only an interactive permission card (ask or denial) breaks a
-                // tool out of a group — auto-approved calls group fine, since
-                // their approval renders as a shield glyph on the row itself.
-                (id) => !!tabState.allPermissionRequests.get(id) || tabState.autoPermissionDecisions.get(id)?.decision === 'deny'
-              ).map(item => {
-                if (isToolGroup(item)) {
-                  return (
-                    <ToolGroupComponent
-                      key={item.groupId}
-                      group={item}
-                      isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
-                      onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
-                      getAutoApproved={(toolId) => {
-                        const decision = tabState.autoPermissionDecisions.get(toolId)
-                        return decision?.decision === 'allow' ? { reason: decision.reason } : undefined
-                      }}
-                    />
-                  )
-                }
-                const autoDecision = isToolCall(item)
-                  ? tabState.autoPermissionDecisions.get(item.id)
-                  : undefined
-                const rendered = renderConversationItem(
-                  item,
-                  autoDecision?.decision === 'allow'
-                    ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
-                    : undefined,
-                )
-                if (isToolCall(item)) {
-                  const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
-                  const permRequest = tabState.allPermissionRequests.get(item.id)
-                  if (deniedAutoDecision || (permRequest && onPermissionResponse)) {
-                    const response = tabState.permissionResponses.get(item.id) || null
-                    return (
-                      <React.Fragment key={item.id}>
-                        {deniedAutoDecision && (
-                          <AutoPermissionDecision
-                            toolCall={deniedAutoDecision.toolCall}
-                            permission={deniedAutoDecision.permission}
-                            decision={deniedAutoDecision.decision}
-                            reason={deniedAutoDecision.reason}
-                          />
-                        )}
-                        {permRequest && onPermissionResponse && (
-                          <PermissionRequest
-                            toolCall={permRequest.toolCall}
-                            permission={permRequest.permission}
-                            onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                            onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                            isProcessing={isActive && activeIsWorking}
-                            response={response}
-                          />
-                        )}
-                        {rendered}
-                      </React.Fragment>
-                    )
-                  }
-                }
-                return rendered
-              })}
+              <TurnConversation
+                items={tabState.conversation}
+                isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
+                onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
+                richToolCards={richToolCards}
+                detailedToolErrors={detailedToolErrors}
+                permissionRequests={tabState.allPermissionRequests}
+                permissionResponses={tabState.permissionResponses}
+                autoPermissionDecisions={tabState.autoPermissionDecisions}
+                onPermissionResponse={onPermissionResponse}
+                permissionIsProcessing={isActive && activeIsWorking}
+                onCodePermissionResponse={onCodePermissionResponse}
+                onComposioConnected={onComposioConnected}
+              />
+
 
               {onAskHumanResponse && Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
                 <AskHumanRequest

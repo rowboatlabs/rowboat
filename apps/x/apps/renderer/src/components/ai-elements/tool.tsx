@@ -30,8 +30,10 @@ const formatToolValue = (value: unknown) => {
 /* ── Quiet tool rows ─────────────────────────────────────────────────
  * A tool call is one borderless 13px line: status glyph, medium-weight
  * verb, muted detail, faint trailing stat. The whole row is the expand
- * trigger; the chevron only appears on hover. Completed rows fade to
- * muted so a finished read is unremarkable and a failure stands out.
+ * trigger; a settled row leads with the expand chevron (down collapsed,
+ * up while open — same as the group header), while running/failed rows
+ * keep a hover-revealed trailing chevron. Completed rows fade to muted
+ * so a finished read is unremarkable and a failure stands out.
  *
  * Every quiet surface in the transcript (generic tools, web search,
  * permissions, app actions) shares these two classes so the row look is
@@ -59,15 +61,18 @@ export const Tool = ({ className, children, ...props }: ToolProps) => (
 // through running → settled. Shared by the custom quiet surfaces too.
 export const quietRowGlyphSlotClass = "flex size-3 shrink-0 items-center justify-center";
 
-// Lead glyph: spinner while running, a red dot on failure — success is
-// the unremarkable default and leaves the slot empty.
+// Lead glyph: spinner while running, a red dot on failure, and — once done —
+// the same expand chevron the settled tool-group header uses (down collapsed,
+// up while open), so the slot never reads as a hole where the spinner was.
 const ToolLeadGlyph = ({ state }: { state: ToolUIPart["state"] }) => (
   <span className={quietRowGlyphSlotClass}>
     {state === "output-error" ? (
       <span className="size-1.5 rounded-full bg-red-600 dark:bg-red-500" />
-    ) : state !== "output-available" ? (
+    ) : state === "output-available" ? (
+      <ChevronDownIcon className="size-3 text-muted-foreground/50 transition-transform group-data-[state=open]/row:rotate-180" />
+    ) : (
       <LoaderIcon className="size-3 animate-spin text-muted-foreground" />
-    ) : null}
+    )}
   </span>
 );
 
@@ -153,7 +158,9 @@ export const ToolHeader = ({
               </TooltipContent>
             </Tooltip>
           )}
-          <ChevronDownIcon className="size-3 text-muted-foreground/50 opacity-0 transition-[opacity,transform] group-hover/row:opacity-100 group-data-[state=open]/row:rotate-180 group-data-[state=open]/row:opacity-100" />
+          {(hideLeadIcon || !done) && (
+            <ChevronDownIcon className="size-3 text-muted-foreground/50 opacity-0 transition-[opacity,transform] group-hover/row:opacity-100 group-data-[state=open]/row:rotate-180 group-data-[state=open]/row:opacity-100" />
+          )}
         </span>
       </CollapsibleTrigger>
       {failed && errorLine && (

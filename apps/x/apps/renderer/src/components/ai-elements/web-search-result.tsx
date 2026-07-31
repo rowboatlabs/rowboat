@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { quietRowContainerClass, quietRowTriggerClass } from "@/components/ai-elements/tool";
+import { quietRowContainerClass, quietRowGlyphSlotClass, quietRowTriggerClass } from "@/components/ai-elements/tool";
 
 interface WebSearchResultProps {
   query: string;
@@ -144,7 +144,6 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     headerKey = "searching";
     headerContent = (
       <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
-        <LoaderIcon className="size-3 shrink-0 animate-spin" />
         <span className="truncate">Searching the web&hellip;</span>
       </span>
     );
@@ -200,6 +199,17 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className={quietRowContainerClass}>
       <CollapsibleTrigger className={quietRowTriggerClass}>
+        {/* Same lead glyph slot as the quiet tool rows: spinner while the
+            search runs, red dot on failure, expand chevron once settled. */}
+        <span className={quietRowGlyphSlotClass}>
+          {status === "error" ? (
+            <span className="size-1.5 rounded-full bg-red-600 dark:bg-red-500" />
+          ) : phase === "searching" ? (
+            <LoaderIcon className="size-3 animate-spin text-muted-foreground" />
+          ) : (
+            <ChevronDownIcon className="size-3 text-muted-foreground/50 transition-transform group-data-[state=open]/row:rotate-180" />
+          )}
+        </span>
         {/* Rolling header: clipped, fixed height so sliding lines stay contained */}
         <div className="relative min-w-0 flex-1 overflow-hidden" style={{ height: "1.25rem" }}>
           <AnimatePresence mode="popLayout" initial={false}>
@@ -221,7 +231,6 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
               {domains.length} source{domains.length !== 1 ? "s" : ""}
             </span>
           )}
-          <ChevronDownIcon className="size-3 text-muted-foreground/50 opacity-0 transition-[opacity,transform] group-hover/row:opacity-100 group-data-[state=open]/row:rotate-180 group-data-[state=open]/row:opacity-100" />
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden data-[state=open]:animate-[collapsible-down_0.09s_ease-out] data-[state=closed]:animate-[collapsible-up_0.08s_ease-in]">
