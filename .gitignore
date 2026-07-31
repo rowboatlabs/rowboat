@@ -1,5 +1,6 @@
 .DS_Store
 .env
+.agentpond/
 .vscode/
 data/
 .venv/

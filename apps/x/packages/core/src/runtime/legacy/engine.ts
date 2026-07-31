@@ -30,6 +30,7 @@ import { PrefixLogger } from "@x/shared";
 import { captureLlmUsage } from "../../analytics/usage.js";
 import { enterUseCase, withUseCase, type UseCase } from "../../analytics/use_case.js";
 import { classifyToolPermissions, type AutoPermissionCandidate } from "../../security/auto-permission-classifier.js";
+import { agentPondTelemetry } from "../../agentpond.js";
 
 function formatCurrentDateTime(now: Date): string {
     return now.toLocaleString('en-US', {
@@ -1154,6 +1155,7 @@ async function* streamLlm(
             tools,
             stopWhen: isStepCount(1),
             abortSignal: signal,
+            ...(agentPondTelemetry ? { telemetry: agentPondTelemetry } : {}),
         }))
         : streamText({
             model,
@@ -1163,6 +1165,7 @@ async function* streamLlm(
             tools,
             stopWhen: isStepCount(1),
             abortSignal: signal,
+            ...(agentPondTelemetry ? { telemetry: agentPondTelemetry } : {}),
         });
     const { stream } = streamResult;
     for await (const event of stream) {

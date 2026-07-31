@@ -251,6 +251,16 @@ Persistent across sessions for the same user. Set via `posthog.people.set` or as
 
 ## Configuration
 
+### AgentPond tracing (separate)
+
+Optional AgentPond/OpenInference traces are separate from PostHog product analytics. They are
+disabled unless `FILES_SDK_PROVIDER` and the selected Files SDK provider variables are present before
+the app starts. The AI SDK integration records operation, model, timing, and token-usage metadata with
+prompt and response recording disabled. Invalid tracing configuration is logged and never blocks a
+turn.
+
+### PostHog
+
 PostHog credentials live in two env vars (also baked into the binary at packaging time — never set at runtime in distributed builds):
 
 - `VITE_PUBLIC_POSTHOG_KEY` — project API key (e.g. `phc_xxx`). Public-facing — safe to commit if you'd rather hardcode.

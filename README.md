@@ -181,6 +181,14 @@ Rowboat works with the model setup you prefer:
 - **Hosted models** (bring your own API key/provider)
 - Swap models anytime — your data stays in your local Markdown vault
 
+### Optional AI tracing
+
+Rowboat can export content-free OpenInference traces for assistant turns to an
+[AgentPond](https://github.com/marcusschiesser/agentpond) Files SDK environment. This is disabled by
+default and only starts when `FILES_SDK_PROVIDER` and the selected provider's environment variables
+are present before Rowboat starts. Traces include operation, model, timing, and token-usage metadata,
+but never prompt or response content.
+
 ## Extend Rowboat with tools (MCP)
 
 Rowboat can connect to external tools and services via **Model Context Protocol (MCP)**.

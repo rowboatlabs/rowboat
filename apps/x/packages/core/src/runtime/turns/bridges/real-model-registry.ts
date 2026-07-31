@@ -18,6 +18,7 @@ import { isReasoningModel } from "../../../models/models-dev.js";
 import { applyPromptCaching } from "../../../models/prompt-caching.js";
 import { applyLocalModelSettings } from "../../../models/local.js";
 import { mapReasoningEffort, parseReasoningEffort } from "../../../models/reasoning.js";
+import { agentPondTelemetry } from "../../../agentpond.js";
 import type {
     IModelRegistry,
     LlmStreamEvent,
@@ -50,6 +51,7 @@ const defaultInvoker: StreamTextInvoker = ({ system, ...options }) =>
         instructions: system,
         allowSystemInMessages: true,
         stopWhen: isStepCount(1),
+        ...(agentPondTelemetry ? { telemetry: agentPondTelemetry } : {}),
     });
 
 export interface RealModelRegistryDeps {
