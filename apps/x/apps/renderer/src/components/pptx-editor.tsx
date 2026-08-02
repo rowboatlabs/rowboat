@@ -31,6 +31,7 @@ import {
 import { SlideCanvas, SlideThumbnail } from '@/components/pptx/canvas'
 import { PresentationOverlay } from '@/components/pptx/presentation'
 import {
+  EditorHeader,
   EditorToolbar,
   MAX_ZOOM,
   MIN_ZOOM,
@@ -77,6 +78,11 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
 function baseName(path: string): string {
   const segs = path.split('/')
   return segs[segs.length - 1] || path
+}
+
+/** The header carries a PPTX badge, so the extension would just be noise. */
+function displayName(path: string): string {
+  return baseName(path).replace(/\.pptx$/i, '')
 }
 
 /** First non-empty line of text on a slide, used to label its rail card. */
@@ -622,6 +628,13 @@ export function PptxEditor({ path }: PptxEditorProps) {
         onPointerDown={() => rootRef.current?.focus({ preventScroll: true })}
         className="flex h-full w-full min-h-0 flex-col bg-background outline-none"
       >
+        <EditorHeader
+          fileName={displayName(path)}
+          filePath={path}
+          saveStatus={saveStatus}
+          onPlay={startPresenting}
+        />
+
         <EditorToolbar
           canUndo={canUndo}
           canRedo={canRedo}
@@ -641,42 +654,40 @@ export function PptxEditor({ path }: PptxEditorProps) {
           onColorChange={(hex) => applyFormat({ colorHex: hex })}
           align={activeAlign}
           onAlign={applyAlign}
-          onPlay={startPresenting}
           slideNumber={activeIndex + 1}
           slideCount={deck.slides.length}
-          saveStatus={saveStatus}
         />
 
         <div className="flex min-h-0 flex-1">
           <nav
             aria-label="Slides"
-            className="flex w-56 shrink-0 flex-col gap-2 overflow-y-auto border-r border-border bg-card/40 p-3"
+            className="flex w-56 shrink-0 flex-col border-r border-border bg-card/40"
           >
-            {deck.slides.map((s, i) => (
-              <SlideCard
-                key={s.xmlPath}
-                index={i}
-                slide={s}
-                sizeEmu={deck.slideSizeEmu}
-                title={slideTitle(s)}
-                active={i === activeIndex}
-                onSelect={() => {
-                  setActiveIndex(i)
-                  setSelectedKey(null)
-                  setEditingKey(null)
-                }}
-              />
-            ))}
+            <div className="flex shrink-0 items-center border-b border-border px-3 py-2">
+              <span className="text-[11px] font-medium text-muted-foreground">
+                Slides · {deck.slides.length}
+              </span>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2">
+              {deck.slides.map((s, i) => (
+                <SlideCard
+                  key={s.xmlPath}
+                  index={i}
+                  slide={s}
+                  sizeEmu={deck.slideSizeEmu}
+                  title={slideTitle(s)}
+                  active={i === activeIndex}
+                  onSelect={() => {
+                    setActiveIndex(i)
+                    setSelectedKey(null)
+                    setEditingKey(null)
+                  }}
+                />
+              ))}
+            </div>
           </nav>
 
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5">
-              <PresentationIcon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="truncate text-sm font-medium text-foreground" title={path}>
-                {baseName(path)}
-              </span>
-            </header>
-
             {slide && (
               <SlideCanvas
                 slide={slide}
@@ -713,7 +724,10 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
 // --------------------------------------------------------------- slide rail
 
-/** Rail width (w-56 = 224) minus nav padding, button padding, badge + gap. */
+/**
+ * Rail width (w-56 = 224) minus its border, the list padding, the card padding,
+ * the number badge + gap, and the scrollbar gutter.
+ */
 const THUMB_WIDTH_PX = 160
 
 interface SlideCardProps {
@@ -732,24 +746,21 @@ function SlideCard({ index, slide, sizeEmu, title, active, onSelect }: SlideCard
       onClick={onSelect}
       aria-current={active ? 'true' : undefined}
       aria-label={`Slide ${index + 1}${title ? `: ${title}` : ''}`}
-      className={`group flex items-start gap-2 rounded-md border p-2 text-left transition-colors ${
+      className={`flex shrink-0 items-center gap-1.5 rounded-md p-1.5 transition-all ${
         active
-          ? 'border-ring bg-accent text-accent-foreground'
-          : 'border-border bg-background hover:border-ring/40 hover:bg-accent/50'
+          ? 'bg-accent/60 shadow-sm ring-2 ring-ring'
+          : 'ring-1 ring-border/60 hover:bg-accent/40 hover:ring-border'
       }`}
     >
+      {/* Outside the thumbnail on purpose — overlaid, it sat on the slide's own title. */}
       <span
-        className={`mt-0.5 w-4 shrink-0 text-right text-[11px] tabular-nums ${
-          active ? 'text-foreground' : 'text-muted-foreground'
+        className={`w-5 shrink-0 rounded py-px text-center text-[10px] font-medium leading-none tabular-nums ${
+          active ? 'bg-background text-foreground' : 'text-muted-foreground'
         }`}
       >
         {index + 1}
       </span>
-      <span
-        className={`min-w-0 flex-1 overflow-hidden rounded-sm ring-1 transition-shadow ${
-          active ? 'ring-[var(--ring)]' : 'ring-border/60 group-hover:ring-border'
-        }`}
-      >
+      <span className="mx-auto block shrink-0 overflow-hidden rounded-sm">
         <SlideThumbnail slide={slide} sizeEmu={sizeEmu} widthPx={THUMB_WIDTH_PX} />
       </span>
     </button>

@@ -8,10 +8,13 @@ import {
   MinusIcon,
   PlayIcon,
   PlusIcon,
+  PresentationIcon,
   Redo2Icon,
   UnderlineIcon,
   Undo2Icon,
 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { RunFormatOverrides } from '@/lib/pptx/serialize'
 import type { TextAlign } from '@/lib/pptx/types'
@@ -42,9 +45,9 @@ function ToolButton({ label, onClick, disabled, active, children }: ToolButtonPr
           // Keep focus in the text overlay so the selection survives the click.
           onMouseDown={(e) => e.preventDefault()}
           onClick={onClick}
-          className={`inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors disabled:pointer-events-none disabled:opacity-40 ${
+          className={`inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors disabled:pointer-events-none disabled:opacity-40 ${
             active
-              ? 'bg-accent text-accent-foreground'
+              ? 'bg-primary/12 text-foreground'
               : 'hover:bg-accent hover:text-accent-foreground'
           }`}
         >
@@ -57,11 +60,11 @@ function ToolButton({ label, onClick, disabled, active, children }: ToolButtonPr
 }
 
 function Group({ children }: { children: ReactNode }) {
-  return <div className="flex items-center gap-0.5">{children}</div>
+  return <div className="flex shrink-0 items-center gap-0.5">{children}</div>
 }
 
 function Divider() {
-  return <div className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
+  return <div className="mx-1.5 h-4 w-px shrink-0 bg-border" aria-hidden="true" />
 }
 
 const SAVE_LABEL: Record<SaveStatus, string> = {
@@ -71,20 +74,51 @@ const SAVE_LABEL: Record<SaveStatus, string> = {
   error: 'Save failed',
 }
 
-function SavePill({ status }: { status: SaveStatus }) {
+/** Quiet status text — nothing to say until the deck has actually been touched. */
+function SaveState({ status }: { status: SaveStatus }) {
   if (status === 'clean') return null
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-        status === 'error'
-          ? 'bg-destructive/15 text-destructive'
-          : status === 'saving'
-            ? 'bg-muted text-muted-foreground'
-            : 'bg-muted text-muted-foreground'
+      className={`shrink-0 text-[11px] ${
+        status === 'error' ? 'text-destructive' : 'text-muted-foreground'
       }`}
     >
       {SAVE_LABEL[status]}
     </span>
+  )
+}
+
+export interface EditorHeaderProps {
+  fileName: string
+  /** Full path, shown on hover. */
+  filePath: string
+  saveStatus: SaveStatus
+  onPlay: () => void
+}
+
+/**
+ * The slim identity row above the toolbar. Present is deliberately the only
+ * accent-coloured control on the whole surface.
+ */
+export function EditorHeader({ fileName, filePath, saveStatus, onPlay }: EditorHeaderProps) {
+  return (
+    <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
+      <PresentationIcon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="truncate text-sm font-medium text-foreground" title={filePath}>
+        {fileName}
+      </span>
+      <Badge
+        variant="outline"
+        className="rounded px-1 py-0 text-[10px] font-medium tracking-wide text-muted-foreground"
+      >
+        PPTX
+      </Badge>
+      <SaveState status={saveStatus} />
+      <Button size="xs" onClick={onPlay} className="ml-auto">
+        <PlayIcon />
+        Present
+      </Button>
+    </header>
   )
 }
 
@@ -112,11 +146,8 @@ export interface ToolbarProps {
   align: TextAlign | null
   onAlign: (align: TextAlign) => void
 
-  onPlay: () => void
-
   slideNumber: number
   slideCount: number
-  saveStatus: SaveStatus
 }
 
 export function EditorToolbar({
@@ -138,10 +169,8 @@ export function EditorToolbar({
   onColorChange,
   align,
   onAlign,
-  onPlay,
   slideNumber,
   slideCount,
-  saveStatus,
 }: ToolbarProps) {
   const fmtOff = format === null
   const sizeLabel = format?.sizePt !== undefined ? String(Math.round(format.sizePt)) : '—'
@@ -149,7 +178,7 @@ export function EditorToolbar({
   const fmtHint = formatDisabledReason ?? undefined
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-card/40 px-3 py-1.5">
+    <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-3 py-1">
       <Group>
         <ToolButton label="Undo (⌘Z)" onClick={onUndo} disabled={!canUndo}>
           <Undo2Icon className="size-4" />
@@ -291,15 +320,9 @@ export function EditorToolbar({
         </ToolButton>
       </Group>
 
-      <div className="ml-auto flex items-center gap-3 pl-2">
-        <ToolButton label="Play from this slide" onClick={onPlay}>
-          <PlayIcon className="size-4" />
-        </ToolButton>
-        <SavePill status={saveStatus} />
-        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-          Slide {slideNumber} of {slideCount}
-        </span>
-      </div>
+      <span className="ml-auto shrink-0 pl-3 text-xs tabular-nums text-muted-foreground">
+        Slide {slideNumber} of {slideCount}
+      </span>
     </div>
   )
 }
