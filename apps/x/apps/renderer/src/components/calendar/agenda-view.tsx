@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar, ChevronDown, ChevronRight, FileText, Loader2, MapPin, Mic, Sparkles, UserPlus, UsersRound, Video } from 'lucide-react'
+import { Calendar, ChevronDown, ChevronRight, FileText, Loader2, MapPin, Mic, Sparkles, Square, UserPlus, UsersRound, Video } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { Streamdown } from 'streamdown'
 
+import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger } from '@/components/ui/popover'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { EventDetailsPopover } from '@/components/calendar/event-details-popover'
@@ -24,6 +26,9 @@ import type { MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
 
 const MEETINGS_ROOT = 'knowledge/Meetings'
 const UPCOMING_MAX_DAYS = 4 // today + next 3
+
+// Same curve as the calendar's view slides, so expands feel related.
+const PREP_TRANSITION = { duration: 0.24, ease: [0.32, 0.72, 0.25, 1] as const }
 
 declare global {
   interface Window {
@@ -220,12 +225,22 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
     return cleanup
   }, [])
 
-  if (!prep || prep.attendees.length === 0) return null
+  const matched = prep?.attendees.filter((a) => a.note) ?? []
+  const unmatched = prep?.attendees.filter((a) => !a.note) ?? []
 
-  const matched = prep.attendees.filter((a) => a.note)
-  const unmatched = prep.attendees.filter((a) => !a.note)
-
+  // The resolve is async — grow the section in when results land rather than
+  // popping, and fold it away if the prep empties out.
   return (
+    <AnimatePresence initial={false}>
+      {prep && prep.attendees.length > 0 ? (
+        <motion.div
+          key="prep-body"
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={PREP_TRANSITION}
+          className="overflow-hidden"
+        >
     <div className="bg-muted/10">
       {prep.prepNote && prep.prepNote.brief ? (
         <div className="border-b px-5 pb-3 pt-3">
@@ -263,10 +278,18 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
         </>
       ) : null}
     </div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   )
 }
 
-function UpcomingEvents({ onOpenNote }: { onOpenNote: (path: string) => void }) {
+function UpcomingEvents({ onOpenNote, onTakeMeetingNotes, meetingState, meetingSummarizing = false }: {
+  onOpenNote: (path: string) => void
+  onTakeMeetingNotes: () => void
+  meetingState: MeetingTranscriptionState
+  meetingSummarizing?: boolean
+}) {
   const { events: allEvents, loading, error, connected: calendarConnected } = useCalendarEvents()
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -319,20 +342,38 @@ function UpcomingEvents({ onOpenNote }: { onOpenNote: (path: string) => void }) 
   const totalVisible = visibleDays.reduce((s, d) => s + d.events.length, 0)
   const now = new Date()
   const todayKey = localDateKey(now)
+  const isMeetingBusy = meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing
+  const isRecording = meetingState === 'recording'
 
   return (
     <section className="border-b border-border/60 pb-6 pt-5">
       <div className="w-full">
-        <div className="mb-3 flex items-baseline justify-between">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Calendar className="size-4 text-muted-foreground" />
             Coming up
+            {loading && events.length === 0 ? null : (
+              <span className="text-[11px] font-normal uppercase tracking-wider text-muted-foreground">
+                · {totalVisible} {totalVisible === 1 ? 'event' : 'events'}
+              </span>
+            )}
           </h3>
-          {loading && events.length === 0 ? null : (
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              {totalVisible} {totalVisible === 1 ? 'event' : 'events'}
-            </span>
-          )}
+          <Button
+            type="button"
+            size="sm"
+            variant={isRecording ? 'destructive' : 'default'}
+            disabled={isMeetingBusy}
+            onClick={onTakeMeetingNotes}
+          >
+            {meetingSummarizing || meetingState === 'connecting' || meetingState === 'stopping' ? (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            ) : isRecording ? (
+              <Square className="mr-2 size-3.5" />
+            ) : (
+              <Mic className="mr-2 size-4" />
+            )}
+            {meetingSummarizing ? 'Generating notes...' : getMeetingButtonLabel(meetingState)}
+          </Button>
         </div>
 
         {calendarConnected === false && events.length === 0 ? (
@@ -505,9 +546,22 @@ function UpcomingEventItem({ event, isLast, isPrepTarget, onOpenNote }: { event:
           </div>
         </div>
       </PopoverTrigger>
-      <EventDetailsPopover event={event} onClose={() => setOpen(false)} />
+      <EventDetailsPopover event={event} onClose={() => setOpen(false)} onOpenNote={onOpenNote} />
     </Popover>
-    {showPrep ? <InlineMeetingPrep event={event} onOpenNote={onOpenNote} /> : null}
+    <AnimatePresence initial={false}>
+      {showPrep ? (
+        <motion.div
+          key="prep"
+          initial={{ height: 0 }}
+          animate={{ height: 'auto' }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={PREP_TRANSITION}
+          className="overflow-hidden"
+        >
+          <InlineMeetingPrep event={event} onOpenNote={onOpenNote} />
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
     </div>
   )
 }
@@ -607,7 +661,7 @@ function formatDateLabel(label: string): string {
   })
 }
 
-export function getMeetingButtonLabel(state: MeetingTranscriptionState): string {
+function getMeetingButtonLabel(state: MeetingTranscriptionState): string {
   switch (state) {
     case 'connecting':
       return 'Starting...'
@@ -624,8 +678,14 @@ export function getMeetingButtonLabel(state: MeetingTranscriptionState): string 
 // The calendar's list mode: the upcoming-events cards followed by the past
 // meeting-notes table. Rendered inside CalendarView's content container (which
 // provides the width cap and horizontal padding); the "Take meeting notes"
-// button lives in the calendar header.
-export function AgendaView({ onOpenNote }: { onOpenNote: (path: string) => void }) {
+// button sits in the "Coming up" section header so the calendar's own header
+// bar stays identical across modes.
+export function AgendaView({ onOpenNote, onTakeMeetingNotes, meetingState, meetingSummarizing = false }: {
+  onOpenNote: (path: string) => void
+  onTakeMeetingNotes: () => void
+  meetingState: MeetingTranscriptionState
+  meetingSummarizing?: boolean
+}) {
   const [notes, setNotes] = useState<MeetingNoteRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -724,7 +784,12 @@ export function AgendaView({ onOpenNote }: { onOpenNote: (path: string) => void 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="pb-12">
-        <UpcomingEvents onOpenNote={onOpenNote} />
+        <UpcomingEvents
+          onOpenNote={onOpenNote}
+          onTakeMeetingNotes={onTakeMeetingNotes}
+          meetingState={meetingState}
+          meetingSummarizing={meetingSummarizing}
+        />
         <div className="pt-6">
         {loading ? (
           <div className="flex items-center justify-center py-10">

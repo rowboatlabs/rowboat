@@ -407,6 +407,64 @@ const ipcSchemas = {
       })),
     }),
   },
+  'calendar:getWriteStatus': {
+    req: z.object({}),
+    res: z.object({
+      connected: z.boolean(),
+      // False when the Google grant predates the calendar.events write scope
+      // (reconnect re-grants it).
+      canWrite: z.boolean(),
+    }),
+  },
+  'calendar:createEvent': {
+    req: z.object({
+      summary: z.string(),
+      startISO: z.string().min(1),
+      endISO: z.string().min(1),
+      addMeet: z.boolean().optional(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      eventId: z.string().optional(),
+      htmlLink: z.string().optional(),
+      error: z.string().optional(),
+      needsReconnect: z.boolean().optional(),
+    }),
+  },
+  'calendar:updateEvent': {
+    req: z.object({
+      eventId: z.string().min(1),
+      summary: z.string().optional(),
+      startISO: z.string().optional(),
+      endISO: z.string().optional(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      eventId: z.string().optional(),
+      htmlLink: z.string().optional(),
+      error: z.string().optional(),
+      needsReconnect: z.boolean().optional(),
+    }),
+  },
+  'calendar:deleteEvent': {
+    req: z.object({ eventId: z.string().min(1) }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+      needsReconnect: z.boolean().optional(),
+    }),
+  },
+  'calendar:respond': {
+    req: z.object({
+      eventId: z.string().min(1),
+      response: z.enum(['accepted', 'declined', 'tentative']),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+      needsReconnect: z.boolean().optional(),
+    }),
+  },
   'mcp:listTools': {
     req: z.object({
       serverName: z.string(),

@@ -141,7 +141,10 @@ const SYNC_DIR = path.join(WorkDir, 'calendar_sync');
 const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
 const LOOKBACK_DAYS = 60;
 const LOOKAHEAD_DAYS = 60;
-const REQUIRED_SCOPES = [
+// Either grant is enough to read events: new connections carry the write
+// scope (calendar.events), older ones the readonly variant until reconnect.
+const ACCEPTED_SCOPES = [
+    'https://www.googleapis.com/auth/calendar.events',
     'https://www.googleapis.com/auth/calendar.events.readonly',
 ];
 const nhm = new NodeHtmlMarkdown();
@@ -174,6 +177,27 @@ function interruptibleSleep(ms: number): Promise<void> {
 
 function cleanFilename(name: string): string {
     return name.replace(/[\\/*?:"<>|]/g, "").replace(/\s+/g, "_").substring(0, 100).trim();
+}
+
+// --- Write-path hooks (calendar_write.ts) ---
+// Persist an event returned by an insert/patch straight into the sync dir so
+// the renderer's file watcher picks it up immediately, without waiting for the
+// next poll. The poll then reconciles anything we got wrong.
+
+export async function persistSyncedEvent(event: cal.Schema$Event): Promise<void> {
+    if (!fs.existsSync(SYNC_DIR)) {
+        fs.mkdirSync(SYNC_DIR, { recursive: true });
+    }
+    await saveEvent(event, SYNC_DIR);
+}
+
+export function removeSyncedEvent(eventId: string): void {
+    const filePath = path.join(SYNC_DIR, `${eventId}.json`);
+    try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (e) {
+        console.error(`[Calendar] Error removing synced event ${eventId}:`, e);
+    }
 }
 
 // --- Sync Logic ---
@@ -495,7 +519,10 @@ export async function init() {
 
     while (true) {
         try {
-            const hasCredentials = await GoogleClientFactory.hasValidCredentials(REQUIRED_SCOPES);
+            const scopeChecks = await Promise.all(
+                ACCEPTED_SCOPES.map((scope) => GoogleClientFactory.hasValidCredentials([scope])),
+            );
+            const hasCredentials = scopeChecks.some(Boolean);
             if (!hasCredentials) {
                 console.log("Google OAuth credentials not available or missing required Calendar/Drive scopes. Sleeping...");
             } else {

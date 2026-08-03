@@ -1,25 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Mic, Square } from 'lucide-react'
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverTrigger } from '@/components/ui/popover'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { addDays, localDateKey } from '@/lib/calendar-events'
 import { cn } from '@/lib/utils'
 import { useCalendarEvents } from '@/hooks/use-calendar-events'
 import type { MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
-import { AgendaView, getMeetingButtonLabel } from './agenda-view'
+import { AgendaView } from './agenda-view'
 import { startOfWeek } from './date-grid'
 import { MonthGrid } from './month-grid'
+import { QuickCreatePopover, nextHalfHour } from './quick-create'
 import { WeekGrid } from './week-grid'
 
 const VIEW_MODE_STORAGE_KEY = 'calendar-view-mode'
 
-export type CalendarMode = 'month' | 'week' | 'agenda'
+export type CalendarMode = 'day' | 'week' | 'month' | 'agenda'
 
-// Toggle order — switching to a mode further right slides content leftward,
-// and vice versa, so the motion matches the segmented control.
-const MODE_ORDER: CalendarMode[] = ['month', 'week', 'agenda']
+// Toggle order (zoom level: day → week → month → agenda) — switching to a
+// mode further right slides content leftward, and vice versa, so the motion
+// matches the segmented control.
+const MODE_ORDER: CalendarMode[] = ['day', 'week', 'month', 'agenda']
 
 // Direction-aware slide-and-fade for view/period changes. `custom` is +1
 // (forward/next: new content enters from the right) or -1 (backward/prev).
@@ -32,7 +35,7 @@ const slideVariants = {
 function loadStoredMode(): CalendarMode {
   try {
     const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY)
-    return stored === 'week' || stored === 'agenda' ? stored : 'month'
+    return stored === 'day' || stored === 'week' || stored === 'agenda' ? stored : 'month'
   } catch {
     return 'month'
   }
@@ -60,6 +63,10 @@ export function CalendarView({
   const [anchor, setAnchor] = useState(() => new Date())
   const [now, setNow] = useState(() => new Date())
   const [slideDirection, setSlideDirection] = useState(1)
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false)
+  // Recomputed each time the header popover opens: the next free half-hour.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const quickCreateSlot = useMemo(() => nextHalfHour(new Date()), [quickCreateOpen])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { events, loading, error, connected } = useCalendarEvents()
 
@@ -87,6 +94,9 @@ export function CalendarView({
     if (mode === 'agenda') {
       return 'Upcoming events and meeting notes.'
     }
+    if (mode === 'day') {
+      return anchor.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+    }
     if (mode === 'month') {
       return anchor.toLocaleDateString([], { month: 'long', year: 'numeric' })
     }
@@ -101,13 +111,14 @@ export function CalendarView({
     return `${startLabel} – ${endLabel}`
   }, [anchor, mode])
 
+  const periodStep = mode === 'day' ? 1 : 7
   const goPrev = () => {
     setSlideDirection(-1)
-    setAnchor((a) => (mode === 'month' ? new Date(a.getFullYear(), a.getMonth() - 1, 1) : addDays(a, -7)))
+    setAnchor((a) => (mode === 'month' ? new Date(a.getFullYear(), a.getMonth() - 1, 1) : addDays(a, -periodStep)))
   }
   const goNext = () => {
     setSlideDirection(1)
-    setAnchor((a) => (mode === 'month' ? new Date(a.getFullYear(), a.getMonth() + 1, 1) : addDays(a, 7)))
+    setAnchor((a) => (mode === 'month' ? new Date(a.getFullYear(), a.getMonth() + 1, 1) : addDays(a, periodStep)))
   }
   const goToday = () => {
     setSlideDirection(new Date() >= anchor ? 1 : -1)
@@ -118,11 +129,9 @@ export function CalendarView({
   // both mode toggles and prev/next/Today navigation animate.
   const contentKey =
     mode === 'agenda' ? 'agenda'
+    : mode === 'day' ? `day-${localDateKey(anchor)}`
     : mode === 'month' ? `month-${anchor.getFullYear()}-${anchor.getMonth()}`
     : `week-${localDateKey(startOfWeek(anchor))}`
-
-  const isMeetingBusy = meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing
-  const isRecording = meetingState === 'recording'
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
@@ -131,7 +140,7 @@ export function CalendarView({
           <h2 className="text-[24px] font-[650] tracking-[-0.02em] text-[#0d0e11] dark:text-[#f4f5f7]">Calendar</h2>
           <div className="flex items-center gap-2">
             <div className="flex overflow-hidden rounded-md border">
-              {(['month', 'week', 'agenda'] as const).map((m) => (
+              {MODE_ORDER.map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -146,38 +155,34 @@ export function CalendarView({
                 </button>
               ))}
             </div>
-            {mode === 'agenda' ? (
-              <Button
-                type="button"
-                size="sm"
-                variant={isRecording ? 'destructive' : 'default'}
-                disabled={isMeetingBusy}
-                onClick={onTakeMeetingNotes}
-              >
-                {meetingSummarizing || meetingState === 'connecting' || meetingState === 'stopping' ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : isRecording ? (
-                  <Square className="mr-2 size-3.5" />
-                ) : (
-                  <Mic className="mr-2 size-4" />
-                )}
-                {meetingSummarizing ? 'Generating notes...' : getMeetingButtonLabel(meetingState)}
+            {/* Same controls in every mode so the bar never jumps; navigation
+                doesn't apply to the agenda list, so those buttons just disable. */}
+            <Button type="button" size="sm" variant="outline" onClick={goToday} disabled={mode === 'agenda'}>
+              Today
+            </Button>
+            <div className="flex items-center">
+              <Button type="button" size="icon" variant="ghost" onClick={goPrev} disabled={mode === 'agenda'} aria-label={`Previous ${mode}`}>
+                <ChevronLeft className="size-4" />
               </Button>
-            ) : (
-              <>
-                <Button type="button" size="sm" variant="outline" onClick={goToday}>
-                  Today
+              <Button type="button" size="icon" variant="ghost" onClick={goNext} disabled={mode === 'agenda'} aria-label={`Next ${mode}`}>
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+            <Popover open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
+              <PopoverTrigger asChild>
+                <Button type="button" size="sm">
+                  <Plus className="mr-1.5 size-4" />
+                  New event
                 </Button>
-                <div className="flex items-center">
-                  <Button type="button" size="icon" variant="ghost" onClick={goPrev} aria-label={mode === 'month' ? 'Previous month' : 'Previous week'}>
-                    <ChevronLeft className="size-4" />
-                  </Button>
-                  <Button type="button" size="icon" variant="ghost" onClick={goNext} aria-label={mode === 'month' ? 'Next month' : 'Next week'}>
-                    <ChevronRight className="size-4" />
-                  </Button>
-                </div>
-              </>
-            )}
+              </PopoverTrigger>
+              {quickCreateOpen ? (
+                <QuickCreatePopover
+                  start={quickCreateSlot.start}
+                  end={quickCreateSlot.end}
+                  onClose={() => setQuickCreateOpen(false)}
+                />
+              ) : null}
+            </Popover>
           </div>
         </div>
         <p className="mt-1 text-[14px] text-black/50 dark:text-white/[0.52]">{headerLabel}</p>
@@ -197,7 +202,12 @@ export function CalendarView({
               className="flex h-full min-h-0 flex-col"
             >
         {mode === 'agenda' ? (
-          <AgendaView onOpenNote={onOpenNote} />
+          <AgendaView
+            onOpenNote={onOpenNote}
+            onTakeMeetingNotes={onTakeMeetingNotes}
+            meetingState={meetingState}
+            meetingSummarizing={meetingSummarizing}
+          />
         ) : connected === false && events.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-16 text-center">
             <CalendarIcon className="size-7 text-muted-foreground opacity-50" />
@@ -218,9 +228,9 @@ export function CalendarView({
         ) : error ? (
           <div className="py-8 text-center text-sm text-muted-foreground">{error}</div>
         ) : mode === 'month' ? (
-          <MonthGrid anchor={anchor} events={events} now={now} />
+          <MonthGrid anchor={anchor} events={events} now={now} onOpenNote={onOpenNote} />
         ) : (
-          <WeekGrid anchor={anchor} events={events} now={now} />
+          <WeekGrid anchor={anchor} events={events} now={now} dayCount={mode === 'day' ? 1 : 7} onOpenNote={onOpenNote} />
         )}
             </motion.div>
           </AnimatePresence>

@@ -123,6 +123,7 @@ import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
 import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, archiveCategoryThreads, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance, setThreadCategory } from '@x/core/dist/knowledge/sync_gmail.js';
 import { loadEmailInstructions, saveEmailInstructions } from '@x/core/dist/knowledge/email_instructions.js';
+import { getCalendarWriteStatus, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent, respondToCalendarEvent } from '@x/core/dist/knowledge/calendar_write.js';
 import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/knowledge/email_labels.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
@@ -1172,6 +1173,21 @@ export function setupIpcHandlers() {
     'gmail:saveMessageHeight': async (_event, args) => {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);
       return {};
+    },
+    'calendar:getWriteStatus': async () => {
+      return getCalendarWriteStatus();
+    },
+    'calendar:createEvent': async (_event, args) => {
+      return createCalendarEvent(args);
+    },
+    'calendar:updateEvent': async (_event, args) => {
+      return updateCalendarEvent(args);
+    },
+    'calendar:deleteEvent': async (_event, args) => {
+      return deleteCalendarEvent(args.eventId);
+    },
+    'calendar:respond': async (_event, args) => {
+      return respondToCalendarEvent(args.eventId, args.response);
     },
     'gmail:searchContacts': async (_event, args) => {
       const query = args?.query ?? '';

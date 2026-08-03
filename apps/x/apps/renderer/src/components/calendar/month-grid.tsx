@@ -1,10 +1,26 @@
 import { useMemo, useState } from 'react'
 
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { addDays, localDateKey, type UpcomingEvent } from '@/lib/calendar-events'
 import { cn } from '@/lib/utils'
 import { buildMonthGrid, eventsByDayKey, eventSpansMultipleDays } from './date-grid'
 import { EventDetailsContent, EventDetailsPopover } from './event-details-popover'
+import { QuickCreatePopover, nextHalfHour } from './quick-create'
+
+type DraftSlot = { dayKey: string; start: Date; end: Date }
+
+// Default slot for a clicked day: the next free half-hour when it's today,
+// otherwise 9:00–9:30 that morning.
+function defaultSlotForDay(day: Date, todayKey: string): DraftSlot {
+  const dayKey = localDateKey(day)
+  if (dayKey === todayKey) {
+    const { start, end } = nextHalfHour(new Date())
+    return { dayKey, start, end }
+  }
+  const start = new Date(day)
+  start.setHours(9, 0, 0, 0)
+  return { dayKey, start, end: new Date(start.getTime() + 30 * 60 * 1000) }
+}
 
 // Max chips per day cell before collapsing into "+N more" (a lone 4th chip
 // renders instead of a pointless "+1 more").
@@ -17,10 +33,11 @@ function chipTimeLabel(d: Date): string {
   return d.toLocaleTimeString([], opts)
 }
 
-export function MonthGrid({ anchor, events, now }: {
+export function MonthGrid({ anchor, events, now, onOpenNote }: {
   anchor: Date
   events: UpcomingEvent[]
   now: Date
+  onOpenNote?: (path: string) => void
 }) {
   const weeks = useMemo(() => buildMonthGrid(anchor), [anchor])
   const byDay = useMemo(() => {
@@ -30,6 +47,8 @@ export function MonthGrid({ anchor, events, now }: {
   }, [events, weeks])
   const todayKey = localDateKey(now)
   const anchorMonth = anchor.getMonth()
+  // Empty-cell click → quick-create anchored inside that day.
+  const [draft, setDraft] = useState<DraftSlot | null>(null)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-card">
@@ -53,6 +72,10 @@ export function MonthGrid({ anchor, events, now }: {
               events={byDay.get(dayKey) ?? []}
               isToday={dayKey === todayKey}
               inMonth={day.getMonth() === anchorMonth}
+              draft={draft && draft.dayKey === dayKey ? draft : null}
+              onDayClick={() => setDraft(defaultSlotForDay(day, todayKey))}
+              onCloseDraft={() => setDraft(null)}
+              onOpenNote={onOpenNote}
             />
           )
         })}
@@ -61,17 +84,27 @@ export function MonthGrid({ anchor, events, now }: {
   )
 }
 
-function DayCell({ day, events, isToday, inMonth }: {
+function DayCell({ day, events, isToday, inMonth, draft, onDayClick, onCloseDraft, onOpenNote }: {
   day: Date
   events: UpcomingEvent[]
   isToday: boolean
   inMonth: boolean
+  draft: DraftSlot | null
+  onDayClick: () => void
+  onCloseDraft: () => void
+  onOpenNote?: (path: string) => void
 }) {
   const visible = events.length <= MAX_CHIPS + 1 ? events : events.slice(0, MAX_CHIPS)
   const hiddenCount = events.length - visible.length
 
   return (
-    <div className={cn('flex min-h-0 flex-col gap-0.5 overflow-hidden p-1', inMonth ? 'bg-card' : 'bg-muted/30')}>
+    <div
+      className={cn('relative flex min-h-0 flex-col gap-0.5 overflow-hidden p-1', inMonth ? 'bg-card' : 'bg-muted/30')}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('button')) return
+        onDayClick()
+      }}
+    >
       <div className="flex shrink-0 justify-end px-1 pt-0.5">
         <span
           className={cn(
@@ -83,14 +116,22 @@ function DayCell({ day, events, isToday, inMonth }: {
         </span>
       </div>
       {visible.map((ev) => (
-        <MonthEventChip key={`${ev.id}-${localDateKey(day)}`} event={ev} />
+        <MonthEventChip key={`${ev.id}-${localDateKey(day)}`} event={ev} onOpenNote={onOpenNote} />
       ))}
-      {hiddenCount > 0 ? <DayOverflowButton day={day} events={events} hiddenCount={hiddenCount} /> : null}
+      {hiddenCount > 0 ? <DayOverflowButton day={day} events={events} hiddenCount={hiddenCount} onOpenNote={onOpenNote} /> : null}
+      {draft ? (
+        <Popover open onOpenChange={(open) => { if (!open) onCloseDraft() }}>
+          <PopoverAnchor asChild>
+            <span aria-hidden className="pointer-events-none absolute left-1 top-7" />
+          </PopoverAnchor>
+          <QuickCreatePopover key={draft.start.toISOString()} start={draft.start} end={draft.end} onClose={onCloseDraft} />
+        </Popover>
+      ) : null}
     </div>
   )
 }
 
-function MonthEventChip({ event }: { event: UpcomingEvent }) {
+function MonthEventChip({ event, onOpenNote }: { event: UpcomingEvent; onOpenNote?: (path: string) => void }) {
   const [open, setOpen] = useState(false)
   const isBanner = event.isAllDay || eventSpansMultipleDays(event)
 
@@ -113,17 +154,18 @@ function MonthEventChip({ event }: { event: UpcomingEvent }) {
           <span className="truncate">{event.summary}</span>
         </button>
       </PopoverTrigger>
-      <EventDetailsPopover event={event} onClose={() => setOpen(false)} />
+      <EventDetailsPopover event={event} onClose={() => setOpen(false)} onOpenNote={onOpenNote} />
     </Popover>
   )
 }
 
 // "+N more" for a crowded day: lists the whole day inside one popover and
 // swaps to the event details (with a back chevron) on click — no nested popovers.
-function DayOverflowButton({ day, events, hiddenCount }: {
+function DayOverflowButton({ day, events, hiddenCount, onOpenNote }: {
   day: Date
   events: UpcomingEvent[]
   hiddenCount: number
+  onOpenNote?: (path: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [detailEvent, setDetailEvent] = useState<UpcomingEvent | null>(null)
@@ -160,7 +202,7 @@ function DayOverflowButton({ day, events, hiddenCount }: {
         }}
       >
         {detailEvent ? (
-          <EventDetailsContent event={detailEvent} onClose={close} onBack={() => setDetailEvent(null)} />
+          <EventDetailsContent event={detailEvent} onClose={close} onBack={() => setDetailEvent(null)} onOpenNote={onOpenNote} />
         ) : (
           <>
             <div className="border-b px-4 py-2.5" style={{ borderColor: 'var(--border, #e4e4e7)' }}>
