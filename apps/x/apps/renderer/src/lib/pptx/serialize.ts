@@ -353,8 +353,16 @@ const isBr = (r: TextRun): boolean => r.text === '\n'
 /**
  * True when the edit changes no paragraph/run structure — only text inside
  * existing runs — so it can be applied as in-place `<a:t>` splices.
+ *
+ * Exported because the editor must gate formatting on the SAME predicate: a
+ * `formatRuns` splice lives inside the `<a:p>` range a rebuild replaces, so if
+ * the editor believed formatting was still addressable while this returned
+ * false, both edits would be emitted and every save would fail closed forever.
  */
-function isTextOnlyEdit(original: Paragraph[], next: EditedParagraph[]): boolean {
+export function isTextOnlyEdit(
+  original: readonly Paragraph[],
+  next: readonly EditedParagraph[],
+): boolean {
   if (original.length !== next.length) return false
   for (let i = 0; i < original.length; i++) {
     const o = original[i]

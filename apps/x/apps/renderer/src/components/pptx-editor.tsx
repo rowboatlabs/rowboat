@@ -44,6 +44,7 @@ import {
   aggregateFormatOfParagraphs,
   applyAlignToBlocks,
   applyFormatToSpans,
+  fontScaleOf,
   selectedParagraphBlocks,
   selectedRunSpans,
   type TextOverlayHandle,
@@ -449,7 +450,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
       const overlay = overlayRef.current
       if (overlay) {
         // Editing: mutate the spans; the commit on blur turns this into edits.
-        applyFormatToSpans(selectedRunSpans(overlay.root), set, overlay.scale)
+        applyFormatToSpans(selectedRunSpans(overlay.root), set, overlay.scale, fontScaleOf(overlay.shape))
         setSelectionTick((t) => t + 1)
         dirtyRef.current = true
         return

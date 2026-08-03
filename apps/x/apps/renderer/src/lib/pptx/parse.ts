@@ -13,28 +13,31 @@
 
 import JSZip from 'jszip'
 import { XMLParser } from 'fast-xml-parser'
-import type {
-  DrawingShape,
-  Fill,
-  GroupShape,
-  ImageShape,
-  NodePath,
-  Paragraph,
-  ParagraphDisplay,
-  PlaceholderKind,
-  PlaceholderShape,
-  RectEmu,
-  ResolvedRunStyle,
-  Shape,
-  Slide,
-  SlideDeck,
-  TextAlign,
-  TextDisplay,
-  TextRun,
-  TextShape,
+import {
+  DEFAULT_LINE_HEIGHT,
+  type DrawingShape,
+  type Fill,
+  type GroupShape,
+  type ImageShape,
+  type LineSpacing,
+  type NodePath,
+  type Paragraph,
+  type ParagraphDisplay,
+  type PlaceholderKind,
+  type PlaceholderShape,
+  type RectEmu,
+  type ResolvedRunStyle,
+  type Shape,
+  type Slide,
+  type SlideDeck,
+  type TextAlign,
+  type TextDisplay,
+  type TextRun,
+  type TextShape,
 } from './types'
 import { DEFAULT_THEME, clrMapOfMaster, parseTheme, schemeColorHex, type Theme } from './theme'
 import {
+  cssFontFamily,
   keptRunNodesOf,
   layersOf,
   levelStyleFromPPr,
@@ -43,6 +46,7 @@ import {
   runLayerFromRPr,
   txStyleKindFor,
   type ParsedListStyle,
+  type SpacingSpec,
 } from './textstyle'
 import { backgroundFillOf, shapeVisualOf } from './geometry'
 
@@ -688,6 +692,13 @@ function resolveRect(node: XmlNode, ctx: ShapeContext): RectEmu {
 
 const HARD_DEFAULT_SIZE_PT = 18
 
+/** spcPts is absolute; spcPct is a fraction of the paragraph's text size. */
+function spacingPt(spec: SpacingSpec | undefined, sizePt: number): number {
+  if (!spec) return 0
+  if (spec.pt !== undefined) return spec.pt
+  return (spec.pct ?? 0) * sizePt
+}
+
 /**
  * Resolves the display styling for one text shape: run rPr -> paragraph
  * defRPr -> shape lstStyle -> layout placeholder -> master placeholder ->
@@ -727,13 +738,22 @@ function resolveTextDisplay(
   const runStyleOf = (
     explicit: ReturnType<typeof runLayerFromRPr>,
     merged: ReturnType<typeof mergeLevelStyles>,
-  ): ResolvedRunStyle => ({
-    sizePt: explicit.sizePt ?? merged.sizePt ?? HARD_DEFAULT_SIZE_PT,
-    bold: explicit.bold ?? merged.bold ?? false,
-    italic: explicit.italic ?? merged.italic ?? false,
-    underline: explicit.underline ?? merged.underline ?? false,
-    colorHex: explicit.colorHex ?? merged.colorHex ?? fallbackColor,
-  })
+  ): ResolvedRunStyle => {
+    const style: ResolvedRunStyle = {
+      sizePt: explicit.sizePt ?? merged.sizePt ?? HARD_DEFAULT_SIZE_PT,
+      bold: explicit.bold ?? merged.bold ?? false,
+      italic: explicit.italic ?? merged.italic ?? false,
+      underline: explicit.underline ?? merged.underline ?? false,
+      colorHex: explicit.colorHex ?? merged.colorHex ?? fallbackColor,
+    }
+    const fontFamily = cssFontFamily(
+      explicit.latinFont ?? merged.latinFont,
+      explicit.eaFont ?? merged.eaFont,
+      explicit.csFont ?? merged.csFont,
+    )
+    if (fontFamily) style.fontFamily = fontFamily
+    return style
+  }
 
   const paragraphs: ParagraphDisplay[] = []
   for (const pNode of childrenByLocal(childrenOf(txBody), 'p')) {
@@ -744,12 +764,20 @@ function resolveTextDisplay(
     const runs = keptRunNodesOf(pNode).map((item) =>
       item.kind === 'br' ? defaultRun : runStyleOf(runLayerFromRPr(item.rPr, theme), merged),
     )
+    // spcPct scales the 1.2 base so an explicit 100% renders like the default.
+    const lineHeight: LineSpacing =
+      merged.lnSpc?.pt !== undefined
+        ? { kind: 'pt', pt: merged.lnSpc.pt }
+        : { kind: 'mult', value: (merged.lnSpc?.pct ?? 1) * DEFAULT_LINE_HEIGHT }
     paragraphs.push({
       level,
       marLEmu: merged.marLEmu ?? 0,
       indentEmu: merged.indentEmu ?? 0,
       align: merged.align,
       bullet: merged.bullet ?? { kind: 'none' },
+      lineHeight,
+      spaceBeforePt: spacingPt(merged.spcBef, defaultRun.sizePt),
+      spaceAfterPt: spacingPt(merged.spcAft, defaultRun.sizePt),
       runs,
       defaultRun,
     })
@@ -761,7 +789,21 @@ function resolveTextDisplay(
   const rawAnchor = bodyPr ? attr(bodyPr, 'anchor') : undefined
   const anchor = rawAnchor === 'ctr' || rawAnchor === 'b' ? rawAnchor : 't'
 
-  return { paragraphs, defaultRun: runStyleOf({}, resolveLevel({}, 0)), anchor }
+  const out: TextDisplay = { paragraphs, defaultRun: runStyleOf({}, resolveLevel({}, 0)), anchor }
+
+  // normAutofit: PowerPoint precomputes the shrink factors and stores them on
+  // the shape's own bodyPr; they scale rendered sizes, never the model.
+  const autofit = bodyPr ? childByLocal(childrenOf(bodyPr), 'normAutofit') : undefined
+  if (autofit) {
+    // Clamped: these only ever shrink, and a corrupt 0 would render the whole
+    // shape's text invisible rather than merely mis-sized.
+    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+    out.autofit = {
+      fontScale: clamp((num(attr(autofit, 'fontScale')) ?? 100000) / 100000, 0.01, 1),
+      lnSpcReduction: clamp((num(attr(autofit, 'lnSpcReduction')) ?? 0) / 100000, 0, 0.99),
+    }
+  }
+  return out
 }
 
 /** grpSp children we walk; anything else inside a group is silently skipped. */

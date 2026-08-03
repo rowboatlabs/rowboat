@@ -41,6 +41,8 @@ import {
   anchorJustify,
   displayAlign,
   displayRunStyle,
+  fontScaleOf,
+  paragraphMetrics,
   type CaretTarget,
   type TextOverlayHandle,
 } from './text-dom'
@@ -392,7 +394,9 @@ function TextShapeView({
   onPointerDown: (e: ReactPointerEvent) => void
   onDoubleClick?: (e: ReactMouseEvent) => void
 }) {
-  const ptToPx = (pt: number) => pt * EMU_PER_PT * scale
+  // normAutofit scales every rendered size; the model's pt values stay raw.
+  const fontScale = fontScaleOf(shape)
+  const ptToPx = (pt: number) => pt * fontScale * EMU_PER_PT * scale
   // Auto-number counters accumulate down the shape; deeper levels reset when
   // a shallower numbered paragraph appears.
   const counters: Record<number, number> = {}
@@ -442,6 +446,7 @@ function TextShapeView({
           const marLPx = (dp?.marLEmu ?? 0) * scale
           const indentPx = (dp?.indentEmu ?? 0) * scale
           const bulletStyle = dp?.defaultRun ?? shape.display?.defaultRun
+          const metrics = paragraphMetrics(dp, shape.display?.autofit, scale)
 
           return (
             <p
@@ -450,6 +455,9 @@ function TextShapeView({
                 textAlign: alignToCss(displayAlign(shape, pi, para)),
                 margin: 0,
                 whiteSpace: 'pre-wrap',
+                lineHeight: metrics.lineHeight,
+                paddingTop: metrics.padTopPx > 0 ? metrics.padTopPx : undefined,
+                paddingBottom: metrics.padBottomPx > 0 ? metrics.padBottomPx : undefined,
                 paddingLeft: marLPx > 0 ? marLPx : undefined,
                 textIndent: indentPx !== 0 ? indentPx : undefined,
               }}
@@ -463,7 +471,7 @@ function TextShapeView({
                     marginRight: indentPx < 0 ? undefined : '0.35em',
                     fontSize: ptToPx(bulletStyle?.sizePt ?? DEFAULT_TEXT_PT),
                     color: `#${bulletStyle?.colorHex ?? '000000'}`,
-                    lineHeight: 1.2,
+                    fontFamily: bulletStyle?.fontFamily,
                   }}
                 >
                   {bulletText}
@@ -480,7 +488,7 @@ function TextShapeView({
                       textDecoration: rs.underline ? 'underline' : 'none',
                       fontSize: ptToPx(rs.sizePt),
                       color: `#${rs.colorHex}`,
-                      lineHeight: 1.2,
+                      fontFamily: rs.fontFamily,
                     }}
                   >
                     {run.text}

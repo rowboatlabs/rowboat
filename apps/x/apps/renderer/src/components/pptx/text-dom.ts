@@ -13,14 +13,16 @@
  */
 
 import type { EditedParagraph, EditedTextRun, RunFormatOverrides } from '@/lib/pptx/serialize'
-import type {
-  Paragraph,
-  ParagraphDisplay,
-  ResolvedRunStyle,
-  TextAlign,
-  TextAnchor,
-  TextRun,
-  TextShape,
+import {
+  DEFAULT_LINE_HEIGHT,
+  type Paragraph,
+  type ParagraphDisplay,
+  type ResolvedRunStyle,
+  type TextAlign,
+  type TextAnchor,
+  type TextAutofit,
+  type TextRun,
+  type TextShape,
 } from '@/lib/pptx/types'
 import { autoNumText } from '@/lib/pptx/textstyle'
 import { EMU_PER_PT } from './edit-model'
@@ -41,12 +43,45 @@ export function displayRunStyle(
   const er = run as EditedTextRun
   const dp = shape.display?.paragraphs[er.srcPara ?? paraIndex]
   const dr = dp?.runs[er.srcRun ?? runIndex] ?? dp?.defaultRun ?? shape.display?.defaultRun
-  return {
+  const style: ResolvedRunStyle = {
     sizePt: run.sizePt ?? dr?.sizePt ?? DEFAULT_TEXT_PT,
     bold: run.bold ?? dr?.bold ?? false,
     italic: run.italic ?? dr?.italic ?? false,
     underline: run.underline ?? dr?.underline ?? false,
     colorHex: run.colorHex ?? dr?.colorHex ?? '000000',
+  }
+  // The model never carries a typeface; the resolved cascade is the only source.
+  if (dr?.fontFamily) style.fontFamily = dr.fontFamily
+  return style
+}
+
+/** normAutofit's multiplier on every rendered font size in a shape. */
+export function fontScaleOf(shape: TextShape): number {
+  return shape.display?.autofit?.fontScale ?? 1
+}
+
+/**
+ * Paragraph typography, resolved identically for the canvas renderer and the
+ * edit overlay so opening the editor never reflows. Line height is a unitless
+ * CSS multiplier (normAutofit's lnSpcReduction applied — it only ever reduces
+ * percentage spacing) or a fixed px value for a:spcPts. Paragraph spacing maps
+ * to paddings, not margins: sibling margins would collapse in the overlay's
+ * block layout but not between the canvas's flex children.
+ */
+export function paragraphMetrics(
+  dp: ParagraphDisplay | undefined,
+  autofit: TextAutofit | undefined,
+  scale: number,
+): { lineHeight: string; padTopPx: number; padBottomPx: number } {
+  const ls = dp?.lineHeight
+  const lineHeight =
+    ls?.kind === 'pt'
+      ? `${ls.pt * EMU_PER_PT * scale}px`
+      : String((ls?.value ?? DEFAULT_LINE_HEIGHT) * (1 - (autofit?.lnSpcReduction ?? 0)))
+  return {
+    lineHeight,
+    padTopPx: (dp?.spaceBeforePt ?? 0) * EMU_PER_PT * scale,
+    padBottomPx: (dp?.spaceAfterPt ?? 0) * EMU_PER_PT * scale,
   }
 }
 
@@ -92,14 +127,17 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function runCss(style: ResolvedRunStyle, scale: number): string {
+// Line-height is set on the paragraph block, not per run: the unitless form
+// inherits and recomputes against each span's own font size (matching the old
+// per-span 1.2), and the fixed-px form must be uniform across the paragraph.
+function runCss(style: ResolvedRunStyle, scale: number, fontScale: number): string {
   return (
     `font-weight:${style.bold ? 700 : 400};` +
     `font-style:${style.italic ? 'italic' : 'normal'};` +
     `text-decoration:${style.underline ? 'underline' : 'none'};` +
-    `font-size:${style.sizePt * EMU_PER_PT * scale}px;` +
-    `color:#${style.colorHex};` +
-    `line-height:1.2`
+    `font-size:${style.sizePt * fontScale * EMU_PER_PT * scale}px;` +
+    `color:#${style.colorHex}` +
+    (style.fontFamily ? `;font-family:${style.fontFamily}` : '')
   )
 }
 
@@ -140,8 +178,9 @@ function bulletHtml(
   const css =
     'display:inline-block;text-indent:0;' +
     (indentPx < 0 ? `min-width:${-indentPx}px;` : 'margin-right:0.35em;') +
-    `font-size:${(style?.sizePt ?? DEFAULT_TEXT_PT) * EMU_PER_PT * scale}px;` +
-    `color:#${style?.colorHex ?? '000000'};line-height:1.2`
+    `font-size:${(style?.sizePt ?? DEFAULT_TEXT_PT) * fontScaleOf(shape) * EMU_PER_PT * scale}px;` +
+    `color:#${style?.colorHex ?? '000000'}` +
+    (style?.fontFamily ? `;font-family:${style.fontFamily}` : '')
   return `<span data-bullet="1" contenteditable="false" style="${css}">${escapeHtml(text)}</span>`
 }
 
@@ -153,6 +192,7 @@ export function buildEditableHtml(shape: TextShape, scale: number): string {
   // Auto-number counters accumulate down the shape, exactly as the rendered
   // view does, so the editable shows the same numbers.
   const counters: Record<number, number> = {}
+  const fontScale = fontScaleOf(shape)
   return shape.paragraphs
     .map((para, pi) => {
       const ep = para as EditedParagraph
@@ -168,24 +208,27 @@ export function buildEditableHtml(shape: TextShape, scale: number): string {
           // extraction never bakes inherited values into write-back edits.
           return (
             `<span data-cp="${pi}" data-cr="${ri}"${prov}${runDataAttrs(run)}` +
-            ` style="${runCss(displayRunStyle(shape, pi, ri, run), scale)}">${escapeHtml(run.text)}</span>`
+            ` style="${runCss(displayRunStyle(shape, pi, ri, run), scale, fontScale)}">${escapeHtml(run.text)}</span>`
           )
         })
         .join('')
       const align = displayAlign(shape, pi, para)
-      // Mirror the rendered paragraph box exactly — padding, indent and the
-      // bullet. The bullet is an inline box that takes real horizontal space,
-      // so leaving it out reflows every line and the point the user clicked
-      // stops mapping to the word they clicked.
+      // Mirror the rendered paragraph box exactly — padding, indent, line
+      // height, paragraph spacing and the bullet. The bullet is an inline box
+      // that takes real horizontal space, so leaving it out reflows every line
+      // and the point the user clicked stops mapping to the word they clicked.
       const dp = shape.display?.paragraphs[paraSrc]
       const marLPx = (dp?.marLEmu ?? 0) * scale
       const indentPx = (dp?.indentEmu ?? 0) * scale
+      const metrics = paragraphMetrics(dp, shape.display?.autofit, scale)
       const boxCss =
         (marLPx > 0 ? `padding-left:${marLPx}px;` : '') +
-        (indentPx !== 0 ? `text-indent:${indentPx}px;` : '')
+        (indentPx !== 0 ? `text-indent:${indentPx}px;` : '') +
+        (metrics.padTopPx > 0 ? `padding-top:${metrics.padTopPx}px;` : '') +
+        (metrics.padBottomPx > 0 ? `padding-bottom:${metrics.padBottomPx}px;` : '')
       return (
         `<div data-cp="${pi}" data-op="${paraSrc}" data-algn="${para.align ?? ''}"` +
-        ` style="margin:0;${boxCss}text-align:${alignToCss(align)}">` +
+        ` style="margin:0;line-height:${metrics.lineHeight};${boxCss}text-align:${alignToCss(align)}">` +
         bulletHtml(shape, para, dp, indentPx, scale, counters) +
         `${inner || '<br>'}</div>`
       )
@@ -589,6 +632,8 @@ export function applyFormatToSpans(
   spans: readonly HTMLElement[],
   set: RunFormatOverrides,
   scale: number,
+  /** The shape's normAutofit font scale; data-pt stays the raw authored pt. */
+  fontScale = 1,
 ): void {
   for (const el of spans) {
     if (set.bold !== undefined) {
@@ -605,7 +650,7 @@ export function applyFormatToSpans(
     }
     if (set.sizePt !== undefined) {
       el.setAttribute('data-pt', String(set.sizePt))
-      el.style.fontSize = `${set.sizePt * EMU_PER_PT * scale}px`
+      el.style.fontSize = `${set.sizePt * fontScale * EMU_PER_PT * scale}px`
     }
     if (set.colorHex !== undefined) {
       el.setAttribute('data-c', set.colorHex)

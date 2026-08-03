@@ -19,11 +19,12 @@
  *    have no meaning, so formatting is dropped and disabled for that shape.
  */
 
-import type {
-  EditedParagraph,
-  RunFormatOverrides,
-  RunRef,
-  SlideEdit,
+import {
+  isTextOnlyEdit,
+  type EditedParagraph,
+  type RunFormatOverrides,
+  type RunRef,
+  type SlideEdit,
 } from '@/lib/pptx/serialize'
 import type {
   NodePath,
@@ -90,28 +91,24 @@ export function hasEdits(edits: EditSet): boolean {
   return Object.keys(edits).length > 0
 }
 
-const isBrRun = (text: string): boolean => text === '\n'
-
 /**
  * True when `next` keeps the paragraph/run structure of `original`, so the
  * serializer can splice text in place and formatting edits stay addressable.
+ *
+ * This delegates to the serializer's own predicate rather than re-deriving it.
+ * A second implementation drifted from it: this one compared run counts and
+ * break positions only, while the serializer also compares alignment and run
+ * properties. A commit whose runs lost their provenance (paste, type-over)
+ * carries undefined props, so the serializer rebuilt the whole `<a:p>` range
+ * while the editor still recorded `formats` against original indices. The two
+ * splices overlap, `applySplices` fails closed — and because saves recompute
+ * from the same edit set, that file could never be saved again.
  */
 export function structureMatches(
   original: readonly Paragraph[],
-  next: readonly { runs: readonly { text: string }[] }[],
+  next: readonly EditedParagraph[],
 ): boolean {
-  if (original.length !== next.length) return false
-  for (let i = 0; i < original.length; i++) {
-    const o = original[i].runs
-    const n = next[i].runs
-    if (o.length !== n.length) return false
-    for (let j = 0; j < o.length; j++) {
-      if (isBrRun(o[j].text) !== isBrRun(n[j].text)) return false
-      // An embedded newline becomes new <a:br/> structure on write.
-      if (!isBrRun(n[j].text) && n[j].text.includes('\n')) return false
-    }
-  }
-  return true
+  return isTextOnlyEdit(original, next)
 }
 
 /** True when this shape can still take formatting/alignment edits. */
@@ -136,10 +133,13 @@ function applyOverrides(run: Record<string, unknown>, set: RunFormatOverrides): 
 /** The paragraphs to render: text replacement, then formatting on top. */
 export function effectiveParagraphs(edit: ShapeEdit, base: readonly Paragraph[]): Paragraph[] {
   const source = edit.text ?? base
-  const paras: Paragraph[] = source.map((p) => ({
-    align: p.align,
-    runs: p.runs.map((r) => ({ ...r })),
-  }))
+  // Spread the whole paragraph, the way the runs below already do: `srcPara`
+  // is what maps a rendered paragraph back to the original it came from.
+  // Rebuilding it as {align, runs} dropped that, so re-opening an edited box
+  // stamped positional provenance into the overlay and the NEXT commit reused
+  // a different paragraph's pPr/endParaRPr bytes — silently moving authored
+  // alignment, bullets and indent onto the wrong paragraph on save.
+  const paras: Paragraph[] = source.map((p) => ({ ...p, runs: p.runs.map((r) => ({ ...r })) }))
   if (edit.formats) {
     for (const [key, set] of Object.entries(edit.formats)) {
       const { para, run } = parseRunKey(key)

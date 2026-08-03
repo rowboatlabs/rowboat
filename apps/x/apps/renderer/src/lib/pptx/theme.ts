@@ -31,11 +31,23 @@ export interface ResolvedColor {
   alpha?: number
 }
 
+/** Typeface per script slot of a:fontScheme's majorFont/minorFont. */
+export interface ThemeFonts {
+  majorLatin?: string
+  majorEa?: string
+  majorCs?: string
+  minorLatin?: string
+  minorEa?: string
+  minorCs?: string
+}
+
 export interface Theme {
   /** dk1/lt1/dk2/lt2/accent1..6/hlink/folHlink -> RRGGBB. */
   scheme: Record<string, string>
   /** Alias -> scheme slot, from the master's p:clrMap (bg1 -> lt1, …). */
   clrMap: Record<string, string>
+  /** From a:fontScheme, for +mj-lt / +mn-lt style typeface references. */
+  fonts: ThemeFonts
   /** Raw fill nodes from a:fmtScheme/a:fillStyleLst, for style fillRef. */
   fillStyleNodes: XmlNode[]
   /** Raw a:ln nodes from a:fmtScheme/a:lnStyleLst, for style lnRef. */
@@ -75,12 +87,30 @@ const DEFAULT_SCHEME: Record<string, string> = {
   folHlink: '954F72',
 }
 
+/** The stock Office fonts, used when a theme names none. */
+const DEFAULT_FONTS: ThemeFonts = { majorLatin: 'Calibri Light', minorLatin: 'Calibri' }
+
 export const DEFAULT_THEME: Theme = {
   scheme: DEFAULT_SCHEME,
   clrMap: DEFAULT_CLR_MAP,
+  fonts: DEFAULT_FONTS,
   fillStyleNodes: [],
   lineStyleNodes: [],
   bgFillStyleNodes: [],
+}
+
+/**
+ * Resolves a typeface token: `+mj-lt` / `+mn-ea`-style references map through
+ * the theme's font scheme (undefined when that slot names nothing); anything
+ * else is already a literal family name.
+ */
+export function themeFontOf(theme: Theme, typeface: string): string | undefined {
+  const m = typeface.match(/^\+(mj|mn)-(lt|ea|cs)$/)
+  if (!m) return typeface
+  const key = `${m[1] === 'mj' ? 'major' : 'minor'}${
+    m[2] === 'lt' ? 'Latin' : m[2] === 'ea' ? 'Ea' : 'Cs'
+  }` as keyof ThemeFonts
+  return theme.fonts[key]
 }
 
 // ------------------------------------------------------------- primitives
@@ -404,7 +434,7 @@ const SCHEME_SLOTS = [
   'folHlink',
 ]
 
-/** Parses `ppt/theme/themeN.xml` (clrScheme + fmtScheme; fonts out of scope). */
+/** Parses `ppt/theme/themeN.xml` (clrScheme + fontScheme + fmtScheme). */
 export function parseTheme(themeDoc: XmlNode[]): Theme {
   const root = childByLocal(themeDoc, 'theme')
   const elements = root ? descend(root, 'themeElements') : undefined
@@ -420,6 +450,27 @@ export function parseTheme(themeDoc: XmlNode[]): Theme {
     }
   }
 
+  const fonts: ThemeFonts = { ...DEFAULT_FONTS }
+  const fontScheme = elements ? descend(elements, 'fontScheme') : undefined
+  if (fontScheme) {
+    for (const [group, prefix] of [
+      ['majorFont', 'major'],
+      ['minorFont', 'minor'],
+    ] as const) {
+      const groupNode = childByLocal(childrenOf(fontScheme), group)
+      if (!groupNode) continue
+      for (const [slot, suffix] of [
+        ['latin', 'Latin'],
+        ['ea', 'Ea'],
+        ['cs', 'Cs'],
+      ] as const) {
+        const slotNode = childByLocal(childrenOf(groupNode), slot)
+        const typeface = slotNode ? attr(slotNode, 'typeface')?.trim() : undefined
+        if (typeface) fonts[`${prefix}${suffix}`] = typeface
+      }
+    }
+  }
+
   const fmtScheme = elements ? descend(elements, 'fmtScheme') : undefined
   const fmtNodes = (list: string) =>
     (fmtScheme ? childrenOf(descend(fmtScheme, list) ?? {}) : []).filter(
@@ -429,6 +480,7 @@ export function parseTheme(themeDoc: XmlNode[]): Theme {
   return {
     scheme,
     clrMap: { ...DEFAULT_CLR_MAP },
+    fonts,
     fillStyleNodes: fmtNodes('fillStyleLst'),
     lineStyleNodes: fmtNodes('lnStyleLst'),
     bgFillStyleNodes: fmtNodes('bgFillStyleLst'),

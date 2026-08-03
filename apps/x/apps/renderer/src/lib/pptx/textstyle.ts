@@ -21,7 +21,7 @@ import {
   tagNameOf,
   type XmlNode,
 } from './parse'
-import { resolveFirstColor, type Theme } from './theme'
+import { resolveFirstColor, themeFontOf, type Theme } from './theme'
 import type { ResolvedBullet, TextAlign } from './types'
 
 export interface RunLayerProps {
@@ -30,6 +30,18 @@ export interface RunLayerProps {
   italic?: boolean
   underline?: boolean
   colorHex?: string
+  /** Resolved family names — theme +mj/+mn tokens already mapped. */
+  latinFont?: string
+  eaFont?: string
+  csFont?: string
+}
+
+/** One a:lnSpc / a:spcBef / a:spcAft value. Exactly one field is set. */
+export interface SpacingSpec {
+  /** Fraction, from a:spcPct (val=100000 -> 1). */
+  pct?: number
+  /** Points, from a:spcPts (val is hundredths of a point). */
+  pt?: number
 }
 
 /** One layer's contribution for one indent level. undefined = inherit. */
@@ -38,6 +50,9 @@ export interface LevelStyle extends RunLayerProps {
   indentEmu?: number
   align?: TextAlign
   bullet?: ResolvedBullet
+  lnSpc?: SpacingSpec
+  spcBef?: SpacingSpec
+  spcAft?: SpacingSpec
 }
 
 export interface ParsedListStyle {
@@ -168,7 +183,7 @@ export function autoNumText(scheme: string, n: number): string {
 
 // ------------------------------------------------------------------ parsing
 
-/** Run-level properties from an rPr/defRPr node, theme colors resolved. */
+/** Run-level properties from an rPr/defRPr node, theme colors/fonts resolved. */
 export function runLayerFromRPr(rPr: XmlNode | undefined, theme: Theme): RunLayerProps {
   if (!rPr) return {}
   const out: RunLayerProps = {}
@@ -180,10 +195,40 @@ export function runLayerFromRPr(rPr: XmlNode | undefined, theme: Theme): RunLaye
   if (u !== undefined) out.underline = u !== 'none'
   const sz = num(attr(rPr, 'sz'))
   if (sz !== undefined) out.sizePt = sz / 100
-  const fill = childByLocal(childrenOf(rPr), 'solidFill')
+  const kids = childrenOf(rPr)
+  const fill = childByLocal(kids, 'solidFill')
   const color = resolveFirstColor(fill, theme)
   if (color) out.colorHex = color.hex
+  const face = (name: string): string | undefined => {
+    const node = childByLocal(kids, name)
+    const typeface = node ? attr(node, 'typeface')?.trim() : undefined
+    return typeface ? themeFontOf(theme, typeface) : undefined
+  }
+  const latin = face('latin')
+  if (latin) out.latinFont = latin
+  const ea = face('ea')
+  if (ea) out.eaFont = ea
+  const cs = face('cs')
+  if (cs) out.csFont = cs
   return out
+}
+
+/** The a:spcPct / a:spcPts child of one spacing element, or undefined. */
+function spacingOf(pPrKids: XmlNode[], name: string): SpacingSpec | undefined {
+  const node = childByLocal(pPrKids, name)
+  if (!node) return undefined
+  const kids = childrenOf(node)
+  const pctNode = childByLocal(kids, 'spcPct')
+  if (pctNode) {
+    const v = num(attr(pctNode, 'val'))
+    if (v !== undefined) return { pct: v / 100000 }
+  }
+  const ptsNode = childByLocal(kids, 'spcPts')
+  if (ptsNode) {
+    const v = num(attr(ptsNode, 'val'))
+    if (v !== undefined) return { pt: v / 100 }
+  }
+  return undefined
 }
 
 function bulletOf(pPrKids: XmlNode[], theme: Theme): ResolvedBullet | undefined {
@@ -221,6 +266,12 @@ export function levelStyleFromPPr(pPr: XmlNode | undefined, theme: Theme): Level
   if (algn && (ALIGNS as readonly string[]).includes(algn)) out.align = algn as TextAlign
   const bullet = bulletOf(kids, theme)
   if (bullet) out.bullet = bullet
+  const lnSpc = spacingOf(kids, 'lnSpc')
+  if (lnSpc) out.lnSpc = lnSpc
+  const spcBef = spacingOf(kids, 'spcBef')
+  if (spcBef) out.spcBef = spcBef
+  const spcAft = spacingOf(kids, 'spcAft')
+  if (spcAft) out.spcAft = spcAft
   return out
 }
 
@@ -260,8 +311,44 @@ export function mergeLevelStyles(layers: readonly LevelStyle[]): LevelStyle {
     if (out.italic === undefined && layer.italic !== undefined) out.italic = layer.italic
     if (out.underline === undefined && layer.underline !== undefined) out.underline = layer.underline
     if (out.colorHex === undefined && layer.colorHex !== undefined) out.colorHex = layer.colorHex
+    if (out.latinFont === undefined && layer.latinFont !== undefined) out.latinFont = layer.latinFont
+    if (out.eaFont === undefined && layer.eaFont !== undefined) out.eaFont = layer.eaFont
+    if (out.csFont === undefined && layer.csFont !== undefined) out.csFont = layer.csFont
+    if (out.lnSpc === undefined && layer.lnSpc !== undefined) out.lnSpc = layer.lnSpc
+    if (out.spcBef === undefined && layer.spcBef !== undefined) out.spcBef = layer.spcBef
+    if (out.spcAft === undefined && layer.spcAft !== undefined) out.spcAft = layer.spcAft
   }
   return out
+}
+
+// ------------------------------------------------------------- font families
+
+/** Generic CSS family guessed from the primary name, for missing-font fallback. */
+function genericFamilyFor(name: string): string {
+  const n = name.toLowerCase()
+  if (/(courier|consolas|menlo|monaco|mono)/.test(n)) return 'monospace'
+  if (/sans/.test(n)) return 'sans-serif'
+  if (/(times|georgia|garamond|palatino|baskerville|didot|cambria|bookman|serif)/.test(n)) {
+    return 'serif'
+  }
+  return 'sans-serif'
+}
+
+/**
+ * CSS font-family for a resolved latin/ea/cs trio: authored families in order
+ * (CSS falls back per character, which is what the ea/cs slots are for), then
+ * a generic guessed from the primary name. Names are sanitized so the result
+ * can be embedded in inline-style HTML attributes.
+ */
+export function cssFontFamily(
+  latin: string | undefined,
+  ea: string | undefined,
+  cs: string | undefined,
+): string | undefined {
+  const names = [...new Set([latin, ea, cs].filter((n): n is string => Boolean(n)))]
+  if (names.length === 0) return undefined
+  const quoted = names.map((n) => `'${n.replace(/['"\\;{}<>&]/g, '')}'`)
+  return `${quoted.join(', ')}, ${genericFamilyFor(names[0])}`
 }
 
 // -------------------------------------------------- placeholder style routing

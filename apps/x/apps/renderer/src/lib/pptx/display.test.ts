@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
 import { parsePptx, parseXml } from './parse'
+import { updateSlideXml, writeDeck } from './serialize'
 import type { DrawingShape, TextShape } from './types'
 import {
   DEFAULT_THEME,
@@ -10,11 +11,13 @@ import {
   resolveColorNode,
   resolveFirstColor,
   schemeColorHex,
+  themeFontOf,
   type Theme,
 } from './theme'
 import {
   autoNumText,
   bulletCharFor,
+  cssFontFamily,
   layersOf,
   levelStyleFromPPr,
   mergeLevelStyles,
@@ -44,7 +47,7 @@ const TEST_THEME_XML =
   '<a:accent6><a:srgbClr val="70AD47"/></a:accent6>' +
   '<a:hlink><a:srgbClr val="0563C1"/></a:hlink>' +
   '<a:folHlink><a:srgbClr val="954F72"/></a:folHlink>' +
-  '</a:clrScheme><a:fontScheme name="f"><a:majorFont><a:latin typeface="X"/></a:majorFont><a:minorFont><a:latin typeface="X"/></a:minorFont></a:fontScheme>' +
+  '</a:clrScheme><a:fontScheme name="f"><a:majorFont><a:latin typeface="TitleFace"/></a:majorFont><a:minorFont><a:latin typeface="BodyFace"/><a:ea typeface="EastAsia"/></a:minorFont></a:fontScheme>' +
   '<a:fmtScheme name="fmt"><a:fillStyleLst>' +
   '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>' +
   '<a:gradFill><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr"><a:tint val="50000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr"/></a:gs></a:gsLst><a:lin ang="5400000"/></a:gradFill>' +
@@ -111,6 +114,32 @@ describe('theme color resolution', () => {
   })
 })
 
+describe('theme fonts', () => {
+  it('parses the font scheme and resolves +mj/+mn typeface tokens', () => {
+    const theme = loadTheme()
+    expect(theme.fonts.majorLatin).toBe('TitleFace')
+    expect(theme.fonts.minorLatin).toBe('BodyFace')
+    expect(theme.fonts.minorEa).toBe('EastAsia')
+    expect(themeFontOf(theme, '+mj-lt')).toBe('TitleFace')
+    expect(themeFontOf(theme, '+mn-lt')).toBe('BodyFace')
+    expect(themeFontOf(theme, '+mn-ea')).toBe('EastAsia')
+    // A slot the theme does not name resolves to nothing, not to a guess.
+    expect(themeFontOf(theme, '+mn-cs')).toBeUndefined()
+    // Literal names pass through; the stock defaults cover themeless decks.
+    expect(themeFontOf(theme, 'Georgia')).toBe('Georgia')
+    expect(themeFontOf(DEFAULT_THEME, '+mn-lt')).toBe('Calibri')
+  })
+
+  it('composes CSS font-family with a sensible generic fallback', () => {
+    expect(cssFontFamily('Georgia', undefined, undefined)).toBe("'Georgia', serif")
+    expect(cssFontFamily('Courier New', undefined, undefined)).toBe("'Courier New', monospace")
+    expect(cssFontFamily('Helvetica Neue', 'MS Gothic', undefined)).toBe(
+      "'Helvetica Neue', 'MS Gothic', sans-serif",
+    )
+    expect(cssFontFamily(undefined, undefined, undefined)).toBeUndefined()
+  })
+})
+
 describe('run property cascade', () => {
   const theme = DEFAULT_THEME
 
@@ -166,6 +195,37 @@ describe('run property cascade', () => {
 
     const none = levelStyleFromPPr(firstNode(`<a:pPr ${A}><a:buNone/></a:pPr>`), theme)
     expect(none.bullet).toEqual({ kind: 'none' })
+  })
+
+  it('resolves run typefaces, mapping theme tokens through the font scheme', () => {
+    const t = loadTheme()
+    const viaTheme = runLayerFromRPr(firstNode(`<a:rPr ${A}><a:latin typeface="+mn-lt"/></a:rPr>`), t)
+    expect(viaTheme.latinFont).toBe('BodyFace')
+    const literal = runLayerFromRPr(
+      firstNode(`<a:rPr ${A}><a:latin typeface="Georgia"/><a:cs typeface="Arial"/></a:rPr>`),
+      t,
+    )
+    expect(literal.latinFont).toBe('Georgia')
+    expect(literal.csFont).toBe('Arial')
+    expect(literal.eaFont).toBeUndefined()
+  })
+
+  it('parses lnSpc/spcBef/spcAft in both spcPct and spcPts forms', () => {
+    const pPr = firstNode(
+      `<a:pPr ${A}><a:lnSpc><a:spcPct val="150000"/></a:lnSpc>` +
+        '<a:spcBef><a:spcPts val="600"/></a:spcBef>' +
+        '<a:spcAft><a:spcPct val="50000"/></a:spcAft></a:pPr>',
+    )
+    const style = levelStyleFromPPr(pPr, theme)
+    expect(style.lnSpc).toEqual({ pct: 1.5 })
+    expect(style.spcBef).toEqual({ pt: 6 })
+    expect(style.spcAft).toEqual({ pct: 0.5 })
+
+    const fixed = levelStyleFromPPr(
+      firstNode(`<a:pPr ${A}><a:lnSpc><a:spcPts val="2000"/></a:lnSpc></a:pPr>`),
+      theme,
+    )
+    expect(fixed.lnSpc).toEqual({ pt: 20 })
   })
 
   it('routes placeholder types to the right master txStyles table', () => {
@@ -296,10 +356,12 @@ const DECK_SLIDE =
   `<p:sld ${P} ${A}><p:cSld><p:spTree>` +
   // Body placeholder: no own size/color anywhere on the slide -> inherits.
   `<p:sp><p:nvSpPr><p:cNvPr id="2" name="Body"/><p:nvSpPr/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>` +
-  '<p:spPr/><p:txBody><a:bodyPr/>' +
+  '<p:spPr/><p:txBody><a:bodyPr><a:normAutofit fontScale="62500" lnSpcReduction="20000"/></a:bodyPr>' +
   '<a:p><a:r><a:t>inherited</a:t></a:r></a:p>' +
   '<a:p><a:pPr lvl="1"/><a:r><a:rPr sz="1200"/><a:t>explicit</a:t></a:r></a:p>' +
   '<a:p><a:r><a:rPr><a:solidFill><a:schemeClr val="accent1"><a:lumMod val="60000"/><a:lumOff val="40000"/></a:schemeClr></a:solidFill></a:rPr><a:t>tinted</a:t></a:r></a:p>' +
+  '<a:p><a:pPr><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPts val="1200"/></a:spcBef><a:spcAft><a:spcPct val="50000"/></a:spcAft></a:pPr>' +
+  '<a:r><a:rPr><a:latin typeface="+mj-lt"/></a:rPr><a:t>spaced</a:t></a:r></a:p>' +
   '</p:txBody></p:sp>' +
   // A themed rectangle with no txBody.
   `<p:sp><p:nvSpPr><p:cNvPr id="3" name="Box"/></p:nvSpPr>` +
@@ -322,7 +384,7 @@ const DECK_MASTER =
   '<p:cSld><p:spTree/></p:cSld>' +
   '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>' +
   '<p:txStyles><p:titleStyle/><p:bodyStyle>' +
-  '<a:lvl1pPr marL="342900" indent="-342900"><a:buFont typeface="Wingdings"/><a:buChar char="l"/><a:defRPr sz="2400"><a:solidFill><a:schemeClr val="tx2"/></a:solidFill></a:defRPr></a:lvl1pPr>' +
+  '<a:lvl1pPr marL="342900" indent="-342900"><a:buFont typeface="Wingdings"/><a:buChar char="l"/><a:defRPr sz="2400"><a:solidFill><a:schemeClr val="tx2"/></a:solidFill><a:latin typeface="+mn-lt"/></a:defRPr></a:lvl1pPr>' +
   '<a:lvl2pPr marL="742950" indent="-285750"><a:buAutoNum type="arabicPeriod"/><a:defRPr sz="2000"/></a:lvl2pPr>' +
   '</p:bodyStyle><p:otherStyle/></p:txStyles></p:sldMaster>'
 
@@ -379,13 +441,15 @@ describe('deck-level display resolution', () => {
     expect(display).toBeDefined()
     const p0 = display!.paragraphs[0]
     // Size from master bodyStyle lvl1, bold from the layout override,
-    // color from tx2 -> dk2 -> theme.
+    // color from tx2 -> dk2 -> theme, typeface from the master's +mn-lt
+    // resolved through the theme font scheme.
     expect(p0.runs[0]).toEqual({
       sizePt: 24,
       bold: true,
       italic: false,
       underline: false,
       colorHex: '44546A',
+      fontFamily: "'BodyFace', sans-serif",
     })
     // Wingdings 'l' from the master maps to a round bullet, with hanging indent.
     expect(p0.bullet).toEqual({ kind: 'char', char: '●' })
@@ -404,6 +468,36 @@ describe('deck-level display resolution', () => {
 
     // Inherited placeholder geometry still works (from the layout).
     expect(body.xfrmEmu).toEqual({ x: 10, y: 20, w: 30, h: 40 })
+  })
+
+  it('resolves paragraph spacing, typefaces and normAutofit at deck level', async () => {
+    const deck = await parsePptx(await buildDisplayFixture())
+    const display = (deck.slides[0].shapes[0] as TextShape).display!
+
+    // No lnSpc/spcBef/spcAft on the first paragraph -> 1.2, zero spacing.
+    expect(display.paragraphs[0].lineHeight).toEqual({ kind: 'mult', value: 1.2 })
+    expect(display.paragraphs[0].spaceBeforePt).toBe(0)
+    expect(display.paragraphs[0].spaceAfterPt).toBe(0)
+
+    // spcPct scales the 1.2 base; spcPts is absolute; spcAft's pct resolves
+    // against the paragraph's own size (24pt from the master bodyStyle).
+    const spaced = display.paragraphs[3]
+    expect(spaced.lineHeight).toEqual({ kind: 'mult', value: 0.9 * 1.2 })
+    expect(spaced.spaceBeforePt).toBe(12)
+    expect(spaced.spaceAfterPt).toBe(12)
+    // The run's own +mj-lt beats the inherited minor font.
+    expect(spaced.runs[0].fontFamily).toBe("'TitleFace', sans-serif")
+
+    // normAutofit factors from the shape's own bodyPr.
+    expect(display.autofit).toEqual({ fontScale: 0.625, lnSpcReduction: 0.2 })
+  })
+
+  it('keeps unedited write-back byte-identical with typography features present', async () => {
+    expect(updateSlideXml(DECK_SLIDE, [])).toBe(DECK_SLIDE)
+    const deck = await parsePptx(await buildDisplayFixture())
+    const out = await writeDeck(deck, new Map())
+    const raw = await (await JSZip.loadAsync(out)).files['ppt/slides/slide1.xml'].async('string')
+    expect(raw).toBe(DECK_SLIDE)
   })
 
   it('renders plain sp without txBody as a drawing with themed fill/line/rotation', async () => {

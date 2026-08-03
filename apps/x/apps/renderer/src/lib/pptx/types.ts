@@ -95,6 +95,23 @@ export interface ResolvedRunStyle {
   italic: boolean
   underline: boolean
   colorHex: string
+  /** Ready-to-use CSS font-family. Absent when nothing is authored anywhere. */
+  fontFamily?: string
+}
+
+/** CSS line-height used when no a:lnSpc is authored anywhere in the cascade. */
+export const DEFAULT_LINE_HEIGHT = 1.2
+
+/**
+ * Resolved a:lnSpc. `mult` is a unitless CSS line-height (spcPct scales the
+ * 1.2 default, so 100% keeps today's rendering); `pt` is fixed (a:spcPts).
+ */
+export type LineSpacing = { kind: 'mult'; value: number } | { kind: 'pt'; pt: number }
+
+/** `a:normAutofit` shrink factors, as fractions (fontScale 1 = unscaled). */
+export interface TextAutofit {
+  fontScale: number
+  lnSpcReduction: number
 }
 
 export type ResolvedBullet =
@@ -109,6 +126,11 @@ export interface ParagraphDisplay {
   /** Resolved fallback used when the paragraph itself declares no algn. */
   align?: TextAlign
   bullet: ResolvedBullet
+  /** Resolved a:lnSpc; `{ kind: 'mult', value: 1.2 }` when unspecified. */
+  lineHeight: LineSpacing
+  /** Resolved a:spcBef/a:spcAft in points (spcPct is taken of defaultRun's size). */
+  spaceBeforePt: number
+  spaceAfterPt: number
   /** Fully resolved style per ORIGINAL run index (explicit rPr over cascade). */
   runs: ResolvedRunStyle[]
   /** The cascade result at this level, for runs with no original anchor. */
@@ -125,6 +147,8 @@ export interface TextDisplay {
   defaultRun: ResolvedRunStyle
   /** OOXML defaults to top; `just`/`dist` render as top. */
   anchor: TextAnchor
+  /** Shrink-to-fit factors from the shape's own bodyPr, applied at render. */
+  autofit?: TextAutofit
 }
 
 // ------------------------------------------------------------------- shapes
