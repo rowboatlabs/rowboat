@@ -53,6 +53,16 @@ export interface ErrorMessage {
   timestamp: number
 }
 
+// The model's thought process for one model call, shown as a collapsible
+// block above the text/tools it produced. Providers that only emit
+// encrypted reasoning yield no item (there is no text to show).
+export interface ReasoningMessage {
+  id: string
+  kind: 'reasoning'
+  content: string
+  timestamp: number
+}
+
 export type ReasoningEffortLevel = 'low' | 'medium' | 'high'
 
 // User-facing names for the canonical effort ladder ("auto" = absent).
@@ -72,13 +82,17 @@ export interface TurnUsageMessage {
   timestamp: number
 }
 
-export type ConversationItem = ChatMessage | ToolCall | ErrorMessage | TurnUsageMessage
+export type ConversationItem = ChatMessage | ToolCall | ErrorMessage | ReasoningMessage | TurnUsageMessage
 export type PermissionResponse = 'approve' | 'deny'
 
 export type ChatTabViewState = {
   runId: string | null
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  // Reasoning text streaming for the in-flight model call; superseded by the
+  // durable reasoning item once the call completes. Optional because the
+  // legacy pre-load fallback path never carries it.
+  currentReasoning?: string
   sessionUsage: TokenUsage
   pendingAskHumanRequests: Map<string, z.infer<typeof AskHumanRequestEvent>>
   allPermissionRequests: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
@@ -95,6 +109,7 @@ export const createEmptyChatTabViewState = (): ChatTabViewState => ({
   runId: null,
   conversation: [],
   currentAssistantMessage: '',
+  currentReasoning: '',
   sessionUsage: {},
   pendingAskHumanRequests: new Map(),
   allPermissionRequests: new Map(),
@@ -108,6 +123,8 @@ export const isChatMessage = (item: ConversationItem): item is ChatMessage => 'r
 export const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
 export const isErrorMessage = (item: ConversationItem): item is ErrorMessage =>
   'kind' in item && item.kind === 'error'
+export const isReasoningMessage = (item: ConversationItem): item is ReasoningMessage =>
+  'kind' in item && item.kind === 'reasoning'
 export const isTurnUsageMessage = (item: ConversationItem): item is TurnUsageMessage =>
   'kind' in item && item.kind === 'turn-usage'
 
