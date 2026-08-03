@@ -1,7 +1,7 @@
 import { buildAvailableSkillCatalog } from "../skills/index.js";
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
 import {
-    getConnectedEmailProvider,
+    getActiveEmailProviderId,
     isCodeModeAvailable,
     isComposioAvailable,
     isSlackAvailable,
@@ -430,7 +430,7 @@ export async function buildCopilotInstructions(): Promise<string> {
             isComposioAvailable(),
             isCodeModeAvailable(),
             isSlackAvailable(),
-            getConnectedEmailProvider(),
+            getActiveEmailProviderId(),
         ]);
     let slackChannelsHint = '';
     if (slackConnected) {

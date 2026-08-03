@@ -33,33 +33,8 @@ export async function isSlackAvailable(): Promise<boolean> {
     }
 }
 
-export async function isGoogleConnected(): Promise<boolean> {
-    try {
-        const repo = await lazyResolve<import("../../auth/repo.js").IOAuthRepo>("oauthRepo");
-        const connection = await repo.read("google");
-        return !!connection.tokens;
-    } catch {
-        return false;
-    }
-}
-
-export async function isMicrosoftConnected(): Promise<boolean> {
-    try {
-        const repo = await lazyResolve<import("../../auth/repo.js").IOAuthRepo>("oauthRepo");
-        const connection = await repo.read("microsoft");
-        return !!connection.tokens;
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Which native email provider is connected (at most one — the connect flow
- * enforces mutual exclusion; Google wins a hand-edited tie, matching the
- * email dispatcher).
- */
-export async function getConnectedEmailProvider(): Promise<'google' | 'microsoft' | null> {
-    if (await isGoogleConnected()) return 'google';
-    if (await isMicrosoftConnected()) return 'microsoft';
-    return null;
-}
+// The email fact lives with the email code — knowledge/email/active-provider.ts
+// is the single source of "which mailbox is connected" (also consumed by the
+// email dispatcher and the main-process OAuth handler). Re-exported here so
+// assembly keeps one import home for connection facts.
+export { getActiveEmailProviderId } from "../../knowledge/email/active-provider.js";

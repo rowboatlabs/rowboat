@@ -14,6 +14,7 @@ import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync
 import { triggerSync as triggerOutlookSync } from '@x/core/dist/knowledge/sync_outlook.js';
 import { triggerSync as triggerOutlookCalendarSync } from '@x/core/dist/knowledge/sync_outlook_calendar.js';
 import { purgeEmailCaches } from '@x/core/dist/knowledge/email/store.js';
+import { isEmailProviderConnected } from '@x/core/dist/knowledge/email/active-provider.js';
 import { invalidateContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { invalidateSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { invalidateSentContacts as invalidateOutlookSentContacts } from '@x/core/dist/knowledge/outlook_sent_contacts.js';
@@ -258,8 +259,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
     // assume a single active mailbox.
     if (provider === 'google' || provider === 'microsoft') {
       const other = provider === 'google' ? 'microsoft' : 'google';
-      const otherConnection = await oauthRepo.read(other);
-      if (otherConnection.tokens) {
+      if (await isEmailProviderConnected(other)) {
         const otherName = other === 'google' ? 'Google' : 'Microsoft';
         return {
           success: false,
@@ -515,8 +515,7 @@ export async function completeRowboatGoogleConnect(state: string): Promise<void>
     const oauthRepo = getOAuthRepo();
     // Same one-email-provider-at-a-time rule as connectProvider — this path
     // bypasses it (deep link from the webapp), so re-check here.
-    const microsoftConnection = await oauthRepo.read('microsoft');
-    if (microsoftConnection.tokens) {
+    if (await isEmailProviderConnected('microsoft')) {
       emitOAuthEvent({
         provider: 'google',
         success: false,
