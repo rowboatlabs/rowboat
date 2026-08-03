@@ -54,7 +54,7 @@ export type ProviderConfigEntry = ProviderConfig[string];
  * loopback redirect, NO client secret. Overridable via env for development.
  */
 const MICROSOFT_CLIENT_ID =
-  process.env.ROWBOAT_MICROSOFT_CLIENT_ID || 'b173a85c-6d6e-4422-a735-3ca7f2c8f477';
+  process.env.ROWBOAT_MICROSOFT_CLIENT_ID || 'd3f3bc8b-47a3-4674-b039-fa947053990d';
 
 /**
  * All configured OAuth providers
