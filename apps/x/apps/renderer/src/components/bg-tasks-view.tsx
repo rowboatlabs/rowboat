@@ -4,13 +4,37 @@ import {
     ListChecks, Play, Square, Loader2, Trash2, Plus, X, AlertCircle,
     Repeat, Clock, Zap, ChevronLeft, ChevronDown, ChevronRight,
     Pencil, Check, PanelRightClose, PanelRightOpen, Sparkles,
-    Code2, FolderOpen, LayoutTemplate,
+    Code2, FolderOpen, LayoutTemplate, MoreVertical, Info,
 } from 'lucide-react'
 import type { BackgroundTask, BackgroundTaskSummary, Triggers } from '@x/shared/dist/background-task.js'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog'
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useBackgroundTaskAgentStatus } from '@/hooks/use-bg-task-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
@@ -1589,6 +1613,91 @@ function TaskDetail({
 }
 
 // ---------------------------------------------------------------------------
+// Task details dialog — opened from a list row's ⋯ menu
+// ---------------------------------------------------------------------------
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+        <div className="grid grid-cols-[100px_1fr] items-start gap-x-3">
+            <div className="pt-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
+            <div className="min-w-0 text-xs leading-relaxed text-foreground">{children}</div>
+        </div>
+    )
+}
+
+function TaskDetailsDialog({ summary, onClose }: { summary: BackgroundTaskSummary | null; onClose: () => void }) {
+    // `model` / `provider` live only on the full task, not the list summary —
+    // fetch them when the dialog opens.
+    const [full, setFull] = useState<BackgroundTask | null>(null)
+    const slug = summary?.slug
+
+    useEffect(() => {
+        setFull(null)
+        if (!slug) return
+        let cancelled = false
+        window.ipc.invoke('bg-task:get', { slug })
+            .then(result => {
+                if (!cancelled && result.success && result.task) setFull(result.task)
+            })
+            .catch(() => {})
+        return () => { cancelled = true }
+    }, [slug])
+
+    if (!summary) return null
+
+    return (
+        <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+            <DialogContent className="max-w-lg">
+                <DialogHeader>
+                    <DialogTitle className="truncate pr-6">{summary.name}</DialogTitle>
+                    <DialogDescription className="font-mono text-[11px]">{summary.slug}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <DetailRow label="Description">
+                        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap">{summary.instructions}</div>
+                    </DetailRow>
+                    <DetailRow label="Status">{summary.active ? 'Active' : 'Paused'}</DetailRow>
+                    <DetailRow label="Schedule">{summarizeSchedule(summary.triggers)}</DetailRow>
+                    <DetailRow label="Model">
+                        {full
+                            ? <span className={full.model ? 'font-mono' : 'text-muted-foreground'}>{full.model ?? 'Global default'}</span>
+                            : <span className="text-muted-foreground">…</span>}
+                    </DetailRow>
+                    <DetailRow label="Provider">
+                        {full
+                            ? <span className={full.provider ? 'font-mono' : 'text-muted-foreground'}>{full.provider ?? 'Global default'}</span>
+                            : <span className="text-muted-foreground">…</span>}
+                    </DetailRow>
+                    {summary.projectId && (
+                        <DetailRow label="Type">Coding task — pinned to a registered repo</DetailRow>
+                    )}
+                    {summary.sourceApp && (
+                        <DetailRow label="Installed by">
+                            <span className="font-mono">{summary.sourceApp}</span> (app)
+                        </DetailRow>
+                    )}
+                    <DetailRow label="Created">{formatRunAt(summary.createdAt)}</DetailRow>
+                    <DetailRow label="Last run">
+                        {summary.lastRunAt ? (
+                            <div className="space-y-1">
+                                <div>{formatRunAt(summary.lastRunAt)}{relativeLabel(summary.lastRunAt) && ` (${relativeLabel(summary.lastRunAt)})`}</div>
+                                {summary.lastRunError ? (
+                                    <div className="line-clamp-3 text-destructive">{summary.lastRunError}</div>
+                                ) : summary.lastRunSummary ? (
+                                    <div className="line-clamp-3 text-muted-foreground">{summary.lastRunSummary}</div>
+                                ) : null}
+                            </div>
+                        ) : (
+                            <span className="text-muted-foreground">Never</span>
+                        )}
+                    </DetailRow>
+                </div>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+// ---------------------------------------------------------------------------
 // List view
 // ---------------------------------------------------------------------------
 
@@ -1637,6 +1746,9 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
     // as `LiveNotesView` uses for its toggle / stop buttons.
     const [updatingSlugs, setUpdatingSlugs] = useState<Set<string>>(new Set())
     const [stoppingSlugs, setStoppingSlugs] = useState<Set<string>>(new Set())
+    const [detailsTask, setDetailsTask] = useState<BackgroundTaskSummary | null>(null)
+    const [deleteTarget, setDeleteTarget] = useState<BackgroundTaskSummary | null>(null)
+    const [deleting, setDeleting] = useState(false)
     const agentStatus = useBackgroundTaskAgentStatus()
 
     const load = useCallback(async () => {
@@ -1703,6 +1815,25 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
         }
     }, [])
 
+    const handleDelete = useCallback(async () => {
+        if (!deleteTarget) return
+        setDeleting(true)
+        try {
+            const result = await window.ipc.invoke('bg-task:delete', { slug: deleteTarget.slug })
+            if (result.success) {
+                analytics.bgAgentDeleted()
+                setDeleteTarget(null)
+                void load()
+            } else {
+                toast(result.error ?? 'Delete failed', 'error')
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Delete failed', 'error')
+        } finally {
+            setDeleting(false)
+        }
+    }, [deleteTarget, load])
+
     if (selectedSlug) {
         return (
             <TaskDetail
@@ -1762,10 +1893,11 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                     <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
                         <table className="w-full table-fixed border-collapse">
                             <colgroup>
-                                <col className="w-[45%]" />
-                                <col className="w-[17%]" />
+                                <col className="w-[43%]" />
+                                <col className="w-[16%]" />
                                 <col className="w-[13%]" />
-                                <col className="w-[25%]" />
+                                <col className="w-[23%]" />
+                                <col className="w-[5%]" />
                             </colgroup>
                             <thead>
                                 <tr className="border-b border-border/60 bg-muted/30 text-left">
@@ -1773,6 +1905,7 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                     <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Schedule</th>
                                     <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Last ran</th>
                                     <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">State</th>
+                                    <th className="px-2 py-3"><span className="sr-only">Actions</span></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1831,7 +1964,7 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                             </td>
                                             <td className="px-4 py-3">
                                                 {isRunning ? (
-                                                    <div className="flex flex-wrap items-center gap-2 pl-7">
+                                                    <div className="flex flex-wrap items-center gap-2">
                                                         <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
                                                             <Loader2 className="size-3 animate-spin" />
                                                             Updating
@@ -1849,11 +1982,6 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                                     </div>
                                                 ) : (
                                                     <div className="flex items-center gap-3">
-                                                        {isUpdating ? (
-                                                            <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                                                        ) : (
-                                                            <span className="size-4 shrink-0" aria-hidden="true" />
-                                                        )}
                                                         <Switch
                                                             checked={task.active}
                                                             onCheckedChange={(checked) => { void handleToggleActive(task.slug, checked) }}
@@ -1862,8 +1990,36 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                                         <span className="min-w-16 text-xs font-medium text-foreground/80">
                                                             {task.active ? 'Active' : 'Inactive'}
                                                         </span>
+                                                        {isUpdating && (
+                                                            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                                                        )}
                                                     </div>
                                                 )}
+                                            </td>
+                                            <td className="px-2 py-3">
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                                                            aria-label={`Options for ${task.name}`}
+                                                        >
+                                                            <MoreVertical className="size-4" />
+                                                        </button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end" className="w-44">
+                                                        <DropdownMenuItem onClick={() => setDetailsTask(task)}>
+                                                            <Info className="size-3.5" /> View details
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuSeparator />
+                                                        <DropdownMenuItem
+                                                            variant="destructive"
+                                                            onClick={() => setDeleteTarget(task)}
+                                                        >
+                                                            <Trash2 className="size-3.5" /> Delete task
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
                                             </td>
                                         </tr>
                                     )
@@ -1886,6 +2042,29 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                 }}
                 onCreateWithCopilot={onCreateWithCopilot}
             />
+
+            <TaskDetailsDialog summary={detailsTask} onClose={() => setDetailsTask(null)} />
+
+            <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open && !deleting) setDeleteTarget(null) }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete &ldquo;{deleteTarget?.name}&rdquo;?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This permanently removes the task, its output, and all run history. This can&apos;t be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={e => { e.preventDefault(); void handleDelete() }}
+                            disabled={deleting}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            {deleting ? <Loader2 className="size-3 animate-spin" /> : <Trash2 className="size-3" />} Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     )
 }
