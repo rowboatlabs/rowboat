@@ -15,6 +15,7 @@ import {
   type FileMention,
 } from '@/components/ai-elements/prompt-input'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
+import { ReasoningRow } from '@/components/reasoning-row'
 import { TurnActivityIndicator } from '@/components/turn-activity-indicator'
 import { TurnConversation } from '@/components/turn-conversation'
 import { streamdownComponents } from '@/lib/markdown-render'
@@ -145,6 +146,17 @@ export function ChatSessionPane({
                 />
               ))}
 
+              {/* In-flight model call's thought stream: open with a
+                  "Thinking..." shimmer while reasoning streams, auto-collapses
+                  once the model moves on to its answer. Replaced by the
+                  durable (collapsed) reasoning item when the call completes. */}
+              {tabState.currentReasoning && (
+                <ReasoningRow
+                  content={tabState.currentReasoning}
+                  isStreaming={isActive && activeIsReasoning}
+                />
+              )}
+
               {tabState.currentAssistantMessage && (
                 <Message from="assistant">
                   <MessageContent>
@@ -153,7 +165,11 @@ export function ChatSessionPane({
                 </Message>
               )}
 
-              {isActive && activeIsProcessing && (
+              {/* The reasoning block above already shows its own "Thinking..."
+                  shimmer while thought text is streaming — only fall back to
+                  the bare indicator when there is nothing to show (working, or
+                  reasoning with no visible text, e.g. encrypted-only). */}
+              {isActive && activeIsProcessing && !(activeIsReasoning && tabState.currentReasoning) && (
                 <Message from="assistant">
                   <MessageContent>
                     <TurnActivityIndicator isReasoning={activeIsReasoning} />

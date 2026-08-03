@@ -7559,6 +7559,7 @@ function App() {
                 onOpenFullScreen={toggleRightPaneMaximize}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
+                currentReasoning={activeChatTabState.currentReasoning}
                 sessionUsage={activeChatTabState.sessionUsage}
                 chatTabStates={chatTabStatesForRender}
                 viewportAnchors={chatViewportAnchorByTab}

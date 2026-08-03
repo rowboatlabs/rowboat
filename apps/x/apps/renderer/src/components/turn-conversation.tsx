@@ -7,6 +7,7 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolIODetails } from '@/components/ai-elements/tool'
+import { ReasoningRow } from '@/components/reasoning-row'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
@@ -33,6 +34,7 @@ import {
   groupConversationItems,
   isChatMessage,
   isErrorMessage,
+  isReasoningMessage,
   isToolCall,
   isToolGroup,
   isTurnUsageMessage,
@@ -200,6 +202,12 @@ export function TurnConversation({
           </MessageContent>
         </Message>
       )
+    }
+
+    if (isReasoningMessage(item)) {
+      // Settled thoughts start collapsed; the live streaming row in
+      // ChatSessionPane is what shows reasoning expanded while it happens.
+      return <ReasoningRow key={item.id} content={item.content} />
     }
 
     if (isToolCall(item)) {

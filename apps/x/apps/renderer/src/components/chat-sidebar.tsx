@@ -67,6 +67,7 @@ interface ChatSidebarProps {
   onOpenFullScreen?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  currentReasoning?: string
   sessionUsage?: TokenUsage
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
@@ -142,6 +143,7 @@ export function ChatSidebar({
   onOpenFullScreen,
   conversation,
   currentAssistantMessage,
+  currentReasoning = '',
   sessionUsage = {},
   chatTabStates = {},
   viewportAnchors = {},
@@ -290,6 +292,7 @@ export function ChatSidebar({
     runId: runId ?? null,
     conversation,
     currentAssistantMessage,
+    currentReasoning,
     sessionUsage,
     pendingAskHumanRequests,
     allPermissionRequests,
@@ -299,6 +302,7 @@ export function ChatSidebar({
     runId,
     conversation,
     currentAssistantMessage,
+    currentReasoning,
     sessionUsage,
     pendingAskHumanRequests,
     allPermissionRequests,

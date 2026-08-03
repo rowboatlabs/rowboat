@@ -21,6 +21,7 @@ import type {
   ErrorMessage,
   MessageAttachment,
   PermissionResponse,
+  ReasoningMessage,
   TokenUsage,
   ToolCall,
 } from '@/lib/chat-conversation'
@@ -295,6 +296,22 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
   for (const call of state.modelCalls) {
     if (call.response === undefined) continue
     const content = call.response.content
+    // The model's thought process precedes what it produced. Encrypted-only
+    // reasoning has no text and yields no item.
+    const reasoning = Array.isArray(content)
+      ? content
+          .map((part) => (part.type === 'reasoning' ? part.text : ''))
+          .filter((text) => text.trim())
+          .join('\n\n')
+      : ''
+    if (reasoning) {
+      items.push({
+        id: `${turnId}:r${call.index}`,
+        kind: 'reasoning',
+        content: reasoning,
+        timestamp: ts(),
+      } satisfies ReasoningMessage)
+    }
     // Voice tags are model-facing markup, never shown (parity with the
     // legacy path's display-time strip).
     const text = stripVoiceTags(
@@ -371,6 +388,10 @@ type PermMeta = z.infer<typeof ToolPermissionMetadata>
 export type SessionChatState = {
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  // Reasoning text streaming for the in-flight model call; the durable
+  // reasoning item supersedes it when the call completes (same lifecycle as
+  // currentAssistantMessage).
+  currentReasoning: string
   sessionUsage: TokenUsage
   // See LiveOverlay.voiceSegments.
   voiceSegments: string[]
@@ -520,6 +541,7 @@ export function buildSessionChatState(
       : null,
     conversation,
     currentAssistantMessage: stripVoiceTags(overlay.text),
+    currentReasoning: overlay.reasoning,
     sessionUsage,
     voiceSegments: overlay.voiceSegments,
     pendingAskHumanRequests,
