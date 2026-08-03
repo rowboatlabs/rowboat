@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, type CSSProperties } from 'react'
 import type { EditedParagraph } from '@/lib/pptx/serialize'
 import type { TextShape } from '@/lib/pptx/types'
 import {
+  anchorJustify,
   buildEditableHtml,
   caretSelectionAtPoint,
   extractParagraphs,
@@ -96,15 +97,21 @@ export function TextEditOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // The flex centering lives on a NON-editable wrapper. Chromium cannot drive
+  // The flex anchoring lives on a NON-editable wrapper. Chromium cannot drive
   // a native caret inside a flex-container contentEditable: clicks anchor the
   // selection on the container instead of a text node and arrow keys cannot
   // move it, so the caret pins to the start of the box. The editable itself
-  // must be a plain block.
+  // must be a plain block. Anchoring mirrors TextShapeView so the text does
+  // not jump when the editor opens.
   return (
     <div
-      style={{ ...style, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
-      className="z-20 cursor-text overflow-hidden outline-2 outline-offset-1 outline-[var(--ring)]"
+      style={{
+        ...style,
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: anchorJustify(shape.display?.anchor),
+      }}
+      className="z-20 cursor-text outline-2 outline-offset-1 outline-[var(--ring)]"
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => {
         // A press on the empty band above/below the text would move focus out

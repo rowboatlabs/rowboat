@@ -40,6 +40,8 @@ export interface Theme {
   fillStyleNodes: XmlNode[]
   /** Raw a:ln nodes from a:fmtScheme/a:lnStyleLst, for style lnRef. */
   lineStyleNodes: XmlNode[]
+  /** Raw fill nodes from a:fmtScheme/a:bgFillStyleLst, for p:bgRef idx ≥ 1001. */
+  bgFillStyleNodes: XmlNode[]
 }
 
 export const DEFAULT_CLR_MAP: Record<string, string> = {
@@ -78,6 +80,7 @@ export const DEFAULT_THEME: Theme = {
   clrMap: DEFAULT_CLR_MAP,
   fillStyleNodes: [],
   lineStyleNodes: [],
+  bgFillStyleNodes: [],
 }
 
 // ------------------------------------------------------------- primitives
@@ -418,18 +421,17 @@ export function parseTheme(themeDoc: XmlNode[]): Theme {
   }
 
   const fmtScheme = elements ? descend(elements, 'fmtScheme') : undefined
-  const fillStyleNodes = fmtScheme
-    ? childrenOf(descend(fmtScheme, 'fillStyleLst') ?? {})
-    : []
-  const lineStyleNodes = fmtScheme
-    ? childrenOf(descend(fmtScheme, 'lnStyleLst') ?? {})
-    : []
+  const fmtNodes = (list: string) =>
+    (fmtScheme ? childrenOf(descend(fmtScheme, list) ?? {}) : []).filter(
+      (n) => tagNameOf(n) !== null,
+    )
 
   return {
     scheme,
     clrMap: { ...DEFAULT_CLR_MAP },
-    fillStyleNodes: fillStyleNodes.filter((n) => tagNameOf(n) !== null),
-    lineStyleNodes: lineStyleNodes.filter((n) => tagNameOf(n) !== null),
+    fillStyleNodes: fmtNodes('fillStyleLst'),
+    lineStyleNodes: fmtNodes('lnStyleLst'),
+    bgFillStyleNodes: fmtNodes('bgFillStyleLst'),
   }
 }
 

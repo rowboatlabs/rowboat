@@ -67,6 +67,33 @@ function firstFillChild(kids: XmlNode[]): XmlNode | undefined {
   })
 }
 
+/**
+ * Resolves a `p:bg` node to a page fill. `p:bgPr` carries a literal fill;
+ * `p:bgRef` points into the theme's format scheme by idx (1..999 →
+ * fillStyleLst, ≥1001 → bgFillStyleLst) with its color child as phClr.
+ * Best-effort: anything unresolvable comes back `{ kind: 'none' }`, which the
+ * renderer draws as the plain white page.
+ */
+export function backgroundFillOf(bgNode: XmlNode, theme: Theme): Fill {
+  const kids = childrenOf(bgNode)
+  const bgPr = childByLocal(kids, 'bgPr')
+  if (bgPr) {
+    const fill = firstFillChild(childrenOf(bgPr))
+    return fill ? fillFromNode(fill, theme) : { kind: 'none' }
+  }
+  const bgRef = childByLocal(kids, 'bgRef')
+  if (bgRef) {
+    const idx = num(attr(bgRef, 'idx')) ?? 0
+    const phClr = resolveFirstColor(bgRef, theme)?.hex
+    if (idx === 0 || idx === 1000) return { kind: 'none' }
+    const styleNode =
+      idx >= 1001 ? theme.bgFillStyleNodes[idx - 1001] : theme.fillStyleNodes[idx - 1]
+    if (styleNode) return fillFromNode(styleNode, theme, phClr)
+    if (phClr) return { kind: 'solid', hex: phClr }
+  }
+  return { kind: 'none' }
+}
+
 // ------------------------------------------------------------------- lines
 
 const DASH_MAP: Record<string, LineStyle['dash']> = {

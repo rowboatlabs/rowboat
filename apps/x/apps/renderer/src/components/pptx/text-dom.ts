@@ -18,6 +18,7 @@ import type {
   ParagraphDisplay,
   ResolvedRunStyle,
   TextAlign,
+  TextAnchor,
   TextRun,
   TextShape,
 } from '@/lib/pptx/types'
@@ -68,6 +69,19 @@ export interface TextOverlayHandle {
 
 export function alignToCss(align: string | undefined): 'left' | 'center' | 'right' | 'justify' {
   return align === 'ctr' ? 'center' : align === 'r' ? 'right' : align === 'just' ? 'justify' : 'left'
+}
+
+/**
+ * `a:bodyPr@anchor` → flex packing. Defaults to top, the OOXML default.
+ * Shared by the shape renderer and the edit overlay so the text does not jump
+ * when the editor opens.
+ */
+export function anchorJustify(
+  anchor: TextAnchor | undefined,
+): 'flex-start' | 'center' | 'flex-end' {
+  if (anchor === 'ctr') return 'center'
+  if (anchor === 'b') return 'flex-end'
+  return 'flex-start'
 }
 
 function escapeHtml(s: string): string {

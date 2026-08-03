@@ -1,7 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
 import { parsePptx, parseXml, resolveNodePath, resolveRelTarget, tagNameOf } from './parse'
-import type { ImageShape, PlaceholderShape, TextShape } from './types'
+import { writeDeck } from './serialize'
+import type { GroupShape, ImageShape, PlaceholderShape, TextShape } from './types'
 
 const SLIDE_W = 12192000
 const SLIDE_H = 6858000
@@ -237,6 +238,228 @@ describe('placeholder geometry inheritance', () => {
     expect(title.xfrmEmu).toEqual(LAYOUT_TITLE)
     // Not present on the layout, so it falls through to the master by idx.
     expect(body.xfrmEmu).toEqual(MASTER_BODY)
+  })
+})
+
+describe('group shapes', () => {
+  // Children live in a 6096000×3048000 child space (chOff 100000/200000)
+  // mapped onto a 3048000×1524000 box at (914400, 457200): scale 0.5 per axis.
+  const GROUP_SLIDE = `<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree>
+    <p:grpSp>
+      <p:nvGrpSpPr><p:cNvPr id="10" name="Group 9"/></p:nvGrpSpPr>
+      <p:grpSpPr><a:xfrm>
+        <a:off x="914400" y="457200"/><a:ext cx="3048000" cy="1524000"/>
+        <a:chOff x="100000" y="200000"/><a:chExt cx="6096000" cy="3048000"/>
+      </a:xfrm></p:grpSpPr>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="11"/></p:nvSpPr>
+        <p:spPr><a:xfrm>
+          <a:off x="2100000" y="1200000"/><a:ext cx="1000000" cy="600000"/>
+        </a:xfrm><a:solidFill><a:srgbClr val="1B2A4A"/></a:solidFill></p:spPr>
+        <p:txBody><a:p><a:r><a:t>Inside the group</a:t></a:r></a:p></p:txBody>
+      </p:sp>
+    </p:grpSp>
+  </p:spTree></p:cSld></p:sld>`
+
+  // Outer maps a 12192000×6096000 child space onto 6096000×3048000 at the
+  // origin (scale 0.5); the inner group halves again — 0.25 through both.
+  const NESTED_SLIDE = `<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree>
+    <p:grpSp>
+      <p:nvGrpSpPr><p:cNvPr id="20"/></p:nvGrpSpPr>
+      <p:grpSpPr><a:xfrm>
+        <a:off x="0" y="0"/><a:ext cx="6096000" cy="3048000"/>
+        <a:chOff x="0" y="0"/><a:chExt cx="12192000" cy="6096000"/>
+      </a:xfrm></p:grpSpPr>
+      <p:grpSp>
+        <p:nvGrpSpPr><p:cNvPr id="21"/></p:nvGrpSpPr>
+        <p:grpSpPr><a:xfrm>
+          <a:off x="2000000" y="1000000"/><a:ext cx="4000000" cy="2000000"/>
+          <a:chOff x="0" y="0"/><a:chExt cx="8000000" cy="4000000"/>
+        </a:xfrm></p:grpSpPr>
+        <p:sp>
+          <p:nvSpPr><p:cNvPr id="22"/></p:nvSpPr>
+          <p:spPr><a:xfrm>
+            <a:off x="1000000" y="2000000"/><a:ext cx="4000000" cy="1000000"/>
+          </a:xfrm></p:spPr>
+        </p:sp>
+      </p:grpSp>
+    </p:grpSp>
+  </p:spTree></p:cSld></p:sld>`
+
+  async function loadSlide(xml: string) {
+    const zip = new JSZip()
+    zip.file('ppt/presentation.xml', PRESENTATION_XML)
+    zip.file('ppt/_rels/presentation.xml.rels', PRESENTATION_RELS)
+    zip.file('ppt/slides/slide1.xml', xml)
+    return parsePptx(await zip.generateAsync({ type: 'uint8array' }))
+  }
+
+  it('walks a group and maps children through chOff/chExt to final slide EMU', async () => {
+    const deck = await loadSlide(GROUP_SLIDE)
+    const [group] = deck.slides[0].shapes as [GroupShape]
+
+    expect(group.type).toBe('group')
+    // The group's own box passes through untransformed (top level).
+    expect(group.xfrmEmu).toEqual({ x: 914400, y: 457200, w: 3048000, h: 1524000 })
+
+    const child = group.children[0] as TextShape
+    expect(child.type).toBe('text')
+    // off + (child − chOff) · 0.5 per axis; extents halve.
+    expect(child.xfrmEmu).toEqual({ x: 1914400, y: 957200, w: 500000, h: 300000 })
+    // The child renders through the full pipeline: text and fill intact.
+    expect(child.paragraphs[0].runs[0].text).toBe('Inside the group')
+    expect(child.visual?.fill).toEqual({ kind: 'solid', hex: '1B2A4A' })
+    // Its nodePath stays well-formed (resolves back through the group)…
+    const doc = parseXml(deck.source.slideXml['ppt/slides/slide1.xml'])
+    expect(tagNameOf(resolveNodePath(doc, child.nodePath)!)).toBe('p:sp')
+  })
+
+  it('multiplies nested group transforms through', async () => {
+    const deck = await loadSlide(NESTED_SLIDE)
+    const [outer] = deck.slides[0].shapes as [GroupShape]
+    const inner = outer.children[0] as GroupShape
+
+    expect(inner.type).toBe('group')
+    // Inner group's box mapped through the outer transform alone.
+    expect(inner.xfrmEmu).toEqual({ x: 1000000, y: 500000, w: 2000000, h: 1000000 })
+
+    // Leaf: through inner (0.5, offset 2000000/1000000) then outer (0.5).
+    const leaf = inner.children[0]
+    expect(leaf.xfrmEmu).toEqual({ x: 1250000, y: 1000000, w: 1000000, h: 250000 })
+  })
+
+  it('keeps unedited write-back of a deck with groups byte-identical', async () => {
+    const deck = await loadSlide(GROUP_SLIDE)
+    const out = await writeDeck(deck, new Map())
+    const raw = await (await JSZip.loadAsync(out)).files['ppt/slides/slide1.xml'].async('string')
+    expect(raw).toBe(GROUP_SLIDE)
+  })
+})
+
+describe('slide background', () => {
+  const BG_SLIDE = `<p:sld xmlns:p="p" xmlns:a="a"><p:cSld>
+    <p:bg><p:bgPr><a:solidFill><a:srgbClr val="1B2A4A"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>
+    <p:spTree></p:spTree>
+  </p:cSld></p:sld>`
+
+  const PLAIN_SLIDE = `<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree></p:spTree></p:cSld></p:sld>`
+
+  const BG_LAYOUT = `<p:sldLayout xmlns:p="p" xmlns:a="a"><p:cSld>
+    <p:bg><p:bgPr><a:solidFill><a:srgbClr val="102030"/></a:solidFill></p:bgPr></p:bg>
+    <p:spTree></p:spTree>
+  </p:cSld></p:sldLayout>`
+
+  const rels = (entries: string) =>
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${entries}</Relationships>`
+
+  it('resolves a slide-level solidFill background', async () => {
+    const zip = new JSZip()
+    zip.file('ppt/presentation.xml', PRESENTATION_XML)
+    zip.file('ppt/_rels/presentation.xml.rels', PRESENTATION_RELS)
+    zip.file('ppt/slides/slide1.xml', BG_SLIDE)
+    const deck = await parsePptx(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.slides[0].background).toEqual({ kind: 'solid', hex: '1B2A4A' })
+  })
+
+  it('cascades to the layout background when the slide has none', async () => {
+    const zip = new JSZip()
+    zip.file('ppt/presentation.xml', PRESENTATION_XML)
+    zip.file('ppt/_rels/presentation.xml.rels', PRESENTATION_RELS)
+    zip.file('ppt/slides/slide1.xml', PLAIN_SLIDE)
+    zip.file(
+      'ppt/slides/_rels/slide1.xml.rels',
+      rels(
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>',
+      ),
+    )
+    zip.file('ppt/slideLayouts/slideLayout1.xml', BG_LAYOUT)
+    const deck = await parsePptx(await zip.generateAsync({ type: 'uint8array' }))
+    expect(deck.slides[0].background).toEqual({ kind: 'solid', hex: '102030' })
+  })
+})
+
+describe('layout decoration underlay', () => {
+  // Canva-style layout: a real photo/panel drawn on the layout part itself,
+  // alongside a placeholder slot that must NOT render.
+  const DECOR_LAYOUT = `<p:sldLayout xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="30" name="Panel"/></p:nvSpPr>
+      <p:spPr><a:xfrm>
+        <a:off x="0" y="0"/><a:ext cx="4000000" cy="6858000"/>
+      </a:xfrm><a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="222F44"/></a:solidFill></p:spPr>
+    </p:sp>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="31"/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:spPr/>
+      <p:txBody><a:p><a:r><a:t>Click to edit title</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld></p:sldLayout>`
+
+  const SLIDE = `<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="2"/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:spPr/>
+      <p:txBody><a:p><a:r><a:t>Real title</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld></p:sld>`
+
+  const rels = (entries: string) =>
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${entries}</Relationships>`
+
+  it('renders layout decoration as an inert underlay, skipping placeholder slots', async () => {
+    const zip = new JSZip()
+    zip.file('ppt/presentation.xml', PRESENTATION_XML)
+    zip.file('ppt/_rels/presentation.xml.rels', PRESENTATION_RELS)
+    zip.file('ppt/slides/slide1.xml', SLIDE)
+    zip.file(
+      'ppt/slides/_rels/slide1.xml.rels',
+      rels(
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>',
+      ),
+    )
+    zip.file('ppt/slideLayouts/slideLayout1.xml', DECOR_LAYOUT)
+
+    const deck = await parsePptx(await zip.generateAsync({ type: 'uint8array' }))
+    const slide = deck.slides[0]
+
+    // Only the decoration panel — the "Click to edit title" prompt is a slot.
+    expect(slide.underlay).toHaveLength(1)
+    const panel = slide.underlay![0]
+    expect(panel.type).toBe('drawing')
+    expect(panel.xfrmEmu).toEqual({ x: 0, y: 0, w: 4000000, h: 6858000 })
+    expect(panel.visual?.fill).toEqual({ kind: 'solid', hex: '222F44' })
+    // Provenance is the layout part, never the slide — read-only by contract.
+    expect(panel.slideXmlPath).toBe('ppt/slideLayouts/slideLayout1.xml')
+
+    // The slide's own editable shapes are unaffected.
+    expect(slide.shapes.map((s) => s.type)).toEqual(['text'])
+  })
+})
+
+describe('text anchor', () => {
+  const ANCHOR_SLIDE = `<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="2"/></p:nvSpPr>
+      <p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1000" cy="1000"/></a:xfrm></p:spPr>
+      <p:txBody><a:bodyPr anchor="ctr"/><a:p><a:r><a:t>Centered</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="3"/></p:nvSpPr>
+      <p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1000" cy="1000"/></a:xfrm></p:spPr>
+      <p:txBody><a:bodyPr/><a:p><a:r><a:t>Defaulted</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld></p:sld>`
+
+  it('honours an explicit bodyPr anchor and defaults to top', async () => {
+    const zip = new JSZip()
+    zip.file('ppt/presentation.xml', PRESENTATION_XML)
+    zip.file('ppt/_rels/presentation.xml.rels', PRESENTATION_RELS)
+    zip.file('ppt/slides/slide1.xml', ANCHOR_SLIDE)
+    const deck = await parsePptx(await zip.generateAsync({ type: 'uint8array' }))
+    const [centered, defaulted] = deck.slides[0].shapes as TextShape[]
+    expect(centered.display?.anchor).toBe('ctr')
+    // The OOXML default is top — forcing center clipped top-anchored decks.
+    expect(defaulted.display?.anchor).toBe('t')
   })
 })
 

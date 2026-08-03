@@ -15,6 +15,8 @@ import JSZip from 'jszip'
 import { XMLParser } from 'fast-xml-parser'
 import type {
   DrawingShape,
+  Fill,
+  GroupShape,
   ImageShape,
   NodePath,
   Paragraph,
@@ -42,7 +44,7 @@ import {
   txStyleKindFor,
   type ParsedListStyle,
 } from './textstyle'
-import { shapeVisualOf } from './geometry'
+import { backgroundFillOf, shapeVisualOf } from './geometry'
 
 const ATTRS = ':@'
 const ATTR_PREFIX = '@_'
@@ -291,6 +293,61 @@ function isEmptyRect(r: RectEmu): boolean {
 }
 
 /**
+ * Axis-aligned affine from a group's child coordinate space to slide space:
+ * `slide = t + child · s`, per axis. Rotation/flip on groups is out of scope —
+ * the group walk renders unrotated.
+ */
+interface GroupXform {
+  sx: number
+  sy: number
+  tx: number
+  ty: number
+}
+
+const IDENTITY_XFORM: GroupXform = { sx: 1, sy: 1, tx: 0, ty: 0 }
+
+function mapRect(r: RectEmu, t: GroupXform): RectEmu {
+  if (t === IDENTITY_XFORM) return r
+  return {
+    x: Math.round(t.tx + r.x * t.sx),
+    y: Math.round(t.ty + r.y * t.sy),
+    w: Math.round(r.w * t.sx),
+    h: Math.round(r.h * t.sy),
+  }
+}
+
+/**
+ * Composes a group's own transform under an outer one. A child coordinate `c`
+ * maps to `off + (c - chOff) · ext/chExt` in the group's parent space, then
+ * through `outer` — nested groups multiply through. Missing chOff/chExt
+ * default to off/ext (identity mapping), per CT_GroupTransform2D.
+ */
+function childXformOf(xfrm: XmlNode | undefined, outer: GroupXform): GroupXform {
+  if (!xfrm) return outer
+  const kids = childrenOf(xfrm)
+  const at = (name: string, key: string): number | undefined => {
+    const node = childByLocal(kids, name)
+    return node ? num(attr(node, key)) : undefined
+  }
+  const offX = at('off', 'x') ?? 0
+  const offY = at('off', 'y') ?? 0
+  const extW = at('ext', 'cx') ?? 0
+  const extH = at('ext', 'cy') ?? 0
+  const chOffX = at('chOff', 'x') ?? offX
+  const chOffY = at('chOff', 'y') ?? offY
+  const chExtW = at('chExt', 'cx') ?? extW
+  const chExtH = at('chExt', 'cy') ?? extH
+  const sx = outer.sx * (chExtW !== 0 ? extW / chExtW : 1)
+  const sy = outer.sy * (chExtH !== 0 ? extH / chExtH : 1)
+  return {
+    sx,
+    sy,
+    tx: outer.tx + outer.sx * offX - sx * chOffX,
+    ty: outer.ty + outer.sy * offY - sy * chOffY,
+  }
+}
+
+/**
  * Placeholder geometry inherited from a slide's layout, and the layout's master.
  *
  * PowerPoint omits `a:xfrm` on title/body placeholders and expects the reader to
@@ -346,6 +403,21 @@ interface SlideStyleContext {
   masterPh: PhListStyles
   masterTx: { title?: ParsedListStyle; body?: ParsedListStyle; other?: ParsedListStyle }
   presDefault?: ParsedListStyle
+  /** Page background from the layout, or the master when the layout has none. */
+  background?: Fill
+  /** Non-placeholder decoration shapes from the master's spTree. Render-only. */
+  masterUnderlay: Shape[]
+  /** Non-placeholder decoration shapes from the layout's spTree. Render-only. */
+  layoutUnderlay: Shape[]
+  /** `p:sldLayout@showMasterSp` — false hides master decorations entirely. */
+  layoutShowsMaster: boolean
+}
+
+/** The `p:bg` of a slide/layout/master part, or undefined when not declared. */
+function bgNodeOf(doc: XmlNode[], rootLocal: string): XmlNode | undefined {
+  const root = childByLocal(doc, rootLocal)
+  const cSld = root ? childByLocal(childrenOf(root), 'cSld') : undefined
+  return cSld ? childByLocal(childrenOf(cSld), 'bg') : undefined
 }
 
 function emptyPhListStyles(): PhListStyles {
@@ -380,6 +452,7 @@ async function loadSlideContext(
   slideRels: Map<string, Relationship>,
   presDefaultNode: XmlNode | undefined,
   cache: Map<string, SlideStyleContext>,
+  blobUrls: string[],
 ): Promise<SlideStyleContext> {
   const layoutPath = relTargetOfType(slideRels, '/slideLayout') ?? ''
   const cached = cache.get(layoutPath)
@@ -391,6 +464,9 @@ async function loadSlideContext(
     layoutPh: emptyPhListStyles(),
     masterPh: emptyPhListStyles(),
     masterTx: {},
+    masterUnderlay: [],
+    layoutUnderlay: [],
+    layoutShowsMaster: true,
   }
 
   const layoutFile = layoutPath ? zip.file(layoutPath) : null
@@ -400,11 +476,12 @@ async function loadSlideContext(
     const masterPath = relTargetOfType(layoutRels, '/slideMaster')
     const masterFile = masterPath ? zip.file(masterPath) : null
     let masterDoc: XmlNode[] | null = null
+    let masterRels = new Map<string, Relationship>()
     if (masterFile && masterPath) {
       masterDoc = parseXml(await masterFile.async('string'))
 
       // Theme first: every list style below resolves colors against it.
-      const masterRels = await readRels(zip, masterPath)
+      masterRels = await readRels(zip, masterPath)
       const themePath = relTargetOfType(masterRels, '/theme')
       const themeFile = themePath ? zip.file(themePath) : null
       if (themeFile) out.theme = parseTheme(parseXml(await themeFile.async('string')))
@@ -429,6 +506,26 @@ async function loadSlideContext(
     }
     collectPlaceholderRects(layoutDoc, out.rects)
     collectPlaceholderListStyles(layoutDoc, out.theme, out.layoutPh)
+
+    // Background cascade below the slide: layout wins, then master.
+    const bgNode =
+      bgNodeOf(layoutDoc, 'sldLayout') ?? (masterDoc ? bgNodeOf(masterDoc, 'sldMaster') : undefined)
+    if (bgNode) out.background = backgroundFillOf(bgNode, out.theme)
+
+    // Decoration underlay: real content (photos, panels, footers) that decks
+    // — Canva exports especially — author on the layout/master rather than the
+    // slide. Placeholder slots are templates, not content, and are skipped.
+    // Media resolves against the owning part's own rels.
+    const layoutRoot = childByLocal(layoutDoc, 'sldLayout')
+    out.layoutShowsMaster = !layoutRoot || attr(layoutRoot, 'showMasterSp') !== '0'
+    if (masterDoc && masterPath && out.layoutShowsMaster) {
+      out.masterUnderlay = await collectDecorations(
+        masterDoc, 'sldMaster', masterPath, masterRels, out, zip, blobUrls,
+      )
+    }
+    out.layoutUnderlay = await collectDecorations(
+      layoutDoc, 'sldLayout', layoutPath, layoutRels, out, zip, blobUrls,
+    )
   }
 
   if (presDefaultNode) out.presDefault = parseListStyle(presDefaultNode, out.theme)
@@ -437,13 +534,51 @@ async function loadSlideContext(
   return out
 }
 
+const NV_PR_LOCALS = ['nvSpPr', 'nvPicPr', 'nvGraphicFramePr', 'nvGrpSpPr', 'nvCxnSpPr']
+
 function shapeIdOf(node: XmlNode, fallbackIndex: number): string {
-  for (const nv of ['nvSpPr', 'nvPicPr', 'nvGraphicFramePr', 'nvGrpSpPr']) {
+  for (const nv of NV_PR_LOCALS) {
     const cNvPr = descend(node, nv, 'cNvPr')
     const id = cNvPr && attr(cNvPr, 'id')
     if (id) return id
   }
   return `idx:${fallbackIndex}`
+}
+
+/** True when the node is a placeholder slot (`p:ph`), whatever its shape kind. */
+function isPlaceholderNode(node: XmlNode): boolean {
+  return NV_PR_LOCALS.some((nv) => descend(node, nv, 'nvPr', 'ph') !== undefined)
+}
+
+/**
+ * Parses a layout/master part's non-placeholder spTree shapes for the render
+ * underlay. The nodePaths produced here index into the OWNING PART's spTree,
+ * not the slide — underlay shapes are render-only and must never be handed to
+ * the serializer.
+ */
+async function collectDecorations(
+  doc: XmlNode[],
+  rootLocal: string,
+  partPath: string,
+  rels: Map<string, Relationship>,
+  styles: SlideStyleContext,
+  zip: JSZip,
+  blobUrls: string[],
+): Promise<Shape[]> {
+  const root = childByLocal(doc, rootLocal)
+  const spTree = root ? descend(root, 'cSld', 'spTree') : undefined
+  if (!spTree) return []
+  const ctx: ShapeContext = { slideXmlPath: partPath, rels, styles, zip, blobUrls }
+  const out: Shape[] = []
+  const kids = childrenOf(spTree)
+  for (let i = 0; i < kids.length; i++) {
+    const tag = tagNameOf(kids[i])
+    if (!tag || !GROUP_CHILD_LOCALS.includes(local(tag))) continue
+    if (isPlaceholderNode(kids[i])) continue
+    const shape = await shapeFromNode(kids[i], [i], i, ctx)
+    if (shape) out.push(shape)
+  }
+  return out
 }
 
 // ------------------------------------------------------------------ text
@@ -620,14 +755,24 @@ function resolveTextDisplay(
     })
   }
 
-  return { paragraphs, defaultRun: runStyleOf({}, resolveLevel({}, 0)) }
+  // Vertical anchor: the shape's own bodyPr, else the OOXML default (top).
+  // `just`/`dist` justify content across the height; top is the nearest draw.
+  const bodyPr = childByLocal(childrenOf(txBody), 'bodyPr')
+  const rawAnchor = bodyPr ? attr(bodyPr, 'anchor') : undefined
+  const anchor = rawAnchor === 'ctr' || rawAnchor === 'b' ? rawAnchor : 't'
+
+  return { paragraphs, defaultRun: runStyleOf({}, resolveLevel({}, 0)), anchor }
 }
+
+/** grpSp children we walk; anything else inside a group is silently skipped. */
+const GROUP_CHILD_LOCALS = ['sp', 'pic', 'grpSp', 'cxnSp', 'graphicFrame']
 
 async function shapeFromNode(
   node: XmlNode,
   nodePath: NodePath,
   index: number,
   ctx: ShapeContext,
+  xform: GroupXform = IDENTITY_XFORM,
 ): Promise<Shape | null> {
   const tag = tagNameOf(node)
   if (!tag) return null
@@ -637,7 +782,7 @@ async function shapeFromNode(
     id: shapeIdOf(node, index),
     slideXmlPath: ctx.slideXmlPath,
     nodePath,
-    xfrmEmu: resolveRect(node, ctx),
+    xfrmEmu: mapRect(resolveRect(node, ctx), xform),
   }
 
   if (name === 'sp') {
@@ -679,7 +824,20 @@ async function shapeFromNode(
   }
 
   if (name === 'grpSp') {
-    return { ...base, type: 'placeholder', kind: 'group' } satisfies PlaceholderShape
+    // Walk the children instead of stubbing the group. Each child's rect maps
+    // through this group's chOff/chExt transform composed under any outer
+    // groups, so every descendant lands in final slide-space EMU. Children are
+    // read-only — see GroupShape.
+    const inner = childXformOf(descend(node, 'grpSpPr', 'xfrm'), xform)
+    const kids = childrenOf(node)
+    const children: Shape[] = []
+    for (let i = 0; i < kids.length; i++) {
+      const childTag = tagNameOf(kids[i])
+      if (!childTag || !GROUP_CHILD_LOCALS.includes(local(childTag))) continue
+      const child = await shapeFromNode(kids[i], [...nodePath, i], i, ctx, inner)
+      if (child) children.push(child)
+    }
+    return { ...base, type: 'group', children } satisfies GroupShape
   }
 
   if (name === 'cxnSp') {
@@ -702,7 +860,7 @@ async function parseSlide(
 ): Promise<Slide> {
   const doc = parseXml(xml)
   const rels = await readRels(zip, xmlPath)
-  const styles = await loadSlideContext(zip, rels, presDefaultNode, styleCache)
+  const styles = await loadSlideContext(zip, rels, presDefaultNode, styleCache, blobUrls)
   const ctx: ShapeContext = { slideXmlPath: xmlPath, rels, styles, zip, blobUrls }
 
   const sldIndex = doc.findIndex((n) => {
@@ -734,7 +892,19 @@ async function parseSlide(
     if (shape) shapes.push(shape)
   }
 
-  return { id: xmlPath, xmlPath, shapes }
+  // Page background: the slide's own p:bg wins over the layout/master's.
+  const ownBg = childByLocal(spTreeKids, 'bg')
+  const background = ownBg ? backgroundFillOf(ownBg, styles.theme) : styles.background
+
+  // Layout/master decoration beneath the slide's own shapes. `p:sld` can opt
+  // out of the master's with showMasterSp="0"; the layout's always paint.
+  const showMaster = attr(sld, 'showMasterSp') !== '0'
+  const underlay = [...(showMaster ? styles.masterUnderlay : []), ...styles.layoutUnderlay]
+
+  const slide: Slide = { id: xmlPath, xmlPath, shapes }
+  if (background !== undefined) slide.background = background
+  if (underlay.length > 0) slide.underlay = underlay
+  return slide
 }
 
 // ------------------------------------------------------------------ entry
@@ -814,11 +984,16 @@ export function resolveNodePath(doc: XmlNode[], path: NodePath): XmlNode | undef
   return node
 }
 
-/** Releases the object URLs held by a deck's image shapes. */
+/** Releases the object URLs held by a deck's image shapes, groups included. */
 export function disposeDeck(deck: SlideDeck): void {
+  const revoke = (shape: Shape): void => {
+    if (shape.type === 'image') URL.revokeObjectURL(shape.blobUrl)
+    else if (shape.type === 'group') shape.children.forEach(revoke)
+  }
   for (const slide of deck.slides) {
-    for (const shape of slide.shapes) {
-      if (shape.type === 'image') URL.revokeObjectURL(shape.blobUrl)
-    }
+    slide.shapes.forEach(revoke)
+    // Underlay arrays are shared across slides on the same layout; revoking an
+    // already-revoked URL is a harmless no-op.
+    slide.underlay?.forEach(revoke)
   }
 }

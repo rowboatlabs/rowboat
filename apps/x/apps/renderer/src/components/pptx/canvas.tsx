@@ -11,7 +11,6 @@ import {
 import {
   BarChart3Icon,
   FilmIcon,
-  GroupIcon,
   ShapesIcon,
   TableIcon,
 } from 'lucide-react'
@@ -39,6 +38,7 @@ import {
 import {
   DEFAULT_TEXT_PT,
   alignToCss,
+  anchorJustify,
   displayAlign,
   displayRunStyle,
   type CaretTarget,
@@ -50,7 +50,6 @@ const PLACEHOLDER_META: Record<PlaceholderKind, { label: string; Icon: typeof Sh
   chart: { label: 'Chart', Icon: BarChart3Icon },
   smartart: { label: 'Diagram', Icon: ShapesIcon },
   table: { label: 'Table', Icon: TableIcon },
-  group: { label: 'Group', Icon: GroupIcon },
   video: { label: 'Video', Icon: FilmIcon },
   unknown: { label: 'Shape', Icon: ShapesIcon },
 }
@@ -254,6 +253,8 @@ function LineShapeView({
   )
 }
 
+const groupChildNoop = () => {}
+
 interface ShapeViewProps {
   shape: Shape
   rect: RectEmuBox
@@ -287,6 +288,34 @@ function ShapeView({
         style={{ ...style, cursor, ...lineCss(shape.visual?.line, scale) }}
         className="object-contain select-none"
       />
+    )
+  }
+
+  if (shape.type === 'group') {
+    // Children carry final slide-space rects, so they render as ordinary
+    // ShapeViews inside a layer that cancels the group box's own offset.
+    // The layer is inert: clicks land on the group box, which selects the
+    // group as one read-only unit — children are never individually
+    // interactive and never enter text editing.
+    return (
+      <div onPointerDown={onPointerDown} style={{ ...style, cursor: 'default' }}>
+        <div
+          className="pointer-events-none absolute"
+          style={{ left: -rect.x * scale, top: -rect.y * scale }}
+        >
+          {shape.children.map((child, i) => (
+            <ShapeView
+              key={`${child.id}:${i}`}
+              shape={child}
+              rect={child.xfrmEmu}
+              scale={scale}
+              selected={false}
+              transform={composeTransform(visualTransform(child))}
+              onPointerDown={groupChildNoop}
+            />
+          ))}
+        </div>
+      </div>
     )
   }
 
@@ -377,12 +406,12 @@ function TextShapeView({
         cursor: selected ? 'move' : 'text',
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center',
+        justifyContent: anchorJustify(shape.display?.anchor),
         ...fillCss(shape.visual?.fill),
         ...lineCss(shape.visual?.line, scale),
         ...radiusCss(shape.visual?.geom, rect, scale),
       }}
-      className="group/pptx-shape overflow-hidden"
+      className="group/pptx-shape"
     >
       {isEmptyText(shape) ? (
         <span
@@ -470,11 +499,14 @@ function SelectionFrame({
   rect,
   scale,
   transform,
+  resizable,
   onHandleDown,
 }: {
   rect: RectEmuBox
   scale: number
   transform?: string
+  /** False for read-only selections (groups): outline only, no handles. */
+  resizable: boolean
   onHandleDown: (handle: HandleId, e: ReactPointerEvent) => void
 }) {
   return (
@@ -482,7 +514,8 @@ function SelectionFrame({
       style={{ ...rectStyle(rect, scale), transform }}
       className="pointer-events-none z-10 outline-2 outline-offset-1 outline-[var(--ring)]"
     >
-      {HANDLES.map((h) => (
+      {resizable &&
+        HANDLES.map((h) => (
         <span
           key={h.id}
           onPointerDown={(e) => onHandleDown(h.id, e)}
@@ -493,6 +526,29 @@ function SelectionFrame({
             cursor: h.cursor,
           }}
           className="pointer-events-auto size-2 rounded-[2px] border border-white bg-[var(--ring)] shadow-sm"
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Decoration inherited from the layout/master, painted beneath the slide's
+ * own shapes. Inert by construction: no selection, no editing, no pointer
+ * events — these shapes live in other parts and must never produce edits.
+ */
+function UnderlayView({ shapes, scale }: { shapes: Shape[]; scale: number }) {
+  return (
+    <div className="pointer-events-none" aria-hidden="true">
+      {shapes.map((shape, i) => (
+        <ShapeView
+          key={`u:${shape.id}:${i}`}
+          shape={shape}
+          rect={shape.xfrmEmu}
+          scale={scale}
+          selected={false}
+          transform={composeTransform(visualTransform(shape))}
+          onPointerDown={groupChildNoop}
         />
       ))}
     </div>
@@ -543,8 +599,11 @@ export const SlideThumbnail = memo(function SlideThumbnail({
           height: refH,
           transform: `scale(${zoom})`,
           transformOrigin: 'top left',
+          // Resolved page background paints over the white base.
+          ...fillCss(slide.background),
         }}
       >
+        {slide.underlay && <UnderlayView shapes={slide.underlay} scale={CSS_PX_PER_EMU} />}
         {slide.shapes.map((shape, i) => (
           <ShapeView
             key={`${shape.id}:${i}`}
@@ -649,6 +708,9 @@ export function SlideCanvas({
       onSelect(key)
       // Editing already: let the overlay keep the pointer.
       if (editingKey === key) return
+      // Groups select as one read-only unit — no move/resize gesture, so no
+      // geometry ever reaches the serializer for them.
+      if (shape.type === 'group') return
 
       if (mode === 'move' && shape.type === 'text') {
         const last = lastPressRef.current
@@ -760,8 +822,14 @@ export function SlideCanvas({
       {scale > 0 && (
         <div
           className="relative overflow-hidden rounded-md bg-white shadow-2xl ring-1 ring-black/20"
-          style={{ width: sizeEmu.w * scale, height: sizeEmu.h * scale }}
+          style={{
+            width: sizeEmu.w * scale,
+            height: sizeEmu.h * scale,
+            // Resolved page background paints over the white base.
+            ...fillCss(slide.background),
+          }}
         >
+          {slide.underlay && <UnderlayView shapes={slide.underlay} scale={scale} />}
           {slide.shapes.map((shape, i) => {
             const key = shapeKeyOf(slide.xmlPath, shape.nodePath)
             const reactKey = `${shape.id}:${i}`
@@ -805,6 +873,7 @@ export function SlideCanvas({
                 liveTransform(selectedKey as ShapeKey),
                 visualTransform(selectedShape),
               )}
+              resizable={selectedShape.type !== 'group'}
               onHandleDown={(handle, e) => beginGesture(selectedShape, 'resize', handle, e)}
             />
           )}

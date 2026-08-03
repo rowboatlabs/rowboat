@@ -115,11 +115,16 @@ export interface ParagraphDisplay {
   defaultRun: ResolvedRunStyle
 }
 
+/** Vertical anchoring of a text body inside its box (`a:bodyPr@anchor`). */
+export type TextAnchor = 't' | 'ctr' | 'b'
+
 export interface TextDisplay {
   /** By ORIGINAL paragraph index, matching the as-parsed `paragraphs`. */
   paragraphs: ParagraphDisplay[]
   /** Level-0 cascade result, for wholly new content. */
   defaultRun: ResolvedRunStyle
+  /** OOXML defaults to top; `just`/`dist` render as top. */
+  anchor: TextAnchor
 }
 
 // ------------------------------------------------------------------- shapes
@@ -160,7 +165,6 @@ export type PlaceholderKind =
   | 'chart'
   | 'smartart'
   | 'table'
-  | 'group'
   | 'video'
   | 'unknown'
 
@@ -169,7 +173,23 @@ export interface PlaceholderShape extends ShapeBase {
   kind: PlaceholderKind
 }
 
-export type Shape = TextShape | ImageShape | PlaceholderShape | DrawingShape
+/**
+ * A `p:grpSp`, walked rather than stubbed. `xfrmEmu` is the group's bounding
+ * box in slide space; each child's `xfrmEmu` is likewise already mapped to
+ * final slide-space EMU through the group's chOff/chExt transform (nested
+ * groups multiply through), so the renderer draws children with no further
+ * coordinate work.
+ *
+ * Children are READ-ONLY: their nodePaths point through the group and must
+ * never be handed to the serializer, and the editor exposes no way to select
+ * or edit them individually.
+ */
+export interface GroupShape extends ShapeBase {
+  type: 'group'
+  children: Shape[]
+}
+
+export type Shape = TextShape | ImageShape | PlaceholderShape | DrawingShape | GroupShape
 
 export interface Slide {
   id: string
@@ -177,6 +197,20 @@ export interface Slide {
   xmlPath: string
   /** In document order, which is also z-order: later shapes paint on top. */
   shapes: Shape[]
+  /**
+   * Resolved page background (slide → layout → master cascade), display only.
+   * Absent when no part in the chain declares one; `{ kind: 'none' }` when one
+   * is declared but can't be drawn — both render as the white page.
+   */
+  background?: Fill
+  /**
+   * Decoration shapes inherited from the master and layout (non-placeholder
+   * spTree content), in paint order beneath `shapes`. Render-only and fully
+   * inert: their nodePaths point into the layout/master parts — never into
+   * this slide — and must never be handed to the serializer. Shared across
+   * slides that use the same layout.
+   */
+  underlay?: Shape[]
 }
 
 export interface SlideDeck {

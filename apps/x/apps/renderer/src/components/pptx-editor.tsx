@@ -301,9 +301,11 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const handleGeometryCommit = useCallback(
     (shape: Shape, rect: RectEmuBox) => {
       if (!slide) return
-      // The serializer writes geometry only for sp/pic/cxnSp. graphicFrame and
-      // group placeholders would fail the whole save closed, so their drags
-      // snap back instead of committing.
+      // The serializer writes geometry only for sp/pic/cxnSp. graphicFrame
+      // placeholders would fail the whole save closed, so their drags snap
+      // back instead of committing. Groups (and everything inside them) are
+      // read-only — their nodePaths must never reach the serializer.
+      if (shape.type === 'group') return
       if (shape.type === 'placeholder' && shape.kind !== 'video') return
       const key = shapeKeyOf(slide.xmlPath, shape.nodePath)
       pushEdits(
