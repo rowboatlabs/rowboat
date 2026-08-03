@@ -360,13 +360,21 @@ export async function attachReceipt(
         }
         const have = new Set(found.item.receipts.map(receiptId));
         if (!have.has(receiptId(receipt))) found.item.receipts.push(receipt);
-        if (opts?.check) found.item.checked = true;
+        // A parent's done means the whole block is done — its steps included.
+        if (opts?.check) {
+            found.item.checked = true;
+            if (!found.parent) for (const child of found.item.children) child.checked = true;
+        }
         await writeRaw(serializeTodoFile(list));
         return true;
     });
 }
 
-/** Set an item's checkbox. Returns false when the line no longer exists. */
+/** Set an item's checkbox. Deliberately touches ONLY this line — the
+ * parent↔steps cascade lives in the UI toggle and in attachReceipt's
+ * parent-done check, so a comment reopening a done parent never silently
+ * reopens its finished steps. Returns false when the line no longer
+ * exists. */
 export async function setChecked(key: string, checked: boolean): Promise<boolean> {
     return withTodoLock(async () => {
         const list = parseTodoFile(await readRaw());

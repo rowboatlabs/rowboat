@@ -1,5 +1,4 @@
 import { getDefaultModelAndProvider } from '../models/defaults.js';
-import { withUseCase } from '../analytics/use_case.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import type { TurnStreamEvent } from '@x/shared/dist/turns.js';
@@ -43,18 +42,29 @@ function errorLine(msg: string, n = 200): string {
     return truncate(msg.split('\n')[0], n);
 }
 
-function buildFirstMessage(text: string, context?: string, parentText?: string): string {
+function buildFirstMessage(
+    text: string,
+    context?: string,
+    parentText?: string,
+    children?: { text: string; checked: boolean }[],
+): string {
     const now = new Date();
     const localNow = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
     const partOf = parentText ? `\n**Part of:** ${parentText} — this item is one step of that larger to-do; scope your work to THIS step only.` : '';
+    // A parent item owns its steps: the run works through them, checking
+    // each off via todo-report, then closes out the parent itself.
+    const openSteps = (children ?? []).filter((c) => !c.checked);
+    const steps = openSteps.length > 0
+        ? `\n**Steps:**\n${(children ?? []).map((c) => `- [${c.checked ? 'x' : ' '}] ${c.text}`).join('\n')}\nThese sub-items are part of this delegation. Work through the unchecked ones in order; steps already checked are done — skip them. Report EACH step you finish with its own \`todo-report\` call (item = the step's exact text, parent = the item text above) so its box gets checked as you go, then finish with one more \`todo-report\` for the item itself with the overall outcome. The trust rules apply per step: an outward-facing step stops at \`ready\`, and then the item overall is \`ready\`, not \`done\`.`
+        : '';
     const report = parentText
         ? `report the outcome with \`todo-report\` (item text exactly as above, parent exactly as in **Part of**)`
         : `report the outcome with \`todo-report\` (item text exactly as above)`;
     const base = `Work on this item from the user's to-do list at \`${TODO_REL_PATH}\`:
 
-**Item:** ${text}${partOf}
+**Item:** ${text}${partOf}${steps}
 **Time:** ${localNow} (${tz})
 
 Start by calling \`file-readText\` on \`${TODO_REL_PATH}\` — the surrounding list often carries context this item's phrasing assumes. Then do the work per your instructions, and ${report}.`;
@@ -160,6 +170,8 @@ function watchSettles(bus: ITurnEventBus): SettleWatcher {
 const runningItems = new Set<string>();
 /** Suspended ask-human questions awaiting an answer, by item key. */
 const pendingAsks = new Map<string, { turnId: string; toolCallId: string }>();
+/** The live turn per running key — what a stop request aborts. */
+const runningTurns = new Map<string, string>();
 
 export function isItemRunning(key: string): boolean {
     return runningItems.has(normalizeKey(key));
@@ -167,6 +179,20 @@ export function isItemRunning(key: string): boolean {
 
 export function runningItemKeys(): string[] {
     return [...runningItems];
+}
+
+/**
+ * Stop the live run on an item (or a `chat:<sessionId>` thread) — the
+ * mistaken-assign escape hatch. The cancelled turn settles normally
+ * ('Stopped'), which clears the spinner and frees the item.
+ */
+export async function stopTodoRun(key: string): Promise<boolean> {
+    const norm = key.startsWith('chat:') ? key : normalizeKey(key);
+    const turnId = runningTurns.get(norm);
+    if (!turnId) return false;
+    const { sessions } = await resolveDeps();
+    await sessions.stopTurn(turnId, 'Stopped by the user from the to-do list');
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,21 +304,26 @@ async function driveTurn(
     try {
         let sent: { turnId: string };
         try {
-            // Chat parity: the assistant model unless the composer overrode it.
-            const { model, provider } = modelOverride ?? await getDefaultModelAndProvider();
-            sent = await withUseCase(
-                { useCase: 'todo_item_agent', subUseCase },
-                () => sessions.sendMessage(
-                    sessionId,
-                    { role: 'user', content: message },
-                    {
-                        agent: {
-                            agentId: 'todo-item-agent',
-                            overrides: { model: { provider, model } },
-                        },
-                        autoPermission,
+            // Chat parity: the assistant selection (model + effort) unless the
+            // composer overrode the model — an override carries no effort of
+            // its own yet (todo:* sends a bare ref; effort rides only with
+            // the assistant pair, per the pairing rule).
+            const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
+                modelOverride ?? await getDefaultModelAndProvider();
+            const { model, provider } = selection;
+            sent = await sessions.sendMessage(
+                sessionId,
+                { role: 'user', content: message },
+                {
+                    agent: {
+                        agentId: 'todo-item-agent',
+                        overrides: { model: { provider, model } },
                     },
-                ),
+                    useCase: 'todo_item_agent',
+                    subUseCase,
+                    ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
+                    autoPermission,
+                },
             );
         } catch (err) {
             if (err instanceof TurnNotSettledError) {
@@ -309,6 +340,7 @@ async function driveTurn(
         }
 
         log.log(`turn=${sent.turnId} session=${sessionId} item="${truncate(itemText, 80)}"`);
+        runningTurns.set(norm, sent.turnId);
         todoBus.publish({ type: 'run_start', key: norm });
         // A manual-permission run suspends until the user approves from the
         // item's chat — surface it once, then KEEP WAITING so the completion
@@ -336,6 +368,7 @@ async function driveTurn(
             }
         }
     } finally {
+        runningTurns.delete(norm);
         watcher.dispose();
     }
 }
@@ -377,7 +410,7 @@ export async function runTodoItem(
         const { sessions } = await resolveDeps();
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
         const { sessionId } = await ensureSession(sessions, item.key, title);
-        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context, parent?.text), 'manual', opts?.model, opts?.autoPermission ?? true);
+        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context, parent?.text, item.children), 'manual', opts?.model, opts?.autoPermission ?? true);
     } finally {
         runningItems.delete(norm);
     }
@@ -412,20 +445,23 @@ async function driveChatTurn(
     try {
         let sent: { turnId: string };
         try {
-            const { model, provider } = modelOverride ?? await getDefaultModelAndProvider();
-            sent = await withUseCase(
-                { useCase: 'copilot_chat', subUseCase: 'home_stream' },
-                () => sessions.sendMessage(
-                    sessionId,
-                    { role: 'user', content: message },
-                    {
-                        agent: {
-                            agentId: 'copilot',
-                            overrides: { model: { provider, model } },
-                        },
-                        autoPermission,
+            // Same selection semantics as runTodoItem above.
+            const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
+                modelOverride ?? await getDefaultModelAndProvider();
+            const { model, provider } = selection;
+            sent = await sessions.sendMessage(
+                sessionId,
+                { role: 'user', content: message },
+                {
+                    agent: {
+                        agentId: 'copilot',
+                        overrides: { model: { provider, model } },
                     },
-                ),
+                    useCase: 'copilot_chat',
+                    subUseCase: 'home_stream',
+                    ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
+                    autoPermission,
+                },
             );
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -437,6 +473,7 @@ async function driveChatTurn(
             return { sessionId, turnId: null, error: msg };
         }
 
+        runningTurns.set(key, sent.turnId);
         todoBus.publish({ type: 'run_start', key });
         // A manual-permission turn suspends until the user approves from the
         // chat — surface it once, then keep waiting so the thread still shows
@@ -467,6 +504,7 @@ async function driveChatTurn(
             return { sessionId, turnId: sent.turnId };
         }
     } finally {
+        runningTurns.delete(key);
         watcher.dispose();
         runningItems.delete(key);
     }
@@ -550,7 +588,7 @@ export async function commentOnTodoItem(
 
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
         const { sessionId, isNew } = await ensureSession(sessions, item.key, title);
-        const text = isNew ? buildFirstMessage(item.text, message, parent?.text) : message;
+        const text = isNew ? buildFirstMessage(item.text, message, parent?.text, item.children) : message;
         return await driveTurn(item.key, item.text, item.receipts.length, sessionId, text, 'comment', opts?.model, opts?.autoPermission ?? true);
     } finally {
         runningItems.delete(norm);

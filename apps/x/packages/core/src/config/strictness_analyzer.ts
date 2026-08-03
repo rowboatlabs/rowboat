@@ -390,9 +390,6 @@ export function analyzeEmailsAndRecommend(): AnalysisResult {
     let reason: string;
 
     const totalHumanSenders = lowWouldCreate;
-    const noiseRatio = uniqueSenders.size > 0
-        ? (newsletterSenders.size + automatedSenders.size) / uniqueSenders.size
-        : 0;
     const consumerRatio = totalHumanSenders > 0
         ? consumerServiceSenders.size / totalHumanSenders
         : 0;

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { WorkDir } from '../config/config.js';
 import { createLanguageModel } from '../models/models.js';
 import { generateObjectSafe } from '../models/structured.js';
+import { directCallReasoningOptions } from '../models/reasoning.js';
 import { getKgModel, resolveProviderConfig } from '../models/defaults.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
@@ -145,9 +146,10 @@ export async function maybeDistillImportanceRules(): Promise<void> {
     if (newSince <= 0) return;
 
     try {
-        const { model: modelId, provider } = await getKgModel();
+        const { model: modelId, provider, effort } = await getKgModel();
         const config = await resolveProviderConfig(provider);
         const model = createLanguageModel(config, modelId);
+        const reasoning = await directCallReasoningOptions(config.flavor, modelId, effort);
 
         const correctionLines = fb.corrections.map(c =>
             `- From: ${c.from} | Subject: "${c.subject}" | classifier said ${c.agentVerdict}, user corrected to ${c.userVerdict}`
@@ -160,6 +162,7 @@ export async function maybeDistillImportanceRules(): Promise<void> {
             prompt: `Corrections (oldest first):\n${correctionLines}${existingRules}`,
             schema: DistilledRules,
             retry: true,
+            generateOptions: reasoning,
         }));
 
         captureLlmUsage({

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { TurnAnalytics } from "@x/shared/dist/analytics.js";
 import {
     DEFAULT_MAX_MODEL_CALLS,
     MODEL_CALL_LIMIT_ERROR_CODE,
@@ -28,6 +29,7 @@ import {
     reduceTurn,
 } from "@x/shared/dist/turns.js";
 import type { IMonotonicallyIncreasingIdGenerator } from "../../application/lib/id-gen.js";
+import { withUseCase } from "../../analytics/use_case.js";
 import type { IAgentResolver } from "./agent-resolver.js";
 import {
     type CreateTurnInput,
@@ -160,6 +162,7 @@ export class TurnRuntime implements ITurnRuntime {
             agent: { requested: input.agent, resolved: snapshot },
             context: input.context,
             input: input.input,
+            analytics: input.analytics ?? { useCase: "copilot_chat" },
             config: {
                 autoPermission: input.config.autoPermission ?? false,
                 humanAvailable: input.config.humanAvailable,
@@ -242,6 +245,9 @@ export class TurnRuntime implements ITurnRuntime {
         }
 
         const definition = state.definition;
+        const analytics: TurnAnalytics = definition.analytics ?? {
+            useCase: "copilot_chat",
+        };
         const materialize = async (): Promise<MaterializedEnv> => {
             const resolvedContext = await this.contextResolver.resolve(
                 definition.context,
@@ -291,6 +297,7 @@ export class TurnRuntime implements ITurnRuntime {
             state,
             stream,
             materialize,
+            analytics,
             usageReporter: this.usageReporter,
             resolveTool: (descriptor) => this.toolRegistry.resolve(descriptor),
             signal: controller.signal,
@@ -301,7 +308,13 @@ export class TurnRuntime implements ITurnRuntime {
             turnEventBus: this.turnEventBus,
         });
         try {
-            return await run.run(input);
+            return await withUseCase(
+                {
+                    ...analytics,
+                    agentName: definition.agent.resolved.agentId,
+                },
+                () => run.run(input),
+            );
         } finally {
             // Drain any queued commits before withLock releases the turn, so
             // no append (straggler tool, un-awaited progress) can run after
@@ -333,6 +346,7 @@ class TurnAdvance {
     private state: TurnState;
     private readonly stream: HotStream<TurnStreamEvent, TurnOutcome>;
     private readonly materialize: () => Promise<MaterializedEnv>;
+    private readonly analytics: TurnAnalytics;
     // Assigned by run() immediately after the cancel fast-path, before any
     // loop phase can touch them. cancel() must never read these.
     private resolvedContext!: Array<z.infer<typeof ConversationMessage>>;
@@ -362,6 +376,7 @@ class TurnAdvance {
         state: TurnState;
         stream: HotStream<TurnStreamEvent, TurnOutcome>;
         materialize: () => Promise<MaterializedEnv>;
+        analytics: TurnAnalytics;
         usageReporter: IUsageReporter;
         resolveTool: (
             descriptor: z.infer<typeof ToolDescriptor>,
@@ -378,6 +393,7 @@ class TurnAdvance {
         this.state = init.state;
         this.stream = init.stream;
         this.materialize = init.materialize;
+        this.analytics = init.analytics;
         this.usageReporter = init.usageReporter;
         this.resolveTool = init.resolveTool;
         this.signal = init.signal;
@@ -1290,6 +1306,7 @@ class TurnAdvance {
         try {
             this.usageReporter.reportModelUsage({
                 agentId: this.resolvedAgent.agentId,
+                analytics: this.analytics,
                 model: this.resolvedAgent.model,
                 usage: completion.usage,
             });

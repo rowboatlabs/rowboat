@@ -128,7 +128,9 @@ container.register({
     // Process-wide turn event spine: every turn's events, tagged with
     // sessionId and durable file offsets, regardless of who started the turn.
     turnEventBus: asClass<ITurnEventBus>(TurnEventHub).singleton(),
-    usageReporter: asClass<IUsageReporter>(RealUsageReporter).singleton(),
+    usageReporter: asFunction<IUsageReporter>(
+        () => new RealUsageReporter(),
+    ).singleton(),
     agentResolver: asFunction<IAgentResolver>(
         () =>
             new DispatchingAgentResolver(

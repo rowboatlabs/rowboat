@@ -7,6 +7,7 @@ import { withUseCase, type UseCase } from "../analytics/use_case.js";
 import { getAutoPermissionDecisionModel, resolveProviderConfig } from "../models/defaults.js";
 import { createLanguageModel } from "../models/models.js";
 import { generateObjectSafe } from "../models/structured.js";
+import { directCallReasoningOptions } from "../models/reasoning.js";
 
 const DecisionSchema = z.object({
     decisions: z.array(z.object({
@@ -81,9 +82,10 @@ export async function classifyToolPermissions(input: {
 }): Promise<AutoPermissionDecision[]> {
     if (input.candidates.length === 0) return [];
 
-    const { model: modelId, provider: providerName } = await getAutoPermissionDecisionModel();
+    const { model: modelId, provider: providerName, effort } = await getAutoPermissionDecisionModel();
     const providerConfig = await resolveProviderConfig(providerName);
     const model = createLanguageModel(providerConfig, modelId);
+    const reasoning = await directCallReasoningOptions(providerConfig.flavor, modelId, effort);
 
     const result = await withUseCase(
         {
@@ -97,6 +99,7 @@ export async function classifyToolPermissions(input: {
             prompt: buildPrompt(input),
             schema: DecisionSchema,
             retry: true,
+            generateOptions: reasoning,
         }),
     );
 

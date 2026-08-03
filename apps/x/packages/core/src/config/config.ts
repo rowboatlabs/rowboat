@@ -1,7 +1,6 @@
 import path from "path";
 import fs from "fs";
 import { homedir } from "os";
-import { fileURLToPath } from "url";
 
 function resolveWorkDir(): string {
     const configured = process.env.ROWBOAT_WORKDIR;
@@ -22,10 +21,6 @@ function resolveWorkDir(): string {
 // Allow override via ROWBOAT_WORKDIR env var for standalone pipeline usage.
 // Normalize to an absolute path so workspace boundary checks behave consistently.
 export const WorkDir = resolveWorkDir();
-
-// Get the directory of this file (for locating bundled assets)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 function ensureDirs() {
     const ensure = (p: string) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };

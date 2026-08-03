@@ -8,8 +8,9 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { AlertTriangleIcon, CheckIcon, ChevronDownIcon, XIcon } from "lucide-react";
-import { useState, type ComponentProps } from "react";
+import { CheckIcon, ChevronDownIcon, ShieldQuestionIcon, XIcon } from "lucide-react";
+import { useState, type ComponentProps, type ReactNode } from "react";
+import { quietRowContainerClass, quietRowGlyphSlotClass, quietRowTriggerClass } from "@/components/ai-elements/tool";
 import { ToolCallPart } from "@x/shared/dist/message.js";
 import { ToolPermissionMetadata } from "@x/shared/dist/runs.js";
 import z from "zod";
@@ -26,12 +27,29 @@ export type PermissionRequestProps = ComponentProps<"div"> & {
 };
 
 const fileActionLabels: Record<string, string> = {
-  read: "Read file",
-  list: "List folder",
-  search: "Search files",
-  write: "Write files",
-  delete: "Delete path",
+  read: "Read",
+  list: "List",
+  search: "Search",
+  write: "Write to",
+  delete: "Delete",
 };
+
+const truncateMiddle = (value: string, max = 64): string => {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max - 1).trim()}…`;
+};
+
+const DetailSection = ({ label, children }: { label: string; children: ReactNode }) => (
+  <div className="min-w-0">
+    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+      {label}
+    </p>
+    <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
+      {children}
+    </pre>
+  </div>
+);
 
 export const PermissionRequest = ({
   className,
@@ -74,160 +92,138 @@ export const PermissionRequest = ({
     Boolean(onApproveSession || onApproveAlways) &&
     Boolean(command || filePermission);
 
-  // Once a response is chosen, collapse the details to just the header.
-  // Users can click the header to expand them again.
+  // Once a response is chosen the ask collapses to a quiet one-line row;
+  // clicking it re-expands the request details.
   const [expanded, setExpanded] = useState(false);
-  const showDetails = !isResponded || expanded;
+
+  // One-line ask: "Run `npm test`?" / "Write to `~/notes/plan.md`?"
+  const summary: ReactNode = command ? (
+    <>Run <code className="rounded bg-muted px-1 py-px font-mono text-xs">{truncateMiddle(command)}</code>?</>
+  ) : filePermission ? (
+    <>
+      {fileActionLabels[filePermission.operation] ?? filePermission.operation}{" "}
+      <code className="rounded bg-muted px-1 py-px font-mono text-xs">
+        {truncateMiddle(filePermission.paths[0] ?? filePermission.pathPrefix)}
+      </code>
+      {filePermission.paths.length > 1 && ` +${filePermission.paths.length - 1} more`}?
+    </>
+  ) : externalAction ? (
+    <>Use <code className="rounded bg-muted px-1 py-px font-mono text-xs">{truncateMiddle(externalAction.detail)}</code>?</>
+  ) : (
+    <>Run <code className="rounded bg-muted px-1 py-px font-mono text-xs">{toolCall.toolName}</code>?</>
+  );
+
+  const details = (
+    <div className="flex flex-col gap-2">
+      {command && <DetailSection label="Command">{command}</DetailSection>}
+      {filePermission && (
+        <>
+          <DetailSection label={`Path${filePermission.paths.length === 1 ? "" : "s"}`}>
+            {filePermission.paths.join("\n")}
+          </DetailSection>
+          <DetailSection label="Approval scope">{filePermission.pathPrefix}</DetailSection>
+        </>
+      )}
+      {externalAction && <DetailSection label={externalAction.label}>{externalAction.detail}</DetailSection>}
+      {!command && !filePermission && toolCall.arguments != null && (
+        <DetailSection label="Arguments">{JSON.stringify(toolCall.arguments, null, 2)}</DetailSection>
+      )}
+    </div>
+  );
+
+  if (isResponded) {
+    return (
+      <div className={cn(quietRowContainerClass, className)} {...props}>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className={quietRowTriggerClass}
+        >
+          <span className={quietRowGlyphSlotClass}>
+            {!isApproved && <span className="size-1.5 rounded-full bg-red-600 dark:bg-red-500" />}
+          </span>
+          <span className="shrink-0 font-medium text-muted-foreground">
+            {isApproved ? "Allowed" : "Denied"}
+          </span>
+          <span className="min-w-0 truncate text-muted-foreground">{summary}</span>
+          <ChevronDownIcon
+            className={cn(
+              "ml-auto size-3 shrink-0 text-muted-foreground/50 opacity-0 transition-[opacity,transform] group-hover/row:opacity-100",
+              expanded && "rotate-180 opacity-100",
+            )}
+          />
+        </button>
+        {expanded && <div className="my-1 ml-[2.5px] border-l-2 border-border pl-3">{details}</div>}
+      </div>
+    );
+  }
 
   return (
     <div
       className={cn(
-        "not-prose mb-4 w-full rounded-md border",
-        isResponded
-          ? isApproved
-            ? "border-green-500/60 bg-green-200/80 dark:border-green-500/40 dark:bg-green-900/40"
-            : "border-[#fa2525]/70 bg-[#fa2525]/30 dark:border-[#fa2525]/60 dark:bg-[#fa2525]/30"
-          : "border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20",
+        "not-prose my-1 w-full rounded-[10px] border border-l-2 border-l-amber-500/70 px-3 py-2 text-[13px]",
         className
       )}
       {...props}
     >
-      <div className="p-4 space-y-4">
-        <div className="flex items-start gap-3">
-          {!isResponded && (
-            <AlertTriangleIcon className="size-5 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
-          )}
-          <div className="flex-1 space-y-2">
-            <div
-              className={cn("flex items-center gap-2", isResponded && "cursor-pointer select-none")}
-              onClick={isResponded ? () => setExpanded((v) => !v) : undefined}
-            >
-              <div className="flex-1">
-                <h3 className="font-semibold text-sm text-foreground">
-                  {isResponded ? (isApproved ? "Permission Granted" : "Permission Denied") : "Permission Required"}
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {isResponded ? "Requested:" : "The agent wants to execute:"} <span className="font-mono font-medium">{toolCall.toolName}</span>
-                </p>
-              </div>
-              {isResponded && (
-                <ChevronDownIcon
-                  className={cn(
-                    "size-4 shrink-0 text-muted-foreground transition-transform",
-                    expanded ? "rotate-180" : "rotate-0"
-                  )}
-                />
-              )}
-            </div>
-            {showDetails && command && (
-              <div className="rounded-md border bg-background/50 p-3 mt-3">
-                <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
-                  Command
-                </p>
-                <pre className="whitespace-pre-wrap text-xs font-mono text-foreground break-all">
-                  {command}
-                </pre>
-              </div>
-            )}
-            {showDetails && filePermission && (
-              <div className="rounded-md border bg-background/50 p-3 mt-3 space-y-3">
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
-                    Action
-                  </p>
-                  <p className="text-xs font-medium text-foreground">
-                    {fileActionLabels[filePermission.operation] ?? filePermission.operation}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
-                    Path{filePermission.paths.length === 1 ? "" : "s"}
-                  </p>
-                  <pre className="whitespace-pre-wrap text-xs font-mono text-foreground break-all">
-                    {filePermission.paths.join("\n")}
-                  </pre>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
-                    Approval Scope
-                  </p>
-                  <pre className="whitespace-pre-wrap text-xs font-mono text-foreground break-all">
-                    {filePermission.pathPrefix}
-                  </pre>
-                </div>
-              </div>
-            )}
-            {showDetails && externalAction && (
-              <div className="rounded-md border bg-background/50 p-3 mt-3">
-                <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
-                  {externalAction.label}
-                </p>
-                <p className="text-xs font-mono font-medium text-foreground break-all">
-                  {externalAction.detail}
-                </p>
-              </div>
-            )}
-            {showDetails && !command && !filePermission && toolCall.arguments && (
-              <div className="rounded-md border bg-background/50 p-3 mt-3">
-                <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
-                  Arguments
-                </p>
-                <pre className="whitespace-pre-wrap text-xs font-mono text-foreground break-all">
-                  {JSON.stringify(toolCall.arguments, null, 2)}
-                </pre>
-              </div>
-            )}
-          </div>
-        </div>
-        {!isResponded && (
-          <div className="flex items-center gap-2 pt-2">
-            <div className="flex flex-1 items-center">
-              <Button
-                variant="default"
-                size="sm"
-                onClick={onApprove}
-                disabled={isProcessing}
-                className={cn("flex-1", hasScopeActions && "rounded-r-none")}
-              >
-                <CheckIcon className="size-4" />
-                Approve
-              </Button>
-              {hasScopeActions && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      disabled={isProcessing}
-                      className="rounded-l-none border-l border-l-primary-foreground/20 px-1.5"
-                    >
-                      <ChevronDownIcon className="size-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={onApproveSession}>
-                      Allow for Session
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={onApproveAlways}>
-                      Always Allow
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
+        <ShieldQuestionIcon className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="min-w-0 flex-1 cursor-pointer truncate text-left"
+          title="Show request details"
+        >
+          {summary}
+        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <div className="flex items-center">
             <Button
-              variant="destructive"
+              variant="default"
               size="sm"
-              onClick={onDeny}
+              onClick={onApprove}
               disabled={isProcessing}
-              className="flex-1"
+              className={cn("h-7 rounded-full px-3 text-xs", hasScopeActions && "rounded-r-none")}
             >
-              <XIcon className="size-4" />
-              Deny
+              <CheckIcon className="size-3.5" />
+              Allow
             </Button>
+            {hasScopeActions && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={isProcessing}
+                    className="h-7 rounded-l-none rounded-r-full border-l border-l-primary-foreground/20 px-1.5"
+                  >
+                    <ChevronDownIcon className="size-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={onApproveSession}>
+                    Allow for Session
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={onApproveAlways}>
+                    Always Allow
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
-        )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onDeny}
+            disabled={isProcessing}
+            className="h-7 rounded-full px-3 text-xs text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-500"
+          >
+            <XIcon className="size-3.5" />
+            Deny
+          </Button>
+        </div>
       </div>
+      {expanded && <div className="mt-2 border-t pt-2">{details}</div>}
     </div>
   );
 };

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { TurnAnalytics } from "@x/shared/dist/analytics.js";
 import {
     DEFAULT_MAX_MODEL_CALLS,
     type JsonValue,
@@ -118,6 +119,7 @@ export async function runSpawnedAgent(
         opts.services ?? (await resolveServices());
 
     let parentModel: z.infer<typeof ModelDescriptor> | undefined;
+    let parentAnalytics: TurnAnalytics = { useCase: "copilot_chat" };
     try {
         const parent = reduceTurn(
             (await turnRuntime.getTurn(opts.parentTurnId)).events,
@@ -130,6 +132,7 @@ export async function runSpawnedAgent(
             return spawnError("sub-agents cannot spawn further sub-agents");
         }
         parentModel = parentAgent.resolved.model;
+        parentAnalytics = parent.definition.analytics ?? parentAnalytics;
     } catch {
         // Parent unreadable (legacy runs path): fall back to app defaults.
         parentModel = undefined;
@@ -143,7 +146,16 @@ export async function runSpawnedAgent(
               provider: input.provider ?? parentModel?.provider ?? "",
               model: input.model,
           }
-        : subagentOverride ?? parentModel;
+        : subagentOverride
+          ? { provider: subagentOverride.provider, model: subagentOverride.model }
+          : parentModel;
+    // Effort pairs with the model source: an explicit per-spawn effort always
+    // wins; else the subagent override's stored effort rides along when the
+    // override supplied the model. Parent-model fallback carries no effort
+    // (the parent's effort is per-message, not a model property).
+    const reasoningEffort = input.reasoning_effort !== undefined
+        ? input.reasoning_effort
+        : subagentOverride?.effort;
     if (model && !model.provider) {
         return spawnError(
             "`model` was set but no provider could be determined; pass `provider` too",
@@ -185,10 +197,9 @@ export async function runSpawnedAgent(
         handle = await headlessRunner.start({
             agent,
             message: input.task,
+            ...parentAnalytics,
             maxModelCalls,
-            ...(input.reasoning_effort === undefined
-                ? {}
-                : { reasoningEffort: input.reasoning_effort }),
+            ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
             signal: opts.signal,
         });
     } catch (error) {
@@ -238,7 +249,7 @@ export async function runSpawnedAgent(
 // Lazy for the same import-cycle reason as resolveServices; best-effort —
 // an unreadable config means "no override", never a failed spawn.
 async function readSubagentOverride(): Promise<
-    z.infer<typeof ModelDescriptor> | null
+    (z.infer<typeof ModelDescriptor> & { effort?: "low" | "medium" | "high" }) | null
 > {
     try {
         const { getSubagentModelOverride } = await import(

@@ -16,7 +16,7 @@ import { LiveNoteSchema, type LiveNote, type Triggers } from '@x/shared/dist/liv
 import { useLiveNoteAgentStatus } from '@/hooks/use-live-note-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { useAgentRunTranscript } from '@/hooks/use-agent-run-transcript'
-import { CompactConversation } from '@/components/compact-conversation'
+import { TurnConversation } from '@/components/turn-conversation'
 
 export type OpenLiveNotePanelDetail = {
   filePath: string
@@ -611,8 +611,9 @@ function DetailsTab({
                 variant="field"
                 inheritDefault={{ label: '(global default)' }}
                 allowCustom
-                value={modelOverrideToRef(draft.model, draft.provider)}
-                onChange={(ref) => setDraft({ ...draft, ...refToModelOverride(ref) })}
+                effortSelectable
+                value={modelOverrideToRef(draft.model, draft.provider, draft.effort)}
+                onChange={(selection) => setDraft({ ...draft, ...refToModelOverride(selection) })}
               />
             </div>
             <div className="mt-4">
@@ -732,7 +733,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
           <p className="text-xs italic text-muted-foreground">No messages or tool calls recorded.</p>
         )}
         {transcript && !loadingRun && items.length > 0 && (
-          <CompactConversation items={items} />
+          <TurnConversation items={items} />
         )}
       </div>
     </div>

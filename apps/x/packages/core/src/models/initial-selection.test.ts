@@ -9,21 +9,21 @@ describe('selectInitialModel', () => {
 
     it('picks the recommended model when the provider lists it', () => {
         expect(selectInitialModel('openai', ['gpt-4.1', 'gpt-5.4', 'gpt-5.4-mini'], recommendations))
-            .toBe('gpt-5.4');
+            .toEqual({ model: 'gpt-5.4' });
     });
 
     it('falls back to the first listed model when the recommendation is not in the list', () => {
         expect(selectInitialModel('openai', ['gpt-4.1', 'gpt-4o'], recommendations))
-            .toBe('gpt-4.1');
+            .toEqual({ model: 'gpt-4.1' });
     });
 
     it('falls back to the first listed model for flavors with no recommendation', () => {
         expect(selectInitialModel('ollama', ['llama3', 'qwen3'], recommendations))
-            .toBe('llama3');
+            .toEqual({ model: 'llama3' });
     });
 
     it('falls back to the first listed model when no recommendations map is available', () => {
-        expect(selectInitialModel('openai', ['gpt-4.1'], undefined)).toBe('gpt-4.1');
+        expect(selectInitialModel('openai', ['gpt-4.1'], undefined)).toEqual({ model: 'gpt-4.1' });
     });
 
     it('returns null when the provider listed nothing', () => {
@@ -33,7 +33,13 @@ describe('selectInitialModel', () => {
     it('accepts the nested { assistantModel, taskModels } wire shape', () => {
         const nested = { rowboat: { assistantModel: 'google/gemini-3.5-flash', taskModels: {} } };
         expect(selectInitialModel('rowboat', ['a', 'google/gemini-3.5-flash'], nested))
-            .toBe('google/gemini-3.5-flash');
+            .toEqual({ model: 'google/gemini-3.5-flash' });
+    });
+
+    it('carries effort from the { model, effort } wire shape', () => {
+        const nested = { rowboat: { assistantModel: { model: 'google/gemini-3.5-flash', effort: 'high' as const } } };
+        expect(selectInitialModel('rowboat', ['google/gemini-3.5-flash'], nested))
+            .toEqual({ model: 'google/gemini-3.5-flash', effort: 'high' });
     });
 });
 
@@ -60,7 +66,7 @@ describe('selectInitialTaskModels', () => {
     };
 
     it('writes overrides only for listed recs that differ from the assistant', () => {
-        expect(selectInitialTaskModels('rowboat', 'rowboat', gatewayList, nested, 'google/gemini-3.5-flash'))
+        expect(selectInitialTaskModels('rowboat', 'rowboat', gatewayList, nested, { model: 'google/gemini-3.5-flash' }))
             .toEqual({
                 knowledgeGraph: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
                 chatTitle: { provider: 'rowboat', model: 'google/gemini-3.5-flash-lite' },
@@ -68,8 +74,26 @@ describe('selectInitialTaskModels', () => {
     });
 
     it('returns nothing for legacy flat recommendations or absent maps', () => {
-        expect(selectInitialTaskModels('rowboat', 'rowboat', gatewayList, { rowboat: 'google/gemini-3.5-flash' }, 'x'))
+        expect(selectInitialTaskModels('rowboat', 'rowboat', gatewayList, { rowboat: 'google/gemini-3.5-flash' }, { model: 'x' }))
             .toEqual({});
-        expect(selectInitialTaskModels('rowboat', 'rowboat', gatewayList, undefined, 'x')).toEqual({});
+        expect(selectInitialTaskModels('rowboat', 'rowboat', gatewayList, undefined, { model: 'x' })).toEqual({});
+    });
+
+    it('keeps a same-model rec whose effort differs from the assistant, and carries effort', () => {
+        const withEffort = {
+            rowboat: {
+                assistantModel: { model: 'google/gemini-3.5-flash', effort: 'high' as const },
+                taskModels: {
+                    // Same model, lower effort → meaningful override.
+                    chatTitle: { model: 'google/gemini-3.5-flash', effort: 'low' as const },
+                    // Same model AND effort → redundant, inherit produces it.
+                    meetingNotes: { model: 'google/gemini-3.5-flash', effort: 'high' as const },
+                },
+            },
+        };
+        expect(selectInitialTaskModels('rowboat', 'rowboat', gatewayList, withEffort, { model: 'google/gemini-3.5-flash', effort: 'high' }))
+            .toEqual({
+                chatTitle: { provider: 'rowboat', model: 'google/gemini-3.5-flash', effort: 'low' },
+            });
     });
 });

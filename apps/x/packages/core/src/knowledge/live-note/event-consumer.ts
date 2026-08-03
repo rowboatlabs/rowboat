@@ -7,6 +7,8 @@ import { createLanguageModel } from '../../models/models.js';
 import { getLiveNoteAgentModel, resolveProviderConfig } from '../../models/defaults.js';
 
 async function resolveRoutingModel() {
+    // Deliberately effort-free: the routing pass is a cheap yes/no
+    // classifier; the liveNoteAgent effort applies to the agent RUNS it triggers.
     const { model: modelId, provider } = await getLiveNoteAgentModel();
     const config = await resolveProviderConfig(provider);
     return {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { reduceTurn } from '@x/shared/src/turns.js'
-import { isChatMessage, isErrorMessage, isToolCall, isTurnUsageMessage } from '@/lib/chat-conversation'
+import { isChatMessage, isErrorMessage, isReasoningMessage, isToolCall, isTurnUsageMessage } from '@/lib/chat-conversation'
 import {
   applyOverlay,
   buildSessionChatState,
@@ -380,6 +380,84 @@ describe('buildTurnConversation', () => {
     expect(buildTurnConversation(bare).filter(isToolCall)[0].subAgent).toBeUndefined()
   })
 
+  it('emits each model call\'s reasoning as an item before its text and tools', () => {
+    const state = reduceTurn([
+      created(T1, S1, user('q')),
+      requested(T1, 0),
+      completed(T1, 0, {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'planning the tool call' },
+          toolCallPart('tc1', 'echo'),
+        ],
+      }),
+      invocation(T1, 'tc1', 'echo'),
+      toolResult(T1, 'tc1', 'echo'),
+      requested(T1, 1, ['assistant:0', 'toolResult:tc1']),
+      completed(T1, 1, {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'shaping the answer' },
+          { type: 'text', text: 'answer' },
+        ],
+      }),
+      turnCompleted(T1, 'answer'),
+    ])
+    const items = buildTurnConversation(state)
+    expect(
+      items.map((i) =>
+        isReasoningMessage(i)
+          ? `reasoning:${i.content}`
+          : isToolCall(i)
+            ? `tool:${i.name}`
+            : isChatMessage(i)
+              ? i.role
+              : 'x',
+      ),
+    ).toEqual([
+      'user',
+      'reasoning:planning the tool call',
+      'tool:echo',
+      'reasoning:shaping the answer',
+      'assistant',
+    ])
+  })
+
+  it('joins multiple reasoning parts and drops encrypted-only (empty) ones', () => {
+    const state = reduceTurn([
+      created(T1, S1, user('q')),
+      requested(T1, 0),
+      completed(T1, 0, {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'part one' },
+          { type: 'reasoning', text: '' },
+          { type: 'reasoning', text: 'part two' },
+          { type: 'text', text: 'answer' },
+        ],
+      }),
+      turnCompleted(T1, 'answer'),
+    ])
+    const reasoning = buildTurnConversation(state).filter(isReasoningMessage)
+    expect(reasoning).toHaveLength(1)
+    expect(reasoning[0].content).toBe('part one\n\npart two')
+
+    // A call whose reasoning is entirely encrypted (no text) yields no item.
+    const encryptedOnly = reduceTurn([
+      created(T1, S1, user('q')),
+      requested(T1, 0),
+      completed(T1, 0, {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: '' },
+          { type: 'text', text: 'answer' },
+        ],
+      }),
+      turnCompleted(T1, 'answer'),
+    ])
+    expect(buildTurnConversation(encryptedOnly).filter(isReasoningMessage)).toHaveLength(0)
+  })
+
   it('renders user attachments and a failed turn as an error item', () => {
     const input = {
       role: 'user' as const,
@@ -625,5 +703,47 @@ describe('buildSessionChatState', () => {
     const state = buildSessionChatState([turn], { ...emptyOverlay(), text: 'typing…' })
     expect(state.currentAssistantMessage).toBe('typing…')
     expect(state.isReasoning).toBe(false)
+  })
+
+  it('surfaces streaming reasoning as currentReasoning', () => {
+    const turn = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      modelStep(T1, 0, { type: 'reasoning_start' }),
+    ])
+    const state = buildSessionChatState([turn], { ...emptyOverlay(), reasoning: 'hmm…' })
+    expect(state.currentReasoning).toBe('hmm…')
+    expect(state.isReasoning).toBe(true)
+  })
+})
+
+describe('lastSelection', () => {
+  it('surfaces the LATEST turn\'s resolved model and reasoning effort', () => {
+    const first = reduceTurn([created(T1, S1)])
+    const laterCreated = created('turn-2', S1)
+    laterCreated.config = { ...laterCreated.config, reasoningEffort: 'high' }
+    laterCreated.agent = {
+      ...laterCreated.agent,
+      resolved: {
+        ...laterCreated.agent.resolved,
+        model: { provider: 'anthropic', model: 'claude-fixture' },
+      },
+    }
+    const second = reduceTurn([laterCreated])
+    const state = buildSessionChatState([first, second], emptyOverlay())
+    expect(state.lastSelection).toEqual({
+      provider: 'anthropic',
+      model: 'claude-fixture',
+      effort: 'high',
+    })
+  })
+
+  it('omits effort when the turn ran on auto', () => {
+    const state = buildSessionChatState([reduceTurn([created(T1, S1)])], emptyOverlay())
+    expect(state.lastSelection).toEqual({ provider: 'openai', model: 'gpt-fixture' })
+  })
+
+  it('is null for a session with no turns', () => {
+    expect(buildSessionChatState([], emptyOverlay()).lastSelection).toBeNull()
   })
 })

@@ -1,18 +1,26 @@
 import { captureLlmUsage } from "../../../analytics/usage.js";
-import { getCurrentUseCase } from "../../../analytics/use_case.js";
 import type { IUsageReporter, ModelUsageReport } from "../usage-reporter.js";
 
-// Reports each completed model call as the same `llm_usage` PostHog event
-// the old run loop emitted. The use case comes from the AsyncLocalStorage
-// context the caller established (headless runners wrap startHeadlessAgent
-// in withUseCase); UI-driven session turns have no context and default to
-// copilot_chat — matching the old createRun default.
+export interface RealUsageReporterDependencies {
+    capture?: typeof captureLlmUsage;
+}
+
+// Reports each completed model call from the attribution persisted on its
+// turn. It deliberately does not consult ambient async context: resumes and
+// external-input advances must report exactly what turn_created recorded.
 export class RealUsageReporter implements IUsageReporter {
+    private readonly capture: typeof captureLlmUsage;
+
+    constructor(deps: RealUsageReporterDependencies = {}) {
+        this.capture = deps.capture ?? captureLlmUsage;
+    }
+
     reportModelUsage(report: ModelUsageReport): void {
-        const context = getCurrentUseCase();
-        captureLlmUsage({
-            useCase: context?.useCase ?? "copilot_chat",
-            ...(context?.subUseCase ? { subUseCase: context.subUseCase } : {}),
+        this.capture({
+            useCase: report.analytics.useCase,
+            ...(report.analytics.subUseCase
+                ? { subUseCase: report.analytics.subUseCase }
+                : {}),
             agentName: report.agentId,
             model: report.model.model,
             provider: report.model.provider,

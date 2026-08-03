@@ -1,6 +1,10 @@
 import { z } from "zod";
-import { ModelRef, TaskModels } from "./models.js";
-import { normalizeModelRecommendation, type ModelRecommendations } from "./rowboat-account.js";
+import { ModelSelection, TaskModels } from "./models.js";
+import {
+    normalizeModelRecommendation,
+    type ModelRecommendations,
+    type RecommendedModelChoice,
+} from "./rowboat-account.js";
 
 /**
  * Initial model selection for a provider being connected for the first time.
@@ -38,12 +42,13 @@ export function selectInitialModel(
     flavor: string,
     availableModelIds: string[],
     recommendations: ModelRecommendations | undefined,
-): string | null {
+): RecommendedModelChoice | null {
     const recommended = normalizeModelRecommendation(recommendations, flavor)?.assistantModel;
-    if (recommended && availableModelIds.includes(recommended)) {
+    if (recommended && availableModelIds.includes(recommended.model)) {
         return recommended;
     }
-    return availableModelIds[0] ?? null;
+    const first = availableModelIds[0];
+    return first ? { model: first } : null;
 }
 
 export function selectInitialTaskModels(
@@ -51,17 +56,23 @@ export function selectInitialTaskModels(
     flavor: string,
     availableModelIds: string[],
     recommendations: ModelRecommendations | undefined,
-    assistantModel: string,
-): Partial<Record<keyof z.infer<typeof TaskModels>, z.infer<typeof ModelRef>>> {
+    assistantModel: RecommendedModelChoice,
+): Partial<Record<keyof z.infer<typeof TaskModels>, z.infer<typeof ModelSelection>>> {
     const taskRecommendations = normalizeModelRecommendation(recommendations, flavor)?.taskModels;
     if (!taskRecommendations) return {};
-    const overrides: Partial<Record<keyof z.infer<typeof TaskModels>, z.infer<typeof ModelRef>>> = {};
+    const overrides: Partial<Record<keyof z.infer<typeof TaskModels>, z.infer<typeof ModelSelection>>> = {};
     for (const key of TASK_MODEL_KEYS) {
-        const model = taskRecommendations[key];
-        // Unknown keys are ignored; a rec equal to the assistant is redundant
-        // (inherit produces it); an unlisted rec is a stale hint.
-        if (!model || model === assistantModel || !availableModelIds.includes(model)) continue;
-        overrides[key] = { provider: providerId, model };
+        const rec = taskRecommendations[key];
+        // Unknown keys are ignored; a rec equal to the assistant pair (model
+        // AND effort) is redundant (inherit produces it); an unlisted rec is
+        // a stale hint.
+        if (!rec || !availableModelIds.includes(rec.model)) continue;
+        if (rec.model === assistantModel.model && rec.effort === assistantModel.effort) continue;
+        overrides[key] = {
+            provider: providerId,
+            model: rec.model,
+            ...(rec.effort ? { effort: rec.effort } : {}),
+        };
     }
     return overrides;
 }

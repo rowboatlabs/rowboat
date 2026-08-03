@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { TurnAnalytics } from "@x/shared/dist/analytics.js";
 import type { AssistantMessage, UserMessage } from "@x/shared/dist/message.js";
 import type {
     JsonValue,
@@ -16,6 +17,7 @@ export interface CreateTurnInput {
     sessionId?: string | null;
     context: z.infer<typeof TurnContext>;
     input: z.infer<typeof UserMessage>;
+    analytics?: TurnAnalytics;
     config: {
         autoPermission?: boolean;
         humanAvailable: boolean;

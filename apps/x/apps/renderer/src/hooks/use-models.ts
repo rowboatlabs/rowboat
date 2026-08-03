@@ -5,6 +5,13 @@ export interface ModelRef {
   model: string
 }
 
+// THE canonical selection threaded UI → IPC → run creation: the ref plus
+// the reasoning effort picked with it (absent = Auto / provider default).
+// Mirrors shared/models.ts ModelSelection.
+export interface ModelSelection extends ModelRef {
+  effort?: 'low' | 'medium' | 'high'
+}
+
 // One picker group per connected provider, straight from the unified model
 // catalog (models:list → core/models/catalog.ts). Every provider — Rowboat
 // gateway, ChatGPT subscription (codex), BYOK keys, local endpoints — comes
@@ -30,6 +37,9 @@ export interface ModelsSnapshot {
   // hasn't picked a model) — shown in pickers instead of guessing from list
   // order, which can disagree with the real default.
   defaultModel: ModelRef | null
+  // The reasoning effort stored WITH the assistant model ('' = Auto). Seeds
+  // new chats' composer state and the settings field display.
+  defaultEffort: '' | 'low' | 'medium' | 'high'
   isRowboatConnected: boolean
   // Raw catalog model ids per provider id, unpinned — for provider-scoped
   // pickers that need a provider's list without group ordering applied.
@@ -50,6 +60,7 @@ const EMPTY_SNAPSHOT: ModelsSnapshot = {
   groups: [],
   reasoningByKey: {},
   defaultModel: null,
+  defaultEffort: '',
   isRowboatConnected: false,
   catalogByProvider: {},
 }
@@ -72,6 +83,9 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
   )
 
   const defaultModel: ModelRef | null = catalog.defaultModel
+    ? { provider: catalog.defaultModel.provider, model: catalog.defaultModel.model }
+    : null
+  const defaultEffort = catalog.defaultModel?.effort ?? ''
   const reasoningByKey: Record<string, boolean> = {}
   const catalogByProvider: Record<string, string[]> = {}
   const groups: ModelPickerGroup[] = []
@@ -112,6 +126,7 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
     groups,
     reasoningByKey,
     defaultModel,
+    defaultEffort,
     isRowboatConnected: catalog.providers.some((p) => p.id === 'rowboat'),
     catalogByProvider,
   }

@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { UseCase } from './analytics.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmProvider, ModelRef, ReasoningEffort } from './models.js';
+import { LlmProvider, ModelSelection, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -23,7 +24,7 @@ import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
-import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
+import { GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { TurnLimitsSettingsSchema } from './turn-limits.js';
@@ -557,6 +558,8 @@ const ipcSchemas = {
       input: UserMessage,
       config: z.object({
         agent: RequestedAgent,
+        useCase: UseCase.optional(),
+        subUseCase: z.string().optional(),
         autoPermission: z.boolean().optional(),
         maxModelCalls: z.number().int().positive().optional(),
         reasoningEffort: ReasoningEffort.optional(),
@@ -680,8 +683,9 @@ const ipcSchemas = {
           reasoning: z.boolean().optional(),
         })),
       })),
-      // The effective runtime default (what runs when nothing is picked).
-      defaultModel: ModelRef.nullable(),
+      // The effective runtime default (what runs when nothing is picked),
+      // effort included — it seeds new chats' composer state.
+      defaultModel: ModelSelection.nullable(),
     }),
   },
   'models:test': {
@@ -767,15 +771,15 @@ const ipcSchemas = {
         baseURL: z.string().optional(),
         hasApiKey: z.boolean(),
       })),
-      assistantModel: ModelRef.nullable(),
+      assistantModel: ModelSelection.nullable(),
       taskModels: z.object({
-        knowledgeGraph: ModelRef.nullable(),
-        meetingNotes: ModelRef.nullable(),
-        liveNoteAgent: ModelRef.nullable(),
-        autoPermissionDecision: ModelRef.nullable(),
-        chatTitle: ModelRef.nullable(),
-        backgroundTask: ModelRef.nullable(),
-        subagent: ModelRef.nullable(),
+        knowledgeGraph: ModelSelection.nullable(),
+        meetingNotes: ModelSelection.nullable(),
+        liveNoteAgent: ModelSelection.nullable(),
+        autoPermissionDecision: ModelSelection.nullable(),
+        chatTitle: ModelSelection.nullable(),
+        backgroundTask: ModelSelection.nullable(),
+        subagent: ModelSelection.nullable(),
       }),
       deferBackgroundTasks: z.boolean(),
     }),
@@ -785,15 +789,15 @@ const ipcSchemas = {
   // assistant model again). taskModels merges per-key.
   'models:updateConfig': {
     req: z.object({
-      assistantModel: ModelRef.nullable().optional(),
+      assistantModel: ModelSelection.nullable().optional(),
       taskModels: z.object({
-        knowledgeGraph: ModelRef.nullable().optional(),
-        meetingNotes: ModelRef.nullable().optional(),
-        liveNoteAgent: ModelRef.nullable().optional(),
-        autoPermissionDecision: ModelRef.nullable().optional(),
-        chatTitle: ModelRef.nullable().optional(),
-        backgroundTask: ModelRef.nullable().optional(),
-        subagent: ModelRef.nullable().optional(),
+        knowledgeGraph: ModelSelection.nullable().optional(),
+        meetingNotes: ModelSelection.nullable().optional(),
+        liveNoteAgent: ModelSelection.nullable().optional(),
+        autoPermissionDecision: ModelSelection.nullable().optional(),
+        chatTitle: ModelSelection.nullable().optional(),
+        backgroundTask: ModelSelection.nullable().optional(),
+        subagent: ModelSelection.nullable().optional(),
       }).optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
@@ -2517,6 +2521,18 @@ const ipcSchemas = {
     req: z.object({
       key: z.string(),
       context: z.string().optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Stop the live run on one item (or `chat:<sessionId>` thread) — the
+  // mistaken-assign escape hatch. The cancelled turn settles as 'Stopped'
+  // on todo:events, which clears the spinner.
+  'todo:stopRun': {
+    req: z.object({
+      key: z.string(),
     }),
     res: z.object({
       success: z.boolean(),

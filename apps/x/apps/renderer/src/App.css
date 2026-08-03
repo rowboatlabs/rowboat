@@ -1477,3 +1477,18 @@
 .bidi-auto :is(p,h1,h2,h3,h4,h5,h6,li,blockquote,td,th){unicode-bidi:plaintext;text-align:start;}
 /* Code is inherently LTR — keep it stable inside RTL messages. */
 .bidi-auto :is(pre,code,kbd,samp){direction:ltr;unicode-bidi:isolate;text-align:left;}
+
+/* Turn usage footer (token menu + effort label): hidden until the turn is
+   hovered. `*:hover + …` reveals it when the element directly above it — the
+   turn's last message — is hovered; the :has() keeps it pinned while its
+   dropdown is open. */
+[data-turn-usage] {
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+}
+[data-turn-usage]:hover,
+[data-turn-usage]:focus-within,
+[data-turn-usage]:has([data-state="open"]),
+*:hover + [data-turn-usage] {
+  opacity: 1;
+}

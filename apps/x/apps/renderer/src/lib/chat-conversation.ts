@@ -53,6 +53,16 @@ export interface ErrorMessage {
   timestamp: number
 }
 
+// The model's thought process for one model call, shown as a collapsible
+// block above the text/tools it produced. Providers that only emit
+// encrypted reasoning yield no item (there is no text to show).
+export interface ReasoningMessage {
+  id: string
+  kind: 'reasoning'
+  content: string
+  timestamp: number
+}
+
 export type ReasoningEffortLevel = 'low' | 'medium' | 'high'
 
 // User-facing names for the canonical effort ladder ("auto" = absent).
@@ -72,13 +82,17 @@ export interface TurnUsageMessage {
   timestamp: number
 }
 
-export type ConversationItem = ChatMessage | ToolCall | ErrorMessage | TurnUsageMessage
+export type ConversationItem = ChatMessage | ToolCall | ErrorMessage | ReasoningMessage | TurnUsageMessage
 export type PermissionResponse = 'approve' | 'deny'
 
 export type ChatTabViewState = {
   runId: string | null
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  // Reasoning text streaming for the in-flight model call; superseded by the
+  // durable reasoning item once the call completes. Optional because the
+  // legacy pre-load fallback path never carries it.
+  currentReasoning?: string
   sessionUsage: TokenUsage
   pendingAskHumanRequests: Map<string, z.infer<typeof AskHumanRequestEvent>>
   allPermissionRequests: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
@@ -95,6 +109,7 @@ export const createEmptyChatTabViewState = (): ChatTabViewState => ({
   runId: null,
   conversation: [],
   currentAssistantMessage: '',
+  currentReasoning: '',
   sessionUsage: {},
   pendingAskHumanRequests: new Map(),
   allPermissionRequests: new Map(),
@@ -108,6 +123,8 @@ export const isChatMessage = (item: ConversationItem): item is ChatMessage => 'r
 export const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
 export const isErrorMessage = (item: ConversationItem): item is ErrorMessage =>
   'kind' in item && item.kind === 'error'
+export const isReasoningMessage = (item: ConversationItem): item is ReasoningMessage =>
+  'kind' in item && item.kind === 'reasoning'
 export const isTurnUsageMessage = (item: ConversationItem): item is TurnUsageMessage =>
   'kind' in item && item.kind === 'turn-usage'
 
@@ -623,6 +640,238 @@ export const getToolDisplayName = (tool: ToolCall): string => {
   const composioData = getComposioActionCardData(tool)
   if (composioData) return composioData.label
   return TOOL_DISPLAY_NAMES[tool.name] || tool.name
+}
+
+/* ── Quiet tool-row summaries ─────────────────────────────────────────
+ * Structured collapsed label for the one-line tool row: a medium-weight
+ * verb, a muted detail (path/pattern/query, optionally with a dimmed
+ * parent-path prefix), and a faint trailing stat ("9 matches", "exit 0").
+ * Derived from tool.input and tool.result — unlike TOOL_DISPLAY_NAMES,
+ * which is name-keyed only and kept for group summaries / status lines.
+ */
+export type ToolRowSummary = {
+  verb: string
+  /** Render the verb in the mono face (shell commands). */
+  verbMono?: boolean
+  /** Dimmed prefix rendered just before `detail` (parent directory). */
+  dimPrefix?: string
+  detail?: string
+  detailMono?: boolean
+  stat?: string
+  /** Line-diff stat for edits, rendered as colored +N -M. */
+  diff?: { added: number; removed: number }
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+
+const asString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value : undefined
+
+const asNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined
+
+/** "a/b/c/d.ts" → { dimPrefix: "b/c/", base: "d.ts" } (last 2 parent segments). */
+const splitDisplayPath = (p: string): { dimPrefix?: string; base: string } => {
+  const segments = p.replace(/\/+$/, '').split('/').filter(Boolean)
+  if (segments.length <= 1) return { base: p }
+  const base = segments[segments.length - 1]
+  const parents = segments.slice(Math.max(0, segments.length - 3), segments.length - 1)
+  return { dimPrefix: `${parents.join('/')}/`, base }
+}
+
+const plural = (count: number, unit: string): string =>
+  `${count} ${unit}${count === 1 ? '' : 's'}`
+
+// Cheap line diff for the edit stat: trim common prefix/suffix lines, count
+// what's left. Not a real LCS, but right for the focused edits models make.
+export const countLineDiff = (
+  oldStr: string,
+  newStr: string,
+): { added: number; removed: number } => {
+  const a = oldStr.split('\n')
+  const b = newStr.split('\n')
+  let start = 0
+  while (start < a.length && start < b.length && a[start] === b[start]) start++
+  let endA = a.length
+  let endB = b.length
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--
+    endB--
+  }
+  return { removed: endA - start, added: endB - start }
+}
+
+const fileRowSummary = (verb: string, rawPath: unknown, stat?: string): ToolRowSummary => {
+  const path = asString(rawPath)
+  if (!path) return { verb, stat }
+  const { dimPrefix, base } = splitDisplayPath(path)
+  return { verb, dimPrefix, detail: base, stat }
+}
+
+export const getToolRowSummary = (tool: ToolCall): ToolRowSummary => {
+  const input = asRecord(normalizeToolInput(tool.input))
+  const result = tool.status === 'completed' ? asRecord(tool.result) : undefined
+  const done = tool.status === 'completed'
+
+  switch (tool.name) {
+    case 'file-readText': {
+      const totalLines = asNumber(result?.totalLines)
+      return fileRowSummary('Read', input?.path, totalLines !== undefined ? plural(totalLines, 'line') : undefined)
+    }
+    case 'file-writeText': {
+      const content = asString(input?.content)
+      const stat = done && content ? plural(content.split('\n').length, 'line') : undefined
+      return fileRowSummary('Write', input?.path, stat)
+    }
+    case 'file-editText': {
+      const summary = fileRowSummary('Edit', input?.path)
+      const oldString = asString(input?.oldString)
+      const newString = typeof input?.newString === 'string' ? input.newString : undefined
+      if (done && oldString !== undefined && newString !== undefined) {
+        const diff = countLineDiff(oldString, newString)
+        const replacements = asNumber(result?.replacements)
+        const times = replacements && replacements > 1 ? replacements : 1
+        summary.diff = { added: diff.added * times, removed: diff.removed * times }
+      }
+      return summary
+    }
+    case 'file-list': {
+      const count =
+        (Array.isArray(result?.entries) ? result.entries.length : undefined) ??
+        (Array.isArray(result?.files) ? result.files.length : undefined)
+      return {
+        verb: 'List',
+        detail: asString(input?.path) ?? '.',
+        stat: count !== undefined ? plural(count, 'item') : undefined,
+      }
+    }
+    case 'file-exists':
+      return fileRowSummary('Check', input?.path, done ? (result?.exists ? 'exists' : 'not found') : undefined)
+    case 'file-stat':
+      return fileRowSummary('Inspect', input?.path)
+    case 'file-glob': {
+      const count = asNumber(result?.count)
+      return {
+        verb: 'Find',
+        detail: asString(input?.pattern) ? `"${input!.pattern}"` : undefined,
+        detailMono: true,
+        stat: count !== undefined ? plural(count, 'file') : undefined,
+      }
+    }
+    case 'file-grep': {
+      const count = asNumber(result?.count)
+      return {
+        verb: 'Search',
+        detail: asString(input?.pattern) ? `"${input!.pattern}"` : undefined,
+        detailMono: true,
+        stat: count !== undefined ? plural(count, 'match') : undefined,
+      }
+    }
+    case 'file-mkdir':
+      return fileRowSummary('Create folder', input?.path)
+    case 'file-rename': {
+      const from = asString(input?.from)
+      const to = asString(input?.to)
+      return {
+        verb: 'Rename',
+        detail: from && to ? `${splitDisplayPath(from).base} → ${splitDisplayPath(to).base}` : from,
+      }
+    }
+    case 'file-copy':
+      return fileRowSummary('Copy', input?.from ?? input?.path)
+    case 'file-remove':
+      return fileRowSummary('Delete', input?.path)
+    case 'file-getRoot':
+      return { verb: 'Locate workspace' }
+    case 'executeCommand': {
+      const command = asString(input?.command)
+      const exitCode = asNumber(result?.exitCode)
+      return {
+        verb: '$',
+        verbMono: true,
+        detail: command ? command.split('\n')[0] : undefined,
+        detailMono: true,
+        stat: exitCode !== undefined ? `exit ${exitCode}` : done ? undefined : tool.status === 'running' ? 'running…' : undefined,
+      }
+    }
+    case 'loadSkill': {
+      // Input is `skillName` (id or catalog path); the result echoes the
+      // resolved id and names any tools the skill attached.
+      const requested = asString(input?.skillName)
+      const name =
+        asString(result?.skillName) ??
+        (requested ? splitDisplayPath(requested.replace(/\/skill\.ts$/, '')).base : undefined)
+      const failed = done && asRecord(tool.result)?.success === false
+      const attached = Array.isArray(result?.attachedTools) ? result.attachedTools.length : undefined
+      return {
+        verb: 'Load skill',
+        detail: name,
+        stat: failed ? 'not found' : attached !== undefined ? `${plural(attached, 'tool')} attached` : undefined,
+      }
+    }
+    case 'parseFile':
+      return fileRowSummary('Parse', input?.path)
+    case 'LLMParse':
+      return fileRowSummary('Extract', input?.path)
+    case 'analyzeAgent':
+      return { verb: 'Analyze agent' }
+    case 'addMcpServer':
+      return { verb: 'Add MCP server', detail: asString(input?.name) ?? asString(input?.url) }
+    case 'listMcpServers':
+      return { verb: 'List MCP servers' }
+    case 'listMcpTools':
+      return { verb: 'List MCP tools', detail: asString(input?.serverName) ?? asString(input?.server) }
+    case 'executeMcpTool': {
+      const server = asString(input?.serverName) ?? asString(input?.server)
+      const toolName = asString(input?.toolName) ?? asString(input?.tool)
+      return { verb: server ?? 'MCP', detail: toolName, detailMono: true }
+    }
+    case 'web-search': {
+      const results = Array.isArray(asRecord(tool.result)?.results)
+        ? (asRecord(tool.result)!.results as unknown[]).length
+        : undefined
+      return {
+        verb: 'Web search',
+        detail: asString(input?.query) ? `"${input!.query}"` : undefined,
+        stat: done && results !== undefined ? plural(results, 'result') : undefined,
+      }
+    }
+    case 'save-to-memory':
+      return { verb: 'Memory', detail: asString(input?.title) ?? asString(input?.content)?.slice(0, 64) }
+    case 'composio-execute-tool': {
+      const toolkitSlug = asString(input?.toolkitSlug) ?? ''
+      const toolkit = COMPOSIO_DISPLAY_NAMES[toolkitSlug] || toolkitSlug
+      const readable = (asString(input?.toolSlug) ?? '')
+        .replace(/^[A-Z0-9]+_/, '')
+        .toLowerCase()
+        .replace(/_/g, ' ')
+        .replace(/^\w/, (c) => c.toUpperCase())
+      const failed = done && asRecord(tool.result)?.successful === false
+      return {
+        verb: toolkit || 'Integration',
+        detail: readable || undefined,
+        stat: failed ? 'failed' : undefined,
+      }
+    }
+    default: {
+      // Sentence-style dynamic labels (browser, app-navigation, composio
+      // search/list) become the whole row title.
+      const dynamicLabel =
+        getBrowserControlLabel(tool) ??
+        getAppActionCardData(tool)?.label ??
+        getComposioActionCardData(tool)?.label
+      if (dynamicLabel) return { verb: dynamicLabel }
+      const named = TOOL_DISPLAY_NAMES[tool.name]
+      if (named) return { verb: named }
+      // Unknown/MCP-style tools: tool name + first meaningful primitive arg.
+      const primary = input
+        ? asString(input.description) ?? asString(input.query) ?? asString(input.url) ??
+          asString(input.filePath) ?? asString(input.path) ?? asString(input.pattern) ?? asString(input.name)
+        : undefined
+      return { verb: tool.name, detail: primary }
+    }
+  }
 }
 
 // Composio action card data (for search, execute, list tools)

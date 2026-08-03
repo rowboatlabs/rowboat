@@ -44,7 +44,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ModelSelector, type ModelRef, type ReasoningEffortLevel } from '@/components/model-selector'
+import { ModelSelector, type ModelRef, type ModelSelection } from '@/components/model-selector'
 import { useModels } from '@/hooks/use-models'
 import {
   type AttachmentIconKind,
@@ -91,8 +91,10 @@ type RecentWorkDir = {
 
 // The picker itself lives in ModelSelector; these aliases keep the composer's
 // public prop surface stable for existing consumers (chat-sidebar, App).
+// SelectedModel is the frozen/locked ref shape; ModelSelection is THE
+// canonical value (ref + effort) the composer holds and reports.
 export type SelectedModel = ModelRef
-export type { ReasoningEffortLevel } from '@/components/model-selector'
+export type { ModelSelection, ReasoningEffortLevel } from '@/components/model-selector'
 
 export type PermissionMode = 'manual' | 'auto'
 
@@ -234,13 +236,21 @@ interface ChatInputInnerProps {
   onEndCall?: () => void
   /** Calls need both voice input (STT) and voice output (TTS) configured. */
   callAvailable?: boolean
-  /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
-  onSelectedModelChange?: (model: SelectedModel | null) => void
   /**
-   * Fired when the user picks a reasoning effort (null = auto). Unlike model,
-   * effort is never frozen on a run — it applies per turn.
+   * Fired whenever this chat's selection (model + effort, one value)
+   * changes: the settings seed on mount, a picker interaction, or a
+   * locked-chat effort pick. Never null after the seed resolves.
    */
-  onReasoningEffortChange?: (effort: ReasoningEffortLevel | null) => void
+  onSelectionChange?: (selection: ModelSelection | null) => void
+  /** The chat's prior selection (per-tab continuity within the app run); seeds the state before anything else. */
+  initialSelection?: ModelSelection | null
+  /**
+   * A reopened session's last-turn selection: undefined = session still
+   * loading (hold the settings seed), a value = adopt it, null = session
+   * has no turns (fall through to the settings seed). Ignored once the
+   * selection is set.
+   */
+  restoredSelection?: ModelSelection | null
   /** Work directory for this chat (per-chat). Null when none is set. */
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
@@ -279,8 +289,9 @@ function ChatInputInner({
   onStartCall,
   onEndCall,
   callAvailable,
-  onSelectedModelChange,
-  onReasoningEffortChange,
+  onSelectionChange,
+  initialSelection = null,
+  restoredSelection,
   workDir = null,
   onWorkDirChange,
   codeSessionLock = null,
@@ -297,11 +308,13 @@ function ChatInputInner({
 
   // Shared model-catalog store (one fetch app-wide); sign-in state also
   // gates search availability below.
-  const { isRowboatConnected, refresh: refreshModels } = useModels()
-  const [selectedModel, setSelectedModel] = useState<SelectedModel | null>(null)
+  const { isRowboatConnected, defaultModel, defaultEffort, refresh: refreshModels } = useModels()
+  // THE chat's selection (model + effort, one value). Initialized from the
+  // tab's prior selection when the caller has one, else seeded once from the
+  // settings pair when the catalog loads; thereafter it changes only on
+  // picker interactions. null only before the seed resolves.
+  const [selection, setSelection] = useState<ModelSelection | null>(initialSelection)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
-  // '' = auto. Effort is per-turn config: reported up, never persisted.
-  const [reasoningEffort, setReasoningEffort] = useState<'' | ReasoningEffortLevel>('')
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
@@ -343,7 +356,7 @@ function ChatInputInner({
   // no-dep effect below still re-collapses if any toggle happens to widen the row.
   useLayoutEffect(() => {
     setCollapseLevel(0)
-  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, selectedModel])
+  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, selection])
 
   // After each render, if the left group still overflows, collapse one more step.
   // Runs before paint, so the intermediate (overflowing) state is never visible.
@@ -559,26 +572,54 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
-  // Selecting a model here is PER-CHAT: it affects the next run created
-  // from this tab (frozen once a run exists) and nothing else. The config's
-  // assistantModel is the durable default — new tabs and background work
-  // always start from it, and only the settings Assistant picker (or a
-  // provider connect's initial selection) writes it.
-  const handleModelChange = useCallback((model: SelectedModel | null) => {
-    if (lockedModel) return
+  // Selecting here is PER-CHAT: it affects the next run created from this
+  // tab and nothing else. The config's assistantModel is the durable
+  // default — new tabs and background work always start from it, and only
+  // the settings Assistant picker (or a provider connect's initial
+  // selection) writes it. On a locked chat the model is frozen but the
+  // picker still commits effort-only selections carrying the locked ref.
+  const handleSelectionChange = useCallback((next: ModelSelection | null) => {
     // null = the sentinel row, which the composer never renders (no
     // defaultOption) — guard for the widened onChange contract only.
-    if (!model) return
-    setSelectedModel(model)
-    onSelectedModelChange?.(model)
-  }, [lockedModel, onSelectedModelChange])
+    if (!next) return
+    if (lockedModel && next.model !== lockedModel.model) return
+    setSelection(next)
+    onSelectionChange?.(next)
+  }, [lockedModel, onSelectionChange])
 
-  // Effort is per-turn and unpersisted; ModelSelector reports '' when the
-  // effective model loses reasoning support so a stale effort never sticks.
-  const handleReasoningEffortChange = useCallback((effort: '' | ReasoningEffortLevel) => {
-    setReasoningEffort(effort)
-    onReasoningEffortChange?.(effort === '' ? null : effort)
-  }, [onReasoningEffortChange])
+  // Seed order for an unset selection: an existing session restores its
+  // last turn's selection (waiting for the session to load rather than
+  // flashing the settings pair); drafts and no-turn sessions adopt the
+  // settings pair once the catalog delivers it. Either way the result is
+  // ONE explicit snapshot — the state never tracks later settings edits.
+  useEffect(() => {
+    if (selection !== null) return
+    if (runId) {
+      if (restoredSelection === undefined) return
+      if (restoredSelection) {
+        setSelection(restoredSelection)
+        onSelectionChange?.(restoredSelection)
+        return
+      }
+    }
+    if (!defaultModel) return
+    const seeded: ModelSelection = { ...defaultModel, ...(defaultEffort ? { effort: defaultEffort } : {}) }
+    setSelection(seeded)
+    onSelectionChange?.(seeded)
+  }, [selection, runId, restoredSelection, defaultModel, defaultEffort, onSelectionChange])
+
+  // "New chat" reuses the tab (and this component instance) in place — the
+  // runId dropping back to null is the reset signal: clear the selection so
+  // the seed effect above restarts it from the CURRENT settings pair.
+  const prevRunIdRef = useRef(runId)
+  useEffect(() => {
+    const prev = prevRunIdRef.current
+    prevRunIdRef.current = runId
+    if (prev && !runId) {
+      setSelection(null)
+      onSelectionChange?.(null)
+    }
+  }, [runId, onSelectionChange])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -1208,11 +1249,10 @@ function ChatInputInner({
         )}
         <div className="flex-1" />
         <ModelSelector
-          value={selectedModel}
-          onChange={handleModelChange}
+          value={selection}
+          onChange={handleSelectionChange}
           lockedModel={lockedModel}
-          effort={reasoningEffort}
-          onEffortChange={handleReasoningEffortChange}
+          effortSelectable
         />
         {onStartCall && (
           <div className="flex shrink-0 items-center">
@@ -1452,8 +1492,9 @@ export interface ChatInputWithMentionsProps {
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
   callAvailable?: boolean
-  onSelectedModelChange?: (model: SelectedModel | null) => void
-  onReasoningEffortChange?: (effort: ReasoningEffortLevel | null) => void
+  onSelectionChange?: (selection: ModelSelection | null) => void
+  initialSelection?: ModelSelection | null
+  restoredSelection?: ModelSelection | null
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
@@ -1494,8 +1535,9 @@ export function ChatInputWithMentions({
   onStartCall,
   onEndCall,
   callAvailable,
-  onSelectedModelChange,
-  onReasoningEffortChange,
+  onSelectionChange,
+  initialSelection,
+  restoredSelection,
   workDir,
   onWorkDirChange,
   codeSessionLock,
@@ -1528,8 +1570,9 @@ export function ChatInputWithMentions({
         onStartCall={onStartCall}
         onEndCall={onEndCall}
         callAvailable={callAvailable}
-        onSelectedModelChange={onSelectedModelChange}
-        onReasoningEffortChange={onReasoningEffortChange}
+        onSelectionChange={onSelectionChange}
+        initialSelection={initialSelection}
+        restoredSelection={restoredSelection}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
         codeSessionLock={codeSessionLock}
