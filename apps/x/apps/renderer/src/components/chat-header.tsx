@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { ArrowUpRight, Bug, ChevronDown, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
+import { ArrowUpRight, Bug, ChevronDown, Files, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,13 @@ export interface ChatHeaderProps {
   sessionUsage?: TokenUsage
   onSelectRun?: (runId: string) => void
   onOpenChatHistory?: () => void
+  /**
+   * Files panel wiring. The button renders when a toggle handler is provided
+   * and the chat has produced at least one file.
+   */
+  filesCount?: number
+  filesPanelOpen?: boolean
+  onToggleFilesPanel?: () => void
 }
 
 /**
@@ -49,6 +56,9 @@ export function ChatHeader({
   sessionUsage,
   onSelectRun,
   onOpenChatHistory,
+  filesCount = 0,
+  filesPanelOpen = false,
+  onToggleFilesPanel,
 }: ChatHeaderProps) {
   const hasHistory = recentRuns.length > 0 || Boolean(onOpenChatHistory)
   const showUsage = hasTokenUsage(sessionUsage)
@@ -135,6 +145,30 @@ export function ChatHeader({
           className="titlebar-no-drag my-1 shrink-0"
           align="end"
         />
+      )}
+      {onToggleFilesPanel && filesCount > 0 && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleFilesPanel}
+              className={cn(
+                'titlebar-no-drag relative my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground',
+                filesPanelOpen && 'bg-accent text-foreground',
+              )}
+              aria-label={filesPanelOpen ? 'Hide files panel' : 'Show files created in this chat'}
+            >
+              <Files className="size-4.5" />
+              {filesCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold leading-none text-primary-foreground">
+                  {filesCount > 9 ? '9+' : filesCount}
+                </span>
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Files created in this chat</TooltipContent>
+        </Tooltip>
       )}
       <Tooltip>
         <TooltipTrigger asChild>

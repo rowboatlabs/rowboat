@@ -73,6 +73,8 @@ import { LiveNoteSidebar } from '@/components/live-note-sidebar'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
+import { ChatFilesPanel } from '@/components/chat-files-panel'
+import { collectSessionFiles } from '@/lib/session-files'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import { CaffeinateIndicator } from '@/components/caffeinate-indicator'
@@ -5288,6 +5290,12 @@ function App() {
       if (isBrowserOpen) {
         dismissBrowserOverlay()
       }
+      // Re-navigating to the already-open view while the chat pane is
+      // maximized over it should reveal it (e.g. clicking "Open" on a PDF
+      // that is already the current file) — mirror applyViewState.
+      if (isRightPaneMaximized) {
+        setIsRightPaneMaximized(false)
+      }
       return
     }
 
@@ -5298,7 +5306,7 @@ function App() {
     }
     setHistory(nextHistory)
     await applyViewState(nextView)
-  }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory, isBrowserOpen, dismissBrowserOverlay])
+  }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory, isBrowserOpen, dismissBrowserOverlay, isRightPaneMaximized])
 
   // Move the maximized/full-screen chat into the right side pane: restore the
   // view we expanded from (or fall back to Home) and dock the chat on the right.
@@ -6690,6 +6698,13 @@ function App() {
     permissionResponses,
     autoPermissionDecisions,
   ])
+  // Files the agent created/modified in the active chat — drives the header
+  // Files button and the right-hand panel (full-screen chat only).
+  const [chatFilesPanelOpen, setChatFilesPanelOpen] = useState(false)
+  const chatSessionFiles = React.useMemo(
+    () => collectSessionFiles(activeChatTabState.conversation),
+    [activeChatTabState.conversation],
+  )
   const emptyChatTabState = React.useMemo<ChatTabViewState>(() => createEmptyChatTabViewState(), [])
   const getChatTabStateForRender = useCallback((tabId: string): ChatTabViewState => {
     if (tabId === activeChatTabId) return activeChatTabState
@@ -6852,6 +6867,9 @@ function App() {
                     sessionUsage={activeChatTabState.sessionUsage}
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                     onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
+                    filesCount={chatSessionFiles.length}
+                    filesPanelOpen={chatFilesPanelOpen}
+                    onToggleFilesPanel={() => setChatFilesPanelOpen(v => !v)}
                   />
                 ) : (
                   <TabBar
@@ -7418,6 +7436,7 @@ function App() {
                 </div>
               ) : (
               <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
+              <div className="flex min-h-0 flex-1">
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="relative min-h-0 flex-1">
                   {chatTabs.map((tab) => {
@@ -7512,6 +7531,13 @@ function App() {
                     })}
                   </div>
                 </div>
+              </div>
+              {chatFilesPanelOpen && (
+                <ChatFilesPanel
+                  files={chatSessionFiles}
+                  onClose={() => setChatFilesPanelOpen(false)}
+                />
+              )}
               </div>
               </FileCardProvider>
               )}
@@ -7612,6 +7638,9 @@ function App() {
                 isToolOpenForTab={isToolOpenForTab}
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
+                sessionFiles={chatSessionFiles}
+                filesPanelOpen={chatFilesPanelOpen}
+                onToggleFilesPanel={() => setChatFilesPanelOpen(v => !v)}
                 onActivate={() => setActiveShortcutPane('right')}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 isRecording={isRecording}
