@@ -8,12 +8,14 @@ import {
   EMPTY_DECK_EDITS,
   acceptsFormatting,
   applyEditSet,
+  withSlideRemoved,
   effectiveParagraphs,
   isNoopCommit,
   shapeKeyOf,
   structureMatches,
   toSlideEdits,
   withShapeEdit,
+  type AddedSlide,
   type DeckEdits,
   type EditSet,
   type ShapeEdit,
@@ -116,7 +118,7 @@ describe('paragraph provenance survives rendering', () => {
         text: first,
       },
     }
-    const rendered = applyEditSet(deck, { shapes: edits, deletedSlides: [] }).slides[0]
+    const rendered = applyEditSet(deck, { shapes: edits, deletedSlides: [], addedSlides: [] }).slides[0]
       .shapes[0] as TextShape
     const host = document.createElement('div')
     host.innerHTML = buildEditableHtml(rendered, 1)
@@ -155,7 +157,7 @@ describe('deletion in the edit set', () => {
         draft.deleted = { shapeType: shape.type, shapeId: shape.id }
       },
     )
-    const edits: DeckEdits = { shapes, deletedSlides: [] }
+    const edits: DeckEdits = { shapes, deletedSlides: [], addedSlides: [] }
 
     const rendered = applyEditSet(deck, edits)
     expect(rendered.slides[0].shapes).toHaveLength(0)
@@ -179,7 +181,7 @@ describe('deletion in the edit set', () => {
 
   it('a deleted slide leaves the render, and undo restores shape and slide alike', async () => {
     const deck = await loadTwoSlides()
-    const edits: DeckEdits = { shapes: {}, deletedSlides: ['ppt/slides/slide2.xml'] }
+    const edits: DeckEdits = { shapes: {}, deletedSlides: ['ppt/slides/slide2.xml'], addedSlides: [] }
 
     const rendered = applyEditSet(deck, edits)
     expect(rendered.slides.map((s) => s.xmlPath)).toEqual(['ppt/slides/slide1.xml'])
@@ -188,6 +190,65 @@ describe('deletion in the edit set', () => {
     // Undo re-renders from the prior snapshot; the empty set IS the base deck,
     // so both the slide and any deleted shapes are back, identity intact.
     expect(applyEditSet(deck, EMPTY_DECK_EDITS)).toBe(deck)
+  })
+})
+
+describe('added slides in the edit set', () => {
+  const fakeAdded = (path: string, afterPath: string): AddedSlide => ({
+    path,
+    afterPath,
+    xml: '<p:sld/>',
+    relsXml: '<Relationships/>',
+    slide: { id: path, xmlPath: path, shapes: [] },
+  })
+
+  it('renders added slides after their anchors, chains included, undo restores', async () => {
+    const deck = await loadTwoSlides()
+    const a = fakeAdded('ppt/slides/slide3.xml', 'ppt/slides/slide1.xml')
+    const b = fakeAdded('ppt/slides/slide4.xml', a.path)
+    const edits: DeckEdits = { shapes: {}, deletedSlides: [], addedSlides: [a, b] }
+
+    const rendered = applyEditSet(deck, edits)
+    expect(rendered.slides.map((s) => s.xmlPath)).toEqual([
+      'ppt/slides/slide1.xml',
+      'ppt/slides/slide3.xml',
+      'ppt/slides/slide4.xml',
+      'ppt/slides/slide2.xml',
+    ])
+    // Base slides keep identity; the added slide IS the pre-parsed object.
+    expect(rendered.slides[0]).toBe(deck.slides[0])
+    expect(rendered.slides[1]).toBe(a.slide)
+
+    // Undo: the prior snapshot renders the base deck by identity.
+    expect(applyEditSet(deck, EMPTY_DECK_EDITS)).toBe(deck)
+  })
+
+  it("withSlideRemoved drops an added slide and re-anchors what followed it", async () => {
+    const deck = await loadTwoSlides()
+    const a = fakeAdded('ppt/slides/slide3.xml', 'ppt/slides/slide1.xml')
+    const b = fakeAdded('ppt/slides/slide4.xml', a.path)
+    const edits: DeckEdits = { shapes: {}, deletedSlides: [], addedSlides: [a, b] }
+
+    // Removing the ADDED slide A: no deletedSlides entry (it never existed in
+    // the file); B re-anchors to A's own anchor and keeps its place.
+    const next = withSlideRemoved(edits, a.path, 'ppt/slides/slide1.xml')
+    expect(next.deletedSlides).toEqual([])
+    expect(next.addedSlides.map((x) => [x.path, x.afterPath])).toEqual([
+      ['ppt/slides/slide4.xml', 'ppt/slides/slide1.xml'],
+    ])
+    expect(applyEditSet(deck, next).slides.map((s) => s.xmlPath)).toEqual([
+      'ppt/slides/slide1.xml',
+      'ppt/slides/slide4.xml',
+      'ppt/slides/slide2.xml',
+    ])
+
+    // Removing a BASE slide records the deletion and re-anchors its additions.
+    const afterBase = withSlideRemoved(next, 'ppt/slides/slide1.xml', '')
+    expect(afterBase.deletedSlides).toEqual(['ppt/slides/slide1.xml'])
+    expect(applyEditSet(deck, afterBase).slides.map((s) => s.xmlPath)).toEqual([
+      'ppt/slides/slide4.xml',
+      'ppt/slides/slide2.xml',
+    ])
   })
 })
 

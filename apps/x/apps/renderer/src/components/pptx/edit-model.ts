@@ -23,6 +23,7 @@ import {
   isTextOnlyEdit,
   type DeleteShapeEdit,
   type EditedParagraph,
+  type NewSlidePart,
   type RunFormatOverrides,
   type RunRef,
   type SlideEdit,
@@ -31,6 +32,7 @@ import type {
   NodePath,
   Paragraph,
   Shape,
+  Slide,
   SlideDeck,
   TextAlign,
   TextShape,
@@ -101,19 +103,38 @@ export type EditSet = Readonly<Record<ShapeKey, ShapeEdit>>
 export const EMPTY_EDIT_SET: EditSet = {}
 
 /**
+ * A slide that exists only in the edit set: its synthesized part strings (what
+ * the serializer writes and applies this slide's shape edits against) plus the
+ * pre-parsed Slide the canvas renders. Parsed once at add time, so its object
+ * identity — and every nodePath in it — is stable across history snapshots.
+ */
+export interface AddedSlide extends NewSlidePart {
+  slide: Slide
+}
+
+/**
  * Everything the editor has changed, and the unit the history stack snapshots:
- * per-shape edits plus slides removed from the deck (by xml path — positions
- * shift as slides are deleted, paths never do).
+ * per-shape edits plus slides removed from / added to the deck (by xml path —
+ * positions shift as slides come and go, paths never do).
  */
 export interface DeckEdits {
   shapes: EditSet
   deletedSlides: readonly string[]
+  addedSlides: readonly AddedSlide[]
 }
 
-export const EMPTY_DECK_EDITS: DeckEdits = { shapes: EMPTY_EDIT_SET, deletedSlides: [] }
+export const EMPTY_DECK_EDITS: DeckEdits = {
+  shapes: EMPTY_EDIT_SET,
+  deletedSlides: [],
+  addedSlides: [],
+}
 
 export function hasEdits(edits: DeckEdits): boolean {
-  return Object.keys(edits.shapes).length > 0 || edits.deletedSlides.length > 0
+  return (
+    Object.keys(edits.shapes).length > 0 ||
+    edits.deletedSlides.length > 0 ||
+    edits.addedSlides.length > 0
+  )
 }
 
 /**
@@ -211,37 +232,100 @@ export function effectiveParagraphs(edit: ShapeEdit, base: readonly Paragraph[])
   return paras
 }
 
+/**
+ * The rendered slide order: base slides minus deletions, with added slides
+ * inserted after their anchors ('' anchors at the front; an added slide can
+ * itself anchor later additions).
+ */
+function composeSlideOrder(deck: SlideDeck, edits: DeckEdits): Slide[] {
+  const removed = new Set(edits.deletedSlides)
+  if (edits.addedSlides.length === 0) {
+    return removed.size === 0 ? [...deck.slides] : deck.slides.filter((s) => !removed.has(s.xmlPath))
+  }
+  const byAnchor = new Map<string, AddedSlide[]>()
+  for (const a of edits.addedSlides) {
+    const list = byAnchor.get(a.afterPath) ?? []
+    list.push(a)
+    byAnchor.set(a.afterPath, list)
+  }
+  const ordered: Slide[] = []
+  const visited = new Set<string>()
+  const emitAdds = (anchorPath: string): void => {
+    for (const a of byAnchor.get(anchorPath) ?? []) {
+      if (visited.has(a.path)) continue // defensive: an anchor cycle can't hang the render
+      visited.add(a.path)
+      ordered.push(a.slide)
+      emitAdds(a.path)
+    }
+  }
+  emitAdds('')
+  for (const slide of deck.slides) {
+    if (removed.has(slide.xmlPath)) continue
+    ordered.push(slide)
+    emitAdds(slide.xmlPath)
+  }
+  // An add whose anchor vanished (never reachable from the UI) still renders,
+  // at the end, rather than silently disappearing from the editor.
+  for (const a of edits.addedSlides) {
+    if (!visited.has(a.path)) ordered.push(a.slide)
+  }
+  return ordered
+}
+
 /** The deck as the user currently sees it. `deck` itself is never mutated. */
 export function applyEditSet(deck: SlideDeck, edits: DeckEdits): SlideDeck {
   if (!hasEdits(edits)) return deck
-  const removedSlides = new Set(edits.deletedSlides)
   return {
     ...deck,
-    slides: deck.slides
-      .filter((slide) => !removedSlides.has(slide.xmlPath))
-      .map((slide) => {
-        let touched = false
-        const shapes: Shape[] = []
-        for (const shape of slide.shapes) {
-          const edit = edits.shapes[shapeKeyOf(slide.xmlPath, shape.nodePath)]
-          if (!edit) {
-            shapes.push(shape)
-            continue
-          }
-          touched = true
-          if (edit.deleted) continue
-          let next: Shape = shape
-          if (edit.geometry) next = { ...next, xfrmEmu: { ...edit.geometry } }
-          if (next.type === 'text' && (edit.text || edit.formats || edit.aligns)) {
-            next = {
-              ...next,
-              paragraphs: effectiveParagraphs(edit, (next as TextShape).paragraphs),
-            }
-          }
-          shapes.push(next)
+    slides: composeSlideOrder(deck, edits).map((slide) => {
+      let touched = false
+      const shapes: Shape[] = []
+      for (const shape of slide.shapes) {
+        const edit = edits.shapes[shapeKeyOf(slide.xmlPath, shape.nodePath)]
+        if (!edit) {
+          shapes.push(shape)
+          continue
         }
-        return touched ? { ...slide, shapes } : slide
-      }),
+        touched = true
+        if (edit.deleted) continue
+        let next: Shape = shape
+        if (edit.geometry) next = { ...next, xfrmEmu: { ...edit.geometry } }
+        if (next.type === 'text' && (edit.text || edit.formats || edit.aligns)) {
+          next = {
+            ...next,
+            paragraphs: effectiveParagraphs(edit, (next as TextShape).paragraphs),
+          }
+        }
+        shapes.push(next)
+      }
+      return touched ? { ...slide, shapes } : slide
+    }),
+  }
+}
+
+/**
+ * The edit set after removing one rendered slide. An ADDED slide is removed by
+ * dropping its entry (it never existed in the file); a base slide joins
+ * `deletedSlides`. Either way its shape edits go, and any additions anchored
+ * to it re-anchor to `reanchorTo` (its rendered predecessor; '' for the front)
+ * so they keep their place in the deck.
+ */
+export function withSlideRemoved(
+  edits: DeckEdits,
+  targetPath: string,
+  reanchorTo: string,
+): DeckEdits {
+  const shapes = Object.fromEntries(
+    Object.entries(edits.shapes).filter(([, v]) => v.slidePath !== targetPath),
+  )
+  const wasAdded = edits.addedSlides.some((a) => a.path === targetPath)
+  const addedSlides = edits.addedSlides
+    .filter((a) => a.path !== targetPath)
+    .map((a) => (a.afterPath === targetPath ? { ...a, afterPath: reanchorTo } : a))
+  return {
+    shapes,
+    addedSlides,
+    deletedSlides: wasAdded ? edits.deletedSlides : [...edits.deletedSlides, targetPath],
   }
 }
 

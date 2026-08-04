@@ -942,11 +942,24 @@ export function updateSlideXml(slideXmlRaw: string, edits: readonly SlideEdit[])
   return applySplices(slideXmlRaw, ops)
 }
 
-// ------------------------------------------------------------ slide deletion
+// ------------------------------------------- slide addition / deletion
 
 const PRESENTATION_PATH = 'ppt/presentation.xml'
 const PRESENTATION_RELS_PATH = 'ppt/_rels/presentation.xml.rels'
 const CONTENT_TYPES_PATH = '[Content_Types].xml'
+const OFFICE_REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+
+/** A synthesized slide to add to the package (see lib/pptx/add-slide.ts). */
+export interface NewSlidePart {
+  /** New part path; must not collide with any existing entry. */
+  path: string
+  /** Complete slide XML; slide edits addressed at `path` apply on top of it. */
+  xml: string
+  /** Complete .rels for the part. */
+  relsXml: string
+  /** Existing or previously-added slide this one follows; '' = deck front. */
+  afterPath: string
+}
 
 /** Attribute value from a scanned open tag, by exact raw name. */
 function rawAttrOf(info: OpenTagInfo, name: string): string | undefined {
@@ -969,30 +982,51 @@ async function requiredPart(zip: JSZip, path: string): Promise<string> {
 }
 
 /**
- * The three package-part rewrites a slide deletion forces, computed as element
- * -range splices so every byte outside the removed elements is untouched:
+ * The three package-part rewrites slide addition and deletion force, computed
+ * as element-range splices (removals) and point insertions so every byte
+ * outside the touched elements is untouched:
  *
- *  - `ppt/_rels/presentation.xml.rels`: the slide's `<Relationship>` goes, and
- *    resolving its Target is how the slide's `r:id` is found in the first place;
- *  - `ppt/presentation.xml`: the `<p:sldId>` carrying that `r:id` goes;
- *  - `[Content_Types].xml`: the slide's per-part `<Override>` goes when one
- *    exists; a package typed some other way is left alone.
+ *  - `ppt/_rels/presentation.xml.rels`: a deleted slide's `<Relationship>`
+ *    goes (resolving its Target is how the slide's `r:id` is found); an added
+ *    slide appends one with a freshly assigned unique `rId`;
+ *  - `ppt/presentation.xml`: the `<p:sldId>` carrying that `r:id` goes /
+ *    a new one is inserted right after its anchor's, with a unique numeric id;
+ *  - `[Content_Types].xml`: the per-part `<Override>` goes when one exists /
+ *    a new one is appended, typed like the existing slide Overrides.
  *
  * Every lookup must resolve to exactly one element or the save fails closed.
  */
-async function slideRemovalReplacements(
+async function packageReplacements(
   zip: JSZip,
   deletions: readonly string[],
+  adds: readonly NewSlidePart[],
 ): Promise<Map<string, string>> {
   const relsRaw = await requiredPart(zip, PRESENTATION_RELS_PATH)
   const relsRoot = childElementsIn(relsRaw, 0, relsRaw.length).find(
     (e) => localOf(e.name) === 'Relationships',
   )
   if (!relsRoot) fail(`no <Relationships> element in ${PRESENTATION_RELS_PATH}`)
+  if (relsRoot.selfClosing) fail(`empty <Relationships/> in ${PRESENTATION_RELS_PATH}`)
   const relElems = childElemsOf(relsRaw, relsRoot).filter((e) => localOf(e.name) === 'Relationship')
 
+  /** Slide part path -> its relationship's rId, for every slide Relationship. */
+  const rIdBySlidePath = new Map<string, string>()
+  let maxRelNum = 0
+  for (const e of relElems) {
+    const info = openTagInfo(relsRaw, e)
+    const rId = rawAttrOf(info, 'Id')
+    if (!rId) continue
+    const m = rId.match(/^rId(\d+)$/)
+    if (m) maxRelNum = Math.max(maxRelNum, Number(m[1]))
+    const target = rawAttrOf(info, 'Target')
+    const type = rawAttrOf(info, 'Type') ?? ''
+    if (target !== undefined && type.endsWith('/slide')) {
+      rIdBySlidePath.set(resolveRelTarget('ppt', target), rId)
+    }
+  }
+
   const relOps: SpliceOp[] = []
-  const rIds: string[] = []
+  const deletedRIds: string[] = []
   for (const slidePath of deletions) {
     const matches = relElems.filter((e) => {
       const info = openTagInfo(relsRaw, e)
@@ -1008,7 +1042,7 @@ async function slideRemovalReplacements(
       fail(`expected exactly one slide relationship for ${slidePath}, found ${matches.length}`)
     }
     const rId = rawAttrOf(openTagInfo(relsRaw, matches[0]), 'Id') ?? fail('slide relationship has no Id')
-    rIds.push(rId)
+    deletedRIds.push(rId)
     relOps.push({ start: matches[0].start, end: matches[0].end, insert: '' })
   }
 
@@ -1018,10 +1052,13 @@ async function slideRemovalReplacements(
   )
   if (!presRoot) fail('no <p:presentation> element in presentation.xml')
   const sldIdLst = childElemByLocal(presRaw, presRoot, 'sldIdLst') ?? fail('presentation.xml has no sldIdLst')
-  const sldIds = childElemsOf(presRaw, sldIdLst).filter((e) => localOf(e.name) === 'sldId')
+  if (adds.length > 0 && sldIdLst.selfClosing) fail('presentation.xml has an empty <p:sldIdLst/>')
+  const sldIds = sldIdLst.selfClosing
+    ? []
+    : childElemsOf(presRaw, sldIdLst).filter((e) => localOf(e.name) === 'sldId')
 
   const presOps: SpliceOp[] = []
-  for (const rId of rIds) {
+  for (const rId of deletedRIds) {
     const matches = sldIds.filter((e) => rawPrefixedAttrOf(openTagInfo(presRaw, e), 'id') === rId)
     if (matches.length !== 1) {
       fail(`expected exactly one p:sldId with r:id ${rId}, found ${matches.length}`)
@@ -1045,6 +1082,7 @@ async function slideRemovalReplacements(
     (e) => localOf(e.name) === 'Types',
   )
   if (!typesRoot) fail('no <Types> element in [Content_Types].xml')
+  if (typesRoot.selfClosing) fail('empty <Types/> in [Content_Types].xml')
   const overrides = childElemsOf(typesRaw, typesRoot).filter((e) => localOf(e.name) === 'Override')
 
   const typeOps: SpliceOp[] = []
@@ -1058,6 +1096,88 @@ async function slideRemovalReplacements(
     if (matches.length === 1) {
       typeOps.push({ start: matches[0].start, end: matches[0].end, insert: '' })
     }
+  }
+
+  // ---- additions -----------------------------------------------------------
+
+  if (adds.length > 0) {
+    // New sldIds copy the anchor list's element prefix; the r: prefix comes
+    // from whatever the root binds to the officeDocument relationship NS.
+    const pPfx = prefixOf(sldIdLst.name)
+    let rPfx = 'r'
+    for (const a of openTagInfo(presRaw, presRoot).attrs) {
+      if (a.value === OFFICE_REL_NS && a.name.startsWith('xmlns:')) rPfx = a.name.slice(6)
+    }
+
+    // The new part must be typed like the slides already in the package.
+    const slideOverride = overrides.find((e) =>
+      (rawAttrOf(openTagInfo(typesRaw, e), 'PartName') ?? '').startsWith('/ppt/slides/'),
+    )
+    const slideContentType = slideOverride
+      ? rawAttrOf(openTagInfo(typesRaw, slideOverride), 'ContentType')
+      : undefined
+    if (!slideContentType) {
+      fail('no existing slide Override in [Content_Types].xml to type the new slide after')
+    }
+
+    let nextSldIdNum = 255
+    for (const e of sldIds) {
+      const n = Number(rawAttrOf(openTagInfo(presRaw, e), 'id'))
+      if (Number.isFinite(n)) nextSldIdNum = Math.max(nextSldIdNum, n)
+    }
+
+    const addsByAnchor = new Map<string, NewSlidePart[]>()
+    for (const a of adds) {
+      const list = addsByAnchor.get(a.afterPath) ?? []
+      list.push(a)
+      addsByAnchor.set(a.afterPath, list)
+    }
+
+    // Insertion offsets group by the nearest BASE anchor (an added anchor
+    // shares its parent's offset and simply follows it in the group), so each
+    // offset gets ONE insert op with the chain concatenated in order.
+    const groups = new Map<number, string[]>()
+    const relInserts: string[] = []
+    const typeInserts: string[] = []
+    const placed = new Set<string>()
+    const emit = (anchorPath: string, offset: number): void => {
+      for (const a of addsByAnchor.get(anchorPath) ?? []) {
+        if (placed.has(a.path)) fail(`added slide ${a.path} appears twice`)
+        placed.add(a.path)
+        const rId = `rId${++maxRelNum}`
+        const sldTag = pPfx ? `${pPfx}:sldId` : 'sldId'
+        const rAttr = rPfx ? `${rPfx}:id` : 'id'
+        const group = groups.get(offset) ?? []
+        group.push(`<${sldTag} id="${++nextSldIdNum}" ${rAttr}="${rId}"/>`)
+        groups.set(offset, group)
+        if (!a.path.startsWith('ppt/')) fail(`unexpected added slide location ${a.path}`)
+        relInserts.push(
+          `<Relationship Id="${rId}" Type="${OFFICE_REL_NS}/slide" Target="${a.path.slice(4)}"/>`,
+        )
+        typeInserts.push(`<Override PartName="/${a.path}" ContentType="${slideContentType}"/>`)
+        emit(a.path, offset)
+      }
+    }
+    emit('', sldIdLst.contentStart)
+    for (const [slidePath, rId] of rIdBySlidePath) {
+      if (!addsByAnchor.has(slidePath)) continue
+      const anchor = sldIds.find((e) => rawPrefixedAttrOf(openTagInfo(presRaw, e), 'id') === rId)
+      if (!anchor) fail(`anchor slide ${slidePath} has no p:sldId`)
+      emit(slidePath, anchor.end)
+    }
+    for (const a of adds) {
+      if (!placed.has(a.path)) fail(`added slide ${a.path} has an unknown anchor ${a.afterPath}`)
+    }
+
+    for (const [offset, inserts] of groups) {
+      presOps.push({ start: offset, end: offset, insert: inserts.join('') })
+    }
+    relOps.push({ start: relsRoot.contentEnd, end: relsRoot.contentEnd, insert: relInserts.join('') })
+    typeOps.push({
+      start: typesRoot.contentEnd,
+      end: typesRoot.contentEnd,
+      insert: typeInserts.join(''),
+    })
   }
 
   const replacements = new Map<string, string>()
@@ -1077,6 +1197,12 @@ export interface WriteDeckOptions {
    * slide stays in the package — orphaned media is valid OOXML.
    */
   deleteSlides?: readonly string[]
+  /**
+   * Synthesized slides to add, in order. Each contributes its part + .rels and
+   * an inserted sldId / Relationship / Override; edits addressed at an added
+   * path apply against its synthesized XML.
+   */
+  addSlides?: readonly NewSlidePart[]
 }
 
 /**
@@ -1089,8 +1215,12 @@ export async function writeDeck(
   editsBySlide: ReadonlyMap<string, readonly SlideEdit[]>,
   options?: WriteDeckOptions,
 ): Promise<Uint8Array> {
+  const adds = options?.addSlides ?? []
+  const addByPath = new Map(adds.map((a) => [a.path, a]))
+  if (addByPath.size !== adds.length) fail('duplicate added slide paths')
+
   for (const slidePath of editsBySlide.keys()) {
-    if (deck.source.slideXml[slidePath] === undefined) {
+    if (deck.source.slideXml[slidePath] === undefined && !addByPath.has(slidePath)) {
       fail(`edits reference unknown slide ${slidePath}`)
     }
   }
@@ -1108,10 +1238,26 @@ export async function writeDeck(
     fail('cannot delete every slide in the deck')
   }
 
+  const deleted = new Set(deletions)
+  for (const a of adds) {
+    if (deck.source.zip.file(a.path) || deck.source.slideXml[a.path] !== undefined) {
+      fail(`added slide ${a.path} collides with an existing part`)
+    }
+    if (deleted.has(a.path)) fail(`added slide ${a.path} is also marked deleted`)
+    if (deleted.has(a.afterPath)) {
+      fail(`added slide ${a.path} is anchored to ${a.afterPath}, which is being deleted`)
+    }
+    const anchorKnown =
+      a.afterPath === '' ||
+      deck.source.slideXml[a.afterPath] !== undefined ||
+      addByPath.has(a.afterPath)
+    if (!anchorKnown) fail(`added slide ${a.path} has an unknown anchor ${a.afterPath}`)
+  }
+
   const removedParts = new Set(deletions.flatMap((p) => [p, relsPathFor(p)]))
   const replacements =
-    deletions.length > 0
-      ? await slideRemovalReplacements(deck.source.zip, deletions)
+    deletions.length > 0 || adds.length > 0
+      ? await packageReplacements(deck.source.zip, deletions, adds)
       : new Map<string, string>()
 
   const out = new JSZip()
@@ -1135,6 +1281,15 @@ export async function writeDeck(
     } else {
       out.file(name, await entry.async('uint8array'), { ...meta, binary: true })
     }
+  }
+  // Added slides: brand-new parts, with any of their own edits applied against
+  // the synthesized XML they were parsed from.
+  for (const a of adds) {
+    const edits = editsBySlide.get(a.path)
+    out.file(a.path, edits && edits.length > 0 ? updateSlideXml(a.xml, edits) : a.xml, {
+      createFolders: false,
+    })
+    out.file(relsPathFor(a.path), a.relsXml, { createFolders: false })
   }
   return out.generateAsync({
     type: 'uint8array',

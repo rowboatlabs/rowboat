@@ -227,14 +227,12 @@ interface Relationship {
   type: string
 }
 
-async function readRels(zip: JSZip, partPath: string): Promise<Map<string, Relationship>> {
+/** Parses a .rels document, resolving Targets against the owning part's dir. */
+function parseRelsXml(relsXml: string, baseDir: string): Map<string, Relationship> {
   const map = new Map<string, Relationship>()
-  const file = zip.file(relsPathFor(partPath))
-  if (!file) return map
-  const doc = parseXml(await file.async('string'))
+  const doc = parseXml(relsXml)
   const root = childByLocal(doc, 'Relationships')
   if (!root) return map
-  const baseDir = dirNameOf(partPath)
   for (const rel of childrenByLocal(childrenOf(root), 'Relationship')) {
     const id = attr(rel, 'Id')
     const target = attr(rel, 'Target')
@@ -243,6 +241,12 @@ async function readRels(zip: JSZip, partPath: string): Promise<Map<string, Relat
     map.set(id, { target: resolveRelTarget(baseDir, target), type: attr(rel, 'Type') ?? '' })
   }
   return map
+}
+
+async function readRels(zip: JSZip, partPath: string): Promise<Map<string, Relationship>> {
+  const file = zip.file(relsPathFor(partPath))
+  if (!file) return new Map()
+  return parseRelsXml(await file.async('string'), dirNameOf(partPath))
 }
 
 function relTargetOfType(rels: Map<string, Relationship>, suffix: string): string | undefined {
@@ -909,9 +913,11 @@ async function parseSlide(
   blobUrls: string[],
   presDefaultNode: XmlNode | undefined,
   styleCache: Map<string, SlideStyleContext>,
+  /** For parts not (yet) in the zip — a freshly synthesized slide's rels. */
+  relsOverride?: Map<string, Relationship>,
 ): Promise<Slide> {
   const doc = parseXml(xml)
-  const rels = await readRels(zip, xmlPath)
+  const rels = relsOverride ?? (await readRels(zip, xmlPath))
   const styles = await loadSlideContext(zip, rels, presDefaultNode, styleCache, blobUrls)
   const ctx: ShapeContext = { slideXmlPath: xmlPath, rels, styles, zip, blobUrls }
 
@@ -1018,6 +1024,32 @@ export async function parsePptx(bytes: Uint8Array): Promise<SlideDeck> {
   }
 
   return { slideSizeEmu, slides, source: { zip, slideXml } }
+}
+
+/**
+ * Parses a slide that exists only in the edit set — a freshly added slide
+ * whose part and .rels are synthesized strings, not zip entries yet. Renders
+ * through the exact pipeline real slides use (layout underlay, placeholder
+ * geometry, style cascade), so an added slide looks right before its first
+ * save. The returned Slide's nodePaths index into `xml`, which is what the
+ * serializer applies this slide's edits against.
+ */
+export async function parseAddedSlide(
+  deck: SlideDeck,
+  xmlPath: string,
+  xml: string,
+  relsXml: string,
+): Promise<Slide> {
+  const zip = deck.source.zip
+  const rels = parseRelsXml(relsXml, dirNameOf(xmlPath))
+  // The presentation-level default text style, re-read since parsePptx's
+  // local doesn't survive parsing.
+  const presFile = zip.file('ppt/presentation.xml')
+  const presDoc = presFile ? parseXml(await presFile.async('string')) : []
+  const pres = childByLocal(presDoc, 'presentation')
+  const presDefaultNode = pres ? childByLocal(childrenOf(pres), 'defaultTextStyle') : undefined
+  const blobUrls: string[] = []
+  return parseSlide(zip, xmlPath, xml, blobUrls, presDefaultNode, new Map(), rels)
 }
 
 /**

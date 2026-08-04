@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
-import { ExternalLinkIcon, Loader2Icon, PresentationIcon, Trash2Icon } from 'lucide-react'
+import { ExternalLinkIcon, Loader2Icon, PlusIcon, PresentationIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -20,7 +20,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { disposeDeck, parsePptx } from '@/lib/pptx/parse'
+import { disposeDeck, parseAddedSlide, parsePptx } from '@/lib/pptx/parse'
+import { planNewSlide } from '@/lib/pptx/add-slide'
 import { writeDeck, type EditedParagraph, type RunFormatOverrides } from '@/lib/pptx/serialize'
 import type { NodePath, Paragraph, Shape, Slide, SlideDeck, TextAlign, TextShape } from '@/lib/pptx/types'
 import {
@@ -36,6 +37,7 @@ import {
   structureMatches,
   toSlideEdits,
   withShapeEdit,
+  withSlideRemoved,
   type DeckEdits,
   type EditSet,
   type RectEmuBox,
@@ -180,6 +182,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         const edits = editSetRef.current
         const bytes = await writeDeck(base, toSlideEdits(edits.shapes), {
           deleteSlides: edits.deletedSlides,
+          addSlides: edits.addedSlides,
         })
         return uint8ArrayToBase64(bytes)
       },
@@ -586,21 +589,49 @@ export function PptxEditor({ path }: PptxEditorProps) {
     [deck],
   )
 
+  // Keynote-style Add Slide: a new slide on the SAME layout as the active one,
+  // inserted right after it, seeded with the layout's placeholder boxes. Both
+  // the part strings and the pre-parsed render live in the edit set, so the
+  // add is undoable and only reaches the file through the normal save.
+  const addingSlideRef = useRef(false)
+  const addSlide = useCallback(async () => {
+    const base = baseDeckRef.current
+    if (!base || !slide || addingSlideRef.current) return
+    addingSlideRef.current = true
+    try {
+      const cur = editSetRef.current
+      const anchorAdded = cur.addedSlides.find((a) => a.path === slide.xmlPath)
+      const plan = await planNewSlide(
+        base,
+        slide.xmlPath,
+        anchorAdded?.relsXml,
+        cur.addedSlides.map((a) => a.path),
+      )
+      const parsed = await parseAddedSlide(base, plan.path, plan.xml, plan.relsXml)
+      pushEdits({ ...cur, addedSlides: [...cur.addedSlides, { ...plan, slide: parsed }] })
+      setSelectedKey(null)
+      setEditingKey(null)
+      setActiveIndex(currentIndex + 1)
+    } catch (err) {
+      console.error('Failed to add slide:', err)
+      toast.error('Could not add a slide to this presentation.')
+    } finally {
+      addingSlideRef.current = false
+    }
+  }, [slide, currentIndex, pushEdits])
+
   const confirmDeleteSlide = useCallback(() => {
     const index = confirmDeleteIndex
     setConfirmDeleteIndex(null)
     if (index === null || !deck) return
     const target = deck.slides[index]
     if (!target || deck.slides.length <= 1) return
-    const cur = editSetRef.current
-    // Prune the deleted slide's shape edits: their splices are moot, and the
-    // serializer refuses a slide that is both edited and deleted. The prior
-    // history entry still holds them, so undo restores slide and edits alike.
-    const shapes: Record<ShapeKey, (typeof cur.shapes)[ShapeKey]> = {}
-    for (const [k, v] of Object.entries(cur.shapes)) {
-      if (v.slidePath !== target.xmlPath) shapes[k] = v
-    }
-    pushEdits({ shapes, deletedSlides: [...cur.deletedSlides, target.xmlPath] })
+    // withSlideRemoved prunes the slide's shape edits (their splices are moot,
+    // and the serializer refuses a slide both edited and deleted), drops an
+    // ADDED slide outright, and re-anchors any additions that followed it. The
+    // prior history entry still holds everything, so undo restores it all.
+    const reanchorTo = deck.slides[index - 1]?.xmlPath ?? ''
+    pushEdits(withSlideRemoved(editSetRef.current, target.xmlPath, reanchorTo))
     setSelectedKey(null)
     setEditingKey(null)
     setActiveIndex((i) => {
@@ -753,10 +784,19 @@ export function PptxEditor({ path }: PptxEditorProps) {
             aria-label="Slides"
             className="flex w-56 shrink-0 flex-col border-r border-border bg-card/40"
           >
-            <div className="flex shrink-0 items-center border-b border-border px-3 py-2">
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
               <span className="text-[11px] font-medium text-muted-foreground">
                 Slides · {deck.slides.length}
               </span>
+              <button
+                type="button"
+                aria-label="Add slide"
+                title="Add slide"
+                onClick={() => void addSlide()}
+                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <PlusIcon className="size-3.5" />
+              </button>
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2">
               {deck.slides.map((s, i) => (
