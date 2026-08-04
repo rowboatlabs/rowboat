@@ -97,6 +97,12 @@ export interface ResolvedRunStyle {
   colorHex: string
   /** Ready-to-use CSS font-family. Absent when nothing is authored anywhere. */
   fontFamily?: string
+  /**
+   * `a:rPr@spc` character tracking in points; negative tightens. Absolute, so
+   * unlike the size it is not scaled by normAutofit — same rule as a fixed
+   * `a:spcPts` line height.
+   */
+  letterSpacingPt?: number
 }
 
 /** CSS line-height used when no a:lnSpc is authored anywhere in the cascade. */

@@ -210,6 +210,21 @@ describe('run property cascade', () => {
     expect(literal.eaFont).toBeUndefined()
   })
 
+  it('parses a:rPr@spc character tracking, hundredths of a point', () => {
+    const t = loadTheme()
+    // Canva authors negative tracking so a heading fits its box on one line;
+    // dropping it re-wraps the text and overflows the shape below.
+    expect(runLayerFromRPr(firstNode(`<a:rPr ${A} spc="-315"/>`), t).letterSpacingPt).toBe(-3.15)
+    expect(runLayerFromRPr(firstNode(`<a:rPr ${A} spc="300"/>`), t).letterSpacingPt).toBe(3)
+    expect(runLayerFromRPr(firstNode(`<a:rPr ${A}/>`), t).letterSpacingPt).toBeUndefined()
+    // It rides the cascade like every other run property.
+    const lst = parseListStyle(
+      firstNode(`<a:lstStyle ${A}><a:lvl1pPr><a:defRPr spc="-120"/></a:lvl1pPr></a:lstStyle>`),
+      t,
+    )
+    expect(mergeLevelStyles(layersOf(lst, 0)).letterSpacingPt).toBe(-1.2)
+  })
+
   it('parses lnSpc/spcBef/spcAft in both spcPct and spcPts forms', () => {
     const pPr = firstNode(
       `<a:pPr ${A}><a:lnSpc><a:spcPct val="150000"/></a:lnSpc>` +
@@ -361,7 +376,7 @@ const DECK_SLIDE =
   '<a:p><a:pPr lvl="1"/><a:r><a:rPr sz="1200"/><a:t>explicit</a:t></a:r></a:p>' +
   '<a:p><a:r><a:rPr><a:solidFill><a:schemeClr val="accent1"><a:lumMod val="60000"/><a:lumOff val="40000"/></a:schemeClr></a:solidFill></a:rPr><a:t>tinted</a:t></a:r></a:p>' +
   '<a:p><a:pPr><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPts val="1200"/></a:spcBef><a:spcAft><a:spcPct val="50000"/></a:spcAft></a:pPr>' +
-  '<a:r><a:rPr><a:latin typeface="+mj-lt"/></a:rPr><a:t>spaced</a:t></a:r></a:p>' +
+  '<a:r><a:rPr spc="-315"><a:latin typeface="+mj-lt"/></a:rPr><a:t>spaced</a:t></a:r></a:p>' +
   '</p:txBody></p:sp>' +
   // A themed rectangle with no txBody.
   `<p:sp><p:nvSpPr><p:cNvPr id="3" name="Box"/></p:nvSpPr>` +
@@ -487,6 +502,8 @@ describe('deck-level display resolution', () => {
     expect(spaced.spaceAfterPt).toBe(12)
     // The run's own +mj-lt beats the inherited minor font.
     expect(spaced.runs[0].fontFamily).toBe("'TitleFace', sans-serif")
+    // Authored tracking survives the cascade onto the resolved run.
+    expect(spaced.runs[0].letterSpacingPt).toBe(-3.15)
 
     // normAutofit factors from the shape's own bodyPr.
     expect(display.autofit).toEqual({ fontScale: 0.625, lnSpcReduction: 0.2 })

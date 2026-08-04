@@ -18,7 +18,9 @@ import {
   EMU_PER_PX,
   acceptsFormatting,
   applyEditSet,
+  editHoldsFormatting,
   hasEdits,
+  isNoopCommit,
   runKeyOf,
   shapeKeyOf,
   structureMatches,
@@ -380,15 +382,15 @@ export function PptxEditor({ path }: PptxEditorProps) {
       }
 
       const previous = editSetRef.current[key]
-      const hadFormatting =
-        Boolean(previous?.formats && Object.keys(previous.formats).length) ||
-        Boolean(previous?.aligns && Object.keys(previous.aligns).length)
-      const nothingChanged =
-        !textChanged &&
-        Object.keys(formats).length === 0 &&
-        Object.keys(aligns).length === 0 &&
-        !hadFormatting
-      if (nothingChanged) return
+      const hadFormatting = editHoldsFormatting(previous)
+      // Retyping the original text is a revert, not a no-op: it must fall
+      // through so the accumulated text edit below is cleared.
+      const noop = isNoopCommit(previous, {
+        textChanged,
+        formatCount: Object.keys(formats).length,
+        alignCount: Object.keys(aligns).length,
+      })
+      if (noop) return
 
       if (structural && hadFormatting) {
         toast.info('Formatting was reset on this text box because its structure changed.')

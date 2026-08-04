@@ -34,6 +34,12 @@ export interface RunLayerProps {
   latinFont?: string
   eaFont?: string
   csFont?: string
+  /**
+   * Character tracking in points from `a:rPr@spc` (authored in hundredths).
+   * Negative tightens. Design tools author this to make a heading fit its box
+   * on exactly one line, so ignoring it re-wraps the text and overflows.
+   */
+  letterSpacingPt?: number
 }
 
 /** One a:lnSpc / a:spcBef / a:spcAft value. Exactly one field is set. */
@@ -195,6 +201,8 @@ export function runLayerFromRPr(rPr: XmlNode | undefined, theme: Theme): RunLaye
   if (u !== undefined) out.underline = u !== 'none'
   const sz = num(attr(rPr, 'sz'))
   if (sz !== undefined) out.sizePt = sz / 100
+  const spc = num(attr(rPr, 'spc'))
+  if (spc !== undefined) out.letterSpacingPt = spc / 100
   const kids = childrenOf(rPr)
   const fill = childByLocal(kids, 'solidFill')
   const color = resolveFirstColor(fill, theme)
@@ -314,6 +322,9 @@ export function mergeLevelStyles(layers: readonly LevelStyle[]): LevelStyle {
     if (out.latinFont === undefined && layer.latinFont !== undefined) out.latinFont = layer.latinFont
     if (out.eaFont === undefined && layer.eaFont !== undefined) out.eaFont = layer.eaFont
     if (out.csFont === undefined && layer.csFont !== undefined) out.csFont = layer.csFont
+    if (out.letterSpacingPt === undefined && layer.letterSpacingPt !== undefined) {
+      out.letterSpacingPt = layer.letterSpacingPt
+    }
     if (out.lnSpc === undefined && layer.lnSpc !== undefined) out.lnSpc = layer.lnSpc
     if (out.spcBef === undefined && layer.spcBef !== undefined) out.spcBef = layer.spcBef
     if (out.spcAft === undefined && layer.spcAft !== undefined) out.spcAft = layer.spcAft

@@ -752,6 +752,8 @@ function resolveTextDisplay(
       explicit.csFont ?? merged.csFont,
     )
     if (fontFamily) style.fontFamily = fontFamily
+    const spc = explicit.letterSpacingPt ?? merged.letterSpacingPt
+    if (spc !== undefined && spc !== 0) style.letterSpacingPt = spc
     return style
   }
 

@@ -1,16 +1,20 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
 import { parsePptx } from '@/lib/pptx/parse'
-import { updateSlideXml, type EditedParagraph } from '@/lib/pptx/serialize'
+import { updateSlideXml, writeDeck, type EditedParagraph } from '@/lib/pptx/serialize'
 import type { Paragraph, TextShape } from '@/lib/pptx/types'
 import { buildEditableHtml, extractParagraphs } from './text-dom'
 import {
   acceptsFormatting,
   applyEditSet,
   effectiveParagraphs,
+  isNoopCommit,
   shapeKeyOf,
   structureMatches,
+  toSlideEdits,
+  withShapeEdit,
   type EditSet,
+  type ShapeEdit,
 } from './edit-model'
 
 const PRES =
@@ -49,6 +53,8 @@ afterAll(() => {
   URL.createObjectURL = originalCreate
   URL.revokeObjectURL = originalRevoke
 })
+
+type CommitDeltaCase = { textChanged: boolean; formatCount: number; alignCount: number }
 
 async function loadSlide(xml: string) {
   const zip = new JSZip()
@@ -109,6 +115,63 @@ describe('paragraph provenance survives rendering', () => {
     expect(out).toContain('<a:buChar char="B"/>')
     expect(out).toContain('algn="r"')
     expect(out).not.toContain('<a:buChar char="H"/>')
+  })
+})
+
+describe('retyping the original text reverts the edit', () => {
+  it('isNoopCommit only skips when there is no accumulated edit to clear', () => {
+    const clean: CommitDeltaCase = { textChanged: false, formatCount: 0, alignCount: 0 }
+    const withText: ShapeEdit = {
+      slidePath: 's',
+      nodePath: [0],
+      text: [{ srcPara: 0, runs: [{ text: 'edited' }] }],
+    }
+    // Nothing accumulated and nothing changed -> genuinely a no-op.
+    expect(isNoopCommit(undefined, clean)).toBe(true)
+    // A prior text edit is still recorded -> this commit is a REVERT.
+    expect(isNoopCommit(withText, clean)).toBe(false)
+    // Prior formatting likewise must be cleared.
+    expect(isNoopCommit({ slidePath: 's', nodePath: [0], formats: { '0:0': { bold: true } } }, clean)).toBe(false)
+    // Any real change always commits.
+    expect(isNoopCommit(undefined, { ...clean, textChanged: true })).toBe(false)
+  })
+
+  it('edit -> save -> retype original -> save writes byte-identical slide XML', async () => {
+    const { deck, slide, shape } = await loadSlide(STYLED_SLIDE)
+    const key = shapeKeyOf(slide.xmlPath, shape.nodePath)
+    const original = shape.paragraphs
+    const seed = { slidePath: slide.xmlPath, nodePath: shape.nodePath, original }
+
+    // 1. Edit the text and save — the slide really is rewritten.
+    const edited: EditedParagraph[] = [
+      { align: original[0].align, srcPara: 0, runs: [{ ...original[0].runs[0], text: 'Changed', srcPara: 0, srcRun: 0 }] },
+    ]
+    let edits = withShapeEdit({}, key, seed, (d) => {
+      d.original = original
+      d.text = edited
+    })
+    const afterEdit = await writeDeck(deck, toSlideEdits(edits))
+    const editedXml = await (await JSZip.loadAsync(afterEdit)).files[slide.xmlPath].async('string')
+    expect(editedXml).not.toBe(STYLED_SLIDE)
+    expect(editedXml).toContain('<a:t>Changed</a:t>')
+
+    // 2. Retype the original wording. Nothing differs from the original file,
+    //    but the accumulated text edit still has to be cleared.
+    const previous = edits[key]
+    expect(isNoopCommit(previous, { textChanged: false, formatCount: 0, alignCount: 0 })).toBe(false)
+    edits = withShapeEdit(edits, key, seed, (d) => {
+      d.original = original
+      d.text = undefined // what handleTextCommit assigns when nothing changed
+    })
+
+    // The shape's entry is gone entirely, so the slide is not touched at all.
+    expect(edits[key]).toBeUndefined()
+    expect(toSlideEdits(edits).size).toBe(0)
+
+    // 3. Save again — byte-identical to the original slide XML.
+    const afterRevert = await writeDeck(deck, toSlideEdits(edits))
+    const revertedXml = await (await JSZip.loadAsync(afterRevert)).files[slide.xmlPath].async('string')
+    expect(revertedXml).toBe(STYLED_SLIDE)
   })
 })
 

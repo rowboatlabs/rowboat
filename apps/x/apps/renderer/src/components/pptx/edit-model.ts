@@ -111,6 +111,36 @@ export function structureMatches(
   return isTextOnlyEdit(original, next)
 }
 
+/** True when the accumulated edit records run formatting or paragraph alignment. */
+export function editHoldsFormatting(edit: ShapeEdit | undefined): boolean {
+  return (
+    Boolean(edit?.formats && Object.keys(edit.formats).length > 0) ||
+    Boolean(edit?.aligns && Object.keys(edit.aligns).length > 0)
+  )
+}
+
+/** What a text commit found to differ from the ORIGINAL file. */
+export interface CommitDelta {
+  textChanged: boolean
+  formatCount: number
+  alignCount: number
+}
+
+/**
+ * True when a commit can be dropped entirely: nothing differs from the
+ * original AND no earlier edit for this shape is left to clear.
+ *
+ * That second half is the easy one to miss. Typing a box's text back to its
+ * original value is a REVERT, not a no-op: the commit has to go through so the
+ * stale `text` edit is dropped. Skipping it left the old edit in the set, so
+ * the canvas snapped back to the superseded text and every save kept writing
+ * it — with no way out but undo.
+ */
+export function isNoopCommit(previous: ShapeEdit | undefined, delta: CommitDelta): boolean {
+  if (delta.textChanged || delta.formatCount > 0 || delta.alignCount > 0) return false
+  return !previous?.text && !editHoldsFormatting(previous)
+}
+
 /** True when this shape can still take formatting/alignment edits. */
 export function acceptsFormatting(edit: ShapeEdit | undefined): boolean {
   if (!edit?.original) return true

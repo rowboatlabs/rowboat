@@ -50,8 +50,10 @@ export function displayRunStyle(
     underline: run.underline ?? dr?.underline ?? false,
     colorHex: run.colorHex ?? dr?.colorHex ?? '000000',
   }
-  // The model never carries a typeface; the resolved cascade is the only source.
+  // The model carries neither typeface nor tracking; the resolved cascade is
+  // the only source for both.
   if (dr?.fontFamily) style.fontFamily = dr.fontFamily
+  if (dr?.letterSpacingPt !== undefined) style.letterSpacingPt = dr.letterSpacingPt
   return style
 }
 
@@ -137,7 +139,10 @@ function runCss(style: ResolvedRunStyle, scale: number, fontScale: number): stri
     `text-decoration:${style.underline ? 'underline' : 'none'};` +
     `font-size:${style.sizePt * fontScale * EMU_PER_PT * scale}px;` +
     `color:#${style.colorHex}` +
-    (style.fontFamily ? `;font-family:${style.fontFamily}` : '')
+    (style.fontFamily ? `;font-family:${style.fontFamily}` : '') +
+    (style.letterSpacingPt !== undefined
+      ? `;letter-spacing:${style.letterSpacingPt * EMU_PER_PT * scale}px`
+      : '')
   )
 }
 

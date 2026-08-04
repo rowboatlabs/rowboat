@@ -99,6 +99,27 @@ describe('SlideThumbnail', () => {
     expect(p?.style.lineHeight).toBe(String(1.2 * (1 - 0.2)))
   })
 
+  it('renders authored character tracking, unscaled by normAutofit', () => {
+    const tracked: ResolvedRunStyle = { ...bodyRun, letterSpacingPt: -3.15 }
+    const shape: TextShape = {
+      ...textShape,
+      display: {
+        anchor: 't',
+        defaultRun: tracked,
+        autofit: { fontScale: 0.5, lnSpcReduction: 0 },
+        paragraphs: [displayParagraph({ runs: [tracked], defaultRun: tracked })],
+      },
+    }
+    const { container } = render(
+      <SlideThumbnail slide={slideWith(shape)} sizeEmu={SIZE_EMU} widthPx={160} />,
+    )
+    const run = container.querySelector<HTMLElement>('p > span')
+    // -3.15pt = -4.2px at the 96dpi reference layout. Tracking is an absolute
+    // typographic measure, so normAutofit's fontScale must NOT scale it.
+    expect(parseFloat(run?.style.letterSpacing ?? '')).toBeCloseTo((-3.15 * 96) / 72, 6)
+    expect(run?.style.fontSize).toBe(`${(BODY_PT * 0.5 * 96) / 72}px`)
+  })
+
   it('renders fixed line spacing and paragraph spacing as px on the block', () => {
     const shape: TextShape = {
       ...textShape,

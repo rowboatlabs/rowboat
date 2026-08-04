@@ -489,6 +489,11 @@ function TextShapeView({
                       fontSize: ptToPx(rs.sizePt),
                       color: `#${rs.colorHex}`,
                       fontFamily: rs.fontFamily,
+                      // Absolute, so it is not scaled by normAutofit.
+                      letterSpacing:
+                        rs.letterSpacingPt !== undefined
+                          ? rs.letterSpacingPt * EMU_PER_PT * scale
+                          : undefined,
                     }}
                   >
                     {run.text}
