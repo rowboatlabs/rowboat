@@ -29,11 +29,14 @@ import {
   childrenOf,
   parseParagraph,
   parseXml,
+  relsPathFor,
   resolveNodePath,
+  resolveRelTarget,
+  shapeIdOf,
   tagNameOf,
   type XmlNode,
 } from './parse'
-import type { NodePath, Paragraph, SlideDeck, TextAlign, TextRun } from './types'
+import type { NodePath, Paragraph, Shape, SlideDeck, TextAlign, TextRun } from './types'
 
 // ------------------------------------------------------------------- types
 
@@ -104,7 +107,29 @@ export interface ShapeGeometryEdit {
   extEmu?: { w: number; h: number }
 }
 
-export type SlideEdit = ShapeTextEdit | FormatRunsEdit | ParagraphAlignEdit | ShapeGeometryEdit
+/**
+ * Removes one shape's entire element range from its slide. The edit carries
+ * what the editor believed about the target — its model kind, its id, and for
+ * text shapes its as-parsed paragraphs — and all of it is re-derived from the
+ * retained bytes and compared before anything is spliced.
+ */
+export interface DeleteShapeEdit {
+  kind: 'deleteShape'
+  nodePath: NodePath
+  /** The model's shape kind; constrains which element names may sit there. */
+  shapeType: Shape['type']
+  /** The model's shape id (`p:cNvPr@id`, or the synthesized `idx:<n>`). */
+  shapeId: string
+  /** Text shapes only: as-parsed paragraphs, revalidated before removal. */
+  original?: Paragraph[]
+}
+
+export type SlideEdit =
+  | ShapeTextEdit
+  | FormatRunsEdit
+  | ParagraphAlignEdit
+  | ShapeGeometryEdit
+  | DeleteShapeEdit
 
 // -------------------------------------------------------------- normalizing
 
@@ -769,6 +794,39 @@ function paragraphAlignOps(ctx: SlideCtx, edit: ParagraphAlignEdit): SpliceOp[] 
   return [{ start: info.closeStart, end: para.elem.end, insert: `>${pPrXml}</${para.elem.name}>` }]
 }
 
+/** Element names each model shape kind can occupy in the spTree. */
+const DELETE_TAGS: Record<Shape['type'], readonly string[]> = {
+  text: ['sp'],
+  drawing: ['sp', 'cxnSp'],
+  image: ['pic'],
+  // Chart/table/diagram placeholders are graphicFrames; video (and missing
+  // media) placeholders are p:pic.
+  placeholder: ['graphicFrame', 'pic'],
+  group: ['grpSp'],
+}
+
+function deleteShapeOps(ctx: SlideCtx, edit: DeleteShapeEdit): SpliceOp[] {
+  const allowed = DELETE_TAGS[edit.shapeType] ?? fail(`unknown shape type "${edit.shapeType}"`)
+  const { node, elem } = locateShape(ctx, edit.nodePath, allowed)
+
+  // Replay the model's id derivation on the re-parsed node. A mismatch means
+  // the path no longer points at the shape the user deleted.
+  const derivedId = shapeIdOf(node, edit.nodePath[edit.nodePath.length - 1])
+  if (derivedId !== edit.shapeId) {
+    fail(`delete target mismatch: edit names shape "${edit.shapeId}", slide XML has "${derivedId}"`)
+  }
+
+  // Text shapes carry their content; re-derive it from the bytes and compare.
+  if (edit.shapeType === 'text') {
+    if (!edit.original) fail('deleting a text shape requires its original paragraphs')
+    validateTextShape(ctx, node, elem, edit.original)
+  }
+
+  // Exactly the element's own byte range: whitespace between siblings sits
+  // outside [start, end) and survives untouched.
+  return [{ start: elem.start, end: elem.end, insert: '' }]
+}
+
 function shapeGeometryOps(ctx: SlideCtx, edit: ShapeGeometryEdit): SpliceOp[] {
   if (!edit.offEmu && !edit.extEmu) return []
   const { elem } = locateShape(ctx, edit.nodePath, ['sp', 'pic', 'cxnSp'])
@@ -874,6 +932,9 @@ export function updateSlideXml(slideXmlRaw: string, edits: readonly SlideEdit[])
       case 'shapeGeometry':
         ops.push(...shapeGeometryOps(ctx, edit))
         break
+      case 'deleteShape':
+        ops.push(...deleteShapeOps(ctx, edit))
+        break
     }
   }
 
@@ -881,7 +942,142 @@ export function updateSlideXml(slideXmlRaw: string, edits: readonly SlideEdit[])
   return applySplices(slideXmlRaw, ops)
 }
 
+// ------------------------------------------------------------ slide deletion
+
+const PRESENTATION_PATH = 'ppt/presentation.xml'
+const PRESENTATION_RELS_PATH = 'ppt/_rels/presentation.xml.rels'
+const CONTENT_TYPES_PATH = '[Content_Types].xml'
+
+/** Attribute value from a scanned open tag, by exact raw name. */
+function rawAttrOf(info: OpenTagInfo, name: string): string | undefined {
+  return info.attrs.find((a) => a.name === name)?.value
+}
+
+/**
+ * The prefixed attribute whose local name matches, mirroring the parser's
+ * `prefixedAttr`: `p:sldId` carries both a plain `id` and the `r:id` we want.
+ */
+function rawPrefixedAttrOf(info: OpenTagInfo, localName: string): string | undefined {
+  const a = info.attrs.find((x) => x.name.includes(':') && localOf(x.name) === localName)
+  return a?.value
+}
+
+async function requiredPart(zip: JSZip, path: string): Promise<string> {
+  const file = zip.file(path)
+  if (!file) fail(`package part ${path} is missing`)
+  return file.async('string')
+}
+
+/**
+ * The three package-part rewrites a slide deletion forces, computed as element
+ * -range splices so every byte outside the removed elements is untouched:
+ *
+ *  - `ppt/_rels/presentation.xml.rels`: the slide's `<Relationship>` goes, and
+ *    resolving its Target is how the slide's `r:id` is found in the first place;
+ *  - `ppt/presentation.xml`: the `<p:sldId>` carrying that `r:id` goes;
+ *  - `[Content_Types].xml`: the slide's per-part `<Override>` goes when one
+ *    exists; a package typed some other way is left alone.
+ *
+ * Every lookup must resolve to exactly one element or the save fails closed.
+ */
+async function slideRemovalReplacements(
+  zip: JSZip,
+  deletions: readonly string[],
+): Promise<Map<string, string>> {
+  const relsRaw = await requiredPart(zip, PRESENTATION_RELS_PATH)
+  const relsRoot = childElementsIn(relsRaw, 0, relsRaw.length).find(
+    (e) => localOf(e.name) === 'Relationships',
+  )
+  if (!relsRoot) fail(`no <Relationships> element in ${PRESENTATION_RELS_PATH}`)
+  const relElems = childElemsOf(relsRaw, relsRoot).filter((e) => localOf(e.name) === 'Relationship')
+
+  const relOps: SpliceOp[] = []
+  const rIds: string[] = []
+  for (const slidePath of deletions) {
+    const matches = relElems.filter((e) => {
+      const info = openTagInfo(relsRaw, e)
+      const target = rawAttrOf(info, 'Target')
+      const type = rawAttrOf(info, 'Type') ?? ''
+      return (
+        target !== undefined &&
+        type.endsWith('/slide') &&
+        resolveRelTarget('ppt', target) === slidePath
+      )
+    })
+    if (matches.length !== 1) {
+      fail(`expected exactly one slide relationship for ${slidePath}, found ${matches.length}`)
+    }
+    const rId = rawAttrOf(openTagInfo(relsRaw, matches[0]), 'Id') ?? fail('slide relationship has no Id')
+    rIds.push(rId)
+    relOps.push({ start: matches[0].start, end: matches[0].end, insert: '' })
+  }
+
+  const presRaw = await requiredPart(zip, PRESENTATION_PATH)
+  const presRoot = childElementsIn(presRaw, 0, presRaw.length).find(
+    (e) => localOf(e.name) === 'presentation',
+  )
+  if (!presRoot) fail('no <p:presentation> element in presentation.xml')
+  const sldIdLst = childElemByLocal(presRaw, presRoot, 'sldIdLst') ?? fail('presentation.xml has no sldIdLst')
+  const sldIds = childElemsOf(presRaw, sldIdLst).filter((e) => localOf(e.name) === 'sldId')
+
+  const presOps: SpliceOp[] = []
+  for (const rId of rIds) {
+    const matches = sldIds.filter((e) => rawPrefixedAttrOf(openTagInfo(presRaw, e), 'id') === rId)
+    if (matches.length !== 1) {
+      fail(`expected exactly one p:sldId with r:id ${rId}, found ${matches.length}`)
+    }
+    // sldIdLst is not the only place a slide can be referenced: custom shows
+    // (p:custShowLst) carry their own r:id lists. Removing only the sldId
+    // would write a dangling reference, so any extra occurrence of the rId
+    // anywhere in presentation.xml refuses the save.
+    const refs = presRaw.split(`"${rId}"`).length - 1
+    if (refs !== 1) {
+      fail(
+        `slide relationship ${rId} is referenced ${refs} times in presentation.xml ` +
+          '(custom shows?) — refusing to delete',
+      )
+    }
+    presOps.push({ start: matches[0].start, end: matches[0].end, insert: '' })
+  }
+
+  const typesRaw = await requiredPart(zip, CONTENT_TYPES_PATH)
+  const typesRoot = childElementsIn(typesRaw, 0, typesRaw.length).find(
+    (e) => localOf(e.name) === 'Types',
+  )
+  if (!typesRoot) fail('no <Types> element in [Content_Types].xml')
+  const overrides = childElemsOf(typesRaw, typesRoot).filter((e) => localOf(e.name) === 'Override')
+
+  const typeOps: SpliceOp[] = []
+  for (const slidePath of deletions) {
+    const matches = overrides.filter(
+      (e) => rawAttrOf(openTagInfo(typesRaw, e), 'PartName') === `/${slidePath}`,
+    )
+    // Absence is fine — the part may be typed via a Default — but duplicate
+    // Overrides mean a package we don't understand well enough to edit.
+    if (matches.length > 1) fail(`duplicate [Content_Types].xml Override for /${slidePath}`)
+    if (matches.length === 1) {
+      typeOps.push({ start: matches[0].start, end: matches[0].end, insert: '' })
+    }
+  }
+
+  const replacements = new Map<string, string>()
+  replacements.set(PRESENTATION_RELS_PATH, applySplices(relsRaw, relOps))
+  replacements.set(PRESENTATION_PATH, applySplices(presRaw, presOps))
+  if (typeOps.length > 0) replacements.set(CONTENT_TYPES_PATH, applySplices(typesRaw, typeOps))
+  return replacements
+}
+
 // ------------------------------------------------------------------ writeDeck
+
+export interface WriteDeckOptions {
+  /**
+   * Slide part paths (e.g. `ppt/slides/slide2.xml`) to remove. The slide part
+   * and its own .rels are dropped; presentation.xml, its rels and any per-part
+   * Content_Types Override are spliced. Media referenced only by a removed
+   * slide stays in the package — orphaned media is valid OOXML.
+   */
+  deleteSlides?: readonly string[]
+}
 
 /**
  * Produces the full .pptx bytes with edits applied. Every entry except the
@@ -891,6 +1087,7 @@ export function updateSlideXml(slideXmlRaw: string, edits: readonly SlideEdit[])
 export async function writeDeck(
   deck: SlideDeck,
   editsBySlide: ReadonlyMap<string, readonly SlideEdit[]>,
+  options?: WriteDeckOptions,
 ): Promise<Uint8Array> {
   for (const slidePath of editsBySlide.keys()) {
     if (deck.source.slideXml[slidePath] === undefined) {
@@ -898,11 +1095,30 @@ export async function writeDeck(
     }
   }
 
+  const deletions = [...new Set(options?.deleteSlides ?? [])]
+  for (const slidePath of deletions) {
+    if (deck.source.slideXml[slidePath] === undefined) {
+      fail(`cannot delete unknown slide ${slidePath}`)
+    }
+    if ((editsBySlide.get(slidePath)?.length ?? 0) > 0) {
+      fail(`slide ${slidePath} is both edited and marked deleted`)
+    }
+  }
+  if (deletions.length > 0 && deletions.length >= deck.slides.length) {
+    fail('cannot delete every slide in the deck')
+  }
+
+  const removedParts = new Set(deletions.flatMap((p) => [p, relsPathFor(p)]))
+  const replacements =
+    deletions.length > 0
+      ? await slideRemovalReplacements(deck.source.zip, deletions)
+      : new Map<string, string>()
+
   const out = new JSZip()
   const files = deck.source.zip.files
   for (const name of Object.keys(files)) {
     const entry = files[name]
-    if (entry.dir) continue
+    if (entry.dir || removedParts.has(name)) continue
     const meta = {
       date: entry.date,
       comment: entry.comment ?? undefined,
@@ -911,8 +1127,11 @@ export async function writeDeck(
       createFolders: false,
     }
     const edits = editsBySlide.get(name)
+    const replaced = replacements.get(name)
     if (edits && edits.length > 0) {
       out.file(name, updateSlideXml(deck.source.slideXml[name], edits), meta)
+    } else if (replaced !== undefined) {
+      out.file(name, replaced, meta)
     } else {
       out.file(name, await entry.async('uint8array'), { ...meta, binary: true })
     }

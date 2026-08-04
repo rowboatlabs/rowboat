@@ -212,8 +212,11 @@ export function resolveRelTarget(baseDir: string, target: string): string {
   return out.join('/')
 }
 
-/** `ppt/slides/slide1.xml` -> `ppt/slides/_rels/slide1.xml.rels` */
-function relsPathFor(partPath: string): string {
+/**
+ * `ppt/slides/slide1.xml` -> `ppt/slides/_rels/slide1.xml.rels`
+ * Exported for the serializer: deleting a slide removes its rels part too.
+ */
+export function relsPathFor(partPath: string): string {
   const dir = dirNameOf(partPath)
   const file = partPath.slice(dir.length + 1)
   return `${dir}/_rels/${file}.rels`
@@ -540,7 +543,12 @@ async function loadSlideContext(
 
 const NV_PR_LOCALS = ['nvSpPr', 'nvPicPr', 'nvGraphicFramePr', 'nvGrpSpPr', 'nvCxnSpPr']
 
-function shapeIdOf(node: XmlNode, fallbackIndex: number): string {
+/**
+ * The model's shape id: `p:cNvPr@id` when present, else the synthesized
+ * ordinal form. Exported so the serializer can replay this exact derivation on
+ * a re-parsed node and cross-check a deletion against the model's target.
+ */
+export function shapeIdOf(node: XmlNode, fallbackIndex: number): string {
   for (const nv of NV_PR_LOCALS) {
     const cNvPr = descend(node, nv, 'cNvPr')
     const id = cNvPr && attr(cNvPr, 'id')

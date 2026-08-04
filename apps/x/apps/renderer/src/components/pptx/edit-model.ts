@@ -21,6 +21,7 @@
 
 import {
   isTextOnlyEdit,
+  type DeleteShapeEdit,
   type EditedParagraph,
   type RunFormatOverrides,
   type RunRef,
@@ -70,6 +71,12 @@ function parseRunKey(key: RunKey): RunRef {
   return { para: Number(para), run: Number(run) }
 }
 
+/** Marks a shape deleted; carries what the serializer revalidates first. */
+export interface ShapeDeletion {
+  shapeType: DeleteShapeEdit['shapeType']
+  shapeId: string
+}
+
 export interface ShapeEdit {
   slidePath: string
   nodePath: NodePath
@@ -81,14 +88,32 @@ export interface ShapeEdit {
   /** Original paragraph index (as a string key) -> alignment. */
   aligns?: Record<string, TextAlign>
   geometry?: RectEmuBox
+  /**
+   * Set when the shape is deleted. Supersedes every other field: their splices
+   * would land inside the removed range, and the serializer fails closed on
+   * overlap — so marking deleted must also clear them.
+   */
+  deleted?: ShapeDeletion
 }
 
 export type EditSet = Readonly<Record<ShapeKey, ShapeEdit>>
 
 export const EMPTY_EDIT_SET: EditSet = {}
 
-export function hasEdits(edits: EditSet): boolean {
-  return Object.keys(edits).length > 0
+/**
+ * Everything the editor has changed, and the unit the history stack snapshots:
+ * per-shape edits plus slides removed from the deck (by xml path — positions
+ * shift as slides are deleted, paths never do).
+ */
+export interface DeckEdits {
+  shapes: EditSet
+  deletedSlides: readonly string[]
+}
+
+export const EMPTY_DECK_EDITS: DeckEdits = { shapes: EMPTY_EDIT_SET, deletedSlides: [] }
+
+export function hasEdits(edits: DeckEdits): boolean {
+  return Object.keys(edits.shapes).length > 0 || edits.deletedSlides.length > 0
 }
 
 /**
@@ -187,28 +212,36 @@ export function effectiveParagraphs(edit: ShapeEdit, base: readonly Paragraph[])
 }
 
 /** The deck as the user currently sees it. `deck` itself is never mutated. */
-export function applyEditSet(deck: SlideDeck, edits: EditSet): SlideDeck {
+export function applyEditSet(deck: SlideDeck, edits: DeckEdits): SlideDeck {
   if (!hasEdits(edits)) return deck
+  const removedSlides = new Set(edits.deletedSlides)
   return {
     ...deck,
-    slides: deck.slides.map((slide) => {
-      let touched = false
-      const shapes = slide.shapes.map((shape) => {
-        const edit = edits[shapeKeyOf(slide.xmlPath, shape.nodePath)]
-        if (!edit) return shape
-        touched = true
-        let next: Shape = shape
-        if (edit.geometry) next = { ...next, xfrmEmu: { ...edit.geometry } }
-        if (next.type === 'text' && (edit.text || edit.formats || edit.aligns)) {
-          next = {
-            ...next,
-            paragraphs: effectiveParagraphs(edit, (next as TextShape).paragraphs),
+    slides: deck.slides
+      .filter((slide) => !removedSlides.has(slide.xmlPath))
+      .map((slide) => {
+        let touched = false
+        const shapes: Shape[] = []
+        for (const shape of slide.shapes) {
+          const edit = edits.shapes[shapeKeyOf(slide.xmlPath, shape.nodePath)]
+          if (!edit) {
+            shapes.push(shape)
+            continue
           }
+          touched = true
+          if (edit.deleted) continue
+          let next: Shape = shape
+          if (edit.geometry) next = { ...next, xfrmEmu: { ...edit.geometry } }
+          if (next.type === 'text' && (edit.text || edit.formats || edit.aligns)) {
+            next = {
+              ...next,
+              paragraphs: effectiveParagraphs(edit, (next as TextShape).paragraphs),
+            }
+          }
+          shapes.push(next)
         }
-        return next
-      })
-      return touched ? { ...slide, shapes } : slide
-    }),
+        return touched ? { ...slide, shapes } : slide
+      }),
   }
 }
 
@@ -228,6 +261,17 @@ export function toSlideEdits(edits: EditSet): Map<string, SlideEdit[]> {
       out.set(edit.slidePath, list)
     }
 
+    if (edit.deleted) {
+      // Deletion supersedes every other field (withShapeEdit cleared them).
+      list.push({
+        kind: 'deleteShape',
+        nodePath: edit.nodePath,
+        shapeType: edit.deleted.shapeType,
+        shapeId: edit.deleted.shapeId,
+        original: edit.original,
+      })
+      continue
+    }
     if (edit.geometry) {
       list.push({
         kind: 'shapeGeometry',
@@ -284,6 +328,7 @@ function isEmptyEdit(edit: ShapeEdit): boolean {
   return (
     !edit.text &&
     !edit.geometry &&
+    !edit.deleted &&
     (!edit.formats || Object.keys(edit.formats).length === 0) &&
     (!edit.aligns || Object.keys(edit.aligns).length === 0)
   )

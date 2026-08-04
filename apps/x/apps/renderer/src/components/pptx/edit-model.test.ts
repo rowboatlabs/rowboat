@@ -5,6 +5,7 @@ import { updateSlideXml, writeDeck, type EditedParagraph } from '@/lib/pptx/seri
 import type { Paragraph, TextShape } from '@/lib/pptx/types'
 import { buildEditableHtml, extractParagraphs } from './text-dom'
 import {
+  EMPTY_DECK_EDITS,
   acceptsFormatting,
   applyEditSet,
   effectiveParagraphs,
@@ -13,6 +14,7 @@ import {
   structureMatches,
   toSlideEdits,
   withShapeEdit,
+  type DeckEdits,
   type EditSet,
   type ShapeEdit,
 } from './edit-model'
@@ -65,6 +67,25 @@ async function loadSlide(xml: string) {
   return { deck, slide: deck.slides[0], shape: deck.slides[0].shapes[0] as TextShape }
 }
 
+const TWO_SLIDE_PRES =
+  '<p:presentation xmlns:p="p" xmlns:r="r"><p:sldIdLst>' +
+  '<p:sldId id="256" r:id="rId2"/><p:sldId id="257" r:id="rId3"/></p:sldIdLst>' +
+  '<p:sldSz cx="12192000" cy="6858000"/></p:presentation>'
+const TWO_SLIDE_RELS =
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+  '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>' +
+  '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>' +
+  '</Relationships>'
+
+async function loadTwoSlides() {
+  const zip = new JSZip()
+  zip.file('ppt/presentation.xml', TWO_SLIDE_PRES)
+  zip.file('ppt/_rels/presentation.xml.rels', TWO_SLIDE_RELS)
+  zip.file('ppt/slides/slide1.xml', STYLED_SLIDE)
+  zip.file('ppt/slides/slide2.xml', TWO_PARA_SLIDE)
+  return parsePptx(await zip.generateAsync({ type: 'uint8array' }))
+}
+
 describe('paragraph provenance survives rendering', () => {
   it('effectiveParagraphs keeps srcPara, not just run-level provenance', () => {
     const base: Paragraph[] = [{ align: 'ctr', runs: [{ text: 'a' }] }, { runs: [{ text: 'b' }] }]
@@ -95,7 +116,8 @@ describe('paragraph provenance survives rendering', () => {
         text: first,
       },
     }
-    const rendered = applyEditSet(deck, edits).slides[0].shapes[0] as TextShape
+    const rendered = applyEditSet(deck, { shapes: edits, deletedSlides: [] }).slides[0]
+      .shapes[0] as TextShape
     const host = document.createElement('div')
     host.innerHTML = buildEditableHtml(rendered, 1)
     const reopened = extractParagraphs(host, rendered, 1)
@@ -115,6 +137,57 @@ describe('paragraph provenance survives rendering', () => {
     expect(out).toContain('<a:buChar char="B"/>')
     expect(out).toContain('algn="r"')
     expect(out).not.toContain('<a:buChar char="H"/>')
+  })
+})
+
+describe('deletion in the edit set', () => {
+  it('a deleted shape leaves the render and toSlideEdits emits its validation payload', async () => {
+    const deck = await loadTwoSlides()
+    const slide1 = deck.slides[0]
+    const shape = slide1.shapes[0] as TextShape
+    const key = shapeKeyOf(slide1.xmlPath, shape.nodePath)
+
+    const shapes = withShapeEdit(
+      {},
+      key,
+      { slidePath: slide1.xmlPath, nodePath: shape.nodePath, original: shape.paragraphs },
+      (draft) => {
+        draft.deleted = { shapeType: shape.type, shapeId: shape.id }
+      },
+    )
+    const edits: DeckEdits = { shapes, deletedSlides: [] }
+
+    const rendered = applyEditSet(deck, edits)
+    expect(rendered.slides[0].shapes).toHaveLength(0)
+    // The untouched slide keeps its identity, so its thumbnail never re-renders.
+    expect(rendered.slides[1]).toBe(deck.slides[1])
+
+    const emitted = toSlideEdits(shapes).get(slide1.xmlPath)
+    expect(emitted).toEqual([
+      {
+        kind: 'deleteShape',
+        nodePath: shape.nodePath,
+        shapeType: 'text',
+        shapeId: shape.id,
+        original: shape.paragraphs,
+      },
+    ])
+
+    // The whole pipeline holds: the emitted edit deletes cleanly.
+    expect(updateSlideXml(STYLED_SLIDE, emitted!)).not.toContain('<a:t>Hello</a:t>')
+  })
+
+  it('a deleted slide leaves the render, and undo restores shape and slide alike', async () => {
+    const deck = await loadTwoSlides()
+    const edits: DeckEdits = { shapes: {}, deletedSlides: ['ppt/slides/slide2.xml'] }
+
+    const rendered = applyEditSet(deck, edits)
+    expect(rendered.slides.map((s) => s.xmlPath)).toEqual(['ppt/slides/slide1.xml'])
+    expect(rendered.slides[0]).toBe(deck.slides[0])
+
+    // Undo re-renders from the prior snapshot; the empty set IS the base deck,
+    // so both the slide and any deleted shapes are back, identity intact.
+    expect(applyEditSet(deck, EMPTY_DECK_EDITS)).toBe(deck)
   })
 })
 

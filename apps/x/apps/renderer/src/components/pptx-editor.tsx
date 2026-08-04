@@ -8,13 +8,23 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
-import { ExternalLinkIcon, Loader2Icon, PresentationIcon } from 'lucide-react'
+import { ExternalLinkIcon, Loader2Icon, PresentationIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { disposeDeck, parsePptx } from '@/lib/pptx/parse'
 import { writeDeck, type EditedParagraph, type RunFormatOverrides } from '@/lib/pptx/serialize'
 import type { NodePath, Paragraph, Shape, Slide, SlideDeck, TextAlign, TextShape } from '@/lib/pptx/types'
 import {
-  EMPTY_EDIT_SET,
+  EMPTY_DECK_EDITS,
   EMU_PER_PX,
   acceptsFormatting,
   applyEditSet,
@@ -26,6 +36,7 @@ import {
   structureMatches,
   toSlideEdits,
   withShapeEdit,
+  type DeckEdits,
   type EditSet,
   type RectEmuBox,
   type ShapeKey,
@@ -132,13 +143,15 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const [selectionTick, setSelectionTick] = useState(0)
   const [presenting, setPresenting] = useState(false)
 
-  const [history, setHistory] = useState<EditSet[]>([EMPTY_EDIT_SET])
+  const [history, setHistory] = useState<DeckEdits[]>([EMPTY_DECK_EDITS])
   const [histIndex, setHistIndex] = useState(0)
-  const editSet = history[histIndex] ?? EMPTY_EDIT_SET
+  const editSet = history[histIndex] ?? EMPTY_DECK_EDITS
+  // Slide pending deletion, as an index into the RENDERED deck; null = closed.
+  const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const baseDeckRef = useRef<SlideDeck | null>(null)
-  const editSetRef = useRef<EditSet>(EMPTY_EDIT_SET)
+  const editSetRef = useRef<DeckEdits>(EMPTY_DECK_EDITS)
   const histIndexRef = useRef(0)
   const overlayRef = useRef<TextOverlayHandle | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -170,7 +183,9 @@ export function PptxEditor({ path }: PptxEditorProps) {
         setSaveStatus('clean')
         return
       }
-      const bytes = await writeDeck(base, toSlideEdits(edits))
+      const bytes = await writeDeck(base, toSlideEdits(edits.shapes), {
+        deleteSlides: edits.deletedSlides,
+      })
       const b64 = uint8ArrayToBase64(bytes)
       if (b64 !== lastWrittenRef.current) {
         await window.ipc.invoke('workspace:writeFile', {
@@ -206,7 +221,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
   /** Commits a new edit set: pushes onto the undo stack and schedules a save. */
   const pushEdits = useCallback(
-    (next: EditSet) => {
+    (next: DeckEdits) => {
       setHistory((h) => {
         const trimmed = [...h.slice(0, histIndexRef.current + 1), next]
         return trimmed.length > MAX_HISTORY ? trimmed.slice(trimmed.length - MAX_HISTORY) : trimmed
@@ -216,6 +231,14 @@ export function PptxEditor({ path }: PptxEditorProps) {
       scheduleSave()
     },
     [scheduleSave],
+  )
+
+  /** Commits a shape-level change, carrying the slide deletions forward. */
+  const pushShapeEdits = useCallback(
+    (shapes: EditSet) => {
+      pushEdits({ ...editSetRef.current, shapes })
+    },
+    [pushEdits],
   )
 
   // Flush pending edits on unmount / path change, before blob URLs are revoked.
@@ -258,9 +281,13 @@ export function PptxEditor({ path }: PptxEditorProps) {
     () => (baseDeck ? applyEditSet(baseDeck, editSet) : null),
     [baseDeck, editSet],
   )
-  const slide = deck?.slides[activeIndex] ?? null
+  // Deleting slides shrinks the rendered deck, and undo/redo can grow it back;
+  // clamp rather than track so a stale index can never render a blank pane.
+  const slideCount = deck?.slides.length ?? 0
+  const currentIndex = Math.max(0, Math.min(activeIndex, slideCount - 1))
+  const slide = deck?.slides[currentIndex] ?? null
   const selectedShape = findShape(slide, selectedKey)
-  const shapeEdit = selectedKey ? editSet[selectedKey] : undefined
+  const shapeEdit = selectedKey ? editSet.shapes[selectedKey] : undefined
 
   // ------------------------------------------------------------ undo / redo
 
@@ -271,7 +298,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
     if (histIndexRef.current <= 0) return
     const next = histIndexRef.current - 1
     histIndexRef.current = next
-    editSetRef.current = history[next] ?? EMPTY_EDIT_SET
+    editSetRef.current = history[next] ?? EMPTY_DECK_EDITS
     setHistIndex(next)
     setEditingKey(null)
     scheduleSave()
@@ -281,7 +308,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
     if (histIndexRef.current >= history.length - 1) return
     const next = histIndexRef.current + 1
     histIndexRef.current = next
-    editSetRef.current = history[next] ?? EMPTY_EDIT_SET
+    editSetRef.current = history[next] ?? EMPTY_DECK_EDITS
     setHistIndex(next)
     setEditingKey(null)
     scheduleSave()
@@ -311,13 +338,13 @@ export function PptxEditor({ path }: PptxEditorProps) {
       if (shape.type === 'group') return
       if (shape.type === 'placeholder' && shape.kind !== 'video') return
       const key = shapeKeyOf(slide.xmlPath, shape.nodePath)
-      pushEdits(
-        withShapeEdit(editSetRef.current, key, seedFor(slide.xmlPath, shape), (draft) => {
+      pushShapeEdits(
+        withShapeEdit(editSetRef.current.shapes, key, seedFor(slide.xmlPath, shape), (draft) => {
           draft.geometry = rect
         }),
       )
     },
-    [slide, pushEdits, seedFor],
+    [slide, pushShapeEdits, seedFor],
   )
 
   const handleTextCommit = useCallback(
@@ -381,7 +408,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         })
       }
 
-      const previous = editSetRef.current[key]
+      const previous = editSetRef.current.shapes[key]
       const hadFormatting = editHoldsFormatting(previous)
       // Retyping the original text is a revert, not a no-op: it must fall
       // through so the accumulated text edit below is cleared.
@@ -396,8 +423,8 @@ export function PptxEditor({ path }: PptxEditorProps) {
         toast.info('Formatting was reset on this text box because its structure changed.')
       }
 
-      pushEdits(
-        withShapeEdit(editSetRef.current, key, seedFor(slide.xmlPath, shape), (draft) => {
+      pushShapeEdits(
+        withShapeEdit(editSetRef.current.shapes, key, seedFor(slide.xmlPath, shape), (draft) => {
           draft.original = original
           draft.text = textChanged || structural ? textNext : undefined
           if (structural) {
@@ -411,7 +438,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         }),
       )
     },
-    [slide, pushEdits, seedFor],
+    [slide, pushShapeEdits, seedFor],
   )
 
   // ------------------------------------------------------------ formatting
@@ -460,8 +487,8 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
       const original = baseParagraphsOf(baseDeckRef.current, slide.xmlPath, shape.nodePath)
       if (!original) return
-      pushEdits(
-        withShapeEdit(editSetRef.current, selectedKey, seedFor(slide.xmlPath, shape), (draft) => {
+      pushShapeEdits(
+        withShapeEdit(editSetRef.current.shapes, selectedKey, seedFor(slide.xmlPath, shape), (draft) => {
           draft.original = original
           const formats = { ...(draft.formats ?? {}) }
           original.forEach((p, pi) =>
@@ -475,7 +502,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         }),
       )
     },
-    [slide, selectedKey, pushEdits, seedFor],
+    [slide, selectedKey, pushShapeEdits, seedFor],
   )
 
   const applyAlign = useCallback(
@@ -494,8 +521,8 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
       const original = baseParagraphsOf(baseDeckRef.current, slide.xmlPath, shape.nodePath)
       if (!original) return
-      pushEdits(
-        withShapeEdit(editSetRef.current, selectedKey, seedFor(slide.xmlPath, shape), (draft) => {
+      pushShapeEdits(
+        withShapeEdit(editSetRef.current.shapes, selectedKey, seedFor(slide.xmlPath, shape), (draft) => {
           draft.original = original
           const aligns = { ...(draft.aligns ?? {}) }
           original.forEach((_, pi) => {
@@ -505,7 +532,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         }),
       )
     },
-    [slide, selectedKey, pushEdits, seedFor],
+    [slide, selectedKey, pushShapeEdits, seedFor],
   )
 
   const stepFontSize = useCallback(
@@ -550,6 +577,63 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const startPresenting = useCallback(() => setPresenting(true), [])
   const stopPresenting = useCallback(() => setPresenting(false), [])
 
+  // -------------------------------------------------------------- deletion
+
+  const deleteSelectedShape = useCallback(() => {
+    if (!slide || !selectedKey) return
+    const shape = findShape(slide, selectedKey)
+    if (!shape) return
+    pushShapeEdits(
+      withShapeEdit(editSetRef.current.shapes, selectedKey, seedFor(slide.xmlPath, shape), (draft) => {
+        // Deletion supersedes the other fields — their splices would land
+        // inside the removed range and fail the whole save closed.
+        draft.text = undefined
+        draft.formats = undefined
+        draft.aligns = undefined
+        draft.geometry = undefined
+        draft.deleted = { shapeType: shape.type, shapeId: shape.id }
+      }),
+    )
+    setSelectedKey(null)
+  }, [slide, selectedKey, pushShapeEdits, seedFor])
+
+  const requestDeleteSlide = useCallback(
+    (index: number) => {
+      if (!deck) return
+      if (deck.slides.length <= 1) {
+        toast.info('A presentation needs at least one slide.')
+        return
+      }
+      setConfirmDeleteIndex(index)
+    },
+    [deck],
+  )
+
+  const confirmDeleteSlide = useCallback(() => {
+    const index = confirmDeleteIndex
+    setConfirmDeleteIndex(null)
+    if (index === null || !deck) return
+    const target = deck.slides[index]
+    if (!target || deck.slides.length <= 1) return
+    const cur = editSetRef.current
+    // Prune the deleted slide's shape edits: their splices are moot, and the
+    // serializer refuses a slide that is both edited and deleted. The prior
+    // history entry still holds them, so undo restores slide and edits alike.
+    const shapes: Record<ShapeKey, (typeof cur.shapes)[ShapeKey]> = {}
+    for (const [k, v] of Object.entries(cur.shapes)) {
+      if (v.slidePath !== target.xmlPath) shapes[k] = v
+    }
+    pushEdits({ shapes, deletedSlides: [...cur.deletedSlides, target.xmlPath] })
+    setSelectedKey(null)
+    setEditingKey(null)
+    setActiveIndex((i) => {
+      // Stay on the same slide when one before it goes; the clamp handles
+      // deleting the last card.
+      const next = i > index ? i - 1 : i
+      return Math.max(0, Math.min(next, deck.slides.length - 2))
+    })
+  }, [confirmDeleteIndex, deck, pushEdits])
+
   // -------------------------------------------------------------- keyboard
 
   const handleKeyDown = useCallback(
@@ -569,6 +653,20 @@ export function PptxEditor({ path }: PptxEditorProps) {
           e.preventDefault()
           setSelectedKey(null)
         }
+        return
+      }
+      if (mod && e.key === 'Backspace') {
+        if (editingKey) return
+        e.preventDefault()
+        requestDeleteSlide(currentIndex)
+        return
+      }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && !mod) {
+        if (editingKey || !selectedKey) return
+        // A press inside a toolbar input must never nuke the selected shape.
+        if (e.target instanceof HTMLElement && e.target.tagName === 'INPUT') return
+        e.preventDefault()
+        deleteSelectedShape()
         return
       }
       if (editingKey || !selectedKey || !slide) return
@@ -592,7 +690,17 @@ export function PptxEditor({ path }: PptxEditorProps) {
         h: shape.xfrmEmu.h,
       })
     },
-    [editingKey, selectedKey, slide, undo, redo, handleGeometryCommit],
+    [
+      editingKey,
+      selectedKey,
+      slide,
+      currentIndex,
+      undo,
+      redo,
+      handleGeometryCommit,
+      deleteSelectedShape,
+      requestDeleteSlide,
+    ],
   )
 
   // ---------------------------------------------------------------- render
@@ -659,7 +767,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
           onColorChange={(hex) => applyFormat({ colorHex: hex })}
           align={activeAlign}
           onAlign={applyAlign}
-          slideNumber={activeIndex + 1}
+          slideNumber={currentIndex + 1}
           slideCount={deck.slides.length}
         />
 
@@ -681,12 +789,13 @@ export function PptxEditor({ path }: PptxEditorProps) {
                   slide={s}
                   sizeEmu={deck.slideSizeEmu}
                   title={slideTitle(s)}
-                  active={i === activeIndex}
+                  active={i === currentIndex}
                   onSelect={() => {
                     setActiveIndex(i)
                     setSelectedKey(null)
                     setEditingKey(null)
                   }}
+                  onDelete={() => requestDeleteSlide(i)}
                 />
               ))}
             </div>
@@ -718,10 +827,32 @@ export function PptxEditor({ path }: PptxEditorProps) {
           <PresentationOverlay
             slides={deck.slides}
             sizeEmu={deck.slideSizeEmu}
-            startIndex={activeIndex}
+            startIndex={currentIndex}
             onExit={stopPresenting}
           />
         )}
+
+        <AlertDialog
+          open={confirmDeleteIndex !== null}
+          onOpenChange={(open) => {
+            if (!open) setConfirmDeleteIndex(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Delete slide {confirmDeleteIndex !== null ? confirmDeleteIndex + 1 : ''}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                The slide is removed from the presentation. You can undo this with ⌘Z.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmDeleteSlide}>Delete slide</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </EditorErrorBoundary>
   )
@@ -742,33 +873,52 @@ interface SlideCardProps {
   title: string | null
   active: boolean
   onSelect: () => void
+  onDelete: () => void
 }
 
-function SlideCard({ index, slide, sizeEmu, title, active, onSelect }: SlideCardProps) {
+function SlideCard({ index, slide, sizeEmu, title, active, onSelect, onDelete }: SlideCardProps) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-current={active ? 'true' : undefined}
-      aria-label={`Slide ${index + 1}${title ? `: ${title}` : ''}`}
-      className={`flex shrink-0 items-center gap-1.5 rounded-md p-1.5 transition-all ${
-        active
-          ? 'bg-accent/60 shadow-sm ring-2 ring-ring'
-          : 'ring-1 ring-border/60 hover:bg-accent/40 hover:ring-border'
-      }`}
-    >
-      {/* Outside the thumbnail on purpose — overlaid, it sat on the slide's own title. */}
-      <span
-        className={`w-5 shrink-0 rounded py-px text-center text-[10px] font-medium leading-none tabular-nums ${
-          active ? 'bg-background text-foreground' : 'text-muted-foreground'
+    // The trash affordance is a SIBLING of the card button (buttons must not
+    // nest), floated over its corner; only the active card shows it.
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={active ? 'true' : undefined}
+        aria-label={`Slide ${index + 1}${title ? `: ${title}` : ''}`}
+        className={`flex w-full shrink-0 items-center gap-1.5 rounded-md p-1.5 transition-all ${
+          active
+            ? 'bg-accent/60 shadow-sm ring-2 ring-ring'
+            : 'ring-1 ring-border/60 hover:bg-accent/40 hover:ring-border'
         }`}
       >
-        {index + 1}
-      </span>
-      <span className="mx-auto block shrink-0 overflow-hidden rounded-sm">
-        <SlideThumbnail slide={slide} sizeEmu={sizeEmu} widthPx={THUMB_WIDTH_PX} />
-      </span>
-    </button>
+        {/* Outside the thumbnail on purpose — overlaid, it sat on the slide's own title. */}
+        <span
+          className={`w-5 shrink-0 rounded py-px text-center text-[10px] font-medium leading-none tabular-nums ${
+            active ? 'bg-background text-foreground' : 'text-muted-foreground'
+          }`}
+        >
+          {index + 1}
+        </span>
+        <span className="mx-auto block shrink-0 overflow-hidden rounded-sm">
+          <SlideThumbnail slide={slide} sizeEmu={sizeEmu} widthPx={THUMB_WIDTH_PX} />
+        </span>
+      </button>
+      {active && (
+        <button
+          type="button"
+          aria-label={`Delete slide ${index + 1}`}
+          title="Delete slide (⌘⌫)"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          className="absolute right-1.5 top-1.5 z-10 inline-flex size-5 items-center justify-center rounded bg-background/90 text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-destructive"
+        >
+          <Trash2Icon className="size-3" />
+        </button>
+      )}
+    </div>
   )
 }
 
