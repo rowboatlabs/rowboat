@@ -121,6 +121,13 @@ export interface DeckEdits {
   shapes: EditSet
   deletedSlides: readonly string[]
   addedSlides: readonly AddedSlide[]
+  /**
+   * Explicit final slide order, as xml paths. Absent until the user reorders;
+   * when present it must be an exact permutation of the surviving base paths
+   * plus the added paths, and it fully governs both the render and the written
+   * `sldIdLst` (see `composeSlideOrder` for the composition rule).
+   */
+  slideOrder?: readonly string[]
 }
 
 export const EMPTY_DECK_EDITS: DeckEdits = {
@@ -133,7 +140,8 @@ export function hasEdits(edits: DeckEdits): boolean {
   return (
     Object.keys(edits.shapes).length > 0 ||
     edits.deletedSlides.length > 0 ||
-    edits.addedSlides.length > 0
+    edits.addedSlides.length > 0 ||
+    edits.slideOrder !== undefined
   )
 }
 
@@ -233,43 +241,100 @@ export function effectiveParagraphs(edit: ShapeEdit, base: readonly Paragraph[])
 }
 
 /**
- * The rendered slide order: base slides minus deletions, with added slides
- * inserted after their anchors ('' anchors at the front; an added slide can
- * itself anchor later additions).
+ * The rendered slide sequence. THE COMPOSITION RULE, in order:
+ *
+ *  1. base document order, minus `deletedSlides`;
+ *  2. each added slide inserted immediately after its `afterPath` anchor
+ *     ('' anchors at the front; an added slide may itself anchor later adds,
+ *     so chains resolve recursively);
+ *  3. if `slideOrder` is present it REPLACES 1–2 as the sequence — anchors
+ *     then only identify where a *new* add lands when the order is next
+ *     recomputed. Paths in the order that no longer exist are skipped, and
+ *     anything the order forgot is appended in 1–2 order, so a stale order can
+ *     never drop a slide from the editor.
+ *
+ * `writeDeck` applies the same rule to `sldIdLst`, so what you see is what is
+ * written.
  */
 function composeSlideOrder(deck: SlideDeck, edits: DeckEdits): Slide[] {
   const removed = new Set(edits.deletedSlides)
-  if (edits.addedSlides.length === 0) {
-    return removed.size === 0 ? [...deck.slides] : deck.slides.filter((s) => !removed.has(s.xmlPath))
-  }
-  const byAnchor = new Map<string, AddedSlide[]>()
-  for (const a of edits.addedSlides) {
-    const list = byAnchor.get(a.afterPath) ?? []
-    list.push(a)
-    byAnchor.set(a.afterPath, list)
-  }
-  const ordered: Slide[] = []
-  const visited = new Set<string>()
-  const emitAdds = (anchorPath: string): void => {
-    for (const a of byAnchor.get(anchorPath) ?? []) {
-      if (visited.has(a.path)) continue // defensive: an anchor cycle can't hang the render
-      visited.add(a.path)
-      ordered.push(a.slide)
-      emitAdds(a.path)
+  const anchored = (): Slide[] => {
+    if (edits.addedSlides.length === 0) {
+      return removed.size === 0
+        ? [...deck.slides]
+        : deck.slides.filter((s) => !removed.has(s.xmlPath))
     }
+    const byAnchor = new Map<string, AddedSlide[]>()
+    for (const a of edits.addedSlides) {
+      const list = byAnchor.get(a.afterPath) ?? []
+      list.push(a)
+      byAnchor.set(a.afterPath, list)
+    }
+    const ordered: Slide[] = []
+    const visited = new Set<string>()
+    const emitAdds = (anchorPath: string): void => {
+      for (const a of byAnchor.get(anchorPath) ?? []) {
+        if (visited.has(a.path)) continue // defensive: an anchor cycle can't hang the render
+        visited.add(a.path)
+        ordered.push(a.slide)
+        emitAdds(a.path)
+      }
+    }
+    emitAdds('')
+    for (const slide of deck.slides) {
+      if (removed.has(slide.xmlPath)) continue
+      ordered.push(slide)
+      emitAdds(slide.xmlPath)
+    }
+    // An add whose anchor vanished (never reachable from the UI) still renders,
+    // at the end, rather than silently disappearing from the editor.
+    for (const a of edits.addedSlides) {
+      if (!visited.has(a.path)) ordered.push(a.slide)
+    }
+    return ordered
   }
-  emitAdds('')
-  for (const slide of deck.slides) {
-    if (removed.has(slide.xmlPath)) continue
+
+  const natural = anchored()
+  if (!edits.slideOrder) return natural
+
+  const byPath = new Map(natural.map((s) => [s.xmlPath, s]))
+  const ordered: Slide[] = []
+  const placed = new Set<string>()
+  for (const p of edits.slideOrder) {
+    const slide = byPath.get(p)
+    if (!slide || placed.has(p)) continue
+    placed.add(p)
     ordered.push(slide)
-    emitAdds(slide.xmlPath)
   }
-  // An add whose anchor vanished (never reachable from the UI) still renders,
-  // at the end, rather than silently disappearing from the editor.
-  for (const a of edits.addedSlides) {
-    if (!visited.has(a.path)) ordered.push(a.slide)
+  for (const slide of natural) {
+    if (!placed.has(slide.xmlPath)) ordered.push(slide)
   }
   return ordered
+}
+
+/** The rendered slide paths, in the order `applyEditSet` will render them. */
+export function renderedSlidePaths(deck: SlideDeck, edits: DeckEdits): string[] {
+  return composeSlideOrder(deck, edits).map((s) => s.xmlPath)
+}
+
+/** Records an explicit final slide order (what a rail drag commits). */
+export function withSlideOrder(edits: DeckEdits, order: readonly string[]): DeckEdits {
+  return { ...edits, slideOrder: [...order] }
+}
+
+/**
+ * Adds a slide to the edit set. When an explicit order already exists the new
+ * path is spliced into it right after its anchor, so a reorder followed by an
+ * add keeps both intents.
+ */
+export function withSlideAdded(edits: DeckEdits, added: AddedSlide): DeckEdits {
+  const addedSlides = [...edits.addedSlides, added]
+  if (!edits.slideOrder) return { ...edits, addedSlides }
+  const order = [...edits.slideOrder]
+  const at = order.indexOf(added.afterPath)
+  if (at >= 0) order.splice(at + 1, 0, added.path)
+  else order.unshift(added.path)
+  return { ...edits, addedSlides, slideOrder: order }
 }
 
 /** The deck as the user currently sees it. `deck` itself is never mutated. */
@@ -322,11 +387,14 @@ export function withSlideRemoved(
   const addedSlides = edits.addedSlides
     .filter((a) => a.path !== targetPath)
     .map((a) => (a.afterPath === targetPath ? { ...a, afterPath: reanchorTo } : a))
-  return {
+  const next: DeckEdits = {
     shapes,
     addedSlides,
     deletedSlides: wasAdded ? edits.deletedSlides : [...edits.deletedSlides, targetPath],
   }
+  // An explicit order must stay an exact permutation of what survives.
+  if (edits.slideOrder) next.slideOrder = edits.slideOrder.filter((p) => p !== targetPath)
+  return next
 }
 
 // ------------------------------------------------------------- serialization

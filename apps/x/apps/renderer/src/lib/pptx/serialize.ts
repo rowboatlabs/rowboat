@@ -1000,6 +1000,7 @@ async function packageReplacements(
   zip: JSZip,
   deletions: readonly string[],
   adds: readonly NewSlidePart[],
+  order: readonly string[] | undefined,
 ): Promise<Map<string, string>> {
   const relsRaw = await requiredPart(zip, PRESENTATION_RELS_PATH)
   const relsRoot = childElementsIn(relsRaw, 0, relsRaw.length).find(
@@ -1098,9 +1099,9 @@ async function packageReplacements(
     }
   }
 
-  // ---- additions -----------------------------------------------------------
+  // ---- additions and reordering --------------------------------------------
 
-  if (adds.length > 0) {
+  if (adds.length > 0 || order !== undefined) {
     // New sldIds copy the anchor list's element prefix; the r: prefix comes
     // from whatever the root binds to the officeDocument relationship NS.
     const pPfx = prefixOf(sldIdLst.name)
@@ -1109,14 +1110,14 @@ async function packageReplacements(
       if (a.value === OFFICE_REL_NS && a.name.startsWith('xmlns:')) rPfx = a.name.slice(6)
     }
 
-    // The new part must be typed like the slides already in the package.
+    // A new part must be typed like the slides already in the package.
     const slideOverride = overrides.find((e) =>
       (rawAttrOf(openTagInfo(typesRaw, e), 'PartName') ?? '').startsWith('/ppt/slides/'),
     )
     const slideContentType = slideOverride
       ? rawAttrOf(openTagInfo(typesRaw, slideOverride), 'ContentType')
       : undefined
-    if (!slideContentType) {
+    if (adds.length > 0 && !slideContentType) {
       fail('no existing slide Override in [Content_Types].xml to type the new slide after')
     }
 
@@ -1126,58 +1127,135 @@ async function packageReplacements(
       if (Number.isFinite(n)) nextSldIdNum = Math.max(nextSldIdNum, n)
     }
 
-    const addsByAnchor = new Map<string, NewSlidePart[]>()
-    for (const a of adds) {
-      const list = addsByAnchor.get(a.afterPath) ?? []
-      list.push(a)
-      addsByAnchor.set(a.afterPath, list)
-    }
-
-    // Insertion offsets group by the nearest BASE anchor (an added anchor
-    // shares its parent's offset and simply follows it in the group), so each
-    // offset gets ONE insert op with the chain concatenated in order.
-    const groups = new Map<number, string[]>()
     const relInserts: string[] = []
     const typeInserts: string[] = []
-    const placed = new Set<string>()
-    const emit = (anchorPath: string, offset: number): void => {
-      for (const a of addsByAnchor.get(anchorPath) ?? []) {
-        if (placed.has(a.path)) fail(`added slide ${a.path} appears twice`)
-        placed.add(a.path)
-        const rId = `rId${++maxRelNum}`
-        const sldTag = pPfx ? `${pPfx}:sldId` : 'sldId'
-        const rAttr = rPfx ? `${rPfx}:id` : 'id'
-        const group = groups.get(offset) ?? []
-        group.push(`<${sldTag} id="${++nextSldIdNum}" ${rAttr}="${rId}"/>`)
-        groups.set(offset, group)
-        if (!a.path.startsWith('ppt/')) fail(`unexpected added slide location ${a.path}`)
-        relInserts.push(
-          `<Relationship Id="${rId}" Type="${OFFICE_REL_NS}/slide" Target="${a.path.slice(4)}"/>`,
-        )
-        typeInserts.push(`<Override PartName="/${a.path}" ContentType="${slideContentType}"/>`)
-        emit(a.path, offset)
-      }
-    }
-    emit('', sldIdLst.contentStart)
-    for (const [slidePath, rId] of rIdBySlidePath) {
-      if (!addsByAnchor.has(slidePath)) continue
-      const anchor = sldIds.find((e) => rawPrefixedAttrOf(openTagInfo(presRaw, e), 'id') === rId)
-      if (!anchor) fail(`anchor slide ${slidePath} has no p:sldId`)
-      emit(slidePath, anchor.end)
-    }
-    for (const a of adds) {
-      if (!placed.has(a.path)) fail(`added slide ${a.path} has an unknown anchor ${a.afterPath}`)
+    /** Mints one added slide's sldId element, recording its rel and Override. */
+    const mint = (a: NewSlidePart): string => {
+      if (!a.path.startsWith('ppt/')) fail(`unexpected added slide location ${a.path}`)
+      const rId = `rId${++maxRelNum}`
+      relInserts.push(
+        `<Relationship Id="${rId}" Type="${OFFICE_REL_NS}/slide" Target="${a.path.slice(4)}"/>`,
+      )
+      typeInserts.push(`<Override PartName="/${a.path}" ContentType="${slideContentType}"/>`)
+      const sldTag = pPfx ? `${pPfx}:sldId` : 'sldId'
+      const rAttr = rPfx ? `${rPfx}:id` : 'id'
+      return `<${sldTag} id="${++nextSldIdNum}" ${rAttr}="${rId}"/>`
     }
 
-    for (const [offset, inserts] of groups) {
-      presOps.push({ start: offset, end: offset, insert: inserts.join('') })
+    if (order === undefined) {
+      // No explicit order: place each add after its anchor. Insertion offsets
+      // group by the nearest BASE anchor (an added anchor shares its parent's
+      // offset and simply follows it), so each offset gets ONE insert op with
+      // the chain concatenated in order.
+      const addsByAnchor = new Map<string, NewSlidePart[]>()
+      for (const a of adds) {
+        const list = addsByAnchor.get(a.afterPath) ?? []
+        list.push(a)
+        addsByAnchor.set(a.afterPath, list)
+      }
+      const groups = new Map<number, string[]>()
+      const placed = new Set<string>()
+      const emit = (anchorPath: string, offset: number): void => {
+        for (const a of addsByAnchor.get(anchorPath) ?? []) {
+          if (placed.has(a.path)) fail(`added slide ${a.path} appears twice`)
+          placed.add(a.path)
+          const group = groups.get(offset) ?? []
+          group.push(mint(a))
+          groups.set(offset, group)
+          emit(a.path, offset)
+        }
+      }
+      emit('', sldIdLst.contentStart)
+      for (const [slidePath, rId] of rIdBySlidePath) {
+        if (!addsByAnchor.has(slidePath)) continue
+        const anchor = sldIds.find((e) => rawPrefixedAttrOf(openTagInfo(presRaw, e), 'id') === rId)
+        if (!anchor) fail(`anchor slide ${slidePath} has no p:sldId`)
+        emit(slidePath, anchor.end)
+      }
+      for (const a of adds) {
+        if (!placed.has(a.path)) fail(`added slide ${a.path} has an unknown anchor ${a.afterPath}`)
+      }
+      for (const [offset, inserts] of groups) {
+        presOps.push({ start: offset, end: offset, insert: inserts.join('') })
+      }
+    } else {
+      // Explicit order: the surviving p:sldId elements are SLOTS, and the
+      // order decides which element's bytes occupy each one. Reordering is
+      // therefore a permutation of exact element slices — every element keeps
+      // its own bytes (and its id/r:id), and the whitespace BETWEEN slots is
+      // never touched, because each op replaces exactly one element's range.
+      const deletedSet = new Set(deletions)
+      const survivorSlots: Array<{ path: string; elem: Elem }> = []
+      for (const [slidePath, rId] of rIdBySlidePath) {
+        if (deletedSet.has(slidePath)) continue
+        const elem = sldIds.find((e) => rawPrefixedAttrOf(openTagInfo(presRaw, e), 'id') === rId)
+        if (!elem) fail(`slide ${slidePath} has no p:sldId`)
+        survivorSlots.push({ path: slidePath, elem })
+      }
+      survivorSlots.sort((a, b) => a.elem.start - b.elem.start)
+      const bytesOfBase = new Map(
+        survivorSlots.map((s) => [s.path, presRaw.slice(s.elem.start, s.elem.end)]),
+      )
+
+      // The order must be an exact permutation of survivors + adds.
+      const addPaths = adds.map((a) => a.path)
+      const expected = [...survivorSlots.map((s) => s.path), ...addPaths]
+      const seen = new Set<string>()
+      for (const p of order) {
+        if (seen.has(p)) fail(`slide order lists ${p} more than once`)
+        seen.add(p)
+      }
+      if (order.length !== expected.length || expected.some((p) => !seen.has(p))) {
+        fail(
+          `slide order must be an exact permutation of the ${expected.length} surviving and added ` +
+            `slides (got ${order.length})`,
+        )
+      }
+
+      // Walk the order, filling one slot per base slide and folding any adds
+      // that follow it into the SAME op. Folding rather than emitting separate
+      // zero-length inserts is what keeps ops from colliding at a slot
+      // boundary, which applySplices would (correctly) reject as overlapping.
+      const addByPath = new Map(adds.map((a) => [a.path, a]))
+      const fills: string[] = survivorSlots.map(() => '')
+      let slotIdx = -1
+      let leading = ''
+      for (const p of order) {
+        const add = addByPath.get(p)
+        if (add) {
+          const xml = mint(add)
+          if (slotIdx < 0) leading += xml
+          else fills[slotIdx] += xml
+          continue
+        }
+        slotIdx += 1
+        const bytes = bytesOfBase.get(p) ?? fail(`slide order references unknown slide ${p}`)
+        fills[slotIdx] = bytes + fills[slotIdx]
+      }
+      fills[0] = leading + fills[0]
+
+      for (let i = 0; i < survivorSlots.length; i++) {
+        const slot = survivorSlots[i]
+        const original = presRaw.slice(slot.elem.start, slot.elem.end)
+        // Unchanged slots emit nothing, so an order equal to the document
+        // order leaves presentation.xml byte-identical.
+        if (fills[i] === original) continue
+        presOps.push({ start: slot.elem.start, end: slot.elem.end, insert: fills[i] })
+      }
     }
-    relOps.push({ start: relsRoot.contentEnd, end: relsRoot.contentEnd, insert: relInserts.join('') })
-    typeOps.push({
-      start: typesRoot.contentEnd,
-      end: typesRoot.contentEnd,
-      insert: typeInserts.join(''),
-    })
+
+    if (relInserts.length > 0) {
+      relOps.push({
+        start: relsRoot.contentEnd,
+        end: relsRoot.contentEnd,
+        insert: relInserts.join(''),
+      })
+      typeOps.push({
+        start: typesRoot.contentEnd,
+        end: typesRoot.contentEnd,
+        insert: typeInserts.join(''),
+      })
+    }
   }
 
   const replacements = new Map<string, string>()
@@ -1203,6 +1281,13 @@ export interface WriteDeckOptions {
    * path apply against its synthesized XML.
    */
   addSlides?: readonly NewSlidePart[]
+  /**
+   * Explicit final slide order as part paths. Must be an exact permutation of
+   * the surviving slides plus `addSlides`. When given it governs `sldIdLst`
+   * placement (existing elements are moved, added ones inserted at their
+   * positions) and `addSlides[].afterPath` is ignored.
+   */
+  slideOrder?: readonly string[]
 }
 
 /**
@@ -1247,17 +1332,21 @@ export async function writeDeck(
     if (deleted.has(a.afterPath)) {
       fail(`added slide ${a.path} is anchored to ${a.afterPath}, which is being deleted`)
     }
+    // With an explicit order the anchor no longer places anything, so it only
+    // has to be meaningful when there is no order.
     const anchorKnown =
+      options?.slideOrder !== undefined ||
       a.afterPath === '' ||
       deck.source.slideXml[a.afterPath] !== undefined ||
       addByPath.has(a.afterPath)
     if (!anchorKnown) fail(`added slide ${a.path} has an unknown anchor ${a.afterPath}`)
   }
 
+  const order = options?.slideOrder
   const removedParts = new Set(deletions.flatMap((p) => [p, relsPathFor(p)]))
   const replacements =
-    deletions.length > 0 || adds.length > 0
-      ? await packageReplacements(deck.source.zip, deletions, adds)
+    deletions.length > 0 || adds.length > 0 || order !== undefined
+      ? await packageReplacements(deck.source.zip, deletions, adds, order)
       : new Map<string, string>()
 
   const out = new JSZip()

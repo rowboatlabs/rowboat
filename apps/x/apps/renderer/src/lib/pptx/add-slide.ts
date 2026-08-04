@@ -23,6 +23,7 @@ import {
   relsPathFor,
   tagNameOf,
 } from './parse'
+import { updateSlideXml, type SlideEdit } from './serialize'
 import type { SlideDeck } from './types'
 
 const REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -169,4 +170,61 @@ export async function planNewSlide(
     relsXml: relsXmlFor(layoutPath),
     afterPath,
   }
+}
+
+/** A slide the editor can duplicate: its current bytes and its rels. */
+export interface DuplicateSource {
+  /**
+   * The anchor's part XML as retained: `deck.source.slideXml[path]` for a base
+   * slide, or the synthesized `xml` when duplicating an added slide.
+   */
+  xml: string
+  /** The anchor's .rels, when it has one (an added slide always does). */
+  relsXml?: string
+  /** The anchor's accumulated edits, applied to `xml` at plan time. */
+  edits?: readonly SlideEdit[]
+}
+
+const EMPTY_RELS =
+  XML_HEAD +
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+
+/**
+ * Plans a duplicate of `anchorPath`, capturing the slide AS CURRENTLY SHOWN:
+ * the anchor's pending edits are applied to its bytes here, once, and the
+ * result becomes the new part's content. The copy is a plain added slide from
+ * that point on, so later edits to either slide address different parts and
+ * cannot affect each other.
+ *
+ * The .rels are cloned verbatim, which means both slides reference the same
+ * media and layout parts — sharing targets is valid OPC, and copying media
+ * would bloat the package for no gain.
+ */
+export function planDuplicateSlide(
+  deck: SlideDeck,
+  anchorPath: string,
+  source: DuplicateSource,
+  usedPaths: readonly string[],
+): NewSlidePlan {
+  // updateSlideXml fails closed on any model/bytes disagreement, so a
+  // duplicate can never capture a half-applied edit.
+  const xml =
+    source.edits && source.edits.length > 0
+      ? updateSlideXml(source.xml, source.edits)
+      : source.xml
+  return {
+    path: nextSlidePath(deck.source.zip, usedPaths),
+    xml,
+    relsXml: source.relsXml ?? EMPTY_RELS,
+    afterPath: anchorPath,
+  }
+}
+
+/** Reads a base slide's .rels for duplication; undefined when it has none. */
+export async function readSlideRels(
+  deck: SlideDeck,
+  slidePath: string,
+): Promise<string | undefined> {
+  const file = deck.source.zip.file(relsPathFor(slidePath))
+  return file ? file.async('string') : undefined
 }

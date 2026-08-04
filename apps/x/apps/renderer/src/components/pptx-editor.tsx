@@ -8,7 +8,14 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
-import { ExternalLinkIcon, Loader2Icon, PlusIcon, PresentationIcon, Trash2Icon } from 'lucide-react'
+import {
+  CopyIcon,
+  ExternalLinkIcon,
+  Loader2Icon,
+  PlusIcon,
+  PresentationIcon,
+  Trash2Icon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -21,7 +28,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { disposeDeck, parseAddedSlide, parsePptx } from '@/lib/pptx/parse'
-import { planNewSlide } from '@/lib/pptx/add-slide'
+import { planDuplicateSlide, planNewSlide, readSlideRels } from '@/lib/pptx/add-slide'
 import { writeDeck, type EditedParagraph, type RunFormatOverrides } from '@/lib/pptx/serialize'
 import type { NodePath, Paragraph, Shape, Slide, SlideDeck, TextAlign, TextShape } from '@/lib/pptx/types'
 import {
@@ -37,6 +44,8 @@ import {
   structureMatches,
   toSlideEdits,
   withShapeEdit,
+  withSlideAdded,
+  withSlideOrder,
   withSlideRemoved,
   type DeckEdits,
   type EditSet,
@@ -151,6 +160,10 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const editSet = history[histIndex] ?? EMPTY_DECK_EDITS
   // Slide pending deletion, as an index into the RENDERED deck; null = closed.
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null)
+  // Rail drag: the card being dragged, and the GAP the drop indicator sits in
+  // (gap g is above card g, so g === slides.length means "after the last").
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
+  const [dragOver, setDragOver] = useState<number | null>(null)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const baseDeckRef = useRef<SlideDeck | null>(null)
@@ -183,6 +196,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         const bytes = await writeDeck(base, toSlideEdits(edits.shapes), {
           deleteSlides: edits.deletedSlides,
           addSlides: edits.addedSlides,
+          slideOrder: edits.slideOrder,
         })
         return uint8ArrayToBase64(bytes)
       },
@@ -608,7 +622,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         cur.addedSlides.map((a) => a.path),
       )
       const parsed = await parseAddedSlide(base, plan.path, plan.xml, plan.relsXml)
-      pushEdits({ ...cur, addedSlides: [...cur.addedSlides, { ...plan, slide: parsed }] })
+      pushEdits(withSlideAdded(cur, { ...plan, slide: parsed }))
       setSelectedKey(null)
       setEditingKey(null)
       setActiveIndex(currentIndex + 1)
@@ -619,6 +633,61 @@ export function PptxEditor({ path }: PptxEditorProps) {
       addingSlideRef.current = false
     }
   }, [slide, currentIndex, pushEdits])
+
+  /**
+   * Duplicate: copies the slide AS CURRENTLY SHOWN. The anchor's pending edits
+   * are baked into the copy's bytes here, once, so the two slides are fully
+   * independent from that point on — later edits address different parts.
+   */
+  const duplicateSlide = useCallback(
+    async (index: number) => {
+      const base = baseDeckRef.current
+      const target = deck?.slides[index]
+      if (!base || !target || addingSlideRef.current) return
+      addingSlideRef.current = true
+      try {
+        const cur = editSetRef.current
+        const anchorAdded = cur.addedSlides.find((a) => a.path === target.xmlPath)
+        const xml = anchorAdded?.xml ?? base.source.slideXml[target.xmlPath]
+        if (xml === undefined) throw new Error(`no retained XML for ${target.xmlPath}`)
+        const relsXml = anchorAdded?.relsXml ?? (await readSlideRels(base, target.xmlPath))
+        const plan = planDuplicateSlide(
+          base,
+          target.xmlPath,
+          { xml, relsXml, edits: toSlideEdits(cur.shapes).get(target.xmlPath) },
+          cur.addedSlides.map((a) => a.path),
+        )
+        const parsed = await parseAddedSlide(base, plan.path, plan.xml, plan.relsXml)
+        pushEdits(withSlideAdded(cur, { ...plan, slide: parsed }))
+        setSelectedKey(null)
+        setEditingKey(null)
+        setActiveIndex(index + 1)
+      } catch (err) {
+        console.error('Failed to duplicate slide:', err)
+        toast.error('Could not duplicate this slide.')
+      } finally {
+        addingSlideRef.current = false
+      }
+    },
+    [deck, pushEdits],
+  )
+
+  /** Commits one explicit order after a rail drag. */
+  const reorderSlides = useCallback(
+    (from: number, to: number) => {
+      if (!deck || from === to) return
+      const paths = deck.slides.map((s) => s.xmlPath)
+      const moved = paths.splice(from, 1)[0]
+      if (moved === undefined) return
+      // `to` is the index the card should occupy once it has been lifted out.
+      paths.splice(Math.max(0, Math.min(to, paths.length)), 0, moved)
+      pushEdits(withSlideOrder(editSetRef.current, paths))
+      setSelectedKey(null)
+      setEditingKey(null)
+      setActiveIndex(paths.indexOf(moved))
+    },
+    [deck, pushEdits],
+  )
 
   const confirmDeleteSlide = useCallback(() => {
     const index = confirmDeleteIndex
@@ -669,6 +738,12 @@ export function PptxEditor({ path }: PptxEditorProps) {
         requestDeleteSlide(currentIndex)
         return
       }
+      if (mod && e.key.toLowerCase() === 'd') {
+        if (editingKey) return
+        e.preventDefault()
+        void duplicateSlide(currentIndex)
+        return
+      }
       if ((e.key === 'Backspace' || e.key === 'Delete') && !mod) {
         if (editingKey || !selectedKey) return
         // A press inside a toolbar input must never nuke the selected shape.
@@ -708,6 +783,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
       handleGeometryCommit,
       deleteSelectedShape,
       requestDeleteSlide,
+      duplicateSlide,
     ],
   )
 
@@ -798,7 +874,21 @@ export function PptxEditor({ path }: PptxEditorProps) {
                 <PlusIcon className="size-3.5" />
               </button>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2">
+            <div
+              className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2"
+              onDragOver={(e) => {
+                // The list itself accepts the drop, so a release in the gap
+                // between cards still lands on the last computed position.
+                if (dragFrom !== null) e.preventDefault()
+              }}
+              onDrop={(e) => {
+                if (dragFrom === null || dragOver === null) return
+                e.preventDefault()
+                reorderSlides(dragFrom, dragOver > dragFrom ? dragOver - 1 : dragOver)
+                setDragFrom(null)
+                setDragOver(null)
+              }}
+            >
               {deck.slides.map((s, i) => (
                 <SlideCard
                   key={s.xmlPath}
@@ -807,12 +897,22 @@ export function PptxEditor({ path }: PptxEditorProps) {
                   sizeEmu={deck.slideSizeEmu}
                   title={slideTitle(s)}
                   active={i === currentIndex}
+                  dragging={dragFrom === i}
+                  dropBefore={dragFrom !== null && dragOver === i}
+                  dropAfter={dragFrom !== null && dragOver === i + 1 && i === deck.slides.length - 1}
                   onSelect={() => {
                     setActiveIndex(i)
                     setSelectedKey(null)
                     setEditingKey(null)
                   }}
                   onDelete={() => requestDeleteSlide(i)}
+                  onDuplicate={() => void duplicateSlide(i)}
+                  onDragStart={() => setDragFrom(i)}
+                  onDragEnd={() => {
+                    setDragFrom(null)
+                    setDragOver(null)
+                  }}
+                  onDragOverCard={(before) => setDragOver(before ? i : i + 1)}
                 />
               ))}
             </div>
@@ -889,15 +989,64 @@ interface SlideCardProps {
   sizeEmu: { w: number; h: number }
   title: string | null
   active: boolean
+  /** This card is the one being dragged. */
+  dragging: boolean
+  /** Show the drop indicator above / below this card. */
+  dropBefore: boolean
+  dropAfter: boolean
   onSelect: () => void
   onDelete: () => void
+  onDuplicate: () => void
+  onDragStart: () => void
+  onDragEnd: () => void
+  /** `true` when the pointer is in the card's top half. */
+  onDragOverCard: (before: boolean) => void
 }
 
-function SlideCard({ index, slide, sizeEmu, title, active, onSelect, onDelete }: SlideCardProps) {
+function SlideCard({
+  index,
+  slide,
+  sizeEmu,
+  title,
+  active,
+  dragging,
+  dropBefore,
+  dropAfter,
+  onSelect,
+  onDelete,
+  onDuplicate,
+  onDragStart,
+  onDragEnd,
+  onDragOverCard,
+}: SlideCardProps) {
   return (
-    // The trash affordance is a SIBLING of the card button (buttons must not
-    // nest), floated over its corner; only the active card shows it.
-    <div className="relative shrink-0">
+    // The action affordances are SIBLINGS of the card button (buttons must not
+    // nest), floated over its corner; only the active card shows them.
+    <div
+      draggable
+      onDragStart={(e) => {
+        // Firefox requires data for a drag to start at all.
+        e.dataTransfer.setData('text/plain', String(index))
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart()
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        const box = e.currentTarget.getBoundingClientRect()
+        onDragOverCard(e.clientY < box.top + box.height / 2)
+      }}
+      className={`relative shrink-0 transition-opacity ${dragging ? 'opacity-40' : ''}`}
+    >
+      {(dropBefore || dropAfter) && (
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-x-1 z-20 h-0.5 rounded-full bg-[var(--ring)] ${
+            dropBefore ? '-top-1' : '-bottom-1'
+          }`}
+        />
+      )}
       <button
         type="button"
         onClick={onSelect}
@@ -922,18 +1071,32 @@ function SlideCard({ index, slide, sizeEmu, title, active, onSelect, onDelete }:
         </span>
       </button>
       {active && (
-        <button
-          type="button"
-          aria-label={`Delete slide ${index + 1}`}
-          title="Delete slide (⌘⌫)"
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
-          }}
-          className="absolute right-1.5 top-1.5 z-10 inline-flex size-5 items-center justify-center rounded bg-background/90 text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-destructive"
-        >
-          <Trash2Icon className="size-3" />
-        </button>
+        <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">
+          <button
+            type="button"
+            aria-label={`Duplicate slide ${index + 1}`}
+            title="Duplicate slide (⌘D)"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDuplicate()
+            }}
+            className="inline-flex size-5 items-center justify-center rounded bg-background/90 text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-foreground"
+          >
+            <CopyIcon className="size-3" />
+          </button>
+          <button
+            type="button"
+            aria-label={`Delete slide ${index + 1}`}
+            title="Delete slide (⌘⌫)"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="inline-flex size-5 items-center justify-center rounded bg-background/90 text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-destructive"
+          >
+            <Trash2Icon className="size-3" />
+          </button>
+        </div>
       )}
     </div>
   )

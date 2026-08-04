@@ -8,6 +8,9 @@ import {
   EMPTY_DECK_EDITS,
   acceptsFormatting,
   applyEditSet,
+  renderedSlidePaths,
+  withSlideAdded,
+  withSlideOrder,
   withSlideRemoved,
   effectiveParagraphs,
   isNoopCommit,
@@ -247,6 +250,85 @@ describe('added slides in the edit set', () => {
     expect(afterBase.deletedSlides).toEqual(['ppt/slides/slide1.xml'])
     expect(applyEditSet(deck, afterBase).slides.map((s) => s.xmlPath)).toEqual([
       'ppt/slides/slide4.xml',
+      'ppt/slides/slide2.xml',
+    ])
+  })
+})
+
+describe('explicit slide order', () => {
+  const fakeAdd = (path: string, afterPath: string): AddedSlide => ({
+    path,
+    afterPath,
+    xml: '<p:sld/>',
+    relsXml: '<Relationships/>',
+    slide: { id: path, xmlPath: path, shapes: [] },
+  })
+
+  it('governs the render, keeps slide identity, and undo returns the prior rendering', async () => {
+    const deck = await loadTwoSlides()
+    const reordered = withSlideOrder(EMPTY_DECK_EDITS, [
+      'ppt/slides/slide2.xml',
+      'ppt/slides/slide1.xml',
+    ])
+    const rendered = applyEditSet(deck, reordered)
+    expect(rendered.slides.map((s) => s.xmlPath)).toEqual([
+      'ppt/slides/slide2.xml',
+      'ppt/slides/slide1.xml',
+    ])
+    // Reordering moves slides, it does not rebuild them.
+    expect(rendered.slides[0]).toBe(deck.slides[1])
+    expect(rendered.slides[1]).toBe(deck.slides[0])
+    // Undo: the prior snapshot is the base deck, by identity.
+    expect(applyEditSet(deck, EMPTY_DECK_EDITS)).toBe(deck)
+  })
+
+  it('renderedSlidePaths matches what applyEditSet renders', async () => {
+    const deck = await loadTwoSlides()
+    const a = fakeAdd('ppt/slides/slide3.xml', 'ppt/slides/slide1.xml')
+    const edits = withSlideOrder({ ...EMPTY_DECK_EDITS, addedSlides: [a] }, [
+      a.path,
+      'ppt/slides/slide2.xml',
+      'ppt/slides/slide1.xml',
+    ])
+    expect(renderedSlidePaths(deck, edits)).toEqual(
+      applyEditSet(deck, edits).slides.map((s) => s.xmlPath),
+    )
+    expect(renderedSlidePaths(deck, edits)).toEqual([
+      a.path,
+      'ppt/slides/slide2.xml',
+      'ppt/slides/slide1.xml',
+    ])
+  })
+
+  it('an add lands after its anchor inside an existing order; a removal prunes it', async () => {
+    const deck = await loadTwoSlides()
+    const ordered = withSlideOrder(EMPTY_DECK_EDITS, [
+      'ppt/slides/slide2.xml',
+      'ppt/slides/slide1.xml',
+    ])
+    const a = fakeAdd('ppt/slides/slide3.xml', 'ppt/slides/slide2.xml')
+    const added = withSlideAdded(ordered, a)
+    expect(added.slideOrder).toEqual([
+      'ppt/slides/slide2.xml',
+      a.path,
+      'ppt/slides/slide1.xml',
+    ])
+
+    // Removing a slide keeps the order an exact permutation of what survives.
+    const removed = withSlideRemoved(added, 'ppt/slides/slide2.xml', '')
+    expect(removed.slideOrder).toEqual([a.path, 'ppt/slides/slide1.xml'])
+    expect(applyEditSet(deck, removed).slides.map((s) => s.xmlPath)).toEqual([
+      a.path,
+      'ppt/slides/slide1.xml',
+    ])
+  })
+
+  it('a stale order never drops a slide from the editor', async () => {
+    const deck = await loadTwoSlides()
+    // An order that forgot slide2 and names a slide that no longer exists.
+    const edits = withSlideOrder(EMPTY_DECK_EDITS, ['ppt/slides/slide9.xml', 'ppt/slides/slide1.xml'])
+    expect(applyEditSet(deck, edits).slides.map((s) => s.xmlPath)).toEqual([
+      'ppt/slides/slide1.xml',
       'ppt/slides/slide2.xml',
     ])
   })
