@@ -465,6 +465,8 @@ describe('deck-level display resolution', () => {
       underline: false,
       colorHex: '44546A',
       fontFamily: "'BodyFace', sans-serif",
+      // The resolved primary family, which is what the font picker offers.
+      latinFont: 'BodyFace',
     })
     // Wingdings 'l' from the master maps to a round bullet, with hanging indent.
     expect(p0.bullet).toEqual({ kind: 'char', char: '●' })

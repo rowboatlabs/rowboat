@@ -65,6 +65,8 @@ import {
 } from '@/components/pptx/toolbar'
 import {
   DEFAULT_TEXT_PT,
+  aggregateFontOfShape,
+  aggregateFontOfSpans,
   aggregateFormat,
   aggregateFormatOfParagraphs,
   applyAlignToBlocks,
@@ -72,6 +74,7 @@ import {
   fontScaleOf,
   selectedParagraphBlocks,
   selectedRunSpans,
+  typefacesInShapes,
   type TextOverlayHandle,
 } from '@/components/pptx/text-dom'
 
@@ -368,6 +371,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
             underline: src?.underline,
             sizePt: src?.sizePt,
             colorHex: src?.colorHex,
+            latinFont: src?.latinFont,
           }
         }),
       }))
@@ -396,6 +400,9 @@ export function PptxEditor({ path }: PptxEditorProps) {
             }
             if ((r.colorHex ?? null) !== (src.colorHex ?? null) && r.colorHex !== undefined) {
               delta.colorHex = r.colorHex
+            }
+            if ((r.latinFont ?? null) !== (src.latinFont ?? null) && r.latinFont !== undefined) {
+              delta.latinFont = r.latinFont
             }
             if (Object.keys(delta).length > 0) formats[runKeyOf(pi, ri)] = delta
           })
@@ -463,6 +470,25 @@ export function PptxEditor({ path }: PptxEditorProps) {
       ? ((selectedParagraphBlocks(overlayRef.current.root)[0]?.getAttribute('data-algn') ||
           'l') as TextAlign)
       : ((selectedShape as TextShape).paragraphs[0]?.align ?? 'l')
+
+  // The RESOLVED typeface of the selection (inheritance included), so the
+  // picker shows what is on screen rather than only explicit run overrides.
+  const activeFont: string | undefined = !canFormat
+    ? undefined
+    : overlayRef.current
+      ? aggregateFontOfSpans(selectedRunSpans(overlayRef.current.root))
+      : aggregateFontOfShape(selectedShape as TextShape)
+
+  // Every typeface the deck renders with, for the picker's first group.
+  const deckFonts = useMemo(
+    () =>
+      deck
+        ? typefacesInShapes(
+            deck.slides.flatMap((s) => s.shapes.filter((sh): sh is TextShape => sh.type === 'text')),
+          )
+        : [],
+    [deck],
+  )
 
   const applyFormat = useCallback(
     (set: RunFormatOverrides) => {
@@ -865,6 +891,9 @@ export function PptxEditor({ path }: PptxEditorProps) {
           onZoomFit={() => setZoomMode('fit')}
           format={activeFormat}
           formatDisabledReason={formatDisabledReason}
+          font={activeFont}
+          deckFonts={deckFonts}
+          onFontChange={(family) => applyFormat({ latinFont: family })}
           onToggleBold={() => applyFormat({ bold: !activeFormat?.bold })}
           onToggleItalic={() => applyFormat({ italic: !activeFormat?.italic })}
           onToggleUnderline={() => applyFormat({ underline: !activeFormat?.underline })}

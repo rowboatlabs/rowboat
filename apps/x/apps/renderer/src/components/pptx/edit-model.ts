@@ -212,6 +212,7 @@ function applyOverrides(run: Record<string, unknown>, set: RunFormatOverrides): 
   if (set.underline !== undefined) run.underline = set.underline
   if (set.sizePt !== undefined) run.sizePt = set.sizePt
   if (set.colorHex !== undefined) run.colorHex = set.colorHex
+  if (set.latinFont !== undefined) run.latinFont = set.latinFont
 }
 
 /** The paragraphs to render: text replacement, then formatting on top. */

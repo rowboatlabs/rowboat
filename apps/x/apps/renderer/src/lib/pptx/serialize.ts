@@ -78,6 +78,12 @@ export interface RunFormatOverrides {
   sizePt?: number
   /** Six-digit RRGGBB; replaces the run's fill with a solid color. */
   colorHex?: string
+  /**
+   * Latin typeface. Unlike the others this is a CHILD ELEMENT of rPr
+   * (`<a:latin typeface="…"/>`), not an attribute: an existing one is spliced
+   * at the attribute level, an absent one is inserted at its schema position.
+   */
+  latinFont?: string
 }
 
 export interface FormatRunsEdit {
@@ -148,6 +154,7 @@ export function normalizeParagraphs(paras: readonly Paragraph[]): string {
         underline: r.underline || undefined,
         sizePt: r.sizePt,
         colorHex: r.colorHex,
+        latinFont: r.latinFont,
       })),
     })),
   )
@@ -159,11 +166,29 @@ function runPropsEqual(a: TextRun, b: TextRun): boolean {
     Boolean(a.italic) === Boolean(b.italic) &&
     Boolean(a.underline) === Boolean(b.underline) &&
     a.sizePt === b.sizePt &&
-    a.colorHex === b.colorHex
+    a.colorHex === b.colorHex &&
+    a.latinFont === b.latinFont
   )
 }
 
 // ------------------------------------------------------------------ escaping
+
+/**
+ * Escapes a value for a double-quoted XML attribute. Font family names are
+ * arbitrary user/OS strings, so unlike the enum and integer attributes
+ * elsewhere in this module they genuinely need escaping.
+ */
+function escapeXmlAttr(s: string): string {
+  return (
+    s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      // eslint-disable-next-line no-control-regex -- stripping them is the point
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '')
+  )
+}
 
 /** Escapes text for XML element content. Quotes stay literal, as Office writes them. */
 function escapeXmlText(s: string): string {
@@ -499,12 +524,20 @@ function drawingPrefixOf(s: string, sldElem: Elem): string {
 
 const FILL_LOCALS = ['noFill', 'solidFill', 'gradFill', 'blipFill', 'pattFill', 'grpFill']
 
+/**
+ * rPr children the schema orders AFTER `a:latin`, per CT_TextCharacterProperties
+ * (ln, fill, effects, highlight, underline fill/line, latin, ea, cs, sym,
+ * hlink*, rtl, extLst). A synthesized `a:latin` goes before the first of these.
+ */
+const AFTER_LATIN_LOCALS = ['ea', 'cs', 'sym', 'hlinkClick', 'hlinkMouseOver', 'rtl', 'extLst']
+
 const hasOverride = (set: RunFormatOverrides): boolean =>
   set.bold !== undefined ||
   set.italic !== undefined ||
   set.underline !== undefined ||
   set.sizePt !== undefined ||
-  set.colorHex !== undefined
+  set.colorHex !== undefined ||
+  set.latinFont !== undefined
 
 /** sz is hundredths of a point, schema-bounded to [1pt, 4000pt]. */
 function szValue(sizePt: number): string {
@@ -525,6 +558,11 @@ function solidFillXml(prefix: string, colorHex: string): string {
   return `<${t('solidFill')}><${t('srgbClr')} val="${colorHex}"/></${t('solidFill')}>`
 }
 
+function latinXml(prefix: string, typeface: string): string {
+  const t = (n: string): string => (prefix ? `${prefix}:${n}` : n)
+  return `<${t('latin')} typeface="${escapeXmlAttr(typeface)}"/>`
+}
+
 /**
  * Ops that rewrite an existing rPr per the overrides: overridden attributes
  * are set on the open tag, an overridden color replaces the fill-group child
@@ -542,28 +580,62 @@ function transformRPrOps(s: string, rPr: Elem, set: RunFormatOverrides): SpliceO
     else attrInserts += ` ${name}="${value}"`
   }
 
-  if (set.colorHex === undefined) {
+  const prefix = prefixOf(rPr.name)
+  const fill = set.colorHex !== undefined ? solidFillXml(prefix, set.colorHex) : ''
+  const wantsLatin = set.latinFont !== undefined
+
+  // Attributes only: nothing inside the element moves.
+  if (!fill && !wantsLatin) {
     if (attrInserts) ops.push({ start: info.closeStart, end: info.closeStart, insert: attrInserts })
     return ops
   }
 
-  const fill = solidFillXml(prefixOf(rPr.name), set.colorHex)
   if (rPr.selfClosing) {
-    // `<a:rPr .../>` must reopen to hold the fill; fold new attributes into
-    // the same op so nothing overlaps.
-    ops.push({ start: info.closeStart, end: rPr.end, insert: `${attrInserts}>${fill}</${rPr.name}>` })
+    // `<a:rPr .../>` must reopen to hold children; fold the new attributes and
+    // every child into ONE op, in schema order, so nothing overlaps.
+    const inner = fill + (wantsLatin ? latinXml(prefix, set.latinFont as string) : '')
+    ops.push({
+      start: info.closeStart,
+      end: rPr.end,
+      insert: `${attrInserts}>${inner}</${rPr.name}>`,
+    })
     return ops
   }
+
   if (attrInserts) ops.push({ start: info.closeStart, end: info.closeStart, insert: attrInserts })
   const children = childElemsOf(s, rPr)
-  const existingFill = children.find((c) => FILL_LOCALS.includes(localOf(c.name)))
-  if (existingFill) {
-    ops.push({ start: existingFill.start, end: existingFill.end, insert: fill })
-  } else {
-    const ln = children.find((c) => localOf(c.name) === 'ln')
-    const at = ln ? ln.end : rPr.contentStart
-    ops.push({ start: at, end: at, insert: fill })
+
+  // Zero-length inserts are merged per offset: two children inserted at the
+  // same point as separate ops would tie in applySplices, which resolves ties
+  // by array order rather than schema order.
+  const inserts = new Map<number, string>()
+  const addInsert = (at: number, xml: string): void => {
+    inserts.set(at, (inserts.get(at) ?? '') + xml)
   }
+
+  if (fill) {
+    const existingFill = children.find((c) => FILL_LOCALS.includes(localOf(c.name)))
+    if (existingFill) {
+      ops.push({ start: existingFill.start, end: existingFill.end, insert: fill })
+    } else {
+      const ln = children.find((c) => localOf(c.name) === 'ln')
+      addInsert(ln ? ln.end : rPr.contentStart, fill)
+    }
+  }
+
+  if (wantsLatin) {
+    const existingLatin = children.find((c) => localOf(c.name) === 'latin')
+    if (existingLatin) {
+      // Attribute-level splice: every other byte of the element — and of its
+      // neighbours — is left exactly as authored.
+      ops.push(...setAttrOps(s, existingLatin, [['typeface', escapeXmlAttr(set.latinFont as string)]]))
+    } else {
+      const after = children.find((c) => AFTER_LATIN_LOCALS.includes(localOf(c.name)))
+      addInsert(after ? after.start : rPr.contentEnd, latinXml(prefix, set.latinFont as string))
+    }
+  }
+
+  for (const [at, xml] of inserts) ops.push({ start: at, end: at, insert: xml })
   return ops
 }
 
@@ -573,8 +645,12 @@ function synthesizedRPr(prefix: string, set: RunFormatOverrides): string {
   const attrs = attrPairsFor(set)
     .map(([n, v]) => ` ${n}="${v}"`)
     .join('')
-  if (set.colorHex === undefined) return `<${t('rPr')}${attrs}/>`
-  return `<${t('rPr')}${attrs}>${solidFillXml(prefix, set.colorHex)}</${t('rPr')}>`
+  // Children in schema order: the fill group precedes a:latin.
+  const children =
+    (set.colorHex !== undefined ? solidFillXml(prefix, set.colorHex) : '') +
+    (set.latinFont !== undefined ? latinXml(prefix, set.latinFont) : '')
+  if (!children) return `<${t('rPr')}${attrs}/>`
+  return `<${t('rPr')}${attrs}>${children}</${t('rPr')}>`
 }
 
 // --------------------------------------------------------------- rebuilding
@@ -745,6 +821,14 @@ function formatRunsOps(ctx: SlideCtx, edit: FormatRunsEdit): SpliceOp[] {
   if (set.colorHex !== undefined) {
     if (!/^[0-9A-Fa-f]{6}$/.test(set.colorHex)) fail(`colorHex must be RRGGBB (got "${set.colorHex}")`)
     set = { ...set, colorHex: set.colorHex.toUpperCase() }
+  }
+  if (set.latinFont !== undefined) {
+    // The value reaches an attribute, so it is escaped on the way out; an
+    // empty typeface is meaningless and would write an unusable a:latin.
+    const typeface = set.latinFont.trim()
+    if (!typeface) fail('latinFont must not be empty')
+    if (typeface.length > 64) fail(`latinFont is implausibly long (${typeface.length} chars)`)
+    set = { ...set, latinFont: typeface }
   }
 
   const { node, elem } = locateShape(ctx, edit.nodePath, ['sp'])

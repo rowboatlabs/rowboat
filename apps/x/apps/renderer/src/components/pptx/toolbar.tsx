@@ -1,9 +1,12 @@
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AlignCenterIcon,
   AlignLeftIcon,
   AlignRightIcon,
   BoldIcon,
+  CheckIcon,
+  ChevronDownIcon,
   DownloadIcon,
   ItalicIcon,
   MinusIcon,
@@ -17,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { isFontAvailable } from '@/components/pptx/text-dom'
 import type { RunFormatOverrides } from '@/lib/pptx/serialize'
 import type { TextAlign } from '@/lib/pptx/types'
 
@@ -62,6 +66,228 @@ function ToolButton({ label, onClick, disabled, active, children }: ToolButtonPr
 
 function Group({ children }: { children: ReactNode }) {
   return <div className="flex shrink-0 items-center gap-0.5">{children}</div>
+}
+
+/** Families offered on every deck, beneath the ones the deck already uses. */
+export const COMMON_FONTS = [
+  'Arial',
+  'Helvetica',
+  'Tahoma',
+  'Verdana',
+  'Georgia',
+  'Times New Roman',
+  'Courier New',
+  'Calibri',
+] as const
+
+/** Shown only for a family this machine cannot actually render. */
+const MISSING_SUFFIX =
+  'is not installed on this machine, so it renders with a substitute and its spacing may differ from PowerPoint.'
+
+interface FontPickerProps {
+  /** Resolved family of the selection; undefined means a mixed selection. */
+  value: string | undefined
+  /** Typefaces already used in this deck, listed first. */
+  deckFonts: readonly string[]
+  disabled: boolean
+  disabledReason: string | null
+  onChange: (family: string) => void
+}
+
+/** w-56 / max-h-72, needed up front to place and clamp the portaled menu. */
+const FONT_MENU_W = 224
+const FONT_MENU_MAX_H = 288
+const VIEWPORT_PAD = 8
+
+interface MenuPos {
+  left: number
+  top: number
+  maxHeight: number
+}
+
+/**
+ * Font family picker.
+ *
+ * The menu is PORTALED to document.body, not positioned inside the picker.
+ * The toolbar row is `overflow-x-auto`, and per CSS a non-visible overflow on
+ * one axis forces the other axis from `visible` to `auto` — so an absolutely
+ * positioned menu inside the row was clipped by the row's own scrollport and
+ * never appeared, even though it was mounted and `aria-expanded` was true.
+ *
+ * Every control in it is still a plain button that `preventDefault`s on
+ * mousedown, portal included: taking focus would blur the text overlay, which
+ * commits the edit and ends the session, so the pick would land on the whole
+ * shape instead of the selected runs.
+ */
+function FontPicker({ value, deckFonts, disabled, disabledReason, onChange }: FontPickerProps) {
+  const [pos, setPos] = useState<MenuPos | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const open = pos !== null
+
+  const close = useCallback(() => setPos(null), [])
+
+  const openMenu = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const left = Math.max(
+      VIEWPORT_PAD,
+      Math.min(rect.left, window.innerWidth - FONT_MENU_W - VIEWPORT_PAD),
+    )
+    const below = window.innerHeight - rect.bottom - VIEWPORT_PAD
+    const above = rect.top - VIEWPORT_PAD
+    // Flip up only when below is genuinely too cramped to be usable.
+    const flip = below < 160 && above > below
+    const maxHeight = Math.max(120, Math.min(FONT_MENU_MAX_H, flip ? above : below))
+    setPos({
+      left,
+      top: flip ? Math.max(VIEWPORT_PAD, rect.top - 4 - maxHeight) : rect.bottom + 4,
+      maxHeight,
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node
+      // The menu lives outside this component's DOM subtree now, so both the
+      // trigger and the portal have to count as "inside".
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      close()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    // Capture, so a scroll in any nested container (the toolbar row, the
+    // canvas) closes the menu rather than leaving it stranded mid-air.
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open, close])
+
+  // Deck fonts first, then the common list minus anything already shown.
+  const extras = COMMON_FONTS.filter((f) => !deckFonts.includes(f))
+  const label = disabled ? '—' : (value ?? 'Mixed')
+  // Only warn about a font that genuinely does not resolve here. Saying it
+  // unconditionally read as a claim about the CURRENT font, which was wrong
+  // whenever that font was installed — the common case.
+  const missing = !disabled && value !== undefined && !isFontAvailable(value)
+  const tip = disabledReason ?? (missing ? `${value} ${MISSING_SUFFIX}` : 'Font')
+
+  const pick = (family: string): void => {
+    onChange(family)
+    close()
+  }
+
+  return (
+    <div className="relative shrink-0">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            ref={triggerRef}
+            type="button"
+            aria-label="Font"
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            disabled={disabled}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => (open ? close() : openMenu())}
+            className="inline-flex h-7 w-32 items-center justify-between gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
+          >
+            <span className="truncate" style={value ? { fontFamily: `'${value}'` } : undefined}>
+              {label}
+            </span>
+            {missing && <span className="shrink-0 text-[10px] text-amber-500">•</span>}
+            <ChevronDownIcon className="size-3 shrink-0" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{tip}</TooltipContent>
+      </Tooltip>
+
+      {pos !== null &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            aria-label="Font"
+            onMouseDown={(e) => e.preventDefault()}
+            style={{
+              position: 'fixed',
+              left: pos.left,
+              top: pos.top,
+              width: FONT_MENU_W,
+              maxHeight: pos.maxHeight,
+            }}
+            className="z-[100] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md"
+          >
+            {deckFonts.length > 0 && (
+              <>
+                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  In this presentation
+                </div>
+                {deckFonts.map((f) => (
+                  <FontOption key={`deck:${f}`} family={f} selected={f === value} onPick={pick} />
+                ))}
+              </>
+            )}
+            {extras.length > 0 && (
+              <>
+                <div className="mt-1 border-t border-border px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Common
+                </div>
+                {extras.map((f) => (
+                  <FontOption key={`common:${f}`} family={f} selected={f === value} onPick={pick} />
+                ))}
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
+  )
+}
+
+function FontOption({
+  family,
+  selected,
+  onPick,
+}: {
+  family: string
+  selected: boolean
+  onPick: (family: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      // Portal or not, focus must stay in the contentEditable.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => onPick(family)}
+      className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground ${
+        selected ? 'text-foreground' : 'text-muted-foreground'
+      }`}
+    >
+      <span className="truncate" style={{ fontFamily: `'${family}'` }}>
+        {family}
+      </span>
+      <span className="flex shrink-0 items-center gap-1">
+        {!isFontAvailable(family) && (
+          <span className="text-[10px] text-amber-500" title={`${family} ${MISSING_SUFFIX}`}>
+            substituted
+          </span>
+        )}
+        {selected && <CheckIcon className="size-3" />}
+      </span>
+    </button>
+  )
 }
 
 function Divider() {
@@ -161,6 +387,11 @@ export interface ToolbarProps {
   /** Null when the selection can't take text formatting. */
   format: RunFormatOverrides | null
   formatDisabledReason: string | null
+  /** Resolved typeface of the selection; undefined renders as "Mixed". */
+  font: string | undefined
+  /** Typefaces already used in the deck, offered above the common list. */
+  deckFonts: readonly string[]
+  onFontChange: (family: string) => void
   onToggleBold: () => void
   onToggleItalic: () => void
   onToggleUnderline: () => void
@@ -186,6 +417,9 @@ export function EditorToolbar({
   onZoomFit,
   format,
   formatDisabledReason,
+  font,
+  deckFonts,
+  onFontChange,
   onToggleBold,
   onToggleItalic,
   onToggleUnderline,
@@ -239,6 +473,14 @@ export function EditorToolbar({
       </Group>
 
       <Divider />
+
+      <FontPicker
+        value={font}
+        deckFonts={deckFonts}
+        disabled={fmtOff}
+        disabledReason={formatDisabledReason}
+        onChange={onFontChange}
+      />
 
       <Group>
         <ToolButton

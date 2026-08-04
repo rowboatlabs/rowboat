@@ -614,6 +614,11 @@ function parseRunProps(rPr: XmlNode | undefined): Omit<TextRun, 'text'> {
   const srgb = descend(rPr, 'solidFill', 'srgbClr')
   const val = srgb && attr(srgb, 'val')
   if (val) out.colorHex = val.toUpperCase()
+  // Verbatim: a `+mn-lt` token stays a token here. Display resolution maps it
+  // through the theme; this model stays anchored to what the bytes say.
+  const latin = childByLocal(childrenOf(rPr), 'latin')
+  const typeface = latin && attr(latin, 'typeface')
+  if (typeface) out.latinFont = typeface
   return out
 }
 
@@ -758,12 +763,14 @@ function resolveTextDisplay(
       underline: explicit.underline ?? merged.underline ?? false,
       colorHex: explicit.colorHex ?? merged.colorHex ?? fallbackColor,
     }
+    const latin = explicit.latinFont ?? merged.latinFont
     const fontFamily = cssFontFamily(
-      explicit.latinFont ?? merged.latinFont,
+      latin,
       explicit.eaFont ?? merged.eaFont,
       explicit.csFont ?? merged.csFont,
     )
     if (fontFamily) style.fontFamily = fontFamily
+    if (latin) style.latinFont = latin
     const spc = explicit.letterSpacingPt ?? merged.letterSpacingPt
     if (spc !== undefined && spc !== 0) style.letterSpacingPt = spc
     return style

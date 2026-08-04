@@ -37,6 +37,13 @@ export interface TextRun {
   sizePt?: number
   /** Six-digit RRGGBB. Absent when the run inherits or uses a theme color. */
   colorHex?: string
+  /**
+   * The run's own `a:latin@typeface`, VERBATIM — a literal family name, or a
+   * theme token like `+mn-lt`. Absent when the run inherits its typeface.
+   * Byte-anchored like the rest of this model: the serializer re-derives it
+   * from the retained XML and compares, so a stale edit fails closed.
+   */
+  latinFont?: string
 }
 
 export interface Paragraph {
@@ -97,6 +104,12 @@ export interface ResolvedRunStyle {
   colorHex: string
   /** Ready-to-use CSS font-family. Absent when nothing is authored anywhere. */
   fontFamily?: string
+  /**
+   * The resolved primary latin typeface (theme tokens already mapped), which
+   * is what the font picker shows and offers. `fontFamily` is this plus the
+   * ea/cs slots and a generic fallback.
+   */
+  latinFont?: string
   /**
    * `a:rPr@spc` character tracking in points; negative tightens. Absolute, so
    * unlike the size it is not scaled by normAutofit — same rule as a fixed

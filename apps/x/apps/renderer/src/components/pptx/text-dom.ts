@@ -24,7 +24,7 @@ import {
   type TextRun,
   type TextShape,
 } from '@/lib/pptx/types'
-import { autoNumText } from '@/lib/pptx/textstyle'
+import { autoNumText, cssFontFamily } from '@/lib/pptx/textstyle'
 import { EMU_PER_PT } from './edit-model'
 
 export const DEFAULT_TEXT_PT = 18
@@ -50,9 +50,15 @@ export function displayRunStyle(
     underline: run.underline ?? dr?.underline ?? false,
     colorHex: run.colorHex ?? dr?.colorHex ?? '000000',
   }
-  // The model carries neither typeface nor tracking; the resolved cascade is
-  // the only source for both.
-  if (dr?.fontFamily) style.fontFamily = dr.fontFamily
+  // A run's own typeface wins over the cascade — that is how a font edit shows
+  // up on canvas, in thumbnails and in the overlay. Theme tokens (`+mn-lt`)
+  // are NOT literal families, so those keep the cascade's already-resolved
+  // value rather than being handed to CSS verbatim.
+  const own = run.latinFont && !run.latinFont.startsWith('+') ? run.latinFont : undefined
+  const family = own ? cssFontFamily(own, undefined, undefined) : dr?.fontFamily
+  if (family) style.fontFamily = family
+  if (own) style.latinFont = own
+  else if (dr?.latinFont) style.latinFont = dr.latinFont
   if (dr?.letterSpacingPt !== undefined) style.letterSpacingPt = dr.letterSpacingPt
   return style
 }
@@ -149,7 +155,8 @@ function runCss(style: ResolvedRunStyle, scale: number, fontScale: number): stri
 function runDataAttrs(run: TextRun): string {
   return (
     ` data-b="${run.bold ? 1 : 0}" data-i="${run.italic ? 1 : 0}" data-u="${run.underline ? 1 : 0}"` +
-    ` data-pt="${run.sizePt ?? ''}" data-c="${run.colorHex ?? ''}"`
+    ` data-pt="${run.sizePt ?? ''}" data-c="${run.colorHex ?? ''}"` +
+    ` data-ff="${escapeHtml(run.latinFont ?? '')}"`
   )
 }
 
@@ -311,6 +318,11 @@ function propsOfSpan(el: HTMLElement, scale: number): Omit<TextRun, 'text'> {
     // Plain black is the render default, not an authored color.
     if (hex && hex !== '000000') out.colorHex = hex
   }
+
+  // Only our own attribute is authoritative: a pasted span's inline
+  // font-family is a resolved CSS stack, not an authored OOXML typeface.
+  const dataFf = el.getAttribute('data-ff')
+  if (dataFf) out.latinFont = dataFf
 
   return out
 }
@@ -661,6 +673,10 @@ export function applyFormatToSpans(
       el.setAttribute('data-c', set.colorHex)
       el.style.color = `#${set.colorHex}`
     }
+    if (set.latinFont !== undefined) {
+      el.setAttribute('data-ff', set.latinFont)
+      el.style.fontFamily = cssFontFamily(set.latinFont, undefined, undefined) ?? ''
+    }
   }
 }
 
@@ -680,14 +696,17 @@ function aggregate(
   let underline = Boolean(items[0].underline)
   let sizePt: number | undefined = items[0].sizePt ?? DEFAULT_TEXT_PT
   let colorHex: string | undefined = items[0].colorHex ?? '000000'
+  // '' stands for "inherits", so runs that all inherit still agree.
+  let latinFont: string | undefined = items[0].latinFont ?? ''
   for (const p of items.slice(1)) {
     bold = bold && Boolean(p.bold)
     italic = italic && Boolean(p.italic)
     underline = underline && Boolean(p.underline)
     if ((p.sizePt ?? DEFAULT_TEXT_PT) !== sizePt) sizePt = undefined
     if ((p.colorHex ?? '000000') !== colorHex) colorHex = undefined
+    if ((p.latinFont ?? '') !== latinFont) latinFont = undefined
   }
-  return { bold, italic, underline, sizePt, colorHex }
+  return { bold, italic, underline, sizePt, colorHex, latinFont }
 }
 
 /** Aggregate formatting of a set of spans, for reflecting toolbar state. */
@@ -701,4 +720,88 @@ export function aggregateFormat(
 /** Aggregate formatting of model runs, for when nothing is being edited. */
 export function aggregateFormatOfParagraphs(paras: readonly Paragraph[]): RunFormatOverrides {
   return aggregate(paras.flatMap((p) => p.runs).filter((r) => r.text !== '\n'))
+}
+
+// ------------------------------------------------------------------- fonts
+
+/** First family out of a CSS font-family stack — one we generated ourselves. */
+function primaryFamily(css: string): string | undefined {
+  const quoted = css.match(/^\s*'([^']+)'/) ?? css.match(/^\s*"([^"]+)"/)
+  if (quoted) return quoted[1]
+  const first = css.split(',')[0]?.trim()
+  return first || undefined
+}
+
+/** The typeface a span renders with: its own when authored, else inherited. */
+function fontOfSpan(el: HTMLElement): string | undefined {
+  const own = el.getAttribute('data-ff')
+  if (own) return own
+  return primaryFamily(el.style.fontFamily)
+}
+
+/** The selection's typeface, or undefined when the spans disagree ("Mixed"). */
+export function aggregateFontOfSpans(spans: readonly HTMLElement[]): string | undefined {
+  if (spans.length === 0) return undefined
+  const first = fontOfSpan(spans[0])
+  return spans.every((s) => fontOfSpan(s) === first) ? first : undefined
+}
+
+/** The shape's typeface as RENDERED (cascade included), or undefined if mixed. */
+export function aggregateFontOfShape(shape: TextShape): string | undefined {
+  const fonts: Array<string | undefined> = []
+  shape.paragraphs.forEach((para, pi) =>
+    para.runs.forEach((run, ri) => {
+      if (run.text === '\n') return
+      fonts.push(displayRunStyle(shape, pi, ri, run).latinFont)
+    }),
+  )
+  if (fonts.length === 0) return shape.display?.defaultRun.latinFont
+  const first = fonts[0]
+  return fonts.every((f) => f === first) ? first : undefined
+}
+
+/**
+ * Whether a family actually resolves on this machine.
+ *
+ * `document.fonts.check()` is not usable here: Chromium answers true for
+ * families it has never heard of, because it reports on the fallback it would
+ * use. So measure instead — a probe string laid out in `family, <generic>` has
+ * a different width from the generic alone exactly when the family resolved.
+ */
+const fontAvailability = new Map<string, boolean>()
+
+export function isFontAvailable(family: string): boolean {
+  const cached = fontAvailability.get(family)
+  if (cached !== undefined) return cached
+
+  const ctx = document.createElement('canvas').getContext('2d')
+  // No measuring surface (jsdom): claim availability rather than warn wrongly.
+  if (!ctx) return true
+
+  const probe = 'mmmmmmmmmmlliWWWWWW@'
+  const available = (['monospace', 'serif', 'sans-serif'] as const).some((generic) => {
+    ctx.font = `72px ${generic}`
+    const base = ctx.measureText(probe).width
+    ctx.font = `72px '${family.replace(/'/g, '')}', ${generic}`
+    return ctx.measureText(probe).width !== base
+  })
+  fontAvailability.set(family, available)
+  return available
+}
+
+/** Every typeface the deck actually renders with, for the picker's first group. */
+export function typefacesInShapes(shapes: readonly TextShape[]): string[] {
+  const seen = new Set<string>()
+  for (const shape of shapes) {
+    const fallback = shape.display?.defaultRun.latinFont
+    if (fallback) seen.add(fallback)
+    shape.paragraphs.forEach((para, pi) =>
+      para.runs.forEach((run, ri) => {
+        if (run.text === '\n') return
+        const font = displayRunStyle(shape, pi, ri, run).latinFont
+        if (font) seen.add(font)
+      }),
+    )
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b))
 }
