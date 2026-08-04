@@ -42,6 +42,7 @@ import {
   type ShapeKey,
 } from '@/components/pptx/edit-model'
 import { SlideCanvas, SlideThumbnail } from '@/components/pptx/canvas'
+import { createSavePipeline, type SavePipeline } from '@/components/pptx/save-pipeline'
 import { PresentationOverlay } from '@/components/pptx/presentation'
 import {
   EditorHeader,
@@ -154,11 +155,6 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const editSetRef = useRef<DeckEdits>(EMPTY_DECK_EDITS)
   const histIndexRef = useRef(0)
   const overlayRef = useRef<TextOverlayHandle | null>(null)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const savingRef = useRef(false)
-  const pendingRef = useRef(false)
-  const dirtyRef = useRef(false)
-  const lastWrittenRef = useRef<string | null>(null)
 
   useEffect(() => {
     editSetRef.current = editSet
@@ -169,55 +165,36 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
   // ------------------------------------------------------------- persistence
 
-  const persist = useCallback(async () => {
-    const base = baseDeckRef.current
-    if (!base) return
-    if (savingRef.current) {
-      pendingRef.current = true
-      return
-    }
-    savingRef.current = true
-    try {
-      const edits = editSetRef.current
-      if (!hasEdits(edits) && lastWrittenRef.current === null) {
-        setSaveStatus('clean')
-        return
-      }
-      const bytes = await writeDeck(base, toSlideEdits(edits.shapes), {
-        deleteSlides: edits.deletedSlides,
-      })
-      const b64 = uint8ArrayToBase64(bytes)
-      if (b64 !== lastWrittenRef.current) {
+  // One pipeline per mount (App.tsx keys this component by path). It owns the
+  // debounce timer and the dirty generations; the callbacks read refs so it
+  // never captures stale edit state. Lazy ref, not useMemo — React may drop
+  // a memo, and with it the generation counters an unmount flush relies on.
+  const savePipelineRef = useRef<SavePipeline | null>(null)
+  if (savePipelineRef.current === null) {
+    savePipelineRef.current = createSavePipeline({
+      debounceMs: SAVE_DEBOUNCE_MS,
+      hasEdits: () => hasEdits(editSetRef.current),
+      serialize: async () => {
+        const base = baseDeckRef.current
+        if (!base) throw new Error('presentation is not loaded')
+        const edits = editSetRef.current
+        const bytes = await writeDeck(base, toSlideEdits(edits.shapes), {
+          deleteSlides: edits.deletedSlides,
+        })
+        return uint8ArrayToBase64(bytes)
+      },
+      write: async (data) => {
         await window.ipc.invoke('workspace:writeFile', {
           path,
-          data: b64,
+          data,
           opts: { encoding: 'base64' },
         })
-        lastWrittenRef.current = b64
-      }
-      dirtyRef.current = false
-      setSaveStatus('saved')
-    } catch (err) {
-      console.error('Failed to save pptx:', err)
-      setSaveStatus('error')
-    } finally {
-      savingRef.current = false
-      if (pendingRef.current) {
-        pendingRef.current = false
-        scheduleSave()
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path])
-
-  const scheduleSave = useCallback(() => {
-    dirtyRef.current = true
-    setSaveStatus('saving')
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      void persist()
-    }, SAVE_DEBOUNCE_MS)
-  }, [persist])
+      },
+      onStatus: setSaveStatus,
+      onError: (err) => console.error('Failed to save pptx:', err),
+    })
+  }
+  const savePipeline = savePipelineRef.current
 
   /** Commits a new edit set: pushes onto the undo stack and schedules a save. */
   const pushEdits = useCallback(
@@ -228,9 +205,9 @@ export function PptxEditor({ path }: PptxEditorProps) {
       })
       setHistIndex((i) => Math.min(i + 1, MAX_HISTORY - 1))
       editSetRef.current = next
-      scheduleSave()
+      savePipeline.scheduleSave()
     },
-    [scheduleSave],
+    [savePipeline],
   )
 
   /** Commits a shape-level change, carrying the slide deletions forward. */
@@ -242,10 +219,10 @@ export function PptxEditor({ path }: PptxEditorProps) {
   )
 
   // Flush pending edits on unmount / path change, before blob URLs are revoked.
+  // The pipeline awaits any in-flight save and persists anything it missed.
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      if (dirtyRef.current) void persist()
+      void savePipeline.flush()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
@@ -301,8 +278,8 @@ export function PptxEditor({ path }: PptxEditorProps) {
     editSetRef.current = history[next] ?? EMPTY_DECK_EDITS
     setHistIndex(next)
     setEditingKey(null)
-    scheduleSave()
-  }, [history, scheduleSave])
+    savePipeline.scheduleSave()
+  }, [history, savePipeline])
 
   const redo = useCallback(() => {
     if (histIndexRef.current >= history.length - 1) return
@@ -311,8 +288,8 @@ export function PptxEditor({ path }: PptxEditorProps) {
     editSetRef.current = history[next] ?? EMPTY_DECK_EDITS
     setHistIndex(next)
     setEditingKey(null)
-    scheduleSave()
-  }, [history, scheduleSave])
+    savePipeline.scheduleSave()
+  }, [history, savePipeline])
 
   // ----------------------------------------------------------- edit commits
 
@@ -481,7 +458,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         // Editing: mutate the spans; the commit on blur turns this into edits.
         applyFormatToSpans(selectedRunSpans(overlay.root), set, overlay.scale, fontScaleOf(overlay.shape))
         setSelectionTick((t) => t + 1)
-        dirtyRef.current = true
+        savePipeline.markEdited()
         return
       }
 
@@ -502,7 +479,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         }),
       )
     },
-    [slide, selectedKey, pushShapeEdits, seedFor],
+    [slide, selectedKey, pushShapeEdits, seedFor, savePipeline],
   )
 
   const applyAlign = useCallback(
@@ -515,7 +492,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
       if (overlay) {
         applyAlignToBlocks(selectedParagraphBlocks(overlay.root), align)
         setSelectionTick((t) => t + 1)
-        dirtyRef.current = true
+        savePipeline.markEdited()
         return
       }
 
@@ -532,7 +509,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
         }),
       )
     },
-    [slide, selectedKey, pushShapeEdits, seedFor],
+    [slide, selectedKey, pushShapeEdits, seedFor, savePipeline],
   )
 
   const stepFontSize = useCallback(
