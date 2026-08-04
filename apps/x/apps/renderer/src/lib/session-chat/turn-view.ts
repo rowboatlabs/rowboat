@@ -76,7 +76,9 @@ const VOICE_OPEN_TAG = '<voice>'
 // Early speech: once an open block has this many unconsumed chars, its last
 // complete clause is emitted immediately instead of waiting for </voice> —
 // TTS starts on the first clause while the rest of the sentence generates.
-const EARLY_SPEECH_MIN_CHARS = 60
+// 40 (down from 60): voice-to-first-audio was the companion's biggest
+// perceived lag, and a shorter first clause is worth the prosody risk.
+const EARLY_SPEECH_MIN_CHARS = 40
 // ...but never emit a fragment shorter than this (prosody suffers).
 const EARLY_SPEECH_MIN_EMIT = 30
 // Clause boundaries (punctuation, optionally inside closing quote/paren,

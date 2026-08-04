@@ -1070,7 +1070,11 @@ function App() {
       if (pttStatusRef.current !== 'idle') break
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
-      if (ttsEnabledRef.current || speakTurnRef.current) {
+      if (
+        (ttsEnabledRef.current || speakTurnRef.current) &&
+        !companionTextModeRef.current &&
+        !suppressSpeechTurnRef.current
+      ) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
         spokeSegmentThisTurnRef.current = true
@@ -1088,6 +1092,11 @@ function App() {
     if (activeIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
+    // Text mode (the companion's expanded card): no fallback read-aloud.
+    if (companionTextModeRef.current || suppressSpeechTurnRef.current) {
+      turn.pending = false
+      return
+    }
     // Speaking this turn: call TTS, or the quick-ask voice toggle.
     if (!(inCallRef.current ? ttsEnabledRef.current : speakTurnRef.current)) {
       turn.pending = false
@@ -1160,6 +1169,17 @@ function App() {
   const inCallRef = useRef(false)
   // User explicitly shrank the full-screen call to the floating pill.
   const [callMinimized, setCallMinimized] = useState(false)
+  // A voice session started from the companion (⌥⇧Space summon or the
+  // card's tuck handle): its share toggle is STICKY — opted in once, every
+  // future summon starts already sharing, until toggled off.
+  const companionVoiceRef = useRef(false)
+  const companionVoiceStartingRef = useRef(false)
+  // The companion's expanded CARD is TEXT MODE: replies render as text and
+  // are not spoken (pushed from the bar over quick-ask:text-mode). The
+  // per-turn ref makes the choice stick for a whole turn — a reply to a
+  // text-mode question stays silent even if the user tucks mid-stream.
+  const companionTextModeRef = useRef(false)
+  const suppressSpeechTurnRef = useRef(false)
   // In-call mute: a full input pause, not just audio — mic audio stops
   // reaching Deepgram AND camera/screen frame capture stops, so nothing said
   // or shown while muted ever reaches the assistant. Output is untouched
@@ -1416,6 +1436,7 @@ function App() {
     setCallMinimized(false)
     inCallRef.current = false
     setInCall(false)
+    companionVoiceRef.current = false
     releaseVoice(CALL_VOICE_HOLDER)
   }, [video, setPttState])
 
@@ -1741,7 +1762,14 @@ function App() {
     return window.ipc.on('video:popout-action', ({ action, text }) => {
       if (action === 'toggle-mic') handleToggleMic()
       else if (action === 'toggle-camera') handleToggleCamera()
-      else if (action === 'toggle-share') void handleToggleScreenShare()
+      else if (action === 'toggle-share') {
+        // Companion voice sessions remember the choice: sharing becomes the
+        // default for future summons until turned off.
+        if (companionVoiceRef.current) {
+          localStorage.setItem('companion-share-sticky', video.screenState !== 'live' ? '1' : '0')
+        }
+        void handleToggleScreenShare()
+      }
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
       else if (action === 'ptt-up') handlePttUp()
@@ -1845,19 +1873,109 @@ function App() {
       .catch(() => {})
   }, [inCall, video.screenState])
 
-  // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
-  // in the current chat exactly like a composer message.
+  // Quick-ask bar: a submit from the global ⌥⇧Space bar lands in the current
+  // chat exactly like a composer message. The bar hosts the REAL composer,
+  // so the payload carries everything an in-app submit does — mentions,
+  // attachments, per-turn config — plus the bar's model/effort picks, which
+  // are applied to the active tab the same way its own composer would.
   const quickAskActiveRef = useRef(false)
   const quickAskStartedAtRef = useRef(0)
   useEffect(() => {
-    return window.ipc.on('quick-ask:submit', ({ text }) => {
-      const trimmed = text.trim()
-      if (!trimmed) return
+    return window.ipc.on('quick-ask:submit', (payload) => {
+      const trimmed = payload.text.trim()
+      if (!trimmed && !payload.attachments?.length) return
       quickAskActiveRef.current = true
       quickAskStartedAtRef.current = Date.now()
-      handlePromptSubmitRef.current?.({ text: trimmed, files: [] })
+      // Model/effort now ride ONE ModelSelection keyed by chatId. The bar's
+      // picks overlay the tab's existing selection; effort-only picks need
+      // a model to attach to (fresh-tab effort still applies via the
+      // hover fast-thinking fallback in handlePromptSubmit).
+      const tabId = activeChatTabIdRef.current
+      if (payload.model || payload.reasoningEffort) {
+        const key = chatIdForTab(tabId)
+        const prev = selectionByTabRef.current.get(key)
+        const model = payload.model ?? prev
+        if (model) {
+          selectionByTabRef.current.set(key, {
+            provider: model.provider,
+            model: model.model,
+            ...(payload.reasoningEffort
+              ? { effort: payload.reasoningEffort }
+              : prev?.effort
+                ? { effort: prev.effort }
+                : {}),
+          })
+        }
+      }
+      void handlePromptSubmitRef.current?.(
+        { text: trimmed, files: [] },
+        payload.mentions,
+        payload.attachments ?? [],
+        payload.searchEnabled,
+        payload.codeMode,
+        payload.permissionMode,
+      )
     })
   }, [])
+
+  // Stop relay: the bar composer's send button becomes Stop while a turn is
+  // processing, same as in the app.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:stop', () => {
+      void stopRunRef.current?.()
+    })
+  }, [])
+
+  // Companion text mode (the expanded card): entering it hushes in-flight
+  // speech and skips the queued voice backlog; while it's on, replies are
+  // text only. Voice comes back when the card tucks away.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:text-mode', ({ textMode }) => {
+      companionTextModeRef.current = textMode
+      if (textMode) {
+        ttsRef.current.cancel()
+        if (voiceSegmentsRef.current) {
+          spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+        }
+        spokeSegmentThisTurnRef.current = true
+      }
+    })
+  }, [])
+
+  // Tuck relay: the bar pushed its text into the mascot — voice-to-voice.
+  // This is the voice call preset's long-promised "floating mascot pill"
+  // surface: start one (it opens minimized → callSurface 'popout' → the
+  // companion pins collapsed). If a call is already live, just minimize it
+  // to the floating surface instead of starting a second one.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:tuck', () => {
+      if (inCallRef.current) {
+        setCallMinimized(true)
+        return
+      }
+      if (companionVoiceStartingRef.current) return
+      if (voiceAvailable && ttsAvailable) {
+        companionVoiceRef.current = true
+        companionVoiceStartingRef.current = true
+        void startCall('voice')
+          .then(() => {
+            // Sticky screen share: opted in once from the mascot's share
+            // pin → every summon starts already sharing, until toggled off.
+            if (localStorage.getItem('companion-share-sticky') === '1') {
+              void video.startScreenShare().then((shared) => {
+                if (!shared) setPermissionDialog('screen-recording')
+              })
+            }
+          })
+          .finally(() => {
+            companionVoiceStartingRef.current = false
+          })
+      } else {
+        // Voice-first has no voice — fall back to the text card.
+        void window.ipc.invoke('quickAsk:show', null).catch(() => {})
+      }
+    })
+  }, [voiceAvailable, ttsAvailable, startCall, video])
 
   // Mirror the in-flight answer back to the bar while a quick-ask turn is
   // live: streaming text while generating, the final assistant message when
@@ -3457,6 +3575,9 @@ function App() {
     // outside the bar never start talking.
     speakTurnRef.current =
       !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
+    // A turn submitted from the companion's expanded card is a TEXT turn:
+    // its reply renders silently, even if the user tucks mid-reply.
+    suppressSpeechTurnRef.current = inCallRef.current && companionTextModeRef.current
 
     if (inCallRef.current || speakTurnRef.current) {
       // A new question supersedes whatever of the previous reply was still
@@ -3540,7 +3661,15 @@ function App() {
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
-      const reasoningEffort = selected?.effort
+      // Effort rides the ModelSelection. Hover-mode turns (companion voice
+      // sessions and bar submits) default to FAST thinking when there's no
+      // explicit pick — voice-to-first-word is the experience, and a long
+      // reasoning phase is dead air.
+      const reasoningEffort =
+        selected?.effort ??
+        ((inCallRef.current && companionVoiceRef.current) || quickAskActiveRef.current
+          ? ('low' as const)
+          : undefined)
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.
@@ -4451,6 +4580,34 @@ function App() {
       handleNewChatTabInSidebar()
     })
   }, [handleNewChatTabInSidebar])
+
+  // Companion-bar chat context: which chat a bar submit lands in (shown as
+  // the bar's destination chip) plus recents for its switcher. Pushed on
+  // every tab/run change; main caches and replays it on bar load.
+  useEffect(() => {
+    const activeTab = chatTabs.find((t) => t.id === activeChatTabId)
+    void window.ipc
+      .invoke('quickAsk:chatContext', {
+        activeRunId: activeTab?.runId ?? null,
+        activeTitle: activeTab ? getChatTabTitle(activeTab) : null,
+        recent: runs.slice(0, 10).map((r) => ({ id: r.id, title: r.title || '(Untitled chat)' })),
+      })
+      .catch(() => {})
+  }, [chatTabs, activeChatTabId, runs, getChatTabTitle])
+
+  // The bar's chip switcher picked a chat: bind the active tab to it — the
+  // same pattern as the sidebar's recent-chats list.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:select-chat', ({ runId: rid }) => {
+      const existingTab = chatTabs.find((t) => t.runId === rid)
+      if (existingTab) {
+        switchChatTab(existingTab.id)
+        return
+      }
+      setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid } : t)))
+      void loadRun(rid)
+    })
+  }, [chatTabs, activeChatTabId, switchChatTab, loadRun])
 
   // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
   // queues the message; the pending-submit effect (below) flushes it once state has settled
@@ -7557,6 +7714,7 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
+                onPopOut={() => void window.ipc.invoke('quickAsk:popOut', null).catch(() => {})}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
                 currentReasoning={activeChatTabState.currentReasoning}

@@ -33,10 +33,7 @@ await esbuild.build({
   // relative to their own package dirs), so they stay external and are copied
   // into .package/node_modules below, where require() from dist/main.cjs
   // finds them.
-  // electron-liquid-glass is staged below on macOS (its only platform);
-  // elsewhere the quick-ask bar's lazy import fails and it keeps the solid
-  // capsule.
-  external: ['electron', 'node-pty', 'uiohook-napi', 'electron-liquid-glass'],
+  external: ['electron', 'node-pty', 'uiohook-napi'],
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',
@@ -130,28 +127,6 @@ const nodeGypBuildDest = path.join(here, '.package', 'node_modules', 'node-gyp-b
 fs.rmSync(nodeGypBuildDest, { recursive: true, force: true });
 fs.cpSync(nodeGypBuildSrc, nodeGypBuildDest, { recursive: true, dereference: true });
 console.log('✅ uiohook-napi staged in .package/node_modules');
-
-// electron-liquid-glass (quick-ask bar's glass material): same node-gyp-build
-// loader + prebuilds layout as uiohook-napi. macOS-only prebuilds — on other
-// platforms nothing is staged and the lazy import in quick-ask.ts falls back
-// to the solid capsule.
-if (process.platform === 'darwin') {
-  const glassSrc = fs.realpathSync(path.join(here, 'node_modules', 'electron-liquid-glass'));
-  const glassDest = path.join(here, '.package', 'node_modules', 'electron-liquid-glass');
-  fs.rmSync(glassDest, { recursive: true, force: true });
-  fs.mkdirSync(glassDest, { recursive: true });
-  for (const item of ['package.json', 'dist']) {
-    fs.cpSync(path.join(glassSrc, item), path.join(glassDest, item), { recursive: true, dereference: true });
-  }
-  const glassPrebuildsSrc = path.join(glassSrc, 'prebuilds');
-  const glassPrebuildsDest = path.join(glassDest, 'prebuilds');
-  fs.mkdirSync(glassPrebuildsDest, { recursive: true });
-  for (const dir of fs.readdirSync(glassPrebuildsSrc)) {
-    if (!dir.startsWith(`${process.platform}-`)) continue;
-    fs.cpSync(path.join(glassPrebuildsSrc, dir), path.join(glassPrebuildsDest, dir), { recursive: true, dereference: true });
-  }
-  console.log('✅ electron-liquid-glass staged in .package/node_modules');
-}
 
 // electron-chrome-extensions injects a preload script into browser tabs to
 // implement the chrome.* extension APIs. It resolves that file at runtime:

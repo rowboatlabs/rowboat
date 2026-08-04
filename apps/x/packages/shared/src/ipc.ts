@@ -3,7 +3,7 @@ import { UseCase } from './analytics.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmProvider, ModelSelection, ReasoningEffort } from './models.js';
+import { LlmProvider, ModelRef, ModelSelection, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -34,6 +34,51 @@ import { ChannelsConfig, ChannelsStatus } from './channels.js';
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
 // ============================================================================
+
+// Everything the in-app composer's onSubmit carries, so a bar question
+// behaves exactly like a composer message: mentions and attachments flow
+// into the turn, and the per-turn config (search/code/permissions) plus the
+// bar's model/effort picks are applied by the app window before submitting.
+const QuickAskSubmitPayload = z.object({
+  text: z.string(),
+  mentions: z
+    .array(
+      z.object({
+        id: z.string(),
+        path: z.string(),
+        displayName: z.string(),
+        lineNumber: z.number().optional(),
+      }),
+    )
+    .optional(),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        path: z.string(),
+        filename: z.string(),
+        mimeType: z.string(),
+        isImage: z.boolean(),
+        size: z.number(),
+        thumbnailUrl: z.string().optional(),
+      }),
+    )
+    .optional(),
+  searchEnabled: z.boolean().optional(),
+  codeMode: z.enum(['claude', 'codex']).optional(),
+  permissionMode: z.enum(['manual', 'auto']).optional(),
+  model: ModelRef.nullable().optional(),
+  reasoningEffort: ReasoningEffort.nullable().optional(),
+});
+
+// Which chat the bar's submits land in (title shown as the bar's
+// destination chip) plus recents for its switcher — pushed by the app
+// window whenever tabs/runs change.
+const QuickAskChatContext = z.object({
+  activeRunId: z.string().nullable(),
+  activeTitle: z.string().nullable(),
+  recent: z.array(z.object({ id: z.string(), title: z.string() })),
+});
 
 const KnowledgeSourceScopeSchema = z.object({
   type: z.string(),
@@ -1089,20 +1134,99 @@ const ipcSchemas = {
     res: z.object({}),
   },
   // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
-  // Bar → main: relay a typed/spoken question into the app window's chat.
+  // Bar → main: relay a composer submit into the app window's chat.
   'quickAsk:submit': {
-    req: z.object({ text: z.string() }),
+    req: QuickAskSubmitPayload,
     res: z.object({}),
   },
-  // Push channel: main → app window with the relayed question.
+  // Push channel: main → app window with the relayed submit.
   'quick-ask:submit': {
-    req: z.object({ text: z.string() }),
+    req: QuickAskSubmitPayload,
+    res: z.null(),
+  },
+  // Bar → main → app window: stop the in-flight turn (the bar composer's
+  // send button becomes Stop while processing, same as in the app).
+  'quickAsk:stop': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  'quick-ask:stop': {
+    req: z.null(),
     res: z.null(),
   },
   // Bar → main: dismiss the bar (Esc).
   'quickAsk:hide': {
     req: z.null(),
     res: z.object({}),
+  },
+  // Main → bar: the window was just summoned. viaShortcut distinguishes the
+  // global chord (⌥⇧Space — hold-to-talk starts capturing immediately) from
+  // programmatic shows (the discoverability toast), which must not touch
+  // the mic.
+  'quick-ask:summoned': {
+    req: z.object({ viaShortcut: z.boolean() }),
+    res: z.null(),
+  },
+  // The companion window's current role: summoned Spotlight bar, pinned
+  // call pill, or hidden. `collapsed` is the pinned pill tucked down to just
+  // the mascot (voice-to-voice). Pushed on every transition; the invoke
+  // covers the load race (the window may finish loading after a transition
+  // fired).
+  'quickAsk:getMode': {
+    req: z.null(),
+    res: z.object({
+      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      collapsed: z.boolean(),
+      // Which surface the pinned role expands to: untuck returns you to the
+      // surface you tucked FROM — 'card' (the bar-style text card, for
+      // bar-originated sessions; screen share keeps the card, its consent
+      // badge rides the card's strip) or 'pill' (only a live CAMERA forces
+      // the pill's tiles).
+      surface: z.enum(['card', 'pill']),
+    }),
+  },
+  'quick-ask:mode': {
+    req: z.object({
+      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      collapsed: z.boolean(),
+      surface: z.enum(['card', 'pill']),
+    }),
+    res: z.null(),
+  },
+  // Bar → main → app window: tuck the text into the mascot. The app starts
+  // the voice-preset call (mascot-only floating surface) — or, if a call is
+  // already live, just minimizes it to the floating surface.
+  'quickAsk:tuck': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // App window → main: pop the ACTIVE chat out into the floating companion,
+  // landing on the expanded text card (the mirror of the card's ↗). Starts
+  // a companion session so the popped chat survives blur (tucking to the
+  // mascot instead of dying like a plain summon would).
+  'quickAsk:popOut': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  'quick-ask:tuck': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Pill ⇄ tucked-mascot presentation of the pinned role (main resizes the
+  // window in place and re-pushes quick-ask:mode).
+  'quickAsk:setPinnedCollapsed': {
+    req: z.object({ collapsed: z.boolean() }),
+    res: z.object({}),
+  },
+  // Bar → main → app window: the companion's expanded card is TEXT MODE —
+  // replies render silently there (entering it hushes in-flight speech).
+  'quickAsk:setTextMode': {
+    req: z.object({ textMode: z.boolean() }),
+    res: z.object({}),
+  },
+  'quick-ask:text-mode': {
+    req: z.object({ textMode: z.boolean() }),
+    res: z.null(),
   },
   // App window → main: open the bar (the discoverability toast's "Try it").
   'quickAsk:show': {
@@ -1156,6 +1280,26 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // App window → main → bar: the destination-chat context (see
+  // QuickAskChatContext). Cached in main and replayed on bar load.
+  'quickAsk:chatContext': {
+    req: QuickAskChatContext,
+    res: z.object({}),
+  },
+  'quick-ask:chat-context': {
+    req: QuickAskChatContext,
+    res: z.null(),
+  },
+  // Bar → main → app window: rebind the bar (= the app's active chat tab)
+  // to one of the recent chats from the chip's switcher.
+  'quickAsk:selectChat': {
+    req: z.object({ runId: z.string() }),
+    res: z.object({}),
+  },
+  'quick-ask:select-chat': {
+    req: z.object({ runId: z.string() }),
+    res: z.null(),
+  },
   // Bar → main: start a fresh chat for the next question (the app stays in
   // the background; only the conversation resets).
   'quickAsk:newChat': {
@@ -1166,11 +1310,6 @@ const ipcSchemas = {
   'quick-ask:new-chat': {
     req: z.null(),
     res: z.null(),
-  },
-  // Bar → main: grow/shrink the window as the response area changes.
-  'quickAsk:resize': {
-    req: z.object({ height: z.number() }),
-    res: z.object({}),
   },
   // App window → main: mirror of the in-flight answer for the bar
   // (streaming text while processing, final text when done).

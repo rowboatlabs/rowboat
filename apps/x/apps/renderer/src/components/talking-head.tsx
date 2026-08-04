@@ -27,6 +27,7 @@ export type MascotHat =
   | 'captain'
   | 'explorer'
   | 'party'
+  | 'cowboy'
 
 type TalkingHeadProps = {
   ttsState: TTSState
@@ -36,6 +37,12 @@ type TalkingHeadProps = {
   hat?: MascotHat
   /** Paddle hard: fast bobbing + oar strokes, e.g. while traveling in the tour. */
   rowing?: boolean
+  /**
+   * Interactive layer rendered INSIDE the bobbing container, absolutely
+   * positioned over the SVG — so overlaid controls (e.g. the companion's
+   * hat pins) ride the bob instead of detaching from the artwork.
+   */
+  hatOverlay?: React.ReactNode
 }
 
 /**
@@ -43,7 +50,7 @@ type TalkingHeadProps = {
  * in a wooden rowboat holding an oar. The mouth is driven every animation
  * frame from the live TTS audio level; eyes blink on a randomized timer.
  */
-export function TalkingHead({ ttsState, getLevel, size = 160, hat, rowing = false }: TalkingHeadProps) {
+export function TalkingHead({ ttsState, getLevel, size = 160, hat, rowing = false, hatOverlay }: TalkingHeadProps) {
   const mouthOpenRef = useRef<SVGEllipseElement>(null)
   const mouthSmileRef = useRef<SVGPathElement>(null)
   const oarRef = useRef<SVGGElement>(null)
@@ -269,6 +276,7 @@ export function TalkingHead({ ttsState, getLevel, size = 160, hat, rowing = fals
           <path d="M 33 121 C 52 131 148 131 167 121" fill="none" stroke={BOAT_LIGHT} strokeWidth="4" strokeLinecap="round" />
         </g>
       </svg>
+      {hatOverlay && <div className="absolute inset-0">{hatOverlay}</div>}
     </div>
   )
 }
@@ -469,6 +477,17 @@ function MascotHatArt({ hat }: { hat: MascotHat }) {
           <path d="M 100 -2 L 84 34 L 116 34 Z" fill="#F2699C" {...outline} />
           <path d="M 92 16 L 111 22 M 88 26 L 114 31" fill="none" stroke="#FFD166" strokeWidth="3.5" strokeLinecap="round" />
           <circle cx="100" cy="0" r="5" fill="#FFD166" stroke={BODY_STROKE} strokeWidth="3" />
+        </g>
+      )
+    case 'cowboy':
+      // The rancher: tall dented crown, leather band (roomy enough for the
+      // companion's control pins to sit on), wide upswept brim.
+      return (
+        <g>
+          <path d="M 76 34 C 73 11 85 1 100 1 C 115 1 127 11 124 34 Z" fill="#CE9455" {...outline} />
+          <path d="M 91 2 Q 100 11 109 2" fill="none" stroke={BODY_STROKE} strokeWidth="3" strokeLinecap="round" />
+          <path d="M 76 26 L 124 26 L 124 34 L 76 34 Z" fill="#5A3A26" {...outline} />
+          <path d="M 48 34 Q 38 20 54 27 C 68 33 82 34 100 34 C 118 34 132 33 146 27 Q 162 20 152 34 Q 138 48 100 48 Q 62 48 48 34 Z" fill="#CE9455" {...outline} />
         </g>
       )
   }
