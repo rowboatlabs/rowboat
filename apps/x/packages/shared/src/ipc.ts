@@ -173,6 +173,18 @@ const ipcSchemas = {
       ok: z.literal(true),
     }),
   },
+  // Copy a workspace file OUT to a user-chosen location. The destination comes
+  // from the OS save dialog, which is also what confirms any overwrite.
+  'workspace:exportCopy': {
+    req: z.object({
+      path: RelPath,
+    }),
+    res: z.object({
+      saved: z.boolean(),
+      dest: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
   'workspace:didChange': {
     req: WorkspaceChangeEvent,
     res: z.null(),

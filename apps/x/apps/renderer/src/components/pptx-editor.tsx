@@ -793,6 +793,26 @@ export function PptxEditor({ path }: PptxEditorProps) {
     void window.ipc.invoke('shell:openPath', { path })
   }, [path])
 
+  /** Saves a copy elsewhere. Flushes first so the copy has the latest edits. */
+  const exportCopy = useCallback(async () => {
+    try {
+      await savePipeline.flush()
+      const result = await window.ipc.invoke('workspace:exportCopy', { path })
+      if (result.error) {
+        toast.error(`Could not export a copy: ${result.error}`)
+        return
+      }
+      // Cancelling the dialog is not a failure — say nothing.
+      if (result.saved && result.dest) toast.success(`Exported to ${baseName(result.dest)}`)
+    } catch (err) {
+      // Surface the reason: a generic message here hid a stale main process
+      // ("no handler registered") behind an unactionable toast.
+      console.error('Failed to export a copy:', err)
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error('Could not export a copy.', { description: message })
+    }
+  }, [path, savePipeline])
+
   if (loadState === 'error') return <FailurePanel path={path} onOpen={openExternally} />
 
   if (loadState === 'loading' || !deck) {
@@ -830,6 +850,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
           filePath={path}
           saveStatus={saveStatus}
           onPlay={startPresenting}
+          onExport={() => void exportCopy()}
         />
 
         <EditorToolbar

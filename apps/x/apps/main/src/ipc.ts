@@ -1105,6 +1105,29 @@ export function setupIpcHandlers() {
     'workspace:remove': async (_event, args) => {
       return workspace.remove(args.path, args.opts);
     },
+    'workspace:exportCopy': async (event, args) => {
+      // Same path scoping as every other workspace handler: the source must
+      // resolve inside the workspace boundary, and this throws if it does not.
+      const sourcePath = workspace.resolveWorkspacePath(args.path);
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const options = { defaultPath: path.basename(sourcePath) };
+      // Electron rejects an explicit null window, so use the modeless overload
+      // when the sender has none rather than passing one through.
+      const result = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options);
+      if (result.canceled || !result.filePath) {
+        return { saved: false };
+      }
+      try {
+        // The dialog already confirmed any overwrite with the user.
+        await fs.copyFile(sourcePath, result.filePath);
+        return { saved: true, dest: result.filePath };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to export a copy';
+        return { saved: false, error: message };
+      }
+    },
     'gmail:getImportant': async (_event, args) => {
       return listImportantThreads({ cursor: args.cursor, limit: args.limit });
     },

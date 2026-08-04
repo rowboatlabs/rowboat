@@ -4,6 +4,7 @@ import {
   AlignLeftIcon,
   AlignRightIcon,
   BoldIcon,
+  DownloadIcon,
   ItalicIcon,
   MinusIcon,
   PlayIcon,
@@ -94,13 +95,21 @@ export interface EditorHeaderProps {
   filePath: string
   saveStatus: SaveStatus
   onPlay: () => void
+  onExport: () => void
 }
 
 /**
  * The slim identity row above the toolbar. Present is deliberately the only
- * accent-coloured control on the whole surface.
+ * accent-coloured control on the whole surface, so Export sits beside it as a
+ * quiet icon button.
  */
-export function EditorHeader({ fileName, filePath, saveStatus, onPlay }: EditorHeaderProps) {
+export function EditorHeader({
+  fileName,
+  filePath,
+  saveStatus,
+  onPlay,
+  onExport,
+}: EditorHeaderProps) {
   return (
     <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
       <PresentationIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -114,10 +123,25 @@ export function EditorHeader({ fileName, filePath, saveStatus, onPlay }: EditorH
         PPTX
       </Badge>
       <SaveState status={saveStatus} />
-      <Button size="xs" onClick={onPlay} className="ml-auto">
-        <PlayIcon />
-        Present
-      </Button>
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Export a copy"
+              onClick={onExport}
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <DownloadIcon className="size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Export a copy</TooltipContent>
+        </Tooltip>
+        <Button size="xs" onClick={onPlay}>
+          <PlayIcon />
+          Present
+        </Button>
+      </div>
     </header>
   )
 }
