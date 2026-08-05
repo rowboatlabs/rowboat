@@ -29,21 +29,39 @@ import {
 } from '@/components/ui/alert-dialog'
 import { disposeDeck, parseAddedSlide, parsePptx } from '@/lib/pptx/parse'
 import { planDuplicateSlide, planNewSlide, readSlideRels } from '@/lib/pptx/add-slide'
+import { isLinePreset } from '@/lib/pptx/geometry'
+import type { NewShapeSpec } from '@/lib/pptx/shape-xml'
 import { writeDeck, type EditedParagraph, type RunFormatOverrides } from '@/lib/pptx/serialize'
-import type { NodePath, Paragraph, Shape, Slide, SlideDeck, TextAlign, TextShape } from '@/lib/pptx/types'
+import type {
+  Fill,
+  NodePath,
+  Paragraph,
+  Shape,
+  Slide,
+  SlideDeck,
+  TextAlign,
+  TextShape,
+} from '@/lib/pptx/types'
 import {
   EMPTY_DECK_EDITS,
+  EMU_PER_INCH,
   EMU_PER_PX,
   acceptsFormatting,
   applyEditSet,
   editHoldsFormatting,
   hasEdits,
+  isInsertedShape,
   isNoopCommit,
   runKeyOf,
   shapeKeyOf,
+  spTreeSlotOf,
   structureMatches,
+  insertsToSlideEdits,
+  mergeSlideEdits,
   toSlideEdits,
   withShapeEdit,
+  withShapeInserted,
+  withShapeUninserted,
   withSlideAdded,
   withSlideOrder,
   withSlideRemoved,
@@ -58,6 +76,7 @@ import { PresentationOverlay } from '@/components/pptx/presentation'
 import {
   EditorHeader,
   EditorToolbar,
+  type InsertChoice,
   MAX_ZOOM,
   MIN_ZOOM,
   ZOOM_STEPS,
@@ -83,6 +102,16 @@ interface PptxEditorProps {
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
+
+/** Default sizes for inserted shapes, centred on the slide. */
+const INSERT_SIZES: Record<string, { w: number; h: number }> = {
+  textbox: { w: 4 * EMU_PER_INCH, h: 0.6 * EMU_PER_INCH },
+  rect: { w: 3 * EMU_PER_INCH, h: 2 * EMU_PER_INCH },
+  roundRect: { w: 3 * EMU_PER_INCH, h: 2 * EMU_PER_INCH },
+  ellipse: { w: 2.5 * EMU_PER_INCH, h: 2.5 * EMU_PER_INCH },
+  line: { w: 3 * EMU_PER_INCH, h: 0 },
+  image: { w: 4 * EMU_PER_INCH, h: 3 * EMU_PER_INCH },
+}
 
 const SAVE_DEBOUNCE_MS = 800
 const MAX_HISTORY = 100
@@ -141,6 +170,11 @@ function baseParagraphsOf(
   return shape?.type === 'text' ? shape.paragraphs : undefined
 }
 
+/** The displayed solid colour of a fill, if it has one. */
+function hexOfFill(fill: Fill | undefined): string | undefined {
+  return fill?.kind === 'solid' ? fill.hex : undefined
+}
+
 /** Structure + text only; formatting is compared separately. */
 function textSignature(paras: readonly { runs: readonly { text: string }[] }[]): string {
   return JSON.stringify(paras.map((p) => p.runs.map((r) => r.text)))
@@ -173,6 +207,8 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const editSetRef = useRef<DeckEdits>(EMPTY_DECK_EDITS)
   const histIndexRef = useRef(0)
   const overlayRef = useRef<TextOverlayHandle | null>(null)
+  /** Last reported save failure, so the same one is not announced repeatedly. */
+  const lastSaveErrorRef = useRef<string | null>(null)
 
   useEffect(() => {
     editSetRef.current = editSet
@@ -196,11 +232,15 @@ export function PptxEditor({ path }: PptxEditorProps) {
         const base = baseDeckRef.current
         if (!base) throw new Error('presentation is not loaded')
         const edits = editSetRef.current
-        const bytes = await writeDeck(base, toSlideEdits(edits.shapes), {
-          deleteSlides: edits.deletedSlides,
-          addSlides: edits.addedSlides,
-          slideOrder: edits.slideOrder,
-        })
+        const bytes = await writeDeck(
+          base,
+          mergeSlideEdits(toSlideEdits(edits.shapes), insertsToSlideEdits(edits.insertedShapes)),
+          {
+            deleteSlides: edits.deletedSlides,
+            addSlides: edits.addedSlides,
+            slideOrder: edits.slideOrder,
+          },
+        )
         return uint8ArrayToBase64(bytes)
       },
       write: async (data) => {
@@ -210,8 +250,25 @@ export function PptxEditor({ path }: PptxEditorProps) {
           opts: { encoding: 'base64' },
         })
       },
-      onStatus: setSaveStatus,
-      onError: (err) => console.error('Failed to save pptx:', err),
+      onStatus: (status) => {
+        if (status === 'saved') lastSaveErrorRef.current = null
+        setSaveStatus(status)
+      },
+      onError: (err) => {
+        console.error('Failed to save pptx:', err)
+        // The edit set is cumulative, so ONE rejected edit makes every later
+        // save fail too — silently, until now. Without the reason on screen
+        // this reads as "editing randomly stopped working", which is exactly
+        // how it was reported. Only announce a CHANGED reason, since the
+        // debounce would otherwise re-toast the same failure on every keystroke.
+        const message = err instanceof Error ? err.message : String(err)
+        if (message === lastSaveErrorRef.current) return
+        lastSaveErrorRef.current = message
+        toast.error('This presentation could not be saved.', {
+          description: message,
+          duration: 10000,
+        })
+      },
     })
   }
   const savePipeline = savePipelineRef.current
@@ -444,15 +501,23 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
   // ------------------------------------------------------------ formatting
 
+  // While a box is OPEN for editing, formatting goes onto DOM spans and is
+  // committed as run properties, which the serializer now emits even for runs
+  // with no provenance — so structure is irrelevant on that path. Only the
+  // closed-box path writes the `formats` map, whose keys are ORIGINAL run
+  // indices and therefore meaningless once the structure has diverged.
+  const editingThisShape = editingKey !== null && editingKey === selectedKey
   const canFormat =
-    selectedShape?.type === 'text' && acceptsFormatting(shapeEdit) && slide !== null
+    selectedShape?.type === 'text' &&
+    (editingThisShape || acceptsFormatting(shapeEdit)) &&
+    slide !== null
 
   const formatDisabledReason = !selectedShape
     ? 'Select a text box first'
     : selectedShape.type !== 'text'
       ? 'This shape has no text'
-      : !acceptsFormatting(shapeEdit)
-        ? 'Formatting is unavailable after changing this text box’s structure'
+      : !editingThisShape && !acceptsFormatting(shapeEdit)
+        ? 'Double-click the text to format it — this box’s structure has changed'
         : null
 
   // Reads live DOM while editing so the toolbar mirrors the caret's run.
@@ -478,6 +543,52 @@ export function PptxEditor({ path }: PptxEditorProps) {
     : overlayRef.current
       ? aggregateFontOfSpans(selectedRunSpans(overlayRef.current.root))
       : aggregateFontOfShape(selectedShape as TextShape)
+
+  // Fill / outline are offered only for the shape kinds the serializer can
+  // restyle — never images, groups or unrendered placeholders — and never
+  // while text is being edited, where the toolbar is about the text.
+  const styleTarget =
+    selectedShape &&
+    !editingKey &&
+    selectedShape.style &&
+    (selectedShape.type === 'text' || selectedShape.type === 'drawing')
+      ? selectedShape
+      : null
+  const styleEdit = styleTarget ? editSet.shapes[selectedKey as ShapeKey] : undefined
+  const shapeFill: string | null = !styleTarget
+    ? null
+    : // Anything drawn as a stroke has no fillable region: connectors, and
+      // inserted `line` shapes alike.
+      isLinePreset(styleTarget.visual?.geom?.preset ?? '')
+      ? null
+      : `#${styleEdit?.fillHex ?? hexOfFill(styleTarget.visual?.fill) ?? 'FFFFFF'}`
+  const shapeLine: string | null = !styleTarget
+    ? null
+    : `#${styleEdit?.lineHex ?? styleTarget.visual?.line?.hex ?? '000000'}`
+
+  /** Commits a fill/outline change through the normal edit-set pipeline. */
+  const applyShapeStyle = useCallback(
+    (set: { fillHex?: string; lineHex?: string }) => {
+      if (!selectedKey || !selectedShape || !selectedShape.style) return
+      pushShapeEdits(
+        withShapeEdit(
+          editSetRef.current.shapes,
+          selectedKey,
+          { slidePath: selectedShape.slideXmlPath, nodePath: selectedShape.nodePath },
+          (draft) => {
+            draft.shapeType = selectedShape.type
+            draft.shapeId = selectedShape.id
+            // The anchor is the file's style, not the current override, so a
+            // second recolour still validates against the original bytes.
+            draft.styleOriginal = selectedShape.style
+            if (set.fillHex !== undefined) draft.fillHex = set.fillHex
+            if (set.lineHex !== undefined) draft.lineHex = set.lineHex
+          },
+        ),
+      )
+    },
+    [selectedKey, selectedShape, pushShapeEdits],
+  )
 
   // Every typeface the deck renders with, for the picker's first group.
   const deckFonts = useMemo(
@@ -603,6 +714,15 @@ export function PptxEditor({ path }: PptxEditorProps) {
     if (!slide || !selectedKey) return
     const shape = findShape(slide, selectedKey)
     if (!shape) return
+    // A shape this session inserted is removed by dropping the insert; it has
+    // no element in the file to splice out, and its id is an editor key rather
+    // than a cNvPr id, so a deleteShape edit would fail the save closed.
+    if (isInsertedShape(editSetRef.current, selectedKey)) {
+      pushEdits(withShapeUninserted(editSetRef.current, selectedKey))
+      setSelectedKey(null)
+      setEditingKey(null)
+      return
+    }
     pushShapeEdits(
       withShapeEdit(editSetRef.current.shapes, selectedKey, seedFor(slide.xmlPath, shape), (draft) => {
         // Deletion supersedes the other fields — their splices would land
@@ -615,7 +735,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
       }),
     )
     setSelectedKey(null)
-  }, [slide, selectedKey, pushShapeEdits, seedFor])
+  }, [slide, selectedKey, pushShapeEdits, pushEdits, seedFor])
 
   const requestDeleteSlide = useCallback(
     (index: number) => {
@@ -713,6 +833,79 @@ export function PptxEditor({ path }: PptxEditorProps) {
       setActiveIndex(paths.indexOf(moved))
     },
     [deck, pushEdits],
+  )
+
+
+  // ------------------------------------------------------------------ insert
+
+  const insertShape = useCallback(
+    async (choice: InsertChoice) => {
+      if (!deck || !slide) return
+      const size = INSERT_SIZES[choice] ?? INSERT_SIZES.rect
+      const xfrmEmu = {
+        x: Math.round((deck.slideSizeEmu.w - size.w) / 2),
+        y: Math.round((deck.slideSizeEmu.h - size.h) / 2),
+        w: size.w,
+        h: Math.max(size.h, 1),
+      }
+
+      let spec: NewShapeSpec
+      let previewUrl: string | undefined
+      if (choice === 'image') {
+        // Opens the OS file picker in the main process. A throw here means the
+        // handler is missing — the main process does not hot-reload, so a
+        // stale app shows that as nothing happening at all unless it is said
+        // out loud.
+        let picked: Awaited<ReturnType<typeof window.ipc.invoke<'workspace:pickImage'>>>
+        try {
+          picked = await window.ipc.invoke('workspace:pickImage', {})
+        } catch (err) {
+          console.error('Image picker failed:', err)
+          toast.error('Could not open the image picker.', {
+            description:
+              (err instanceof Error ? err.message : String(err)) +
+              ' — fully quit and relaunch the app, then try again.',
+            duration: 10000,
+          })
+          return
+        }
+        if (picked.error) {
+          toast.error('Could not read that image.', { description: picked.error })
+          return
+        }
+        // Cancelled the dialog: nothing to say.
+        if (!picked.picked || !picked.dataBase64 || !picked.ext) return
+        const bytes = base64ToUint8Array(picked.dataBase64)
+        previewUrl = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]))
+        spec = {
+          kind: 'image',
+          xfrmEmu,
+          ext: picked.ext,
+          dataBase64: picked.dataBase64,
+          name: picked.name,
+        }
+      } else if (choice === 'textbox') {
+        spec = { kind: 'textbox', xfrmEmu }
+      } else {
+        spec = { kind: 'shape', preset: choice, xfrmEmu }
+      }
+
+      // The key must be the one the RENDERED shape will carry, i.e. derived
+      // from the node path it will occupy — otherwise selection cannot find
+      // it and the whole toolbar stays disabled.
+      const slot = spTreeSlotOf(slide)
+      const pending = editSetRef.current.insertedShapes.filter(
+        (i) => i.slidePath === slide.xmlPath,
+      ).length
+      const key = shapeKeyOf(slide.xmlPath, [...slot.path, slot.nextChild + pending])
+      pushEdits(
+        withShapeInserted(editSetRef.current, { key, slidePath: slide.xmlPath, spec, previewUrl }),
+      )
+      setSelectedKey(key)
+      // A new text box opens for typing straight away; a shape is just selected.
+      setEditingKey(choice === 'textbox' ? key : null)
+    },
+    [deck, slide, pushEdits],
   )
 
   const confirmDeleteSlide = useCallback(() => {
@@ -891,6 +1084,11 @@ export function PptxEditor({ path }: PptxEditorProps) {
           onZoomFit={() => setZoomMode('fit')}
           format={activeFormat}
           formatDisabledReason={formatDisabledReason}
+          onInsert={(choice) => void insertShape(choice)}
+          shapeFill={shapeFill}
+          shapeLine={shapeLine}
+          onShapeFillChange={(hex) => applyShapeStyle({ fillHex: hex })}
+          onShapeLineChange={(hex) => applyShapeStyle({ lineHex: hex })}
           font={activeFont}
           deckFonts={deckFonts}
           onFontChange={(family) => applyFormat({ latinFont: family })}

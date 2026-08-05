@@ -36,6 +36,8 @@ import {
   tagNameOf,
   type XmlNode,
 } from './parse'
+import { normalizeShapeStyle, shapeStyleSnapshotOf, type ShapeStyleSnapshot } from './geometry'
+import { newPictureXml, newShapeXml, type NewShapeSpec, type XmlPrefixes } from './shape-xml'
 import type { NodePath, Paragraph, Shape, SlideDeck, TextAlign, TextRun } from './types'
 
 // ------------------------------------------------------------------- types
@@ -130,8 +132,43 @@ export interface DeleteShapeEdit {
   original?: Paragraph[]
 }
 
+/**
+ * Recolours a shape's fill and/or outline. Only `p:sp` and `p:cxnSp` qualify
+ * (a connector has no fill), and the edit carries the shape's identity plus
+ * its as-parsed spPr style so both are re-derived and compared before any
+ * splice — images, graphicFrames and groups are rejected outright.
+ */
+export interface SetShapeStyleEdit {
+  kind: 'setShapeStyle'
+  nodePath: NodePath
+  /** The model's shape kind; only text/drawing can be restyled. */
+  shapeType: Shape['type']
+  /** The model's shape id (`p:cNvPr@id`, or the synthesized `idx:<n>`). */
+  shapeId: string
+  /** The shape's as-parsed spPr fill/line; the fail-closed anchor. */
+  original: ShapeStyleSnapshot
+  /** Six-digit RRGGBB for the shape fill. */
+  fillHex?: string
+  /** Six-digit RRGGBB for the outline. */
+  lineHex?: string
+}
+
+/**
+ * Adds a wholly new shape to a slide, spliced immediately before
+ * `</p:spTree>` so it lands on top of the z-order. The element's `p:cNvPr@id`
+ * is assigned at write time from the slide's existing ids plus every other
+ * pending insert; a picture additionally claims a media part and a
+ * relationship, which `writeDeck` splices into that slide's .rels.
+ */
+export interface InsertShapeEdit {
+  kind: 'insertShape'
+  spec: NewShapeSpec
+}
+
 export type SlideEdit =
   | ShapeTextEdit
+  | InsertShapeEdit
+  | SetShapeStyleEdit
   | FormatRunsEdit
   | ParagraphAlignEdit
   | ShapeGeometryEdit
@@ -653,6 +690,36 @@ function synthesizedRPr(prefix: string, set: RunFormatOverrides): string {
   return `<${t('rPr')}${attrs}>${children}</${t('rPr')}>`
 }
 
+/**
+ * The run properties a rebuilt run must carry in its own rPr: everything that
+ * differs from the run it derives from. A run with no provenance has no
+ * original, so every property it carries is its own.
+ */
+function runOverridesOf(nr: EditedTextRun, origRun: TextRun | undefined): RunFormatOverrides {
+  const set: RunFormatOverrides = {}
+  if (Boolean(nr.bold) !== Boolean(origRun?.bold)) set.bold = Boolean(nr.bold)
+  if (Boolean(nr.italic) !== Boolean(origRun?.italic)) set.italic = Boolean(nr.italic)
+  if (Boolean(nr.underline) !== Boolean(origRun?.underline)) set.underline = Boolean(nr.underline)
+  if (nr.sizePt !== undefined && nr.sizePt !== origRun?.sizePt) set.sizePt = nr.sizePt
+  if (nr.colorHex !== undefined && nr.colorHex !== origRun?.colorHex) set.colorHex = nr.colorHex
+  if (nr.latinFont !== undefined && nr.latinFont !== origRun?.latinFont) set.latinFont = nr.latinFont
+  return set
+}
+
+/**
+ * Donor rPr bytes with a run's own overrides applied on top, reusing the very
+ * same transform the in-place formatting path uses — so a rebuilt run ends up
+ * with exactly the rPr an in-place edit would have produced. Without this a
+ * structurally-new run silently lost every property the user had set on it.
+ */
+function rPrWithOverrides(prefix: string, donorBytes: string, set: RunFormatOverrides): string {
+  if (!hasOverride(set)) return donorBytes
+  if (!donorBytes) return synthesizedRPr(prefix, set)
+  const rPr = childElementsIn(donorBytes, 0, donorBytes.length)[0]
+  if (!rPr || localOf(rPr.name) !== 'rPr') return synthesizedRPr(prefix, set)
+  return applySplices(donorBytes, transformRPrOps(donorBytes, rPr, set))
+}
+
 // --------------------------------------------------------------- rebuilding
 
 /** `<a:t>` open tag, adding xml:space when edge whitespace must survive. */
@@ -674,7 +741,36 @@ function rebuildParagraphs(
   const srcParaOf = (idx: number | undefined): RawParagraph | undefined =>
     idx !== undefined ? rawParas[idx] : undefined
 
-  const buildRun = (nr: EditedTextRun, para: EditedParagraph): string => {
+  /**
+   * rPr bytes to inherit from when a run has none of its own. A paragraph the
+   * user created (Enter) has no source, so without walking to a NEIGHBOURING
+   * paragraph the run would be written bare — and a bare run takes the
+   * shape's cascade default, which for a title placeholder is routinely white
+   * on a light slide. That is the "typing does nothing" report.
+   */
+  const donorRPrFor = (paraIndex: number): string => {
+    const firstRPrOf = (rp: RawParagraph | undefined): string | undefined => {
+      const item = rp?.items.find((it) => it.kind !== 'br' && it.rPr)
+      return item?.rPr ? slice(item.rPr) : undefined
+    }
+    // Nearest preceding paragraph with a source, then nearest following.
+    for (let i = paraIndex; i >= 0; i--) {
+      const got = firstRPrOf(srcParaOf(next[i]?.srcPara))
+      if (got) return got
+    }
+    for (let i = paraIndex + 1; i < next.length; i++) {
+      const got = firstRPrOf(srcParaOf(next[i]?.srcPara))
+      if (got) return got
+    }
+    // Nothing in this edit has a source: fall back to the shape's own bytes.
+    for (const rp of rawParas) {
+      const got = firstRPrOf(rp)
+      if (got) return got
+    }
+    return ''
+  }
+
+  const buildRun = (nr: EditedTextRun, para: EditedParagraph, paraIndex: number): string => {
     const srcP = nr.srcPara !== undefined ? rawParas[nr.srcPara] : undefined
     const item = srcP && nr.srcRun !== undefined ? srcP.items[nr.srcRun] : undefined
     const origRun =
@@ -695,14 +791,17 @@ function rebuildParagraphs(
     }
 
     // Changed or new run: synthesize <a:r>, reusing the best-matching rPr
-    // bytes we have (own provenance, else the source paragraph's first run's).
+    // bytes we have (own provenance, else the source paragraph's first run's,
+    // else a neighbouring paragraph's).
     let rPrBytes = ''
     if (item?.rPr) rPrBytes = slice(item.rPr)
     else {
       const fallbackPara = srcP ?? srcParaOf(para.srcPara)
       const donor = fallbackPara?.items.find((it) => it.kind !== 'br' && it.rPr)
-      if (donor?.rPr) rPrBytes = slice(donor.rPr)
+      rPrBytes = donor?.rPr ? slice(donor.rPr) : donorRPrFor(paraIndex)
     }
+    // Then the run's OWN properties on top of whatever it inherited.
+    rPrBytes = rPrWithOverrides(prefix, rPrBytes, runOverridesOf(nr, origRun))
 
     // Embedded newlines become <a:br/> between text segments.
     return nr.text
@@ -714,11 +813,11 @@ function rebuildParagraphs(
   }
 
   return next
-    .map((np) => {
+    .map((np, pi) => {
       const srcP = srcParaOf(np.srcPara)
       const pPr = srcP?.pPr ? slice(srcP.pPr) : ''
       const endPr = srcP?.endParaRPr ? slice(srcP.endParaRPr) : ''
-      const runs = np.runs.map((r) => buildRun(r, np)).join('')
+      const runs = np.runs.map((r) => buildRun(r, np, pi)).join('')
       return `<${tag('p')}>${pPr}${runs}${endPr}</${tag('p')}>`
     })
     .join('')
@@ -731,6 +830,8 @@ interface SlideCtx {
   s: string
   doc: XmlNode[]
   sldElem: Elem
+  /** The `p:spTree` element; inserts append just inside its close tag. */
+  spTreeElem: Elem
   /** Element children of p:spTree, in document order. */
   spTreeShapes: Elem[]
 }
@@ -911,6 +1012,188 @@ function deleteShapeOps(ctx: SlideCtx, edit: DeleteShapeEdit): SpliceOp[] {
   return [{ start: elem.start, end: elem.end, insert: '' }]
 }
 
+/**
+ * spPr children the schema orders AFTER the fill group, per
+ * CT_ShapeProperties (xfrm, geometry, fill, ln, effects, 3-D, extLst). A
+ * synthesized fill goes before the first of these — i.e. after prstGeom /
+ * custGeom and before a:ln.
+ */
+const AFTER_FILL_LOCALS = ['ln', 'effectLst', 'effectDag', 'scene3d', 'sp3d', 'extLst']
+/** And the same for a:ln itself, which sits between the fill and the effects. */
+const AFTER_LN_LOCALS = ['effectLst', 'effectDag', 'scene3d', 'sp3d', 'extLst']
+
+function setShapeStyleOps(ctx: SlideCtx, edit: SetShapeStyleEdit): SpliceOp[] {
+  if (edit.fillHex === undefined && edit.lineHex === undefined) return []
+  for (const hex of [edit.fillHex, edit.lineHex]) {
+    if (hex !== undefined && !/^[0-9A-Fa-f]{6}$/.test(hex)) {
+      fail(`shape style colors must be RRGGBB (got "${hex}")`)
+    }
+  }
+  // Only shapes the model calls text or drawing can be restyled; that maps to
+  // p:sp and p:cxnSp, so images / graphicFrames / groups never get this far.
+  if (edit.shapeType !== 'text' && edit.shapeType !== 'drawing') {
+    fail(`shape type "${edit.shapeType}" cannot be restyled`)
+  }
+  const { node, elem } = locateShape(ctx, edit.nodePath, ['sp', 'cxnSp'])
+
+  const derivedId = shapeIdOf(node, edit.nodePath[edit.nodePath.length - 1])
+  if (derivedId !== edit.shapeId) {
+    fail(`style target mismatch: edit names shape "${edit.shapeId}", slide XML has "${derivedId}"`)
+  }
+  // A connector carries no fill of its own.
+  if (edit.fillHex !== undefined && localOf(elem.name) === 'cxnSp') {
+    fail('a connector (p:cxnSp) has no fill — only its outline can be set')
+  }
+
+  // Re-derive the shape's own spPr style from the retained bytes; if it does
+  // not match what the editor believed, the splice ranges below are not the
+  // ones the user was looking at.
+  const derived = shapeStyleSnapshotOf(node)
+  if (normalizeShapeStyle(derived) !== normalizeShapeStyle(edit.original)) {
+    fail(
+      `shape style does not match the slide XML for shape "${edit.shapeId}" ` +
+        `(expected ${normalizeShapeStyle(edit.original)}, found ${normalizeShapeStyle(derived)})`,
+    )
+  }
+
+  const spPr = childElemByLocal(ctx.s, elem, 'spPr') ?? fail('shape has no spPr')
+  const aPfx = drawingPrefixOf(ctx.s, ctx.sldElem)
+  const t = (n: string): string => (aPfx ? `${aPfx}:${n}` : n)
+  const ops: SpliceOp[] = []
+
+  // Everything below reopens spPr at most once; collect what a self-closing
+  // spPr must be reopened with, in schema order.
+  let reopen = ''
+  const spPrKids = spPr.selfClosing ? [] : childElemsOf(ctx.s, spPr)
+
+  // Zero-length inserts merged per offset. A fill and a synthesized a:ln both
+  // land at spPr.contentEnd, and as two separate ops applySplices would break
+  // the tie by processing order — emitting a:ln BEFORE the fill, which is
+  // invalid CT_ShapeProperties order.
+  const inserts = new Map<number, string>()
+  const addInsert = (at: number, xml: string): void => {
+    inserts.set(at, (inserts.get(at) ?? '') + xml)
+  }
+
+  if (edit.fillHex !== undefined) {
+    const fillXml = solidFillXml(aPfx, edit.fillHex.toUpperCase())
+    const existing = spPrKids.find((c) => FILL_LOCALS.includes(localOf(c.name)))
+    if (existing) {
+      // Replace the ENTIRE fill element — solidFill, gradFill or noFill alike.
+      // Its whole range goes, so a gradient's stop list cannot survive as
+      // orphaned children of the new solid fill.
+      ops.push({ start: existing.start, end: existing.end, insert: fillXml })
+    } else if (spPr.selfClosing) {
+      reopen += fillXml
+    } else {
+      const after = spPrKids.find((c) => AFTER_FILL_LOCALS.includes(localOf(c.name)))
+      addInsert(after ? after.start : spPr.contentEnd, fillXml)
+    }
+  }
+
+  if (edit.lineHex !== undefined) {
+    const lineFillXml = solidFillXml(aPfx, edit.lineHex.toUpperCase())
+    const ln = spPr.selfClosing ? undefined : spPrKids.find((c) => localOf(c.name) === 'ln')
+    if (!ln) {
+      // No outline authored: a minimal a:ln holding just the colour, so the
+      // shape gains a stroke without inventing a width or a dash.
+      const lnXml = `<${t('ln')}>${lineFillXml}</${t('ln')}>`
+      if (spPr.selfClosing) {
+        reopen += lnXml
+      } else {
+        const after = spPrKids.find((c) => AFTER_LN_LOCALS.includes(localOf(c.name)))
+        addInsert(after ? after.start : spPr.contentEnd, lnXml)
+      }
+    } else if (ln.selfClosing) {
+      // `<a:ln w="12700"/>`: reopen it, keeping its attributes (w, cap, cmpd).
+      const info = openTagInfo(ctx.s, ln)
+      ops.push({ start: info.closeStart, end: ln.end, insert: `>${lineFillXml}</${ln.name}>` })
+    } else {
+      const lnKids = childElemsOf(ctx.s, ln)
+      const existing = lnKids.find((c) => FILL_LOCALS.includes(localOf(c.name)))
+      if (existing) {
+        // Only the fill child moves; a:ln's own w/cap/cmpd attributes and its
+        // prstDash / join / head-tail children are all outside this range.
+        ops.push({ start: existing.start, end: existing.end, insert: lineFillXml })
+      } else {
+        // CT_LineProperties puts the fill group first.
+        ops.push({ start: ln.contentStart, end: ln.contentStart, insert: lineFillXml })
+      }
+    }
+  }
+
+  for (const [at, xml] of inserts) ops.push({ start: at, end: at, insert: xml })
+  if (reopen) {
+    const info = openTagInfo(ctx.s, spPr)
+    ops.push({ start: info.closeStart, end: spPr.end, insert: `>${reopen}</${spPr.name}>` })
+  }
+  return ops
+}
+
+// ------------------------------------------------------------ inserting
+
+/** Namespace prefix bound to a URI on the slide root, for synthesized XML. */
+function prefixForNs(s: string, sldElem: Elem, uri: string, fallback: string): string {
+  for (const a of openTagInfo(s, sldElem).attrs) {
+    if (a.value === uri && a.name.startsWith('xmlns:')) return a.name.slice(6)
+    if (a.value === uri && a.name === 'xmlns') return ''
+  }
+  return fallback
+}
+
+const PML_NS = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+const DML_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+const OREL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+
+function prefixesOf(ctx: SlideCtx): XmlPrefixes {
+  return {
+    p: prefixForNs(ctx.s, ctx.sldElem, PML_NS, prefixOf(ctx.spTreeElem.name)),
+    a: prefixForNs(ctx.s, ctx.sldElem, DML_NS, drawingPrefixOf(ctx.s, ctx.sldElem)),
+    r: prefixForNs(ctx.s, ctx.sldElem, OREL_NS, 'r'),
+  }
+}
+
+/**
+ * The highest `p:cNvPr@id` anywhere in the slide. Scanned over the raw bytes
+ * rather than the shape list, because ids must be unique across the WHOLE
+ * part — group children and the spTree's own nvGrpSpPr included.
+ */
+function maxShapeIdIn(s: string): number {
+  let max = 0
+  for (const m of s.matchAll(/<[^<>]*?cNvPr\b[^<>]*?\bid="(\d+)"/g)) {
+    const n = Number(m[1])
+    if (Number.isFinite(n)) max = Math.max(max, n)
+  }
+  return max
+}
+
+/**
+ * ALL inserts for a slide, as ONE op at the end of spTree. Emitting one op per
+ * insert would tie at the same offset, and applySplices breaks ties by
+ * processing order — which would silently reverse the z-order the user chose.
+ */
+function insertShapeOps(
+  ctx: SlideCtx,
+  inserts: readonly InsertShapeEdit[],
+  rIdFor: (edit: InsertShapeEdit) => string,
+): SpliceOp[] {
+  if (inserts.length === 0) return []
+  if (ctx.spTreeElem.selfClosing) fail('slide has an empty <p:spTree/>')
+  const px = prefixesOf(ctx)
+  let nextId = maxShapeIdIn(ctx.s)
+
+  let xml = ''
+  for (const edit of inserts) {
+    const id = ++nextId
+    xml +=
+      edit.spec.kind === 'image'
+        ? newPictureXml(edit.spec, id, rIdFor(edit), px)
+        : newShapeXml(edit.spec, id, px)
+  }
+  const at = ctx.spTreeElem.contentEnd
+  return [{ start: at, end: at, insert: xml }]
+}
+
 function shapeGeometryOps(ctx: SlideCtx, edit: ShapeGeometryEdit): SpliceOp[] {
   if (!edit.offEmu && !edit.extEmu) return []
   const { elem } = locateShape(ctx, edit.nodePath, ['sp', 'pic', 'cxnSp'])
@@ -984,25 +1267,59 @@ function shapeGeometryOps(ctx: SlideCtx, edit: ShapeGeometryEdit): SpliceOp[] {
  * there is nothing to change. Throws (leaving the caller's file untouched) on
  * any inconsistency between the model, the edit, and the raw bytes.
  */
-export function updateSlideXml(slideXmlRaw: string, edits: readonly SlideEdit[]): string {
+export interface UpdateSlideOptions {
+  /**
+   * Relationship id for an image insert. `writeDeck` supplies this after
+   * claiming the media part and splicing the slide's .rels; a caller that
+   * inserts no images never needs it.
+   */
+  rIdFor?: (edit: InsertShapeEdit) => string | undefined
+}
+
+export function updateSlideXml(
+  slideXmlRaw: string,
+  edits: readonly SlideEdit[],
+  options?: UpdateSlideOptions,
+): string {
   if (edits.length === 0) return slideXmlRaw
 
-  const doc = parseXml(slideXmlRaw)
-
-  // Scanner view of the same document, cross-validated per edit.
-  const rootElems = childElementsIn(slideXmlRaw, 0, slideXmlRaw.length)
-  const sldElem = rootElems.find((e) => localOf(e.name) === 'sld') ?? fail('no <p:sld> element')
-  const cSldElem = childElemByLocal(slideXmlRaw, sldElem, 'cSld') ?? fail('no <p:cSld> element')
-  const spTreeElem = childElemByLocal(slideXmlRaw, cSldElem, 'spTree') ?? fail('no <p:spTree> element')
-  const ctx: SlideCtx = {
-    s: slideXmlRaw,
-    doc,
-    sldElem,
-    spTreeShapes: childElemsOf(slideXmlRaw, spTreeElem),
+  const buildCtx = (s: string): SlideCtx => {
+    // Scanner view of the same document, cross-validated per edit.
+    const rootElems = childElementsIn(s, 0, s.length)
+    const sldElem = rootElems.find((e) => localOf(e.name) === 'sld') ?? fail('no <p:sld> element')
+    const cSldElem = childElemByLocal(s, sldElem, 'cSld') ?? fail('no <p:cSld> element')
+    const spTreeElem = childElemByLocal(s, cSldElem, 'spTree') ?? fail('no <p:spTree> element')
+    return {
+      s,
+      doc: parseXml(s),
+      sldElem,
+      spTreeElem,
+      spTreeShapes: childElemsOf(s, spTreeElem),
+    }
   }
 
+  // Inserts run in their OWN pass, first. Every other edit addresses a shape
+  // by node path, and a shape inserted in this same save does not exist in
+  // the base bytes — so its path would not resolve. Applying inserts first
+  // and re-scanning makes an inserted shape addressable exactly like any
+  // other, which is what "inserted shapes are ordinary shapes" has to mean.
+  const inserts = edits.filter((e): e is InsertShapeEdit => e.kind === 'insertShape')
+  let working = slideXmlRaw
+  if (inserts.length > 0) {
+    const insertOps = insertShapeOps(buildCtx(working), inserts, (edit) => {
+      const rId = options?.rIdFor?.(edit)
+      if (!rId) fail('an image insert reached the writer with no relationship id')
+      return rId
+    })
+    if (insertOps.length > 0) working = applySplices(working, insertOps)
+  }
+
+  const rest = edits.filter((e) => e.kind !== 'insertShape')
+  if (rest.length === 0) return working
+
+  const ctx = buildCtx(working)
   const ops: SpliceOp[] = []
-  for (const edit of edits) {
+  for (const edit of rest) {
     switch (edit.kind) {
       case 'text':
         ops.push(...textEditOps(ctx, edit))
@@ -1013,6 +1330,9 @@ export function updateSlideXml(slideXmlRaw: string, edits: readonly SlideEdit[])
       case 'paragraphAlign':
         ops.push(...paragraphAlignOps(ctx, edit))
         break
+      case 'setShapeStyle':
+        ops.push(...setShapeStyleOps(ctx, edit))
+        break
       case 'shapeGeometry':
         ops.push(...shapeGeometryOps(ctx, edit))
         break
@@ -1022,8 +1342,8 @@ export function updateSlideXml(slideXmlRaw: string, edits: readonly SlideEdit[])
     }
   }
 
-  if (ops.length === 0) return slideXmlRaw
-  return applySplices(slideXmlRaw, ops)
+  if (ops.length === 0) return working
+  return applySplices(working, ops)
 }
 
 // ------------------------------------------- slide addition / deletion
@@ -1349,6 +1669,159 @@ async function packageReplacements(
   return replacements
 }
 
+/** Base64 -> bytes, for media parts handed in from the renderer. */
+function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64)
+  const out = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
+  return out
+}
+
+interface MediaPlan {
+  /** New media part path -> its bytes. */
+  parts: Map<string, Uint8Array>
+  /** Slide path -> its rewritten .rels XML. */
+  relsXml: Map<string, string>
+  /** Per-edit relationship id, keyed by edit object identity. */
+  rIdByEdit: Map<InsertShapeEdit, string>
+}
+
+/**
+ * Claims a media part and a relationship for every image insert.
+ *
+ * Media names are unique across the WHOLE package plus everything claimed in
+ * this same save; relationship ids are unique within the owning slide's .rels.
+ * Each slide's Relationships element gets exactly one insertion, immediately
+ * before its close tag, so no existing relationship byte moves.
+ */
+async function planInsertedMedia(
+  zip: JSZip,
+  editsBySlide: ReadonlyMap<string, readonly SlideEdit[]>,
+  addedRels: ReadonlyMap<string, string>,
+): Promise<MediaPlan> {
+  const plan: MediaPlan = { parts: new Map(), relsXml: new Map(), rIdByEdit: new Map() }
+
+  let maxMedia = 0
+  for (const name of Object.keys(zip.files)) {
+    const m = name.match(/^ppt\/media\/image(\d+)\./i)
+    if (m) maxMedia = Math.max(maxMedia, Number(m[1]))
+  }
+
+  for (const [slidePath, edits] of editsBySlide) {
+    const images = edits.filter(
+      (e): e is InsertShapeEdit => e.kind === 'insertShape' && e.spec.kind === 'image',
+    )
+    if (images.length === 0) continue
+
+    const relsPath = relsPathFor(slidePath)
+    let relsRaw = addedRels.get(slidePath)
+    if (relsRaw === undefined) {
+      const file = zip.file(relsPath)
+      relsRaw =
+        (await file?.async('string')) ??
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+    }
+
+    const root = childElementsIn(relsRaw, 0, relsRaw.length).find(
+      (e) => localOf(e.name) === 'Relationships',
+    )
+    if (!root) fail(`no <Relationships> element in ${relsPath}`)
+
+    let maxRel = 0
+    const existingIds = new Set<string>()
+    if (!root.selfClosing) {
+      for (const e of childElemsOf(relsRaw, root)) {
+        const id = rawAttrOf(openTagInfo(relsRaw, e), 'Id')
+        if (!id) continue
+        existingIds.add(id)
+        const m = id.match(/^rId(\d+)$/)
+        if (m) maxRel = Math.max(maxRel, Number(m[1]))
+      }
+    }
+
+    let additions = ''
+    for (const edit of images) {
+      const spec = edit.spec as Extract<NewShapeSpec, { kind: 'image' }>
+      const ext = spec.ext.toLowerCase().replace(/[^a-z0-9]/g, '')
+      if (!ext) fail('an inserted image has no usable file extension')
+      const mediaPath = `ppt/media/image${++maxMedia}.${ext}`
+      if (zip.file(mediaPath) || plan.parts.has(mediaPath)) {
+        fail(`media part ${mediaPath} already exists`)
+      }
+      const rId = `rId${++maxRel}`
+      if (existingIds.has(rId)) fail(`relationship ${rId} already exists in ${relsPath}`)
+      existingIds.add(rId)
+
+      plan.parts.set(mediaPath, base64ToBytes(spec.dataBase64))
+      plan.rIdByEdit.set(edit, rId)
+      additions +=
+        `<Relationship Id="${rId}" Type="${OFFICE_REL_NS}/image" ` +
+        `Target="../media/image${maxMedia}.${ext}"/>`
+    }
+
+    if (root.selfClosing) {
+      const info = openTagInfo(relsRaw, root)
+      plan.relsXml.set(
+        slidePath,
+        applySplices(relsRaw, [
+          { start: info.closeStart, end: root.end, insert: `>${additions}</${root.name}>` },
+        ]),
+      )
+    } else {
+      plan.relsXml.set(
+        slidePath,
+        applySplices(relsRaw, [
+          { start: root.contentEnd, end: root.contentEnd, insert: additions },
+        ]),
+      )
+    }
+  }
+  return plan
+}
+
+const MEDIA_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  bmp: 'image/bmp',
+  webp: 'image/webp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+}
+
+/**
+ * [Content_Types].xml with a `<Default>` for every inserted media extension
+ * that lacks one. Without this, inserting (say) a .webp into a deck that has
+ * never held one produces an untyped part — a package PowerPoint refuses to
+ * open. `current` may already carry this save's slide-add/delete rewrites;
+ * the Defaults splice on top of it.
+ */
+function withMediaDefaults(current: string, exts: ReadonlySet<string>): string {
+  const root = childElementsIn(current, 0, current.length).find((e) => localOf(e.name) === 'Types')
+  if (!root) fail('no <Types> element in [Content_Types].xml')
+  if (root.selfClosing) fail('empty <Types/> in [Content_Types].xml')
+
+  const present = new Set<string>()
+  for (const e of childElemsOf(current, root)) {
+    if (localOf(e.name) !== 'Default') continue
+    const ext = rawAttrOf(openTagInfo(current, e), 'Extension')
+    if (ext) present.add(ext.toLowerCase())
+  }
+
+  let additions = ''
+  for (const ext of [...exts].sort()) {
+    if (present.has(ext)) continue
+    const mime = MEDIA_MIME[ext] ?? fail(`no known content type for inserted media ".${ext}"`)
+    additions += `<Default Extension="${ext}" ContentType="${mime}"/>`
+  }
+  if (!additions) return current
+  return applySplices(current, [
+    { start: root.contentEnd, end: root.contentEnd, insert: additions },
+  ])
+}
+
 // ------------------------------------------------------------------ writeDeck
 
 export interface WriteDeckOptions {
@@ -1427,11 +1900,31 @@ export async function writeDeck(
   }
 
   const order = options?.slideOrder
+  // Image inserts claim media parts and relationships before anything is
+  // written, so the p:pic elements can reference ids that are already fixed.
+  const mediaPlan = await planInsertedMedia(
+    deck.source.zip,
+    editsBySlide,
+    new Map(adds.map((a) => [a.path, a.relsXml])),
+  )
+  const rIdFor = (edit: InsertShapeEdit): string | undefined => mediaPlan.rIdByEdit.get(edit)
   const removedParts = new Set(deletions.flatMap((p) => [p, relsPathFor(p)]))
   const replacements =
     deletions.length > 0 || adds.length > 0 || order !== undefined
       ? await packageReplacements(deck.source.zip, deletions, adds, order)
       : new Map<string, string>()
+
+  // Inserted media must be typed: add missing Defaults on top of whatever the
+  // slide add/delete path already did to [Content_Types].xml.
+  if (mediaPlan.parts.size > 0) {
+    const exts = new Set(
+      [...mediaPlan.parts.keys()].map((p) => p.slice(p.lastIndexOf('.') + 1).toLowerCase()),
+    )
+    const currentCt =
+      replacements.get(CONTENT_TYPES_PATH) ?? (await requiredPart(deck.source.zip, CONTENT_TYPES_PATH))
+    const nextCt = withMediaDefaults(currentCt, exts)
+    if (nextCt !== currentCt) replacements.set(CONTENT_TYPES_PATH, nextCt)
+  }
 
   const out = new JSZip()
   const files = deck.source.zip.files
@@ -1447,8 +1940,11 @@ export async function writeDeck(
     }
     const edits = editsBySlide.get(name)
     const replaced = replacements.get(name)
+    const newRels = [...mediaPlan.relsXml].find(([slide]) => relsPathFor(slide) === name)?.[1]
     if (edits && edits.length > 0) {
-      out.file(name, updateSlideXml(deck.source.slideXml[name], edits), meta)
+      out.file(name, updateSlideXml(deck.source.slideXml[name], edits, { rIdFor }), meta)
+    } else if (newRels !== undefined) {
+      out.file(name, newRels, meta)
     } else if (replaced !== undefined) {
       out.file(name, replaced, meta)
     } else {
@@ -1459,10 +1955,20 @@ export async function writeDeck(
   // the synthesized XML they were parsed from.
   for (const a of adds) {
     const edits = editsBySlide.get(a.path)
-    out.file(a.path, edits && edits.length > 0 ? updateSlideXml(a.xml, edits) : a.xml, {
+    out.file(
+      a.path,
+      edits && edits.length > 0 ? updateSlideXml(a.xml, edits, { rIdFor }) : a.xml,
+      { createFolders: false },
+    )
+    // An image inserted onto an added slide rewrites that slide's synthesized
+    // rels string rather than a part on disk.
+    out.file(relsPathFor(a.path), mediaPlan.relsXml.get(a.path) ?? a.relsXml, {
       createFolders: false,
     })
-    out.file(relsPathFor(a.path), a.relsXml, { createFolders: false })
+  }
+  // Brand-new media parts.
+  for (const [mediaPath, bytes] of mediaPlan.parts) {
+    out.file(mediaPath, bytes, { createFolders: false, binary: true })
   }
   return out.generateAsync({
     type: 'uint8array',

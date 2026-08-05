@@ -111,7 +111,7 @@ const DASH_MAP: Record<string, LineStyle['dash']> = {
 }
 
 /** Default line width when `a:ln` has no @w: 0.75pt. */
-const DEFAULT_LINE_EMU = 9525
+export const DEFAULT_LINE_EMU = 9525
 
 /** Resolves an `a:ln` node to a line style, or null for explicit noFill. */
 export function lineFromLn(lnNode: XmlNode, theme: Theme, phClr?: string): LineStyle | null {
@@ -157,6 +157,69 @@ function geomFrom(spPrKids: XmlNode[]): PresetGeometry | undefined {
 /** Presets we draw as a single stroked line rather than an outlined box. */
 export function isLinePreset(preset: string): boolean {
   return preset === 'line' || preset === 'straightConnector1' || preset.startsWith('bentConnector')
+}
+
+// ----------------------------------------------------- byte-anchored style
+
+/**
+ * A shape's OWN spPr fill/line, with no theme resolution and no `p:style`
+ * reference inheritance — the write-back anchor for fill and outline edits,
+ * exactly as `parseParagraph` anchors text edits. `ShapeVisual` is the
+ * opposite: fully resolved, display-only, and never read by the serializer.
+ */
+export interface ShapeStyleSnapshot {
+  /** Local name of spPr's fill child (`solidFill`, `gradFill`, …); null = none. */
+  fill: string | null
+  /** Literal `a:srgbClr@val`; absent for theme colours and non-solid fills. */
+  fillHex?: string
+  hasLine: boolean
+  /** Local name of the fill child inside `a:ln`; null when it has none. */
+  lineFill: string | null
+  lineHex?: string
+  /** `a:ln@w` verbatim, so preserving the stroke width is checkable. */
+  lineW?: string
+}
+
+/** Literal srgbClr directly under a fill element, if any. */
+function literalHexOf(fillNode: XmlNode | undefined): string | undefined {
+  const srgb = fillNode && descend(fillNode, 'srgbClr')
+  const val = srgb && attr(srgb, 'val')
+  return val ? val.toUpperCase() : undefined
+}
+
+export function shapeStyleSnapshotOf(shapeNode: XmlNode): ShapeStyleSnapshot {
+  const out: ShapeStyleSnapshot = { fill: null, hasLine: false, lineFill: null }
+  const spPr = childByLocal(childrenOf(shapeNode), 'spPr')
+  if (!spPr) return out
+  const kids = childrenOf(spPr)
+
+  const fill = firstFillChild(kids)
+  if (fill) {
+    const tag = tagNameOf(fill)
+    out.fill = tag ? localNameOf(tag) : null
+    const hex = literalHexOf(fill)
+    if (hex) out.fillHex = hex
+  }
+
+  const ln = childByLocal(kids, 'ln')
+  if (ln) {
+    out.hasLine = true
+    const lnFill = firstFillChild(childrenOf(ln))
+    if (lnFill) {
+      const tag = tagNameOf(lnFill)
+      out.lineFill = tag ? localNameOf(tag) : null
+      const hex = literalHexOf(lnFill)
+      if (hex) out.lineHex = hex
+    }
+    const w = attr(ln, 'w')
+    if (w) out.lineW = w
+  }
+  return out
+}
+
+/** Canonical form for the serializer's fail-closed comparison. */
+export function normalizeShapeStyle(s: ShapeStyleSnapshot): string {
+  return JSON.stringify([s.fill, s.fillHex, s.hasLine, s.lineFill, s.lineHex, s.lineW])
 }
 
 // -------------------------------------------------------------- shape visual

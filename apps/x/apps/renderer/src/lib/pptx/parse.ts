@@ -48,7 +48,7 @@ import {
   type ParsedListStyle,
   type SpacingSpec,
 } from './textstyle'
-import { backgroundFillOf, shapeVisualOf } from './geometry'
+import { backgroundFillOf, shapeStyleSnapshotOf, shapeVisualOf } from './geometry'
 
 const ATTRS = ':@'
 const ATTR_PREFIX = '@_'
@@ -850,14 +850,15 @@ async function shapeFromNode(
 
   if (name === 'sp') {
     const visual = shapeVisualOf(node, ctx.styles.theme)
+    const style = shapeStyleSnapshotOf(node)
     const txBody = childByLocal(childrenOf(node), 'txBody')
     if (!txBody) {
       // A shape with geometry but no text — an arrow, a divider, a colored box.
-      return { ...base, type: 'drawing', visual } satisfies DrawingShape
+      return { ...base, type: 'drawing', visual, style } satisfies DrawingShape
     }
     const paragraphs = childrenByLocal(childrenOf(txBody), 'p').map(parseParagraph)
     const display = resolveTextDisplay(node, txBody, ctx)
-    return { ...base, type: 'text', paragraphs, visual, display } satisfies TextShape
+    return { ...base, type: 'text', paragraphs, visual, display, style } satisfies TextShape
   }
 
   if (name === 'pic') {
@@ -907,7 +908,7 @@ async function shapeFromNode(
     // Connectors: lines/arrows with real stroke styling.
     const visual = shapeVisualOf(node, ctx.styles.theme)
     if (!visual.geom) visual.geom = { preset: 'straightConnector1', adj: {} }
-    return { ...base, type: 'drawing', visual } satisfies DrawingShape
+    return { ...base, type: 'drawing', visual, style: shapeStyleSnapshotOf(node) } satisfies DrawingShape
   }
 
   return null
@@ -933,7 +934,7 @@ async function parseSlide(
     return t !== null && local(t) === 'sld'
   })
   const shapes: Shape[] = []
-  if (sldIndex < 0) return { id: xmlPath, xmlPath, shapes }
+  if (sldIndex < 0) return { id: xmlPath, xmlPath, shapes, spTreePath: [] }
 
   const sld = doc[sldIndex]
   const cSldKids = childrenOf(sld)
@@ -941,14 +942,14 @@ async function parseSlide(
     const t = tagNameOf(n)
     return t !== null && local(t) === 'cSld'
   })
-  if (cSldIndex < 0) return { id: xmlPath, xmlPath, shapes }
+  if (cSldIndex < 0) return { id: xmlPath, xmlPath, shapes, spTreePath: [] }
 
   const spTreeKids = childrenOf(cSldKids[cSldIndex])
   const spTreeIndex = spTreeKids.findIndex((n) => {
     const t = tagNameOf(n)
     return t !== null && local(t) === 'spTree'
   })
-  if (spTreeIndex < 0) return { id: xmlPath, xmlPath, shapes }
+  if (spTreeIndex < 0) return { id: xmlPath, xmlPath, shapes, spTreePath: [] }
 
   const children = childrenOf(spTreeKids[spTreeIndex])
   for (let i = 0; i < children.length; i++) {
@@ -966,7 +967,12 @@ async function parseSlide(
   const showMaster = attr(sld, 'showMasterSp') !== '0'
   const underlay = [...(showMaster ? styles.masterUnderlay : []), ...styles.layoutUnderlay]
 
-  const slide: Slide = { id: xmlPath, xmlPath, shapes }
+  const slide: Slide = {
+    id: xmlPath,
+    xmlPath,
+    shapes,
+    spTreePath: [sldIndex, cSldIndex, spTreeIndex],
+  }
   if (background !== undefined) slide.background = background
   if (underlay.length > 0) slide.underlay = underlay
   return slide
@@ -1030,7 +1036,15 @@ export async function parsePptx(bytes: Uint8Array): Promise<SlideDeck> {
     slides.push(await parseSlide(zip, path, xml, blobUrls, presDefaultNode, styleCache))
   }
 
-  return { slideSizeEmu, slides, source: { zip, slideXml } }
+  const deck: SlideDeck = { slideSizeEmu, slides, source: { zip, slideXml } }
+  const firstCtx = styleCache.values().next().value as SlideStyleContext | undefined
+  if (firstCtx) {
+    deck.themeColors = {
+      accent1: schemeColorHex(firstCtx.theme, 'accent1'),
+      tx1: schemeColorHex(firstCtx.theme, 'tx1'),
+    }
+  }
+  return deck
 }
 
 /**

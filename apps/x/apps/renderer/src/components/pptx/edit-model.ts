@@ -19,6 +19,8 @@
  *    have no meaning, so formatting is dropped and disabled for that shape.
  */
 
+import { DEFAULT_LINE_EMU, type ShapeStyleSnapshot } from '@/lib/pptx/geometry'
+import type { NewShapeSpec } from '@/lib/pptx/shape-xml'
 import {
   isTextOnlyEdit,
   type DeleteShapeEdit,
@@ -90,6 +92,14 @@ export interface ShapeEdit {
   /** Original paragraph index (as a string key) -> alignment. */
   aligns?: Record<string, TextAlign>
   geometry?: RectEmuBox
+  /** Shape fill / outline, six-digit RRGGBB. */
+  fillHex?: string
+  lineHex?: string
+  /** The shape's as-parsed spPr style, the serializer's fail-closed anchor. */
+  styleOriginal?: ShapeStyleSnapshot
+  /** Shape identity, carried so the serializer can revalidate it. */
+  shapeType?: Shape['type']
+  shapeId?: string
   /**
    * Set when the shape is deleted. Supersedes every other field: their splices
    * would land inside the removed range, and the serializer fails closed on
@@ -117,8 +127,23 @@ export interface AddedSlide extends NewSlidePart {
  * per-shape edits plus slides removed from / added to the deck (by xml path —
  * positions shift as slides come and go, paths never do).
  */
+/**
+ * A shape inserted into an existing slide. The spec is what the serializer
+ * writes; `slide` records which slide it belongs to and `key` gives it a
+ * stable identity for selection and undo BEFORE it exists in any XML.
+ */
+export interface InsertedShape {
+  key: ShapeKey
+  slidePath: string
+  spec: NewShapeSpec
+  /** Object URL for an image's bytes, so the canvas can draw it pre-save. */
+  previewUrl?: string
+}
+
 export interface DeckEdits {
   shapes: EditSet
+  /** Shapes added to existing slides, in insertion (z-) order. */
+  insertedShapes: readonly InsertedShape[]
   deletedSlides: readonly string[]
   addedSlides: readonly AddedSlide[]
   /**
@@ -132,6 +157,7 @@ export interface DeckEdits {
 
 export const EMPTY_DECK_EDITS: DeckEdits = {
   shapes: EMPTY_EDIT_SET,
+  insertedShapes: [],
   deletedSlides: [],
   addedSlides: [],
 }
@@ -139,6 +165,7 @@ export const EMPTY_DECK_EDITS: DeckEdits = {
 export function hasEdits(edits: DeckEdits): boolean {
   return (
     Object.keys(edits.shapes).length > 0 ||
+    edits.insertedShapes.length > 0 ||
     edits.deletedSlides.length > 0 ||
     edits.addedSlides.length > 0 ||
     edits.slideOrder !== undefined
@@ -338,15 +365,117 @@ export function withSlideAdded(edits: DeckEdits, added: AddedSlide): DeckEdits {
   return { ...edits, addedSlides, slideOrder: order }
 }
 
+/**
+ * A preview of an inserted shape, so the canvas can draw it before it exists
+ * in any XML. Its nodePath is the position it WILL occupy — last in spTree —
+ * which is also what makes it addressable by move/style/delete edits.
+ */
+/**
+ * Where the next inserted shape lands: the spTree node path, and the child
+ * index it will occupy.
+ *
+ * Derived from the existing shapes wherever possible rather than read straight
+ * off `slide.spTreePath`. A Slide object can predate that field — a deck held
+ * in React state across a hot reload is exactly that — and spreading a missing
+ * one is a hard TypeError, which crashed insert instead of degrading. Any
+ * shape's node path already ends in its spTree child index, so the parent path
+ * is simply its prefix.
+ */
+export function spTreeSlotOf(slide: Slide): { path: NodePath; nextChild: number } {
+  const last = slide.shapes[slide.shapes.length - 1]
+  if (last && last.nodePath.length > 1) {
+    return {
+      path: last.nodePath.slice(0, -1),
+      nextChild: last.nodePath[last.nodePath.length - 1] + 1,
+    }
+  }
+  // No shapes to derive from. spTree always opens with nvGrpSpPr and grpSpPr,
+  // so the first shape slot is index 2.
+  return { path: slide.spTreePath ?? [], nextChild: 2 }
+}
+
+/** PowerPoint's stock accent1, for a deck whose theme could not be read. */
+const FALLBACK_ACCENT = '4472C4'
+
+function previewShapeOf(
+  ins: InsertedShape,
+  slide: Slide,
+  offset: number,
+  accentHex: string | undefined,
+): Shape {
+  // The node path the shape WILL have once written: inserts append to spTree,
+  // so it is the next spTree CHILD index — not the next model-shape index.
+  // spTree also holds nvGrpSpPr/grpSpPr, which are not shapes, so counting
+  // model shapes pointed at the wrong element and nothing addressed at it
+  // resolved.
+  const slot = spTreeSlotOf(slide)
+  const nodePath = [...slot.path, slot.nextChild + offset]
+  const base = {
+    id: shapeKeyOf(slide.xmlPath, nodePath),
+    slideXmlPath: slide.xmlPath,
+    nodePath,
+    xfrmEmu: { ...ins.spec.xfrmEmu },
+  }
+  if (ins.spec.kind === 'image') {
+    return { ...base, type: 'image', blobUrl: ins.previewUrl ?? '', mediaPath: '' }
+  }
+  // Every preview carries the `style` snapshot its synthesized XML will parse
+  // to. That is what lets the Fill/Outline swatches target it, and what the
+  // serializer's fail-closed check re-derives and compares.
+  if (ins.spec.kind === 'textbox') {
+    return {
+      ...base,
+      type: 'text',
+      paragraphs: [{ runs: [] }],
+      style: { fill: 'noFill', hasLine: false, lineFill: null },
+    }
+  }
+  // The preview must show what the file will contain: `schemeClr accent1`,
+  // resolved through the deck's own theme. With no fill at all here, an
+  // inserted rectangle rendered as an invisible "white" box.
+  const accent = accentHex ?? FALLBACK_ACCENT
+  if (ins.spec.preset === 'line') {
+    return {
+      ...base,
+      type: 'drawing',
+      visual: {
+        geom: { preset: 'line', adj: {} },
+        line: { hex: accent, widthEmu: DEFAULT_LINE_EMU, dash: 'solid' },
+      },
+      style: { fill: 'noFill', hasLine: true, lineFill: 'solidFill' },
+    }
+  }
+  return {
+    ...base,
+    type: 'drawing',
+    visual: {
+      geom: { preset: ins.spec.preset, adj: {} },
+      fill: { kind: 'solid', hex: accent },
+    },
+    style: { fill: 'solidFill', hasLine: false, lineFill: null },
+  }
+}
+
 /** The deck as the user currently sees it. `deck` itself is never mutated. */
 export function applyEditSet(deck: SlideDeck, edits: DeckEdits): SlideDeck {
   if (!hasEdits(edits)) return deck
   return {
     ...deck,
     slides: composeSlideOrder(deck, edits).map((slide) => {
-      let touched = false
+      // Inserted shapes join the list BEFORE edits are applied, so every edit
+      // kind reaches them exactly as it reaches a shape already in the file.
+      // Appending them afterwards meant nothing applied: a dragged box snapped
+      // straight back, and typing, recolouring and restyling were all inert.
+      const inserts = edits.insertedShapes.filter((i) => i.slidePath === slide.xmlPath)
+      // They append to spTree, so they paint on top of everything else.
+      const source =
+        inserts.length > 0
+          ? [...slide.shapes, ...inserts.map((ins, i) => previewShapeOf(ins, slide, i, deck.themeColors?.accent1))]
+          : slide.shapes
+
+      let touched = inserts.length > 0
       const shapes: Shape[] = []
-      for (const shape of slide.shapes) {
+      for (const shape of source) {
         const edit = edits.shapes[shapeKeyOf(slide.xmlPath, shape.nodePath)]
         if (!edit) {
           shapes.push(shape)
@@ -356,6 +485,23 @@ export function applyEditSet(deck: SlideDeck, edits: DeckEdits): SlideDeck {
         if (edit.deleted) continue
         let next: Shape = shape
         if (edit.geometry) next = { ...next, xfrmEmu: { ...edit.geometry } }
+        // Fill / outline overrides ride on the DISPLAY visual, so the canvas
+        // and the thumbnails pick them up through the one render path.
+        if (edit.fillHex !== undefined || edit.lineHex !== undefined) {
+          const visual = { ...next.visual }
+          if (edit.fillHex !== undefined) visual.fill = { kind: 'solid', hex: edit.fillHex }
+          if (edit.lineHex !== undefined) {
+            visual.line = {
+              // A shape with no authored outline gains a hairline, matching
+              // the minimal a:ln the serializer writes.
+              widthEmu: visual.line?.widthEmu ?? EMU_PER_PT,
+              dash: visual.line?.dash ?? 'solid',
+              ...visual.line,
+              hex: edit.lineHex,
+            }
+          }
+          next = { ...next, visual }
+        }
         if (next.type === 'text' && (edit.text || edit.formats || edit.aligns)) {
           next = {
             ...next,
@@ -367,6 +513,29 @@ export function applyEditSet(deck: SlideDeck, edits: DeckEdits): SlideDeck {
       return touched ? { ...slide, shapes } : slide
     }),
   }
+}
+
+/**
+ * Removes a shape that this edit set INSERTED. It never existed in the file,
+ * so there is nothing to splice out — the insert is simply dropped. Emitting a
+ * deleteShape for it instead would fail closed: a preview shape's `id` is its
+ * composite editor key, not the numeric cNvPr id the serializer re-derives.
+ */
+export function withShapeUninserted(edits: DeckEdits, key: ShapeKey): DeckEdits {
+  const insertedShapes = edits.insertedShapes.filter((i) => i.key !== key)
+  if (insertedShapes.length === edits.insertedShapes.length) return edits
+  const shapes = Object.fromEntries(Object.entries(edits.shapes).filter(([k]) => k !== key))
+  return { ...edits, shapes, insertedShapes }
+}
+
+/** True when `key` names a shape this edit set inserted. */
+export function isInsertedShape(edits: DeckEdits, key: ShapeKey): boolean {
+  return edits.insertedShapes.some((i) => i.key === key)
+}
+
+/** Adds an inserted shape to the edit set. */
+export function withShapeInserted(edits: DeckEdits, inserted: InsertedShape): DeckEdits {
+  return { ...edits, insertedShapes: [...edits.insertedShapes, inserted] }
 }
 
 /**
@@ -390,6 +559,8 @@ export function withSlideRemoved(
     .map((a) => (a.afterPath === targetPath ? { ...a, afterPath: reanchorTo } : a))
   const next: DeckEdits = {
     shapes,
+    // An inserted shape on a removed slide goes with it.
+    insertedShapes: edits.insertedShapes.filter((i) => i.slidePath !== targetPath),
     addedSlides,
     deletedSlides: wasAdded ? edits.deletedSlides : [...edits.deletedSlides, targetPath],
   }
@@ -405,6 +576,29 @@ function formatSignature(set: RunFormatOverrides): string {
 }
 
 /** Groups the edit set into the per-slide arrays `writeDeck` consumes. */
+/** Insert edits, grouped by slide, in insertion (z-) order. */
+export function insertsToSlideEdits(
+  inserted: readonly InsertedShape[],
+): Map<string, SlideEdit[]> {
+  const out = new Map<string, SlideEdit[]>()
+  for (const ins of inserted) {
+    const list = out.get(ins.slidePath) ?? []
+    list.push({ kind: 'insertShape', spec: ins.spec })
+    out.set(ins.slidePath, list)
+  }
+  return out
+}
+
+/** Merges two per-slide edit maps, keeping each slide's ordering. */
+export function mergeSlideEdits(
+  a: Map<string, SlideEdit[]>,
+  b: Map<string, SlideEdit[]>,
+): Map<string, SlideEdit[]> {
+  const out = new Map(a)
+  for (const [slide, edits] of b) out.set(slide, [...(out.get(slide) ?? []), ...edits])
+  return out
+}
+
 export function toSlideEdits(edits: EditSet): Map<string, SlideEdit[]> {
   const out = new Map<string, SlideEdit[]>()
   for (const edit of Object.values(edits)) {
@@ -431,6 +625,22 @@ export function toSlideEdits(edits: EditSet): Map<string, SlideEdit[]> {
         nodePath: edit.nodePath,
         offEmu: { x: edit.geometry.x, y: edit.geometry.y },
         extEmu: { w: edit.geometry.w, h: edit.geometry.h },
+      })
+    }
+    if (
+      (edit.fillHex !== undefined || edit.lineHex !== undefined) &&
+      edit.styleOriginal &&
+      edit.shapeType &&
+      edit.shapeId !== undefined
+    ) {
+      list.push({
+        kind: 'setShapeStyle',
+        nodePath: edit.nodePath,
+        shapeType: edit.shapeType,
+        shapeId: edit.shapeId,
+        original: edit.styleOriginal,
+        fillHex: edit.fillHex,
+        lineHex: edit.lineHex,
       })
     }
     if (edit.text && edit.original) {

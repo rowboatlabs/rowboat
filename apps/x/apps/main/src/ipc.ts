@@ -1105,6 +1105,38 @@ export function setupIpcHandlers() {
     'workspace:remove': async (_event, args) => {
       return workspace.remove(args.path, args.opts);
     },
+    'workspace:pickImage': async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const options = {
+        properties: ['openFile' as const],
+        filters: [
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tiff'] },
+        ],
+      };
+      const result = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options);
+      const filePath = result.filePaths[0];
+      if (result.canceled || !filePath) {
+        return { picked: false };
+      }
+      try {
+        const bytes = await fs.readFile(filePath);
+        const ext = path.extname(filePath).slice(1).toLowerCase();
+        if (!ext) {
+          return { picked: false, error: 'That file has no extension' };
+        }
+        return {
+          picked: true,
+          name: path.basename(filePath),
+          ext,
+          dataBase64: bytes.toString('base64'),
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to read the image';
+        return { picked: false, error: message };
+      }
+    },
     'workspace:exportCopy': async (event, args) => {
       // Same path scoping as every other workspace handler: the source must
       // resolve inside the workspace boundary, and this throws if it does not.

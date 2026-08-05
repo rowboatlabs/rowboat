@@ -8,6 +8,7 @@
  */
 
 import type JSZip from 'jszip'
+import type { ShapeStyleSnapshot } from './geometry'
 
 /** English Metric Units per inch — the unit every OOXML coordinate is in. */
 export const EMU_PER_INCH = 914400
@@ -181,6 +182,12 @@ interface ShapeBase {
   xfrmEmu: RectEmu
   /** Display-only visual properties (fill, line, geometry, rotation). */
   visual?: ShapeVisual
+  /**
+   * The shape's OWN spPr fill/line, unresolved. Present for the kinds that
+   * can be restyled (`p:sp`, `p:cxnSp`); this is the write-back anchor the
+   * serializer re-derives and compares, never the display `visual`.
+   */
+  style?: ShapeStyleSnapshot
 }
 
 export interface TextShape extends ShapeBase {
@@ -241,6 +248,12 @@ export interface Slide {
   /** In document order, which is also z-order: later shapes paint on top. */
   shapes: Shape[]
   /**
+   * Node path of this slide's `p:spTree`. Inserted shapes append to it, so
+   * this is what gives a not-yet-written shape its real node path — the model
+   * shape list cannot supply it, since spTree also holds nvGrpSpPr/grpSpPr.
+   */
+  spTreePath: NodePath
+  /**
    * Resolved page background (slide → layout → master cascade), display only.
    * Absent when no part in the chain declares one; `{ kind: 'none' }` when one
    * is declared but can't be drawn — both render as the white page.
@@ -259,6 +272,14 @@ export interface Slide {
 export interface SlideDeck {
   slideSizeEmu: { w: number; h: number }
   slides: Slide[]
+  /**
+   * Display-only: key scheme colours of the FIRST slide's theme, so inserted
+   * shapes can be previewed in the colour the file will actually get
+   * (`schemeClr accent1`) before any save. Multi-master decks with different
+   * themes per slide will preview with slide 1's accent; the written XML is a
+   * theme reference either way, so the saved file is always right.
+   */
+  themeColors?: { accent1: string; tx1: string }
   /** Everything Phase B needs to write back without touching untouched parts. */
   source: {
     zip: JSZip

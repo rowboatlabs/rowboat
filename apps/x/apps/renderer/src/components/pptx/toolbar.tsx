@@ -290,6 +290,158 @@ function FontOption({
   )
 }
 
+interface ColorSwatchProps {
+  label: string
+  /** Glyph drawn above the colour bar. */
+  glyph: ReactNode
+  /** `#RRGGBB`. */
+  value: string
+  disabled: boolean
+  onChange: (hex: string) => void
+}
+
+/** The toolbar's colour control: a glyph over a colour bar, backed by an
+ * `<input type="color">` filling the whole hit area. */
+function ColorSwatch({ label, glyph, value, disabled, onChange }: ColorSwatchProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <label
+          className={`relative inline-flex size-7 shrink-0 items-center justify-center rounded-md ${
+            disabled ? 'pointer-events-none opacity-40' : 'hover:bg-accent'
+          }`}
+        >
+          {glyph}
+          <span
+            className="absolute bottom-1 h-1 w-4 rounded-sm ring-1 ring-black/20"
+            style={{ backgroundColor: value }}
+          />
+          <input
+            type="color"
+            aria-label={label}
+            value={value}
+            disabled={disabled}
+            onMouseDown={(e) => e.stopPropagation()}
+            onChange={(e) => onChange(e.target.value.slice(1).toUpperCase())}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          />
+        </label>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** What the Insert menu offers. */
+export type InsertChoice = 'textbox' | 'rect' | 'roundRect' | 'ellipse' | 'line' | 'image'
+
+const INSERT_ITEMS: ReadonlyArray<{ choice: InsertChoice; label: string }> = [
+  { choice: 'textbox', label: 'Text box' },
+  { choice: 'rect', label: 'Rectangle' },
+  { choice: 'roundRect', label: 'Rounded rectangle' },
+  { choice: 'ellipse', label: 'Ellipse' },
+  { choice: 'line', label: 'Line' },
+  { choice: 'image', label: 'Image…' },
+]
+
+/**
+ * Insert menu. Portaled for the same reason the font picker is: the toolbar
+ * row is `overflow-x-auto`, which forces overflow-y to `auto` and clips any
+ * absolutely positioned child.
+ */
+function InsertMenu({ onInsert }: { onInsert: (choice: InsertChoice) => void }) {
+  const [pos, setPos] = useState<MenuPos | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const open = pos !== null
+  const close = useCallback(() => setPos(null), [])
+
+  const openMenu = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setPos({
+      left: Math.max(VIEWPORT_PAD, Math.min(rect.left, window.innerWidth - 200 - VIEWPORT_PAD)),
+      top: rect.bottom + 4,
+      maxHeight: Math.max(120, window.innerHeight - rect.bottom - VIEWPORT_PAD),
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      close()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open, close])
+
+  return (
+    <div className="relative shrink-0">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            ref={triggerRef}
+            type="button"
+            aria-label="Insert"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => (open ? close() : openMenu())}
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <PlusIcon className="size-3.5" />
+            Insert
+            <ChevronDownIcon className="size-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Insert a shape, text box or image</TooltipContent>
+      </Tooltip>
+
+      {pos !== null &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label="Insert"
+            onMouseDown={(e) => e.preventDefault()}
+            style={{ position: 'fixed', left: pos.left, top: pos.top, width: 200, maxHeight: pos.maxHeight }}
+            className="z-[100] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md"
+          >
+            {INSERT_ITEMS.map((item) => (
+              <button
+                key={item.choice}
+                type="button"
+                role="menuitem"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onInsert(item.choice)
+                  close()
+                }}
+                className="flex w-full items-center rounded px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </div>
+  )
+}
+
 function Divider() {
   return <div className="mx-1.5 h-4 w-px shrink-0 bg-border" aria-hidden="true" />
 }
@@ -388,6 +540,12 @@ export interface ToolbarProps {
   format: RunFormatOverrides | null
   formatDisabledReason: string | null
   /** Resolved typeface of the selection; undefined renders as "Mixed". */
+  onInsert: (choice: InsertChoice) => void
+  /** Shape fill / outline as `#RRGGBB`; null hides the control entirely. */
+  shapeFill: string | null
+  shapeLine: string | null
+  onShapeFillChange: (hex: string) => void
+  onShapeLineChange: (hex: string) => void
   font: string | undefined
   /** Typefaces already used in the deck, offered above the common list. */
   deckFonts: readonly string[]
@@ -417,6 +575,11 @@ export function EditorToolbar({
   onZoomFit,
   format,
   formatDisabledReason,
+  onInsert,
+  shapeFill,
+  shapeLine,
+  onShapeFillChange,
+  onShapeLineChange,
   font,
   deckFonts,
   onFontChange,
@@ -471,6 +634,10 @@ export function EditorToolbar({
           <PlusIcon className="size-4" />
         </ToolButton>
       </Group>
+
+      <Divider />
+
+      <InsertMenu onInsert={onInsert} />
 
       <Divider />
 
@@ -530,32 +697,47 @@ export function EditorToolbar({
         >
           <UnderlineIcon className="size-4" />
         </ToolButton>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <label
-              className={`relative inline-flex size-7 items-center justify-center rounded-md ${
-                fmtOff ? 'pointer-events-none opacity-40' : 'hover:bg-accent'
-              }`}
-            >
-              <span className="text-[13px] font-semibold leading-none text-foreground">A</span>
-              <span
-                className="mt-3.5 absolute bottom-1 h-1 w-4 rounded-sm ring-1 ring-black/20"
-                style={{ backgroundColor: colorValue }}
-              />
-              <input
-                type="color"
-                aria-label="Text color"
-                value={colorValue}
-                disabled={fmtOff}
-                onMouseDown={(e) => e.stopPropagation()}
-                onChange={(e) => onColorChange(e.target.value.slice(1).toUpperCase())}
-                className="absolute inset-0 cursor-pointer opacity-0"
-              />
-            </label>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{fmtHint ?? 'Text color'}</TooltipContent>
-        </Tooltip>
+        <ColorSwatch
+          label="Text color"
+          glyph={<span className="text-[13px] font-semibold leading-none text-foreground">A</span>}
+          value={colorValue}
+          disabled={fmtOff}
+          onChange={onColorChange}
+        />
       </Group>
+
+      {(shapeFill !== null || shapeLine !== null) && (
+        <>
+          <Divider />
+          <Group>
+            {shapeFill !== null && (
+              <ColorSwatch
+                label="Shape fill"
+                glyph={
+                  <span
+                    className="size-3 rounded-[2px] ring-1 ring-black/20"
+                    style={{ backgroundColor: shapeFill }}
+                  />
+                }
+                value={shapeFill}
+                disabled={false}
+                onChange={onShapeFillChange}
+              />
+            )}
+            {shapeLine !== null && (
+              <ColorSwatch
+                label="Shape outline"
+                glyph={
+                  <span className="size-3 rounded-[2px] border-2" style={{ borderColor: shapeLine }} />
+                }
+                value={shapeLine}
+                disabled={false}
+                onChange={onShapeLineChange}
+              />
+            )}
+          </Group>
+        </>
+      )}
 
       <Divider />
 

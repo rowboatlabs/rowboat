@@ -26,7 +26,7 @@ const textShape: TextShape = {
   paragraphs: [{ runs: [{ text: 'Settings dialog · sign-in status', sizePt: BODY_PT }] }],
 }
 
-const slide: Slide = { id: 's1', xmlPath: 'ppt/slides/slide1.xml', shapes: [textShape] }
+const slide: Slide = { spTreePath: [0, 0, 0], id: 's1', xmlPath: 'ppt/slides/slide1.xml', shapes: [textShape] }
 
 const bodyRun: ResolvedRunStyle = {
   sizePt: BODY_PT,
@@ -53,7 +53,7 @@ function displayParagraph(overrides: Partial<ParagraphDisplay>): ParagraphDispla
 }
 
 function slideWith(shape: TextShape): Slide {
-  return { id: 's1', xmlPath: 'ppt/slides/slide1.xml', shapes: [shape] }
+  return { spTreePath: [0, 0, 0], id: 's1', xmlPath: 'ppt/slides/slide1.xml', shapes: [shape] }
 }
 
 describe('SlideThumbnail', () => {

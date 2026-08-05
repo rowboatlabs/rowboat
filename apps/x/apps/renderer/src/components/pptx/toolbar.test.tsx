@@ -17,6 +17,11 @@ function toolbarProps(overrides: Partial<ToolbarProps> = {}): ToolbarProps {
     onZoomFit: () => {},
     format: { bold: false, italic: false, underline: false, sizePt: 20, colorHex: '000000' },
     formatDisabledReason: null,
+    onInsert: () => {},
+    shapeFill: null,
+    shapeLine: null,
+    onShapeFillChange: () => {},
+    onShapeLineChange: () => {},
     font: 'Tahoma',
     deckFonts: ['Tahoma'],
     onFontChange: () => {},
@@ -120,5 +125,77 @@ describe('font picker', () => {
     expect(trigger).toBeDisabled()
     fireEvent.click(trigger)
     expect(screen.queryByRole('listbox')).toBeNull()
+  })
+})
+
+describe('shape fill / outline', () => {
+  it('is hidden entirely when the selection is not a restylable shape', () => {
+    render(<EditorToolbar {...toolbarProps()} />)
+    expect(screen.queryByLabelText('Shape fill')).toBeNull()
+    expect(screen.queryByLabelText('Shape outline')).toBeNull()
+  })
+
+  it('shows both swatches for a shape and reports the picked colour as RRGGBB', () => {
+    const onShapeFillChange = vi.fn()
+    const onShapeLineChange = vi.fn()
+    render(
+      <EditorToolbar
+        {...toolbarProps({
+          shapeFill: '#ff0000',
+          shapeLine: '#00ff00',
+          onShapeFillChange,
+          onShapeLineChange,
+        })}
+      />,
+    )
+    const fill = screen.getByLabelText('Shape fill') as HTMLInputElement
+    const line = screen.getByLabelText('Shape outline') as HTMLInputElement
+    expect(fill.value).toBe('#ff0000')
+    expect(line.value).toBe('#00ff00')
+
+    fireEvent.change(fill, { target: { value: '#336699' } })
+    expect(onShapeFillChange).toHaveBeenCalledWith('336699')
+    fireEvent.change(line, { target: { value: '#123456' } })
+    expect(onShapeLineChange).toHaveBeenCalledWith('123456')
+  })
+
+  it('shows outline alone for a connector, which has no fill', () => {
+    render(<EditorToolbar {...toolbarProps({ shapeFill: null, shapeLine: '#0000ff' })} />)
+    expect(screen.queryByLabelText('Shape fill')).toBeNull()
+    expect(screen.getByLabelText('Shape outline')).toBeInTheDocument()
+  })
+})
+
+describe('insert menu', () => {
+  it('portals its menu and reports the chosen kind', () => {
+    const onInsert = vi.fn()
+    render(<EditorToolbar {...toolbarProps({ onInsert })} />)
+    const trigger = screen.getByLabelText('Insert')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(trigger)
+    const menu = screen.getByRole('menu')
+    expect(menu.parentElement).toBe(document.body)
+    expect(menu.closest('.overflow-x-auto')).toBeNull()
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      'Text box',
+      'Rectangle',
+      'Rounded rectangle',
+      'Ellipse',
+      'Line',
+      'Image\u2026',
+    ])
+
+    // Focus must stay in the editor, as with every other toolbar control.
+    const item = within(menu).getByRole('menuitem', { name: 'Rounded rectangle' })
+    expect(fireEvent.mouseDown(item)).toBe(false)
+    fireEvent.click(item)
+    expect(onInsert).toHaveBeenCalledWith('roundRect')
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('stays available with no shape selected — insert is not a selection action', () => {
+    render(<EditorToolbar {...toolbarProps({ format: null, formatDisabledReason: 'none' })} />)
+    expect(screen.getByLabelText('Insert')).not.toBeDisabled()
   })
 })
