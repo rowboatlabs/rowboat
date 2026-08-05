@@ -11,7 +11,7 @@
 
 import * as esbuild from 'esbuild';
 import { readFile } from 'node:fs/promises';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +56,34 @@ await esbuild.build({
 // binaries). The macOS spawn-helper must be executable — pnpm extraction drops
 // the bit, and a non-executable helper makes every PTY spawn fail.
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// Finder/CI shells occasionally expose a Command Line Tools compiler whose
+// default SDK symlink points at an incompatible newer SDK. Try the default
+// first, then each installed CLT SDK, while keeping the module cache inside
+// the build tree instead of relying on a writable home-directory cache.
+function compileSwiftHelper(source, output) {
+  const moduleCache = path.join(here, '.package', 'swift-module-cache');
+  fs.mkdirSync(moduleCache, { recursive: true });
+  const sdkRoot = '/Library/Developer/CommandLineTools/SDKs';
+  const sdkCandidates = fs.existsSync(sdkRoot)
+    ? fs.readdirSync(sdkRoot)
+      .filter(name => /^MacOSX[0-9.]*\.sdk$/.test(name))
+      .map(name => path.join(sdkRoot, name))
+    : [];
+  let lastError;
+  for (const sdk of [null, ...sdkCandidates]) {
+    const args = ['-O', '-module-cache-path', moduleCache];
+    if (sdk) args.push('-sdk', sdk);
+    args.push(source, '-o', output);
+    try {
+      execFileSync('swiftc', args, { stdio: 'pipe' });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error('swiftc failed without an error');
+}
 const ptySrc = fs.realpathSync(path.join(here, 'node_modules', 'node-pty'));
 const ptyDest = path.join(here, '.package', 'node_modules', 'node-pty');
 fs.rmSync(ptyDest, { recursive: true, force: true });
@@ -151,12 +179,37 @@ if (process.platform === 'darwin') {
     console.log('✅ mic-monitor helper up to date');
   } else {
     try {
-      execSync(`swiftc -O "${swiftSrc}" -o "${helperOut}"`, { stdio: 'inherit' });
+      compileSwiftHelper(swiftSrc, helperOut);
       console.log('✅ mic-monitor helper compiled');
     } catch {
       console.warn('⚠️  mic-monitor helper not built (swiftc unavailable?) — meeting detection disabled');
     }
   }
+}
+
+// Compile the bounded Zoom Accessibility helper on macOS. Like mic-monitor,
+// this is best-effort: meeting capture continues with generic diarization if
+// the helper cannot be built or Accessibility is not granted.
+if (process.platform === 'darwin') {
+  const swiftSrc = path.join(here, 'native', 'zoom-accessibility.swift');
+  const helperOut = path.join(here, '.package', 'dist', 'zoom-accessibility');
+  const licenseSrc = path.join(here, 'native', 'zoom-accessibility-LICENSE.txt');
+  const licenseOut = path.join(here, '.package', 'dist', 'zoom-accessibility-LICENSE.txt');
+  const upToDate = fs.existsSync(helperOut) &&
+    fs.statSync(helperOut).mtimeMs >= fs.statSync(swiftSrc).mtimeMs;
+  if (upToDate) {
+    console.log('✅ zoom-accessibility helper up to date');
+  } else {
+    try {
+      compileSwiftHelper(swiftSrc, helperOut);
+      execFileSync(helperOut, ['--self-test'], { stdio: 'inherit' });
+      console.log('✅ zoom-accessibility helper compiled and self-tested');
+    } catch {
+      fs.rmSync(helperOut, { force: true });
+      console.warn('⚠️  zoom-accessibility helper not built — Zoom names stay on diarization labels');
+    }
+  }
+  fs.copyFileSync(licenseSrc, licenseOut);
 }
 
 // Bundle the vendored agent-slack CLI into a single self-contained script next

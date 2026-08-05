@@ -230,6 +230,7 @@ module.exports = {
         ],
         extendInfo: {
             NSAudioCaptureUsageDescription: 'Rowboat needs access to system audio to transcribe meetings from other apps (Zoom, Meet, etc.)',
+            NSAccessibilityUsageDescription: 'Rowboat uses Accessibility during Zoom meetings to label active speakers and detect when the meeting window closes.',
             NSCameraUsageDescription: 'Rowboat uses your camera in video chat mode so the assistant can see you and give feedback (e.g. pitch practice).',
         },
         // Signs the packaged app's executables (rowboat.exe etc.); the Squirrel
