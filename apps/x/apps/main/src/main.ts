@@ -72,6 +72,7 @@ import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { ensureLoginItemRegistration } from "./login_item.js";
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
 import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
+import { initNextMeetingTray } from "./next-meeting.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
 import { initQuickAsk } from "./quick-ask.js";
 
@@ -580,7 +581,28 @@ app.whenReady().then(async () => {
       }
       win.webContents.send("app:toggleMeetingNotes", null);
     },
+    // Tray "Join & take notes": same renderer flow as the calendar deeplink
+    // (openMeeting makes the renderer open the conference link). If capture
+    // is already running or the window is gone, just open the link.
+    joinNextMeeting: (meeting) => {
+      showApp();
+      const win = mainWindow;
+      if (isRecordingActive() || !win || win.isDestroyed()) {
+        if (meeting.conferenceLink) void shell.openExternal(meeting.conferenceLink);
+        return;
+      }
+      const payload = { event: meeting.event, openMeeting: true };
+      if (win.webContents.isLoading()) {
+        win.webContents.once("did-finish-load", () => {
+          if (!win.isDestroyed()) win.webContents.send("app:takeMeetingNotes", payload);
+        });
+        return;
+      }
+      win.webContents.send("app:takeMeetingNotes", payload);
+    },
   });
+  // Menu-bar countdown to the next meeting, fed from the calendar sync dir.
+  initNextMeetingTray();
 
   // Ambient meeting detection (Granola-style): the mic-monitor helper +
   // running-app scan produce "Meeting detected" events; the popup asks

@@ -17,6 +17,7 @@ import docCollabSkill from "./doc-collab/skill.js";
 import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
+import calendarSkill from "./calendar/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
 
@@ -77,6 +78,20 @@ const definitions: SkillDefinition[] = [
     title: "Meeting Prep",
     summary: "Prepare for meetings by gathering context about attendees from the knowledge base.",
     content: meetingPrepSkill,
+  },
+  {
+    id: "calendar",
+    title: "Calendar",
+    summary: "Read the user's schedule, find open time slots, and create, reschedule, cancel, or RSVP to Google Calendar events.",
+    content: calendarSkill,
+    tools: [
+      "calendar-list-events",
+      "calendar-find-free-slots",
+      "calendar-create-event",
+      "calendar-update-event",
+      "calendar-delete-event",
+      "calendar-rsvp-event",
+    ],
   },
   {
     id: "charts",

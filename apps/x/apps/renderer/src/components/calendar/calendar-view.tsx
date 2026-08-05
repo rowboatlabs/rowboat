@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react'
+import { Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, Copy, Loader2, Plus, Share2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { addDays, localDateKey } from '@/lib/calendar-events'
 import { cn } from '@/lib/utils'
+import { toast } from '@/lib/toast'
 import { useCalendarEvents } from '@/hooks/use-calendar-events'
 import type { MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
 import { AgendaView } from './agenda-view'
+import { formatAvailabilityText, mergeAvailabilitySlots } from './availability'
 import { startOfWeek } from './date-grid'
 import { MonthGrid } from './month-grid'
 import { QuickCreatePopover, nextHalfHour } from './quick-create'
-import { WeekGrid } from './week-grid'
+import { WeekGrid, type AvailabilitySlot } from './week-grid'
 
 const VIEW_MODE_STORAGE_KEY = 'calendar-view-mode'
 
@@ -68,20 +70,41 @@ export function CalendarView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const quickCreateSlot = useMemo(() => nextHalfHour(new Date()), [quickCreateOpen])
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const { events, loading, error, connected } = useCalendarEvents()
+  const { events, calendars, hiddenCalendarIds, setCalendarHidden, loading, error, connected } = useCalendarEvents()
 
   useEffect(() => {
     const tick = setInterval(() => setNow(new Date()), 60 * 1000)
     return () => clearInterval(tick)
   }, [])
 
+  // Availability sharing: drag free windows on the week/day grid, then copy
+  // them as text. Slots survive an accidental view switch (the mode just
+  // pauses); "Done" clears them.
+  const [availabilityMode, setAvailabilityMode] = useState(false)
+  const [availabilitySlots, setAvailabilitySlots] = useState<AvailabilitySlot[]>([])
+
   const selectMode = (next: CalendarMode) => {
     setSlideDirection(MODE_ORDER.indexOf(next) >= MODE_ORDER.indexOf(mode) ? 1 : -1)
     setMode(next)
+    if (next === 'month' || next === 'agenda') setAvailabilityMode(false)
     try {
       window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, next)
     } catch {
       // localStorage unavailable — the toggle still works for this session.
+    }
+  }
+
+  const toggleAvailabilityMode = () => {
+    if (!availabilityMode && mode !== 'week' && mode !== 'day') selectMode('week')
+    setAvailabilityMode((v) => !v)
+  }
+
+  const copyAvailability = async () => {
+    try {
+      await navigator.clipboard.writeText(formatAvailabilityText(availabilitySlots))
+      toast('Availability copied — paste it anywhere.', 'success')
+    } catch {
+      toast('Could not copy to the clipboard.', 'error')
     }
   }
 
@@ -124,6 +147,43 @@ export function CalendarView({
     setSlideDirection(new Date() >= anchor ? 1 : -1)
     setAnchor(new Date())
   }
+
+  // Keyboard shortcuts, Notion Calendar-style: T today, ←/K back, →/J forward,
+  // D/W/M/A switch views, C new event, S share availability. Skipped while
+  // typing or when focus is inside a dialog/popover, so form fields and
+  // overlays keep their keys.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable ||
+        target.closest('[role="dialog"]')
+      )) return
+      switch (e.key.toLowerCase()) {
+        case 't': if (mode !== 'agenda') goToday(); break
+        case 'arrowleft': case 'k': if (mode !== 'agenda') goPrev(); break
+        case 'arrowright': case 'j': if (mode !== 'agenda') goNext(); break
+        case 'd': selectMode('day'); break
+        case 'w': selectMode('week'); break
+        case 'm': selectMode('month'); break
+        case 'a': selectMode('agenda'); break
+        case 'c': setQuickCreateOpen(true); break
+        case 's': toggleAvailabilityMode(); break
+        case 'escape':
+          if (!availabilityMode) return
+          setAvailabilityMode(false)
+          break
+        default: return
+      }
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  })
 
   // What the sliding container shows: one key per mode + visible period, so
   // both mode toggles and prev/next/Today navigation animate.
@@ -168,6 +228,53 @@ export function CalendarView({
                 <ChevronRight className="size-4" />
               </Button>
             </div>
+            {calendars.length > 1 ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" size="icon" variant="ghost" title="Calendars" aria-label="Choose visible calendars">
+                    <CalendarDays className="size-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" side="bottom" sideOffset={6} className="w-72 p-2">
+                  <p className="px-2 pb-1.5 pt-0.5 text-xs font-semibold text-foreground">Calendars</p>
+                  {calendars.map((cal) => {
+                    const isPrimary = Boolean(cal.primary)
+                    const hidden = hiddenCalendarIds.has(cal.id)
+                    return (
+                      <label
+                        key={cal.id}
+                        className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                        title={isPrimary ? 'Your primary calendar is always shown' : undefined}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isPrimary || !hidden}
+                          disabled={isPrimary}
+                          onChange={(e) => setCalendarHidden(cal.id, !e.target.checked)}
+                        />
+                        <span
+                          aria-hidden
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ background: cal.backgroundColor ?? 'var(--primary, #18181b)' }}
+                        />
+                        <span className="min-w-0 truncate text-foreground">{cal.summary}</span>
+                      </label>
+                    )
+                  })}
+                </PopoverContent>
+              </Popover>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant={availabilityMode ? 'default' : 'outline'}
+              onClick={toggleAvailabilityMode}
+              aria-pressed={availabilityMode}
+              title="Share availability (S)"
+            >
+              <Share2 className="mr-1.5 size-4" />
+              Share availability
+            </Button>
             <Popover open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
               <PopoverTrigger asChild>
                 <Button type="button" size="sm">
@@ -187,6 +294,35 @@ export function CalendarView({
         </div>
         <p className="mt-1 text-[14px] text-black/50 dark:text-white/[0.52]">{headerLabel}</p>
       </div>
+
+      {availabilityMode ? (
+        <div className="mx-auto w-full max-w-[1120px] shrink-0 px-[30px] pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5">
+            <p className="text-[13px] text-foreground">
+              {availabilitySlots.length === 0
+                ? 'Drag on the grid to mark when you’re free, then copy it to share.'
+                : `${mergeAvailabilitySlots(availabilitySlots).length} free window${mergeAvailabilitySlots(availabilitySlots).length === 1 ? '' : 's'} selected — click a green block to remove it.`}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" size="sm" disabled={availabilitySlots.length === 0} onClick={() => void copyAvailability()}>
+                <Copy className="mr-1.5 size-3.5" />
+                Copy availability
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setAvailabilitySlots([])
+                  setAvailabilityMode(false)
+                }}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mx-auto flex w-full max-w-[1120px] flex-1 min-h-0 flex-col px-[30px] pb-6">
         <div className="relative flex-1 min-h-0 overflow-hidden">
@@ -230,7 +366,17 @@ export function CalendarView({
         ) : mode === 'month' ? (
           <MonthGrid anchor={anchor} events={events} now={now} onOpenNote={onOpenNote} />
         ) : (
-          <WeekGrid anchor={anchor} events={events} now={now} dayCount={mode === 'day' ? 1 : 7} onOpenNote={onOpenNote} />
+          <WeekGrid
+            anchor={anchor}
+            events={events}
+            now={now}
+            dayCount={mode === 'day' ? 1 : 7}
+            onOpenNote={onOpenNote}
+            availabilityMode={availabilityMode}
+            availabilitySlots={availabilitySlots}
+            onAddAvailabilitySlot={(slot) => setAvailabilitySlots((prev) => mergeAvailabilitySlots([...prev, slot]))}
+            onRemoveAvailabilitySlot={(index) => setAvailabilitySlots((prev) => prev.filter((_, i) => i !== index))}
+          />
         )}
             </motion.div>
           </AnimatePresence>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft, Clock, ExternalLink, FileText, Loader2, MapPin, Mic, Pencil, Trash2, UserRound, UsersRound, Video, X } from 'lucide-react'
+import { ChevronLeft, Clock, ExternalLink, FileText, Loader2, MapPin, Mic, Pencil, Repeat, Trash2, UserRound, UsersRound, Video, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { PopoverContent } from '@/components/ui/popover'
@@ -58,8 +58,10 @@ export function EventDetailsContent({ event, onClose, onBack, onOpenNote }: {
   }
 
   const canWrite = useCalendarWriteAccess()
+  // Reader-role calendars can't be edited no matter what the grant allows.
+  const canModify = canWrite === true && !event.readOnly
   const isPast = (event.end ?? event.start).getTime() < Date.now()
-  const showRsvp = !isPast && event.attendees.some((a) => a.self) && event.attendees.length > 1
+  const showRsvp = !isPast && !event.readOnly && event.attendees.some((a) => a.self) && event.attendees.length > 1
 
   // RSVP — optimistic chip state; the sync refresh catches up moments later.
   const [rsvpOverride, setRsvpOverride] = useState<RsvpAnswer | null>(null)
@@ -76,6 +78,7 @@ export function EventDetailsContent({ event, onClose, onBack, onOpenNote }: {
       const result = await window.ipc.invoke('calendar:respond', {
         eventId: event.id,
         response: RSVP_TO_API[answer],
+        calendarId: event.calendarId,
       })
       if (result.ok) {
         setRsvpOverride(answer)
@@ -125,6 +128,7 @@ export function EventDetailsContent({ event, onClose, onBack, onOpenNote }: {
     try {
       const result = await window.ipc.invoke('calendar:updateEvent', {
         eventId: event.id,
+        calendarId: event.calendarId,
         ...(titleChanged ? { summary: trimmed } : {}),
         // Start and end travel together so a partial patch can't cross them.
         ...(timesChanged && newStart && newEnd
@@ -144,17 +148,23 @@ export function EventDetailsContent({ event, onClose, onBack, onOpenNote }: {
     }
   }
 
-  // Delete — inline confirm so a stray click can't remove an event.
+  // Delete — inline confirm so a stray click can't remove an event. Instances
+  // of a repeating series get a scope choice: just this occurrence, or the
+  // whole series (deleting the series master takes every occurrence with it).
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const isOrganizer = Boolean(event.organizer?.self)
-  const handleDelete = async () => {
+  const isRecurring = Boolean(event.recurringEventId)
+  const handleDelete = async (scope: 'instance' | 'series') => {
     if (deleting) return
     setDeleting(true)
     try {
-      const result = await window.ipc.invoke('calendar:deleteEvent', { eventId: event.id })
+      const result = await window.ipc.invoke('calendar:deleteEvent', {
+        eventId: scope === 'series' && event.recurringEventId ? event.recurringEventId : event.id,
+        calendarId: event.calendarId,
+      })
       if (result.ok) {
-        toast('Event deleted', 'success')
+        toast(scope === 'series' ? 'Series deleted' : 'Event deleted', 'success')
         onClose()
       } else {
         writeFailureToast(result, 'Could not delete the event.')
@@ -194,12 +204,12 @@ export function EventDetailsContent({ event, onClose, onBack, onOpenNote }: {
           </HeaderIconButton>
         ) : null}
         <div className="flex items-center gap-1">
-          {canWrite && !editing ? (
+          {canModify && !editing ? (
             <HeaderIconButton onClick={startEditing} label="Edit event">
               <Pencil className="size-4" />
             </HeaderIconButton>
           ) : null}
-          {canWrite && !confirmingDelete ? (
+          {canModify && !confirmingDelete ? (
             <HeaderIconButton onClick={() => setConfirmingDelete(true)} label="Delete event">
               <Trash2 className="size-4" />
             </HeaderIconButton>
@@ -217,13 +227,31 @@ export function EventDetailsContent({ event, onClose, onBack, onOpenNote }: {
       {confirmingDelete ? (
         <div className="flex items-center justify-between gap-2 border-b px-4 py-2" style={{ borderColor: 'var(--border, #e4e4e7)' }}>
           <span className="text-xs" style={{ color: 'var(--foreground, #27272a)' }}>
-            {isOrganizer ? 'Cancel this event for all attendees?' : 'Remove this event from your calendar?'}
+            {isRecurring
+              ? isOrganizer
+                ? 'Cancel one occurrence or the whole series for all attendees?'
+                : 'Remove one occurrence or the whole series from your calendar?'
+              : isOrganizer
+                ? 'Cancel this event for all attendees?'
+                : 'Remove this event from your calendar?'}
           </span>
           <div className="flex shrink-0 gap-1.5">
-            <Button type="button" size="sm" variant="destructive" disabled={deleting} onClick={() => void handleDelete()}>
-              {deleting ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
-              Delete
-            </Button>
+            {isRecurring ? (
+              <>
+                <Button type="button" size="sm" variant="destructive" disabled={deleting} onClick={() => void handleDelete('instance')}>
+                  {deleting ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                  This event
+                </Button>
+                <Button type="button" size="sm" variant="destructive" disabled={deleting} onClick={() => void handleDelete('series')}>
+                  All events
+                </Button>
+              </>
+            ) : (
+              <Button type="button" size="sm" variant="destructive" disabled={deleting} onClick={() => void handleDelete('instance')}>
+                {deleting ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                Delete
+              </Button>
+            )}
             <Button type="button" size="sm" variant="outline" disabled={deleting} onClick={() => setConfirmingDelete(false)}>
               Cancel
             </Button>
@@ -235,7 +263,7 @@ export function EventDetailsContent({ event, onClose, onBack, onOpenNote }: {
           <span
             aria-hidden
             className="mt-1.5 h-3 w-3 shrink-0 rounded-sm"
-            style={{ background: 'var(--primary, #18181b)' }}
+            style={{ background: event.color ?? 'var(--primary, #18181b)' }}
           />
           <div className="min-w-0 flex-1">
             {editing ? (
@@ -297,18 +325,26 @@ export function EventDetailsContent({ event, onClose, onBack, onOpenNote }: {
         {editing ? (
           <div className="flex gap-3">
             <span className="size-4 shrink-0" />
-            <div className="flex gap-2">
-              <Button type="button" size="sm" disabled={!editTimesValid || savingEdit} onClick={() => void saveEdit()}>
-                {savingEdit ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
-                Save changes
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={savingEdit} onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
+            <div className="min-w-0">
+              <div className="flex gap-2">
+                <Button type="button" size="sm" disabled={!editTimesValid || savingEdit} onClick={() => void saveEdit()}>
+                  {savingEdit ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                  Save changes
+                </Button>
+                <Button type="button" size="sm" variant="outline" disabled={savingEdit} onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+              {isRecurring ? (
+                <p className="mt-1.5 text-[11px] leading-4" style={{ color: 'var(--muted-foreground, #71717a)' }}>
+                  Changes apply only to this occurrence.
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}
 
+        {isRecurring && !editing ? <EventDetailRow icon={<Repeat className="size-4" />} value="Repeating event" /> : null}
         {event.location ? <EventDetailRow icon={<MapPin className="size-4" />} value={event.location} /> : null}
         {organizer ? <EventDetailRow icon={<UserRound className="size-4" />} value={`Organizer: ${organizer}`} /> : null}
         {attendees.length > 0 ? (

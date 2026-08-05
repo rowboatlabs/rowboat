@@ -437,6 +437,8 @@ const ipcSchemas = {
       summary: z.string().optional(),
       startISO: z.string().optional(),
       endISO: z.string().optional(),
+      // Which calendar the event lives on; defaults to primary.
+      calendarId: z.string().optional(),
     }),
     res: z.object({
       ok: z.boolean(),
@@ -447,7 +449,7 @@ const ipcSchemas = {
     }),
   },
   'calendar:deleteEvent': {
-    req: z.object({ eventId: z.string().min(1) }),
+    req: z.object({ eventId: z.string().min(1), calendarId: z.string().optional() }),
     res: z.object({
       ok: z.boolean(),
       error: z.string().optional(),
@@ -458,6 +460,7 @@ const ipcSchemas = {
     req: z.object({
       eventId: z.string().min(1),
       response: z.enum(['accepted', 'declined', 'tentative']),
+      calendarId: z.string().optional(),
     }),
     res: z.object({
       ok: z.boolean(),

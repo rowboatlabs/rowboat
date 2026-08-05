@@ -21,6 +21,21 @@ export type RawCalendarEvent = {
   conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
   hangoutLink?: string
   conferenceLink?: string
+  // Present on instances of a repeating series (sync expands singleEvents).
+  recurringEventId?: string
+  // Stamped by the sync loop on events from non-primary calendars.
+  rowboatCalendarId?: string
+}
+
+// Entry from calendar_sync/calendars.json (written by the sync loop).
+export type CalendarMeta = {
+  id: string
+  summary: string
+  primary?: boolean
+  backgroundColor?: string
+  foregroundColor?: string
+  accessRole?: string
+  selected?: boolean
 }
 
 export type CalendarPerson = {
@@ -51,6 +66,10 @@ export type UpcomingEvent = {
   creator: CalendarPerson | null
   organizer: CalendarPerson | null
   attendees: CalendarAttendee[]
+  recurringEventId: string | null // series master id when this is an instance
+  calendarId: string // 'primary' or a secondary calendar's id
+  color: string | null // calendar color, set for secondary calendars only
+  readOnly: boolean // calendar grants no event edits (reader access roles)
   source: string // workspace path to the calendar_sync JSON
   rawStart: { dateTime?: string; date?: string } | undefined
   rawEnd: { dateTime?: string; date?: string } | undefined
@@ -119,11 +138,23 @@ export function normalizeEvent(raw: RawCalendarEvent, sourcePath: string): Upcom
     creator: raw.creator ?? null,
     organizer: raw.organizer ?? null,
     attendees: raw.attendees ?? [],
+    recurringEventId: raw.recurringEventId ?? null,
+    calendarId: raw.rowboatCalendarId ?? 'primary',
+    color: null,
+    readOnly: false,
     source: sourcePath,
     rawStart: raw.start,
     rawEnd: raw.end,
     dateKey: localDateKey(start),
   }
+}
+
+// "#RRGGBB" with an alpha channel appended; non-hex inputs pass through as-is.
+export function hexAlpha(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return hex
+  const a = Math.round(alpha * 255).toString(16).padStart(2, '0')
+  return `#${m[1]}${a}`
 }
 
 export function triggerMeetingCapture(event: UpcomingEvent, openConference: boolean) {

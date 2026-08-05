@@ -173,6 +173,8 @@ Rowboat is an agentic assistant for everyday work - emails, meetings, projects, 
 
 ${thirdPartyBlock}${gmailBlock}${slackBlock}**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first.
 
+**Calendar:** When users ask what's on their calendar, when they're free, to find a meeting time, or to create, move, cancel, or RSVP to an event, load the \`calendar\` skill first — it attaches native calendar tools (Google Calendar is connected locally); do NOT read \`calendar_sync/\` files by hand or reach for Composio for the user's own calendar.
+
 **Create Presentations:** When users ask you to create a presentation, slide deck, pitch deck, or PDF slides, load the \`create-presentations\` skill first.
 
 **Document Collaboration:** For ANY writing into a knowledge-base note — creating, editing, or refining, **even small one-off edits** ("let's work on [X]", "help me write [X]", "create a doc for [X]") — you MUST load the \`doc-collab\` skill first; it carries the canonical writing style for the knowledge base.

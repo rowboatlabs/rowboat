@@ -17,14 +17,26 @@ const TRAY_ICON_18 =
 const TRAY_ICON_36 =
   "iVBORw0KGgoAAAANSUhEUgAAACQAAAAkCAYAAADhAJiYAAAC3klEQVR4nOyYu4sUQRDGa3fm8DgxUxB8ICqKqBj4QBOFMxMDRQUfgS/0D1A0MRQMTA1MxBcngpFmBiocgokgCopo4PnCSE193e74FV11XTtMz+zs9sLB3Qc/drenp/ubrqruuUtpmimlaaYZb6gBmvK9DbKiDoNUU+bIxEClEoqvRIxkOYbBcrAJ7ALzwATlFiVWyDQULYE1F2wE28E2sBYsJr8I58Fjc18UQw2hLYOOgJ1gHxgFSwru+SsmXsnvjjzq1ZA1wgOuBMfBQXJhUbUF7c8akraJWIZ4yVsyEIfhjBgZket6TRPa5mkmbd/AZ9PWk6GGmXAhuABOgTnSPikmmoH79F7+/Rr8IV+BtQ3xJFq2HJpLYkqNJNS5EkXbiVYb65kZt1XXkIZoAbhKLmGtkdRMFNrXMmOA+4zn2qdUtTGqma1gDKwAv2XgtOD+MkOaV5w/XAS/ijqmXZjZA+6QT9ph00erLDGTFpnitkn5fCRmbBpUGtLYHgU3pe0teAKegnVgL7kqI+lrjwlrKh+ue1Si0NPwICfBFXAX3CaXiP9MP16V3eSqbXOFKb32BawmF/ZCNQvaeDDOlWVgvRgbFzOJgSd5QO5YuEyd+5OaUnRzHBMzwTM0lIRD5FcjofBpnZDPIzZ1jnz12Qdk8ZGxBnykgv2nyhDLnthl0oOVjb0AG8itlOYnPxg/4C1wjALJrCp7/agykjfF/b+CI9QZNq2ww+BH1UBNiiPNkYfgHflQtuT7NfCe/KoHFfMFTZN6PthBblU4bLwq+ymwEeYVa4WsXspnW8Y/C75TSSJbDeIlf1Q+eUe/T24PK01kq9gv+fyAb8Aq8IncK+xPudZVkcQKmY6zhfzBeYBc/nQVKlXskJ0Wc4fAc6oRKlWMkOkKLCUXphPgBvmqqz1Yv9K95SL4AK73aiaWIRYfDYvInVO1w0QDMKTqywwr5k5dq5pCGsTf9n1p9h9WVfoPAAD//0eu+ckAAAAGSURBVAMAjdCu7L3gD4wAAAAASUVORK5CYII=";
 
+export interface TrayNextMeeting {
+  eventId: string;
+  summary: string;
+  startMs: number;
+  endMs: number;
+  conferenceLink: string | null;
+  // Raw calendar event JSON, forwarded to the renderer take-notes flow.
+  event: unknown;
+}
+
 interface TrayActions {
   openApp: () => void;
   toggleMeetingNotes: () => void;
+  joinNextMeeting: (meeting: TrayNextMeeting) => void;
 }
 
 let tray: Tray | null = null;
 let actions: TrayActions | null = null;
 let recording = false;
+let nextMeeting: TrayNextMeeting | null = null;
 
 // Tray commands issued while the renderer wasn't ready to receive them
 // (window closed or still loading). Drained by the renderer on mount via
@@ -93,6 +105,57 @@ export function setTrayRecordingState(isRecording: boolean): void {
   else stopWaveAnimation();
 }
 
+// --- Next-meeting countdown (Notion Calendar-style menu bar presence) ---
+// Fed by next-meeting.ts (30s scan of calendar_sync). The countdown renders
+// as the tray title on macOS; other platforms get it in the tooltip. While a
+// recording is running, the waveform owns the title and the countdown yields.
+
+const NEXT_TITLE_WINDOW_MS = 60 * 60 * 1000;
+
+export function setTrayNextMeeting(next: TrayNextMeeting | null): void {
+  const changed =
+    (next === null) !== (nextMeeting === null) ||
+    (next !== null && nextMeeting !== null && (
+      next.eventId !== nextMeeting.eventId ||
+      next.startMs !== nextMeeting.startMs ||
+      next.summary !== nextMeeting.summary ||
+      next.conferenceLink !== nextMeeting.conferenceLink
+    ));
+  nextMeeting = next;
+  if (!tray) return;
+  if (changed) rebuildMenu();
+  updateIdleTitle();
+}
+
+function shortSummary(summary: string): string {
+  const trimmed = summary.trim() || "Meeting";
+  return trimmed.length > 24 ? `${trimmed.slice(0, 23)}…` : trimmed;
+}
+
+function menuTimeLabel(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+// Countdown label shown beside the icon: only within the last hour before a
+// meeting (and through its end), so the menu bar stays quiet the rest of the
+// day. Leading space keeps it off the icon.
+function nextMeetingTitle(): string {
+  if (!nextMeeting) return "";
+  const now = Date.now();
+  if (now >= nextMeeting.startMs && now < nextMeeting.endMs) {
+    return ` ${shortSummary(nextMeeting.summary)} · now`;
+  }
+  const msUntil = nextMeeting.startMs - now;
+  if (msUntil <= 0 || msUntil > NEXT_TITLE_WINDOW_MS) return "";
+  return ` ${shortSummary(nextMeeting.summary)} in ${Math.ceil(msUntil / 60000)}m`;
+}
+
+function updateIdleTitle(): void {
+  if (!tray || process.platform !== "darwin") return;
+  if (recording) return; // waveform owns the title
+  tray.setTitle(nextMeetingTitle());
+}
+
 // --- Recording indicator: animated mini-waveform beside the tray icon ---
 // macOS renders tray titles to the right of the icon. Braille cells give
 // 1-dot-wide bars (two bars per character, four height steps each) — a slim
@@ -144,12 +207,30 @@ function stopWaveAnimation(): void {
     clearInterval(waveTimer);
     waveTimer = null;
   }
-  if (tray && process.platform === "darwin") tray.setTitle("");
+  // Hand the title back to the next-meeting countdown (or clear it).
+  if (tray && process.platform === "darwin") tray.setTitle(nextMeetingTitle());
 }
 
 function rebuildMenu(): void {
   if (!tray) return;
-  const menu = Menu.buildFromTemplate([
+  const template: Electron.MenuItemConstructorOptions[] = [];
+  if (nextMeeting) {
+    template.push({
+      label: `Next: ${shortSummary(nextMeeting.summary)} at ${menuTimeLabel(nextMeeting.startMs)}`,
+      enabled: false,
+    });
+    if (nextMeeting.conferenceLink) {
+      template.push({
+        label: "Join & take notes",
+        click: () => {
+          const meeting = nextMeeting;
+          if (meeting) actions?.joinNextMeeting(meeting);
+        },
+      });
+    }
+    template.push({ type: "separator" });
+  }
+  template.push(
     { label: "Open Rowboat", click: () => actions?.openApp() },
     // Permanent discoverability for the global quick-ask shortcut — the
     // accelerator renders next to the label (display only; the real binding
@@ -171,7 +252,13 @@ function rebuildMenu(): void {
         },
     { type: "separator" },
     { label: "Quit Rowboat", click: () => app.quit() },
-  ]);
-  tray.setContextMenu(menu);
-  tray.setToolTip(recording ? "Rowboat — recording meeting" : "Rowboat");
+  );
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+  tray.setToolTip(
+    recording
+      ? "Rowboat — recording meeting"
+      : nextMeeting
+        ? `Rowboat — next: ${nextMeeting.summary} at ${menuTimeLabel(nextMeeting.startMs)}`
+        : "Rowboat",
+  );
 }

@@ -202,6 +202,12 @@ const HISTORICAL_KEY_ORDER = [
     "run-background-task-agent",
     "launch-code-task",
     "notify-user",
+    "calendar-list-events",
+    "calendar-find-free-slots",
+    "calendar-create-event",
+    "calendar-update-event",
+    "calendar-delete-event",
+    "calendar-rsvp-event",
     "spawn-agent",
 ];
 
@@ -239,6 +245,10 @@ describe("BuiltinTools permission audit", () => {
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
             "composio-execute-tool": "composio-execute",
+            "calendar-create-event": "prompt",
+            "calendar-update-event": "prompt",
+            "calendar-delete-event": "prompt",
+            "calendar-rsvp-event": "prompt",
         });
     });
 });

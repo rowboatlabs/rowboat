@@ -5,7 +5,8 @@ import { persistSyncedEvent, removeSyncedEvent, triggerSync } from './sync_calen
 
 /**
  * Google Calendar write operations backing the visual calendar's quick-create,
- * edit/delete, and RSVP actions. All writes go to the primary calendar.
+ * edit/delete, and RSVP actions. Creates go to the primary calendar; edits,
+ * deletes, and RSVPs target the calendar the event lives on (default primary).
  *
  * Requires the calendar.events scope. Grants issued before that scope replaced
  * calendar.events.readonly report `needsReconnect` so the renderer can point
@@ -111,9 +112,11 @@ export async function updateCalendarEvent(args: {
     summary?: string;
     startISO?: string;
     endISO?: string;
+    calendarId?: string;
 }): Promise<CalendarWriteResult> {
     const client = await getWriteCalendar();
     if ('error' in client) return { ok: false, ...client };
+    const calendarId = args.calendarId ?? CALENDAR_ID;
 
     const requestBody: cal.Schema$Event = {};
     if (args.summary !== undefined) requestBody.summary = args.summary;
@@ -125,12 +128,12 @@ export async function updateCalendarEvent(args: {
 
     try {
         const res = await client.calendar.events.patch({
-            calendarId: CALENDAR_ID,
+            calendarId,
             eventId: args.eventId,
             sendUpdates: 'all',
             requestBody,
         });
-        await persistSyncedEvent(res.data);
+        await persistSyncedEvent(res.data, calendarId);
         triggerSync();
         return { ok: true, eventId: res.data.id ?? undefined, htmlLink: res.data.htmlLink ?? undefined };
     } catch (err) {
@@ -139,13 +142,14 @@ export async function updateCalendarEvent(args: {
     }
 }
 
-export async function deleteCalendarEvent(eventId: string): Promise<CalendarWriteResult> {
+export async function deleteCalendarEvent(eventId: string, calendarIdArg?: string): Promise<CalendarWriteResult> {
     const client = await getWriteCalendar();
     if ('error' in client) return { ok: false, ...client };
+    const calendarId = calendarIdArg ?? CALENDAR_ID;
 
     try {
         await client.calendar.events.delete({
-            calendarId: CALENDAR_ID,
+            calendarId,
             eventId,
             sendUpdates: 'all',
         });
@@ -157,19 +161,20 @@ export async function deleteCalendarEvent(eventId: string): Promise<CalendarWrit
             return toWriteError(err);
         }
     }
-    removeSyncedEvent(eventId);
+    removeSyncedEvent(eventId, calendarId);
     triggerSync();
     return { ok: true, eventId };
 }
 
-export async function respondToCalendarEvent(eventId: string, response: RsvpResponse): Promise<CalendarWriteResult> {
+export async function respondToCalendarEvent(eventId: string, response: RsvpResponse, calendarIdArg?: string): Promise<CalendarWriteResult> {
     const client = await getWriteCalendar();
     if ('error' in client) return { ok: false, ...client };
+    const calendarId = calendarIdArg ?? CALENDAR_ID;
 
     try {
         // Patch replaces the whole attendees array, so read-modify-write it
         // with only our own responseStatus changed.
-        const existing = await client.calendar.events.get({ calendarId: CALENDAR_ID, eventId });
+        const existing = await client.calendar.events.get({ calendarId, eventId });
         const attendees = existing.data.attendees ?? [];
         const self = attendees.find((a) => a.self);
         if (!self) {
@@ -177,12 +182,12 @@ export async function respondToCalendarEvent(eventId: string, response: RsvpResp
         }
         self.responseStatus = response;
         const res = await client.calendar.events.patch({
-            calendarId: CALENDAR_ID,
+            calendarId,
             eventId,
             sendUpdates: 'none',
             requestBody: { attendees },
         });
-        await persistSyncedEvent(res.data);
+        await persistSyncedEvent(res.data, calendarId);
         triggerSync();
         return { ok: true, eventId };
     } catch (err) {

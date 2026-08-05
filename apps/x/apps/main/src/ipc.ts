@@ -1184,10 +1184,10 @@ export function setupIpcHandlers() {
       return updateCalendarEvent(args);
     },
     'calendar:deleteEvent': async (_event, args) => {
-      return deleteCalendarEvent(args.eventId);
+      return deleteCalendarEvent(args.eventId, args.calendarId);
     },
     'calendar:respond': async (_event, args) => {
-      return respondToCalendarEvent(args.eventId, args.response);
+      return respondToCalendarEvent(args.eventId, args.response, args.calendarId);
     },
     'gmail:searchContacts': async (_event, args) => {
       const query = args?.query ?? '';

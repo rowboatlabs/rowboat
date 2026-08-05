@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { addDays, localDateKey, type UpcomingEvent } from '@/lib/calendar-events'
+import { addDays, hexAlpha, localDateKey, type UpcomingEvent } from '@/lib/calendar-events'
 import { cn } from '@/lib/utils'
 import { buildMonthGrid, eventsByDayKey, eventSpansMultipleDays } from './date-grid'
 import { EventDetailsContent, EventDetailsPopover } from './event-details-popover'
@@ -147,7 +147,11 @@ function MonthEventChip({ event, onOpenNote }: { event: UpcomingEvent; onOpenNot
               ? 'bg-primary/10 font-medium text-foreground hover:bg-primary/20'
               : 'text-foreground hover:bg-muted',
           )}
+          style={isBanner && event.color ? { backgroundColor: hexAlpha(event.color, 0.15) } : undefined}
         >
+          {!isBanner && event.color ? (
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: event.color }} />
+          ) : null}
           {!isBanner ? (
             <span className="shrink-0 tabular-nums text-muted-foreground">{chipTimeLabel(event.start)}</span>
           ) : null}

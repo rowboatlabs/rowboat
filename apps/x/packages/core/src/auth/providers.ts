@@ -81,6 +81,11 @@ const providerConfigs: ProviderConfig = {
       // before this scope replaced calendar.events.readonly are invalidated on
       // startup by disconnectGoogleIfScopesStale, prompting a reconnect.
       'https://www.googleapis.com/auth/calendar.events',
+      // Enumerate the account's calendars (names/colors/selection) so the sync
+      // loop can mirror secondary calendars too. Events on them are already
+      // covered by calendar.events; older grants missing this scope fall back
+      // to primary-only sync until the startup migration prompts a reconnect.
+      'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
       // Per-file Drive access (non-restricted): the user grants read/write to a
       // specific doc by choosing it in the Google Picker. Enough to export/
       // download and write back, without the restricted full-drive scope.

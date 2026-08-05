@@ -138,6 +138,11 @@ async function publishCalendarSyncEvent(
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'calendar_sync');
+// Non-primary calendars sync into per-calendar subdirectories so event ids
+// (shared by invite copies across calendars) can't collide with primary's
+// flat files, which every existing consumer reads.
+const SECONDARY_DIR = path.join(SYNC_DIR, 'secondary');
+const CALENDAR_LIST_FILE = 'calendars.json';
 const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
 const LOOKBACK_DAYS = 60;
 const LOOKAHEAD_DAYS = 60;
@@ -148,6 +153,25 @@ const ACCEPTED_SCOPES = [
     'https://www.googleapis.com/auth/calendar.events.readonly',
 ];
 const nhm = new NodeHtmlMarkdown();
+
+function safeCalendarKey(calendarId: string): string {
+    return calendarId.replace(/[^a-zA-Z0-9@._-]/g, '_').substring(0, 120);
+}
+
+function secondaryCalendarDir(calendarId: string): string {
+    return path.join(SECONDARY_DIR, safeCalendarKey(calendarId));
+}
+
+function dirForCalendar(calendarId: string): string {
+    return calendarId === 'primary' ? SYNC_DIR : secondaryCalendarDir(calendarId);
+}
+
+// Events on non-primary calendars carry the calendar id so readers (renderer,
+// tools) can route writes back to the right calendar.
+function stampCalendarId(event: cal.Schema$Event, calendarId: string): cal.Schema$Event {
+    if (calendarId === 'primary') return event;
+    return { ...event, rowboatCalendarId: calendarId } as cal.Schema$Event;
+}
 
 // --- Wake Signal for Immediate Sync Trigger ---
 let wakeResolve: (() => void) | null = null;
@@ -184,15 +208,16 @@ function cleanFilename(name: string): string {
 // the renderer's file watcher picks it up immediately, without waiting for the
 // next poll. The poll then reconciles anything we got wrong.
 
-export async function persistSyncedEvent(event: cal.Schema$Event): Promise<void> {
-    if (!fs.existsSync(SYNC_DIR)) {
-        fs.mkdirSync(SYNC_DIR, { recursive: true });
+export async function persistSyncedEvent(event: cal.Schema$Event, calendarId = 'primary'): Promise<void> {
+    const dir = dirForCalendar(calendarId);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
     }
-    await saveEvent(event, SYNC_DIR);
+    await saveEvent(stampCalendarId(event, calendarId), dir);
 }
 
-export function removeSyncedEvent(eventId: string): void {
-    const filePath = path.join(SYNC_DIR, `${eventId}.json`);
+export function removeSyncedEvent(eventId: string, calendarId = 'primary'): void {
+    const filePath = path.join(dirForCalendar(calendarId), `${eventId}.json`);
     try {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } catch (e) {
@@ -208,7 +233,7 @@ function cleanUpOldFiles(currentEventIds: Set<string>, syncDir: string): string[
     const files = fs.readdirSync(syncDir);
     const deleted: string[] = [];
     for (const filename of files) {
-        if (filename === 'sync_state.json' || filename === 'composio_state.json') continue;
+        if (filename === 'sync_state.json' || filename === 'composio_state.json' || filename === CALENDAR_LIST_FILE) continue;
 
         // We expect files like:
         // {eventId}.json
@@ -322,6 +347,82 @@ async function processAttachments(drive: drive.Drive, event: cal.Schema$Event, s
     return savedCount;
 }
 
+// Enumerate the account's calendars. Needs the calendarlist.readonly scope —
+// grants issued before it returns null (403) and sync falls back to
+// primary-only until the user reconnects.
+async function fetchCalendarList(calendar: cal.Calendar): Promise<cal.Schema$CalendarListEntry[] | null> {
+    try {
+        const items: cal.Schema$CalendarListEntry[] = [];
+        let pageToken: string | undefined;
+        do {
+            const res = await calendar.calendarList.list({ maxResults: 250, pageToken });
+            items.push(...(res.data.items ?? []));
+            pageToken = res.data.nextPageToken ?? undefined;
+        } while (pageToken);
+        return items;
+    } catch (err) {
+        const status = (err as { response?: { status?: number } }).response?.status;
+        if (status === 403) {
+            console.log('[Calendar] Calendar list not readable with current grant; syncing primary only.');
+            return null;
+        }
+        throw err;
+    }
+}
+
+// Metadata file the renderer reads for calendar names/colors/visibility UI.
+function persistCalendarList(items: cal.Schema$CalendarListEntry[]): void {
+    const calendars = items
+        .map((c) => ({
+            id: c.primary ? 'primary' : (c.id ?? ''),
+            summary: c.summaryOverride || c.summary || c.id || 'Calendar',
+            primary: Boolean(c.primary),
+            backgroundColor: c.backgroundColor ?? undefined,
+            foregroundColor: c.foregroundColor ?? undefined,
+            accessRole: c.accessRole ?? undefined,
+            selected: Boolean(c.selected),
+        }))
+        .filter((c) => c.id);
+    const filePath = path.join(SYNC_DIR, CALENDAR_LIST_FILE);
+    const content = JSON.stringify({ calendars }, null, 2);
+    try {
+        if (fs.existsSync(filePath) && fs.readFileSync(filePath, 'utf-8') === content) return;
+        fs.writeFileSync(filePath, content);
+    } catch (e) {
+        console.error('[Calendar] Failed to persist calendar list:', e);
+    }
+}
+
+// Which calendars to sync events from: primary always, plus the calendars the
+// user keeps enabled in Google's own UI ("selected"), skipping free/busy-only.
+function pickSyncCalendarIds(items: cal.Schema$CalendarListEntry[] | null): string[] {
+    if (!items) return ['primary'];
+    const ids = ['primary'];
+    for (const c of items) {
+        if (!c.id || c.primary) continue;
+        if (!c.selected) continue;
+        if (c.accessRole === 'freeBusyReader') continue;
+        ids.push(c.id);
+    }
+    return ids;
+}
+
+// Drop subdirectories of calendars that are no longer synced (deselected,
+// unsubscribed, or the grant lost calendar-list access).
+function pruneStaleSecondaryDirs(activeCalendarIds: string[]): void {
+    if (!fs.existsSync(SECONDARY_DIR)) return;
+    const keep = new Set(activeCalendarIds.filter((id) => id !== 'primary').map(safeCalendarKey));
+    try {
+        for (const entry of fs.readdirSync(SECONDARY_DIR)) {
+            if (keep.has(entry)) continue;
+            fs.rmSync(path.join(SECONDARY_DIR, entry), { recursive: true, force: true });
+            console.log(`[Calendar] Removed stale calendar dir: ${entry}`);
+        }
+    } catch (e) {
+        console.error('[Calendar] Error pruning secondary calendar dirs:', e);
+    }
+}
+
 async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackDays: number, lookaheadDays: number) {
     // Calculate window
     const now = new Date();
@@ -359,59 +460,76 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
     };
 
     try {
-        // Paginate: singleEvents expansion over a wide window can exceed the
-        // per-page cap (default 250), silently truncating without a pageToken loop.
-        const events: cal.Schema$Event[] = [];
-        let pageToken: string | undefined;
-        do {
-            const res = await calendar.events.list({
-                calendarId: 'primary',
-                timeMin: timeMin,
-                timeMax: timeMax,
-                singleEvents: true,
-                orderBy: 'startTime',
-                maxResults: 2500,
-                pageToken,
-            });
-            events.push(...(res.data.items || []));
-            pageToken = res.data.nextPageToken ?? undefined;
-        } while (pageToken);
-        const currentEventIds = new Set<string>();
+        const calendarItems = await fetchCalendarList(calendar);
+        if (calendarItems) persistCalendarList(calendarItems);
+        const calendarIds = pickSyncCalendarIds(calendarItems);
+        pruneStaleSecondaryDirs(calendarIds);
 
-        if (events.length === 0) {
-            console.log("No events found in this window.");
-        } else {
-            console.log(`Found ${events.length} events.`);
+        const deletedFiles: string[] = [];
+        for (const calendarId of calendarIds) {
+            const isPrimary = calendarId === 'primary';
+            const dir = isPrimary ? syncDir : secondaryCalendarDir(calendarId);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+            // Paginate: singleEvents expansion over a wide window can exceed the
+            // per-page cap (default 250), silently truncating without a pageToken loop.
+            const events: cal.Schema$Event[] = [];
+            try {
+                let pageToken: string | undefined;
+                do {
+                    const res = await calendar.events.list({
+                        calendarId,
+                        timeMin: timeMin,
+                        timeMax: timeMax,
+                        singleEvents: true,
+                        orderBy: 'startTime',
+                        maxResults: 2500,
+                        pageToken,
+                    });
+                    events.push(...(res.data.items || []));
+                    pageToken = res.data.nextPageToken ?? undefined;
+                } while (pageToken);
+            } catch (err) {
+                // A broken secondary calendar shouldn't take down the whole sync.
+                if (!isPrimary) {
+                    console.error(`[Calendar] Failed to list events for ${calendarId}:`, err);
+                    continue;
+                }
+                throw err;
+            }
+
+            console.log(`[Calendar] ${calendarId}: found ${events.length} events.`);
+            const currentEventIds = new Set<string>();
             for (const event of events) {
-                if (event.id) {
-                    if (!shouldSyncCalendarEvent(event)) {
-                        continue;
-                    }
-                    const result = await saveEvent(event, syncDir);
-                    const attachmentsSaved = await processAttachments(drive, event, syncDir);
-                    currentEventIds.add(event.id);
+                if (!event.id || !shouldSyncCalendarEvent(event)) {
+                    continue;
+                }
+                const result = await saveEvent(stampCalendarId(event, calendarId), dir);
+                // Attachment export costs Drive quota, so it stays primary-only.
+                const attachmentsSaved = isPrimary ? await processAttachments(drive, event, dir) : 0;
+                currentEventIds.add(event.id);
 
-                    if (result.changed) {
-                        await ensureRun();
-                        changedTitles.push(result.title);
-                        if (result.isNew) {
-                            newCount++;
-                            newEvents.push(event);
-                        } else {
-                            updatedCount++;
-                            updatedEvents.push(event);
-                        }
-                    }
-
-                    if (attachmentsSaved > 0) {
-                        await ensureRun();
-                        attachmentCount += attachmentsSaved;
+                if (result.changed) {
+                    await ensureRun();
+                    changedTitles.push(result.title);
+                    if (result.isNew) {
+                        newCount++;
+                        newEvents.push(event);
+                    } else {
+                        updatedCount++;
+                        updatedEvents.push(event);
                     }
                 }
+
+                if (attachmentsSaved > 0) {
+                    await ensureRun();
+                    attachmentCount += attachmentsSaved;
+                }
             }
+
+            deletedFiles.push(...cleanUpOldFiles(currentEventIds, dir));
         }
 
-        const deletedFiles = cleanUpOldFiles(currentEventIds, syncDir);
         if (deletedFiles.length > 0) {
             await ensureRun();
             deletedCount = deletedFiles.length;
