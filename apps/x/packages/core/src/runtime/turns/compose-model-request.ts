@@ -64,7 +64,10 @@ export async function materializeModelRequest(
     contextResolver: IContextResolver,
     encode: (messages: Array<z.infer<typeof ConversationMessage>>) => JsonValue[],
 ): Promise<ComposedModelRequest> {
-    const prefix = await contextResolver.resolve(state.definition.context);
+    const prefix = await contextResolver.resolve(
+        state.definition.context,
+        state.definition.agent.resolved.model,
+    );
     const agent = await contextResolver.resolveAgent(
         state.definition.agent.resolved,
     );

@@ -249,8 +249,12 @@ export class TurnRuntime implements ITurnRuntime {
             useCase: "copilot_chat",
         };
         const materialize = async (): Promise<MaterializedEnv> => {
+            // The snapshot's model is concrete on both snapshot variants, so
+            // the context resolver can gate provider-continuation replay on
+            // it without resolving the agent first.
             const resolvedContext = await this.contextResolver.resolve(
                 definition.context,
+                definition.agent.resolved.model,
             );
             const resolvedAgent = await this.contextResolver.resolveAgent(
                 definition.agent.resolved,
