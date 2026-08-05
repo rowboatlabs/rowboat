@@ -390,7 +390,10 @@ Materialization is performed by an injected resolver:
 
 ```ts
 interface IContextResolver {
-  resolve(context: TurnContext): Promise<ConversationMessage[]>;
+  resolve(
+    context: TurnContext,
+    currentModel: ModelDescriptor,
+  ): Promise<ConversationMessage[]>;
 }
 ```
 
@@ -407,6 +410,36 @@ Rules:
 - A reference to a missing or corrupt turn file is an infrastructure error.
   It rejects the execution and does not append `turn_failed`.
 - The reducer treats `context` as opaque data and never resolves references.
+
+Provider continuation metadata (`providerOptions` on assistant messages and
+their parts — Anthropic thinking signatures, OpenAI encrypted reasoning,
+Gemini thoughtSignatures, OpenRouter reasoning_details) is sealed to the
+exact endpoint that minted it; replaying it after a mid-session model
+switch is rejected by providers (e.g. OpenRouter 404 "encrypted payloads
+can only be replayed to the endpoint that created them"). `currentModel` is
+the model the materialized context is about to be sent to, and gates
+replay per walked segment:
+
+- A segment replays verbatim — metadata included — only when its producing
+  turn's `agent.resolved.model` equals `currentModel` (strict
+  provider-instance + model-id equality) AND that turn completed cleanly.
+  Same-model continuations rely on this fidelity (and it keeps provider
+  prefix caches byte-stable).
+- Every other segment — a different producing model, a failed or cancelled
+  producing turn, and always the inline base (its origin is unrecorded;
+  migrated runs may carry foreign metadata) — passes through
+  `stripProviderContinuation` (shared/turns.ts): message- and part-level
+  `providerOptions` are dropped, reasoning parts with visible text are
+  demoted to plain text parts (the continuation model keeps the
+  information, loses the opaque blobs), and signature-only reasoning parts
+  are dropped.
+
+Within-turn replay (`assistant:N` request refs, §8.3) never passes through
+the resolver, so signatures between tool calls of the in-progress loop —
+the one place providers hard-require them — are preserved by construction.
+Stripping is deterministic per message and happens at materialization only;
+durable turn files keep full fidelity, so switching back to the original
+model restores verbatim replay of its segments.
 
 The app wires the resolver through a decorator (`context-elision.ts`) that
 applies transmit-time elision to the materialized prefix: tool results from

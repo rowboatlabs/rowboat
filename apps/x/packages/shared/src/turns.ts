@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+    AssistantContentPart,
     AssistantMessage,
     ToolCallPart,
     ToolMessage,
@@ -1271,4 +1272,56 @@ export function turnTranscript(
         }
     }
     return messages;
+}
+
+// Removes provider "native continuation" state from a transcript segment:
+// the opaque round-trip metadata providers attach to assistant output
+// (Anthropic thinking signatures, OpenAI encrypted reasoning, Gemini
+// thoughtSignatures, OpenRouter reasoning_details). Those payloads are
+// sealed to the exact endpoint that minted them — replaying them after a
+// model switch is rejected outright (e.g. OpenRouter 404 "encrypted
+// payloads can only be replayed to the endpoint that created them"). The
+// context resolver applies this to segments produced by a different model
+// than the one about to run, and to segments of unknown or unclean origin.
+// Visible content survives: reasoning text is demoted to an ordinary text
+// part (the continuation model keeps the information, loses the blobs);
+// signature-only and redacted reasoning blocks carry nothing readable and
+// are dropped. Pure and deterministic per message, so stripped prefixes
+// stay byte-stable across calls (provider prefix caches keep working).
+export function stripProviderContinuation(
+    messages: Array<z.infer<typeof ConversationMessage>>,
+): Array<z.infer<typeof ConversationMessage>> {
+    return messages.map((message) => {
+        if (message.role !== "assistant") {
+            return message;
+        }
+        const bare = { ...message };
+        delete bare.providerOptions;
+        if (typeof bare.content === "string") {
+            return bare;
+        }
+        const content = bare.content.flatMap(
+            (part): Array<z.infer<typeof AssistantContentPart>> => {
+                switch (part.type) {
+                    case "text":
+                        return [{ type: "text", text: part.text }];
+                    case "reasoning":
+                        // No tags around the demoted text: the model must
+                        // not learn to mimic a reasoning wrapper format.
+                        return part.text.trim() === ""
+                            ? []
+                            : [{ type: "text", text: part.text }];
+                    case "tool-call": {
+                        const call = { ...part };
+                        delete call.providerOptions;
+                        return [call];
+                    }
+                }
+            },
+        );
+        // A message left with no parts (it held only signature-bearing
+        // blocks) degrades to the empty-string form the model bridge
+        // already emits for content-free responses.
+        return { ...bare, content: content.length > 0 ? content : "" };
+    });
 }

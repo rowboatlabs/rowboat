@@ -3,6 +3,7 @@ import path from "path";
 import { z } from "zod";
 import type {
     ConversationMessage,
+    ModelDescriptor,
     ResolvedAgent,
     ResolvedAgentSnapshot,
     TurnContext,
@@ -203,8 +204,9 @@ export class ElidingContextResolver implements IContextResolver {
 
     async resolve(
         context: z.infer<typeof TurnContext>,
+        currentModel: z.infer<typeof ModelDescriptor>,
     ): Promise<Array<z.infer<typeof ConversationMessage>>> {
-        let prefix = await this.inner.resolve(context);
+        let prefix = await this.inner.resolve(context, currentModel);
         const policy = this.loadPolicy();
         if (policy.toolResults) {
             prefix = elideHistoricToolResults(

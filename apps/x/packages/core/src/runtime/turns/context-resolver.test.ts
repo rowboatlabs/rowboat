@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
+    type ConversationMessage,
     MODEL_CALL_LIMIT_ERROR_CODE,
     type TurnContext,
     TurnCorruptionError,
@@ -25,8 +26,13 @@ function completedTurnLog(
     context: z.infer<typeof TurnContext>,
     inputText: string,
     responseText: string,
+    overrides?: {
+        model?: { provider: string; model: string };
+        response?: z.infer<typeof ConversationMessage> & { role: "assistant" };
+    },
 ): TEvent[] {
     const ts = "2026-07-02T10:00:00Z";
+    const response = overrides?.response ?? assistant(responseText);
     return [
         {
             type: "turn_created",
@@ -39,7 +45,7 @@ function completedTurnLog(
                 resolved: {
                     agentId: "copilot",
                     systemPrompt: "SYS",
-                    model: { provider: "fake", model: "m" },
+                    model: overrides?.model ?? { provider: "fake", model: "m" },
                     tools: [],
                 },
             },
@@ -70,7 +76,7 @@ function completedTurnLog(
             turnId,
             ts,
             modelCallIndex: 0,
-            message: assistant(responseText),
+            message: response,
             finishReason: "stop",
             usage: {},
         },
@@ -78,7 +84,7 @@ function completedTurnLog(
             type: "turn_completed",
             turnId,
             ts,
-            output: assistant(responseText),
+            output: response,
             finishReason: "stop",
             usage: {},
         },
@@ -105,6 +111,7 @@ function limitFailedTurnLog(turnId: string): TEvent[] {
                 toolCallId: "tc1",
                 toolName: "echo",
                 arguments: {},
+                providerOptions: { google: { thoughtSignature: "sig" } },
             },
         ],
     };
@@ -181,23 +188,26 @@ function limitFailedTurnLog(turnId: string): TEvent[] {
     ];
 }
 
+// Matches the fixture turn logs' model, so resolution replays verbatim.
+const FIXTURE_MODEL = { provider: "fake", model: "m" };
+
 const T1 = "2026-07-02T10-00-00Z-0000001-000";
 const T2 = "2026-07-02T10-00-00Z-0000002-000";
 const T3 = "2026-07-02T10-00-00Z-0000003-000";
 
 describe("TurnRepoContextResolver", () => {
-    it("passes inline context through unchanged", async () => {
+    it("passes plain inline context through unchanged", async () => {
         const repo = new InMemoryTurnRepo();
         const resolver = new TurnRepoContextResolver({ turnRepo: repo });
         const inline = [user("a"), assistant("b")];
-        expect(await resolver.resolve(inline)).toEqual(inline);
+        expect(await resolver.resolve(inline, FIXTURE_MODEL)).toEqual(inline);
     });
 
     it("resolves a single reference to the referenced turn's transcript", async () => {
         const repo = new InMemoryTurnRepo();
         repo.seed(completedTurnLog(T1, [], "first question", "first answer"));
         const resolver = new TurnRepoContextResolver({ turnRepo: repo });
-        expect(await resolver.resolve({ previousTurnId: T1 })).toEqual([
+        expect(await resolver.resolve({ previousTurnId: T1 }, FIXTURE_MODEL)).toEqual([
             user("first question"),
             assistant("first answer"),
         ]);
@@ -209,7 +219,7 @@ describe("TurnRepoContextResolver", () => {
         repo.seed(completedTurnLog(T2, { previousTurnId: T1 }, "q2", "a2"));
         repo.seed(completedTurnLog(T3, { previousTurnId: T2 }, "q3", "a3"));
         const resolver = new TurnRepoContextResolver({ turnRepo: repo });
-        expect(await resolver.resolve({ previousTurnId: T3 })).toEqual([
+        expect(await resolver.resolve({ previousTurnId: T3 }, FIXTURE_MODEL)).toEqual([
             user("preamble"),
             user("q1"),
             assistant("a1"),
@@ -224,7 +234,7 @@ describe("TurnRepoContextResolver", () => {
         const repo = new InMemoryTurnRepo();
         repo.seed(limitFailedTurnLog(T1));
         const resolver = new TurnRepoContextResolver({ turnRepo: repo });
-        const resolved = await resolver.resolve({ previousTurnId: T1 });
+        const resolved = await resolver.resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
         expect(resolved.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
         expect(resolved[2]).toMatchObject({
             role: "tool",
@@ -237,7 +247,7 @@ describe("TurnRepoContextResolver", () => {
         const repo = new InMemoryTurnRepo();
         const resolver = new TurnRepoContextResolver({ turnRepo: repo });
         await expect(
-            resolver.resolve({ previousTurnId: T1 }),
+            resolver.resolve({ previousTurnId: T1 }, FIXTURE_MODEL),
         ).rejects.toThrowError(/turn not found/);
     });
 
@@ -324,7 +334,172 @@ describe("TurnRepoContextResolver", () => {
         repo.seed(completedTurnLog(T2, { previousTurnId: T1 }, "q2", "a2"));
         const resolver = new TurnRepoContextResolver({ turnRepo: repo });
         await expect(
-            resolver.resolve({ previousTurnId: T1 }),
+            resolver.resolve({ previousTurnId: T1 }, FIXTURE_MODEL),
         ).rejects.toThrowError(TurnCorruptionError);
+    });
+});
+
+const OTHER_MODEL = { provider: "openrouter", model: "gpt-5.6-luna" };
+
+// An assistant response carrying every kind of provider round-trip state:
+// message-level options (OpenRouter reasoning_details), signed reasoning,
+// signature-only reasoning (redacted/encrypted with no visible text), and
+// a signed text part.
+function sealedResponse(): z.infer<typeof ConversationMessage> & {
+    role: "assistant";
+} {
+    return {
+        role: "assistant",
+        content: [
+            {
+                type: "reasoning",
+                text: "",
+                providerOptions: { openrouter: { blob: "sealed-encrypted" } },
+            },
+            {
+                type: "reasoning",
+                text: "visible thought",
+                providerOptions: { openrouter: { sig: "s1" } },
+            },
+            {
+                type: "text",
+                text: "answer",
+                providerOptions: { openrouter: { sig: "s2" } },
+            },
+        ],
+        providerOptions: { openrouter: { reasoning_details: [{ sig: "r1" }] } },
+    };
+}
+
+describe("provider continuation replay", () => {
+    it("replays same-model completed turns verbatim, metadata included", async () => {
+        const repo = new InMemoryTurnRepo();
+        repo.seed(
+            completedTurnLog(T1, [], "q1", "", { response: sealedResponse() }),
+        );
+        const resolver = new TurnRepoContextResolver({ turnRepo: repo });
+        const resolved = await resolver.resolve(
+            { previousTurnId: T1 },
+            FIXTURE_MODEL,
+        );
+        expect(resolved).toEqual([user("q1"), sealedResponse()]);
+    });
+
+    it("strips metadata and demotes reasoning for segments from a different model", async () => {
+        const repo = new InMemoryTurnRepo();
+        repo.seed(
+            completedTurnLog(T1, [], "q1", "", {
+                model: OTHER_MODEL,
+                response: sealedResponse(),
+            }),
+        );
+        const resolver = new TurnRepoContextResolver({ turnRepo: repo });
+        const resolved = await resolver.resolve(
+            { previousTurnId: T1 },
+            FIXTURE_MODEL,
+        );
+        expect(resolved).toEqual([
+            user("q1"),
+            {
+                role: "assistant",
+                content: [
+                    // Signature-only reasoning dropped; signed reasoning
+                    // demoted to plain text; all providerOptions gone.
+                    { type: "text", text: "visible thought" },
+                    { type: "text", text: "answer" },
+                ],
+            },
+        ]);
+    });
+
+    it("strips metadata from failed turns even for the same model", async () => {
+        const repo = new InMemoryTurnRepo();
+        repo.seed(limitFailedTurnLog(T1)); // fixture model, status "failed"
+        const resolver = new TurnRepoContextResolver({ turnRepo: repo });
+        const resolved = await resolver.resolve(
+            { previousTurnId: T1 },
+            FIXTURE_MODEL,
+        );
+        const call = resolved[1];
+        if (call.role !== "assistant" || typeof call.content === "string") {
+            throw new Error("expected assistant message with parts");
+        }
+        expect(call.content[0]).toEqual({
+            type: "tool-call",
+            toolCallId: "tc1",
+            toolName: "echo",
+            arguments: {},
+        });
+    });
+
+    it("strips only the foreign segments of a mixed-model chain", async () => {
+        const repo = new InMemoryTurnRepo();
+        repo.seed(
+            completedTurnLog(T1, [], "q1", "", { response: sealedResponse() }),
+        );
+        repo.seed(
+            completedTurnLog(T2, { previousTurnId: T1 }, "q2", "", {
+                model: OTHER_MODEL,
+                response: sealedResponse(),
+            }),
+        );
+        const resolver = new TurnRepoContextResolver({ turnRepo: repo });
+        const resolved = await resolver.resolve(
+            { previousTurnId: T2 },
+            FIXTURE_MODEL,
+        );
+        expect(resolved).toEqual([
+            user("q1"),
+            sealedResponse(), // same model as current: verbatim
+            user("q2"),
+            {
+                role: "assistant",
+                content: [
+                    { type: "text", text: "visible thought" },
+                    { type: "text", text: "answer" },
+                ],
+            },
+        ]);
+    });
+
+    it("always strips the inline base, whose origin is unrecorded", async () => {
+        const repo = new InMemoryTurnRepo();
+        const resolver = new TurnRepoContextResolver({ turnRepo: repo });
+        const resolved = await resolver.resolve(
+            [user("migrated q"), sealedResponse()],
+            FIXTURE_MODEL,
+        );
+        expect(resolved).toEqual([
+            user("migrated q"),
+            {
+                role: "assistant",
+                content: [
+                    { type: "text", text: "visible thought" },
+                    { type: "text", text: "answer" },
+                ],
+            },
+        ]);
+    });
+
+    it("degrades a metadata-only assistant message to empty string content", async () => {
+        const repo = new InMemoryTurnRepo();
+        const resolver = new TurnRepoContextResolver({ turnRepo: repo });
+        const resolved = await resolver.resolve(
+            [
+                user("q"),
+                {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "reasoning",
+                            text: "",
+                            providerOptions: { openrouter: { blob: "sealed" } },
+                        },
+                    ],
+                },
+            ],
+            FIXTURE_MODEL,
+        );
+        expect(resolved[1]).toEqual({ role: "assistant", content: "" });
     });
 });
