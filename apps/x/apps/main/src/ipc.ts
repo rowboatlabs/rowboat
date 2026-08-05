@@ -2235,6 +2235,20 @@ export function setupIpcHandlers() {
       const mimeType = mimeMap[ext] || 'application/octet-stream';
       return { data: buffer.toString('base64'), mimeType, size: stat.size };
     },
+    'spreadsheet:load': async (_event, args) => {
+      const { loadSheetWindow } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
+      const result = await loadSheetWindow(args.path, args.sheet, args.offset, args.limit);
+      return {
+        format: result.meta.format,
+        sheets: result.meta.sheets,
+        activeSheet: result.activeSheet,
+        rows: result.rows,
+        offset: result.offset,
+        totalRows: result.totalRows,
+        totalColumns: result.totalColumns,
+        etag: result.meta.etag,
+      };
+    },
     'dialog:openDirectory': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);
       const defaultPath = args.defaultPath ? resolveShellPath(args.defaultPath) : os.homedir();

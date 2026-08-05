@@ -61,6 +61,8 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'file-writeText':
         case 'file-editText':
         case 'file-mkdir':
+        case 'spreadsheet-create':
+        case 'spreadsheet-edit':
             return pathArg ? { operation: 'write', paths: [pathArg] } : null;
         case 'file-copy':
         case 'file-rename': {

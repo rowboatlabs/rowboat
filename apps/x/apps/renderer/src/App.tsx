@@ -22,6 +22,7 @@ import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
 import { DocxFileViewer } from '@/components/docx-file-viewer';
+import { SpreadsheetFileViewer } from '@/components/spreadsheet-file-viewer';
 import { PersistentViewerCache } from '@/components/persistent-viewer-cache';
 import { UnsupportedFileViewer } from '@/components/unsupported-file-viewer';
 import { getViewerType, isCacheableViewerPath } from '@/lib/file-types';
@@ -5849,6 +5850,39 @@ function App() {
     }
   }, [sessionChat.chatState?.conversation, runId, applyAppNavigation])
 
+  // Spreadsheet auto-open: when the assistant creates or edits a spreadsheet
+  // inside the workspace, open the in-app viewer on it (a no-op navigation if
+  // it's already open; the viewer refreshes itself via workspace:didChange).
+  // Same seeding semantics as app-navigation above: transcript entries present
+  // on session switch are marked processed without replaying.
+  const processedSpreadsheetToolsRef = useRef<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() })
+  useEffect(() => {
+    const conversation = sessionChat.chatState?.conversation
+    if (!conversation) return
+    const completed = conversation.filter(
+      (item): item is ToolCall =>
+        isToolCall(item) &&
+        (item.name === 'spreadsheet-create' || item.name === 'spreadsheet-edit') &&
+        item.status === 'completed'
+    )
+    if (processedSpreadsheetToolsRef.current.key !== runId) {
+      processedSpreadsheetToolsRef.current = { key: runId, ids: new Set(completed.map((t) => t.id)) }
+      return
+    }
+    for (const tool of completed) {
+      if (processedSpreadsheetToolsRef.current.ids.has(tool.id)) continue
+      processedSpreadsheetToolsRef.current.ids.add(tool.id)
+      const result = tool.result as Record<string, unknown> | undefined
+      if (result && result.success && typeof result.workspaceRelPath === 'string') {
+        void navigateToView({ type: 'file', path: result.workspaceRelPath })
+        // If the viewer is already open on this file the navigation is a
+        // no-op, and the workspace watcher only covers allowlisted roots —
+        // so tell the viewer directly that the file changed.
+        window.dispatchEvent(new CustomEvent('rowboat:spreadsheet-touched', { detail: { path: result.workspaceRelPath } }))
+      }
+    }
+  }, [sessionChat.chatState?.conversation, runId, navigateToView])
+
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
     if (currentViewState.type !== 'chat') {
@@ -7551,6 +7585,10 @@ function App() {
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <DocxFileViewer path={selectedPath} />
                   </div>
+                ) : selectedPath && getViewerType(selectedPath) === 'spreadsheet' ? (
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <SpreadsheetFileViewer path={selectedPath} />
+                  </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <UnsupportedFileViewer path={selectedPath} />
@@ -7574,7 +7612,7 @@ function App() {
                   />
                 </div>
               ) : (
-              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
+              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }} onOpenFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="relative min-h-0 flex-1">
                   {chatTabs.map((tab) => {
@@ -7770,6 +7808,7 @@ function App() {
                 isToolOpenForTab={isToolOpenForTab}
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
+                onOpenFile={(path) => { navigateToFile(path) }}
                 onActivate={() => setActiveShortcutPane('right')}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 isRecording={isRecording}
