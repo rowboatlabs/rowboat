@@ -44,6 +44,10 @@ export class InMemoryTurnRepo implements ITurnRepo {
         }
     }
 
+    async delete(turnId: string): Promise<void> {
+        this.files.delete(turnId);
+    }
+
     async withLock<T>(turnId: string, fn: () => Promise<T>): Promise<T> {
         return this.mutex.run(turnId, fn);
     }
