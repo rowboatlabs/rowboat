@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { Loader2, Calendar } from "lucide-react"
-import { FirefliesIcon, GoogleIcon, SlackIcon } from "@/components/onboarding/provider-icons"
+import { FirefliesIcon, GoogleIcon, OutlookIcon, SlackIcon } from "@/components/onboarding/provider-icons"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
@@ -33,13 +33,14 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
   // "quit Slack first" one-click import there. mac/Linux import with Slack open.
   const isWindows = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('win')
 
-  const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string) => {
+  const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string, disabledReason?: string) => {
     const state = c.providerStates[provider] || {
       isConnected: false,
       isLoading: true,
       isConnecting: false,
     }
     const needsReconnect = Boolean(c.providerStatus[provider]?.error)
+    const connectDisabled = !state.isConnected && !needsReconnect && Boolean(disabledReason)
 
     return (
       <div
@@ -56,6 +57,8 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
               <span className="text-xs text-amber-600">Needs reconnect</span>
             ) : state.isConnected ? (
               <span className="text-xs text-emerald-600">Connected</span>
+            ) : connectDisabled ? (
+              <span className="text-xs text-muted-foreground truncate">{disabledReason}</span>
             ) : (
               <span className="text-xs text-muted-foreground truncate">{description}</span>
             )}
@@ -87,7 +90,8 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
               variant="default"
               size="sm"
               onClick={() => c.handleConnect(provider)}
-              disabled={state.isConnecting}
+              disabled={state.isConnecting || connectDisabled}
+              title={connectDisabled ? disabledReason : undefined}
               className="h-7 px-3 text-xs"
             >
               {state.isConnecting ? (
@@ -133,7 +137,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
 
       <div className="space-y-1">
         {/* Email & Calendar Section */}
-        {(c.useComposioForGoogle || c.useComposioForGoogleCalendar || c.providers.includes('google')) && (
+        {(c.useComposioForGoogle || c.useComposioForGoogleCalendar || c.providers.includes('google') || c.providers.includes('microsoft')) && (
           <>
             <div className="px-3 pt-1 pb-0.5">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -185,7 +189,22 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                 </div>
               </div>
             ) : (
-              c.providers.includes('google') && renderOAuthProvider('google', 'Google', <GoogleIcon className="size-5" />, 'Sync emails and calendar')
+              c.providers.includes('google') && renderOAuthProvider(
+                'google',
+                'Google',
+                <GoogleIcon className="size-5" />,
+                'Sync emails and calendar',
+                // Only one email provider at a time — the main process
+                // enforces this too; the disabled button just explains it.
+                c.providerStates.microsoft?.isConnected ? 'Disconnect Microsoft Outlook first' : undefined,
+              )
+            )}
+            {c.providers.includes('microsoft') && renderOAuthProvider(
+              'microsoft',
+              'Microsoft Outlook',
+              <OutlookIcon className="size-5" />,
+              'Sync email and calendar',
+              c.providerStates.google?.isConnected ? 'Disconnect Google first' : undefined,
             )}
             {c.useComposioForGoogleCalendar && (
               <div className="flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">

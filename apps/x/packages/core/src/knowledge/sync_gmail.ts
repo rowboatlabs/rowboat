@@ -1,218 +1,95 @@
 import fs from 'fs';
 import path from 'path';
 import { google, gmail_v1 as gmail } from 'googleapis';
-import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { getMaxEmails } from '../config/gmail_sync_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
-import { createEvent } from '../events/producer.js';
-import { classifyThread, getUserEmail, type EmailCategory } from './classify_thread.js';
-import { recordImportanceCorrection } from './email_importance_feedback.js';
-import { recordCategoryCorrection } from './email_category_feedback.js';
-import { notifyIfEnabled } from '../application/notification/notifier.js';
 import { formatTimestampForModel } from '@x/shared/dist/time.js';
+import { classifyThread, getUserEmail } from './classify_thread.js';
+import {
+    SYNC_DIR,
+    CACHE_DIR,
+    SNAPSHOT_PARSER_VERSION,
+    type EmailThreadSnapshot,
+    type SyncedThread,
+    readCachedSnapshot,
+    writeCachedSnapshot,
+    deleteCachedSnapshot,
+    readSearchSnapshot,
+    writeSearchSnapshot,
+    mirrorThreadReadState,
+    mirrorThreadDraft,
+    stampClassificationFrontmatter,
+    notifyNewEmailThreads,
+    publishEmailSyncEvent,
+    cleanFilename,
+    normalizeBody,
+    htmlToMarkdownBody,
+    plainTextBody,
+    stripQuotedReplyText,
+    sanitizeReplyBody,
+    decodeHtmlEntities,
+} from './email/store.js';
+import type {
+    EmailProvider,
+    ThreadActionResult,
+    SendReplyOptions,
+    SendReplyResult,
+    SaveDraftOptions,
+    SaveDraftResult,
+    DownloadAttachmentResult,
+    SearchResult,
+    EmailConnectionStatus,
+} from './email/provider.js';
+import { searchSentContacts, warmSentContacts } from './gmail_sent_contacts.js';
+
+// Back-compat re-exports: this module historically owned the whole email
+// store. The provider-independent pieces now live in email/store.ts; existing
+// importers (tests, classify_thread, gmail_contacts, composio-handler) keep
+// working through these aliases.
+export {
+    setThreadImportance,
+    setThreadCategory,
+    saveMessageBodyHeight,
+    listImportantThreads,
+    listEverythingElseThreads,
+    listInboxPage,
+    stampClassificationFrontmatter,
+    NEW_EMAIL_MAX_AGE_MS,
+    isEmailTooOldToNotify,
+    stripQuotedReplyText as stripGmailQuotedReplyText,
+    stripQuotedReplyHtml as stripGmailQuotedReplyHtml,
+    sanitizeReplyBody as sanitizeReplyBodyForGmailReply,
+} from './email/store.js';
+export type {
+    EmailThreadSnapshot as GmailThreadSnapshot,
+    InboxSection,
+    InboxPageOptions,
+    InboxPageResult,
+} from './email/store.js';
+export type {
+    ThreadActionResult,
+    SendReplyOptions,
+    SendReplyResult,
+    SaveDraftOptions,
+    SaveDraftResult,
+    DownloadAttachmentResult,
+    SearchResult,
+    EmailConnectionStatus as GmailConnectionStatus,
+} from './email/provider.js';
 
 // Configuration
-const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
-const LEGACY_CACHE_DIR = path.join(SYNC_DIR, 'cache');
-const CACHE_DIR = path.join(WorkDir, 'inbox_lists');
-// Local index of full-text search results. Kept separate from inbox_lists/ so it
-// never leaks non-inbox threads into the inbox view. Grows as you search; we
-// don't prune it (the user wants a durable local index).
-const SEARCH_CACHE_DIR = path.join(WorkDir, 'search_index');
-
-(function migrateLegacyCacheDir() {
-    try {
-        if (fs.existsSync(LEGACY_CACHE_DIR) && !fs.existsSync(CACHE_DIR)) {
-            fs.renameSync(LEGACY_CACHE_DIR, CACHE_DIR);
-            console.log(`[Gmail] Migrated cache from ${LEGACY_CACHE_DIR} → ${CACHE_DIR}`);
-        }
-    } catch (err) {
-        console.warn('[Gmail] Cache directory migration failed:', err);
-    }
-})();
 const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
-const MAX_THREADS_IN_DIGEST = 10;
 const RECENT_BACKFILL_INTERVAL_MS = 15 * 60 * 1000;
-const nhm = new NodeHtmlMarkdown();
-
-// Bump whenever snapshot-building logic changes in a way that should invalidate
-// previously cached snapshots (e.g. attachment / recipient parsing fixes). The
-// short-circuit in buildAndCacheSnapshot only reuses a cache whose version matches,
-// so stale entries are transparently rebuilt on the next sync.
-const SNAPSHOT_PARSER_VERSION = 3;
-
-interface SnapshotCacheEntry {
-    historyId: string;
-    fetchedAt: string;
-    parserVersion?: number;
-    snapshot: GmailThreadSnapshot;
-}
-
-function cachePath(threadId: string): string {
-    return path.join(CACHE_DIR, `${encodeURIComponent(threadId)}.json`);
-}
-
-function readCachedSnapshot(threadId: string): SnapshotCacheEntry | null {
-    try {
-        const raw = fs.readFileSync(cachePath(threadId), 'utf-8');
-        return JSON.parse(raw) as SnapshotCacheEntry;
-    } catch {
-        return null;
-    }
-}
-
-function writeCachedSnapshot(threadId: string, historyId: string, snapshot: GmailThreadSnapshot): void {
-    try {
-        if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
-        const entry: SnapshotCacheEntry = {
-            historyId,
-            fetchedAt: new Date().toISOString(),
-            parserVersion: SNAPSHOT_PARSER_VERSION,
-            snapshot,
-        };
-        fs.writeFileSync(cachePath(threadId), JSON.stringify(entry), 'utf-8');
-    } catch (err) {
-        console.warn(`[Gmail cache] write failed for ${threadId}:`, err);
-    }
-}
-
-/**
- * User explicitly flips a thread's importance in the UI. Two effects:
- *  1. The verdict is applied to the cached snapshot and marked sticky
- *     (importanceSource: 'user') so re-classification never overrides it.
- *  2. The disagreement is recorded as a correction the classifier learns from
- *     (few-shot + distilled rules) for FUTURE threads.
- */
-export function setThreadImportance(
-    threadId: string,
-    importance: 'important' | 'other',
-): { success: boolean; previous?: 'important' | 'other'; error?: string } {
-    const cached = readCachedSnapshot(threadId);
-    if (!cached) {
-        return { success: false, error: `No inbox entry found for thread ${threadId}` };
-    }
-    const previous = cached.snapshot.importance === 'other' ? 'other' as const : 'important' as const;
-    cached.snapshot.importance = importance;
-    cached.snapshot.importanceSource = 'user';
-    try {
-        fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
-    } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
-    }
-    recordImportanceCorrection({
-        threadId,
-        subject: cached.snapshot.subject || '(no subject)',
-        from: cached.snapshot.from || 'unknown',
-        agentVerdict: previous,
-        userVerdict: importance,
-        at: new Date().toISOString(),
-    });
-    // Keep the markdown mirror's stamped importance truthful. The knowledge
-    // verdict is deliberately untouched — "stop showing me this" must never
-    // silently starve the knowledge graph.
-    stampClassificationFrontmatter(threadId, cached.snapshot);
-    return { success: true, previous };
-}
-
-/**
- * User explicitly picks a thread's category in the UI. Sticky on the thread
- * (categorySource: 'user'; re-classification never overrides it) and recorded
- * as a correction the classifier learns from as few-shot examples. Like
- * importance flips, this never touches the knowledge verdict.
- */
-export function setThreadCategory(
-    threadId: string,
-    category: EmailCategory,
-): { success: boolean; error?: string } {
-    const cached = readCachedSnapshot(threadId);
-    if (!cached) {
-        return { success: false, error: `No inbox entry found for thread ${threadId}` };
-    }
-    const previous = cached.snapshot.category;
-    cached.snapshot.category = category;
-    cached.snapshot.categorySource = 'user';
-    try {
-        fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
-    } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
-    }
-    recordCategoryCorrection({
-        threadId,
-        subject: cached.snapshot.subject || '(no subject)',
-        from: cached.snapshot.from || 'unknown',
-        agentCategory: previous ?? 'unknown',
-        userCategory: category,
-        at: new Date().toISOString(),
-    });
-    stampClassificationFrontmatter(threadId, cached.snapshot);
-    return { success: true };
-}
-
-export function saveMessageBodyHeight(threadId: string, messageId: string, height: number): void {
-    const cached = readCachedSnapshot(threadId);
-    if (!cached) return;
-    const message = cached.snapshot.messages.find((m) => m.id === messageId);
-    if (!message) return;
-    if (message.bodyHeight === height) return;
-    message.bodyHeight = height;
-    try {
-        fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
-    } catch (err) {
-        console.warn(`[Gmail cache] height write failed for ${threadId}/${messageId}:`, err);
-    }
-}
-
-function deleteCachedSnapshot(threadId: string): void {
-    try {
-        fs.rmSync(cachePath(threadId), { force: true });
-    } catch (err) {
-        console.warn(`[Gmail cache] delete failed for ${threadId}:`, err);
-    }
-}
-
-// Local search index — same on-disk shape as the inbox cache, separate dir.
-function searchCachePath(threadId: string): string {
-    return path.join(SEARCH_CACHE_DIR, `${encodeURIComponent(threadId)}.json`);
-}
-
-function readSearchSnapshot(threadId: string): SnapshotCacheEntry | null {
-    try {
-        const raw = fs.readFileSync(searchCachePath(threadId), 'utf-8');
-        return JSON.parse(raw) as SnapshotCacheEntry;
-    } catch {
-        return null;
-    }
-}
-
-function writeSearchSnapshot(threadId: string, historyId: string, snapshot: GmailThreadSnapshot): void {
-    try {
-        if (!fs.existsSync(SEARCH_CACHE_DIR)) fs.mkdirSync(SEARCH_CACHE_DIR, { recursive: true });
-        const entry: SnapshotCacheEntry = {
-            historyId,
-            fetchedAt: new Date().toISOString(),
-            parserVersion: SNAPSHOT_PARSER_VERSION,
-            snapshot,
-        };
-        fs.writeFileSync(searchCachePath(threadId), JSON.stringify(entry), 'utf-8');
-    } catch (err) {
-        console.warn(`[Gmail search index] write failed for ${threadId}:`, err);
-    }
-}
 
 async function getGmailClientOrThrow() {
     const auth = await GoogleClientFactory.getClient();
     if (!auth) throw new Error('Gmail is not connected.');
     return google.gmail({ version: 'v1', auth });
-}
-
-export interface ThreadActionResult {
-    ok: boolean;
-    error?: string;
 }
 
 export async function archiveThread(threadId: string): Promise<ThreadActionResult> {
@@ -250,160 +127,19 @@ export async function markThreadRead(threadId: string, read: boolean = true): Pr
             requestBody: read ? { removeLabelIds: ['UNREAD'] } : { addLabelIds: ['UNREAD'] },
         });
         // Mirror the new read state onto every message in the cached thread.
-        const cached = readCachedSnapshot(threadId);
-        if (cached) {
-            for (const m of cached.snapshot.messages) m.unread = !read;
-            cached.snapshot.unread = !read;
-            try {
-                fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
-            } catch (err) {
-                console.warn(`[Gmail cache] markRead write failed for ${threadId}:`, err);
-            }
-        }
+        mirrorThreadReadState(threadId, read);
         return { ok: true };
     } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
 }
 
-interface SyncedThread {
-    threadId: string;
-    markdown: string;
-}
-
-export interface GmailThreadSnapshot {
-    threadId: string;
-    threadUrl: string;
-    summary?: string;
-    subject?: string;
-    from?: string;
-    to?: string;
-    date?: string;
-    latest_email?: string;
-    past_summary?: string;
-    unread?: boolean;
-    importance?: 'important' | 'other';
-    /** 'user' when the user explicitly set importance in the UI — sticky; re-classification never overrides it. */
-    importanceSource?: 'user';
-    /** What kind of email this is (chip in the inbox UI, context for the knowledge pipeline). */
-    category?: EmailCategory;
-    /** 'user' when the user explicitly picked the category in the UI — sticky; re-classification never overrides it. */
-    categorySource?: 'user';
-    /** Knowledge-graph admission verdict, stamped into the gmail_sync markdown frontmatter. */
-    knowledge?: 'extract' | 'skip';
-    draft_response?: string;
-    gmail_draft?: string;
-    /** Gmail-side draft id, present on entries from listDraftThreads. */
-    draftId?: string;
-    messages: Array<{
-        id?: string;
-        from?: string;
-        to?: string;
-        cc?: string;
-        date?: string;
-        subject?: string;
-        body?: string;
-        bodyHtml?: string;
-        unread?: boolean;
-        bodyHeight?: number;
-        attachments?: Array<{
-            filename: string;
-            mimeType?: string;
-            sizeBytes?: number;
-            savedPath: string;
-            messageId?: string;
-            attachmentId?: string;
-        }>;
-        messageIdHeader?: string;
-        isDraft?: boolean;
-        /**
-         * The draft's own stored In-Reply-To / References headers. Only set
-         * on draft messages (see buildDraftSnapshot) — the composer reuses
-         * them on send since the Drafts pseudo-thread has no other messages
-         * to rebuild the reply chain from.
-         */
-        inReplyToHeader?: string;
-        referencesHeader?: string;
-    }>;
-}
-
-function summarizeGmailSync(threads: SyncedThread[]): string {
-    const lines: string[] = [
-        `# Gmail sync update`,
-        ``,
-        `${threads.length} new/updated thread${threads.length === 1 ? '' : 's'}.`,
-        ``,
-    ];
-
-    const shown = threads.slice(0, MAX_THREADS_IN_DIGEST);
-    const hidden = threads.length - shown.length;
-
-    if (shown.length > 0) {
-        lines.push(`## Threads`, ``);
-        for (const { markdown } of shown) {
-            lines.push(markdown.trimEnd(), ``, `---`, ``);
-        }
-        if (hidden > 0) {
-            lines.push(`_…and ${hidden} more thread(s) omitted from digest._`, ``);
-        }
-    }
-
-    return lines.join('\n');
-}
-
-/**
- * A "new email" notification for a message older than this is treated as a
- * stale backlog item — e.g. Gmail replaying history after the app reopens from
- * a long offline period — and suppressed, so a reopen doesn't surface day-old
- * mail as if it just arrived.
- */
-export const NEW_EMAIL_MAX_AGE_MS = 5 * 60 * 1000;
-
-/**
- * True when an email is too old to be worth a "new email" ping. A `dateMs` of 0
- * means the age couldn't be determined, in which case we err toward notifying
- * rather than risk silently dropping genuinely-new mail.
- */
-export function isEmailTooOldToNotify(dateMs: number, now: number = Date.now()): boolean {
-    return dateMs > 0 && now - dateMs > NEW_EMAIL_MAX_AGE_MS;
-}
-
-/**
- * Fire one OS notification per genuinely-new email thread. Only ever called
- * from the partial-sync (incremental) path, so the first-time connect — which
- * goes through fullSync — never notifies. Suppressed while the app is focused,
- * and for stale backlog (see isEmailTooOldToNotify).
- */
 function notifyNewEmails(threads: SyncedThread[]): void {
-    const now = Date.now();
-    for (const { threadId } of threads) {
-        const snapshot = readCachedSnapshot(threadId)?.snapshot;
-        if (snapshot?.importance !== 'important') continue;
-        if (snapshot && isEmailTooOldToNotify(snapshotDateMs(snapshot), now)) continue;
-        const subject = snapshot?.subject?.trim() || '(no subject)';
-        const from = snapshot?.from?.trim();
-        void notifyIfEnabled('new_email', {
-            title: from ? `New email from ${from}` : 'New email',
-            message: subject,
-            link: `rowboat://open?type=email&threadId=${threadId}`,
-            actionLabel: 'Open',
-            onlyWhenBackground: true,
-        });
-    }
+    notifyNewEmailThreads(threads.map((t) => t.threadId));
 }
 
 async function publishGmailSyncEvent(threads: SyncedThread[]): Promise<void> {
-    if (threads.length === 0) return;
-    try {
-        await createEvent({
-            source: 'gmail',
-            type: 'email.synced',
-            createdAt: new Date().toISOString(),
-            payload: summarizeGmailSync(threads),
-        });
-    } catch (err) {
-        console.error('[Gmail] Failed to publish sync event:', err);
-    }
+    await publishEmailSyncEvent(threads);
 }
 
 // --- Wake Signal for Immediate Sync Trigger ---
@@ -432,10 +168,6 @@ function interruptibleSleep(ms: number): Promise<void> {
 
 // --- Helper Functions ---
 
-function cleanFilename(name: string): string {
-    return name.replace(/[\\/*?:":<>|]/g, "").substring(0, 100).trim();
-}
-
 function decodeBase64(data: string): string {
     return Buffer.from(data, 'base64').toString('utf-8');
 }
@@ -462,13 +194,8 @@ function extractBodyParts(payload: gmail.Schema$MessagePart): { text: string; ht
 
 function getBody(payload: gmail.Schema$MessagePart): string {
     const { text, html } = extractBodyParts(payload);
-    if (html) {
-        const md = nhm.translate(html);
-        return md.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
-    }
-    if (text) {
-        return text.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
-    }
+    if (html) return htmlToMarkdownBody(html);
+    if (text) return plainTextBody(text);
     return '';
 }
 
@@ -579,116 +306,6 @@ async function inlineCidImages(
     return rewritten;
 }
 
-function normalizeBody(body: string): string {
-    return body.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-}
-
-function isGmailQuoteAttribution(line: string): boolean {
-    const trimmed = line.trim();
-    return /^On\b.+\bwrote:\s*$/i.test(trimmed);
-}
-
-function isOriginalMessageBoundary(line: string): boolean {
-    return /^-{2,}\s*Original Message\s*-{2,}$/i.test(line.trim());
-}
-
-function isForwardedMessageBoundary(line: string): boolean {
-    return /^-{2,}\s*Forwarded message\s*-{2,}$/i.test(line.trim());
-}
-
-function isOutlookHeaderBoundary(lines: string[], index: number): boolean {
-    if (!/^From:\s+\S/i.test(lines[index]?.trim() || '')) return false;
-    const next = lines.slice(index + 1, index + 6).map((line) => line.trim());
-    return next.some((line) => /^(Sent|Date):\s+\S/i.test(line))
-        && next.some((line) => /^To:\s+\S/i.test(line))
-        && next.some((line) => /^Subject:\s+\S/i.test(line));
-}
-
-function findQuotedReplyBoundary(lines: string[]): number {
-    for (let i = 0; i < lines.length; i += 1) {
-        const line = lines[i] || '';
-        if (
-            isGmailQuoteAttribution(line)
-            || isOriginalMessageBoundary(line)
-            || isForwardedMessageBoundary(line)
-            || isOutlookHeaderBoundary(lines, i)
-        ) {
-            return i;
-        }
-
-        // Gmail plain text drafts often carry older messages as a quoted block.
-        // Treat a trailing blockquote as history, but avoid stripping an inline
-        // quote the user is actively writing at the top of the reply.
-        if (i > 0 && line.trim().startsWith('>') && (lines[i - 1]?.trim() === '' || lines[i - 1]?.trim().startsWith('>'))) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-export function stripGmailQuotedReplyText(text: string): string {
-    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = normalized.split('\n');
-    const boundary = findQuotedReplyBoundary(lines);
-    const visible = boundary >= 0 ? lines.slice(0, boundary) : lines;
-    return visible
-        .join('\n')
-        .replace(/[ \t]+\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-}
-
-function htmlQuoteBoundaryIndex(html: string): number {
-    const candidates: number[] = [];
-    const patterns = [
-        /<[^>]+\bclass\s*=\s*["'][^"']*\bgmail_(?:quote|attr)\b[^"']*["'][^>]*>/i,
-        /<blockquote\b[^>]*(?:type\s*=\s*["']cite["']|class\s*=\s*["'][^"']*\bgmail_quote\b[^"']*["'])[^>]*>/i,
-        /<(p|div|li)\b[^>]*>\s*(?:<(?:span|b|strong|i|em)\b[^>]*>\s*)*On\b[\s\S]{0,800}?\bwrote:\s*(?:<br\s*\/?>\s*)?(?:<\/(?:span|b|strong|i|em)>\s*)*<\/\1>/i,
-        /<(p|div|li)\b[^>]*>\s*-{2,}\s*(?:Original Message|Forwarded message)\s*-{2,}\s*<\/\1>/i,
-    ];
-
-    for (const pattern of patterns) {
-        const match = pattern.exec(html);
-        if (match?.index !== undefined) candidates.push(match.index);
-    }
-
-    return candidates.length > 0 ? Math.min(...candidates) : -1;
-}
-
-export function stripGmailQuotedReplyHtml(html: string): string {
-    const boundary = htmlQuoteBoundaryIndex(html);
-    const visible = boundary >= 0 ? html.slice(0, boundary) : html;
-    return visible.trim();
-}
-
-function textToHtml(text: string): string {
-    return text
-        .split(/\n{2,}/)
-        .map((para) => `<p>${escapeHtml(para).replace(/\n/g, '<br />')}</p>`)
-        .join('');
-}
-
-function escapeHtml(value: string): string {
-    return value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-export function sanitizeReplyBodyForGmailReply(bodyHtml: string, bodyText: string): { bodyHtml: string; bodyText: string } {
-    const cleanText = stripGmailQuotedReplyText(bodyText);
-    const cleanHtml = stripGmailQuotedReplyHtml(bodyHtml);
-    const textWasStripped = cleanText !== bodyText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-    const htmlWasStripped = cleanHtml !== bodyHtml.trim();
-
-    return {
-        bodyText: cleanText,
-        bodyHtml: textWasStripped && !htmlWasStripped ? textToHtml(cleanText) : cleanHtml,
-    };
-}
-
 function headerValue(headers: gmail.Schema$MessagePartHeader[] | undefined, name: string): string | undefined {
     return headers?.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || undefined;
 }
@@ -697,219 +314,6 @@ export interface RecentThreadInfo {
     threadId: string;
     historyId: string;
     snippet?: string;
-}
-
-export type InboxSection = 'important' | 'other';
-
-export interface InboxPageOptions {
-    section: InboxSection;
-    cursor?: string;
-    limit?: number;
-    /** Restrict the page to threads of this category (used by the "Everything else" filter pills). */
-    category?: string;
-}
-
-export interface InboxPageResult {
-    threads: GmailThreadSnapshot[];
-    nextCursor: string | null;
-    /**
-     * Threads per category across the WHOLE section (ignoring `category` and
-     * pagination) — drives the filter pills. Threads with no verdict yet count
-     * under 'unclassified'.
-     */
-    categoryCounts: Record<string, number>;
-}
-
-interface IndexedEntry {
-    threadId: string;
-    dateMs: number;
-    snapshot: GmailThreadSnapshot;
-}
-
-function snapshotImportance(s: GmailThreadSnapshot): InboxSection {
-    return s.importance === 'other' ? 'other' : 'important';
-}
-
-function snapshotDateMs(s: GmailThreadSnapshot): number {
-    const latest = s.messages[s.messages.length - 1];
-    const raw = latest?.date || s.date;
-    if (!raw) return 0;
-    const ms = Date.parse(raw);
-    return Number.isFinite(ms) ? ms : 0;
-}
-
-function parseCursor(cursor: string | undefined): { dateMs: number; threadId: string } | null {
-    if (!cursor) return null;
-    const idx = cursor.indexOf('|');
-    if (idx < 0) return null;
-    const dateMs = Number(cursor.slice(0, idx));
-    const threadId = cursor.slice(idx + 1);
-    if (!Number.isFinite(dateMs) || !threadId) return null;
-    return { dateMs, threadId };
-}
-
-function encodeCursor(entry: { dateMs: number; threadId: string }): string {
-    return `${entry.dateMs}|${entry.threadId}`;
-}
-
-export function listImportantThreads(opts: { cursor?: string; limit?: number } = {}): InboxPageResult {
-    return listInboxPage({ section: 'important', ...opts });
-}
-
-export function listEverythingElseThreads(opts: { cursor?: string; limit?: number; category?: string } = {}): InboxPageResult {
-    return listInboxPage({ section: 'other', ...opts });
-}
-
-// In-memory index of parsed snapshots, keyed by cache filename and validated by
-// file mtime. listInboxPage runs on every inbox open, every "load more", and
-// every throttled live reload during a sync — without this it re-reads and
-// JSON.parses every cached thread (message bodies included) on each call. The
-// cache lets unchanged files skip the read+parse, so e.g. the "Everything else"
-// page right after "Important", reloads mid-sync, and re-opening the inbox cost
-// a cheap stat() per file instead of a full parse of the whole cache.
-interface ListCacheEntry {
-    mtimeMs: number;
-    dateMs: number;
-    section: InboxSection;
-    snapshot: GmailThreadSnapshot;
-}
-const listCache = new Map<string, ListCacheEntry>();
-
-export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
-    const limit = Math.max(1, Math.min(100, opts.limit ?? 25));
-    const cursor = parseCursor(opts.cursor);
-    const categoryCounts: Record<string, number> = {};
-
-    if (!fs.existsSync(CACHE_DIR)) {
-        listCache.clear();
-        return { threads: [], nextCursor: null, categoryCounts };
-    }
-
-    let names: string[];
-    try {
-        names = fs.readdirSync(CACHE_DIR);
-    } catch {
-        return { threads: [], nextCursor: null, categoryCounts };
-    }
-
-    const seen = new Set<string>();
-    const entries: IndexedEntry[] = [];
-    for (const name of names) {
-        if (!name.endsWith('.json')) continue;
-        seen.add(name);
-        const filePath = path.join(CACHE_DIR, name);
-
-        let mtimeMs: number;
-        try {
-            mtimeMs = fs.statSync(filePath).mtimeMs;
-        } catch {
-            listCache.delete(name);
-            continue;
-        }
-
-        let cached = listCache.get(name);
-        if (!cached || cached.mtimeMs !== mtimeMs) {
-            try {
-                const raw = fs.readFileSync(filePath, 'utf-8');
-                const wrapper = JSON.parse(raw) as SnapshotCacheEntry;
-                const snapshot = wrapper.snapshot;
-                if (!snapshot) {
-                    listCache.delete(name);
-                    continue;
-                }
-                cached = {
-                    mtimeMs,
-                    dateMs: snapshotDateMs(snapshot),
-                    section: snapshotImportance(snapshot),
-                    snapshot,
-                };
-                listCache.set(name, cached);
-            } catch (err) {
-                console.warn(`[Inbox lists] read failed for ${name}:`, err);
-                listCache.delete(name);
-                continue;
-            }
-        }
-
-        if (cached.section !== opts.section) continue;
-        const cat = cached.snapshot.category ?? 'unclassified';
-        categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1;
-        if (opts.category && cat !== opts.category) continue;
-        entries.push({
-            threadId: cached.snapshot.threadId,
-            dateMs: cached.dateMs,
-            snapshot: cached.snapshot,
-        });
-    }
-
-    // Evict cache entries for files that are gone (archived/trashed/pruned).
-    for (const key of listCache.keys()) {
-        if (!seen.has(key)) listCache.delete(key);
-    }
-
-    // Newest first, threadId asc as tiebreak.
-    entries.sort((a, b) => {
-        if (b.dateMs !== a.dateMs) return b.dateMs - a.dateMs;
-        return a.threadId < b.threadId ? -1 : 1;
-    });
-
-    let startIdx = 0;
-    if (cursor) {
-        startIdx = entries.findIndex((e) => {
-            if (e.dateMs < cursor.dateMs) return true;
-            if (e.dateMs === cursor.dateMs && e.threadId > cursor.threadId) return true;
-            return false;
-        });
-        if (startIdx < 0) startIdx = entries.length;
-    }
-
-    const slice = entries.slice(startIdx, startIdx + limit);
-    const hasMore = startIdx + slice.length < entries.length;
-    const last = slice[slice.length - 1];
-
-    return {
-        threads: slice.map((e) => e.snapshot),
-        nextCursor: hasMore && last ? encodeCursor({ dateMs: last.dateMs, threadId: last.threadId }) : null,
-        categoryCounts,
-    };
-}
-
-/**
- * Archive every "Everything else" thread of the given category in one sweep —
- * the bulk gesture behind the category filter pills. Walks the local cache
- * (never the live mailbox), so it can only touch threads the user can see in
- * the section. Threads whose category was user-corrected are matched on the
- * corrected value, like everywhere else.
- *
- * Returns per-thread failures rather than aborting: one 404 (thread deleted
- * elsewhere) shouldn't strand the other 80 promotions in the inbox.
- */
-export async function archiveCategoryThreads(category: string): Promise<{ archived: number; failed: number; error?: string }> {
-    if (!fs.existsSync(CACHE_DIR)) return { archived: 0, failed: 0 };
-    let names: string[];
-    try {
-        names = fs.readdirSync(CACHE_DIR);
-    } catch (err) {
-        return { archived: 0, failed: 0, error: err instanceof Error ? err.message : String(err) };
-    }
-    const targets: string[] = [];
-    for (const name of names) {
-        if (!name.endsWith('.json')) continue;
-        const threadId = decodeURIComponent(name.replace(/\.json$/, ''));
-        const snapshot = readCachedSnapshot(threadId)?.snapshot;
-        if (!snapshot) continue;
-        if (snapshotImportance(snapshot) !== 'other') continue;
-        if ((snapshot.category ?? 'unclassified') !== category) continue;
-        targets.push(threadId);
-    }
-    let archived = 0;
-    let failed = 0;
-    for (const threadId of targets) {
-        const result = await archiveThread(threadId);
-        if (result.ok) archived += 1;
-        else failed += 1;
-    }
-    return { archived, failed };
 }
 
 export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentThreadInfo[]> {
@@ -947,63 +351,8 @@ export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentTh
     return results;
 }
 
-/** Drop a leading YAML frontmatter block, returning just the document body. */
-function stripLeadingFrontmatter(content: string): string {
-    if (!content.startsWith('---\n')) return content;
-    const end = content.indexOf('\n---', 4);
-    if (end === -1) return content;
-    const afterClose = content.indexOf('\n', end + 4);
-    if (afterClose === -1) return '';
-    return content.slice(afterClose + 1).replace(/^\n+/, '');
-}
-
 /**
- * Stamp the classification verdict into the thread's gmail_sync markdown as
- * YAML frontmatter. The knowledge-graph builder holds any email file without
- * frontmatter (it can't tell noise from signal yet), so this stamp is what
- * admits — or permanently excludes — the thread from knowledge extraction.
- *
- * No-op when the snapshot carries no verdict (LLM failure → the sweep in
- * performSync retries later) or when the file already carries this verdict.
- *
- * Exported for tests.
- */
-export function stampClassificationFrontmatter(threadId: string, snapshot: GmailThreadSnapshot): void {
-    if (!snapshot.category || !snapshot.knowledge) return;
-    const mdPath = path.join(SYNC_DIR, `${threadId}.md`);
-    let content: string;
-    try {
-        content = fs.readFileSync(mdPath, 'utf-8');
-    } catch {
-        return; // no markdown mirror for this thread (e.g. draft-only)
-    }
-    const importance = snapshot.importance === 'other' ? 'other' : 'important';
-    const frontmatter = [
-        '---',
-        `importance: ${importance}`,
-        `category: ${snapshot.category}`,
-        `knowledge: ${snapshot.knowledge}`,
-        `classified_at: "${new Date().toISOString()}"`,
-        '---',
-        '',
-    ].join('\n');
-    if (
-        content.startsWith('---') &&
-        content.includes(`\nimportance: ${importance}\n`) &&
-        content.includes(`\ncategory: ${snapshot.category}\n`) &&
-        content.includes(`\nknowledge: ${snapshot.knowledge}\n`)
-    ) {
-        return; // already stamped with this exact verdict
-    }
-    try {
-        fs.writeFileSync(mdPath, frontmatter + stripLeadingFrontmatter(content));
-    } catch (err) {
-        console.warn(`[Gmail] frontmatter stamp failed for ${threadId}:`, err);
-    }
-}
-
-/**
- * Build a GmailThreadSnapshot from an already-fetched threads.get response,
+ * Build a EmailThreadSnapshot from an already-fetched threads.get response,
  * classify it, and write to inbox_lists/. Called by the background sync
  * (processThread) — the only path that materializes snapshots.
  *
@@ -1015,7 +364,7 @@ async function buildAndCacheSnapshot(
     threadData: gmail.Schema$Thread,
     gmailClient: gmail.Gmail,
     auth: OAuth2Client,
-): Promise<GmailThreadSnapshot | null> {
+): Promise<EmailThreadSnapshot | null> {
     const messages = threadData.messages;
     if (!messages || messages.length === 0) return null;
 
@@ -1063,7 +412,7 @@ async function buildAndCacheSnapshot(
         if (classification.knowledge) snapshot.knowledge = classification.knowledge;
         if (classification.summary) snapshot.summary = classification.summary;
         if (classification.draftResponse) {
-            const draftResponse = stripGmailQuotedReplyText(classification.draftResponse);
+            const draftResponse = stripQuotedReplyText(classification.draftResponse);
             if (draftResponse) snapshot.draft_response = draftResponse;
         }
     } catch (err) {
@@ -1080,7 +429,7 @@ async function buildAndCacheSnapshot(
     }
 
     if (threadData.historyId) {
-        writeCachedSnapshot(threadId, threadData.historyId, snapshot);
+        writeCachedSnapshot(threadId, threadData.historyId, snapshot, 'gmail');
     }
     stampClassificationFrontmatter(threadId, snapshot);
 
@@ -1097,7 +446,7 @@ async function parseThreadSnapshot(
     threadId: string,
     threadData: gmail.Schema$Thread,
     gmailClient: gmail.Gmail,
-): Promise<GmailThreadSnapshot | null> {
+): Promise<EmailThreadSnapshot | null> {
     const messages = threadData.messages;
     if (!messages || messages.length === 0) return null;
 
@@ -1149,10 +498,15 @@ async function parseThreadSnapshot(
         return rest as Omit<typeof msg, 'isDraft'>;
     });
     const latestDraftBody = draftMessages.length > 0
-        ? stripGmailQuotedReplyText(draftMessages[draftMessages.length - 1]!.body)
+        ? stripQuotedReplyText(draftMessages[draftMessages.length - 1]!.body)
         : '';
 
     if (visibleMessages.length === 0) return null;
+
+    // Provider-native preview for the list row: the latest non-draft
+    // message's snippet (clean text, entity-encoded by the API).
+    const latestSnippet = [...messages].reverse()
+        .find((m) => !(m.labelIds?.includes('DRAFT')) && m.snippet?.trim())?.snippet;
 
     const latest = visibleMessages[visibleMessages.length - 1]!;
     const earlier = visibleMessages.slice(0, -1);
@@ -1174,6 +528,7 @@ async function parseThreadSnapshot(
         date: latest.date,
         latest_email: latest.body,
         past_summary: earlierSummary || undefined,
+        preview: latestSnippet ? decodeHtmlEntities(latestSnippet).trim() || undefined : undefined,
         unread: visibleMessages.some((m) => m.unread),
         messages: visibleMessages,
         gmail_draft: latestDraftBody || undefined,
@@ -1207,11 +562,6 @@ async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string,
         console.error(`Error saving attachment ${filename}:`, e);
     }
     return null;
-}
-
-export interface DownloadAttachmentResult {
-    ok: boolean;
-    error?: string;
 }
 
 /**
@@ -1395,6 +745,9 @@ async function pruneInboxCache(auth: OAuth2Client): Promise<void> {
     try {
         const gmailClient = google.gmail({ version: 'v1', auth });
         const inInbox = new Set<string>();
+        // threads.list returns a per-thread snippet for free — used below to
+        // backfill `preview` on cache entries written before the field existed.
+        const snippetByThread = new Map<string, string>();
         let pageToken: string | undefined;
         do {
             const res = await gmailClient.users.threads.list({
@@ -1404,7 +757,9 @@ async function pruneInboxCache(auth: OAuth2Client): Promise<void> {
                 pageToken,
             });
             for (const t of res.data.threads || []) {
-                if (t.id) inInbox.add(t.id);
+                if (!t.id) continue;
+                inInbox.add(t.id);
+                if (t.snippet) snippetByThread.set(t.id, t.snippet);
             }
             pageToken = res.data.nextPageToken ?? undefined;
         } while (pageToken);
@@ -1412,11 +767,26 @@ async function pruneInboxCache(auth: OAuth2Client): Promise<void> {
         for (const name of fs.readdirSync(CACHE_DIR)) {
             if (!name.endsWith('.json')) continue;
             const threadId = decodeURIComponent(name.replace(/\.json$/, ''));
-            if (!inInbox.has(threadId)) {
+            // Entries stamped by another provider are leftovers from a previous
+            // connection (ids are provider-specific and would 404 here).
+            const entry = readCachedSnapshot(threadId);
+            const foreign = (entry?.provider ?? 'gmail') !== 'gmail';
+            if (foreign || !inInbox.has(threadId)) {
                 try {
                     fs.rmSync(path.join(CACHE_DIR, name), { force: true });
                 } catch (err) {
                     console.warn(`[Gmail] prune failed for ${threadId}:`, err);
+                }
+                continue;
+            }
+            // One-time preview backfill: only entries missing the field are
+            // touched, so this converges and then no-ops.
+            const snip = snippetByThread.get(threadId);
+            if (entry && snip && !entry.snapshot.preview) {
+                const preview = decodeHtmlEntities(snip).trim();
+                if (preview) {
+                    entry.snapshot.preview = preview;
+                    writeCachedSnapshot(threadId, entry.historyId, entry.snapshot, 'gmail');
                 }
             }
         }
@@ -1913,7 +1283,7 @@ async function sweepUnclassifiedMarkdown(auth: OAuth2Client, llmBudget: number =
                 entry.snapshot.knowledge = classification.knowledge;
                 // The user's sticky verdict (and the previously shown one) win —
                 // this pass is about adding the missing fields, not re-judging.
-                writeCachedSnapshot(threadId, entry.historyId, entry.snapshot);
+                writeCachedSnapshot(threadId, entry.historyId, entry.snapshot, 'gmail');
                 const mdPath = path.join(SYNC_DIR, `${threadId}.md`);
                 let mdContent: string | null = null;
                 try {
@@ -1996,45 +1366,8 @@ async function performSync() {
 }
 
 // --- Send Reply ---
-
-export interface SendReplyOptions {
-    threadId?: string;
-    to: string;
-    cc?: string;
-    bcc?: string;
-    subject: string;
-    bodyHtml: string;
-    bodyText: string;
-    inReplyTo?: string;
-    references?: string;
-    /** Files to attach. contentBase64 is the raw (unwrapped) base64 of the file bytes. */
-    attachments?: Array<{ filename: string; mimeType: string; contentBase64: string }>;
-}
-
-export interface SendReplyResult {
-    messageId?: string;
-    error?: string;
-}
-
-export interface SaveDraftOptions extends Omit<SendReplyOptions, 'to'> {
-    /** Recipient may be blank while a draft is still being written. */
-    to?: string;
-    /** Existing Gmail draft to update; omitted on first save (creates a new one). */
-    draftId?: string;
-}
-
-export interface SaveDraftResult {
-    /** The Gmail-side draft id, to be passed back on subsequent saves. */
-    draftId?: string;
-    error?: string;
-}
-
-export interface GmailConnectionStatus {
-    connected: boolean;
-    hasRequiredScope: boolean;
-    missingScopes: string[];
-    email: string | null;
-}
+// (SendReplyOptions / SaveDraftOptions / result types live in email/provider.ts
+// and are re-exported above for back-compat.)
 
 /** The connected Gmail address (cached). Used by the composer to exclude "me" from reply-all. */
 export async function getAccountEmail(): Promise<string | null> {
@@ -2081,7 +1414,7 @@ export async function getAccountName(): Promise<string | null> {
     }
 }
 
-export async function getConnectionStatus(): Promise<GmailConnectionStatus> {
+export async function getConnectionStatus(): Promise<EmailConnectionStatus> {
     const status = await GoogleClientFactory.getCredentialStatus(REQUIRED_SCOPE);
     let email: string | null = null;
     if (status.connected) {
@@ -2143,7 +1476,7 @@ function buildRawMimeMessage(opts: SaveDraftOptions, userEmail: string): { raw: 
     const safeInReplyTo = opts.inReplyTo ? requireSafeHeaderValue('In-Reply-To', opts.inReplyTo) : undefined;
     const safeReferences = opts.references ? requireSafeHeaderValue('References', opts.references) : undefined;
     const replyBody = opts.threadId
-        ? sanitizeReplyBodyForGmailReply(opts.bodyHtml, opts.bodyText)
+        ? sanitizeReplyBody(opts.bodyHtml, opts.bodyText)
         : { bodyHtml: opts.bodyHtml.trim(), bodyText: opts.bodyText.trim() };
     const isEmpty = !replyBody.bodyText.trim();
 
@@ -2330,15 +1663,7 @@ export async function saveThreadDraft(opts: SaveDraftOptions): Promise<SaveDraft
         // whole sync loop per autosave (md/event writes + LLM reclassification)
         // is exactly what we're avoiding.
         if (opts.threadId) {
-            const cached = readCachedSnapshot(opts.threadId);
-            if (cached) {
-                cached.snapshot.gmail_draft = opts.bodyText?.trim() || undefined;
-                try {
-                    fs.writeFileSync(cachePath(opts.threadId), JSON.stringify(cached), 'utf-8');
-                } catch (err) {
-                    console.warn(`[Gmail cache] draft write failed for ${opts.threadId}:`, err);
-                }
-            }
+            mirrorThreadDraft(opts.threadId, opts.bodyText);
         }
 
         return { draftId: res.data.id || undefined };
@@ -2373,7 +1698,7 @@ export async function deleteThreadDraft(draftId: string): Promise<{ ok: boolean;
 // per-draft drafts.get + body parse, mirroring listInboxPage's mtime cache.
 interface DraftCacheEntry {
     messageId: string;
-    snapshot: GmailThreadSnapshot;
+    snapshot: EmailThreadSnapshot;
 }
 const draftListCache = new Map<string, DraftCacheEntry>();
 
@@ -2381,7 +1706,7 @@ const draftListCache = new Map<string, DraftCacheEntry>();
 async function buildDraftSnapshot(
     gmailClient: gmail.Gmail,
     draftId: string,
-): Promise<GmailThreadSnapshot | null> {
+): Promise<EmailThreadSnapshot | null> {
     const full = await gmailClient.users.drafts.get({ userId: 'me', id: draftId, format: 'full' });
     const msg = full.data.message;
     if (!msg) return null;
@@ -2389,7 +1714,7 @@ async function buildDraftSnapshot(
     const headers = msg.payload?.headers || [];
     const parts = msg.payload ? extractBodyParts(msg.payload) : { text: '', html: '' };
     const rawBody = msg.payload ? normalizeBody(getBody(msg.payload)) : '';
-    const body = stripGmailQuotedReplyText(rawBody);
+    const body = stripQuotedReplyText(rawBody);
     const subject = headerValue(headers, 'Subject') || '';
     const from = headerValue(headers, 'From') || '';
     const to = headerValue(headers, 'To') || '';
@@ -2441,7 +1766,7 @@ async function buildDraftSnapshot(
  * unchanged drafts and only drafts.get the new/edited ones. No AI
  * classification; recipients/subject/body come straight off the draft message.
  */
-export async function listDraftThreads(): Promise<{ threads: GmailThreadSnapshot[]; error?: string }> {
+export async function listDraftThreads(): Promise<{ threads: EmailThreadSnapshot[]; error?: string }> {
     try {
         const auth = await GoogleClientFactory.getClient();
         if (!auth) {
@@ -2479,7 +1804,7 @@ export async function listDraftThreads(): Promise<{ threads: GmailThreadSnapshot
             if (!seen.has(key)) draftListCache.delete(key);
         }
 
-        const threads = built.filter((s): s is GmailThreadSnapshot => s !== null);
+        const threads = built.filter((s): s is EmailThreadSnapshot => s !== null);
         // Newest first.
         threads.sort((a, b) => {
             const da = a.date ? Date.parse(a.date) : 0;
@@ -2490,11 +1815,6 @@ export async function listDraftThreads(): Promise<{ threads: GmailThreadSnapshot
     } catch (err) {
         return { threads: [], error: err instanceof Error ? err.message : String(err) };
     }
-}
-
-export interface SearchResult {
-    threads: GmailThreadSnapshot[];
-    error?: string;
 }
 
 /**
@@ -2528,7 +1848,7 @@ export async function searchThreads(query: string, opts: { limit?: number } = {}
             try {
                 const threadData = await gmailClient.users.threads.get({ userId: 'me', id: threadId, format: 'full' });
                 const snapshot = await parseThreadSnapshot(threadId, threadData.data, gmailClient);
-                if (snapshot) writeSearchSnapshot(threadId, threadData.data.historyId || '', snapshot);
+                if (snapshot) writeSearchSnapshot(threadId, threadData.data.historyId || '', snapshot, 'gmail');
                 return snapshot;
             } catch (err) {
                 console.warn(`[Gmail search] fetch failed for ${threadId}:`, err);
@@ -2536,7 +1856,7 @@ export async function searchThreads(query: string, opts: { limit?: number } = {}
             }
         }));
 
-        const threads = built.filter((s): s is GmailThreadSnapshot => s !== null);
+        const threads = built.filter((s): s is EmailThreadSnapshot => s !== null);
         // Newest first.
         threads.sort((a, b) => {
             const da = a.date ? Date.parse(a.date) : 0;
@@ -2570,3 +1890,23 @@ export async function init() {
         await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }
+
+/** The Gmail implementation of the provider-agnostic email interface. */
+export const gmailEmailProvider: EmailProvider = {
+    id: 'google',
+    triggerSync,
+    sendThreadReply,
+    saveThreadDraft,
+    deleteThreadDraft,
+    listDraftThreads,
+    searchThreads,
+    archiveThread,
+    trashThread,
+    markThreadRead,
+    downloadAttachment,
+    getAccountEmail,
+    getAccountName,
+    getConnectionStatus,
+    searchSentContacts,
+    warmSentContacts,
+};

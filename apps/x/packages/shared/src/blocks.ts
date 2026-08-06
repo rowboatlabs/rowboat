@@ -160,10 +160,22 @@ export const GmailThreadSchema = EmailBlockSchema.extend({
   // Gmail-side draft id, present on entries returned by the Drafts list so the
   // composer can update/delete that exact draft.
   draftId: z.string().optional(),
+  // Provider-supplied plain-text preview of the latest message (Gmail
+  // `snippet` / Graph `bodyPreview`) — clean list-row text, unlike
+  // latest_email which is markdown and can lead with table scaffolding.
+  preview: z.string().optional(),
   messages: z.array(GmailThreadMessageSchema),
 });
 
 export type GmailThread = z.infer<typeof GmailThreadSchema>;
+
+// Provider-neutral aliases: the same thread shape is served for Gmail and
+// Outlook (the sync backends normalize into it). New code should use these;
+// the Gmail-prefixed names above are kept for the existing renderer surface.
+export const EmailThreadSchema = GmailThreadSchema;
+export type EmailThread = GmailThread;
+export const EmailThreadMessageSchema = GmailThreadMessageSchema;
+export type EmailThreadMessage = GmailThreadMessage;
 
 export const EmailsBlockSchema = z.object({
   title: z.string().optional(),

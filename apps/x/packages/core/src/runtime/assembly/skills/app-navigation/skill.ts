@@ -30,14 +30,15 @@ Returns the same data the view renders; the app simultaneously navigates to
 that view so the user sees it.
 
 - ` + "`view: \"email\"`" + ` → latest important inbox threads: ` + "`{ threadId, subject, from, date, unread, summary }`" + `.
-  Pass ` + "`query`" + ` to search instead. **This is a LIVE Gmail search over the
-  user's ENTIRE mailbox via the Gmail API** (not a local/semantic search) and
-  supports full Gmail search operators — ` + "`from:`, `to:`, `subject:`, `before:`/`after:`, `has:attachment`" + `,
-  quoted phrases, ` + "`OR`" + ` — e.g. ` + "`query: \"from:arjun subject:deck\"`" + ` or plain words like ` + "`\"Arjun\"`" + `.
-  When the user says "search my gmail" or wants Gmail's real search, THIS is
-  it — do not reach for any other integration. Gmail matches whole words
-  literally, so prefer broad queries (one or two distinctive words, or
-  ` + "`OR`" + ` variants like ` + "`\"intern OR internship\"`" + `) over long phrases.
+  Pass ` + "`query`" + ` to search instead. **This is a LIVE search over the
+  user's ENTIRE mailbox via the connected provider's real search** (not a
+  local/semantic search): Gmail search operators — ` + "`from:`, `to:`, `subject:`, `before:`/`after:`, `has:attachment`" + `,
+  quoted phrases, ` + "`OR`" + ` — or Outlook KQL (` + "`from:`, `subject:`, `received>=`, `hasattachment:true`" + `),
+  e.g. ` + "`query: \"from:arjun subject:deck\"`" + ` or plain words like ` + "`\"Arjun\"`" + `.
+  When the user says "search my gmail"/"search my outlook" or wants their
+  mailbox's real search, THIS is it — do not reach for any other integration.
+  Searches match whole words literally, so prefer broad queries (one or two
+  distinctive words, or ` + "`OR`" + ` variants like ` + "`\"intern OR internship\"`" + `) over long phrases.
   A ` + "`query`" + ` search also fills the email view's search box on the user's
   screen, so they see the same results — and a follow-up open-item works for
   any thread the search returned, including old threads outside the inbox.
