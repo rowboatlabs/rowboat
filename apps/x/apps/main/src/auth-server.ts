@@ -20,6 +20,29 @@ export interface AuthServerResult {
   port: number;
 }
 
+/**
+ * Stop an OAuth callback server and wait until its listening socket has been
+ * released. `server.close()` is asynchronous; starting another fixed-port
+ * flow before its callback runs can otherwise fail with EADDRINUSE even when
+ * the previous server belonged to this process.
+ *
+ * The operation is intentionally idempotent so cleanup paths can call it after
+ * a callback, timeout, cancellation, or partially completed setup.
+ */
+export async function closeAuthServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 interface CallbackHandlingOpts {
   callbackPath: string;
   /** Invoked when the provider redirects back with an `error` param. */
@@ -193,4 +216,3 @@ export async function createAuthServer(
   // Unreachable — loop always returns or throws — but satisfies TypeScript
   throw new Error(`No available port found in range ${port}–${limit}.`);
 }
-

@@ -1,5 +1,5 @@
 import { shell, BrowserWindow } from 'electron';
-import { createAuthServer } from './auth-server.js';
+import { closeAuthServer, createAuthServer } from './auth-server.js';
 import * as composioClient from '@x/core/dist/composio/client.js';
 import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/runtime/assembly/copilot/instructions.js';
@@ -10,14 +10,31 @@ import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
-// Store active OAuth flows (keyed by toolkitSlug to prevent concurrent flows for the same toolkit)
-const activeFlows = new Map<string, {
+interface ActiveComposioFlow {
     toolkitSlug: string;
     connectedAccountId: string;
     authConfigId: string;
     server: import('http').Server;
     timeout: NodeJS.Timeout;
-}>();
+}
+
+// Composio registers one fixed callback URI, so only one managed OAuth flow
+// can own port 8081 at a time — even when the toolkits differ.
+let activeFlow: ActiveComposioFlow | null = null;
+
+async function cancelActiveFlow(reason: string): Promise<void> {
+    const flow = activeFlow;
+    if (!flow) return;
+
+    activeFlow = null;
+    clearTimeout(flow.timeout);
+    console.log(`[Composio] Aborting ${flow.toolkitSlug} flow: ${reason}`);
+    await closeAuthServer(flow.server);
+}
+
+// Serialize setup as well as active ownership. Without this queue, two rapid
+// Connect clicks can both pass the preflight before either has bound 8081.
+let connectionSetupQueue: Promise<void> = Promise.resolve();
 
 /**
  * Emit Composio connection event to all renderer windows
@@ -57,7 +74,18 @@ export function setApiKey(apiKey: string): { success: boolean; error?: string } 
 /**
  * Initiate OAuth connection for a toolkit
  */
-export async function initiateConnection(toolkitSlug: string): Promise<{
+export function initiateConnection(toolkitSlug: string): Promise<{
+    success: boolean;
+    redirectUrl?: string;
+    connectedAccountId?: string;
+    error?: string;
+}> {
+    const result = connectionSetupQueue.then(() => initiateConnectionExclusive(toolkitSlug));
+    connectionSetupQueue = result.then(() => undefined, () => undefined);
+    return result;
+}
+
+async function initiateConnectionExclusive(toolkitSlug: string): Promise<{
     success: boolean;
     redirectUrl?: string;
     connectedAccountId?: string;
@@ -104,6 +132,10 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
             authConfigId = created.auth_config.id;
         }
 
+        // A second connector (or a retry) supersedes the abandoned browser
+        // flow. Await socket release before creating and opening the next link.
+        await cancelActiveFlow('new_flow_started');
+
         // Create a Connect Link for the managed OAuth account. Composio retired
         // managed OAuth creation through POST /connected_accounts in July 2026.
         const callbackUrl = REDIRECT_URI;
@@ -115,15 +147,6 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
 
         const connectedAccountId = response.connected_account_id;
         const redirectUrl = response.redirect_url;
-
-        // Abort any existing flow for this toolkit before starting a new one
-        const existingFlow = activeFlows.get(toolkitSlug);
-        if (existingFlow) {
-            console.log(`[Composio] Aborting existing flow for ${toolkitSlug}`);
-            clearTimeout(existingFlow.timeout);
-            existingFlow.server.close();
-            activeFlows.delete(toolkitSlug);
-        }
 
         // Save initial account state
         const account: LocalConnectedAccount = {
@@ -173,18 +196,20 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
                     error: error instanceof Error ? error.message : 'Unknown error',
                 });
             } finally {
-                activeFlows.delete(toolkitSlug);
-                server.close();
+                if (activeFlow?.server === server) activeFlow = null;
                 if (timeoutRef.current) clearTimeout(timeoutRef.current);
+                await closeAuthServer(server);
             }
         });
 
         // Timeout for abandoned flows (5 minutes)
         const cleanupTimeout = setTimeout(() => {
-            if (activeFlows.has(toolkitSlug)) {
+            if (activeFlow?.server === server) {
                 console.log(`[Composio] Cleaning up abandoned flow for ${toolkitSlug}`);
-                activeFlows.delete(toolkitSlug);
-                server.close();
+                activeFlow = null;
+                void closeAuthServer(server).catch(error => {
+                    console.error('[Composio] Failed to close timed-out callback server:', error);
+                });
                 emitComposioEvent({
                     toolkitSlug,
                     success: false,
@@ -194,17 +219,17 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         }, 5 * 60 * 1000);
         timeoutRef.current = cleanupTimeout;
 
-        // Store flow state (keyed by toolkit to prevent concurrent flows)
-        activeFlows.set(toolkitSlug, {
+        // Store the single fixed-port owner.
+        activeFlow = {
             toolkitSlug,
             connectedAccountId,
             authConfigId,
             server,
             timeout: cleanupTimeout,
-        });
+        };
 
         // Open browser for OAuth
-        shell.openExternal(redirectUrl);
+        await shell.openExternal(redirectUrl);
 
         return {
             success: true,
