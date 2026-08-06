@@ -104,30 +104,17 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
             authConfigId = created.auth_config.id;
         }
 
-        // Create connected account with callback URL
+        // Create a Connect Link for the managed OAuth account. Composio retired
+        // managed OAuth creation through POST /connected_accounts in July 2026.
         const callbackUrl = REDIRECT_URI;
-        const response = await composioClient.createConnectedAccount({
-            auth_config: { id: authConfigId },
-            connection: {
-                user_id: 'rowboat-user',
-                callback_url: callbackUrl,
-            },
+        const response = await composioClient.createConnectedAccountLink({
+            auth_config_id: authConfigId,
+            user_id: 'rowboat-user',
+            callback_url: callbackUrl,
         });
 
-        const connectedAccountId = response.id;
-
-        // Safely extract redirectUrl with type checking
-        const connectionVal = response.connectionData?.val;
-        const redirectUrl = typeof connectionVal === 'object' && connectionVal !== null && 'redirectUrl' in connectionVal
-            ? String((connectionVal as Record<string, unknown>).redirectUrl)
-            : undefined;
-
-        if (!redirectUrl) {
-            return {
-                success: false,
-                error: 'No redirect URL received from Composio',
-            };
-        }
+        const connectedAccountId = response.connected_account_id;
+        const redirectUrl = response.redirect_url;
 
         // Abort any existing flow for this toolkit before starting a new one
         const existingFlow = activeFlows.get(toolkitSlug);
