@@ -40,11 +40,20 @@ async function getClient(serverName: string): Promise<Client> {
                 env: config.env,
             });
         } else {
+            // Forward any configured headers (e.g. Authorization) so
+            // auth-protected remote MCP servers can be reached.
+            const requestInit = config.headers
+                ? { headers: config.headers }
+                : undefined;
             try {
-                transport = new StreamableHTTPClientTransport(new URL(config.url));
+                transport = new StreamableHTTPClientTransport(new URL(config.url), {
+                    requestInit,
+                });
             } catch (error) {
                 // if that fails, try sse transport
-                transport = new SSEClientTransport(new URL(config.url));
+                transport = new SSEClientTransport(new URL(config.url), {
+                    requestInit,
+                });
             }
         }
 
