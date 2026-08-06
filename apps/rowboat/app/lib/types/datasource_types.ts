@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const EmbeddingRecord = z.object({
-    id: z.string().uuid(),
+    id: z.string(),
     vector: z.array(z.number()),
     payload: z.object({
         projectId: z.string(),
