@@ -240,7 +240,11 @@ function renderTemplateWithAssistantNotes(def: NoteTypeDefinition): string {
 }
 
 export function renderNoteTypesBlock(): string {
-  const defs = getNoteTypeDefinitions();
+  // Template-less types (Meetings) are folders the pipeline reads FROM or
+  // tags, never folders the note-creation agent writes INTO. Rendering an
+  // empty "## Meetings" template invited the agent to improvise a format and
+  // rewrite source meeting notes in place (destroying transcripts).
+  const defs = getNoteTypeDefinitions().filter((d) => d.template.trim() !== "");
   const sections = defs.map(
     (d) =>
       `## ${d.type}\n\`\`\`markdown\n${renderTemplateWithAssistantNotes(d)}\n\`\`\``,
