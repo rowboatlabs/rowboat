@@ -80,6 +80,10 @@ serializes each connection's feed requests, and resets sessions on stop or rende
 only a random connection ID and bounded snapshots. Generated meeting Markdown records
 `transcription_provider: self-hosted` in frontmatter so later processing retains provenance.
 
+Committed updates also retain their monotonic stable-audio interval from `inputMs - bufferedMs`. This lets an
+independent, privacy-bounded evidence source align participant names without coupling this provider adapter to
+Zoom, Accessibility, or any one meeting platform.
+
 A compatible reference worker and provider-neutral Docker deployment are available in
 [Meeting Assistant's self-hosted STT directory](https://github.com/Rahulk644/Meeting-Assitant/tree/main/deploy/self-hosted-stt).
 That project records one-vCPU/4-GB measurements as a reference, not a Hostinger dependency.

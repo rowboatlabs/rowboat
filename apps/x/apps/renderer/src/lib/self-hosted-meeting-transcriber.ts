@@ -7,6 +7,8 @@ export type CanonicalTranscriptUpdate = {
   channelIndex: 0 | 1;
   text: string;
   isFinal: boolean;
+  stableStartMs?: number;
+  stableEndMs?: number;
 };
 
 export interface SelfHostedMeetingTransport {
@@ -30,6 +32,7 @@ function pcmToBase64(pcm: Int16Array): string {
 export class SelfHostedSnapshotAssembler {
   private committed: [string, string] = ['', ''];
   private revisions: [number, number] = [-1, -1];
+  private stableAudioMs: [number, number] = [0, 0];
 
   apply(snapshot: SelfHostedTranscriptSnapshot): CanonicalTranscriptUpdate[] {
     const channel = snapshot.channelIndex;
@@ -44,10 +47,24 @@ export class SelfHostedSnapshotAssembler {
     }
     const updates: CanonicalTranscriptUpdate[] = [];
     const committedDelta = snapshot.committed.slice(previous.length);
+    const previousStableAudioMs = this.stableAudioMs[channel];
+    const stableAudioMs = Math.max(
+      previousStableAudioMs,
+      snapshot.inputMs - snapshot.bufferedMs,
+    );
     if (committedDelta.trim()) {
-      updates.push({ channelIndex: channel, text: committedDelta, isFinal: true });
+      updates.push({
+        channelIndex: channel,
+        text: committedDelta,
+        isFinal: true,
+        ...(stableAudioMs > previousStableAudioMs ? {
+          stableStartMs: previousStableAudioMs,
+          stableEndMs: stableAudioMs,
+        } : {}),
+      });
     }
     this.committed[channel] = snapshot.committed;
+    this.stableAudioMs[channel] = stableAudioMs;
 
     const tentative = snapshot.tentative.trim();
     updates.push({ channelIndex: channel, text: tentative, isFinal: false });

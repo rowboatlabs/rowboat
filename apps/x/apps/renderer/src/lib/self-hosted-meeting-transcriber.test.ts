@@ -69,6 +69,34 @@ describe('SelfHostedSnapshotAssembler', () => {
       .toEqual({ channelIndex: 0, text: ', world', isFinal: true });
   });
 
+  it('exposes stable audio intervals for independent speaker evidence', () => {
+    const assembler = new SelfHostedSnapshotAssembler();
+    expect(assembler.apply(snapshot(1, {
+      committed: 'first',
+      inputMs: 3_200,
+      bufferedMs: 600,
+      revision: 1,
+    }))[0]).toEqual({
+      channelIndex: 1,
+      text: 'first',
+      isFinal: true,
+      stableStartMs: 0,
+      stableEndMs: 2_600,
+    });
+    expect(assembler.apply(snapshot(1, {
+      committed: 'first second',
+      inputMs: 4_800,
+      bufferedMs: 400,
+      revision: 2,
+    }))[0]).toEqual({
+      channelIndex: 1,
+      text: ' second',
+      isFinal: true,
+      stableStartMs: 2_600,
+      stableEndMs: 4_400,
+    });
+  });
+
   it('rejects revision rollback and committed-text mutation', () => {
     const assembler = new SelfHostedSnapshotAssembler();
     assembler.apply(snapshot(0, { committed: 'stable', revision: 2 }));
