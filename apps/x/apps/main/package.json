@@ -9,6 +9,7 @@
     "scripts": {
         "start": "electron .",
         "build": "rm -rf dist && tsc && node bundle.mjs",
+        "test": "rm -rf dist && tsc && node --test dist/*.test.js",
         "package": "electron-forge package",
         "make": "electron-forge make"
     },

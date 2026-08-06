@@ -35,6 +35,7 @@ import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus
 import { ModelSelectionSection } from "@/components/settings/model-selection-section"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
+import { waitForComposioConnection } from "@/lib/composio-connection"
 
 type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "advanced" | "help"
 
@@ -508,6 +509,8 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
   // Connection state
   const [connectedToolkits, setConnectedToolkits] = useState<Set<string>>(new Set())
   const [connectingToolkit, setConnectingToolkit] = useState<string | null>(null)
+  const connectionAttemptRef = React.useRef<{ id: number; toolkitSlug: string } | null>(null)
+  const nextConnectionAttemptId = React.useRef(0)
 
   // Check API key configuration
   const checkApiKey = useCallback(async () => {
@@ -526,7 +529,15 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
   const loadConnected = useCallback(async () => {
     try {
       const result = await window.ipc.invoke("composio:list-connected", null)
-      setConnectedToolkits(new Set(result.toolkits))
+      const connected = new Set(result.toolkits)
+      setConnectedToolkits(connected)
+      setConnectingToolkit(current => {
+        if (!current || !connected.has(current)) return current
+        if (connectionAttemptRef.current?.toolkitSlug === current) {
+          connectionAttemptRef.current = null
+        }
+        return null
+      })
     } catch {
       // ignore
     }
@@ -563,15 +574,20 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
   useEffect(() => {
     const cleanup = window.ipc.on('composio:didConnect', (event) => {
       const { toolkitSlug, success, error } = event
-      setConnectingToolkit(null)
+      const wasPending = connectionAttemptRef.current?.toolkitSlug === toolkitSlug
+      if (wasPending) connectionAttemptRef.current = null
+      setConnectingToolkit(current => current === toolkitSlug ? null : current)
       if (success) {
         setConnectedToolkits(prev => new Set([...prev, toolkitSlug]))
-        toast.success(`Connected to ${toolkitSlug}`)
-      } else {
+        if (wasPending) toast.success(`Connected to ${toolkitSlug}`)
+      } else if (wasPending) {
         toast.error(error || `Failed to connect to ${toolkitSlug}`)
       }
     })
-    return cleanup
+    return () => {
+      connectionAttemptRef.current = null
+      cleanup()
+    }
   }, [])
 
   // Save API key
@@ -598,17 +614,42 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
 
   // Connect a toolkit
   const handleConnect = async (toolkitSlug: string) => {
+    const attempt = { id: ++nextConnectionAttemptId.current, toolkitSlug }
+    connectionAttemptRef.current = attempt
     setConnectingToolkit(toolkitSlug)
     try {
       const result = await window.ipc.invoke("composio:initiate-connection", { toolkitSlug })
       if (!result.success) {
+        if (connectionAttemptRef.current !== attempt) return
+        connectionAttemptRef.current = null
         toast.error(result.error || "Failed to connect")
         setConnectingToolkit(null)
+        return
       }
-      // Success will be handled by composio:didConnect event
+
+      // The event is the fast path. Persisted-state reconciliation is the
+      // reliable path when that one-shot renderer notification is missed.
+      const outcome = await waitForComposioConnection({
+        readStatus: () => window.ipc.invoke("composio:get-connection-status", { toolkitSlug }),
+        isCurrent: () => connectionAttemptRef.current === attempt,
+      })
+      if (connectionAttemptRef.current !== attempt) return
+      connectionAttemptRef.current = null
+      setConnectingToolkit(current => current === toolkitSlug ? null : current)
+
+      if (outcome.state === "connected") {
+        setConnectedToolkits(prev => new Set([...prev, toolkitSlug]))
+        toast.success(`Connected to ${toolkitSlug}`)
+      } else if (outcome.state === "failed") {
+        toast.error(`Connection status: ${outcome.status}`)
+      } else if (outcome.state === "timeout") {
+        toast.error(`Connection to ${toolkitSlug} timed out`)
+      }
     } catch {
+      if (connectionAttemptRef.current !== attempt) return
+      connectionAttemptRef.current = null
       toast.error("Failed to connect")
-      setConnectingToolkit(null)
+      setConnectingToolkit(current => current === toolkitSlug ? null : current)
     }
   }
 
