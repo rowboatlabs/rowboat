@@ -155,6 +155,7 @@ const SERVICE_LABELS: Record<string, string> = {
   gmail: "Syncing Gmail",
   calendar: "Syncing Calendar",
   fireflies: "Syncing Fireflies",
+  wispr_flow: "Syncing Wispr Flow",
   granola: "Syncing Granola",
   graph: "Updating knowledge",
   voice_memo: "Processing voice memo",

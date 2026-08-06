@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Loader2, Calendar } from "lucide-react"
+import { Loader2, Calendar, Mic } from "lucide-react"
 import { FirefliesIcon, GoogleIcon, SlackIcon } from "@/components/onboarding/provider-icons"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -236,7 +236,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
         )}
 
         {/* Meeting Notes Section */}
-        {c.providers.includes('fireflies-ai') && (
+        {(c.providers.includes('fireflies-ai') || c.providers.includes('wispr-flow')) && (
           <>
             <div className="px-3 pt-1 pb-0.5">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -245,7 +245,8 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
             </div>
 
             {/* Fireflies */}
-            {renderOAuthProvider('fireflies-ai', 'Fireflies', <FirefliesIcon className="size-5" />, 'AI meeting transcripts')}
+            {c.providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <FirefliesIcon className="size-5" />, 'AI meeting transcripts')}
+            {c.providers.includes('wispr-flow') && renderOAuthProvider('wispr-flow', 'Wispr Flow', <Mic className="size-5" />, 'Import finalized Notetaker meetings')}
           </>
         )}
 

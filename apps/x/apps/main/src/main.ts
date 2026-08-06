@@ -23,6 +23,7 @@ import { initUpdater } from "./updater.js";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
+import { init as initWisprFlowSync } from "@x/core/dist/knowledge/wispr-flow/sync.js";
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
@@ -722,6 +723,9 @@ app.whenReady().then(async () => {
 
   // start fireflies sync
   initFirefliesSync();
+
+  // Import finalized Wispr Notetaker meetings through its OAuth-protected MCP.
+  initWisprFlowSync();
 
   // start granola sync
   initGranolaSync();

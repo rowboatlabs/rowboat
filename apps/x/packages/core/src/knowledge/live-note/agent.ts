@@ -121,7 +121,7 @@ The user's knowledge graph is plain markdown in \`${WorkDir}/knowledge/\`, organ
 - **Projects/** — initiatives
 - **Topics/** — recurring themes
 
-Synced external data often sits alongside under \`gmail_sync/\`, \`calendar_sync/\`, \`granola_sync/\`, \`fireflies_sync/\` — consult these when the objective references emails, meetings, or calendar events.
+Synced external data sits under \`gmail_sync/\`, \`calendar_sync/\`, and \`knowledge/Meetings/\` (including Granola, Fireflies, Rowboat, and Wispr Flow) — consult these when the objective references emails, meetings, or calendar events.
 
 **CRITICAL:** Always include the folder prefix in paths. Never pass an empty path or the workspace root.
 - \`file-grep({ pattern: "Acme", searchPath: "knowledge/" })\`

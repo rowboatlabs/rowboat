@@ -12,6 +12,12 @@ export interface ProviderStatus {
   error?: string
 }
 
+function providerDisplayName(provider: string): string {
+  if (provider === 'fireflies-ai') return 'Fireflies'
+  if (provider === 'wispr-flow') return 'Wispr Flow'
+  return provider.charAt(0).toUpperCase() + provider.slice(1)
+}
+
 type KnowledgeSourceConfig = {
   id: string
   provider: 'gmail' | 'meeting' | 'voice_memo' | 'slack' | 'github' | 'linear'
@@ -638,7 +644,7 @@ export function useConnectors(active: boolean) {
         if (provider === 'google') {
           clearGoogleCredentials()
         }
-        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
+        const displayName = providerDisplayName(provider)
         toast.success(provider === 'rowboat' ? 'Logged out of Rowboat' : `Disconnected from ${displayName}`)
         setProviderStates(prev => ({
           ...prev,
@@ -739,10 +745,10 @@ export function useConnectors(active: boolean) {
       }))
 
       if (success) {
-        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
+        const displayName = providerDisplayName(provider)
         if (provider === 'rowboat') {
           toast.success('Logged in to Rowboat')
-        } else if (provider === 'google' || provider === 'fireflies-ai') {
+        } else if (provider === 'google' || provider === 'fireflies-ai' || provider === 'wispr-flow') {
           toast.success(`Connected to ${displayName}`, {
             description: 'Syncing your data in the background. This may take a few minutes before changes appear.',
             duration: 8000,

@@ -35,6 +35,14 @@ const BUILTIN_SOURCES: KnowledgeSourceConfig[] = [
         scopes: [],
     },
     {
+        id: 'wispr-flow-meetings',
+        provider: 'meeting',
+        enabled: true,
+        artifactDir: path.join('knowledge', 'Meetings', 'wispr-flow'),
+        syncMode: 'file',
+        scopes: [],
+    },
+    {
         id: 'rowboat-meetings',
         provider: 'meeting',
         enabled: true,

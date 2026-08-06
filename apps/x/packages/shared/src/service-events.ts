@@ -5,6 +5,7 @@ export const ServiceName = z.enum([
   'gmail',
   'calendar',
   'fireflies',
+  'wispr_flow',
   'granola',
   'slack',
   'voice_memo',

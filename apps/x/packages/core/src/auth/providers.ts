@@ -42,6 +42,9 @@ const ProviderConfigSchema = z.record(
     discovery: DiscoverySchema,
     client: ClientSchema,
     scopes: z.array(z.string()).optional(),
+    // RFC 8707 resource indicator. MCP servers use this to issue an access
+    // token whose audience is the protected resource rather than the issuer.
+    resource: z.url().optional(),
   })
 );
 
@@ -95,6 +98,23 @@ const providerConfigs: ProviderConfig = {
       'profile',
       'email',
     ]
+  },
+  'wispr-flow': {
+    discovery: {
+      mode: 'issuer',
+      issuer: 'https://mcp-auth.wisprflow.com',
+    },
+    client: {
+      mode: 'dcr',
+      registrationEndpoint: 'https://mcp-auth.wisprflow.com/oauth2/register',
+    },
+    scopes: [
+      'openid',
+      'email',
+      'profile',
+      'offline_access',
+    ],
+    resource: 'https://api.wisprflow.ai/connect/mcp',
   }
 };
 

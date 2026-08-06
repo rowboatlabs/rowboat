@@ -213,7 +213,7 @@ file-readText({ path: "{source_file}" })
 - Has \`Attendees:\` field
 - Has \`Meeting:\` title
 - Transcript format with speaker labels
-- Source file path is under \`knowledge/Meetings/\` (e.g. \`knowledge/Meetings/granola/...\` or \`knowledge/Meetings/fireflies/...\`)
+- Source file path is under \`knowledge/Meetings/\` (e.g. \`knowledge/Meetings/granola/...\`, \`knowledge/Meetings/fireflies/...\`, or \`knowledge/Meetings/wispr-flow/...\`)
 
 **Email indicators:**
 - Has \`From:\` and \`To:\` fields
