@@ -16,7 +16,16 @@ interface ActiveComposioFlow {
     authConfigId: string;
     server: import('http').Server;
     timeout: NodeJS.Timeout;
+    pollInterval: NodeJS.Timeout | null;
+    settled: boolean;
 }
+
+const TERMINAL_CONNECTION_STATUSES = new Set<LocalConnectedAccount['status']>([
+    'ACTIVE',
+    'FAILED',
+    'EXPIRED',
+    'INACTIVE',
+]);
 
 // Composio registers one fixed callback URI, so only one managed OAuth flow
 // can own port 8081 at a time — even when the toolkits differ.
@@ -27,9 +36,68 @@ async function cancelActiveFlow(reason: string): Promise<void> {
     if (!flow) return;
 
     activeFlow = null;
+    flow.settled = true;
     clearTimeout(flow.timeout);
+    if (flow.pollInterval) clearInterval(flow.pollInterval);
     console.log(`[Composio] Aborting ${flow.toolkitSlug} flow: ${reason}`);
     await closeAuthServer(flow.server);
+}
+
+function activateToolkit(toolkitSlug: string): void {
+    invalidateCopilotInstructionsCache();
+    if (toolkitSlug === 'gmail') triggerGmailSync();
+    if (toolkitSlug === 'googlecalendar') triggerCalendarSync();
+}
+
+async function settleFlow(
+    flow: ActiveComposioFlow,
+    status: LocalConnectedAccount['status'],
+): Promise<void> {
+    if (flow.settled) return;
+    flow.settled = true;
+    if (activeFlow === flow) activeFlow = null;
+    clearTimeout(flow.timeout);
+    if (flow.pollInterval) clearInterval(flow.pollInterval);
+
+    const previousStatus = composioAccountsRepo.getAccount(flow.toolkitSlug)?.status;
+    composioAccountsRepo.updateAccountStatus(flow.toolkitSlug, status);
+
+    if (status === 'ACTIVE') {
+        if (previousStatus !== 'ACTIVE') activateToolkit(flow.toolkitSlug);
+        emitComposioEvent({ toolkitSlug: flow.toolkitSlug, success: true });
+    } else {
+        emitComposioEvent({
+            toolkitSlug: flow.toolkitSlug,
+            success: false,
+            error: `Connection status: ${status}`,
+        });
+    }
+
+    await closeAuthServer(flow.server);
+}
+
+/**
+ * Connect Links do not consistently redirect every provider back to the
+ * localhost callback after consent. Reconcile against Composio while the
+ * browser flow is active so providers such as Google Meet and Canva still
+ * settle promptly, while the callback remains the fast path when delivered.
+ */
+async function reconcileActiveFlow(flow: ActiveComposioFlow): Promise<void> {
+    if (flow.settled) return;
+    try {
+        const accountStatus = await composioClient.getConnectedAccount(flow.connectedAccountId);
+        if (flow.settled) return;
+
+        if (TERMINAL_CONNECTION_STATUSES.has(accountStatus.status)) {
+            await settleFlow(flow, accountStatus.status);
+        } else {
+            composioAccountsRepo.updateAccountStatus(flow.toolkitSlug, accountStatus.status);
+        }
+    } catch (error) {
+        // Browser OAuth may outlive a transient API/network failure. Keep the
+        // flow alive and let the next poll or the callback settle it.
+        console.warn(`[Composio] Status reconciliation failed for ${flow.toolkitSlug}:`, error);
+    }
 }
 
 // Serialize setup as well as active ownership. Without this queue, two rapid
@@ -160,53 +228,25 @@ async function initiateConnectionExclusive(toolkitSlug: string): Promise<{
         composioAccountsRepo.saveAccount(account);
 
         // Set up callback server
-        const timeoutRef: { current: NodeJS.Timeout | null } = { current: null };
+        let flow: ActiveComposioFlow | null = null;
         let callbackHandled = false;
         const { server } = await createAuthServer(8081, async () => {
             // Guard against duplicate callbacks (browser may send multiple requests)
             if (callbackHandled) return;
             callbackHandled = true;
-            // OAuth callback received - sync the account status
-            try {
-                const accountStatus = await composioClient.getConnectedAccount(connectedAccountId);
-                composioAccountsRepo.updateAccountStatus(toolkitSlug, accountStatus.status);
-
-                if (accountStatus.status === 'ACTIVE') {
-                    // Invalidate instructions cache so the copilot knows about the new connection
-                    invalidateCopilotInstructionsCache();
-                    emitComposioEvent({ toolkitSlug, success: true });
-                    if (toolkitSlug === 'gmail') {
-                        triggerGmailSync();
-                    }
-                    if (toolkitSlug === 'googlecalendar') {
-                        triggerCalendarSync();
-                    }
-                } else {
-                    emitComposioEvent({
-                        toolkitSlug,
-                        success: false,
-                        error: `Connection status: ${accountStatus.status}`,
-                    });
-                }
-            } catch (error) {
-                console.error('[Composio] Failed to sync account status:', error);
-                emitComposioEvent({
-                    toolkitSlug,
-                    success: false,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                });
-            } finally {
-                if (activeFlow?.server === server) activeFlow = null;
-                if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                await closeAuthServer(server);
-            }
+            if (flow) await reconcileActiveFlow(flow);
+            // Consent has returned; if Composio is still propagating the
+            // status, the background poll can finish without another callback.
+            if (flow && !flow.settled) await closeAuthServer(server);
         });
 
         // Timeout for abandoned flows (5 minutes)
         const cleanupTimeout = setTimeout(() => {
-            if (activeFlow?.server === server) {
+            if (flow && activeFlow === flow && !flow.settled) {
                 console.log(`[Composio] Cleaning up abandoned flow for ${toolkitSlug}`);
+                flow.settled = true;
                 activeFlow = null;
+                if (flow.pollInterval) clearInterval(flow.pollInterval);
                 void closeAuthServer(server).catch(error => {
                     console.error('[Composio] Failed to close timed-out callback server:', error);
                 });
@@ -217,16 +257,24 @@ async function initiateConnectionExclusive(toolkitSlug: string): Promise<{
                 });
             }
         }, 5 * 60 * 1000);
-        timeoutRef.current = cleanupTimeout;
 
         // Store the single fixed-port owner.
-        activeFlow = {
+        flow = {
             toolkitSlug,
             connectedAccountId,
             authConfigId,
             server,
             timeout: cleanupTimeout,
+            pollInterval: null,
+            settled: false,
         };
+        activeFlow = flow;
+
+        // Callback delivery varies by provider. Polling centralizes reliable
+        // completion for every renderer surface (Settings, onboarding, chat).
+        flow.pollInterval = setInterval(() => {
+            if (flow) void reconcileActiveFlow(flow);
+        }, 1_000);
 
         // Open browser for OAuth
         await shell.openExternal(redirectUrl);
@@ -256,9 +304,30 @@ export async function getConnectionStatus(toolkitSlug: string): Promise<{
     if (!account) {
         return { isConnected: false };
     }
+
+    if (account.status !== 'ACTIVE') {
+        const flow = activeFlow?.toolkitSlug === toolkitSlug ? activeFlow : null;
+        if (flow) {
+            await reconcileActiveFlow(flow);
+        } else {
+            // Recover successful authorizations after an app restart or a
+            // missed callback from a previous build.
+            try {
+                const remote = await composioClient.getConnectedAccount(account.id);
+                composioAccountsRepo.updateAccountStatus(toolkitSlug, remote.status);
+                if (remote.status === 'ACTIVE') {
+                    activateToolkit(toolkitSlug);
+                }
+            } catch (error) {
+                console.warn(`[Composio] Failed to refresh ${toolkitSlug} status:`, error);
+            }
+        }
+    }
+
+    const refreshed = composioAccountsRepo.getAccount(toolkitSlug);
     return {
-        isConnected: account.status === 'ACTIVE',
-        status: account.status,
+        isConnected: refreshed?.status === 'ACTIVE',
+        status: refreshed?.status,
     };
 }
 
