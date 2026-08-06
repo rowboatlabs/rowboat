@@ -4,6 +4,11 @@ import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
 import { finalizeDeepgramStream } from '@/lib/deepgram-finalize';
 import { useRowboatAccount } from '@/hooks/useRowboatAccount';
 import { fetchRowboatConfig } from '@/hooks/use-rowboat-config';
+import {
+    SelfHostedMeetingTranscriber,
+    createIpcSelfHostedMeetingTransport,
+    type CanonicalTranscriptUpdate,
+} from '@/lib/self-hosted-meeting-transcriber';
 
 export type MeetingTranscriptionState = 'idle' | 'connecting' | 'recording' | 'stopping';
 
@@ -88,6 +93,8 @@ interface TranscriptEntry {
     text: string;
 }
 
+type MeetingTranscriptionProvider = 'rowboat-managed' | 'deepgram' | 'self-hosted';
+
 export interface CalendarEventMeta {
     summary?: string
     start?: { dateTime?: string; date?: string }
@@ -98,7 +105,12 @@ export interface CalendarEventMeta {
     source?: string
 }
 
-function formatTranscript(entries: TranscriptEntry[], date: string, calendarEvent?: CalendarEventMeta): string {
+function formatTranscript(
+    entries: TranscriptEntry[],
+    date: string,
+    calendarEvent?: CalendarEventMeta,
+    transcriptionProvider?: MeetingTranscriptionProvider,
+): string {
     const noteTitle = calendarEvent?.summary || 'Meeting Notes';
     const lines = [
         '---',
@@ -107,6 +119,7 @@ function formatTranscript(entries: TranscriptEntry[], date: string, calendarEven
         `title: ${noteTitle}`,
         `date: "${date}"`,
     ];
+    if (transcriptionProvider) lines.push(`transcription_provider: ${transcriptionProvider}`);
     if (calendarEvent) {
         // Serialize as a JSON string on one line — the frontmatter system
         // only supports flat key: value pairs, not nested YAML objects.
@@ -150,6 +163,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
     const { refresh: refreshRowboatAccount } = useRowboatAccount();
     const [state, setState] = useState<MeetingTranscriptionState>('idle');
     const wsRef = useRef<WebSocket | null>(null);
+    const selfHostedRef = useRef<SelfHostedMeetingTranscriber | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
     const systemStreamRef = useRef<MediaStream | null>(null);
     const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -173,6 +187,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
     onAutoStopRef.current = onAutoStop;
     const dateRef = useRef<string>('');
     const calendarEventRef = useRef<CalendarEventMeta | undefined>(undefined);
+    const transcriptionProviderRef = useRef<MeetingTranscriptionProvider | undefined>(undefined);
 
     const writeTranscriptToFile = useCallback(async () => {
         if (!notePathRef.current) return;
@@ -186,7 +201,12 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
             }
         }
         if (entries.length === 0) return;
-        const content = formatTranscript(entries, dateRef.current, calendarEventRef.current);
+        const content = formatTranscript(
+            entries,
+            dateRef.current,
+            calendarEventRef.current,
+            transcriptionProviderRef.current,
+        );
         try {
             await window.ipc.invoke('workspace:writeFile', {
                 path: notePathRef.current,
@@ -247,18 +267,70 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
             wsRef.current.close();
             wsRef.current = null;
         }
+        if (selfHostedRef.current) {
+            void selfHostedRef.current.cancel();
+            selfHostedRef.current = null;
+        }
     }, [stopInputCapture]);
 
     const start = useCallback(async (calendarEvent?: CalendarEventMeta): Promise<string | null> => {
         if (state !== 'idle') return null;
         setState('connecting');
 
+        const applyTranscript = ({
+            channelIndex,
+            text,
+            isFinal,
+        }: CanonicalTranscriptUpdate) => {
+            const speaker = channelIndex === 0 ? 'You' : 'System audio';
+            if (isFinal) {
+                interimRef.current.delete(channelIndex);
+                if (!text) return;
+                const entries = transcriptRef.current;
+                if (entries.length > 0 && entries[entries.length - 1].speaker === speaker) {
+                    const separator = /^[\s,.;:!?)]/.test(text) ? '' : ' ';
+                    entries[entries.length - 1].text += separator + text;
+                } else {
+                    entries.push({ speaker, text: text.trim() });
+                }
+            } else if (text) {
+                interimRef.current.set(channelIndex, { speaker, text });
+            } else {
+                interimRef.current.delete(channelIndex);
+            }
+            scheduleDebouncedWrite();
+        };
+
         // Run independent setup steps in parallel for faster startup
-        const [headphoneResult, wsResult, micResult, systemResult] = await Promise.allSettled([
+        const [headphoneResult, providerResult, micResult, systemResult] = await Promise.allSettled([
             // 1. Detect headphones vs speakers
             detectHeadphones(),
-            // 2. Set up Deepgram WebSocket (account refresh + connect + wait for open)
+            // 2. Resolve the explicitly configured provider. A self-hosted
+            // worker is strict: invalid/unavailable configuration fails the
+            // start instead of silently sending audio to another provider.
             (async () => {
+                const selfHosted = await window.ipc.invoke('meeting:selfHostedTranscriptionStatus', null);
+                if (selfHosted.configured) {
+                    if (!selfHosted.valid) {
+                        throw new Error(selfHosted.error || 'Self-hosted transcription configuration is invalid');
+                    }
+                    const client = new SelfHostedMeetingTranscriber(
+                        createIpcSelfHostedMeetingTransport(),
+                        applyTranscript,
+                        (error) => {
+                            console.error('[meeting] Self-hosted transcription failed:', error);
+                            toast.error('Self-hosted transcription needs attention', {
+                                description: error.message,
+                                duration: 10_000,
+                            });
+                            onAutoStopRef.current?.();
+                        },
+                    );
+                    await client.start();
+                    console.log(`[meeting] Using self-hosted transcription (${selfHosted.endpoint ?? 'private worker'})`);
+                    return { kind: 'self-hosted' as const, client, provider: 'self-hosted' as const };
+                }
+
                 // Token from account refresh; websocket URL from the
                 // sign-in-independent bootstrap config store.
                 const [account, rowboatConfig] = await Promise.all([
@@ -266,6 +338,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                     fetchRowboatConfig(),
                 ]);
                 let ws: WebSocket;
+                let provider: 'rowboat-managed' | 'deepgram';
                 if (
                     account?.signedIn &&
                     account.accessToken &&
@@ -274,6 +347,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                     const listenUrl = buildDeepgramListenUrl(rowboatConfig.websocketApiUrl, DEEPGRAM_PARAMS);
                     console.log('[meeting] Using Rowboat WebSocket');
                     ws = new WebSocket(listenUrl, ['bearer', account.accessToken]);
+                    provider = 'rowboat-managed';
                 } else {
                     const config = await window.ipc.invoke('voice:getConfig', null);
                     if (!config?.deepgram) {
@@ -281,6 +355,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                     }
                     console.log('[meeting] Using Deepgram API key');
                     ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['token', config.deepgram.apiKey]);
+                    provider = 'deepgram';
                 }
                 const ok = await new Promise<boolean>((resolve) => {
                     ws.onopen = () => resolve(true);
@@ -289,7 +364,11 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                 });
                 if (!ok) throw new Error('WebSocket failed to connect');
                 console.log('[meeting] WebSocket connected');
-                return ws;
+                return {
+                    kind: 'deepgram' as const,
+                    ws,
+                    provider,
+                };
             })(),
             // 3. Get mic stream
             navigator.mediaDevices.getUserMedia({
@@ -316,12 +395,20 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         ]);
 
         // Check for failures — clean up any successful resources if something failed
-        const failed = wsResult.status === 'rejected'
+        const failed = providerResult.status === 'rejected'
             || micResult.status === 'rejected'
             || systemResult.status === 'rejected';
 
         if (failed) {
-            if (wsResult.status === 'rejected') console.error('[meeting] WebSocket setup failed:', wsResult.reason);
+            if (providerResult.status === 'rejected') {
+                console.error('[meeting] Transcription provider setup failed:', providerResult.reason);
+                toast.error('Could not start meeting transcription', {
+                    description: providerResult.reason instanceof Error
+                        ? providerResult.reason.message
+                        : 'The configured transcription provider is unavailable.',
+                    duration: 10_000,
+                });
+            }
             if (micResult.status === 'rejected') console.error('[meeting] Microphone access denied:', micResult.reason);
             if (systemResult.status === 'rejected') {
                 console.error('[meeting] System audio access denied:', systemResult.reason);
@@ -333,7 +420,10 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                 }
             }
             // Clean up any resources that did succeed
-            if (wsResult.status === 'fulfilled') { wsResult.value.close(); }
+            if (providerResult.status === 'fulfilled') {
+                if (providerResult.value.kind === 'deepgram') providerResult.value.ws.close();
+                else await providerResult.value.client.cancel();
+            }
             if (micResult.status === 'fulfilled') { micResult.value.getTracks().forEach(t => t.stop()); }
             if (systemResult.status === 'fulfilled') { systemResult.value.getTracks().forEach(t => t.stop()); }
             cleanup();
@@ -344,50 +434,46 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         const usingHeadphones = headphoneResult.status === 'fulfilled' ? headphoneResult.value : false;
         console.log(`[meeting] Audio output mode: ${usingHeadphones ? 'headphones' : 'speakers'}`);
 
-        const ws = wsResult.value;
-        wsRef.current = ws;
-
-        // Set up WS message handler
         transcriptRef.current = [];
         interimRef.current = new Map();
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (!data.channel?.alternatives?.[0]) return;
-            const transcript = data.channel.alternatives[0].transcript;
-            if (!transcript) return;
+        transcriptionProviderRef.current = providerResult.value.provider;
+        if (providerResult.value.kind === 'deepgram') {
+            const ws = providerResult.value.ws;
+            wsRef.current = ws;
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (!data.channel?.alternatives?.[0]) return;
+                const transcript = data.channel.alternatives[0].transcript;
+                if (!transcript) return;
 
-            const channelIndex = data.channel_index?.[0] ?? 0;
-            const isMic = channelIndex === 0;
-
-            // Channel 0 = mic = "You", Channel 1 = system audio with diarization
-            let speaker: string;
-            if (isMic) {
-                speaker = 'You';
-            } else {
-                // Use Deepgram diarization speaker ID for system audio channel
+                const channelIndex = (data.channel_index?.[0] ?? 0) as 0 | 1;
                 const words = data.channel.alternatives[0].words;
                 const speakerId = words?.[0]?.speaker;
-                speaker = speakerId != null ? `Speaker ${speakerId}` : 'System audio';
-            }
+                const speaker = channelIndex === 0
+                    ? 'You'
+                    : speakerId != null ? `Speaker ${speakerId}` : 'System audio';
 
-            if (data.is_final) {
-                interimRef.current.delete(channelIndex);
-                const entries = transcriptRef.current;
-                if (entries.length > 0 && entries[entries.length - 1].speaker === speaker) {
-                    entries[entries.length - 1].text += ' ' + transcript;
+                if (data.is_final) {
+                    interimRef.current.delete(channelIndex);
+                    const entries = transcriptRef.current;
+                    if (entries.length > 0 && entries[entries.length - 1].speaker === speaker) {
+                        entries[entries.length - 1].text += ' ' + transcript;
+                    } else {
+                        entries.push({ speaker, text: transcript });
+                    }
                 } else {
-                    entries.push({ speaker, text: transcript });
+                    interimRef.current.set(channelIndex, { speaker, text: transcript });
                 }
-            } else {
-                interimRef.current.set(channelIndex, { speaker, text: transcript });
-            }
-            scheduleDebouncedWrite();
-        };
+                scheduleDebouncedWrite();
+            };
 
-        ws.onclose = () => {
-            console.log('[meeting] WebSocket closed');
-            wsRef.current = null;
-        };
+            ws.onclose = () => {
+                console.log('[meeting] WebSocket closed');
+                wsRef.current = null;
+            };
+        } else {
+            selfHostedRef.current = providerResult.value.client;
+        }
 
         const micStream = micResult.value;
         micStreamRef.current = micStream;
@@ -464,7 +550,9 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         processorRef.current = processor;
 
         processor.onaudioprocess = (e) => {
-            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+            const deepgram = wsRef.current?.readyState === WebSocket.OPEN ? wsRef.current : null;
+            const selfHosted = selfHostedRef.current;
+            if (!deepgram && !selfHosted) return;
 
             const micRaw = e.inputBuffer.getChannelData(0);
             const sysRaw = e.inputBuffer.getChannelData(1);
@@ -506,7 +594,8 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                 int16[i * 2] = s0 < 0 ? s0 * 0x8000 : s0 * 0x7fff;
                 int16[i * 2 + 1] = s1 < 0 ? s1 * 0x8000 : s1 * 0x7fff;
             }
-            wsRef.current.send(int16.buffer);
+            if (selfHosted) selfHosted.send(int16);
+            else deepgram?.send(int16.buffer);
         };
 
         merger.connect(processor);
@@ -539,7 +628,12 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         const calEndMs = calendarEvent?.end?.dateTime ? Date.parse(calendarEvent.end.dateTime) : NaN;
         calendarEndMsRef.current = Number.isFinite(calEndMs) ? calEndMs : null;
 
-        const initialContent = formatTranscript([], dateStr, calendarEvent);
+        const initialContent = formatTranscript(
+            [],
+            dateStr,
+            calendarEvent,
+            transcriptionProviderRef.current,
+        );
         await window.ipc.invoke('workspace:writeFile', {
             path: notePath,
             data: initialContent,
@@ -594,7 +688,18 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         setState('stopping');
 
         stopInputCapture();
-        await finalizeDeepgramStream(wsRef.current, 2200);
+        if (selfHostedRef.current) {
+            const client = selfHostedRef.current;
+            selfHostedRef.current = null;
+            try {
+                await client.finish();
+            } catch (error) {
+                console.error('[meeting] Failed to finalize self-hosted transcription:', error);
+                await client.cancel();
+            }
+        } else {
+            await finalizeDeepgramStream(wsRef.current, 2200);
+        }
         cleanup();
         await writeTranscriptToFile();
         interimRef.current = new Map();

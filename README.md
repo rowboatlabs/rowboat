@@ -142,6 +142,10 @@ To connect Google services (Gmail, Calendar, and Drive), follow [Google setup](h
 ### Voice input
 To enable voice input and voice notes (optional), add a Deepgram API key in `~/.rowboat/config/deepgram.json`
 
+Meeting transcription can instead use an explicitly configured local or remote worker. See
+[Self-hosted meeting transcription](docs/self-hosted-meeting-transcription.md) for its strict routing,
+secret handling, protocol, and qualification boundary.
+
 ### Voice output
 
 To enable voice output (optional), add an ElevenLabs API key in `~/.rowboat/config/elevenlabs.json`
