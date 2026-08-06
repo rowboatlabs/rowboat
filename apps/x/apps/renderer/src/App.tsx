@@ -4562,6 +4562,22 @@ function App() {
     setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
   }, [dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen])
 
+  // A chat was deleted (sessions:delete succeeded): drop it from the recents
+  // list and — because closeChatTab no-ops on the last tab in the single-chat
+  // model — reset the chat surface to a fresh conversation when the deleted
+  // chat is the one currently bound, so a dead transcript never stays on
+  // screen.
+  const handleRunDeleted = useCallback((rid: string) => {
+    setRuns((prev) => prev.filter((r) => r.id !== rid))
+    const openTab = chatTabs.find((t) => t.runId === rid)
+    if (!openTab) return
+    if (chatTabs.length > 1) {
+      closeChatTab(openTab.id)
+    } else {
+      handleNewChatTab()
+    }
+  }, [chatTabs, closeChatTab, handleNewChatTab])
+
   // Sidebar variant: reset the chat in place without leaving file/graph context.
   // A caller with a selection already chosen for the fresh chat (the Home
   // composer handoff) passes it here so the map entry exists BEFORE the
@@ -6949,11 +6965,7 @@ function App() {
               }}
               onDeleteRun={(rid) => {
                 void window.ipc.invoke('sessions:delete', { sessionId: rid })
-                  .then(() => {
-                    setRuns((prev) => prev.filter((r) => r.id !== rid))
-                    const openTab = chatTabs.find((t) => t.runId === rid)
-                    if (openTab) closeChatTab(openTab.id)
-                  })
+                  .then(() => handleRunDeleted(rid))
                   .catch((err) => console.error('Failed to delete chat:', err))
               }}
               onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
@@ -7358,6 +7370,7 @@ function App() {
                     onDeleteRun={async (rid) => {
                       try {
                         await window.ipc.invoke('sessions:delete', { sessionId: rid })
+                        handleRunDeleted(rid)
                         await loadRuns()
                       } catch (err) {
                         console.error('Failed to delete run:', err)
