@@ -49,6 +49,22 @@ function activateToolkit(toolkitSlug: string): void {
     if (toolkitSlug === 'googlecalendar') triggerCalendarSync();
 }
 
+async function refreshStoredAccountStatus(
+    account: LocalConnectedAccount,
+): Promise<LocalConnectedAccount['status']> {
+    try {
+        const remote = await composioClient.getConnectedAccount(account.id);
+        composioAccountsRepo.updateAccountStatus(account.toolkitSlug, remote.status);
+        if (remote.status === 'ACTIVE' && account.status !== 'ACTIVE') {
+            activateToolkit(account.toolkitSlug);
+        }
+        return remote.status;
+    } catch (error) {
+        console.warn(`[Composio] Failed to refresh ${account.toolkitSlug} status:`, error);
+        return account.status;
+    }
+}
+
 async function settleFlow(
     flow: ActiveComposioFlow,
     status: LocalConnectedAccount['status'],
@@ -162,9 +178,20 @@ async function initiateConnectionExclusive(toolkitSlug: string): Promise<{
     try {
         console.log(`[Composio] Initiating connection for ${toolkitSlug}...`);
 
-        // Check if already connected
-        if (composioAccountsRepo.isConnected(toolkitSlug)) {
-            return { success: true };
+        // Recover a grant completed by Composio even when that provider never
+        // returned to localhost (or the app restarted before reconciliation).
+        const existingAccount = composioAccountsRepo.getAccount(toolkitSlug);
+        if (existingAccount) {
+            const existingStatus = existingAccount.status === 'ACTIVE'
+                ? 'ACTIVE'
+                : await refreshStoredAccountStatus(existingAccount);
+            if (existingStatus === 'ACTIVE') {
+                emitComposioEvent({ toolkitSlug, success: true });
+                return {
+                    success: true,
+                    connectedAccountId: existingAccount.id,
+                };
+            }
         }
 
         // Get toolkit to check auth schemes
@@ -312,15 +339,7 @@ export async function getConnectionStatus(toolkitSlug: string): Promise<{
         } else {
             // Recover successful authorizations after an app restart or a
             // missed callback from a previous build.
-            try {
-                const remote = await composioClient.getConnectedAccount(account.id);
-                composioAccountsRepo.updateAccountStatus(toolkitSlug, remote.status);
-                if (remote.status === 'ACTIVE') {
-                    activateToolkit(toolkitSlug);
-                }
-            } catch (error) {
-                console.warn(`[Composio] Failed to refresh ${toolkitSlug} status:`, error);
-            }
+            await refreshStoredAccountStatus(account);
         }
     }
 
@@ -370,7 +389,12 @@ export async function disconnect(toolkitSlug: string): Promise<{ success: boolea
 /**
  * List connected toolkits
  */
-export function listConnected(): { toolkits: string[] } {
+export async function listConnected(): Promise<{ toolkits: string[] }> {
+    // Reconcile unfinished records on every Connections load. This doubles as
+    // a migration for grants completed by older callback-only builds.
+    const pendingAccounts = Object.values(composioAccountsRepo.getAllAccounts())
+        .filter(account => account.status !== 'ACTIVE');
+    await Promise.all(pendingAccounts.map(refreshStoredAccountStatus));
     return { toolkits: composioAccountsRepo.getConnectedToolkits() };
 }
 
