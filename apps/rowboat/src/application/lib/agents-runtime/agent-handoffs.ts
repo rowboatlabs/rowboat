@@ -69,7 +69,7 @@ function filterForPipeline(data: HandoffInputData): HandoffInputData {
         preHandoffItems: data.preHandoffItems.filter(item => 
             !item.type || 
             item.type === 'message' || 
-            item.type === 'tool_call' && item.name?.includes('pipeline')
+            (item.type === 'tool_call' && item.name?.includes('pipeline'))
         )
     };
 }
