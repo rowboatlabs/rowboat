@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle2, ArrowLeft, Calendar, FileText } from "lucide-react"
+import { Loader2, CheckCircle2, ArrowLeft, Calendar, FileText, Mic } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -186,6 +186,18 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                 iconColor="text-amber-500"
                 providerState={providerStates['fireflies-ai']}
                 onConnect={() => handleConnect('fireflies-ai')}
+                index={cardIndex++}
+              />
+            )}
+            {providers.includes('wispr-flow') && (
+              <ProviderCard
+                name="Wispr Flow"
+                description="Import finalized Notetaker meetings."
+                icon={<Mic className="size-5" />}
+                iconBg="bg-violet-500/10"
+                iconColor="text-violet-500"
+                providerState={providerStates['wispr-flow']}
+                onConnect={() => handleConnect('wispr-flow')}
                 index={cardIndex++}
               />
             )}
