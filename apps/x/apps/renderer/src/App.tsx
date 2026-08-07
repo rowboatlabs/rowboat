@@ -22,6 +22,7 @@ import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
 import { DocxFileViewer } from '@/components/docx-file-viewer';
+import { PptxEditor } from '@/components/pptx-editor';
 import { PersistentViewerCache } from '@/components/persistent-viewer-cache';
 import { UnsupportedFileViewer } from '@/components/unsupported-file-viewer';
 import { getViewerType, isCacheableViewerPath } from '@/lib/file-types';
@@ -7563,6 +7564,10 @@ function App() {
                 ) : selectedPath && getViewerType(selectedPath) === 'docx' ? (
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <DocxFileViewer path={selectedPath} />
+                  </div>
+                ) : selectedPath && getViewerType(selectedPath) === 'pptx' ? (
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <PptxEditor key={selectedPath} path={selectedPath} />
                   </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-hidden">
