@@ -36,6 +36,7 @@ import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
+import { NewPresentationDialog } from '@/components/new-presentation-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
 import { TodoView } from '@/components/todo-view';
@@ -830,6 +831,8 @@ function App() {
   const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
   const [googleDocPickerOpen, setGoogleDocPickerOpen] = useState(false)
   const [googleDocPickerTargetFolder, setGoogleDocPickerTargetFolder] = useState('knowledge')
+  const [newPresentationOpen, setNewPresentationOpen] = useState(false)
+  const [newPresentationTargetFolder, setNewPresentationTargetFolder] = useState('knowledge')
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
   // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
@@ -6248,6 +6251,10 @@ function App() {
       setGoogleDocPickerTargetFolder(parentPath)
       setGoogleDocPickerOpen(true)
     },
+    createPresentation: (parentPath: string = 'knowledge') => {
+      setNewPresentationTargetFolder(parentPath)
+      setNewPresentationOpen(true)
+    },
     createFolder: async (parentPath: string = 'knowledge'): Promise<string> => {
       try {
         let index = 1
@@ -7291,6 +7298,7 @@ function App() {
                       copyPath: knowledgeActions.copyPath,
                       revealInFileManager: knowledgeActions.revealInFileManager,
                       createNote: knowledgeActions.createNote,
+                      createPresentation: knowledgeActions.createPresentation,
                       addGoogleDoc: knowledgeActions.addGoogleDoc,
                       createFolder: knowledgeActions.createFolder,
                       onOpenInNewTab: knowledgeActions.onOpenInNewTab,
@@ -7894,6 +7902,17 @@ function App() {
         targetFolder={googleDocPickerTargetFolder}
         onOpenChange={setGoogleDocPickerOpen}
         onImported={(path) => {
+          const parentPath = path.split('/').slice(0, -1).join('/') || 'knowledge'
+          setExpandedPaths(prev => new Set([...prev, parentPath]))
+          void loadDirectory().then(setTree)
+          navigateToFile(path)
+        }}
+      />
+      <NewPresentationDialog
+        open={newPresentationOpen}
+        targetFolder={newPresentationTargetFolder}
+        onOpenChange={setNewPresentationOpen}
+        onCreated={(path) => {
           const parentPath = path.split('/').slice(0, -1).join('/') || 'knowledge'
           setExpandedPaths(prev => new Set([...prev, parentPath]))
           void loadDirectory().then(setTree)
