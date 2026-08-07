@@ -1601,6 +1601,10 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [globalLimit, setGlobalLimit] = useState("")
   const [chatLimit, setChatLimit] = useState("")
   const [loaded, setLoaded] = useState(false)
+  // Storage retention (auto-delete old chats & task transcripts).
+  // chatDays null = never delete chats (transcript cleanup still runs).
+  const [retentionEnabled, setRetentionEnabled] = useState(true)
+  const [retentionChatDays, setRetentionChatDays] = useState<number | null>(30)
 
   useEffect(() => {
     if (!dialogOpen) return
@@ -1621,8 +1625,25 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
       .catch(() => {
         if (!cancelled) toast.error("Failed to load advanced settings")
       })
+    window.ipc.invoke("retention:getSettings", null)
+      .then((settings) => {
+        if (cancelled) return
+        setRetentionEnabled(settings.enabled)
+        setRetentionChatDays(settings.chatDays)
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load auto-delete settings")
+      })
     return () => { cancelled = true }
   }, [dialogOpen])
+
+  const saveRetention = useCallback(async (patch: { enabled?: boolean; chatDays?: number | null }) => {
+    try {
+      await window.ipc.invoke("retention:setSettings", patch)
+    } catch {
+      toast.error("Failed to save auto-delete settings")
+    }
+  }, [])
 
   // Saves silently on success (a toast per stepper click would be noisy,
   // matching the notification toggles); errors still surface.
@@ -1727,6 +1748,56 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
             />
           </div>
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Auto-delete old chats &amp; task history</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Deletes chats inactive for longer than the period below, and background run
+              transcripts (note creation, background tasks, knowledge sync) older than 14 days.
+              Notes and files created by agents are never touched.
+            </div>
+          </div>
+          <Switch
+            checked={retentionEnabled}
+            onCheckedChange={(checked) => {
+              setRetentionEnabled(checked)
+              void saveRetention({ enabled: checked })
+            }}
+            aria-label="Auto-delete old chats and task history"
+          />
+        </div>
+
+        {retentionEnabled && (
+          <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">Delete chats after</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Measured from the chat&apos;s last activity, not when it was created.
+              </div>
+            </div>
+            <Select
+              value={retentionChatDays === null ? "never" : String(retentionChatDays)}
+              onValueChange={(value) => {
+                const days = value === "never" ? null : Number(value)
+                setRetentionChatDays(days)
+                void saveRetention({ chatDays: days })
+              }}
+            >
+              <SelectTrigger className="w-32 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="30">30 days</SelectItem>
+                <SelectItem value="60">60 days</SelectItem>
+                <SelectItem value="90">90 days</SelectItem>
+                <SelectItem value="never">Never</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
     </div>
   )

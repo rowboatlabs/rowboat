@@ -5579,6 +5579,21 @@ function App() {
     })
   }, [])
 
+  // One-time storage-retention notice: shown on the first launch with
+  // retention enabled; the actual sweep starts on the NEXT launch so months
+  // of history are never deleted before the user has seen this.
+  useEffect(() => {
+    void window.ipc.invoke('retention:consumeFirstRunNotice', null).then(({ show, chatDays }) => {
+      if (!show) return
+      toast('Old chats are now cleaned up automatically', {
+        description: chatDays === null
+          ? 'Old background-task transcripts are deleted to save disk space. Notes and files created by agents are never touched. Adjust this in Settings → Advanced.'
+          : `Chats inactive for ${chatDays}+ days and old background-task transcripts are deleted to save disk space. Notes and files created by agents are never touched. Turn this off in Settings → Advanced.`,
+        duration: 15000,
+      })
+    }).catch(() => { /* settings unavailable — try again next launch */ })
+  }, [])
+
   // Report the UI theme to the apps server (spec §7.1): apps read it from
   // GET /_rowboat/app and get live changes via the SSE theme event.
   useEffect(() => {
