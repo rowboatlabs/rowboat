@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import {
   setupIpcHandlers,
-  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady,
+  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady, startRetentionSweep,
   startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
@@ -662,6 +662,8 @@ app.whenReady().then(async () => {
     markSessionsIndexReady();
   }
   startSessionsWatcher();
+  // Daily auto-delete of old chats & task transcripts (delayed first run).
+  startRetentionSweep();
   // Turn event spine: durable events of every turn (session, headless,
   // sub-agent) → renderer, for turnId-keyed live views.
   startTurnEventsWatcher();

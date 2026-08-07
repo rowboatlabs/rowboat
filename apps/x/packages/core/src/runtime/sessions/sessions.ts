@@ -667,9 +667,9 @@ function defaultTitle(input: z.infer<typeof UserMessage>): string {
 
 // spawn-agent records one durable 'subagent' tool_progress entry per child
 // turn (see spawn-agent.ts) — the same parent→child link the UI uses to
-// fetch child transcripts. Extracting it here lets session deletion follow
-// the chain and remove sub-agent turn files too.
-function childTurnIdsOf(state: TurnState): string[] {
+// fetch child transcripts. Extracting it here lets session deletion (and the
+// retention sweep) follow the chain and treat sub-agent turn files correctly.
+export function childTurnIdsOf(state: TurnState): string[] {
     const ids: string[] = [];
     for (const toolCall of state.toolCalls) {
         for (const progress of toolCall.progress) {
