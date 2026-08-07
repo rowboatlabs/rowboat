@@ -1,8 +1,15 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { attr, childByLocal, childrenByLocal, childrenOf, parsePptx, parseXml, resolveRelTarget } from './parse'
+import { attr, childByLocal, childrenByLocal, childrenOf, parseAddedSlide, parsePptx, parseXml, resolveRelTarget } from './parse'
 import { writeDeck } from './serialize'
 import { planNewSlide } from './add-slide'
+import {
+  EMPTY_DECK_EDITS,
+  shapeKeyOf,
+  toSlideEdits,
+  withSlideAdded,
+  type DeckEdits,
+} from '@/components/pptx/edit-model'
 import {
   BODY_LAYOUT_RECTS,
   DECK_PALETTES,
@@ -10,6 +17,7 @@ import {
   newDeckPptx,
   SLIDE_SIZE_EMU,
   TITLE_LAYOUT_RECTS,
+  upgradeGeneratedDeck,
 } from './new-deck'
 import type { TextShape } from './types'
 
@@ -100,6 +108,12 @@ function validatePackage(parts: Map<string, string>): void {
     'ppt/slides/slide1.xml':
       'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
     'ppt/theme/theme1.xml': 'application/vnd.openxmlformats-officedocument.theme+xml',
+    'ppt/presProps.xml':
+      'application/vnd.openxmlformats-officedocument.presentationml.presProps+xml',
+    'ppt/viewProps.xml':
+      'application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml',
+    'ppt/tableStyles.xml':
+      'application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml',
     'docProps/core.xml': 'application/vnd.openxmlformats-package.core-properties+xml',
     'docProps/app.xml': 'application/vnd.openxmlformats-officedocument.extended-properties+xml',
   }
@@ -223,6 +237,52 @@ describe('newDeckParts package structure', () => {
     const parts = newDeckParts({ title: 'A & B <deck>', palette: NAVY })
     expect(parts.get('ppt/slides/slide1.xml')).toContain('<a:t>A &amp; B &lt;deck&gt;</a:t>')
     expect(parts.get('docProps/core.xml')).toContain('<dc:title>A &amp; B &lt;deck&gt;</dc:title>')
+  })
+})
+
+describe('PowerPoint-required scaffolding', () => {
+  // Desktop PowerPoint silently renders slides blank — no repair prompt on
+  // Mac — when a package is schema-minimal, even though the XML validates
+  // against ECMA-376 and every other renderer shows the text. These pin the
+  // package to the shape PowerPoint itself emits.
+  const parts = newDeckParts({ title: 'T', palette: NAVY, createdAt: '2026-08-07T00:00:00.000Z' })
+
+  it('ships presProps, viewProps and tableStyles, related from the presentation', () => {
+    for (const part of ['ppt/presProps.xml', 'ppt/viewProps.xml', 'ppt/tableStyles.xml']) {
+      expect(parts.has(part), part).toBe(true)
+    }
+    const presRels = relsOf(parts, 'ppt/_rels/presentation.xml.rels')
+    expect(presRels.find((r) => r.type === `${REL_TYPE}/presProps`)?.target).toBe('ppt/presProps.xml')
+    expect(presRels.find((r) => r.type === `${REL_TYPE}/viewProps`)?.target).toBe('ppt/viewProps.xml')
+    expect(presRels.find((r) => r.type === `${REL_TYPE}/tableStyles`)?.target).toBe(
+      'ppt/tableStyles.xml',
+    )
+  })
+
+  it('ships the full Office theme, not a schema-minimal skeleton', () => {
+    const theme = parts.get('ppt/theme/theme1.xml')!
+    // The complete style matrix: gradient fills, real effect styles, and the
+    // object defaults + extra scheme list tail Office always writes.
+    expect(theme).toContain('<a:gradFill rotWithShape="1">')
+    expect(theme).toContain('<a:outerShdw')
+    expect(theme).toContain('<a:objectDefaults>')
+    expect(theme).toContain('<a:extraClrSchemeLst/>')
+    // Per-script typeface tables on both font slots.
+    expect(theme.match(/script="Jpan"/g)).toHaveLength(2)
+  })
+
+  it('ships deep master txStyles, a bgRef background and a default text style', () => {
+    const master = parts.get('ppt/slideMasters/slideMaster1.xml')!
+    expect(master).toContain('<p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>')
+    // The full 9-level body ladder, not just lvl1.
+    expect(master).toContain('<a:lvl9pPr')
+    // Footer chrome placeholders exist on the master (and only there — the
+    // layouts stay chrome-free so planNewSlide never instantiates them).
+    expect(master).toContain('type="dt"')
+    expect(master).toContain('type="ftr"')
+    expect(master).toContain('type="sldNum"')
+    expect(parts.get('ppt/slideLayouts/slideLayout1.xml')).not.toContain('type="ftr"')
+    expect(parts.get('ppt/presentation.xml')).toContain('<p:defaultTextStyle>')
   })
 })
 
@@ -358,5 +418,197 @@ describe('editing a generated deck', () => {
     const reparsed = await parsePptx(out)
     const editedTitle = reparsed.slides[0].shapes[0] as TextShape
     expect(editedTitle.paragraphs[0].runs[0].text).toBe('Hello, world')
+  })
+
+  it('typed text reaches the written bytes via the editor save path (title + added-slide body)', async () => {
+    // The exact flow the editor runs: commit shape edits into a DeckEdits,
+    // plan an added slide, then writeDeck(toSlideEdits(...), { addSlides }).
+    // Guards the silent-data-loss repro: type into the title, add a slide,
+    // type into its body, export.
+    const deck = await parsePptx(await newDeckPptx({ title: 'Untitled presentation', palette: NAVY }))
+    const slide1Path = 'ppt/slides/slide1.xml'
+    const title = deck.slides[0].shapes[0] as TextShape
+
+    let edits: DeckEdits = {
+      ...EMPTY_DECK_EDITS,
+      shapes: {
+        [shapeKeyOf(slide1Path, title.nodePath)]: {
+          slidePath: slide1Path,
+          nodePath: title.nodePath,
+          original: title.paragraphs,
+          text: [{ srcPara: 0, runs: [{ text: 'prakhar', srcPara: 0, srcRun: 0 }] }],
+        },
+      },
+    }
+
+    // Add a slide on the title+body layout and type into its body placeholder.
+    const anchorRels =
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      `<Relationship Id="rId1" Type="${REL_TYPE}/slideLayout" Target="../slideLayouts/slideLayout2.xml"/>` +
+      '</Relationships>'
+    const plan = await planNewSlide(deck, slide1Path, anchorRels, [])
+    const added = await parseAddedSlide(deck, plan.path, plan.xml, plan.relsXml)
+    edits = withSlideAdded(edits, { ...plan, slide: added })
+    const body = added.shapes[1] as TextShape
+    edits = {
+      ...edits,
+      shapes: {
+        ...edits.shapes,
+        [shapeKeyOf(plan.path, body.nodePath)]: {
+          slidePath: plan.path,
+          nodePath: body.nodePath,
+          original: body.paragraphs,
+          text: [{ srcPara: 0, runs: [{ text: 'body copy' }] }],
+        },
+      },
+    }
+
+    const bytes = await writeDeck(deck, toSlideEdits(edits.shapes), {
+      deleteSlides: edits.deletedSlides,
+      addSlides: edits.addedSlides,
+      slideOrder: edits.slideOrder,
+    })
+
+    // The typed text is in the bytes on disk…
+    const zip = await JSZip.loadAsync(bytes)
+    expect(await zip.files[slide1Path].async('string')).toContain('<a:t>prakhar</a:t>')
+    expect(await zip.files[plan.path].async('string')).toContain('<a:t>body copy</a:t>')
+
+    // …and re-parsing the WRITTEN package finds it in the correct shapes.
+    const reparsed = await parsePptx(bytes)
+    expect(reparsed.slides.map((s) => s.xmlPath)).toEqual([slide1Path, plan.path])
+    const writtenTitle = reparsed.slides[0].shapes[0] as TextShape
+    const writtenBody = reparsed.slides[1].shapes[1] as TextShape
+    expect(writtenTitle.paragraphs[0].runs.map((r) => r.text)).toEqual(['prakhar'])
+    expect(writtenBody.paragraphs[0].runs.map((r) => r.text)).toEqual(['body copy'])
+    expect(writtenBody.xfrmEmu).toEqual(BODY_LAYOUT_RECTS.body)
+  })
+})
+
+// ------------------------------------------------- v1 scaffolding upgrade
+
+/**
+ * The first version of the generator emitted a schema-minimal skeleton
+ * (no presProps/viewProps/tableStyles, bare theme, no defaultTextStyle)
+ * that desktop PowerPoint renders as blank slides. Rebuilt here by
+ * downgrading v2 parts, so the fixture always matches the current package
+ * layout in everything the upgrade does not touch.
+ */
+const V1_THEME =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
+  '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Rowboat Navy">' +
+  '<a:themeElements><a:clrScheme name="Navy">' +
+  (
+    ['dk1', 'lt1', 'dk2', 'lt2', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6', 'hlink', 'folHlink'] as const
+  )
+    .map((n) => `<a:${n}><a:srgbClr val="${NAVY.scheme[n]}"/></a:${n}>`)
+    .join('') +
+  '</a:clrScheme><a:fontScheme name="Navy">' +
+  '<a:majorFont><a:latin typeface="Georgia"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>' +
+  '<a:minorFont><a:latin typeface="Arial"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>' +
+  '</a:fontScheme></a:themeElements></a:theme>'
+
+async function buildV1StyleDeck(title: string): Promise<Uint8Array> {
+  const parts = newDeckParts({ title, palette: NAVY, createdAt: '2026-08-07T00:00:00.000Z' })
+  const zip = new JSZip()
+  for (const [p, xml] of parts) {
+    if (p === 'ppt/presProps.xml' || p === 'ppt/viewProps.xml' || p === 'ppt/tableStyles.xml') {
+      continue
+    }
+    let out = xml
+    if (p === '[Content_Types].xml') {
+      out = out.replace(/<Override PartName="\/ppt\/(presProps|viewProps|tableStyles)\.xml"[^>]*\/>/g, '')
+    } else if (p === 'ppt/presentation.xml') {
+      out = out.replace(/<p:defaultTextStyle>[\s\S]*<\/p:defaultTextStyle>/, '')
+    } else if (p === 'ppt/_rels/presentation.xml.rels') {
+      out = out.replace(/<Relationship Id="rId[456]"[^>]*\/>/g, '')
+    } else if (p === 'ppt/theme/theme1.xml') {
+      out = V1_THEME
+    }
+    zip.file(p, out, { createFolders: false })
+  }
+  return zip.generateAsync({ type: 'uint8array' })
+}
+
+async function partsOfZip(bytes: Uint8Array): Promise<Map<string, string>> {
+  const zip = await JSZip.loadAsync(bytes)
+  const out = new Map<string, string>()
+  for (const name of Object.keys(zip.files)) {
+    if (!zip.files[name].dir) out.set(name, await zip.files[name].async('string'))
+  }
+  return out
+}
+
+describe('upgradeGeneratedDeck', () => {
+  it('rebuilds v1 scaffolding into the full PowerPoint-shaped package', async () => {
+    const upgraded = await upgradeGeneratedDeck(await buildV1StyleDeck('Legacy deck'))
+    expect(upgraded).not.toBeNull()
+
+    // The upgraded package passes the same structural bar as a fresh one.
+    const parts = await partsOfZip(upgraded!)
+    validatePackage(parts)
+    const theme = parts.get('ppt/theme/theme1.xml')!
+    expect(theme).toContain('<a:objectDefaults>')
+    expect(theme).toContain(`val="${NAVY.scheme.accent1}"`)
+    expect(theme).toContain('typeface="Georgia"')
+    expect(parts.get('ppt/presentation.xml')).toContain('<p:defaultTextStyle>')
+
+    // Slide content and inherited geometry survive untouched.
+    const deck = await parsePptx(upgraded!)
+    const title = deck.slides[0].shapes[0] as TextShape
+    expect(title.paragraphs[0].runs.map((r) => r.text)).toEqual(['Legacy deck'])
+    expect(title.xfrmEmu).toEqual(TITLE_LAYOUT_RECTS.ctrTitle)
+  })
+
+  it('preserves edits and added slides made to a v1 deck before the upgrade', async () => {
+    // The user's lifecycle: create with v1, type, add a slide, save — THEN open.
+    const deck = await parsePptx(await buildV1StyleDeck('Legacy deck'))
+    const title = deck.slides[0].shapes[0] as TextShape
+    const plan = await planNewSlide(deck, 'ppt/slides/slide1.xml', undefined, [])
+    const edited = await writeDeck(
+      deck,
+      new Map([
+        [
+          'ppt/slides/slide1.xml',
+          [
+            {
+              kind: 'text' as const,
+              nodePath: title.nodePath,
+              original: title.paragraphs,
+              next: [{ srcPara: 0, runs: [{ text: 'kept', srcPara: 0, srcRun: 0 }] }],
+            },
+          ],
+        ],
+      ]),
+      { addSlides: [plan] },
+    )
+
+    const upgraded = await upgradeGeneratedDeck(edited)
+    expect(upgraded).not.toBeNull()
+    // (validatePackage asserts the pristine single-slide shape, so here just
+    // check the support parts landed alongside the preserved second slide.)
+    const parts = await partsOfZip(upgraded!)
+    expect(parts.has('ppt/presProps.xml')).toBe(true)
+    expect(parts.get('[Content_Types].xml')).toContain('/ppt/slides/slide2.xml')
+    const reparsed = await parsePptx(upgraded!)
+    expect(reparsed.slides.map((s) => s.xmlPath)).toEqual([
+      'ppt/slides/slide1.xml',
+      'ppt/slides/slide2.xml',
+    ])
+    expect((reparsed.slides[0].shapes[0] as TextShape).paragraphs[0].runs[0].text).toBe('kept')
+  })
+
+  it('leaves fresh v2 decks and foreign decks alone', async () => {
+    // Fresh v2: nothing to do.
+    expect(await upgradeGeneratedDeck(await newDeckPptx({ title: 'T', palette: NAVY }))).toBeNull()
+    // Idempotent: an upgraded package is a v2 package.
+    const upgraded = await upgradeGeneratedDeck(await buildV1StyleDeck('T'))
+    expect(await upgradeGeneratedDeck(upgraded!)).toBeNull()
+    // Foreign deck (not our theme marker): untouched.
+    const foreign = new JSZip()
+    for (const [p, xml] of newDeckParts({ title: 'T', palette: NAVY })) {
+      foreign.file(p, p === 'ppt/theme/theme1.xml' ? V1_THEME.replace('Rowboat Navy', 'Office Theme') : xml)
+    }
+    expect(await upgradeGeneratedDeck(await foreign.generateAsync({ type: 'uint8array' }))).toBeNull()
   })
 })
