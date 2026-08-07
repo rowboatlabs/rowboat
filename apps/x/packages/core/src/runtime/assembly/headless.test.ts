@@ -158,6 +158,8 @@ class FakeRuntime implements ITurnRuntime {
     async getTurn() {
         return { turnId: TURN_ID, events: this.log };
     }
+
+    async deleteTurn(): Promise<void> {}
 }
 
 const completedOutcome: TurnOutcome = {

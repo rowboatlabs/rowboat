@@ -191,6 +191,12 @@ export class TurnRuntime implements ITurnRuntime {
         return { turnId, events };
     }
 
+    async deleteTurn(turnId: string): Promise<void> {
+        // The lock serializes with any in-flight append; the caller must have
+        // stopped live advances so no new appends start after this.
+        await this.turnRepo.withLock(turnId, () => this.turnRepo.delete(turnId));
+    }
+
     advanceTurn(
         turnId: string,
         input?: TurnExternalInput,

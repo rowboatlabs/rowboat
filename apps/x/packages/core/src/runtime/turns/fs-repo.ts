@@ -122,6 +122,18 @@ export class FSTurnRepo implements ITurnRepo {
         await fs.appendFile(file, payload);
     }
 
+    async delete(turnId: string): Promise<void> {
+        const file = this.filePath(turnId);
+        try {
+            await fs.unlink(file);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                return;
+            }
+            throw error;
+        }
+    }
+
     async withLock<T>(turnId: string, fn: () => Promise<T>): Promise<T> {
         return this.mutex.run(turnId, fn);
     }
