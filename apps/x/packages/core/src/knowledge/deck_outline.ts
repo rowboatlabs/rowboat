@@ -33,22 +33,39 @@ Never return clarifyingQuestions AND slides together. Respond with ONLY a JSON o
   "clarifyingQuestions": string[],       // TURN 1 only, 1-2 questions; OMIT on a full outline
   "slides": [                            // omit / empty on a clarify turn
     {
-      "layout": "title" | "title-body",
-      "heading": string,
-      "bullets": string[],               // OPTIONAL
-      "body": string,                    // OPTIONAL short paragraph, alternative to bullets
+      "layout": "title" | "title-body",  // "title" for the "title" pattern, else "title-body"
+      "pattern": "title" | "bullets" | "two-column" | "big-number" | "quote" | "section" | "closing",
+      "heading": string,                 // every slide has one
+      "bullets": string[],               // 'bullets' pattern (also the title subtitle fallback)
+      "body": string,                    // OPTIONAL short paragraph / subtitle
+      "columns": [ { "heading": string, "lines": string[] } ],  // 'two-column' only (exactly 2)
+      "stat": { "value": string, "caption": string },           // 'big-number' only
+      "quote": { "text": string, "attribution": string },       // 'quote' only
       "speakerNotes": string             // OPTIONAL
     }
   ]
 }
 
-Deck-writing rules (for the full outline):
+Slide patterns — design a VARIED deck, not a wall of bullet lists:
+- "title": the opener. Deck title as heading, subtitle in "body". Always the FIRST slide.
+- "bullets": a heading + 3-5 short bullets. The workhorse, but do not overuse it.
+- "two-column": a heading + a "columns" array of exactly 2 cards, each { heading, lines: 2-4 short lines }. Use for compare/contrast, before/after, pros/cons.
+- "big-number": one headline metric in "stat" { value like "312%", caption }. Use whenever a slide's point IS a number.
+- "quote": a testimonial or key line in "quote" { text, attribution }. Use for customer voice or a memorable statement.
+- "section": a divider that announces a topic shift. Heading + optional "body" tagline. Use between major parts of the deck.
+- "closing": the final slide — recap, thank-you, or call to action. Always the LAST slide.
+
+Pattern rules:
+- The FIRST slide is "title"; the LAST slide is "closing".
+- A deck of 6+ slides MUST use at least THREE different patterns.
+- Insert a "section" slide when the topic shifts to a new part of the story.
+- Use "big-number" when a concrete metric exists; use "quote" when there is a quotable line.
+- Never place two slides with the SAME pattern next to each other — except "bullets", which may repeat.
+
+Deck-writing rules:
 - Punchy, specific headings — a claim or takeaway, not a topic label.
-- At most 3-5 bullets per slide; each one short line, never a wall of text.
-- Prefer bullets; use "body" only for a short narrative moment (or the title slide's subtitle).
-- The FIRST slide must use layout "title": the deck title as its heading, an optional subtitle as "body".
-- The LAST slide is a closing — recap, call to action, or thank-you.
-- Middle slides use layout "title-body".
+- At most 3-5 bullets/lines per slide; each one short, never a wall of text.
+- Set "layout" to "title" only for the "title" pattern; every other pattern uses "title-body".
 - Pick suggestedPalette by subject: "navy" professional/corporate, "warm" human/creative, "mono" minimal/technical.
 - Add speakerNotes (1-3 spoken sentences) only where they add value.`;
 

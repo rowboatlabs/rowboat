@@ -90,6 +90,38 @@ describe('DeckOutline schema', () => {
             expect(deck.DeckOutline.safeParse(outline).success, JSON.stringify(outline)).toBe(false);
         }
     });
+
+    it('accepts every pattern with its pattern-specific payload', () => {
+        const slides: deck.DeckOutlineSlide[] = [
+            { layout: 'title', pattern: 'title', heading: 'Deck', body: 'Subtitle' },
+            { layout: 'title-body', pattern: 'section', heading: 'Part one' },
+            { layout: 'title-body', pattern: 'bullets', heading: 'Facts', bullets: ['a', 'b'] },
+            {
+                layout: 'title-body', pattern: 'two-column', heading: 'Compare',
+                columns: [{ heading: 'L', lines: ['l1'] }, { heading: 'R', lines: ['r1'] }],
+            },
+            { layout: 'title-body', pattern: 'big-number', heading: 'Growth', stat: { value: '312%', caption: 'YoY' } },
+            { layout: 'title-body', pattern: 'quote', heading: 'Voice', quote: { text: 'Wow.', attribution: 'A user' } },
+            { layout: 'title-body', pattern: 'closing', heading: 'Thanks' },
+        ];
+        expect(deck.DeckOutline.safeParse({ ...GOOD_OUTLINE, slides }).success).toBe(true);
+    });
+
+    it('rejects unknown patterns and malformed pattern payloads', () => {
+        const bad: unknown[] = [
+            // Unknown pattern value.
+            { ...GOOD_OUTLINE, slides: [{ layout: 'title-body', pattern: 'timeline', heading: 'X' }] },
+            // columns missing its required lines array.
+            { ...GOOD_OUTLINE, slides: [{ layout: 'title-body', pattern: 'two-column', heading: 'X', columns: [{ heading: 'L' }] }] },
+            // stat missing caption.
+            { ...GOOD_OUTLINE, slides: [{ layout: 'title-body', pattern: 'big-number', heading: 'X', stat: { value: '9x' } }] },
+            // quote missing text.
+            { ...GOOD_OUTLINE, slides: [{ layout: 'title-body', pattern: 'quote', heading: 'X', quote: { attribution: 'A' } }] },
+        ];
+        for (const outline of bad) {
+            expect(deck.DeckOutline.safeParse(outline).success, JSON.stringify(outline)).toBe(false);
+        }
+    });
 });
 
 describe('generateDeckOutline', () => {

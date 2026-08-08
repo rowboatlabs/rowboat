@@ -3,9 +3,34 @@ import type { deck as deckShared } from '@x/shared'
 import { parsePptx } from './parse'
 import { DECK_PALETTES, BODY_LAYOUT_RECTS, TITLE_LAYOUT_RECTS } from './new-deck'
 import { synthesizeDeckFromOutline } from './generate'
-import type { TextShape } from './types'
+import type { Shape, TextShape } from './types'
 
 const NAVY = DECK_PALETTES[0]
+
+/** The solid fill hex a shape resolves to, or undefined for none/unfilled. */
+function fillHex(shape: Shape): string | undefined {
+  const fill = shape.visual?.fill
+  return fill?.kind === 'solid' ? fill.hex : undefined
+}
+
+/** All run text across a slide's shapes, concatenated (for presence checks). */
+function slideText(shapes: readonly Shape[]): string {
+  return shapes
+    .map((s) => (s.type === 'text' ? (s as TextShape).paragraphs.map((p) => p.runs.map((r) => r.text).join('')).join('\n') : ''))
+    .join('\n')
+}
+
+/** A one-slide-per-pattern outline: title opener + the pattern under test. */
+async function renderPattern(slide: deckShared.DeckOutlineSlide) {
+  const outline: deckShared.DeckOutline = {
+    title: 'Deck',
+    suggestedPalette: 'navy',
+    slides: [{ layout: 'title', pattern: 'title', heading: 'Deck' }, slide],
+  }
+  const { bytes } = await synthesizeDeckFromOutline(outline, NAVY)
+  const deck = await parsePptx(bytes)
+  return deck.slides[1]
+}
 
 const originalCreate = URL.createObjectURL
 const originalRevoke = URL.revokeObjectURL
@@ -108,5 +133,157 @@ describe('synthesizeDeckFromOutline', () => {
   it('throws (writing nothing) when the outline has no slides', async () => {
     const empty = { title: 'T', suggestedPalette: 'navy', slides: [] } as unknown as deckShared.DeckOutline
     await expect(synthesizeDeckFromOutline(empty, NAVY)).rejects.toThrow(/no slides/)
+  })
+})
+
+describe('slide patterns', () => {
+  it('two-column: heading textbox + two accent-tinted cards, each with its text', async () => {
+    const slide = await renderPattern({
+      layout: 'title-body',
+      pattern: 'two-column',
+      heading: 'Wins and risks',
+      columns: [
+        { heading: 'Wins', lines: ['40% faster', 'Churn flat'] },
+        { heading: 'Risks', lines: ['Hiring', 'Infra cost'] },
+      ],
+    })
+    // heading + 2 card backgrounds + 2 card text boxes.
+    expect(slide.shapes).toHaveLength(5)
+    // The two card backgrounds are solid-filled (accent tints); text boxes are not.
+    const filled = slide.shapes.filter((s) => fillHex(s) !== undefined)
+    expect(filled).toHaveLength(2)
+    const text = slideText(slide.shapes)
+    for (const t of ['Wins and risks', 'Wins', '40% faster', 'Risks', 'Infra cost']) {
+      expect(text).toContain(t)
+    }
+  })
+
+  it('big-number: the stat value and caption render, unfilled', async () => {
+    const slide = await renderPattern({
+      layout: 'title-body',
+      pattern: 'big-number',
+      heading: 'Growth',
+      stat: { value: '312%', caption: 'YoY revenue growth' },
+      bullets: ['Driven by enterprise'],
+    })
+    // eyebrow + stat + caption + support.
+    expect(slide.shapes).toHaveLength(4)
+    expect(slide.shapes.every((s) => fillHex(s) === undefined)).toBe(true)
+    const text = slideText(slide.shapes)
+    expect(text).toContain('312%')
+    expect(text).toContain('YoY revenue growth')
+    expect(text).toContain('Driven by enterprise')
+  })
+
+  it('quote: a tinted panel behind a centered quote and attribution', async () => {
+    const slide = await renderPattern({
+      layout: 'title-body',
+      pattern: 'quote',
+      heading: 'Voice of the customer',
+      quote: { text: 'This changed how our team ships.', attribution: 'VP Eng, Acme' },
+    })
+    // panel + quote textbox.
+    expect(slide.shapes).toHaveLength(2)
+    expect(slide.shapes.filter((s) => fillHex(s) !== undefined)).toHaveLength(1)
+    const text = slideText(slide.shapes)
+    expect(text).toContain('This changed how our team ships.')
+    expect(text).toContain('VP Eng, Acme')
+  })
+
+  it('section: full-bleed accent1 background, accent2 underline, light heading', async () => {
+    const slide = await renderPattern({
+      layout: 'title-body',
+      pattern: 'section',
+      heading: 'Where we are',
+      body: 'The story so far',
+    })
+    // background + underline + heading.
+    expect(slide.shapes).toHaveLength(3)
+    const fills = slide.shapes.map(fillHex).filter(Boolean)
+    // Background resolves to accent1 exactly; the bar to accent2 exactly.
+    expect(fills).toContain(NAVY.scheme.accent1)
+    expect(fills).toContain(NAVY.scheme.accent2)
+    expect(slideText(slide.shapes)).toContain('Where we are')
+  })
+
+  it('closing: an accent1 bar, heading and a line', async () => {
+    const slide = await renderPattern({
+      layout: 'title-body',
+      pattern: 'closing',
+      heading: 'Thank you',
+      body: 'Questions? hi@co.com',
+    })
+    // bar + heading + line.
+    expect(slide.shapes).toHaveLength(3)
+    expect(slide.shapes.map(fillHex)).toContain(NAVY.scheme.accent1)
+    const text = slideText(slide.shapes)
+    expect(text).toContain('Thank you')
+    expect(text).toContain('Questions? hi@co.com')
+  })
+
+  it('title (non-first): a centered heading and an accent bar', async () => {
+    const slide = await renderPattern({
+      layout: 'title',
+      pattern: 'title',
+      heading: 'Part Two',
+      body: 'The sequel',
+    })
+    expect(slide.shapes).toHaveLength(2)
+    expect(slide.shapes.map(fillHex)).toContain(NAVY.scheme.accent1)
+    expect(slideText(slide.shapes)).toContain('Part Two')
+  })
+
+  it('bullets: caps at five paragraphs in the body placeholder', async () => {
+    const slide = await renderPattern({
+      layout: 'title-body',
+      pattern: 'bullets',
+      heading: 'Seven things',
+      bullets: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+    })
+    const body = slide.shapes[1] as TextShape
+    expect(body.paragraphs.map((p) => p.runs.map((r) => r.text).join(''))).toEqual(['a', 'b', 'c', 'd', 'e'])
+  })
+
+  it('composes a mixed-pattern deck in one writeDeck', async () => {
+    const outline: deckShared.DeckOutline = {
+      title: 'Everything',
+      suggestedPalette: 'navy',
+      slides: [
+        { layout: 'title', pattern: 'title', heading: 'Everything', body: 'A tour' },
+        { layout: 'title-body', pattern: 'section', heading: 'Part one' },
+        { layout: 'title-body', pattern: 'bullets', heading: 'Facts', bullets: ['x', 'y'] },
+        { layout: 'title-body', pattern: 'two-column', heading: 'Sides', columns: [
+          { heading: 'L', lines: ['l1'] }, { heading: 'R', lines: ['r1'] },
+        ] },
+        { layout: 'title-body', pattern: 'big-number', heading: 'Metric', stat: { value: '9x', caption: 'faster' } },
+        { layout: 'title-body', pattern: 'quote', heading: 'Voice', quote: { text: 'Wow.', attribution: 'A user' } },
+        { layout: 'title-body', pattern: 'closing', heading: 'Fin' },
+      ],
+    }
+    const { bytes, slideCount } = await synthesizeDeckFromOutline(outline, NAVY)
+    expect(slideCount).toBe(7)
+    const deck = await parsePptx(bytes)
+    expect(deck.slides).toHaveLength(7)
+    // Spot-check that distinctive patterns landed in order.
+    expect(slideText(deck.slides[1].shapes)).toContain('Part one')
+    expect(slideText(deck.slides[4].shapes)).toContain('9x')
+    expect(slideText(deck.slides[5].shapes)).toContain('Wow.')
+    expect(slideText(deck.slides[6].shapes)).toContain('Fin')
+  })
+
+  it('falls back to bullets for a missing or unknown pattern', async () => {
+    // Missing pattern on a title-body slide → bullets placeholders.
+    const missing = await renderPattern({ layout: 'title-body', heading: 'No pattern', bullets: ['one', 'two'] })
+    expect((missing.shapes[1] as TextShape).paragraphs.map((p) => p.runs.map((r) => r.text).join(''))).toEqual(['one', 'two'])
+
+    // A future/unknown pattern value → also bullets (forward compatibility).
+    const unknown = await renderPattern({
+      layout: 'title-body',
+      pattern: 'timeline' as deckShared.DeckSlidePattern,
+      heading: 'Future',
+      bullets: ['later'],
+    })
+    expect(slideText(unknown.shapes)).toContain('Future')
+    expect(slideText(unknown.shapes)).toContain('later')
   })
 })
