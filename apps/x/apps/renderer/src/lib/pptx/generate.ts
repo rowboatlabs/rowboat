@@ -26,7 +26,7 @@ import { parseAddedSlide, parsePptx } from './parse'
 import { planNewSlide } from './add-slide'
 import { writeDeck, type NewSlidePart, type SlideEdit, type EditedParagraph } from './serialize'
 import { newDeckPptx, type DeckPalette } from './new-deck'
-import type { Slide, TextShape } from './types'
+import type { Slide, SlideDeck, TextShape } from './types'
 
 type DeckOutline = deckShared.DeckOutline
 type DeckOutlineSlide = deckShared.DeckOutlineSlide
@@ -580,4 +580,74 @@ export async function synthesizeDeckFromOutline(
     slideCount: outline.slides.length,
     droppedSpeakerNotes: outline.slides.some((s) => Boolean(s.speakerNotes?.trim())),
   }
+}
+
+// ------------------------------------------------- single-slide synthesis
+
+/** A placeholder shape with baked plain text (inherits layout/master style). */
+function bakedPlaceholderSp(id: number, name: string, phAttrs: string, texts: string[]): string {
+  const paras =
+    texts.length > 0
+      ? texts.map((t) => `<a:p><a:r><a:t>${esc(t)}</a:t></a:r></a:p>`).join('')
+      : '<a:p><a:endParaRPr lang="en-US"/></a:p>'
+  return (
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${escAttr(name)}"/>` +
+    '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>' +
+    `<p:nvPr><p:ph ${phAttrs}/></p:nvPr></p:nvSpPr><p:spPr/>` +
+    `<p:txBody><a:bodyPr/><a:lstStyle/>${paras}</p:txBody></p:sp>`
+  )
+}
+
+/**
+ * A self-contained 'bullets' slide: heading + up-to-5 bullets baked into the
+ * title/body placeholders, so the bullets inherit the master's bullet glyphs
+ * and the slide needs no separate text edits.
+ */
+function authorBulletsSlide(slide: DeckOutlineSlide): string {
+  const heading = trimmed(slide.heading)
+  const titleSp = bakedPlaceholderSp(2, 'Title 1', 'type="title"', heading ? [heading] : [])
+  const bodySp = bakedPlaceholderSp(3, 'Content Placeholder 2', 'type="body" idx="1"', fallbackLines(slide, 5))
+  return slideEnvelope(titleSp + bodySp)
+}
+
+/**
+ * Synthesizes ONE slide as a self-contained NewSlidePart for insertion into an
+ * existing deck via the edit set. Every pattern bakes its own text, so no
+ * separate shape edits are needed and the inserted slide is a single undoable
+ * added slide. Colours are theme tokens, so the slide inherits the deck's
+ * current theme — no palette argument needed.
+ */
+export async function synthesizeSlidePart(
+  base: SlideDeck,
+  outlineSlide: DeckOutlineSlide,
+  anchorPath: string,
+  usedPaths: readonly string[],
+): Promise<NewSlidePart> {
+  shapeIdCounter = 2
+  const pattern = resolvePattern(outlineSlide)
+  const layoutPart = pattern === 'title' ? LAYOUT_TITLE : LAYOUT_BODY
+  const plan = await planNewSlide(base, anchorPath, relsForLayout(layoutPart), usedPaths)
+  const author = AUTHORED[pattern]
+  const xml = author ? author(outlineSlide) : authorBulletsSlide(outlineSlide)
+  return { ...plan, xml }
+}
+
+/**
+ * Extracts the deck context single-slide generation reasons about: the deck
+ * title plus, for each slide, its heading (first text line) and the remaining
+ * text lines as bullets.
+ */
+export function buildDeckContext(deck: SlideDeck, title: string): deckShared.DeckContext {
+  const slides = deck.slides.map((s) => {
+    const lines: string[] = []
+    for (const shape of s.shapes) {
+      if (shape.type !== 'text') continue
+      for (const para of (shape as TextShape).paragraphs) {
+        const line = para.runs.map((r) => r.text).join('').trim()
+        if (line) lines.push(line)
+      }
+    }
+    return { heading: lines[0] ?? '', bullets: lines.slice(1) }
+  })
+  return { title, slides }
 }

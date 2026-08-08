@@ -176,3 +176,207 @@ export async function generateDeckOutline(input: GenerateDeckOutlineInput): Prom
 
     throw new DeckOutlineError('The model did not produce a valid deck outline', repaired.issue);
 }
+
+// --------------------------------------------------- single-slide generation
+
+const SLIDE_SYSTEM_PROMPT = `You add ONE slide to an existing presentation.
+
+You are given the deck's title, its current slides (each heading with its bullet text), the position the new slide will be inserted at, and optionally a topic.
+
+Respond with ONLY a JSON object for a SINGLE slide — no prose, no markdown fences — using the same slide shape and patterns as a deck outline:
+{
+  "layout": "title" | "title-body",
+  "pattern": "bullets" | "two-column" | "big-number" | "quote" | "section" | "closing",
+  "heading": string,
+  "bullets": string[],                                    // 'bullets'
+  "body": string,                                         // OPTIONAL short paragraph / subtitle
+  "columns": [ { "heading": string, "lines": string[] } ],// 'two-column' (exactly 2)
+  "stat": { "value": string, "caption": string },         // 'big-number'
+  "quote": { "text": string, "attribution": string },     // 'quote'
+  "speakerNotes": string                                  // OPTIONAL
+}
+
+Rules:
+- Match the deck's existing TONE, DEPTH, and MIX of patterns — do not make this slide far denser or sparser than the rest.
+- Do NOT reuse a heading that already appears in the deck.
+- Pick the pattern that fits: "big-number" for a metric, "quote" for a testimonial, "two-column" for compare/contrast, "section" for a topic shift, "bullets" for a list, "closing" only if this is the deck's end.
+- Punchy heading (a claim, not a topic label); at most 3-5 short bullets/lines.
+- Set "layout" to "title" only for the "title" pattern; every other pattern uses "title-body".
+- If a topic is given, write that slide. If NO topic is given, SUGGEST the single slide that best fills a gap in the current flow at the insert position.`;
+
+function buildSlideUserPrompt(input: deck.GenerateSlideRequest): string {
+    const { deckContext, topic, position } = input;
+    const lines = [`Deck title: ${deckContext.title || '(untitled)'}`, '', 'Current slides:'];
+    if (deckContext.slides.length === 0) {
+        lines.push('(none yet)');
+    } else {
+        deckContext.slides.forEach((s, i) => {
+            const bullets = s.bullets.length > 0 ? ` — ${s.bullets.join('; ')}` : '';
+            lines.push(`${i + 1}. ${s.heading || '(no heading)'}${bullets}`);
+        });
+    }
+    lines.push('', `Insert the new slide at position ${position + 1} of ${deckContext.slides.length + 1}.`);
+    if (topic && topic.trim()) {
+        lines.push('', `Topic for the new slide: ${topic.trim()}`);
+    } else {
+        lines.push('', 'No topic was given — suggest the single slide that best fills a gap in the flow at this position.');
+    }
+    return lines.join('\n');
+}
+
+function parseSlide(raw: string): { slide: deck.DeckOutlineSlide } | { issue: string } {
+    let data: unknown;
+    try {
+        data = JSON.parse(stripCodeFences(raw));
+    } catch (err) {
+        return { issue: `not valid JSON (${err instanceof Error ? err.message : String(err)})` };
+    }
+    const parsed = deck.DeckOutlineSlide.safeParse(data);
+    if (!parsed.success) {
+        return {
+            issue: parsed.error.issues
+                .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+                .join('; '),
+        };
+    }
+    return { slide: parsed.data };
+}
+
+/**
+ * Generates one slide to insert into an existing deck. Same model plumbing and
+ * one-repair-then-typed-error contract as generateDeckOutline; validates the
+ * result against the single-slide schema so a malformed slide is a failure,
+ * never partially returned.
+ */
+export async function generateSlide(input: deck.GenerateSlideRequest): Promise<deck.DeckOutlineSlide> {
+    const selection = await getDefaultModelAndProvider();
+    const providerConfig = await resolveProviderConfig(selection.provider);
+    const model = createLanguageModel(providerConfig, selection.model);
+    const reasoning = await directCallReasoningOptions(providerConfig.flavor, selection.model, selection.effort);
+
+    const call = async (prompt: string): Promise<string> => {
+        const result = await withUseCase({ useCase: 'app_llm_generate', subUseCase: 'deck_slide' }, () => generateText({
+            model,
+            instructions: SLIDE_SYSTEM_PROMPT,
+            prompt,
+            ...reasoning,
+        }));
+        captureLlmUsage({
+            useCase: 'app_llm_generate',
+            subUseCase: 'deck_slide',
+            model: selection.model,
+            provider: selection.provider,
+            usage: result.usage,
+        });
+        return result.text;
+    };
+
+    const userPrompt = buildSlideUserPrompt(input);
+    const first = await call(userPrompt);
+    const attempt = parseSlide(first);
+    if ('slide' in attempt) return attempt.slide;
+
+    const repairPrompt = [
+        userPrompt,
+        '',
+        'Your previous response was not a valid slide JSON object.',
+        `Problems: ${attempt.issue}`,
+        '',
+        'Your previous response:',
+        first.trim(),
+        '',
+        'Respond again with ONLY the corrected JSON object for a single slide.',
+    ].join('\n');
+    const second = await call(repairPrompt);
+    const repaired = parseSlide(second);
+    if ('slide' in repaired) return repaired.slide;
+
+    throw new DeckOutlineError('The model did not produce a valid slide', repaired.issue);
+}
+
+// ------------------------------------------------------ single-slide editing
+
+const SLIDE_EDIT_SYSTEM_PROMPT = `You edit ONE existing slide of a presentation.
+
+You are given the deck's title and slide headings for context, the current slide as a JSON object (its pattern and full content), and an instruction.
+
+Respond with ONLY a JSON object — no prose, no markdown fences — for the slide AFTER the edit, in the same shape:
+{
+  "layout": "title" | "title-body",
+  "pattern": "title" | "bullets" | "two-column" | "big-number" | "quote" | "section" | "closing",
+  "heading": string,
+  "bullets": string[],                                    // 'bullets'
+  "body": string,                                         // OPTIONAL short paragraph / subtitle
+  "columns": [ { "heading": string, "lines": string[] } ],// 'two-column' (exactly 2)
+  "stat": { "value": string, "caption": string },         // 'big-number'
+  "quote": { "text": string, "attribution": string },     // 'quote'
+  "speakerNotes": string                                  // OPTIONAL
+}
+
+Rules:
+- Apply the instruction FAITHFULLY, and change ONLY what it asks for. Everything the instruction does not touch must come back verbatim.
+- Keep the slide's current "pattern" and "layout" unless the instruction clearly implies a different one (e.g. "turn this into a quote").
+- Preserve the slide's tone and depth; do not expand or trim content that was not mentioned.
+- Keep the same fields populated: if the slide has a stat, return a stat; if it has columns, return the same number of columns — unless the instruction says otherwise.`;
+
+function buildEditSlideUserPrompt(input: deck.EditSlideRequest): string {
+    const { deckContext, slide, instruction } = input;
+    const lines = [`Deck title: ${deckContext.title || '(untitled)'}`];
+    if (deckContext.slides.length > 0) {
+        lines.push('Slide headings: ' + deckContext.slides.map((s, i) => `${i + 1}. ${s.heading || '(none)'}`).join(' | '));
+    }
+    lines.push('', 'Current slide:', JSON.stringify(slide));
+    lines.push('', `Instruction: ${instruction.trim()}`);
+    return lines.join('\n');
+}
+
+/**
+ * Applies an instruction to one slide. Same plumbing and one-repair contract
+ * as generateSlide; the response is the full slide after the edit, so invalid
+ * output is a failure — never a partial slide.
+ */
+export async function editSlide(input: deck.EditSlideRequest): Promise<deck.DeckOutlineSlide> {
+    const selection = await getDefaultModelAndProvider();
+    const providerConfig = await resolveProviderConfig(selection.provider);
+    const model = createLanguageModel(providerConfig, selection.model);
+    const reasoning = await directCallReasoningOptions(providerConfig.flavor, selection.model, selection.effort);
+
+    const call = async (prompt: string): Promise<string> => {
+        const result = await withUseCase({ useCase: 'app_llm_generate', subUseCase: 'deck_slide_edit' }, () => generateText({
+            model,
+            instructions: SLIDE_EDIT_SYSTEM_PROMPT,
+            prompt,
+            ...reasoning,
+        }));
+        captureLlmUsage({
+            useCase: 'app_llm_generate',
+            subUseCase: 'deck_slide_edit',
+            model: selection.model,
+            provider: selection.provider,
+            usage: result.usage,
+        });
+        return result.text;
+    };
+
+    const userPrompt = buildEditSlideUserPrompt(input);
+    const first = await call(userPrompt);
+    const attempt = parseSlide(first);
+    if ('slide' in attempt) return attempt.slide;
+
+    const repairPrompt = [
+        userPrompt,
+        '',
+        'Your previous response was not a valid slide JSON object.',
+        `Problems: ${attempt.issue}`,
+        '',
+        'Your previous response:',
+        first.trim(),
+        '',
+        'Respond again with ONLY the corrected JSON object for the edited slide.',
+    ].join('\n');
+    const second = await call(repairPrompt);
+    const repaired = parseSlide(second);
+    if ('slide' in repaired) return repaired.slide;
+
+    throw new DeckOutlineError('The model did not produce a valid edited slide', repaired.issue);
+}

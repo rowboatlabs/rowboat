@@ -91,6 +91,37 @@ export const DeckOutline = z.object({
 });
 export type DeckOutline = z.infer<typeof DeckOutline>;
 
+/** One slide as the deck-context sent to single-slide generation. */
+export const DeckContextSlide = z.object({
+    heading: z.string(),
+    bullets: z.array(z.string()),
+});
+export type DeckContextSlide = z.infer<typeof DeckContextSlide>;
+
+/** The deck the model reasons about when generating one more slide. */
+export const DeckContext = z.object({
+    title: z.string(),
+    slides: z.array(DeckContextSlide),
+});
+export type DeckContext = z.infer<typeof DeckContext>;
+
+export const GenerateSlideRequest = z.object({
+    deckContext: DeckContext,
+    /** What the slide should be about; when absent the model suggests one. */
+    topic: z.string().optional(),
+    /** 0-based insert index (0 = before the first slide, N = after the last). */
+    position: z.number().int().min(0),
+});
+export type GenerateSlideRequest = z.infer<typeof GenerateSlideRequest>;
+
+export const EditSlideRequest = z.object({
+    /** The slide as it currently is, in outline form (pattern + content). */
+    slide: DeckOutlineSlide,
+    instruction: z.string().min(1),
+    deckContext: DeckContext,
+});
+export type EditSlideRequest = z.infer<typeof EditSlideRequest>;
+
 export const GenerateDeckOutlineRequest = z.object({
     prompt: z.string().min(1),
     slideCount: z.number().int().min(1).max(30).optional(),

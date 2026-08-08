@@ -14,6 +14,7 @@ import {
   Loader2Icon,
   PlusIcon,
   PresentationIcon,
+  SparklesIcon,
   Trash2Icon,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -31,7 +32,13 @@ import { disposeDeck, parseAddedSlide, parsePptx } from '@/lib/pptx/parse'
 import { upgradeGeneratedDeck, DECK_PALETTES } from '@/lib/pptx/new-deck'
 import { buildThemeXml, resolveThemePath } from '@/lib/pptx/restyle'
 import { planDuplicateSlide, planNewSlide, readSlideRels } from '@/lib/pptx/add-slide'
+import { buildDeckContext, synthesizeSlidePart } from '@/lib/pptx/generate'
+import { extractOutlineSlide, linesToEditedParagraphs, planSlideEdit } from '@/components/pptx/edit-slide'
+import { humanizeModelError } from '@/lib/billing-error'
 import { isLinePreset } from '@/lib/pptx/geometry'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import type { NewShapeSpec } from '@/lib/pptx/shape-xml'
 import { writeDeck, type EditedParagraph, type RunFormatOverrides } from '@/lib/pptx/serialize'
 import type {
@@ -394,6 +401,13 @@ export function PptxEditor({ path }: PptxEditorProps) {
     () => (baseDeck ? applyEditSet(baseDeck, editSet) : null),
     [baseDeck, editSet],
   )
+  // The rendered deck, held in a ref so async handlers (slide generation) read
+  // the current one without re-subscribing.
+  const deckRef = useRef<SlideDeck | null>(null)
+  useEffect(() => {
+    deckRef.current = deck
+  }, [deck])
+
   // Deleting slides shrinks the rendered deck, and undo/redo can grow it back;
   // clamp rather than track so a stale index can never render a blank pane.
   const slideCount = deck?.slides.length ?? 0
@@ -956,6 +970,137 @@ export function PptxEditor({ path }: PptxEditorProps) {
   }, [slide, currentIndex, pushEdits])
 
   /**
+   * Generate one slide with AI and insert it after `afterIndex` (−1 = append at
+   * the very front is not used; the rail passes a real index or the last one).
+   * Runs the model, synthesizes the slide with the G2 pattern functions, and
+   * inserts it through the SAME edit-set path as Add Slide — so it autosaves,
+   * is a single undo, and is deletable/duplicable/reorderable. On any failure
+   * it returns `{ error }` and leaves the edit set untouched (nothing partial).
+   */
+  const generateSlideAfter = useCallback(
+    async (afterIndex: number, topic: string | null): Promise<{ error?: string }> => {
+      const base = baseDeckRef.current
+      const rendered = deckRef.current
+      if (!base || !rendered) return { error: 'presentation is not loaded' }
+      const anchor = rendered.slides[afterIndex]
+      if (!anchor) return { error: 'could not find the slide to insert after' }
+      try {
+        const res = await window.ipc.invoke('deck:generateSlide', {
+          deckContext: buildDeckContext(rendered, displayName(path)),
+          topic: topic ?? undefined,
+          position: afterIndex + 1,
+        })
+        if (res.error || !res.slide) return { error: res.error ?? 'the model did not return a slide' }
+        // Synthesize + parse BEFORE any state change, so a throw here can never
+        // leave a half-inserted slide.
+        const cur = editSetRef.current
+        const part = await synthesizeSlidePart(
+          base,
+          res.slide,
+          anchor.xmlPath,
+          cur.addedSlides.map((a) => a.path),
+        )
+        const parsed = await parseAddedSlide(base, part.path, part.xml, part.relsXml)
+        pushEdits(withSlideAdded(editSetRef.current, { ...part, slide: parsed }))
+        setSelectedKey(null)
+        setEditingKey(null)
+        setActiveIndex(afterIndex + 1)
+        return {}
+      } catch (err) {
+        console.error('Failed to generate slide:', err)
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+    [path, pushEdits],
+  )
+
+  /**
+   * AI edit of one existing slide. Extracts the slide in outline form, asks the
+   * model to apply `instruction`, then lands the result through the edit set:
+   * text edits when only text changed; an in-place content replacement (remove
+   * + re-synthesize at the same position, same slide count) when the pattern
+   * or slot structure changed. Either way ONE pushEdits — a single undo. All
+   * model/synthesis work happens before any state change, so failure applies
+   * nothing.
+   */
+  const aiEditSlide = useCallback(
+    async (index: number, instruction: string): Promise<{ error?: string }> => {
+      const base = baseDeckRef.current
+      const rendered = deckRef.current
+      if (!base || !rendered) return { error: 'presentation is not loaded' }
+      const target = rendered.slides[index]
+      if (!target) return { error: 'could not find the slide to edit' }
+      try {
+        const { pattern, outline } = extractOutlineSlide(target)
+        const res = await window.ipc.invoke('deck:editSlide', {
+          slide: outline,
+          instruction,
+          deckContext: buildDeckContext(rendered, displayName(path)),
+        })
+        if (res.error || !res.slide) return { error: res.error ?? 'the model did not return a slide' }
+
+        const plan = planSlideEdit(target, pattern, res.slide)
+        if (plan.kind === 'noop') return {}
+
+        const cur = editSetRef.current
+        if (plan.kind === 'text') {
+          // Original (as-parsed) paragraphs: base slides from the base deck,
+          // pending added slides from their parsed synthesized XML.
+          const originalParasOf = (nodePath: NodePath): Paragraph[] | undefined => {
+            const fromBase = baseParagraphsOf(base, target.xmlPath, nodePath)
+            if (fromBase) return fromBase
+            const added = cur.addedSlides.find((a) => a.path === target.xmlPath)
+            const shape = added?.slide.shapes.find((s) => s.nodePath.join('.') === nodePath.join('.'))
+            return shape?.type === 'text' ? shape.paragraphs : undefined
+          }
+          let shapes = cur.shapes
+          for (const change of plan.changes) {
+            const original = originalParasOf(change.nodePath)
+            if (!original) return { error: 'could not resolve the slide content to edit' }
+            const key = shapeKeyOf(target.xmlPath, change.nodePath)
+            shapes = withShapeEdit(
+              shapes,
+              key,
+              { slidePath: target.xmlPath, nodePath: change.nodePath, original },
+              (draft) => {
+                draft.original = original
+                draft.text = linesToEditedParagraphs(original, change.lines)
+                // The whole slot is being rewritten; run-level overrides from
+                // earlier edits would land on the wrong runs.
+                draft.formats = undefined
+                draft.aligns = undefined
+              },
+            )
+          }
+          pushEdits({ ...cur, shapes })
+        } else {
+          // In-place replace: new part anchored to the rendered predecessor,
+          // old slide removed with its later anchors re-pointed at the new one.
+          const anchorPath = index > 0 ? rendered.slides[index - 1].xmlPath : ''
+          const part = await synthesizeSlidePart(
+            base,
+            res.slide,
+            anchorPath,
+            cur.addedSlides.map((a) => a.path),
+          )
+          const parsed = await parseAddedSlide(base, part.path, part.xml, part.relsXml)
+          pushEdits(
+            withSlideAdded(withSlideRemoved(cur, target.xmlPath, part.path), { ...part, slide: parsed }),
+          )
+        }
+        setSelectedKey(null)
+        setEditingKey(null)
+        setActiveIndex(index)
+        return {}
+      } catch (err) {
+        console.error('Failed to edit slide:', err)
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+    [path, pushEdits],
+  )
+
+  /**
    * Duplicate: copies the slide AS CURRENTLY SHOWN. The anchor's pending edits
    * are baked into the copy's bytes here, once, so the two slides are fully
    * independent from that point on — later edits address different parts.
@@ -1290,15 +1435,30 @@ export function PptxEditor({ path }: PptxEditorProps) {
               <span className="text-[11px] font-medium text-muted-foreground">
                 Slides · {deck.slides.length}
               </span>
-              <button
-                type="button"
-                aria-label="Add slide"
-                title="Add slide"
-                onClick={() => void addSlide()}
-                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-              >
-                <PlusIcon className="size-3.5" />
-              </button>
+              <div className="flex items-center gap-0.5">
+                <SlideGenPopover
+                  onGenerate={(topic) => generateSlideAfter(deck.slides.length - 1, topic)}
+                  trigger={
+                    <button
+                      type="button"
+                      aria-label="Generate a slide at the end"
+                      title="Generate a slide with AI"
+                      className="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                      <SparklesIcon className="size-3.5" />
+                    </button>
+                  }
+                />
+                <button
+                  type="button"
+                  aria-label="Add slide"
+                  title="Add slide"
+                  onClick={() => void addSlide()}
+                  className="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                >
+                  <PlusIcon className="size-3.5" />
+                </button>
+              </div>
             </div>
             <div
               className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2"
@@ -1333,6 +1493,9 @@ export function PptxEditor({ path }: PptxEditorProps) {
                   }}
                   onDelete={() => requestDeleteSlide(i)}
                   onDuplicate={() => void duplicateSlide(i)}
+                  onGenerateSlide={(topic) => generateSlideAfter(i, topic)}
+                  onEditSlide={(instruction) => aiEditSlide(i, instruction)}
+                  hasContent={slideTitle(s) !== null}
                   onDragStart={() => setDragFrom(i)}
                   onDragEnd={() => {
                     setDragFrom(null)
@@ -1423,6 +1586,12 @@ interface SlideCardProps {
   onSelect: () => void
   onDelete: () => void
   onDuplicate: () => void
+  /** Generate a new slide inserted right after this one. */
+  onGenerateSlide: (topic: string | null) => Promise<{ error?: string }>
+  /** Apply an AI instruction to THIS slide. */
+  onEditSlide: (instruction: string) => Promise<{ error?: string }>
+  /** Default the sparkle popover to Edit when the slide has content. */
+  hasContent: boolean
   onDragStart: () => void
   onDragEnd: () => void
   /** `true` when the pointer is in the card's top half. */
@@ -1441,6 +1610,9 @@ function SlideCard({
   onSelect,
   onDelete,
   onDuplicate,
+  onGenerateSlide,
+  onEditSlide,
+  hasContent,
   onDragStart,
   onDragEnd,
   onDragOverCard,
@@ -1498,6 +1670,22 @@ function SlideCard({
       </button>
       {active && (
         <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">
+          <SlideGenPopover
+            onGenerate={onGenerateSlide}
+            onEdit={onEditSlide}
+            defaultMode={hasContent ? 'edit' : 'new'}
+            trigger={
+              <button
+                type="button"
+                aria-label={`Edit slide ${index + 1} with AI`}
+                title="Edit or add a slide with AI"
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex size-5 items-center justify-center rounded bg-background/90 text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-foreground"
+              >
+                <SparklesIcon className="size-3" />
+              </button>
+            }
+          />
           <button
             type="button"
             aria-label={`Duplicate slide ${index + 1}`}
@@ -1525,6 +1713,170 @@ function SlideCard({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * The sparkle popover. One input, two modes:
+ *  - "Edit this slide" (only when `onEdit` is given): the input is an
+ *    instruction, applied by a single Apply button.
+ *  - "New slide": the input is an optional topic — Suggest (no topic) /
+ *    Generate (with topic).
+ * The action returns `{ error }` on failure, shown inline with Retry; on
+ * success the popover closes. It stays open and busy while the model runs so
+ * a failure is never silent and nothing partial is shown.
+ */
+function SlideGenPopover({
+  onGenerate,
+  onEdit,
+  defaultMode = 'new',
+  trigger,
+}: {
+  onGenerate: (topic: string | null) => Promise<{ error?: string }>
+  /** Present on a slide card; absent on the rail header (nothing to edit). */
+  onEdit?: (instruction: string) => Promise<{ error?: string }>
+  defaultMode?: 'edit' | 'new'
+  trigger: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<'edit' | 'new'>(onEdit ? defaultMode : 'new')
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const lastRef = useRef<{ mode: 'edit' | 'new'; text: string | null } | null>(null)
+
+  const run = useCallback(
+    async (action: { mode: 'edit' | 'new'; text: string | null }) => {
+      lastRef.current = action
+      setBusy(true)
+      setError(null)
+      try {
+        const res =
+          action.mode === 'edit' && onEdit
+            ? await onEdit(action.text ?? '')
+            : await onGenerate(action.text)
+        if (res.error) {
+          setError(humanizeModelError(res.error))
+          return
+        }
+        setOpen(false)
+        setText('')
+      } finally {
+        setBusy(false)
+      }
+    },
+    [onGenerate, onEdit],
+  )
+
+  const submit = useCallback(() => {
+    if (mode === 'edit') {
+      if (text.trim()) void run({ mode: 'edit', text: text.trim() })
+    } else if (text.trim()) {
+      void run({ mode: 'new', text: text.trim() })
+    }
+  }, [mode, text, run])
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setMode(onEdit ? defaultMode : 'new')
+        else {
+          setText('')
+          setError(null)
+        }
+      }}
+    >
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-3">
+        <div className="grid gap-2">
+          {onEdit ? (
+            <div className="flex gap-1 rounded-md bg-muted p-0.5">
+              {(['edit', 'new'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    setMode(m)
+                    setError(null)
+                  }}
+                  aria-pressed={mode === m}
+                  className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                    mode === m ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {m === 'edit' ? 'Edit this slide' : 'New slide after this'}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs font-medium">New slide</div>
+          )}
+          <Input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={
+              mode === 'edit'
+                ? 'What should change? (e.g. change 15% to 200%)'
+                : 'What should this slide cover? (e.g. Competitive landscape)'
+            }
+            disabled={busy}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !busy) {
+                e.preventDefault()
+                submit()
+              }
+            }}
+          />
+          {error && (
+            <div className="flex items-start justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+              {/* Wraps rather than truncates: the actionable half of a mapped
+                  message ("…configure your own API key in Settings") is the
+                  part a single line would cut off. */}
+              <span className="min-w-0">{error}</span>
+              <button
+                type="button"
+                className="shrink-0 font-medium underline"
+                onClick={() => lastRef.current && void run(lastRef.current)}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            {busy ? (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2Icon className="size-3.5 animate-spin" />
+                {mode === 'edit' ? 'Editing…' : 'Generating…'}
+              </span>
+            ) : (
+              <span />
+            )}
+            {mode === 'edit' ? (
+              <Button size="xs" disabled={busy || !text.trim()} onClick={submit}>
+                Apply
+              </Button>
+            ) : (
+              <div className="flex gap-1.5">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void run({ mode: 'new', text: null })}
+                >
+                  Suggest
+                </Button>
+                <Button size="xs" disabled={busy || !text.trim()} onClick={submit}>
+                  Generate
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 

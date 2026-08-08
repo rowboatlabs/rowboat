@@ -21,7 +21,7 @@ vi.mock('../analytics/usage.js', () => ({
     captureLlmUsage: vi.fn(),
 }));
 
-import { DeckOutlineError, generateDeckOutline } from './deck_outline.js';
+import { DeckOutlineError, editSlide, generateDeckOutline, generateSlide } from './deck_outline.js';
 
 const GOOD_OUTLINE: deck.DeckOutline = {
     title: 'Q3 Review',
@@ -199,5 +199,100 @@ describe('generateDeckOutline', () => {
         expect(generateTextMock).toHaveBeenCalledTimes(2);
         const { prompt } = generateTextMock.mock.calls[1][0];
         expect(prompt).toContain('Problems: slides');
+    });
+});
+
+describe('generateSlide', () => {
+    const GOOD_SLIDE: deck.DeckOutlineSlide = {
+        layout: 'title-body',
+        pattern: 'big-number',
+        heading: 'Adoption is accelerating',
+        stat: { value: '312%', caption: 'YoY growth' },
+    };
+    const CONTEXT: deck.DeckContext = {
+        title: 'Q3 Review',
+        slides: [
+            { heading: 'Q3 Review', bullets: ['What we shipped'] },
+            { heading: 'Revenue grew 40%', bullets: ['New pricing', 'Churn flat'] },
+        ],
+    };
+
+    it('returns a validated single slide and feeds the context into the prompt', async () => {
+        respondWith(JSON.stringify(GOOD_SLIDE));
+        const slide = await generateSlide({ deckContext: CONTEXT, topic: 'growth metric', position: 2 });
+        expect(slide).toEqual(GOOD_SLIDE);
+        expect(generateTextMock).toHaveBeenCalledTimes(1);
+        const { prompt } = generateTextMock.mock.calls[0][0];
+        expect(prompt).toContain('Deck title: Q3 Review');
+        expect(prompt).toContain('Revenue grew 40% — New pricing; Churn flat');
+        expect(prompt).toContain('Topic for the new slide: growth metric');
+        expect(prompt).toContain('position 3 of 3');
+    });
+
+    it('asks the model to suggest a slide when no topic is given', async () => {
+        respondWith(JSON.stringify({ ...GOOD_SLIDE, pattern: 'section', heading: 'Where we are next' }));
+        await generateSlide({ deckContext: CONTEXT, position: 1 });
+        const { prompt } = generateTextMock.mock.calls[0][0];
+        expect(prompt).toContain('No topic was given');
+    });
+
+    it('repairs one malformed response then returns the slide', async () => {
+        const bad = JSON.stringify({ ...GOOD_SLIDE, pattern: 'timeline' }); // unknown pattern
+        respondWith(bad, JSON.stringify(GOOD_SLIDE));
+        const slide = await generateSlide({ deckContext: CONTEXT, topic: 't', position: 0 });
+        expect(slide).toEqual(GOOD_SLIDE);
+        expect(generateTextMock).toHaveBeenCalledTimes(2);
+        expect(generateTextMock.mock.calls[1][0].prompt).toContain('single slide');
+    });
+
+    it('throws a typed error when the repair is also malformed', async () => {
+        respondWith('not json', '{"layout":"title-body"}'); // missing heading
+        const pending = generateSlide({ deckContext: CONTEXT, topic: 't', position: 0 });
+        await expect(pending).rejects.toBeInstanceOf(DeckOutlineError);
+        expect(generateTextMock).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('editSlide', () => {
+    const CURRENT: deck.DeckOutlineSlide = {
+        layout: 'title-body',
+        pattern: 'big-number',
+        heading: 'Growth',
+        stat: { value: '15%', caption: 'MoM growth' },
+    };
+    const EDITED: deck.DeckOutlineSlide = {
+        ...CURRENT,
+        stat: { value: '200%', caption: 'MoM growth' },
+    };
+    const CONTEXT: deck.DeckContext = {
+        title: 'Q3 Review',
+        slides: [{ heading: 'Growth', bullets: [] }],
+    };
+
+    it('returns the edited slide and feeds slide + instruction into the prompt', async () => {
+        respondWith(JSON.stringify(EDITED));
+        const slide = await editSlide({ slide: CURRENT, instruction: 'change 15% to 200%', deckContext: CONTEXT });
+        expect(slide).toEqual(EDITED);
+        expect(generateTextMock).toHaveBeenCalledTimes(1);
+        const { prompt } = generateTextMock.mock.calls[0][0];
+        expect(prompt).toContain('Current slide:');
+        expect(prompt).toContain('"15%"');
+        expect(prompt).toContain('Instruction: change 15% to 200%');
+        expect(prompt).toContain('Deck title: Q3 Review');
+    });
+
+    it('repairs one malformed response', async () => {
+        respondWith('```json\n{"nope":true}\n```', JSON.stringify(EDITED));
+        const slide = await editSlide({ slide: CURRENT, instruction: 'i', deckContext: CONTEXT });
+        expect(slide).toEqual(EDITED);
+        expect(generateTextMock).toHaveBeenCalledTimes(2);
+        expect(generateTextMock.mock.calls[1][0].prompt).toContain('Problems:');
+    });
+
+    it('throws a typed error when the repair is also invalid', async () => {
+        respondWith('nope', 'still nope');
+        const pending = editSlide({ slide: CURRENT, instruction: 'i', deckContext: CONTEXT });
+        await expect(pending).rejects.toBeInstanceOf(DeckOutlineError);
+        expect(generateTextMock).toHaveBeenCalledTimes(2);
     });
 });
