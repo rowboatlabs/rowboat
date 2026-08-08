@@ -37,6 +37,7 @@ import {
   type XmlNode,
 } from './parse'
 import { normalizeShapeStyle, shapeStyleSnapshotOf, type ShapeStyleSnapshot } from './geometry'
+import { resolveThemePath } from './restyle'
 import { newPictureXml, newShapeXml, type NewShapeSpec, type XmlPrefixes } from './shape-xml'
 import type { NodePath, Paragraph, Shape, SlideDeck, TextAlign, TextRun } from './types'
 
@@ -1845,6 +1846,15 @@ export interface WriteDeckOptions {
    * positions) and `addSlides[].afterPath` is ignored.
    */
   slideOrder?: readonly string[]
+  /**
+   * Replace the deck's theme part with these bytes. The part swapped is the
+   * one the slide master references (resolved via the master's rels), so it
+   * targets the right part even for imported decks whose theme is named
+   * differently. Exactly that one entry changes; everything else is
+   * byte-identical. Fails closed (throws) when the master's theme reference
+   * can't be resolved unambiguously, so a swap never corrupts a package.
+   */
+  replaceTheme?: { xml: string }
 }
 
 /**
@@ -1913,6 +1923,14 @@ export async function writeDeck(
     deletions.length > 0 || adds.length > 0 || order !== undefined
       ? await packageReplacements(deck.source.zip, deletions, adds, order)
       : new Map<string, string>()
+
+  // Theme swap: replace exactly the part the master references. Resolved here
+  // so the option targets the right part regardless of its name; fail-closed
+  // resolution means an ambiguous package throws before anything is written.
+  if (options?.replaceTheme) {
+    const themePath = await resolveThemePath(deck.source.zip)
+    replacements.set(themePath, options.replaceTheme.xml)
+  }
 
   // Inserted media must be typed: add missing Defaults on top of whatever the
   // slide add/delete path already did to [Content_Types].xml.

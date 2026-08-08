@@ -28,7 +28,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { disposeDeck, parseAddedSlide, parsePptx } from '@/lib/pptx/parse'
-import { upgradeGeneratedDeck } from '@/lib/pptx/new-deck'
+import { upgradeGeneratedDeck, DECK_PALETTES } from '@/lib/pptx/new-deck'
+import { buildThemeXml, resolveThemePath } from '@/lib/pptx/restyle'
 import { planDuplicateSlide, planNewSlide, readSlideRels } from '@/lib/pptx/add-slide'
 import { isLinePreset } from '@/lib/pptx/geometry'
 import type { NewShapeSpec } from '@/lib/pptx/shape-xml'
@@ -144,6 +145,25 @@ function displayName(path: string): string {
   return baseName(path).replace(/\.pptx$/i, '')
 }
 
+/**
+ * One undo/redo step. A plain step is an edit-set snapshot; a theme step also
+ * carries the theme part bytes before/after the swap (edits are unchanged
+ * across it), so undo restores `before` and redo re-applies `after`.
+ */
+interface HistoryEntry {
+  edits: DeckEdits
+  theme?: { before: string; after: string }
+}
+
+/** The built-in palette id a theme's bytes correspond to, or null if custom. */
+function paletteIdOfTheme(themeXml: string | null): string | null {
+  if (!themeXml) return null
+  for (const p of DECK_PALETTES) {
+    if (themeXml === buildThemeXml(p)) return p.id
+  }
+  return null
+}
+
 /** First non-empty line of text on a slide, used to label its rail card. */
 function slideTitle(slide: Slide): string | null {
   for (const shape of slide.shapes) {
@@ -193,9 +213,16 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const [selectionTick, setSelectionTick] = useState(0)
   const [presenting, setPresenting] = useState(false)
 
-  const [history, setHistory] = useState<DeckEdits[]>([EMPTY_DECK_EDITS])
+  // A history entry is an edit-set snapshot; a theme-change entry additionally
+  // carries the theme part bytes before/after the swap, since theme changes are
+  // NOT part of the edit set — undo/redo restore those bytes directly.
+  const [history, setHistory] = useState<HistoryEntry[]>([{ edits: EMPTY_DECK_EDITS }])
   const [histIndex, setHistIndex] = useState(0)
-  const editSet = history[histIndex] ?? EMPTY_DECK_EDITS
+  const editSet = (history[histIndex] ?? { edits: EMPTY_DECK_EDITS }).edits
+  // The theme part currently loaded into baseDeck; null until the deck loads.
+  const [currentThemeXml, setCurrentThemeXml] = useState<string | null>(null)
+  const [themeBusy, setThemeBusy] = useState(false)
+  const activeThemeRef = useRef<string | null>(null)
   // Slide pending deletion, as an index into the RENDERED deck; null = closed.
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null)
   // Rail drag: the card being dragged, and the GAP the drop indicator sits in
@@ -278,7 +305,7 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const pushEdits = useCallback(
     (next: DeckEdits) => {
       setHistory((h) => {
-        const trimmed = [...h.slice(0, histIndexRef.current + 1), next]
+        const trimmed = [...h.slice(0, histIndexRef.current + 1), { edits: next }]
         return trimmed.length > MAX_HISTORY ? trimmed.slice(trimmed.length - MAX_HISTORY) : trimmed
       })
       setHistIndex((i) => Math.min(i + 1, MAX_HISTORY - 1))
@@ -335,6 +362,20 @@ export function PptxEditor({ path }: PptxEditorProps) {
         }
         baseDeckRef.current = parsed
         setBaseDeck(parsed)
+        // Snapshot the theme part so the palette picker can highlight the
+        // current one and undo has an original to restore to. Best-effort:
+        // a deck whose theme can't be resolved just shows no highlight.
+        try {
+          const themePath = await resolveThemePath(parsed.source.zip)
+          const themeXml = await parsed.source.zip.file(themePath)?.async('string')
+          if (themeXml && !cancelled) {
+            activeThemeRef.current = themeXml
+            setCurrentThemeXml(themeXml)
+          }
+        } catch {
+          activeThemeRef.current = null
+          setCurrentThemeXml(null)
+        }
         setLoadState('ready')
       } catch (err) {
         console.error('Failed to open pptx:', err)
@@ -361,30 +402,146 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const selectedShape = findShape(slide, selectedKey)
   const shapeEdit = selectedKey ? editSet.shapes[selectedKey] : undefined
 
+  // -------------------------------------------------------------- theme swap
+
+  /**
+   * Re-parses the base deck with a different theme part and installs it, so the
+   * canvas re-renders in the new palette while the edit set is untouched. Only
+   * the theme part changes (writeDeck replaceTheme); everything else is copied
+   * byte-for-byte. Fails closed inside writeDeck on an ambiguous package.
+   */
+  const swapBaseTheme = useCallback(async (themeXml: string) => {
+    const base = baseDeckRef.current
+    if (!base) return
+    const bytes = await writeDeck(base, new Map(), { replaceTheme: { xml: themeXml } })
+    const nextBase = await parsePptx(bytes)
+    baseDeckRef.current = nextBase
+    setBaseDeck(nextBase)
+    if (base !== nextBase) disposeDeck(base)
+    activeThemeRef.current = themeXml
+    setCurrentThemeXml(themeXml)
+  }, [])
+
+  /** Writes the full deck (current edits + current base theme) to disk now. */
+  const persistFullDeck = useCallback(async () => {
+    const base = baseDeckRef.current
+    if (!base) return
+    const edits = editSetRef.current
+    const bytes = await writeDeck(
+      base,
+      mergeSlideEdits(toSlideEdits(edits.shapes), insertsToSlideEdits(edits.insertedShapes)),
+      { deleteSlides: edits.deletedSlides, addSlides: edits.addedSlides, slideOrder: edits.slideOrder },
+    )
+    await window.ipc.invoke('workspace:writeFile', {
+      path,
+      data: uint8ArrayToBase64(bytes),
+      opts: { encoding: 'base64' },
+    })
+  }, [path])
+
+  const activePaletteId = useMemo(() => paletteIdOfTheme(currentThemeXml), [currentThemeXml])
+
+  /**
+   * Swap the whole deck to a built-in palette. Flushes pending edits first,
+   * swaps the theme in memory, writes the restyled deck, and records a special
+   * history entry so the change is undoable through the same mechanism.
+   */
+  const changeTheme = useCallback(
+    async (paletteId: string) => {
+      const pal = DECK_PALETTES.find((p) => p.id === paletteId)
+      const base = baseDeckRef.current
+      if (!pal || !base || themeBusy) return
+      const before = activeThemeRef.current
+      const after = buildThemeXml(pal)
+      if (after === before) return
+      setThemeBusy(true)
+      try {
+        // Persist any pending edits before we overwrite the file.
+        await savePipeline.flush()
+        // `before` may be null for a deck whose theme we couldn't resolve at
+        // load; recover it now so undo has an exact original to restore.
+        let originalTheme = before
+        if (originalTheme === null) {
+          const themePath = await resolveThemePath(base.source.zip)
+          originalTheme = (await base.source.zip.file(themePath)?.async('string')) ?? null
+        }
+        if (originalTheme === null) throw new Error('could not resolve the deck theme to replace')
+        await swapBaseTheme(after)
+        await persistFullDeck()
+        setHistory((h) => {
+          const trimmed = [
+            ...h.slice(0, histIndexRef.current + 1),
+            { edits: editSetRef.current, theme: { before: originalTheme!, after } },
+          ]
+          return trimmed.length > MAX_HISTORY ? trimmed.slice(trimmed.length - MAX_HISTORY) : trimmed
+        })
+        setHistIndex((i) => Math.min(i + 1, MAX_HISTORY - 1))
+        setSelectedKey(null)
+        setEditingKey(null)
+      } catch (err) {
+        console.error('Failed to change theme:', err)
+        toast.error('Could not change the theme.', {
+          description: err instanceof Error ? err.message : String(err),
+        })
+      } finally {
+        setThemeBusy(false)
+      }
+    },
+    [savePipeline, swapBaseTheme, persistFullDeck, themeBusy],
+  )
+
   // ------------------------------------------------------------ undo / redo
 
   const canUndo = histIndex > 0
   const canRedo = histIndex < history.length - 1
 
   const undo = useCallback(() => {
-    if (histIndexRef.current <= 0) return
-    const next = histIndexRef.current - 1
+    if (histIndexRef.current <= 0 || themeBusy) return
+    const from = histIndexRef.current
+    const next = from - 1
+    const leaving = history[from]
     histIndexRef.current = next
-    editSetRef.current = history[next] ?? EMPTY_DECK_EDITS
+    editSetRef.current = (history[next] ?? { edits: EMPTY_DECK_EDITS }).edits
     setHistIndex(next)
     setEditingKey(null)
-    savePipeline.scheduleSave()
-  }, [history, savePipeline])
+    if (leaving?.theme) {
+      // Undo a theme change: restore the previous theme part and persist.
+      setThemeBusy(true)
+      void (async () => {
+        try {
+          await swapBaseTheme(leaving.theme!.before)
+          await persistFullDeck()
+        } finally {
+          setThemeBusy(false)
+        }
+      })()
+    } else {
+      savePipeline.scheduleSave()
+    }
+  }, [history, savePipeline, swapBaseTheme, persistFullDeck, themeBusy])
 
   const redo = useCallback(() => {
-    if (histIndexRef.current >= history.length - 1) return
+    if (histIndexRef.current >= history.length - 1 || themeBusy) return
     const next = histIndexRef.current + 1
+    const entering = history[next]
     histIndexRef.current = next
-    editSetRef.current = history[next] ?? EMPTY_DECK_EDITS
+    editSetRef.current = (entering ?? { edits: EMPTY_DECK_EDITS }).edits
     setHistIndex(next)
     setEditingKey(null)
-    savePipeline.scheduleSave()
-  }, [history, savePipeline])
+    if (entering?.theme) {
+      setThemeBusy(true)
+      void (async () => {
+        try {
+          await swapBaseTheme(entering.theme!.after)
+          await persistFullDeck()
+        } finally {
+          setThemeBusy(false)
+        }
+      })()
+    } else {
+      savePipeline.scheduleSave()
+    }
+  }, [history, savePipeline, swapBaseTheme, persistFullDeck, themeBusy])
 
   // ----------------------------------------------------------- edit commits
 
@@ -1088,6 +1245,9 @@ export function PptxEditor({ path }: PptxEditorProps) {
           saveStatus={saveStatus}
           onPlay={startPresenting}
           onExport={() => void exportCopy()}
+          paletteId={activePaletteId}
+          onChangeTheme={(id) => void changeTheme(id)}
+          themeBusy={themeBusy}
         />
 
         <EditorToolbar
