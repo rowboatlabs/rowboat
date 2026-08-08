@@ -33,6 +33,14 @@ const GOOD_OUTLINE: deck.DeckOutline = {
     ],
 };
 
+/** A first-turn clarify response: 1-2 questions, no slides. */
+const CLARIFY_OUTLINE: deck.DeckOutline = {
+    title: 'Draft',
+    suggestedPalette: 'navy',
+    clarifyingQuestions: ['Who is the audience?', 'How deep should it go?'],
+    slides: [],
+};
+
 function respondWith(...texts: string[]) {
     for (const text of texts) {
         generateTextMock.mockResolvedValueOnce({ text, usage: {} });
@@ -44,8 +52,30 @@ beforeEach(() => {
 });
 
 describe('DeckOutline schema', () => {
-    it('accepts a good outline', () => {
+    it('accepts a full outline (slides, no questions)', () => {
         expect(deck.DeckOutline.safeParse(GOOD_OUTLINE).success).toBe(true);
+    });
+
+    it('accepts a clarify response (1-2 questions, no slides)', () => {
+        expect(deck.DeckOutline.safeParse(CLARIFY_OUTLINE).success).toBe(true);
+        const oneQ = { ...CLARIFY_OUTLINE, clarifyingQuestions: ['Who is the audience?'] };
+        expect(deck.DeckOutline.safeParse(oneQ).success).toBe(true);
+    });
+
+    it('rejects questions and slides together', () => {
+        const both = { ...GOOD_OUTLINE, clarifyingQuestions: ['Audience?'] };
+        expect(deck.DeckOutline.safeParse(both).success).toBe(false);
+    });
+
+    it('rejects an empty outline with no questions', () => {
+        expect(deck.DeckOutline.safeParse({ ...GOOD_OUTLINE, slides: [] }).success).toBe(false);
+        const emptyQs = { ...CLARIFY_OUTLINE, clarifyingQuestions: [] };
+        expect(deck.DeckOutline.safeParse(emptyQs).success).toBe(false);
+    });
+
+    it('rejects more than 2 clarifying questions', () => {
+        const threeQs = { ...CLARIFY_OUTLINE, clarifyingQuestions: ['A?', 'B?', 'C?'] };
+        expect(deck.DeckOutline.safeParse(threeQs).success).toBe(false);
     });
 
     it('rejects malformed outlines', () => {
@@ -53,7 +83,6 @@ describe('DeckOutline schema', () => {
             { ...GOOD_OUTLINE, title: undefined },
             { ...GOOD_OUTLINE, title: '' },
             { ...GOOD_OUTLINE, suggestedPalette: 'neon' },
-            { ...GOOD_OUTLINE, slides: [] },
             { ...GOOD_OUTLINE, slides: [{ layout: 'two-column', heading: 'X' }] },
             { ...GOOD_OUTLINE, slides: [{ layout: 'title' }] },
         ];
@@ -61,17 +90,21 @@ describe('DeckOutline schema', () => {
             expect(deck.DeckOutline.safeParse(outline).success, JSON.stringify(outline)).toBe(false);
         }
     });
-
-    it('caps clarifyingQuestions at 2', () => {
-        const twoQs = { ...GOOD_OUTLINE, clarifyingQuestions: ['Audience?', 'How long?'] };
-        expect(deck.DeckOutline.safeParse(twoQs).success).toBe(true);
-        const threeQs = { ...GOOD_OUTLINE, clarifyingQuestions: ['A?', 'B?', 'C?'] };
-        expect(deck.DeckOutline.safeParse(threeQs).success).toBe(false);
-    });
 });
 
 describe('generateDeckOutline', () => {
-    it('returns the parsed outline from a valid first response', async () => {
+    it('returns a clarify response (questions, no slides) on the first turn', async () => {
+        respondWith(JSON.stringify(CLARIFY_OUTLINE));
+        const outline = await generateDeckOutline({ prompt: 'a deck about our roadmap' });
+        expect(outline.clarifyingQuestions).toEqual(CLARIFY_OUTLINE.clarifyingQuestions);
+        expect(outline.slides).toEqual([]);
+        expect(generateTextMock).toHaveBeenCalledTimes(1);
+        // The first-turn user prompt asks the model to clarify first.
+        const { prompt } = generateTextMock.mock.calls[0][0];
+        expect(prompt).toContain('TURN 1: clarify first');
+    });
+
+    it('returns the full outline when a fully-specified prompt skips questions', async () => {
         respondWith(JSON.stringify(GOOD_OUTLINE));
         const outline = await generateDeckOutline({ prompt: 'Q3 review deck' });
         expect(outline).toEqual(GOOD_OUTLINE);
@@ -85,7 +118,7 @@ describe('generateDeckOutline', () => {
         await expect(generateDeckOutline({ prompt: 'p' })).resolves.toEqual(GOOD_OUTLINE);
     });
 
-    it('passes slideCount, tone and answers through to the prompt', async () => {
+    it('marks the second turn and passes slideCount, tone and answers through', async () => {
         respondWith(JSON.stringify(GOOD_OUTLINE));
         await generateDeckOutline({
             prompt: 'pitch deck',
@@ -98,6 +131,7 @@ describe('generateDeckOutline', () => {
         expect(prompt).toContain('Tone: playful');
         expect(prompt).toContain('1. Investors');
         expect(prompt).toContain('2. 10 minutes');
+        expect(prompt).toContain('TURN 2');
     });
 
     it('repairs once: invalid first response, valid second', async () => {
@@ -122,12 +156,16 @@ describe('generateDeckOutline', () => {
         expect(generateTextMock).toHaveBeenCalledTimes(2);
     });
 
-    it('does not repair a response that is already valid JSON with 3 clarifying questions', async () => {
-        // Over-limit clarifyingQuestions is a schema violation → repair path.
-        const overLimit = JSON.stringify({ ...GOOD_OUTLINE, clarifyingQuestions: ['A?', 'B?', 'C?'] });
-        respondWith(overLimit, JSON.stringify({ ...GOOD_OUTLINE, clarifyingQuestions: ['A?', 'B?'] }));
+    it('repairs a response that returns questions AND slides together', async () => {
+        // The XOR rule is a schema violation → repair path; the model then
+        // returns a clean clarify response.
+        const both = JSON.stringify({ ...GOOD_OUTLINE, clarifyingQuestions: ['A?', 'B?'] });
+        respondWith(both, JSON.stringify(CLARIFY_OUTLINE));
         const outline = await generateDeckOutline({ prompt: 'p' });
-        expect(outline.clarifyingQuestions).toEqual(['A?', 'B?']);
+        expect(outline.clarifyingQuestions).toEqual(CLARIFY_OUTLINE.clarifyingQuestions);
+        expect(outline.slides).toEqual([]);
         expect(generateTextMock).toHaveBeenCalledTimes(2);
+        const { prompt } = generateTextMock.mock.calls[1][0];
+        expect(prompt).toContain('Problems: slides');
     });
 });

@@ -399,15 +399,23 @@ export function NewPresentationDialog({
   const clarifyBody = (
     <div className="grid gap-4">
       <p className="text-sm text-muted-foreground">
-        A couple of quick questions to sharpen the outline:
+        Before drafting, a couple of quick questions to tailor your deck:
       </p>
       {questions.map((q, i) => (
-        <div key={i} className="grid gap-2">
-          <label className="text-sm font-medium">{q}</label>
+        <div key={i} className="grid gap-1.5">
+          <label htmlFor={`clarify-${i}`} className="text-sm font-medium">{q}</label>
           <Input
+            id={`clarify-${i}`}
             value={answers[i] ?? ''}
+            placeholder="Your answer…"
             onChange={(e) => setAnswers((prev) => prev.map((a, j) => (j === i ? e.target.value : a)))}
             autoFocus={i === 0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !busy && clarifyComplete(questions, answers)) {
+                e.preventDefault()
+                handleClarifyContinue()
+              }
+            }}
           />
         </div>
       ))}
@@ -559,7 +567,9 @@ export function NewPresentationDialog({
               ? 'Creates a blank 16:9 deck and opens it in the editor.'
               : genStep === 'review'
                 ? 'Review and edit the outline. Nothing is saved until you press Create.'
-                : 'Describe your deck and let AI draft an outline you can edit.'}
+                : genStep === 'clarify'
+                  ? 'Answer a couple of quick questions so the outline fits your audience and depth.'
+                  : 'Describe your deck and let AI draft an outline you can edit.'}
           </DialogDescription>
         </DialogHeader>
 

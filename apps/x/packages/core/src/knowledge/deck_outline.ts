@@ -13,14 +13,25 @@ import { withUseCase } from '../analytics/use_case.js';
 // repair attempt (its own output + the validation problems), then the
 // caller sees a typed DeckOutlineError.
 
-const SYSTEM_PROMPT = `You write concise, well-structured presentation outlines.
+const SYSTEM_PROMPT = `You help someone draft a slide deck. You always work in TWO turns:
 
-Respond with ONLY a JSON object — no prose, no markdown fences — of this shape:
+TURN 1 (no answers yet) — CLARIFY FIRST.
+Ask 1-2 short clarifying questions and return NO slides. This is the norm, not the exception: a good deck depends on who it is for and how deep to go, so ask before drafting.
+- Prefer asking about (a) the AUDIENCE and (b) the desired DEPTH or LENGTH.
+- Skip a question only when the prompt ALREADY answers it explicitly; ask about whatever is still unspecified.
+- Only when the prompt is fully specified (audience AND depth/length both clear) may you skip questions entirely and go straight to the full outline in this turn.
+Return: { "title", "suggestedPalette", "clarifyingQuestions": [1-2 short questions], "slides": [] }
+
+TURN 2 (answers provided) — FULL OUTLINE.
+Use the answers to write the complete outline. Return NO clarifyingQuestions.
+Return: { "title", "suggestedPalette", "slides": [ ... ] }
+
+Never return clarifyingQuestions AND slides together. Respond with ONLY a JSON object — no prose, no markdown fences — of this shape:
 {
   "title": string,                       // short deck title
   "suggestedPalette": "navy" | "warm" | "mono",
-  "clarifyingQuestions": string[],       // OPTIONAL, AT MOST 2 — only when the request is genuinely ambiguous; still produce your best outline alongside them
-  "slides": [
+  "clarifyingQuestions": string[],       // TURN 1 only, 1-2 questions; OMIT on a full outline
+  "slides": [                            // omit / empty on a clarify turn
     {
       "layout": "title" | "title-body",
       "heading": string,
@@ -31,7 +42,7 @@ Respond with ONLY a JSON object — no prose, no markdown fences — of this sha
   ]
 }
 
-Deck-writing rules:
+Deck-writing rules (for the full outline):
 - Punchy, specific headings — a claim or takeaway, not a topic label.
 - At most 3-5 bullets per slide; each one short line, never a wall of text.
 - Prefer bullets; use "body" only for a short narrative moment (or the title slide's subtitle).
@@ -83,6 +94,7 @@ function parseOutline(raw: string): { outline: deck.DeckOutline } | { issue: str
 }
 
 function buildUserPrompt(input: GenerateDeckOutlineInput): string {
+    const hasAnswers = Boolean(input.answers && input.answers.length > 0);
     const lines = ['Create a slide deck outline for this request:', '', input.prompt];
     if (input.slideCount) {
         lines.push('', `Target slide count: ${input.slideCount} (including the title and closing slides).`);
@@ -90,9 +102,12 @@ function buildUserPrompt(input: GenerateDeckOutlineInput): string {
     if (input.tone) {
         lines.push('', `Tone: ${input.tone}`);
     }
-    if (input.answers && input.answers.length > 0) {
-        lines.push('', 'Answers to your earlier clarifying questions:');
-        lines.push(...input.answers.map((a, i) => `${i + 1}. ${a}`));
+    if (hasAnswers) {
+        lines.push('', 'Answers to your clarifying questions:');
+        lines.push(...input.answers!.map((a, i) => `${i + 1}. ${a}`));
+        lines.push('', 'This is TURN 2: return the full outline and no clarifyingQuestions.');
+    } else {
+        lines.push('', 'This is TURN 1: clarify first — ask 1-2 questions and return no slides, unless the request already specifies both the audience and the desired depth/length.');
     }
     return lines.join('\n');
 }

@@ -48,14 +48,12 @@ function baseHandlers(outline: deckShared.DeckOutline, outlineOnRetry?: deckShar
   }
 }
 
+// A first-turn clarify response now carries questions and NO slides.
 const CLARIFY_OUTLINE: deckShared.DeckOutline = {
   title: 'Draft',
   suggestedPalette: 'navy',
   clarifyingQuestions: ['Who is the audience?', 'How long is the talk?'],
-  slides: [
-    { layout: 'title', heading: 'Draft' },
-    { layout: 'title-body', heading: 'Point one', bullets: ['a'] },
-  ],
+  slides: [],
 }
 
 const FINAL_OUTLINE: deckShared.DeckOutline = {
