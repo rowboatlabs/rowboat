@@ -129,6 +129,7 @@ import { readPrepNoteForEvent } from '@x/core/dist/knowledge/meeting_prep_brief.
 import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
+import { generateDeckOutline } from '@x/core/dist/knowledge/deck_outline.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
@@ -1219,6 +1220,15 @@ export function setupIpcHandlers() {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to export a copy';
         return { saved: false, error: message };
+      }
+    },
+    'deck:generateOutline': async (_event, args) => {
+      try {
+        const outline = await generateDeckOutline(args);
+        return { outline };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to generate the deck outline';
+        return { error: message };
       }
     },
     'gmail:getImportant': async (_event, args) => {

@@ -28,6 +28,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { disposeDeck, parseAddedSlide, parsePptx } from '@/lib/pptx/parse'
+import { upgradeGeneratedDeck } from '@/lib/pptx/new-deck'
 import { planDuplicateSlide, planNewSlide, readSlideRels } from '@/lib/pptx/add-slide'
 import { isLinePreset } from '@/lib/pptx/geometry'
 import type { NewShapeSpec } from '@/lib/pptx/shape-xml'
@@ -310,7 +311,24 @@ export function PptxEditor({ path }: PptxEditorProps) {
     ;(async () => {
       try {
         const result = await window.ipc.invoke('workspace:readFile', { path, encoding: 'base64' })
-        const parsed = await parsePptx(base64ToUint8Array(result.data))
+        let bytes = base64ToUint8Array(result.data)
+        // Decks created by the first version of the deck generator carry
+        // scaffolding desktop PowerPoint renders as blank slides, and saves
+        // preserve it byte-for-byte — repair the package once, on open.
+        try {
+          const upgraded = await upgradeGeneratedDeck(bytes)
+          if (upgraded && !cancelled) {
+            await window.ipc.invoke('workspace:writeFile', {
+              path,
+              data: uint8ArrayToBase64(upgraded),
+              opts: { encoding: 'base64' },
+            })
+            bytes = upgraded
+          }
+        } catch (err) {
+          console.warn('pptx upgrade check failed; opening as-is:', err)
+        }
+        const parsed = await parsePptx(bytes)
         if (cancelled) {
           disposeDeck(parsed)
           return

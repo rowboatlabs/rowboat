@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
+import { DeckOutline, GenerateDeckOutlineRequest } from './deck.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
@@ -248,6 +249,16 @@ const ipcSchemas = {
   'workspace:didChange': {
     req: WorkspaceChangeEvent,
     res: z.null(),
+  },
+  // One-shot deck outline generation for the AI deck builder. Soft errors,
+  // like workspace:exportCopy: failures come back as { error } rather than a
+  // rejected invoke.
+  'deck:generateOutline': {
+    req: GenerateDeckOutlineRequest,
+    res: z.object({
+      outline: DeckOutline.optional(),
+      error: z.string().optional(),
+    }),
   },
   'gmail:getImportant': {
     req: z.object({
