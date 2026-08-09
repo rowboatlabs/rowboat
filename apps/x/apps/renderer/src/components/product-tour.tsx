@@ -506,6 +506,15 @@ export function ProductTour({
     const entering = enteredStepRef.current !== stepIndex
     let cancelled = false
 
+    // settle() marks the step entered *before* the boat starts rowing, so a
+    // teardown mid-travel would leave the step flagged as already-entered.
+    // The next run then takes the "resize" branch, skips startTravel, and
+    // `arrived` never flips — no bubble, tour stuck. React StrictMode does
+    // exactly this in dev (mount → cleanup → mount), so roll the flag back.
+    const unmarkEntered = () => {
+      if (entering && enteredStepRef.current === stepIndex) enteredStepRef.current = -1
+    }
+
     if (entering && step.navigate) {
       onNavigateRef.current(step.navigate)
     }
@@ -547,6 +556,7 @@ export function ProductTour({
       return () => {
         cancelled = true
         cancelTravel()
+        unmarkEntered()
       }
     }
 
@@ -574,6 +584,7 @@ export function ProductTour({
       cancelled = true
       cancelAnimationFrame(pollRaf)
       cancelTravel()
+      unmarkEntered()
     }
   }, [stepIndex, resizeNonce, goTo, applyZoom, displayedRect, startTravel, cancelTravel, moveMascot])
 
