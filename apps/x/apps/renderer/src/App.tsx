@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { SettingsDialog } from "@/components/settings-dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
@@ -5579,18 +5580,14 @@ function App() {
     })
   }, [])
 
-  // One-time storage-retention notice: shown on the first launch with
+  // One-time storage-retention notice: a modal on the first launch with
   // retention enabled; the actual sweep starts on the NEXT launch so months
   // of history are never deleted before the user has seen this.
+  const [retentionNotice, setRetentionNotice] = useState<{ chatDays: number | null } | null>(null)
+  const [retentionSettingsOpen, setRetentionSettingsOpen] = useState(false)
   useEffect(() => {
     void window.ipc.invoke('retention:consumeFirstRunNotice', null).then(({ show, chatDays }) => {
-      if (!show) return
-      toast('Old chats are now cleaned up automatically', {
-        description: chatDays === null
-          ? 'Old background-task transcripts are deleted to save disk space. Notes and files created by agents are never touched. Adjust this in Settings → Advanced.'
-          : `Chats inactive for ${chatDays}+ days and old background-task transcripts are deleted to save disk space. Notes and files created by agents are never touched. Turn this off in Settings → Advanced.`,
-        duration: 15000,
-      })
+      if (show) setRetentionNotice({ chatDays })
     }).catch(() => { /* settings unavailable — try again next launch */ })
   }, [])
 
@@ -7883,6 +7880,37 @@ function App() {
         open={billingErrorOpen}
         match={billingErrorMatch}
         onOpenChange={setBillingErrorOpen}
+      />
+      {/* One-time storage-retention notice (see retention:consumeFirstRunNotice). */}
+      <Dialog open={retentionNotice !== null} onOpenChange={(open) => { if (!open) setRetentionNotice(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Old chats are cleaned up automatically</DialogTitle>
+            <DialogDescription className="pt-1 leading-relaxed">
+              {retentionNotice?.chatDays != null
+                ? `To save disk space, Rowboat now deletes chats that have been inactive for ${retentionNotice.chatDays}+ days, along with old background-task transcripts.`
+                : 'To save disk space, Rowboat now deletes old background-task transcripts.'}
+              {' '}Notes and files created by agents are never touched. Cleanup starts from the next launch, and you can change or turn this off anytime.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRetentionNotice(null)
+                setRetentionSettingsOpen(true)
+              }}
+            >
+              Open Settings
+            </Button>
+            <Button onClick={() => setRetentionNotice(null)}>Got it</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <SettingsDialog
+        open={retentionSettingsOpen}
+        onOpenChange={setRetentionSettingsOpen}
+        defaultTab="advanced"
       />
       <OnboardingModal
         open={showOnboarding}
