@@ -119,7 +119,8 @@ describe("runRetentionSweep", () => {
         const result = await runRetentionSweep({
             sessions,
             turnsRootDir: path.join(root, "turns"),
-            settings: { ...DEFAULT_RETENTION_SETTINGS, noticeShown: true },
+            // Explicit windows so the assertions don't shift with the defaults.
+            settings: { ...DEFAULT_RETENTION_SETTINGS, chatDays: 30, taskDays: 14, noticeShown: true },
             now: NOW,
         });
 

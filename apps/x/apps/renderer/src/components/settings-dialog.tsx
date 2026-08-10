@@ -1604,7 +1604,7 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
   // Storage retention (auto-delete old chats & task transcripts).
   // chatDays null = never delete chats (transcript cleanup still runs).
   const [retentionEnabled, setRetentionEnabled] = useState(true)
-  const [retentionChatDays, setRetentionChatDays] = useState<number | null>(30)
+  const [retentionChatDays, setRetentionChatDays] = useState<number | null>(60)
 
   useEffect(() => {
     if (!dialogOpen) return

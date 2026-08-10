@@ -43,7 +43,7 @@ export type RetentionSettingsUpdate = z.infer<typeof RetentionSettingsUpdateSche
 
 export const DEFAULT_RETENTION_SETTINGS: RetentionSettings = {
   enabled: true,
-  chatDays: 30,
+  chatDays: 60,
   taskDays: 14,
   noticeShown: false,
 };
