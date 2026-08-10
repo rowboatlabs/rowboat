@@ -1281,6 +1281,27 @@ function PinnedPill({
         </div>
         )}
         <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg bg-neutral-800">
+          <style>{`
+            @keyframes listen-ring {
+              0% { transform: scale(0.72); opacity: 0.9; }
+              100% { transform: scale(1.28); opacity: 0; }
+            }
+          `}</style>
+          {/* Listening halo — same signal as the tucked mascot: while the
+              mic gate is open (right ⌘ held / hands-free), green rings pulse
+              around the head. The corner chip alone is too easy to miss. */}
+          {!state.micMuted && (state.status === 'listening' || state.pttLocked) && (
+            <>
+              <span
+                className="pointer-events-none absolute left-1/2 top-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+                style={{ width: 88, height: 88, marginLeft: -44, marginTop: -44, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
+              />
+              <span
+                className="pointer-events-none absolute left-1/2 top-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+                style={{ width: 88, height: 88, marginLeft: -44, marginTop: -44, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
+              />
+            </>
+          )}
           {/* On a call = hat on (the companion's on-duty signal); thinking
               shows the thought bubbles. */}
           <TalkingHead
@@ -1518,6 +1539,11 @@ function TuckedMascot({
 
   const statusDisplay = state.status ? STATUS_DISPLAY[state.status] : null
 
+  // Mic gate open (holding right ⌘ / the pin, or hands-free lock): the ONE
+  // state the user must never have to squint for — without visible feedback
+  // there is no way to tell a working hold from a dead key hook.
+  const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)
+
   return (
     <div
       className="group relative flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden pb-2"
@@ -1528,6 +1554,10 @@ function TuckedMascot({
           0% { opacity: 0; transform: scale(0.5); }
           100% { opacity: 1; transform: scale(1); }
         }
+        @keyframes listen-ring {
+          0% { transform: scale(0.72); opacity: 0.9; }
+          100% { transform: scale(1.28); opacity: 0; }
+        }
       `}</style>
 
       {/* On duty = cowboy hat on; the controls are enamel pins on the hat
@@ -1537,7 +1567,22 @@ function TuckedMascot({
           hit target that grows on hover. */}
       {/* -mb pulls the caption/chip up under the boat: the SVG box has dead
           space below the ripples that read as a big gap. */}
-      <div className="-mb-4" style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+      <div className="relative -mb-4" style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+        {/* Listening halo: expanding green rings around the head while the
+            mic gate is open. Peripheral-vision feedback — the user is
+            usually looking at their own work, not at the chip's 10px text. */}
+        {micOpen && (
+          <>
+            <span
+              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+              style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
+            />
+            <span
+              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+              style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
+            />
+          </>
+        )}
         <TalkingHead
           // Thinking = thought bubbles (the calm version — rowing on every
           // turn wore thin): status 'thinking' with idle TTS maps to the
@@ -1664,9 +1709,15 @@ function TuckedMascot({
         )}
       </div>
       {/* Pure status line — the CONTROLS are the pins (gold mic = hold to
-          talk, red = stop) and the ✕ (end & close). */}
+          talk, red = stop) and the ✕ (end & close). While the mic gate is
+          open the chip goes loud (green, mic icon): paired with the halo,
+          holding right ⌘ is unmistakably "working". */}
       <div className="flex h-6 items-center">
-        <span className="flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-white shadow-md">
+        <span
+          className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium text-white shadow-md ${
+            micOpen ? 'bg-green-600 text-[11px] font-semibold' : 'bg-black/60 text-[10px]'
+          }`}
+        >
           {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
             <>
               <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
@@ -1674,13 +1725,13 @@ function TuckedMascot({
             </>
           ) : state.pttLocked ? (
             <>
-              <span className="block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-              Hands-free — tap the mic to send
+              <Mic className="h-3 w-3 animate-pulse" />
+              Hands-free — tap ⌘ to send
             </>
           ) : state.status === 'listening' ? (
             <>
-              <span className="block h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-              Release to send
+              <Mic className="h-3 w-3 animate-pulse" />
+              Listening — release to send
             </>
           ) : statusDisplay ? (
             <>
