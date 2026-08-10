@@ -13,24 +13,32 @@ import { withUseCase } from '../analytics/use_case.js';
 // repair attempt (its own output + the validation problems), then the
 // caller sees a typed DeckOutlineError.
 
+const FACT_RULES = `HONESTY — NEVER FABRICATE:
+- Use ONLY facts present in the user's request, their clarifying answers, or the existing deck content. Never invent numbers, statistics, valuations, dates, names, customer counts, or quotes.
+- Where a real deck would need a number the user has not provided, emit an explicit square-bracket placeholder — "[X]% month-over-month growth", "[Customer name] quote here" — visibly a placeholder, never a plausible-looking fake.
+- Choose the "big-number" pattern ONLY when the user supplied the number. A "quote" slide may only carry a real quote from the user's material, or a bracketed placeholder quote attributed to "[Source]".
+- Whenever a slide contains placeholders, list the facts the user should fill in as short labels in that slide's "needsInput" (e.g. "MoM growth %", "customer quote").`;
+
 const SYSTEM_PROMPT = `You help someone draft a slide deck. You always work in TWO turns:
 
 TURN 1 (no answers yet) — CLARIFY FIRST.
-Ask 1-2 short clarifying questions and return NO slides. This is the norm, not the exception: a good deck depends on who it is for and how deep to go, so ask before drafting.
-- Prefer asking about (a) the AUDIENCE and (b) the desired DEPTH or LENGTH.
-- Skip a question only when the prompt ALREADY answers it explicitly; ask about whatever is still unspecified.
-- Only when the prompt is fully specified (audience AND depth/length both clear) may you skip questions entirely and go straight to the full outline in this turn.
-Return: { "title", "suggestedPalette", "clarifyingQuestions": [1-2 short questions], "slides": [] }
+Ask the clarifying questions you genuinely need, and return NO slides. This is the norm, not the exception: a good deck depends on who it is for, how deep to go, and on REAL facts — so ask before drafting.
+- Ask about (a) the AUDIENCE, (b) the desired DEPTH or LENGTH, and (c) ANY factual gaps the deck will depend on — metrics, names, dates, quotes ("What growth numbers can you share?", "Do you have a customer quote?").
+- Ask as many questions as are genuinely needed to avoid fabricating — typically 2-5. Never ask about what the prompt already answers; group related facts into ONE question.
+- Only when the prompt is fully specified (audience, depth/length AND the facts it needs) may you skip questions entirely and go straight to the full outline in this turn.
+Return: { "title", "suggestedPalette", "clarifyingQuestions": [the questions], "slides": [] }
 
 TURN 2 (answers provided) — FULL OUTLINE.
-Use the answers to write the complete outline. Return NO clarifyingQuestions.
+Use the answers to write the complete outline. Return NO clarifyingQuestions. A fact the user still did not provide becomes a bracketed placeholder, never an invented value.
 Return: { "title", "suggestedPalette", "slides": [ ... ] }
+
+${FACT_RULES}
 
 Never return clarifyingQuestions AND slides together. Respond with ONLY a JSON object — no prose, no markdown fences — of this shape:
 {
   "title": string,                       // short deck title
   "suggestedPalette": "navy" | "warm" | "mono",
-  "clarifyingQuestions": string[],       // TURN 1 only, 1-2 questions; OMIT on a full outline
+  "clarifyingQuestions": string[],       // TURN 1 only; OMIT on a full outline
   "slides": [                            // omit / empty on a clarify turn
     {
       "layout": "title" | "title-body",  // "title" for the "title" pattern, else "title-body"
@@ -41,6 +49,7 @@ Never return clarifyingQuestions AND slides together. Respond with ONLY a JSON o
       "columns": [ { "heading": string, "lines": string[] } ],  // 'two-column' only (exactly 2)
       "stat": { "value": string, "caption": string },           // 'big-number' only
       "quote": { "text": string, "attribution": string },       // 'quote' only
+      "needsInput": string[],            // OPTIONAL: facts the user must fill in, when the slide has [bracketed] placeholders
       "speakerNotes": string             // OPTIONAL
     }
   ]
@@ -50,8 +59,8 @@ Slide patterns — design a VARIED deck, not a wall of bullet lists:
 - "title": the opener. Deck title as heading, subtitle in "body". Always the FIRST slide.
 - "bullets": a heading + 3-5 short bullets. The workhorse, but do not overuse it.
 - "two-column": a heading + a "columns" array of exactly 2 cards, each { heading, lines: 2-4 short lines }. Use for compare/contrast, before/after, pros/cons.
-- "big-number": one headline metric in "stat" { value like "312%", caption }. Use whenever a slide's point IS a number.
-- "quote": a testimonial or key line in "quote" { text, attribution }. Use for customer voice or a memorable statement.
+- "big-number": one headline metric in "stat" { value, caption }. ONLY when the user supplied the number — never an invented one.
+- "quote": a testimonial or key line in "quote" { text, attribution }. Only a quote from the user's material, or a "[bracketed placeholder]" attributed to "[Source]".
 - "section": a divider that announces a topic shift. Heading + optional "body" tagline. Use between major parts of the deck.
 - "closing": the final slide — recap, thank-you, or call to action. Always the LAST slide.
 
@@ -59,7 +68,7 @@ Pattern rules:
 - The FIRST slide is "title"; the LAST slide is "closing".
 - A deck of 6+ slides MUST use at least THREE different patterns.
 - Insert a "section" slide when the topic shifts to a new part of the story.
-- Use "big-number" when a concrete metric exists; use "quote" when there is a quotable line.
+- Use "big-number" when the user gave a concrete metric; use "quote" when the user's material has a quotable line.
 - Never place two slides with the SAME pattern next to each other — except "bullets", which may repeat.
 
 Deck-writing rules:
@@ -124,7 +133,7 @@ function buildUserPrompt(input: GenerateDeckOutlineInput): string {
         lines.push(...input.answers!.map((a, i) => `${i + 1}. ${a}`));
         lines.push('', 'This is TURN 2: return the full outline and no clarifyingQuestions.');
     } else {
-        lines.push('', 'This is TURN 1: clarify first — ask 1-2 questions and return no slides, unless the request already specifies both the audience and the desired depth/length.');
+        lines.push('', 'This is TURN 1: clarify first — ask the questions you genuinely need (audience, depth/length, and any facts the deck depends on) and return no slides, unless the request already answers all of them.');
     }
     return lines.join('\n');
 }
@@ -193,16 +202,19 @@ Respond with ONLY a JSON object for a SINGLE slide — no prose, no markdown fen
   "columns": [ { "heading": string, "lines": string[] } ],// 'two-column' (exactly 2)
   "stat": { "value": string, "caption": string },         // 'big-number'
   "quote": { "text": string, "attribution": string },     // 'quote'
+  "needsInput": string[],                                 // OPTIONAL: facts the user must fill in, when the slide has [bracketed] placeholders
   "speakerNotes": string                                  // OPTIONAL
 }
 
 Rules:
 - Match the deck's existing TONE, DEPTH, and MIX of patterns — do not make this slide far denser or sparser than the rest.
 - Do NOT reuse a heading that already appears in the deck.
-- Pick the pattern that fits: "big-number" for a metric, "quote" for a testimonial, "two-column" for compare/contrast, "section" for a topic shift, "bullets" for a list, "closing" only if this is the deck's end.
+- Pick the pattern that fits: "big-number" for a metric the user supplied, "quote" for a testimonial from the user's material, "two-column" for compare/contrast, "section" for a topic shift, "bullets" for a list, "closing" only if this is the deck's end.
 - Punchy heading (a claim, not a topic label); at most 3-5 short bullets/lines.
 - Set "layout" to "title" only for the "title" pattern; every other pattern uses "title-body".
-- If a topic is given, write that slide. If NO topic is given, SUGGEST the single slide that best fills a gap in the current flow at the insert position.`;
+- If a topic is given, write that slide. If NO topic is given, SUGGEST the single slide that best fills a gap in the current flow at the insert position.
+
+${FACT_RULES}`;
 
 function buildSlideUserPrompt(input: deck.GenerateSlideRequest): string {
     const { deckContext, topic, position } = input;
@@ -310,6 +322,7 @@ Respond with ONLY a JSON object — no prose, no markdown fences — for the sli
   "columns": [ { "heading": string, "lines": string[] } ],// 'two-column' (exactly 2)
   "stat": { "value": string, "caption": string },         // 'big-number'
   "quote": { "text": string, "attribution": string },     // 'quote'
+  "needsInput": string[],                                 // OPTIONAL: facts the user must fill in, when the slide has [bracketed] placeholders
   "speakerNotes": string                                  // OPTIONAL
 }
 
@@ -317,7 +330,9 @@ Rules:
 - Apply the instruction FAITHFULLY, and change ONLY what it asks for. Everything the instruction does not touch must come back verbatim.
 - Keep the slide's current "pattern" and "layout" unless the instruction clearly implies a different one (e.g. "turn this into a quote").
 - Preserve the slide's tone and depth; do not expand or trim content that was not mentioned.
-- Keep the same fields populated: if the slide has a stat, return a stat; if it has columns, return the same number of columns — unless the instruction says otherwise.`;
+- Keep the same fields populated: if the slide has a stat, return a stat; if it has columns, return the same number of columns — unless the instruction says otherwise.
+
+${FACT_RULES}`;
 
 function buildEditSlideUserPrompt(input: deck.EditSlideRequest): string {
     const { deckContext, slide, instruction } = input;

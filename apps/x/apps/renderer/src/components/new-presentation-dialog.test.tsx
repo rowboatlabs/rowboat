@@ -49,10 +49,17 @@ function baseHandlers(outline: deckShared.DeckOutline, outlineOnRetry?: deckShar
 }
 
 // A first-turn clarify response now carries questions and NO slides.
+// A gap-sized clarify round: more than the old 2-question cap.
+const CLARIFY_QUESTIONS = [
+  'Who is the audience?',
+  'How long is the talk?',
+  'What growth metrics can you share?',
+  'Do you have a customer quote?',
+]
 const CLARIFY_OUTLINE: deckShared.DeckOutline = {
   title: 'Draft',
   suggestedPalette: 'navy',
-  clarifyingQuestions: ['Who is the audience?', 'How long is the talk?'],
+  clarifyingQuestions: CLARIFY_QUESTIONS,
   slides: [],
 }
 
@@ -62,7 +69,12 @@ const FINAL_OUTLINE: deckShared.DeckOutline = {
   slides: [
     { layout: 'title', heading: 'Final' },
     { layout: 'title-body', heading: 'Point one', bullets: ['a', 'b'] },
-    { layout: 'title-body', heading: 'Point two', bullets: ['c'] },
+    {
+      layout: 'title-body',
+      heading: 'Point two',
+      bullets: ['[X]% growth'],
+      needsInput: ['MoM growth %', 'customer quote'],
+    },
   ],
 }
 
@@ -89,7 +101,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('NewPresentationDialog — generate flow', () => {
-  it('surfaces two clarifying questions, then re-calls with answers and reaches review', async () => {
+  it('surfaces a gap-sized question list (4), then re-calls with answers and reaches review', async () => {
     const seen: unknown[] = []
     baseHandlers(CLARIFY_OUTLINE, FINAL_OUTLINE)
     const originalGen = handlers['deck:generateOutline']
@@ -105,15 +117,20 @@ describe('NewPresentationDialog — generate flow', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
-    // Both questions appear as inputs; Continue stays disabled until answered.
-    await screen.findByText('Who is the audience?')
-    expect(screen.getByText('How long is the talk?')).toBeInTheDocument()
-    const continueBtn = screen.getByRole('button', { name: 'Continue' })
-    expect(continueBtn).toBeDisabled()
+    // Every question appears as an input; Continue stays disabled until ALL answered.
+    await screen.findByText(CLARIFY_QUESTIONS[0])
+    for (const q of CLARIFY_QUESTIONS.slice(1)) {
+      expect(screen.getByText(q)).toBeInTheDocument()
+    }
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
 
+    const answers = ['executives', '10 minutes', '40% MoM', 'no quote yet']
     const inputs = screen.getAllByRole('textbox')
-    fireEvent.change(inputs[0], { target: { value: 'executives' } })
-    fireEvent.change(inputs[1], { target: { value: '10 minutes' } })
+    expect(inputs).toHaveLength(CLARIFY_QUESTIONS.length)
+    answers.slice(0, 3).forEach((a, i) => fireEvent.change(inputs[i], { target: { value: a } }))
+    // Three of four answered → still gated.
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
+    fireEvent.change(inputs[3], { target: { value: answers[3] } })
     expect(screen.getByRole('button', { name: 'Continue' })).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
@@ -123,7 +140,23 @@ describe('NewPresentationDialog — generate flow', () => {
     expect(screen.getByDisplayValue('Point two')).toBeInTheDocument()
 
     const retryReq = seen[1] as deckShared.GenerateDeckOutlineRequest
-    expect(retryReq.answers).toEqual(['executives', '10 minutes'])
+    expect(retryReq.answers).toEqual(answers)
+  })
+
+  it('shows needsInput as "fill in" chips on the review rows', async () => {
+    baseHandlers(FINAL_OUTLINE)
+    openDialog()
+    await switchToGenerate()
+    fireEvent.change(screen.getByLabelText('What should the deck cover?'), {
+      target: { value: 'a deck' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByRole('button', { name: 'Create' })
+
+    expect(screen.getByText('fill in: MoM growth %')).toBeInTheDocument()
+    expect(screen.getByText('fill in: customer quote')).toBeInTheDocument()
+    // The bracketed placeholder is shown verbatim in the editable bullets.
+    expect(screen.getByDisplayValue('[X]% growth')).toBeInTheDocument()
   })
 
   it('writes nothing when synthesis fails, and shows the error', async () => {

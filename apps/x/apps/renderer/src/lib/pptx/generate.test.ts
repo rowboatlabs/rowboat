@@ -271,6 +271,19 @@ describe('slide patterns', () => {
     expect(slideText(deck.slides[6].shapes)).toContain('Fin')
   })
 
+  it('renders bracketed placeholders verbatim — impossible to mistake for real data', async () => {
+    const slide = await renderPattern({
+      layout: 'title-body',
+      pattern: 'big-number',
+      heading: 'Traction',
+      stat: { value: '[X]%', caption: '[metric] month-over-month' },
+      needsInput: ['MoM growth %'],
+    })
+    const text = slideText(slide.shapes)
+    expect(text).toContain('[X]%')
+    expect(text).toContain('[metric] month-over-month')
+  })
+
   it('falls back to bullets for a missing or unknown pattern', async () => {
     // Missing pattern on a title-body slide → bullets placeholders.
     const missing = await renderPattern({ layout: 'title-body', heading: 'No pattern', bullets: ['one', 'two'] })

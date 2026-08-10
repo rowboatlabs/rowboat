@@ -397,28 +397,31 @@ export function NewPresentationDialog({
   )
 
   const clarifyBody = (
-    <div className="grid gap-4">
+    <div className="grid gap-3">
       <p className="text-sm text-muted-foreground">
-        Before drafting, a couple of quick questions to tailor your deck:
+        Before drafting, a few quick questions — including any facts the deck should quote
+        instead of inventing:
       </p>
-      {questions.map((q, i) => (
-        <div key={i} className="grid gap-1.5">
-          <label htmlFor={`clarify-${i}`} className="text-sm font-medium">{q}</label>
-          <Input
-            id={`clarify-${i}`}
-            value={answers[i] ?? ''}
-            placeholder="Your answer…"
-            onChange={(e) => setAnswers((prev) => prev.map((a, j) => (j === i ? e.target.value : a)))}
-            autoFocus={i === 0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !busy && clarifyComplete(questions, answers)) {
-                e.preventDefault()
-                handleClarifyContinue()
-              }
-            }}
-          />
-        </div>
-      ))}
+      <div className="grid max-h-[50vh] gap-4 overflow-y-auto pr-1">
+        {questions.map((q, i) => (
+          <div key={i} className="grid gap-1.5">
+            <label htmlFor={`clarify-${i}`} className="text-sm font-medium">{q}</label>
+            <Input
+              id={`clarify-${i}`}
+              value={answers[i] ?? ''}
+              placeholder="Your answer…"
+              onChange={(e) => setAnswers((prev) => prev.map((a, j) => (j === i ? e.target.value : a)))}
+              autoFocus={i === 0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !busy && clarifyComplete(questions, answers)) {
+                  e.preventDefault()
+                  handleClarifyContinue()
+                }
+              }}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   )
 
@@ -486,6 +489,20 @@ export function NewPresentationDialog({
                 rows={Math.min(6, Math.max(2, bulletsToText(s).split('\n').length))}
                 className="mt-2 text-sm"
               />
+            )}
+            {s.needsInput && s.needsInput.length > 0 && (
+              // The facts the model refused to invent: the deck carries
+              // [bracketed] placeholders for these until the user fills them in.
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                {s.needsInput.map((need, ni) => (
+                  <span
+                    key={ni}
+                    className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-500"
+                  >
+                    fill in: {need}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
         ))}

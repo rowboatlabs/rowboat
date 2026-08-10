@@ -56,6 +56,12 @@ export const DeckOutlineSlide = z.object({
     stat: DeckOutlineStat.optional(),
     /** 'quote' only. */
     quote: DeckOutlineQuote.optional(),
+    /**
+     * Facts the user should fill in (short labels like "MoM growth %"),
+     * present when the slide carries bracketed placeholders instead of
+     * invented numbers. Surfaced as "fill in" chips in the outline review.
+     */
+    needsInput: z.array(z.string()).optional(),
     speakerNotes: z.string().optional(),
 });
 export type DeckOutlineSlide = z.infer<typeof DeckOutlineSlide>;
@@ -68,8 +74,11 @@ export type DeckOutlineSlide = z.infer<typeof DeckOutlineSlide>;
 export const DeckOutline = z.object({
     title: z.string().min(1),
     suggestedPalette: DeckOutlinePalette,
-    /** 1-2 questions on a clarify round; absent on a full outline. */
-    clarifyingQuestions: z.array(z.string()).max(2).optional(),
+    /**
+     * Questions on a clarify round; absent on a full outline. Sized to the
+     * gap (typically 2-5); 8 is a sanity bound, not a target.
+     */
+    clarifyingQuestions: z.array(z.string()).max(8).optional(),
     slides: z.array(DeckOutlineSlide),
 }).superRefine((val, ctx) => {
     const hasQuestions = (val.clarifyingQuestions?.length ?? 0) > 0;

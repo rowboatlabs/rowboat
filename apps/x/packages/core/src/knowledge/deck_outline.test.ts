@@ -73,9 +73,28 @@ describe('DeckOutline schema', () => {
         expect(deck.DeckOutline.safeParse(emptyQs).success).toBe(false);
     });
 
-    it('rejects more than 2 clarifying questions', () => {
-        const threeQs = { ...CLARIFY_OUTLINE, clarifyingQuestions: ['A?', 'B?', 'C?'] };
-        expect(deck.DeckOutline.safeParse(threeQs).success).toBe(false);
+    it('sizes clarifying questions to the gap: up to 8, not more', () => {
+        const five = { ...CLARIFY_OUTLINE, clarifyingQuestions: ['A?', 'B?', 'C?', 'D?', 'E?'] };
+        expect(deck.DeckOutline.safeParse(five).success).toBe(true);
+        const nine = { ...CLARIFY_OUTLINE, clarifyingQuestions: Array.from({ length: 9 }, (_, i) => `Q${i}?`) };
+        expect(deck.DeckOutline.safeParse(nine).success).toBe(false);
+    });
+
+    it('accepts needsInput labels on a slide', () => {
+        const withNeeds = {
+            ...GOOD_OUTLINE,
+            slides: [
+                { ...GOOD_OUTLINE.slides[0] },
+                {
+                    layout: 'title-body' as const,
+                    pattern: 'big-number' as const,
+                    heading: 'Growth',
+                    stat: { value: '[X]%', caption: 'MoM growth' },
+                    needsInput: ['MoM growth %'],
+                },
+            ],
+        };
+        expect(deck.DeckOutline.safeParse(withNeeds).success).toBe(true);
     });
 
     it('rejects malformed outlines', () => {
@@ -186,6 +205,67 @@ describe('generateDeckOutline', () => {
         await expect(pending).rejects.toBeInstanceOf(DeckOutlineError);
         await expect(pending).rejects.toMatchObject({ name: 'DeckOutlineError' });
         expect(generateTextMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('pins the anti-fabrication rules into every generation prompt', async () => {
+        // The rules ride in the system prompt (generateText's `instructions`);
+        // this pins them so they cannot silently regress.
+        respondWith(JSON.stringify(GOOD_OUTLINE));
+        await generateDeckOutline({ prompt: 'p' });
+        respondWith(JSON.stringify(GOOD_OUTLINE.slides[1]));
+        await generateSlide({ deckContext: { title: 'T', slides: [] }, position: 0 });
+        respondWith(JSON.stringify(GOOD_OUTLINE.slides[1]));
+        await editSlide({ slide: GOOD_OUTLINE.slides[1], instruction: 'i', deckContext: { title: 'T', slides: [] } });
+
+        for (const call of generateTextMock.mock.calls) {
+            const { instructions } = call[0] as unknown as { instructions: string };
+            expect(instructions).toContain('Never invent numbers, statistics, valuations, dates, names, customer counts, or quotes');
+            expect(instructions).toContain('square-bracket placeholder');
+            expect(instructions).toContain('ONLY when the user supplied the number');
+        }
+    });
+
+    it('carries the honest no-metrics shapes through: a metrics question, or a bracketed stat with needsInput', async () => {
+        // Shape A — the model asks for the number instead of inventing it
+        // (>2 questions: gap-sized, not capped at 2).
+        const askingClarify: deck.DeckOutline = {
+            title: 'Pitch',
+            suggestedPalette: 'navy',
+            clarifyingQuestions: [
+                'Who is the audience?',
+                'How long is the talk?',
+                'What growth metrics can you share?',
+            ],
+            slides: [],
+        };
+        respondWith(JSON.stringify(askingClarify));
+        const clarify = await generateDeckOutline({ prompt: 'a pitch deck for my startup' });
+        expect(clarify.clarifyingQuestions).toHaveLength(3);
+        expect(clarify.slides).toEqual([]);
+
+        // Shape B — turn 2 without the number: a visibly-bracketed placeholder
+        // plus needsInput, never a plausible-looking value.
+        const placeholderOutline: deck.DeckOutline = {
+            title: 'Pitch',
+            suggestedPalette: 'navy',
+            slides: [
+                { layout: 'title', pattern: 'title', heading: 'Pitch' },
+                {
+                    layout: 'title-body',
+                    pattern: 'big-number',
+                    heading: 'Traction',
+                    stat: { value: '[X]%', caption: '[metric] month-over-month' },
+                    needsInput: ['MoM growth %'],
+                },
+                { layout: 'title-body', pattern: 'closing', heading: 'Thanks' },
+            ],
+        };
+        respondWith(JSON.stringify(placeholderOutline));
+        const outline = await generateDeckOutline({ prompt: 'a pitch deck', answers: ['investors', '10 min', 'no numbers yet'] });
+        const stat = outline.slides[1].stat!;
+        expect(stat.value).toBe('[X]%');
+        expect(stat.value).toMatch(/^\[.*\]/);
+        expect(outline.slides[1].needsInput).toEqual(['MoM growth %']);
     });
 
     it('repairs a response that returns questions AND slides together', async () => {

@@ -54,6 +54,14 @@ describe('outline row edits', () => {
     expect(next[2].bullets).toEqual(['x', 'y'])
     expect(next[2].body).toBeUndefined()
   })
+
+  it('preserves needsInput through heading and bullet edits', () => {
+    const withNeeds: deckShared.DeckOutlineSlide[] = [
+      { layout: 'title-body', heading: 'Traction', bullets: ['[X]% growth'], needsInput: ['MoM growth %'] },
+    ]
+    expect(updateHeading(withNeeds, 0, 'Traction!')[0].needsInput).toEqual(['MoM growth %'])
+    expect(updateBullets(withNeeds, 0, '[X]% growth\nmore')[0].needsInput).toEqual(['MoM growth %'])
+  })
 })
 
 describe('clarify round-trip', () => {
