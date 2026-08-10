@@ -1145,12 +1145,44 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({ success: z.boolean() }),
   },
-  // Deep-link to a macOS Privacy & Security pane (permission dialogs).
+  // Deep-link to a macOS Privacy & Security pane (permission dialogs and the
+  // Settings → Permissions panel). 'notifications' opens the OS notification
+  // settings (not under Privacy on either platform).
   'app:openPrivacySettings': {
     req: z.object({
-      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring']),
+      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring', 'accessibility', 'automation', 'notifications']),
     }),
     res: z.object({ success: z.boolean() }),
+  },
+  // Aggregate OS-permission snapshot for Settings → Permissions. States are
+  // HONEST: 'unknown' means the OS gives us no way to read it (input
+  // monitoring outside a call, notifications, unprobed automation) — the UI
+  // must say so rather than fake a verdict. 'not-required' rows are hidden
+  // (that permission doesn't exist on this platform).
+  'permissions:getStatus': {
+    req: z.null(),
+    res: z.object({
+      platform: z.enum(['darwin', 'win32', 'linux']),
+      microphone: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      camera: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      screenRecording: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      accessibility: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      inputMonitoring: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      automation: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      notifications: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+    }),
+  },
+  // Fire the OS grant flow for one permission where a programmatic path
+  // exists: mic/camera native prompts, the Accessibility add-to-list dialog,
+  // an Automation probe (the probe IS the consent prompt on first run), or
+  // re-arming the input-monitoring key hook. Returns the state afterwards.
+  'permissions:request': {
+    req: z.object({
+      permission: z.enum(['microphone', 'camera', 'accessibility', 'automation', 'input-monitoring']),
+    }),
+    res: z.object({
+      state: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+    }),
   },
   // Relaunch the app — macOS requires it for a fresh Screen Recording grant
   // to take effect.
@@ -2441,6 +2473,44 @@ const ipcSchemas = {
       text: z.string().optional(),
     }),
     res: z.null(),
+  },
+  // Renderer → main: whether a screen share (call or quick-ask) is currently
+  // live. Gates the assistant's screen-pointer tool — pointing at a screen
+  // the user isn't sharing would be pure confusion — and tears the pointer
+  // overlay down the moment the share ends.
+  'screenPointer:setShareActive': {
+    req: z.object({ active: z.boolean() }),
+    res: z.object({}),
+  },
+  // Push channel: main → pointer-overlay window with the current pointer
+  // state. `nonce` re-triggers the ping animation when the assistant points
+  // twice at the same spot; coordinates are fractions of the display.
+  'screen-pointer:state': {
+    req: z.object({
+      visible: z.boolean(),
+      x: z.number(),
+      y: z.number(),
+      label: z.string().nullable(),
+      nonce: z.number(),
+    }),
+    res: z.null(),
+  },
+  // Overlay window → fetch the current pointer state on mount. Same race as
+  // video:getPopoutState: the did-finish-load replay can fire before the
+  // React listener registers, and a missed push means an invisible pointer.
+  'screenPointer:getState': {
+    req: z.null(),
+    res: z.object({
+      state: z
+        .object({
+          visible: z.boolean(),
+          x: z.number(),
+          y: z.number(),
+          label: z.string().nullable(),
+          nonce: z.number(),
+        })
+        .nullable(),
+    }),
   },
   'meeting:checkScreenPermission': {
     req: z.null(),

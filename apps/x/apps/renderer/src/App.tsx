@@ -1755,6 +1755,22 @@ function App() {
       .catch(() => {})
   }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
+  // Screen-pointer gate: tell main whether a share is live (call OR
+  // quick-ask — this window owns the capture either way). While true the
+  // assistant's screen-pointer tool may draw on the shared display; flipping
+  // false tears the pointer overlay down instantly.
+  useEffect(() => {
+    try {
+      void window.ipc
+        .invoke('screenPointer:setShareActive', { active: video.screenState === 'live' })
+        .catch((err) => console.warn('[screen-pointer] setShareActive failed:', err))
+    } catch (err) {
+      // A stale preload (app not restarted since the channel was added)
+      // throws synchronously from schema validation — must not break the app.
+      console.warn('[screen-pointer] setShareActive failed:', err)
+    }
+  }, [video.screenState])
+
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full
   // screen, which by the exclusivity rule stops any running share; the main
@@ -3704,7 +3720,11 @@ function App() {
             },
           },
         },
-        autoPermission: (permissionMode ?? 'manual') === 'auto',
+        // Default matches the composer toggle's default (auto): submissions
+        // that don't thread a mode — voice/PTT utterances, quick-ask, popout
+        // text — must not silently fall back to manual, which skipped the
+        // auto-permission classifier and carded EVERY gated tool mid-call.
+        autoPermission: (permissionMode ?? 'auto') === 'auto',
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }

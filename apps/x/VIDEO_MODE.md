@@ -276,6 +276,57 @@ Voice input/output prompt sections (`# Voice Input`, `# Voice Output`) are
 reused untouched — calls set `voiceInput` per utterance and force
 `voiceOutput: 'full'`.
 
+## Pointing at the shared screen
+
+During a live screen share the assistant can point at the user's REAL
+display: the `screen-pointer` builtin (attached by the `app-navigation`
+skill) takes fractional coordinates (x/y in 0–1, estimated from the latest
+screen-share frame) plus an optional tiny label, and main draws an animated
+laser-dot + ping rings there. "This dip here is the weekend" now comes with
+a finger on the chart.
+
+- Tool: `packages/core/src/runtime/tools/domains/screen-pointer.ts` —
+  actions `point` (x, y, `label?`, `durationMs?`, default auto-hide 8s) and
+  `hide`. Executes directly in main via the DI seam
+  (`IScreenPointerService`, registered in `main.ts` like browser control) —
+  no renderer round-trip, and it hard-fails with an explanation when no
+  share is live.
+- Share gate: an App.tsx effect reports `video.screenState === 'live'` over
+  `screenPointer:setShareActive` (covers call AND quick-ask shares); share
+  end tears the pointer down instantly.
+- Overlay: `apps/main/src/screen-pointer.ts` creates a transparent,
+  click-through (`setIgnoreMouseEvents`), non-focusable, screen-saver-level
+  NSPanel covering the primary display (the share always captures the
+  primary display), loading the renderer with `#screen-pointer` →
+  `components/screen-pointer-overlay.tsx`. State pushes over
+  `screen-pointer:state` (replayed on load; `nonce` restarts the ping when
+  pointing twice at one spot). The window exists only while something is
+  pointed at — hide destroys it.
+- Prompt surface: a "You can POINT at their screen" bullet in the
+  `# Video Mode` screen-sharing section (`capabilities/modes.ts`) plus a
+  "Pointing at the user's shared screen" section with a worked example in
+  the `app-navigation` skill.
+- **Clicking/typing (v2)** — the separate `screen-control` builtin (same
+  domain file/service) really acts on the machine by posting REAL CGEvents
+  through `osascript -l JavaScript` + the ObjC bridge (no native module):
+  `click` moves + presses at frame coordinates with proper clickState for
+  double-clicks (the pointer telegraphs the spot ~600ms before the click
+  lands); `type` posts unicode keyboard events into the focused field
+  (newlines → Return keycode; optional `pressEnter`; text rides an env var,
+  never spliced into the script). Deliberately NOT System Events
+  `click at` — that returns success without clicking on modern macOS, and
+  skipping System Events also drops the Automation permission entirely.
+  macOS-only; the ONE permission is Accessibility
+  (`systemPreferences.isTrustedAccessibilityClient` — a denied state fires
+  the system grant dialog and the tool returns the grant flow as its
+  error; note CGEventPost from an untrusted process drops events silently,
+  so the upfront self-check is the only reliable gate). Unlike pointing
+  (`permission: "none"`), screen-control is `permission: "prompt"` — it
+  rides the standard permission/auto-decision layer. Prompt-side rules
+  (skill + video-mode fragment): act only on the user's ask, narrate
+  first, one action per step verified against the next frame, never type
+  secrets.
+
 ## Driving the app on a call
 
 The assistant can drive the Rowboat UI itself via the extended

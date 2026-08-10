@@ -42,6 +42,7 @@ import {
   setPinnedCollapsed,
   showQuickAsk,
 } from './quick-ask.js';
+import { screenPointerService, getAutomationPermissionState, setAutomationPermissionState } from './screen-pointer.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -992,11 +993,13 @@ export function setupIpcHandlers() {
     'app:openPrivacySettings': async (_event, args) => {
       if (process.platform === 'win32') {
         // Windows Settings deep links (ms-settings). Sections without a
-        // Windows equivalent (screen recording, input monitoring are macOS
-        // TCC concepts) report failure, as before.
+        // Windows equivalent (screen recording, input monitoring,
+        // accessibility, automation are macOS TCC concepts) report failure,
+        // as before.
         const winUris: Partial<Record<typeof args.section, string>> = {
           microphone: 'ms-settings:privacy-microphone',
           camera: 'ms-settings:privacy-webcam',
+          notifications: 'ms-settings:notifications',
         };
         const uri = winUris[args.section];
         if (!uri) return { success: false };
@@ -1008,19 +1011,118 @@ export function setupIpcHandlers() {
         }
       }
       if (process.platform !== 'darwin') return { success: false };
-      const anchors = {
-        microphone: 'Privacy_Microphone',
-        camera: 'Privacy_Camera',
-        'screen-recording': 'Privacy_ScreenCapture',
-        'input-monitoring': 'Privacy_ListenEvent',
-      } as const;
+      // Notification settings live outside the Privacy & Security pane.
+      const url = args.section === 'notifications'
+        ? 'x-apple.systempreferences:com.apple.Notifications-Settings.extension'
+        : `x-apple.systempreferences:com.apple.preference.security?${({
+            microphone: 'Privacy_Microphone',
+            camera: 'Privacy_Camera',
+            'screen-recording': 'Privacy_ScreenCapture',
+            'input-monitoring': 'Privacy_ListenEvent',
+            accessibility: 'Privacy_Accessibility',
+            automation: 'Privacy_Automation',
+          } as const)[args.section]}`;
       try {
-        await shell.openExternal(
-          `x-apple.systempreferences:com.apple.preference.security?${anchors[args.section]}`,
-        );
+        await shell.openExternal(url);
         return { success: true };
       } catch {
         return { success: false };
+      }
+    },
+    'permissions:getStatus': async () => {
+      const platform = process.platform === 'darwin' ? 'darwin' as const
+        : process.platform === 'win32' ? 'win32' as const : 'linux' as const;
+      type PermState = ipc.IPCChannels['permissions:getStatus']['res']['microphone'];
+      // getMediaAccessStatus exists on darwin and win32 only.
+      const media = (kind: 'microphone' | 'camera' | 'screen'): PermState => {
+        try {
+          return systemPreferences.getMediaAccessStatus(kind) as PermState;
+        } catch {
+          return 'unknown';
+        }
+      };
+      if (platform === 'linux') {
+        // No OS permission gates for any of these under X11; notifications
+        // vary by desktop and can't be read.
+        return {
+          platform,
+          microphone: 'not-required', camera: 'not-required', screenRecording: 'not-required',
+          accessibility: 'not-required', inputMonitoring: 'not-required', automation: 'not-required',
+          notifications: 'unknown',
+        };
+      }
+      if (platform === 'win32') {
+        // Desktop apps are gated by the global "let desktop apps access…"
+        // toggles (surfaced through getMediaAccessStatus); everything else
+        // needs no permission on Windows.
+        return {
+          platform,
+          microphone: media('microphone'), camera: media('camera'),
+          screenRecording: 'not-required', accessibility: 'not-required',
+          inputMonitoring: 'not-required', automation: 'not-required',
+          notifications: 'unknown',
+        };
+      }
+      // macOS. Input monitoring has no read API — infer from the key hook:
+      // events seen = definitely granted; anything else is honestly unknown
+      // (the hook only runs during calls, so absence of events proves
+      // nothing). Automation is only known after a probe or a real
+      // click/type (cached below). Notifications can't be read at all.
+      const ptt = getPttStatus();
+      return {
+        platform,
+        microphone: media('microphone'),
+        camera: media('camera'),
+        screenRecording: media('screen'),
+        accessibility: systemPreferences.isTrustedAccessibilityClient(false) ? 'granted' : 'denied',
+        inputMonitoring: ptt.eventsSeen ? 'granted' : 'unknown',
+        // Click/type posts CGEvents directly (no System Events), so the
+        // Automation consent is no longer needed — the panel hides the row.
+        automation: 'not-required',
+        notifications: 'unknown',
+      };
+    },
+    'permissions:request': async (_event, args) => {
+      const darwin = process.platform === 'darwin';
+      switch (args.permission) {
+        case 'microphone':
+        case 'camera': {
+          if (!darwin) return { state: 'unknown' };
+          try {
+            const granted = await systemPreferences.askForMediaAccess(args.permission);
+            return { state: granted ? 'granted' : 'denied' };
+          } catch {
+            return { state: 'unknown' };
+          }
+        }
+        case 'accessibility': {
+          if (!darwin) return { state: 'not-required' };
+          // prompt=true fires the system "add to Accessibility" dialog on
+          // first ask; the checkbox itself is the user's to flip.
+          return { state: systemPreferences.isTrustedAccessibilityClient(true) ? 'granted' : 'denied' };
+        }
+        case 'automation': {
+          if (!darwin) return { state: 'not-required' };
+          // Harmless probe — counting processes exercises the same Apple
+          // Events consent that clicking/typing needs; on first run macOS
+          // shows its prompt, which is exactly the point.
+          try {
+            await execFileAsync('osascript', ['-e', 'tell application "System Events" to count processes'], { timeout: 15000 });
+            setAutomationPermissionState('granted');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setAutomationPermissionState(msg.includes('-1743') || /not authorized/i.test(msg) ? 'denied' : 'unknown');
+          }
+          return { state: getAutomationPermissionState() };
+        }
+        case 'input-monitoring': {
+          if (!darwin) return { state: 'not-required' };
+          // Recreates the uiohook tap: fires the consent prompt if macOS
+          // never asked, and revives a tap created before a grant. The
+          // status stays unknown until real key events arrive (next call).
+          retryPttHook();
+          return { state: 'unknown' };
+        }
       }
     },
     // --- Quick-ask bar relays ---
@@ -2593,6 +2695,15 @@ export function setupIpcHandlers() {
     },
     'video:getPopoutState': async () => {
       return { state: getPopoutState() };
+    },
+    'screenPointer:setShareActive': async (_event, args) => {
+      // Gates the assistant's screen-pointer tool and tears the pointer
+      // overlay down the moment the share (call or quick-ask) ends.
+      screenPointerService.setShareActive(args.active);
+      return {};
+    },
+    'screenPointer:getState': async () => {
+      return { state: screenPointerService.getState() };
     },
     'video:popoutAction': async (_event, args) => {
       // Relay a popout control-bar action to the app window, which owns the

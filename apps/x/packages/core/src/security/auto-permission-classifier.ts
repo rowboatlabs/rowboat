@@ -38,6 +38,8 @@ Deny tool calls that are destructive, credential-sensitive, privacy-sensitive, b
 Command examples to deny unless explicitly requested: deleting data, force pushing, deploying, running migrations, changing permissions, reading secrets, exfiltrating tokens, or modifying files outside the user's workspace.
 File examples to deny unless explicitly requested: deleting paths, writing outside the workspace, reading secrets or credentials, or broad access to private directories.
 
+screen-control (clicking/typing on the user's real screen during a live screen share): allow when the user's recent messages clearly asked for that action ("click the address bar", "type hi in the message box") — this is the feature working as intended, and the pointer shows the user each click before it lands. Deny when the action was not asked for in the conversation, when the text being typed looks like a password, 2FA code, or other secret, or when the target is plainly destructive or irreversible (delete/send/confirm buttons the user hasn't mentioned).
+
 Return one decision for every toolCallId. Use the exact toolCallId values provided.`;
 
 function compact(value: unknown, max = 8_000): string {

@@ -205,6 +205,8 @@ const HISTORICAL_KEY_ORDER = [
     "todo-add",
     "todo-propose",
     "todo-report",
+    "screen-pointer",
+    "screen-control",
     "spawn-agent",
 ];
 
@@ -242,6 +244,7 @@ describe("BuiltinTools permission audit", () => {
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
             "composio-execute-tool": "composio-execute",
+            "screen-control": "prompt",
         });
     });
 });
