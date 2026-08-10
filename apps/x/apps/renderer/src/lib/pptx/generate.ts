@@ -524,6 +524,48 @@ export interface DeckSynthesisResult {
 }
 
 /**
+ * The parsed base package plus the title slide's text edits — the first step
+ * of outline synthesis, SHARED with the in-memory preview (lib/pptx/preview)
+ * so what the preview renders is by construction what Create writes.
+ */
+export async function buildOutlineBase(
+  outline: DeckOutline,
+  palette: DeckPalette,
+): Promise<{ base: SlideDeck; firstSlideEdits: SlideEdit[] }> {
+  if (outline.slides.length === 0) {
+    throw new Error('Outline has no slides')
+  }
+  shapeIdCounter = 2
+  const base = await parsePptx(await newDeckPptx({ title: outline.title, palette }))
+  const firstSlide = base.slides[0]
+  if (!firstSlide) throw new Error('Base deck has no title slide to seed')
+  return { base, firstSlideEdits: placeholderEdits(firstSlide, outline.slides[0], 2) }
+}
+
+/**
+ * One outline slide (index >= 1) as a package part plus its text edits —
+ * the per-slide step of outline synthesis, shared with the preview.
+ */
+export async function buildOutlineSlidePart(
+  base: SlideDeck,
+  outlineSlide: DeckOutlineSlide,
+  anchorPath: string,
+  usedPaths: readonly string[],
+): Promise<{ part: NewSlidePart; edits: SlideEdit[] }> {
+  const pattern = resolvePattern(outlineSlide)
+  const layoutPart = pattern === 'title' ? LAYOUT_TITLE : LAYOUT_BODY
+  const plan = await planNewSlide(base, anchorPath, relsForLayout(layoutPart), usedPaths)
+  const author = AUTHORED[pattern]
+  if (author) {
+    // Reuse planNewSlide's path/rels/anchor; author the slide body ourselves.
+    return { part: { ...plan, xml: author(outlineSlide) }, edits: [] }
+  }
+  // 'bullets' (and any fallback): placeholders + text edits.
+  const parsed = await parseAddedSlide(base, plan.path, plan.xml, plan.relsXml)
+  return { part: plan, edits: placeholderEdits(parsed, outlineSlide, 5) }
+}
+
+/**
  * Turns an outline into a .pptx. Throws on any failure before producing bytes,
  * so a caller that only writes on success never persists a partial deck.
  */
@@ -531,47 +573,23 @@ export async function synthesizeDeckFromOutline(
   outline: DeckOutline,
   palette: DeckPalette,
 ): Promise<DeckSynthesisResult> {
-  if (outline.slides.length === 0) {
-    throw new Error('Outline has no slides')
-  }
-  shapeIdCounter = 2
-
-  // Base package: docProps + title slide seeded with the deck title.
-  const base = await parsePptx(await newDeckPptx({ title: outline.title, palette }))
+  const { base, firstSlideEdits } = await buildOutlineBase(outline, palette)
   const editsBySlide = new Map<string, SlideEdit[]>()
   const addSlides: NewSlidePart[] = []
-
-  // First slide reuses the base title slide (slide1, Title layout).
-  const firstSlide = base.slides[0]
-  if (!firstSlide) throw new Error('Base deck has no title slide to seed')
-  const firstEdits = placeholderEdits(firstSlide, outline.slides[0], 2)
-  if (firstEdits.length > 0) editsBySlide.set(firstSlide.xmlPath, firstEdits)
+  if (firstSlideEdits.length > 0) editsBySlide.set(base.slides[0].xmlPath, firstSlideEdits)
 
   // Remaining slides: one per outline entry, in their pattern's shape.
-  let anchorPath = firstSlide.xmlPath
+  let anchorPath = base.slides[0].xmlPath
   for (let i = 1; i < outline.slides.length; i++) {
-    const outlineSlide = outline.slides[i]
-    const pattern = resolvePattern(outlineSlide)
-    const layoutPart = pattern === 'title' ? LAYOUT_TITLE : LAYOUT_BODY
-    const plan = await planNewSlide(
+    const { part, edits } = await buildOutlineSlidePart(
       base,
+      outline.slides[i],
       anchorPath,
-      relsForLayout(layoutPart),
       addSlides.map((a) => a.path),
     )
-
-    const author = AUTHORED[pattern]
-    if (author) {
-      // Reuse planNewSlide's path/rels/anchor; author the slide body ourselves.
-      addSlides.push({ ...plan, xml: author(outlineSlide) })
-    } else {
-      // 'bullets' (and any fallback): placeholders + text edits.
-      const parsed = await parseAddedSlide(base, plan.path, plan.xml, plan.relsXml)
-      addSlides.push(plan)
-      const edits = placeholderEdits(parsed, outlineSlide, 5)
-      if (edits.length > 0) editsBySlide.set(plan.path, edits)
-    }
-    anchorPath = plan.path
+    addSlides.push(part)
+    if (edits.length > 0) editsBySlide.set(part.path, edits)
+    anchorPath = part.path
   }
 
   const bytes = await writeDeck(base, editsBySlide, { addSlides })

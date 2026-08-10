@@ -7,9 +7,12 @@ import {
   clarifyComplete,
   clarifyRequest,
   deleteSlide,
+  insertSlideAt,
   moveSlide,
+  reorderSlides,
   updateBullets,
   updateHeading,
+  updatePattern,
 } from './outline-editing'
 
 const SLIDES: deckShared.DeckOutlineSlide[] = [
@@ -53,6 +56,30 @@ describe('outline row edits', () => {
     const next = updateBullets(SLIDES, 2, '  x \n\n y ')
     expect(next[2].bullets).toEqual(['x', 'y'])
     expect(next[2].body).toBeUndefined()
+  })
+
+  it('inserts a blank bullets slide at a gap, never above the title slide', () => {
+    const next = insertSlideAt(SLIDES, 1)
+    expect(next).toHaveLength(4)
+    expect(next[1]).toEqual(blankSlide())
+    expect(insertSlideAt(SLIDES, 0)[0].heading).toBe('A')
+    expect(insertSlideAt(SLIDES, 99)[3]).toEqual(blankSlide())
+  })
+
+  it('reorders by drag target, keeping the title slide first', () => {
+    expect(reorderSlides(SLIDES, 2, 1).map((s) => s.heading)).toEqual(['A', 'C', 'B'])
+    // Dropping above the title slide clamps to just after it.
+    expect(reorderSlides(SLIDES, 2, 0).map((s) => s.heading)).toEqual(['A', 'C', 'B'])
+    // The title slide itself never moves.
+    expect(reorderSlides(SLIDES, 0, 2).map((s) => s.heading)).toEqual(['A', 'B', 'C'])
+    expect(reorderSlides(SLIDES, 1, 1).map((s) => s.heading)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('switches a pattern in place, preserving content fields', () => {
+    const next = updatePattern(SLIDES, 1, 'two-column')
+    expect(next[1].pattern).toBe('two-column')
+    expect(next[1].bullets).toEqual(['b1', 'b2'])
+    expect(next[0].pattern).toBeUndefined()
   })
 
   it('preserves needsInput through heading and bullet edits', () => {

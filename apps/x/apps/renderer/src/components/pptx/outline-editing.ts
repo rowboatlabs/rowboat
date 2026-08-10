@@ -43,6 +43,41 @@ export function addSlide(slides: readonly DeckOutlineSlide[]): DeckOutlineSlide[
   return [...slides, blankSlide()]
 }
 
+/** Inserts a blank bullets slide at `index` (clamped below the title slide). */
+export function insertSlideAt(
+  slides: readonly DeckOutlineSlide[],
+  index: number,
+): DeckOutlineSlide[] {
+  const at = Math.max(1, Math.min(index, slides.length))
+  const next = [...slides]
+  next.splice(at, 0, blankSlide())
+  return next
+}
+
+/** Moves a slide to an arbitrary position (card drag). The title slide stays. */
+export function reorderSlides(
+  slides: readonly DeckOutlineSlide[],
+  from: number,
+  to: number,
+): DeckOutlineSlide[] {
+  if (from <= 0 || from >= slides.length) return [...slides]
+  const target = Math.max(1, Math.min(to, slides.length - 1))
+  if (target === from) return [...slides]
+  const next = [...slides]
+  const [moved] = next.splice(from, 1)
+  next.splice(target, 0, moved)
+  return next
+}
+
+/** Switches a slide's visual pattern; content fields are left as they are. */
+export function updatePattern(
+  slides: readonly DeckOutlineSlide[],
+  index: number,
+  pattern: DeckOutlineSlide['pattern'],
+): DeckOutlineSlide[] {
+  return slides.map((s, i) => (i === index ? { ...s, pattern } : s))
+}
+
 export function updateHeading(
   slides: readonly DeckOutlineSlide[],
   index: number,
