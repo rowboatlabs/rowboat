@@ -516,7 +516,8 @@ function ThemePalettePicker({
       </Tooltip>
       <PopoverContent align="end" className="w-auto p-2">
         <div className="mb-1.5 px-1 text-[11px] font-medium text-muted-foreground">Theme</div>
-        <div className="flex gap-2">
+        {/* Nine palettes: a compact grid, not a row. */}
+        <div className="grid grid-cols-3 gap-2">
           {DECK_PALETTES.map((p) => {
             const selected = p.id === paletteId
             return (

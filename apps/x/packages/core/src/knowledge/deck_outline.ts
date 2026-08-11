@@ -37,7 +37,7 @@ ${FACT_RULES}
 Never return clarifyingQuestions AND slides together. Respond with ONLY a JSON object — no prose, no markdown fences — of this shape:
 {
   "title": string,                       // short deck title
-  "suggestedPalette": "navy" | "warm" | "mono",
+  "suggestedPalette": "navy" | "warm" | "mono" | "ocean" | "forest" | "sunset" | "berry" | "slate" | "midnight",
   "clarifyingQuestions": string[],       // TURN 1 only; OMIT on a full outline
   "slides": [                            // omit / empty on a clarify turn
     {
@@ -75,7 +75,8 @@ Deck-writing rules:
 - Punchy, specific headings — a claim or takeaway, not a topic label.
 - At most 3-5 bullets/lines per slide; each one short, never a wall of text.
 - Set "layout" to "title" only for the "title" pattern; every other pattern uses "title-body".
-- Pick suggestedPalette by subject: "navy" professional/corporate, "warm" human/creative, "mono" minimal/technical.
+- Pick suggestedPalette by subject:
+  "navy" classic corporate blue, trustworthy | "warm" earthy human creative tones | "mono" minimal grayscale, strictly technical | "ocean" cool teal cyan, calm professional | "forest" natural greens, sustainable grounded feel | "sunset" coral amber, energetic launch energy | "berry" plum violet, premium polished feel | "slate" quiet graphite, understated corporate | "midnight" dark luminous, dramatic keynote look.
 - Add speakerNotes (1-3 spoken sentences) only where they add value.`;
 
 /** The model failed to produce a valid outline even after the repair round. */

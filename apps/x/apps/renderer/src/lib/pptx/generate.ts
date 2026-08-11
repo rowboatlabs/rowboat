@@ -77,17 +77,19 @@ function escAttr(s: string): string {
   return esc(s).replace(/"/g, '&quot;')
 }
 
-/** A theme colour token with optional lumMod/lumOff tint transforms. */
+/** A theme colour token with optional transforms. */
 interface SchemeColor {
   /** 'accent1'..'accent6' | 'tx1' | 'bg1' | 'dk1' | 'lt1' … */
   val: string
-  /** e.g. { lumMod: 20000, lumOff: 80000 } for "lighter 80%". */
+  /** 0..100000; e.g. 16000 = 16% opacity. */
+  alpha?: number
   lumMod?: number
   lumOff?: number
 }
 
 function schemeClrXml(c: SchemeColor): string {
   const transforms =
+    (c.alpha !== undefined ? `<a:alpha val="${c.alpha}"/>` : '') +
     (c.lumMod !== undefined ? `<a:lumMod val="${c.lumMod}"/>` : '') +
     (c.lumOff !== undefined ? `<a:lumOff val="${c.lumOff}"/>` : '')
   return transforms
@@ -193,8 +195,15 @@ function slideEnvelope(shapes: string): string {
 
 // ---------------------------------------------------------- shared tokens
 
-/** Card / panel tint: the accent lightened to ~80% so dark text stays legible. */
-const tintOf = (val: string): SchemeColor => ({ val, lumMod: 20000, lumOff: 80000 })
+/**
+ * Card / panel tint: the accent GLAZED at low opacity over the slide
+ * background, not lightened toward white. "Lighter 80%" (lumMod/lumOff)
+ * assumed a light theme — under the dark 'midnight' palette it produced a
+ * near-white card beneath near-white tx1 text. A 16% alpha glaze follows the
+ * background instead: pastel accent on light themes, a deep accent-tinted
+ * surface on dark ones, with tx1 text legible on both.
+ */
+const tintOf = (val: string): SchemeColor => ({ val, alpha: 16000 })
 const TX1: SchemeColor = { val: 'tx1' }
 const BG1: SchemeColor = { val: 'bg1' }
 const ACCENT1: SchemeColor = { val: 'accent1' }

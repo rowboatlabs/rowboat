@@ -67,12 +67,15 @@ describe('synthesizeOutlineDeck', () => {
     expect(preview.slides[4]!.shapes.map(fillHex)).toContain(NAVY.scheme.accent1)
   })
 
-  it('re-resolves fills when the palette switches', async () => {
+  it('re-resolves fills when the palette switches (including a new palette)', async () => {
+    const ocean = DECK_PALETTES.find((p) => p.id === 'ocean')!
     const navy = await synthesizeOutlineDeck(OUTLINE, NAVY)
     const warm = await synthesizeOutlineDeck(OUTLINE, WARM)
+    const cool = await synthesizeOutlineDeck(OUTLINE, ocean)
     expect(navy.slides[4]!.shapes.map(fillHex)).toContain(NAVY.scheme.accent1)
     expect(warm.slides[4]!.shapes.map(fillHex)).toContain(WARM.scheme.accent1)
-    expect(WARM.scheme.accent1).not.toBe(NAVY.scheme.accent1)
+    expect(cool.slides[4]!.shapes.map(fillHex)).toContain(ocean.scheme.accent1)
+    expect(new Set([NAVY.scheme.accent1, WARM.scheme.accent1, ocean.scheme.accent1]).size).toBe(3)
   })
 
   it('is by construction what Create writes: preview equals the re-parsed bytes', async () => {

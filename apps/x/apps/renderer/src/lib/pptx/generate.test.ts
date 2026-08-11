@@ -271,6 +271,44 @@ describe('slide patterns', () => {
     expect(slideText(deck.slides[6].shapes)).toContain('Fin')
   })
 
+  it('midnight (dark theme) resolves inverted bg/text end to end', async () => {
+    const midnight = DECK_PALETTES.find((p) => p.id === 'midnight')!
+    const outline: deckShared.DeckOutline = {
+      title: 'Dark deck',
+      suggestedPalette: 'midnight',
+      slides: [
+        { layout: 'title', pattern: 'title', heading: 'Dark deck' },
+        { layout: 'title-body', pattern: 'section', heading: 'A section' },
+        {
+          layout: 'title-body', pattern: 'two-column', heading: 'Cards',
+          columns: [{ heading: 'L', lines: ['l1'] }, { heading: 'R', lines: ['r1'] }],
+        },
+      ],
+    }
+    const { bytes } = await synthesizeDeckFromOutline(outline, midnight)
+    const deck = await parsePptx(bytes)
+
+    // bg1 → lt1: the slide background is the near-black, via the master chain.
+    expect(deck.slides[0].background).toMatchObject({ kind: 'solid', hex: midnight.scheme.lt1 })
+    // tx1 → dk1: title text resolves to the near-white.
+    const title = deck.slides[0].shapes[0] as TextShape
+    expect(title.display?.paragraphs[0]?.runs[0]?.colorHex).toBe(midnight.scheme.dk1)
+
+    // Section: luminous accent1 backdrop, bg1-coloured (near-black) heading.
+    const sectionFills = deck.slides[1].shapes.map((s) => (s.visual?.fill?.kind === 'solid' ? s.visual.fill.hex : undefined))
+    expect(sectionFills).toContain(midnight.scheme.accent1)
+    const sectionHeading = deck.slides[1].shapes.find((s) => s.type === 'text') as TextShape
+    expect(sectionHeading.display?.paragraphs[0]?.runs[0]?.colorHex).toBe(midnight.scheme.lt1)
+
+    // Cards: the accent GLAZE (alpha), never a lightened near-white fill —
+    // the fix midnight forced. Text on cards stays tx1 (near-white).
+    const card = deck.slides[2].shapes.find(
+      (s) => s.visual?.fill?.kind === 'solid' && s.visual.fill.hex === midnight.scheme.accent1,
+    )
+    expect(card, 'card background carries the accent token').toBeDefined()
+    expect(card!.visual!.fill).toMatchObject({ kind: 'solid', alpha: 0.16 })
+  })
+
   it('renders bracketed placeholders verbatim — impossible to mistake for real data', async () => {
     const slide = await renderPattern({
       layout: 'title-body',

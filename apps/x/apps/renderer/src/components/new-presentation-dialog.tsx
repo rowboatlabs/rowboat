@@ -127,7 +127,8 @@ function PaletteRow({
   return (
     <div className="grid gap-2">
       <span className="text-sm font-medium">Theme</span>
-      <div className="flex gap-2">
+      {/* Nine palettes: a grid, not a row. */}
+      <div className="grid max-h-72 grid-cols-3 gap-2 overflow-y-auto pr-1">
         {DECK_PALETTES.map((palette) => (
           <PaletteSwatch
             key={palette.id}
@@ -255,7 +256,7 @@ function PaletteStrip({
   onSelect: (id: string) => void
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">Theme</span>
       {DECK_PALETTES.map((p) => (
         <button

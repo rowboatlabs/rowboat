@@ -5,7 +5,17 @@ import { z } from "zod";
 // deck:generateOutline IPC channel, and the renderer's deck builder.
 
 /** Built-in deck palettes (lib/pptx/new-deck.ts DECK_PALETTES ids). */
-export const DeckOutlinePalette = z.enum(["navy", "warm", "mono"]);
+export const DeckOutlinePalette = z.enum([
+    "navy",
+    "warm",
+    "mono",
+    "ocean",
+    "forest",
+    "sunset",
+    "berry",
+    "slate",
+    "midnight",
+]);
 export type DeckOutlinePalette = z.infer<typeof DeckOutlinePalette>;
 
 /** The visual patterns the synthesizer can render (lib/pptx/generate.ts). */

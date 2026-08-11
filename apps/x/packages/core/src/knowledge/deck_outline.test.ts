@@ -80,6 +80,13 @@ describe('DeckOutline schema', () => {
         expect(deck.DeckOutline.safeParse(nine).success).toBe(false);
     });
 
+    it('accepts every one of the nine palette names', () => {
+        for (const id of ['navy', 'warm', 'mono', 'ocean', 'forest', 'sunset', 'berry', 'slate', 'midnight']) {
+            expect(deck.DeckOutline.safeParse({ ...GOOD_OUTLINE, suggestedPalette: id }).success, id).toBe(true);
+        }
+        expect(deck.DeckOutline.safeParse({ ...GOOD_OUTLINE, suggestedPalette: 'neon' }).success).toBe(false);
+    });
+
     it('accepts needsInput labels on a slide', () => {
         const withNeeds = {
             ...GOOD_OUTLINE,
