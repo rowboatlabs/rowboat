@@ -157,6 +157,27 @@ describe("filesystem files", () => {
     await expect(files.writeText("etag.txt", "third", { expectedEtag: initial.etag })).rejects.toThrow("ETag mismatch");
   });
 
+  it("roundtrips binary data through writeBuffer", async () => {
+    const files = await loadFiles();
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x7f, 0x01]);
+
+    const result = await files.writeBuffer("bin/data.xlsx", bytes);
+
+    expect(result.isInsideWorkspace).toBe(true);
+    expect(result.etag).toBeTruthy();
+    await expect(fs.readFile(path.join(workspaceDir, "bin", "data.xlsx"))).resolves.toEqual(bytes);
+  });
+
+  it("rejects stale expectedEtag buffer writes", async () => {
+    const files = await loadFiles();
+    const initial = await files.writeBuffer("etag.bin", Buffer.from("first"));
+    await files.writeBuffer("etag.bin", Buffer.from("second-longer"));
+
+    await expect(
+      files.writeBuffer("etag.bin", Buffer.from("third"), { expectedEtag: initial.etag })
+    ).rejects.toThrow("ETag mismatch");
+  });
+
   it("requires unique editText matches unless replaceAll is true", async () => {
     const files = await loadFiles();
     await fs.mkdir(workspaceDir, { recursive: true });

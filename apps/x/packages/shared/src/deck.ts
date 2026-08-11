@@ -32,47 +32,47 @@ export type DeckSlidePattern = z.infer<typeof DeckSlidePattern>;
 
 /** One card of a 'two-column' slide. */
 export const DeckOutlineColumn = z.object({
-    heading: z.string(),
-    lines: z.array(z.string()),
+    heading: z.string().describe('Card heading; empty string for a headingless card'),
+    lines: z.array(z.string()).describe('Short lines inside the card (at most 4 are rendered)'),
 });
 export type DeckOutlineColumn = z.infer<typeof DeckOutlineColumn>;
 
 /** The headline metric of a 'big-number' slide. */
 export const DeckOutlineStat = z.object({
-    value: z.string(),
-    caption: z.string(),
+    value: z.string().describe('The metric itself, e.g. "42%" — only a value the user actually supplied, never invented'),
+    caption: z.string().describe('One line saying what the value measures'),
 });
 export type DeckOutlineStat = z.infer<typeof DeckOutlineStat>;
 
 /** The pull quote of a 'quote' slide. */
 export const DeckOutlineQuote = z.object({
-    text: z.string(),
-    attribution: z.string().optional(),
+    text: z.string().describe('The quoted sentence, from the user\'s material — or a visibly bracketed placeholder'),
+    attribution: z.string().optional().describe('Who said it; "[Source]" when unknown'),
 });
 export type DeckOutlineQuote = z.infer<typeof DeckOutlineQuote>;
 
 export const DeckOutlineSlide = z.object({
     /** 'title' = the Title Slide layout; 'title-body' = Title and Body. */
-    layout: z.enum(["title", "title-body"]),
+    layout: z.enum(["title", "title-body"]).describe('"title" only for the "title" pattern; every other pattern uses "title-body"'),
     /** Visual pattern; the synthesizer falls back to 'bullets' when absent. */
-    pattern: DeckSlidePattern.optional(),
-    heading: z.string().min(1),
-    bullets: z.array(z.string()).optional(),
+    pattern: DeckSlidePattern.optional().describe('Visual pattern; falls back to "bullets" when absent'),
+    heading: z.string().min(1).describe('Slide heading — a punchy claim, not a topic label'),
+    bullets: z.array(z.string()).optional().describe('3-5 short bullets for the "bullets" pattern (also the title-slide subtitle fallback)'),
     /** Short narrative alternative to bullets. */
-    body: z.string().optional(),
+    body: z.string().optional().describe('Short paragraph / subtitle, an alternative to bullets'),
     /** 'two-column' only: exactly the cards to render (max 2 used). */
-    columns: z.array(DeckOutlineColumn).optional(),
+    columns: z.array(DeckOutlineColumn).optional().describe('"two-column" only: exactly 2 cards'),
     /** 'big-number' only. */
-    stat: DeckOutlineStat.optional(),
+    stat: DeckOutlineStat.optional().describe('"big-number" only: the headline metric'),
     /** 'quote' only. */
-    quote: DeckOutlineQuote.optional(),
+    quote: DeckOutlineQuote.optional().describe('"quote" only: the pull quote'),
     /**
      * Facts the user should fill in (short labels like "MoM growth %"),
      * present when the slide carries bracketed placeholders instead of
      * invented numbers. Surfaced as "fill in" chips in the outline review.
      */
-    needsInput: z.array(z.string()).optional(),
-    speakerNotes: z.string().optional(),
+    needsInput: z.array(z.string()).optional().describe('Short labels for facts the user must fill in, when the slide carries [bracketed] placeholders'),
+    speakerNotes: z.string().optional().describe('1-3 spoken sentences; optional'),
 });
 export type DeckOutlineSlide = z.infer<typeof DeckOutlineSlide>;
 
@@ -149,3 +149,36 @@ export const GenerateDeckOutlineRequest = z.object({
     answers: z.array(z.string()).optional(),
 });
 export type GenerateDeckOutlineRequest = z.infer<typeof GenerateDeckOutlineRequest>;
+
+/** One per-slide note of a deck review. */
+export const DeckReviewComment = z.object({
+    /** 1-based slide number the note is about. */
+    slideNumber: z.number().int().min(1),
+    comment: z.string(),
+});
+export type DeckReviewComment = z.infer<typeof DeckReviewComment>;
+
+/** The model's structured feedback on an existing deck (reviewDeck). */
+export const DeckReview = z.object({
+    /** 2-4 sentence assessment: story arc, coverage, audience fit. */
+    overall: z.string().min(1),
+    /** What already works and should be kept as-is. */
+    strengths: z.array(z.string()),
+    /** Per-slide improvement notes, most important first. */
+    comments: z.array(DeckReviewComment),
+    /**
+     * Facts the deck still needs from the user: bracketed placeholders to
+     * fill, plus any numbers/quotes that look invented and must be verified.
+     */
+    factsToFill: z.array(z.string()),
+});
+export type DeckReview = z.infer<typeof DeckReview>;
+
+export const ReviewDeckRequest = z.object({
+    deckContext: DeckContext,
+    /** Per-slide visual patterns, parallel to deckContext.slides, when known. */
+    patterns: z.array(DeckSlidePattern).optional(),
+    /** Optional aspect to focus the feedback on (e.g. "clarity for investors"). */
+    focus: z.string().optional(),
+});
+export type ReviewDeckRequest = z.infer<typeof ReviewDeckRequest>;

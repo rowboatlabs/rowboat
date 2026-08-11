@@ -35,11 +35,11 @@ import {
   shapeIdOf,
   tagNameOf,
   type XmlNode,
-} from './parse'
-import { normalizeShapeStyle, shapeStyleSnapshotOf, type ShapeStyleSnapshot } from './geometry'
-import { resolveThemePath } from './restyle'
-import { newPictureXml, newShapeXml, type NewShapeSpec, type XmlPrefixes } from './shape-xml'
-import type { NodePath, Paragraph, Shape, SlideDeck, TextAlign, TextRun } from './types'
+} from './parse.js'
+import { normalizeShapeStyle, shapeStyleSnapshotOf, type ShapeStyleSnapshot } from './geometry.js'
+import { resolveThemePath } from './restyle.js'
+import { newPictureXml, newShapeXml, type NewShapeSpec, type XmlPrefixes } from './shape-xml.js'
+import type { NodePath, Paragraph, Shape, SlideDeck, TextAlign, TextRun } from './types.js'
 
 // ------------------------------------------------------------------- types
 

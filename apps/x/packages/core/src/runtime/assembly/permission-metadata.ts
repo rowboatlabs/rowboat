@@ -51,6 +51,7 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'LLMParse':
         case 'file-exists':
         case 'file-stat':
+        case 'deck-review':
             return pathArg ? { operation: 'read', paths: [pathArg] } : null;
         case 'file-list':
             return pathArg ? { operation: 'list', paths: [pathArg || '.'] } : null;
@@ -61,6 +62,10 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'file-writeText':
         case 'file-editText':
         case 'file-mkdir':
+        case 'deck-create':
+        case 'deck-add-slide':
+        case 'deck-edit-slide':
+        case 'deck-restyle':
             return pathArg ? { operation: 'write', paths: [pathArg] } : null;
         case 'file-copy':
         case 'file-rename': {

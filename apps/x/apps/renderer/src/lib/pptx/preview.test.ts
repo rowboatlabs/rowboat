@@ -1,10 +1,10 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import type { deck as deckShared } from '@x/shared'
-import { parsePptx } from './parse'
-import { DECK_PALETTES } from './new-deck'
-import { synthesizeDeckFromOutline } from './generate'
+import { parsePptx } from '@x/shared/dist/pptx/parse.js'
+import { DECK_PALETTES } from '@x/shared/dist/pptx/new-deck.js'
+import { synthesizeDeckFromOutline } from '@x/shared/dist/pptx/generate.js'
 import { disposeOutlinePreview, synthesizeOutlineDeck } from './preview'
-import type { Shape, SlideDeck, TextShape } from './types'
+import type { Shape, SlideDeck, TextShape } from '@x/shared/dist/pptx/types.js'
 
 const NAVY = DECK_PALETTES[0]
 const WARM = DECK_PALETTES[1]

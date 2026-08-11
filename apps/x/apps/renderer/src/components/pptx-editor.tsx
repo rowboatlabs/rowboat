@@ -28,16 +28,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { disposeDeck, parseAddedSlide, parsePptx } from '@/lib/pptx/parse'
-import { upgradeGeneratedDeck, DECK_PALETTES } from '@/lib/pptx/new-deck'
-import { buildThemeXml, resolveThemePath } from '@/lib/pptx/restyle'
-import { planDuplicateSlide, planNewSlide, readSlideRels } from '@/lib/pptx/add-slide'
-import { buildDeckContext, synthesizeSlidePart } from '@/lib/pptx/generate'
-import { extractOutlineSlide, linesToEditedParagraphs, planSlideEdit } from '@/components/pptx/edit-slide'
+import { disposeDeck, parseAddedSlide, parsePptx } from '@x/shared/dist/pptx/parse.js'
+import { upgradeGeneratedDeck, DECK_PALETTES } from '@x/shared/dist/pptx/new-deck.js'
+import { buildThemeXml, resolveThemePath } from '@x/shared/dist/pptx/restyle.js'
+import { planDuplicateSlide, planNewSlide, readSlideRels } from '@x/shared/dist/pptx/add-slide.js'
+import { buildDeckContext, synthesizeSlidePart } from '@x/shared/dist/pptx/generate.js'
+import { extractOutlineSlide, linesToEditedParagraphs, planSlideEdit } from '@x/shared/dist/pptx/edit-slide.js'
 import { SlideGenPopover } from '@/components/pptx/slide-gen-popover'
-import { isLinePreset } from '@/lib/pptx/geometry'
-import type { NewShapeSpec } from '@/lib/pptx/shape-xml'
-import { writeDeck, type EditedParagraph, type RunFormatOverrides } from '@/lib/pptx/serialize'
+import { isLinePreset } from '@x/shared/dist/pptx/geometry.js'
+import type { NewShapeSpec } from '@x/shared/dist/pptx/shape-xml.js'
+import { writeDeck, type EditedParagraph, type RunFormatOverrides } from '@x/shared/dist/pptx/serialize.js'
 import type {
   Fill,
   NodePath,
@@ -47,7 +47,7 @@ import type {
   SlideDeck,
   TextAlign,
   TextShape,
-} from '@/lib/pptx/types'
+} from '@x/shared/dist/pptx/types.js'
 import {
   EMPTY_DECK_EDITS,
   EMU_PER_INCH,

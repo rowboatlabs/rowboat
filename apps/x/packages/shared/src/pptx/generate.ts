@@ -21,12 +21,12 @@
  * Fails closed: any error throws before bytes are produced.
  */
 
-import type { deck as deckShared } from '@x/shared'
-import { parseAddedSlide, parsePptx } from './parse'
-import { planNewSlide } from './add-slide'
-import { writeDeck, type NewSlidePart, type SlideEdit, type EditedParagraph } from './serialize'
-import { newDeckPptx, type DeckPalette } from './new-deck'
-import type { Slide, SlideDeck, TextShape } from './types'
+import type * as deckShared from '../deck.js'
+import { parseAddedSlide, parsePptx } from './parse.js'
+import { planNewSlide } from './add-slide.js'
+import { writeDeck, type NewSlidePart, type SlideEdit, type EditedParagraph } from './serialize.js'
+import { newDeckPptx, type DeckPalette } from './new-deck.js'
+import type { Slide, SlideDeck, TextShape } from './types.js'
 
 type DeckOutline = deckShared.DeckOutline
 type DeckOutlineSlide = deckShared.DeckOutlineSlide
@@ -145,13 +145,19 @@ function txBodyXml(paras: Para[], anchor?: 't' | 'ctr' | 'b'): string {
   )
 }
 
-let shapeIdCounter = 2
-function nextId(): number {
-  return shapeIdCounter++
+/**
+ * Per-slide shape id allocator. Ids only need uniqueness within one slide
+ * part (id 1 is the spTree group); each author function mints its own so
+ * concurrent syntheses never share state.
+ */
+function idAllocator(): () => number {
+  let next = 2
+  return () => next++
 }
+type NextId = () => number
 
 /** A filled/outlined shape, optionally with text (cards, bars, backgrounds). */
-function shapeXml(opts: {
+function shapeXml(nextId: NextId, opts: {
   name: string
   rect: Rect
   preset?: 'rect' | 'roundRect'
@@ -171,7 +177,7 @@ function shapeXml(opts: {
 }
 
 /** A borderless text box (no fill), for headings and captions. */
-function textBoxXml(opts: { name: string; rect: Rect; paras: Para[]; anchor?: 't' | 'ctr' | 'b' }): string {
+function textBoxXml(nextId: NextId, opts: { name: string; rect: Rect; paras: Para[]; anchor?: 't' | 'ctr' | 'b' }): string {
   const id = nextId()
   const spPr =
     `<p:spPr>${xfrmXml(opts.rect)}${prstGeomXml('rect')}<a:noFill/></p:spPr>`
@@ -240,10 +246,11 @@ function fallbackLines(slide: DeckOutlineSlide, limit: number): string[] {
 // ------------------------------------------------------- authored patterns
 
 function authorTwoColumn(slide: DeckOutlineSlide): string {
+  const nextId = idAllocator()
   const shapes: string[] = []
   const headingY = IN(0.5)
   shapes.push(
-    textBoxXml({
+    textBoxXml(nextId, {
       name: 'Heading',
       rect: { x: MARGIN, y: headingY, w: CONTENT_W, h: IN(1.0) },
       paras: [{ runs: [{ text: trimmed(slide.heading), sizePt: SIZE.patternHeading, bold: true, color: TX1 }] }],
@@ -284,7 +291,7 @@ function authorTwoColumn(slide: DeckOutlineSlide): string {
     const cardRect: Rect = { x: cardX, y: cardY, w: cardW, h: cardH }
     // Fill-only rounded background.
     shapes.push(
-      shapeXml({
+      shapeXml(nextId, {
         name: `Card ${i + 1} Background`,
         rect: cardRect,
         preset: 'roundRect',
@@ -301,7 +308,7 @@ function authorTwoColumn(slide: DeckOutlineSlide): string {
     }
     if (paras.length === 0) paras.push({ runs: [] })
     shapes.push(
-      textBoxXml({
+      textBoxXml(nextId, {
         name: `Card ${i + 1} Text`,
         rect: { x: cardX + pad, y: cardY + pad, w: cardW - 2 * pad, h: cardH - 2 * pad },
         paras,
@@ -313,9 +320,10 @@ function authorTwoColumn(slide: DeckOutlineSlide): string {
 }
 
 function authorBigNumber(slide: DeckOutlineSlide): string {
+  const nextId = idAllocator()
   const shapes: string[] = []
   shapes.push(
-    textBoxXml({
+    textBoxXml(nextId, {
       name: 'Eyebrow',
       rect: { x: MARGIN, y: IN(0.6), w: CONTENT_W, h: IN(0.6) },
       paras: [{ runs: [{ text: trimmed(slide.heading), sizePt: SIZE.eyebrow, bold: true, color: ACCENT1 }] }],
@@ -324,7 +332,7 @@ function authorBigNumber(slide: DeckOutlineSlide): string {
   )
   const value = slide.stat?.value?.trim() || trimmed(slide.heading)
   shapes.push(
-    textBoxXml({
+    textBoxXml(nextId, {
       name: 'Stat',
       rect: { x: MARGIN, y: IN(1.4), w: CONTENT_W, h: IN(2.4) },
       paras: [{ runs: [{ text: value, sizePt: SIZE.bigNumber, bold: true, color: ACCENT1 }] }],
@@ -334,7 +342,7 @@ function authorBigNumber(slide: DeckOutlineSlide): string {
   const caption = slide.stat?.caption?.trim()
   if (caption) {
     shapes.push(
-      textBoxXml({
+      textBoxXml(nextId, {
         name: 'Caption',
         rect: { x: MARGIN, y: IN(3.9), w: CONTENT_W, h: IN(0.8) },
         paras: [{ runs: [{ text: caption, sizePt: SIZE.caption, color: TX1 }] }],
@@ -345,7 +353,7 @@ function authorBigNumber(slide: DeckOutlineSlide): string {
   const support = fallbackLines(slide, 3)
   if (support.length > 0) {
     shapes.push(
-      textBoxXml({
+      textBoxXml(nextId, {
         name: 'Support',
         rect: { x: MARGIN, y: IN(4.8), w: CONTENT_W, h: IN(1.4) },
         paras: support.map((l) => ({ runs: [{ text: l, sizePt: SIZE.body, color: TX1 }] })),
@@ -357,10 +365,11 @@ function authorBigNumber(slide: DeckOutlineSlide): string {
 }
 
 function authorQuote(slide: DeckOutlineSlide): string {
+  const nextId = idAllocator()
   const shapes: string[] = []
   const panel: Rect = { x: IN(0.4), y: IN(0.6), w: SLIDE_W - 2 * IN(0.4), h: SLIDE_H - 2 * IN(0.6) }
   shapes.push(
-    shapeXml({ name: 'Quote Panel', rect: panel, preset: 'roundRect', fill: tintOf('accent1') }),
+    shapeXml(nextId, { name: 'Quote Panel', rect: panel, preset: 'roundRect', fill: tintOf('accent1') }),
   )
   const text = slide.quote?.text?.trim() || slide.body?.trim() || trimmed(slide.heading)
   const paras: Para[] = [
@@ -371,7 +380,7 @@ function authorQuote(slide: DeckOutlineSlide): string {
     paras.push({ runs: [{ text: `— ${attribution}`, sizePt: SIZE.lead, color: ACCENT1 }], align: 'ctr' })
   }
   shapes.push(
-    textBoxXml({
+    textBoxXml(nextId, {
       name: 'Quote',
       rect: { x: IN(1.2), y: IN(1.4), w: SLIDE_W - 2 * IN(1.2), h: SLIDE_H - 2 * IN(1.4) },
       paras,
@@ -382,12 +391,13 @@ function authorQuote(slide: DeckOutlineSlide): string {
 }
 
 function authorSection(slide: DeckOutlineSlide): string {
+  const nextId = idAllocator()
   const shapes: string[] = []
   // Full-bleed accent background.
-  shapes.push(shapeXml({ name: 'Section Background', rect: { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H }, fill: ACCENT1 }))
+  shapes.push(shapeXml(nextId, { name: 'Section Background', rect: { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H }, fill: ACCENT1 }))
   // Thin accent2 underline bar beneath the heading.
   shapes.push(
-    shapeXml({ name: 'Underline', rect: { x: MARGIN, y: IN(4.1), w: IN(2.2), h: BAR_H }, fill: ACCENT2 }),
+    shapeXml(nextId, { name: 'Underline', rect: { x: MARGIN, y: IN(4.1), w: IN(2.2), h: BAR_H }, fill: ACCENT2 }),
   )
   const paras: Para[] = [
     { runs: [{ text: trimmed(slide.heading), sizePt: SIZE.sectionHeading, bold: true, color: BG1 }] },
@@ -395,7 +405,7 @@ function authorSection(slide: DeckOutlineSlide): string {
   const sub = slide.body?.trim() || (fallbackLines(slide, 1)[0] ?? '')
   if (sub) paras.push({ runs: [{ text: sub, sizePt: SIZE.lead, color: BG1 }] })
   shapes.push(
-    textBoxXml({
+    textBoxXml(nextId, {
       name: 'Section Heading',
       rect: { x: MARGIN, y: IN(2.2), w: CONTENT_W, h: IN(1.8) },
       paras,
@@ -406,12 +416,13 @@ function authorSection(slide: DeckOutlineSlide): string {
 }
 
 function authorClosing(slide: DeckOutlineSlide): string {
+  const nextId = idAllocator()
   const shapes: string[] = []
   shapes.push(
-    shapeXml({ name: 'Accent Bar', rect: { x: MARGIN, y: IN(2.5), w: IN(2.2), h: BAR_H }, fill: ACCENT1 }),
+    shapeXml(nextId, { name: 'Accent Bar', rect: { x: MARGIN, y: IN(2.5), w: IN(2.2), h: BAR_H }, fill: ACCENT1 }),
   )
   shapes.push(
-    textBoxXml({
+    textBoxXml(nextId, {
       name: 'Closing Heading',
       rect: { x: MARGIN, y: IN(2.9), w: CONTENT_W, h: IN(1.4) },
       paras: [{ runs: [{ text: trimmed(slide.heading), sizePt: SIZE.titleHeading, bold: true, color: TX1 }] }],
@@ -421,7 +432,7 @@ function authorClosing(slide: DeckOutlineSlide): string {
   const line = slide.body?.trim() || (fallbackLines(slide, 1)[0] ?? '')
   if (line) {
     shapes.push(
-      textBoxXml({
+      textBoxXml(nextId, {
         name: 'Closing Line',
         rect: { x: MARGIN, y: IN(4.2), w: CONTENT_W, h: IN(0.8) },
         paras: [{ runs: [{ text: line, sizePt: SIZE.lead, color: TX1 }] }],
@@ -433,6 +444,7 @@ function authorClosing(slide: DeckOutlineSlide): string {
 }
 
 function authorTitle(slide: DeckOutlineSlide): string {
+  const nextId = idAllocator()
   const shapes: string[] = []
   const paras: Para[] = [
     { runs: [{ text: trimmed(slide.heading), sizePt: SIZE.titleHeading, bold: true, color: TX1 }], align: 'ctr' },
@@ -440,7 +452,7 @@ function authorTitle(slide: DeckOutlineSlide): string {
   const sub = slide.body?.trim() || (fallbackLines(slide, 1)[0] ?? '')
   if (sub) paras.push({ runs: [{ text: sub, sizePt: SIZE.lead, color: TX1 }], align: 'ctr' })
   shapes.push(
-    textBoxXml({
+    textBoxXml(nextId, {
       name: 'Title',
       rect: { x: MARGIN, y: IN(2.6), w: CONTENT_W, h: IN(1.8) },
       paras,
@@ -448,7 +460,7 @@ function authorTitle(slide: DeckOutlineSlide): string {
     }),
   )
   shapes.push(
-    shapeXml({ name: 'Accent Bar', rect: { x: (SLIDE_W - IN(2.2)) / 2, y: IN(4.3), w: IN(2.2), h: BAR_H }, fill: ACCENT1 }),
+    shapeXml(nextId, { name: 'Accent Bar', rect: { x: (SLIDE_W - IN(2.2)) / 2, y: IN(4.3), w: IN(2.2), h: BAR_H }, fill: ACCENT1 }),
   )
   return slideEnvelope(shapes.join(''))
 }
@@ -544,7 +556,6 @@ export async function buildOutlineBase(
   if (outline.slides.length === 0) {
     throw new Error('Outline has no slides')
   }
-  shapeIdCounter = 2
   const base = await parsePptx(await newDeckPptx({ title: outline.title, palette }))
   const firstSlide = base.slides[0]
   if (!firstSlide) throw new Error('Base deck has no title slide to seed')
@@ -650,7 +661,6 @@ export async function synthesizeSlidePart(
   anchorPath: string,
   usedPaths: readonly string[],
 ): Promise<NewSlidePart> {
-  shapeIdCounter = 2
   const pattern = resolvePattern(outlineSlide)
   const layoutPart = pattern === 'title' ? LAYOUT_TITLE : LAYOUT_BODY
   const plan = await planNewSlide(base, anchorPath, relsForLayout(layoutPart), usedPaths)

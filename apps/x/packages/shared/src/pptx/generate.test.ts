@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
-import type { deck as deckShared } from '@x/shared'
-import { parsePptx } from './parse'
-import { DECK_PALETTES, BODY_LAYOUT_RECTS, TITLE_LAYOUT_RECTS } from './new-deck'
-import { synthesizeDeckFromOutline } from './generate'
-import type { Shape, TextShape } from './types'
+import type * as deckShared from '../deck.js'
+import { parsePptx } from './parse.js'
+import { DECK_PALETTES, BODY_LAYOUT_RECTS, TITLE_LAYOUT_RECTS } from './new-deck.js'
+import { synthesizeDeckFromOutline } from './generate.js'
+import type { Shape, TextShape } from './types.js'
 
 const NAVY = DECK_PALETTES[0]
 

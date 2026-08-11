@@ -18,9 +18,9 @@
  * Everything here is pure; the editor owns IPC and the edit-set commit.
  */
 
-import type { deck as deckShared } from '@x/shared'
-import type { EditedParagraph } from '@/lib/pptx/serialize'
-import type { NodePath, Paragraph, Shape, Slide, TextShape } from '@/lib/pptx/types'
+import type * as deckShared from '../deck.js'
+import type { EditedParagraph } from './serialize.js'
+import type { NodePath, Paragraph, Shape, Slide, TextShape } from './types.js'
 
 type DeckOutlineSlide = deckShared.DeckOutlineSlide
 type DeckSlidePattern = deckShared.DeckSlidePattern

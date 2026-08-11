@@ -1,19 +1,19 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import type { deck as deckShared } from '@x/shared'
-import { parseAddedSlide, parsePptx } from '@/lib/pptx/parse'
-import { writeDeck, type SlideEdit } from '@/lib/pptx/serialize'
-import { DECK_PALETTES } from '@/lib/pptx/new-deck'
-import { synthesizeDeckFromOutline, synthesizeSlidePart } from '@/lib/pptx/generate'
+import type * as deckShared from '@x/shared/dist/deck.js'
+import { parseAddedSlide, parsePptx } from '@x/shared/dist/pptx/parse.js'
+import { writeDeck, type SlideEdit } from '@x/shared/dist/pptx/serialize.js'
+import { DECK_PALETTES } from '@x/shared/dist/pptx/new-deck.js'
+import { synthesizeDeckFromOutline, synthesizeSlidePart } from '@x/shared/dist/pptx/generate.js'
 import {
   detectPattern,
   extractOutlineSlide,
   linesToEditedParagraphs,
   paraLines,
   planSlideEdit,
-} from './edit-slide'
+} from '@x/shared/dist/pptx/edit-slide.js'
 import { EMPTY_DECK_EDITS, applyEditSet, withSlideAdded, withSlideRemoved } from './edit-model'
-import type { SlideDeck, TextShape } from '@/lib/pptx/types'
+import type { SlideDeck, TextShape } from '@x/shared/dist/pptx/types.js'
 
 const NAVY = DECK_PALETTES[0]
 

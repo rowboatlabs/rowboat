@@ -15,10 +15,10 @@
  */
 
 import type { deck as deckShared } from '@x/shared'
-import { disposeDeck, parseAddedSlide } from './parse'
-import { buildOutlineBase, buildOutlineSlidePart } from './generate'
-import type { DeckPalette } from './new-deck'
-import type { Slide, SlideDeck } from './types'
+import { disposeDeck, parseAddedSlide } from '@x/shared/dist/pptx/parse.js'
+import { buildOutlineBase, buildOutlineSlidePart } from '@x/shared/dist/pptx/generate.js'
+import type { DeckPalette } from '@x/shared/dist/pptx/new-deck.js'
+import type { Slide, SlideDeck } from '@x/shared/dist/pptx/types.js'
 import {
   applyEditSet,
   shapeKeyOf,

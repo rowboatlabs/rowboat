@@ -396,3 +396,108 @@ export async function editSlide(input: deck.EditSlideRequest): Promise<deck.Deck
 
     throw new DeckOutlineError('The model did not produce a valid edited slide', repaired.issue);
 }
+
+// -------------------------------------------------------------- deck review
+
+const REVIEW_SYSTEM_PROMPT = `You review an existing slide deck and return structured, actionable feedback.
+
+You are given the deck's title and every slide's content (heading, text lines, and the visual pattern it renders as), and optionally an aspect to focus on.
+
+Respond with ONLY a JSON object — no prose, no markdown fences — of this shape:
+{
+  "overall": string,        // 2-4 sentences: story arc, coverage, audience fit
+  "strengths": string[],    // what already works and should be kept as-is
+  "comments": [ { "slideNumber": number, "comment": string } ],  // per-slide improvements, most important first, 1-based
+  "factsToFill": string[]   // facts the deck still needs from its author — see below
+}
+
+Review for:
+- STORY: does the deck open with a clear claim, build an argument slide by slide, and land on an ask or takeaway? Call out gaps and ordering problems.
+- DENSITY: slides with walls of bullets, headings that are topic labels instead of claims, or content that belongs in speaker notes.
+- VARIETY: long runs of the same pattern; suggest a better-fitting one ("two-column" for compare/contrast, "big-number" for one key metric, "section" for a topic shift).
+- HONESTY: this is critical. List EVERY [bracketed] placeholder still in the deck in "factsToFill". Any specific number, statistic, date, or quote with no visible source in the deck may have been fabricated — flag it in "factsToFill" as something to verify with the author. NEVER suggest adding a number or a quote the author has not supplied; suggest a bracketed placeholder instead.
+- Comments must be concrete enough to act on ("merge slides 4 and 5", "turn the 3 comparisons into a two-column"), not generic advice.`;
+
+function buildReviewUserPrompt(input: deck.ReviewDeckRequest): string {
+    const { deckContext, patterns, focus } = input;
+    const lines = [`Deck title: ${deckContext.title || '(untitled)'}`, '', 'Slides:'];
+    deckContext.slides.forEach((s, i) => {
+        const pattern = patterns?.[i] ? ` [${patterns[i]}]` : '';
+        lines.push(`${i + 1}.${pattern} ${s.heading || '(no heading)'}`);
+        for (const b of s.bullets) lines.push(`   - ${b}`);
+    });
+    if (focus && focus.trim()) {
+        lines.push('', `Focus the review on: ${focus.trim()}`);
+    }
+    return lines.join('\n');
+}
+
+function parseReview(raw: string): { review: deck.DeckReview } | { issue: string } {
+    let data: unknown;
+    try {
+        data = JSON.parse(stripCodeFences(raw));
+    } catch (err) {
+        return { issue: `not valid JSON (${err instanceof Error ? err.message : String(err)})` };
+    }
+    const parsed = deck.DeckReview.safeParse(data);
+    if (!parsed.success) {
+        return {
+            issue: parsed.error.issues
+                .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+                .join('; '),
+        };
+    }
+    return { review: parsed.data };
+}
+
+/**
+ * Reviews an existing deck's extracted content. Same model plumbing and
+ * one-repair-then-typed-error contract as generateDeckOutline; the response
+ * is validated against DeckReview so malformed feedback is a failure, never
+ * a partial review.
+ */
+export async function reviewDeck(input: deck.ReviewDeckRequest): Promise<deck.DeckReview> {
+    const selection = await getDefaultModelAndProvider();
+    const providerConfig = await resolveProviderConfig(selection.provider);
+    const model = createLanguageModel(providerConfig, selection.model);
+    const reasoning = await directCallReasoningOptions(providerConfig.flavor, selection.model, selection.effort);
+
+    const call = async (prompt: string): Promise<string> => {
+        const result = await withUseCase({ useCase: 'app_llm_generate', subUseCase: 'deck_review' }, () => generateText({
+            model,
+            instructions: REVIEW_SYSTEM_PROMPT,
+            prompt,
+            ...reasoning,
+        }));
+        captureLlmUsage({
+            useCase: 'app_llm_generate',
+            subUseCase: 'deck_review',
+            model: selection.model,
+            provider: selection.provider,
+            usage: result.usage,
+        });
+        return result.text;
+    };
+
+    const userPrompt = buildReviewUserPrompt(input);
+    const first = await call(userPrompt);
+    const attempt = parseReview(first);
+    if ('review' in attempt) return attempt.review;
+
+    const repairPrompt = [
+        userPrompt,
+        '',
+        'Your previous response was not a valid review JSON object.',
+        `Problems: ${attempt.issue}`,
+        '',
+        'Your previous response:',
+        first.trim(),
+        '',
+        'Respond again with ONLY the corrected JSON object.',
+    ].join('\n');
+    const second = await call(repairPrompt);
+    const repaired = parseReview(second);
+    if ('review' in repaired) return repaired.review;
+
+    throw new DeckOutlineError('The model did not produce a valid deck review', repaired.issue);
+}

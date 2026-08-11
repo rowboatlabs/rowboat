@@ -1,11 +1,11 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import type { deck as deckShared } from '@x/shared'
-import { parseAddedSlide, parsePptx } from './parse'
-import { writeDeck, type NewSlidePart } from './serialize'
-import { DECK_PALETTES } from './new-deck'
-import { buildDeckContext, synthesizeDeckFromOutline, synthesizeSlidePart } from './generate'
+import { parseAddedSlide, parsePptx } from '@x/shared/dist/pptx/parse.js'
+import { writeDeck, type NewSlidePart } from '@x/shared/dist/pptx/serialize.js'
+import { DECK_PALETTES } from '@x/shared/dist/pptx/new-deck.js'
+import { buildDeckContext, synthesizeDeckFromOutline, synthesizeSlidePart } from '@x/shared/dist/pptx/generate.js'
 import { EMPTY_DECK_EDITS, applyEditSet, withSlideAdded } from '@/components/pptx/edit-model'
-import type { Shape, SlideDeck, TextShape } from './types'
+import type { Shape, SlideDeck, TextShape } from '@x/shared/dist/pptx/types.js'
 
 const NAVY = DECK_PALETTES[0]
 

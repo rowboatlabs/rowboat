@@ -36,8 +36,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { DECK_PALETTES, newDeckPptx, type DeckPalette } from '@/lib/pptx/new-deck'
-import { synthesizeDeckFromOutline } from '@/lib/pptx/generate'
+import { DECK_PALETTES, newDeckPptx, type DeckPalette } from '@x/shared/dist/pptx/new-deck.js'
+import { synthesizeDeckFromOutline } from '@x/shared/dist/pptx/generate.js'
 import { disposeOutlinePreview, synthesizeOutlineDeck, type OutlinePreview } from '@/lib/pptx/preview'
 import { SlideThumbnail } from '@/components/pptx/canvas'
 import {

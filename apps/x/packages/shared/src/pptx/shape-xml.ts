@@ -8,7 +8,7 @@
  * shapes and are then movable, stylable and deletable like any other.
  */
 
-import type { RectEmu } from './types'
+import type { RectEmu } from './types.js'
 
 /** Preset geometries the insert menu offers. */
 export type InsertPreset = 'rect' | 'roundRect' | 'ellipse' | 'line'

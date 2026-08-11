@@ -22,9 +22,9 @@ import {
   parseXml,
   relsPathFor,
   tagNameOf,
-} from './parse'
-import { updateSlideXml, type SlideEdit } from './serialize'
-import type { SlideDeck } from './types'
+} from './parse.js'
+import { updateSlideXml, type SlideEdit } from './serialize.js'
+import type { SlideDeck } from './types.js'
 
 const REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 

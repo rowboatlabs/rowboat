@@ -29,7 +29,7 @@
  */
 
 import JSZip from 'jszip'
-import { buildThemeXml } from './restyle'
+import { buildThemeXml } from './restyle.js'
 
 // ------------------------------------------------------------------ palettes
 

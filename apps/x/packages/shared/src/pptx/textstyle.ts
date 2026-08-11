@@ -20,9 +20,9 @@ import {
   num,
   tagNameOf,
   type XmlNode,
-} from './parse'
-import { resolveFirstColor, themeFontOf, type Theme } from './theme'
-import type { ResolvedBullet, TextAlign } from './types'
+} from './parse.js'
+import { resolveFirstColor, themeFontOf, type Theme } from './theme.js'
+import type { ResolvedBullet, TextAlign } from './types.js'
 
 export interface RunLayerProps {
   sizePt?: number

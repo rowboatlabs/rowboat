@@ -205,6 +205,11 @@ const HISTORICAL_KEY_ORDER = [
     "todo-add",
     "todo-propose",
     "todo-report",
+    "deck-create",
+    "deck-add-slide",
+    "deck-edit-slide",
+    "deck-restyle",
+    "deck-review",
     "spawn-agent",
 ];
 
@@ -238,6 +243,11 @@ describe("BuiltinTools permission audit", () => {
             "file-mkdir": "file-boundary",
             parseFile: "file-boundary",
             LLMParse: "file-boundary",
+            "deck-create": "file-boundary",
+            "deck-add-slide": "file-boundary",
+            "deck-edit-slide": "file-boundary",
+            "deck-restyle": "file-boundary",
+            "deck-review": "file-boundary",
             executeCommand: "command-allowlist",
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",

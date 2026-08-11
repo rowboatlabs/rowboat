@@ -1,12 +1,12 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { parsePptx } from './parse'
-import { writeDeck } from './serialize'
-import { DECK_PALETTES, newDeckPptx } from './new-deck'
-import { buildThemeXml, resolveThemePath } from './restyle'
-import { synthesizeDeckFromOutline } from './generate'
-import type { Shape, TextShape } from './types'
-import type { deck as deckShared } from '@x/shared'
+import { parsePptx } from './parse.js'
+import { writeDeck } from './serialize.js'
+import { DECK_PALETTES, newDeckPptx } from './new-deck.js'
+import { buildThemeXml, resolveThemePath } from './restyle.js'
+import { synthesizeDeckFromOutline } from './generate.js'
+import type { Shape, TextShape } from './types.js'
+import type * as deckShared from '../deck.js'
 
 const NAVY = DECK_PALETTES[0]
 const WARM = DECK_PALETTES[1]

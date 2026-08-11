@@ -19,8 +19,8 @@
  *    have no meaning, so formatting is dropped and disabled for that shape.
  */
 
-import { DEFAULT_LINE_EMU, type ShapeStyleSnapshot } from '@/lib/pptx/geometry'
-import type { NewShapeSpec } from '@/lib/pptx/shape-xml'
+import { DEFAULT_LINE_EMU, type ShapeStyleSnapshot } from '@x/shared/dist/pptx/geometry.js'
+import type { NewShapeSpec } from '@x/shared/dist/pptx/shape-xml.js'
 import {
   isTextOnlyEdit,
   type DeleteShapeEdit,
@@ -29,7 +29,7 @@ import {
   type RunFormatOverrides,
   type RunRef,
   type SlideEdit,
-} from '@/lib/pptx/serialize'
+} from '@x/shared/dist/pptx/serialize.js'
 import type {
   NodePath,
   Paragraph,
@@ -38,7 +38,7 @@ import type {
   SlideDeck,
   TextAlign,
   TextShape,
-} from '@/lib/pptx/types'
+} from '@x/shared/dist/pptx/types.js'
 
 export const EMU_PER_INCH = 914400
 export const CSS_PX_PER_INCH = 96

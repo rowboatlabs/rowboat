@@ -19,9 +19,9 @@ import {
   num,
   tagNameOf,
   type XmlNode,
-} from './parse'
-import { resolveFirstColor, type Theme } from './theme'
-import type { Fill, GradientStop, LineStyle, PresetGeometry, ShapeVisual } from './types'
+} from './parse.js'
+import { resolveFirstColor, type Theme } from './theme.js'
+import type { Fill, GradientStop, LineStyle, PresetGeometry, ShapeVisual } from './types.js'
 
 const FILL_LOCALS = ['noFill', 'solidFill', 'gradFill', 'blipFill', 'pattFill', 'grpFill']
 

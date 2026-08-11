@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { deck as deckShared } from '@x/shared'
 import { NewPresentationDialog } from './new-presentation-dialog'
-import { synthesizeDeckFromOutline } from '@/lib/pptx/generate'
+import { synthesizeDeckFromOutline } from '@x/shared/dist/pptx/generate.js'
 
 // Radix primitives in jsdom.
 class ResizeObserverStub {
@@ -16,7 +16,7 @@ Element.prototype.scrollIntoView = () => {}
 
 // Synthesis is mocked so a "build failure" can be forced deterministically;
 // the real path is covered by generate.test.ts.
-vi.mock('@/lib/pptx/generate', () => ({
+vi.mock('@x/shared/dist/pptx/generate.js', () => ({
   synthesizeDeckFromOutline: vi.fn(),
 }))
 const synthMock = vi.mocked(synthesizeDeckFromOutline)

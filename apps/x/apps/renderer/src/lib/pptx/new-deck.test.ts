@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { attr, childByLocal, childrenByLocal, childrenOf, parseAddedSlide, parsePptx, parseXml, resolveRelTarget } from './parse'
-import { writeDeck } from './serialize'
-import { planNewSlide } from './add-slide'
+import { attr, childByLocal, childrenByLocal, childrenOf, parseAddedSlide, parsePptx, parseXml, resolveRelTarget } from '@x/shared/dist/pptx/parse.js'
+import { writeDeck } from '@x/shared/dist/pptx/serialize.js'
+import { planNewSlide } from '@x/shared/dist/pptx/add-slide.js'
 import {
   EMPTY_DECK_EDITS,
   shapeKeyOf,
@@ -18,8 +18,8 @@ import {
   SLIDE_SIZE_EMU,
   TITLE_LAYOUT_RECTS,
   upgradeGeneratedDeck,
-} from './new-deck'
-import type { TextShape } from './types'
+} from '@x/shared/dist/pptx/new-deck.js'
+import type { TextShape } from '@x/shared/dist/pptx/types.js'
 
 const NAVY = DECK_PALETTES[0]
 const REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'

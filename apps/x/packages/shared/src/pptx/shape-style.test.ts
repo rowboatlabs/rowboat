@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { parsePptx } from './parse'
-import { updateSlideXml, writeDeck, type SetShapeStyleEdit } from './serialize'
-import type { DrawingShape, Shape, TextShape } from './types'
+import { parsePptx } from './parse.js'
+import { updateSlideXml, writeDeck, type SetShapeStyleEdit } from './serialize.js'
+import type { DrawingShape, Shape, TextShape } from './types.js'
 
 const NS_P = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
 const NS_A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
