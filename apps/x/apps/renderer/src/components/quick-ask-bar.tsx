@@ -1165,10 +1165,13 @@ export function QuickAskBar() {
           <>
             {/* Fixed-height caption + chip slots: present in BOTH states so
                 the head never shifts when a caption appears or the text
-                folds. */}
-            <div className="flex h-4 max-w-full items-center px-2">
+                folds. Both are single-line and CENTERED on the mascot —
+                wider than the 132px column they overflow it symmetrically
+                (the column doesn't clip), which reads as a caption under
+                the head instead of a squeezed left-ragged wrap. */}
+            <div className="flex h-4 items-center">
               {skipperCaption && (
-                <span className="truncate rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{skipperCaption}</span>
+                <span className="max-w-[176px] truncate whitespace-nowrap rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{skipperCaption}</span>
               )}
             </div>
             <div className="flex h-6 items-center">
@@ -1333,7 +1336,7 @@ function SkipperStatusChip({ state }: { state: CallState }) {
   const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)
   return (
     <span
-      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium text-white shadow-md ${
+      className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 font-medium text-white shadow-md ${
         micOpen ? 'bg-green-600 text-[11px] font-semibold' : 'bg-black/60 text-[10px]'
       }`}
     >
