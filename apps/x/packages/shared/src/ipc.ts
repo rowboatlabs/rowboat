@@ -2393,6 +2393,9 @@ const ipcSchemas = {
       screenSharing: z.boolean(),
       // Output mute: replies are not spoken while set (input mute is micMuted).
       speakerMuted: z.boolean(),
+      // High-level "what's happening" while a turn runs ("Searching the
+      // web…", "Reasoning…") — tool NAMES only, never arguments.
+      activityText: z.string().nullable(),
       // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
       // A quick ⌘ tap locked hands-free capture (until the next tap).
@@ -2425,6 +2428,7 @@ const ipcSchemas = {
           micMuted: z.boolean(),
           screenSharing: z.boolean(),
           speakerMuted: z.boolean(),
+          activityText: z.string().nullable(),
           interimText: z.string().nullable(),
           pttLocked: z.boolean(),
           responseText: z.string().nullable(),
@@ -2455,6 +2459,9 @@ const ipcSchemas = {
       screenSharing: z.boolean(),
       // Output mute: replies are not spoken while set (input mute is micMuted).
       speakerMuted: z.boolean(),
+      // High-level "what's happening" while a turn runs ("Searching the
+      // web…", "Reasoning…") — tool NAMES only, never arguments.
+      activityText: z.string().nullable(),
       interimText: z.string().nullable(),
       pttLocked: z.boolean(),
       responseText: z.string().nullable(),

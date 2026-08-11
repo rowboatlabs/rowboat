@@ -70,6 +70,8 @@ type CallState = {
   screenSharing: boolean
   /** Output mute (the speaker pin): replies are not spoken while set. */
   speakerMuted: boolean
+  /** Tool-name-level "what's happening" while a turn runs, else null. */
+  activityText: string | null
   interimText: string | null
   /** A quick ⌘ tap locked hands-free capture (until the next tap). */
   pttLocked: boolean
@@ -86,6 +88,7 @@ const IDLE_CALL_STATE: CallState = {
   micMuted: false,
   screenSharing: false,
   speakerMuted: false,
+  activityText: null,
   interimText: null,
   pttLocked: false,
   responseText: null,
@@ -212,6 +215,9 @@ export function QuickAskBar() {
   // this window only renders it (same contract as the old popout).
   const [callState, setCallState] = useState<CallState>(IDLE_CALL_STATE)
   speakerMutedRef.current = callState.speakerMuted
+  // Flicker-held activity label shared by every surface this window renders
+  // (Skipper chip + panel, tucked chip, pill chip).
+  const heldActivity = useHeldLabel(callState.activityText)
   useEffect(() => {
     const cleanup = window.ipc.on('video:popout-state', (next) => setCallState(next))
     // Main replays the cached state on did-finish-load, but that can race
@@ -677,6 +683,7 @@ export function QuickAskBar() {
     return (
       <TuckedMascot
         state={callState}
+        activity={heldActivity}
         sendAction={sendAction}
         onExpand={() => requestCollapsed(false)}
       />
@@ -691,6 +698,7 @@ export function QuickAskBar() {
       <>
         <PinnedPill
           state={callState}
+          activity={heldActivity}
           sendAction={sendAction}
           onCollapse={() => requestCollapsed(true)}
           composer={
@@ -724,7 +732,9 @@ export function QuickAskBar() {
   const panelAsked = callCard ? callState.questionText : asked
   const panelText = callCard ? (callState.responseText ?? '') : (answer?.text ?? '')
   const panelProcessing = callCard ? callState.status === 'thinking' : processing
-  const panelStatusText = (!callCard && answer?.statusText) || 'Thinking…'
+  const panelStatusText = callCard
+    ? (heldActivity ?? 'Thinking…')
+    : (answer?.statusText || 'Thinking…')
   // One-line caption under the Skipper's mascot: the in-flight utterance
   // wins; otherwise the tail of the reply while it speaks.
   const skipperReplyTail =
@@ -1178,7 +1188,7 @@ export function QuickAskBar() {
               )}
             </div>
             <div className="flex h-6 items-center">
-              <SkipperStatusChip state={callState} />
+              <SkipperStatusChip state={callState} activity={heldActivity} />
             </div>
           </>
         )}
@@ -1198,6 +1208,31 @@ const STATUS_DISPLAY: Record<NonNullable<CallState['status']>, { label: string; 
 
 const dragRegion = { WebkitAppRegion: 'drag' } as React.CSSProperties
 const noDragRegion = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
+
+/**
+ * Anti-flicker hold for the activity label: agent turns fire tool calls in
+ * quick bursts, and mirroring them raw makes the chip strobe. Each shown
+ * label holds for a minimum beat; the newest value wins once it elapses.
+ */
+function useHeldLabel(next: string | null, holdMs = 800): string | null {
+  const [shown, setShown] = useState<string | null>(next)
+  const shownAtRef = useRef(0)
+  useEffect(() => {
+    if (next === shown) return
+    const apply = () => {
+      shownAtRef.current = Date.now()
+      setShown(next)
+    }
+    const elapsed = Date.now() - shownAtRef.current
+    if (shown === null || elapsed >= holdMs) {
+      apply()
+      return
+    }
+    const timer = setTimeout(apply, holdMs - elapsed)
+    return () => clearTimeout(timer)
+  }, [next, shown, holdMs])
+  return shown
+}
 
 /**
  * The Skipper's control pins — ONE cluster for both presentations (text
@@ -1333,8 +1368,11 @@ function SkipperPins({
  * The Skipper's status line — the same words under the mascot in both
  * presentations. While the mic gate is open it goes loud (green, mic icon):
  * paired with the listening halo, holding right ⌘ is unmistakably working.
+ * While a turn runs, the generic "Thinking…" upgrades to the current
+ * activity ("Searching the web…") when one is known — flicker-held by the
+ * caller via useHeldLabel.
  */
-function SkipperStatusChip({ state }: { state: CallState }) {
+function SkipperStatusChip({ state, activity }: { state: CallState; activity?: string | null }) {
   const statusDisplay = state.status ? STATUS_DISPLAY[state.status] : null
   const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)
   return (
@@ -1361,7 +1399,11 @@ function SkipperStatusChip({ state }: { state: CallState }) {
       ) : statusDisplay ? (
         <>
           <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
-          {state.status === 'idle' ? 'Hold the mic — or right ⌘' : statusDisplay.label}
+          {state.status === 'idle'
+            ? 'Hold the mic — or right ⌘'
+            : state.status === 'thinking' && activity
+              ? activity
+              : statusDisplay.label}
         </>
       ) : (
         <>
@@ -1387,11 +1429,13 @@ function SkipperStatusChip({ state }: { state: CallState }) {
  */
 function PinnedPill({
   state,
+  activity,
   sendAction,
   onCollapse,
   composer,
 }: {
   state: CallState
+  activity?: string | null
   sendAction: (action: PopoutAction) => void
   /** Tuck the pill down to just the mascot (voice-to-voice presentation). */
   onCollapse: () => void
@@ -1559,7 +1603,7 @@ function PinnedPill({
               ) : (
                 <>
                   <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
-                  {statusDisplay.label}
+                  {state.status === 'thinking' && activity ? activity : statusDisplay.label}
                 </>
               )}
             </span>
@@ -1751,10 +1795,12 @@ function PinnedPill({
  */
 function TuckedMascot({
   state,
+  activity,
   sendAction,
   onExpand,
 }: {
   state: CallState
+  activity?: string | null
   sendAction: (action: PopoutAction) => void
   onExpand: () => void
 }) {
@@ -1840,7 +1886,7 @@ function TuckedMascot({
       </div>
       {/* Pure status line — the CONTROLS are the pins. */}
       <div className="flex h-6 items-center">
-        <SkipperStatusChip state={state} />
+        <SkipperStatusChip state={state} activity={activity} />
       </div>
     </div>
   )

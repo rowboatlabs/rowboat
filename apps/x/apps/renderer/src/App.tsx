@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
@@ -1740,6 +1740,26 @@ function App() {
     }
   }
 
+  // What's happening right now, at tool-NAME level ("Searching the web…",
+  // "Reasoning…" — never arguments): the most recent activity wins — a
+  // running tool by display name, else reasoning, else plain thinking.
+  // Feeds the summoned bar's status line AND the Skipper's chip/panel.
+  const liveActivityText = useMemo(() => {
+    if (!activeIsProcessing) return null
+    let label = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
+    for (let i = liveConversation.length - 1; i >= 0; i--) {
+      const item = liveConversation[i]
+      if (isToolCall(item)) {
+        if (item.status === 'pending' || item.status === 'running') {
+          label = `${getToolDisplayName(item)}…`
+        }
+        break
+      }
+      if (isChatMessage(item)) break
+    }
+    return label
+  }, [activeIsProcessing, activeIsReasoning, liveConversation])
+
   // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
   // The main process caches the latest state and replays it when the popout
   // loads.
@@ -1753,13 +1773,14 @@ function App() {
         micMuted,
         screenSharing: video.screenState === 'live',
         speakerMuted,
+        activityText: liveActivityText,
         interimText: voice.interimText || null,
         pttLocked: pttStatus === 'locked',
         responseText: callResponseText,
         questionText: callQuestionText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, voice.interimText, pttStatus, callResponseText, callQuestionText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, liveActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
   // Screen-pointer gate: tell main whether a share is live (call OR
   // quick-ask — this window owns the capture either way). While true the
@@ -2026,28 +2047,11 @@ function App() {
     // Nothing new yet (run not started / no fresh answer): pushing would
     // only flicker the bar's local "Thinking…" state away.
     if (!text && !activeIsProcessing) return
-    // What's happening right now, for the bar's blinking status line: the
-    // most recent activity wins — a running tool by name, else reasoning,
-    // else plain thinking.
-    let statusText: string | null = null
-    if (activeIsProcessing) {
-      statusText = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
-      for (let i = liveConversation.length - 1; i >= 0; i--) {
-        const item = liveConversation[i]
-        if (isToolCall(item)) {
-          if (item.status === 'pending' || item.status === 'running') {
-            statusText = `${getToolDisplayName(item)}…`
-          }
-          break
-        }
-        if (isChatMessage(item)) break
-      }
-    }
     void window.ipc
-      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText })
+      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText: liveActivityText })
       .catch(() => {})
     if (!activeIsProcessing && text) quickAskActiveRef.current = false
-  }, [activeIsProcessing, activeIsReasoning, liveAssistantMessage, liveConversation])
+  }, [activeIsProcessing, liveActivityText, liveAssistantMessage, liveConversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
