@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -33,10 +33,11 @@ import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { ModelSelectionSection } from "@/components/settings/model-selection-section"
+import { PermissionsSettings } from "@/components/settings/permissions-settings"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "advanced" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -105,6 +106,12 @@ const tabs: TabConfig[] = [
     description: "Choose which notifications you receive",
   },
   {
+    id: "permissions",
+    label: "Permissions",
+    icon: ShieldCheck,
+    description: "What Rowboat can access, and how to grant it",
+  },
+  {
     id: "note-tagging",
     label: "Note Tagging",
     icon: Tags,
@@ -129,7 +136,7 @@ const tabs: TabConfig[] = [
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
-  { label: "App", ids: ["appearance", "notifications", "help"] },
+  { label: "App", ids: ["appearance", "notifications", "permissions", "help"] },
 ]
 
 interface SettingsDialogProps {
@@ -2014,6 +2021,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <AppearanceSettings />
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
+              ) : activeTab === "permissions" ? (
+                <PermissionsSettings dialogOpen={open} />
               ) : activeTab === "advanced" ? (
                 <AdvancedSettings dialogOpen={open} />
               ) : activeTab === "help" ? (
