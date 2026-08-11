@@ -1,8 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { deck as deckShared } from '@x/shared'
 import { NewPresentationDialog } from './new-presentation-dialog'
-import { synthesizeDeckFromOutline } from '@x/shared/dist/pptx/generate.js'
+import { DECK_PALETTES } from '@x/shared/dist/pptx/new-deck.js'
 
 // Radix primitives in jsdom.
 class ResizeObserverStub {
@@ -14,15 +13,9 @@ class ResizeObserverStub {
 Element.prototype.scrollIntoView = () => {}
 ;(Element.prototype as unknown as { hasPointerCapture: () => boolean }).hasPointerCapture = () => false
 
-// Synthesis is mocked so a "build failure" can be forced deterministically;
-// the real path is covered by generate.test.ts.
-vi.mock('@x/shared/dist/pptx/generate.js', () => ({
-  synthesizeDeckFromOutline: vi.fn(),
-}))
-const synthMock = vi.mocked(synthesizeDeckFromOutline)
-
 let handlers: Record<string, (args: unknown) => Promise<unknown>> = {}
-const writeCalls: Array<{ path: string }> = []
+let writeCalls: Array<{ path: string; data: string }> = []
+let existing: Set<string>
 
 ;(window as unknown as { ipc: unknown }).ipc = {
   on: () => () => undefined,
@@ -33,165 +26,96 @@ const writeCalls: Array<{ path: string }> = []
   },
 }
 
-function baseHandlers(outline: deckShared.DeckOutline, outlineOnRetry?: deckShared.DeckOutline) {
-  let call = 0
+const onCreated = vi.fn()
+const onOpenChange = vi.fn()
+
+beforeEach(() => {
+  writeCalls = []
+  existing = new Set()
+  onCreated.mockClear()
+  onOpenChange.mockClear()
   handlers = {
-    'workspace:exists': async () => ({ exists: false }),
-    'workspace:writeFile': async (args: unknown) => {
-      writeCalls.push({ path: (args as { path: string }).path })
-      return { path: (args as { path: string }).path, stat: {}, etag: '' }
-    },
-    'deck:generateOutline': async () => {
-      call += 1
-      return { outline: call === 1 ? outline : outlineOnRetry ?? outline }
+    'workspace:exists': async (args) => ({
+      exists: existing.has((args as { path: string }).path),
+    }),
+    'workspace:writeFile': async (args) => {
+      const { path, data } = args as { path: string; data: string }
+      writeCalls.push({ path, data })
+      return { path, stat: {}, etag: '' }
     },
   }
-}
+})
 
-// A first-turn clarify response now carries questions and NO slides.
-// A gap-sized clarify round: more than the old 2-question cap.
-const CLARIFY_QUESTIONS = [
-  'Who is the audience?',
-  'How long is the talk?',
-  'What growth metrics can you share?',
-  'Do you have a customer quote?',
-]
-const CLARIFY_OUTLINE: deckShared.DeckOutline = {
-  title: 'Draft',
-  suggestedPalette: 'navy',
-  clarifyingQuestions: CLARIFY_QUESTIONS,
-  slides: [],
-}
+afterEach(() => {
+  cleanup()
+})
 
-const FINAL_OUTLINE: deckShared.DeckOutline = {
-  title: 'Final',
-  suggestedPalette: 'navy',
-  slides: [
-    { layout: 'title', heading: 'Final' },
-    { layout: 'title-body', heading: 'Point one', bullets: ['a', 'b'] },
-    {
-      layout: 'title-body',
-      heading: 'Point two',
-      bullets: ['[X]% growth'],
-      needsInput: ['MoM growth %', 'customer quote'],
-    },
-  ],
-}
-
-function openDialog() {
+function renderDialog() {
   return render(
     <NewPresentationDialog
       open
-      targetFolder="knowledge/Workspace/Demo"
-      onOpenChange={() => {}}
-      onCreated={() => {}}
+      targetFolder="presentations"
+      onOpenChange={onOpenChange}
+      onCreated={onCreated}
     />,
   )
 }
 
-async function switchToGenerate() {
-  fireEvent.click(screen.getByText('Generate with AI'))
-  await screen.findByLabelText('What should the deck cover?')
-}
+describe('NewPresentationDialog', () => {
+  it('writes a blank deck at the typed name and opens it', async () => {
+    renderDialog()
 
-beforeEach(() => {
-  writeCalls.length = 0
-  synthMock.mockReset()
-})
-afterEach(cleanup)
-
-describe('NewPresentationDialog — generate flow', () => {
-  it('surfaces a gap-sized question list (4), then re-calls with answers and reaches review', async () => {
-    const seen: unknown[] = []
-    baseHandlers(CLARIFY_OUTLINE, FINAL_OUTLINE)
-    const originalGen = handlers['deck:generateOutline']
-    handlers['deck:generateOutline'] = async (args) => {
-      seen.push(args)
-      return originalGen(args)
-    }
-
-    openDialog()
-    await switchToGenerate()
-    fireEvent.change(screen.getByLabelText('What should the deck cover?'), {
-      target: { value: 'a talk about our product' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-
-    // Every question appears as an input; Continue stays disabled until ALL answered.
-    await screen.findByText(CLARIFY_QUESTIONS[0])
-    for (const q of CLARIFY_QUESTIONS.slice(1)) {
-      expect(screen.getByText(q)).toBeInTheDocument()
-    }
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
-
-    const answers = ['executives', '10 minutes', '40% MoM', 'no quote yet']
-    const inputs = screen.getAllByRole('textbox')
-    expect(inputs).toHaveLength(CLARIFY_QUESTIONS.length)
-    answers.slice(0, 3).forEach((a, i) => fireEvent.change(inputs[i], { target: { value: a } }))
-    // Three of four answered → still gated.
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
-    fireEvent.change(inputs[3], { target: { value: answers[3] } })
-    expect(screen.getByRole('button', { name: 'Continue' })).not.toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-
-    // Review step: the re-request carried the answers, and the final outline shows.
-    await screen.findByRole('button', { name: 'Create' })
-    expect(screen.getByLabelText('Title')).toHaveValue('Final')
-    expect(screen.getByDisplayValue('Point two')).toBeInTheDocument()
-
-    const retryReq = seen[1] as deckShared.GenerateDeckOutlineRequest
-    expect(retryReq.answers).toEqual(answers)
-  })
-
-  it('shows needsInput as "fill in" chips on the review rows', async () => {
-    baseHandlers(FINAL_OUTLINE)
-    openDialog()
-    await switchToGenerate()
-    fireEvent.change(screen.getByLabelText('What should the deck cover?'), {
-      target: { value: 'a deck' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    await screen.findByRole('button', { name: 'Create' })
-
-    expect(screen.getByText('fill in: MoM growth %')).toBeInTheDocument()
-    expect(screen.getByText('fill in: customer quote')).toBeInTheDocument()
-    // The bracketed placeholder is shown verbatim in the editable bullets.
-    expect(screen.getByDisplayValue('[X]% growth')).toBeInTheDocument()
-  })
-
-  it('writes nothing when synthesis fails, and shows the error', async () => {
-    baseHandlers(FINAL_OUTLINE)
-    synthMock.mockRejectedValue(new Error('bad geometry'))
-
-    openDialog()
-    await switchToGenerate()
-    fireEvent.change(screen.getByLabelText('What should the deck cover?'), {
-      target: { value: 'a deck' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-
-    await screen.findByRole('button', { name: 'Create' })
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
-
-    await screen.findByText('bad geometry')
-    expect(synthMock).toHaveBeenCalledTimes(1)
-    expect(writeCalls).toHaveLength(0)
-  })
-
-  it('writes and opens when synthesis succeeds', async () => {
-    baseHandlers(FINAL_OUTLINE)
-    synthMock.mockResolvedValue({ bytes: new Uint8Array([1, 2, 3]), slideCount: 3, droppedSpeakerNotes: false })
-
-    openDialog()
-    await switchToGenerate()
-    fireEvent.change(screen.getByLabelText('What should the deck cover?'), {
-      target: { value: 'a deck' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    await screen.findByRole('button', { name: 'Create' })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Quarterly review' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
     await waitFor(() => expect(writeCalls).toHaveLength(1))
-    expect(writeCalls[0].path).toBe('knowledge/Workspace/Demo/Final.pptx')
+    expect(writeCalls[0].path).toBe('presentations/Quarterly review.pptx')
+    // A real .pptx is a zip — "PK" base64-encodes to a "UEs" prefix.
+    expect(writeCalls[0].data.startsWith('UEs')).toBe(true)
+    expect(onCreated).toHaveBeenCalledWith('presentations/Quarterly review.pptx')
+  })
+
+  it('dedupes against an existing file instead of overwriting it', async () => {
+    existing.add('presentations/Untitled presentation.pptx')
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(writeCalls).toHaveLength(1))
+    expect(writeCalls[0].path).toBe('presentations/Untitled presentation (1).pptx')
+  })
+
+  it('rejects a name containing a slash without writing', async () => {
+    renderDialog()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'a/b' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    expect(await screen.findByText('Name cannot contain "/"')).toBeInTheDocument()
+    expect(writeCalls).toHaveLength(0)
+    expect(onCreated).not.toHaveBeenCalled()
+  })
+
+  it('offers every palette and builds with the selected one', async () => {
+    renderDialog()
+
+    for (const palette of DECK_PALETTES) {
+      expect(screen.getByRole('button', { name: new RegExp(palette.name) })).toBeInTheDocument()
+    }
+
+    // The first palette starts selected; pick a different one and build with it.
+    const second = DECK_PALETTES[1]
+    const swatch = screen.getByRole('button', { name: new RegExp(second.name) })
+    fireEvent.click(swatch)
+    expect(swatch).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(writeCalls).toHaveLength(1))
+  })
+
+  it('has no AI generate affordance', () => {
+    renderDialog()
+    expect(screen.queryByText(/generate with ai/i)).toBeNull()
+    expect(screen.queryByLabelText(/what should the deck cover/i)).toBeNull()
   })
 })
