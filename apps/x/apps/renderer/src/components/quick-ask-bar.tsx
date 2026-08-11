@@ -666,8 +666,11 @@ export function QuickAskBar() {
     }
   }, [asked, pinned, surface, collapsed, requestCollapsed, sendAction, startRecording, submitRecording, cancelRecording, reset, dismiss])
 
-  // Pinned role, tucked: just the mascot (voice-to-voice).
-  if (pinned && collapsed) {
+  // Pinned PILL role, tucked: just the mascot (voice-to-voice). The card
+  // surface does NOT branch here — its folded state renders inside the one
+  // Skipper layout below, so the mascot never remounts (and never moves) on
+  // fold/unfold.
+  if (pinned && collapsed && surface !== 'card') {
     return (
       <TuckedMascot
         state={callState}
@@ -708,27 +711,49 @@ export function QuickAskBar() {
     )
   }
 
-  // The bar-style card — summoned (no call), or hosting a live voice call
-  // (callCard: "bring the text back" from a bar-originated tuck). Same
-  // layout; the exchange comes from the call's mirror on the call card
-  // (covers spoken turns too), from the quick-ask mirror when summoned.
+  // The bar-style card — summoned (no call), or the SKIPPER (a live voice
+  // call on the card surface, text panel open or folded). One layout: the
+  // mascot column below is the SAME mounted node in both Skipper states —
+  // fold/unfold only adds/removes the card beside it, so the mascot never
+  // moves, resizes, or replays its entry animation. The exchange comes from
+  // the call's mirror on the call card, from the quick-ask mirror summoned.
+  const skipper = pinned && surface === 'card'
   const panelAsked = callCard ? callState.questionText : asked
   const panelText = callCard ? (callState.responseText ?? '') : (answer?.text ?? '')
   const panelProcessing = callCard ? callState.status === 'thinking' : processing
   const panelStatusText = (!callCard && answer?.statusText) || 'Thinking…'
+  // One-line caption under the Skipper's mascot: the in-flight utterance
+  // wins; otherwise the tail of the reply while it speaks.
+  const skipperReplyTail =
+    skipper && (callState.ttsState !== 'idle' || callState.status === 'thinking')
+      ? (callState.responseText ?? '')
+          .replace(/[#*_`>[\]]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(-90)
+      : ''
+  const skipperCaption = skipper ? (callState.interimText || skipperReplyTail) : ''
 
   return (
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden">
       {/* The invisible stage: popovers open into this zone; clicking it
           dismisses the bar — or, on the call card, tucks the text back into
-          the mascot (the call keeps going). */}
-      <div className="min-h-0 flex-1" onMouseDown={callCard ? () => requestCollapsed(true) : dismiss} />
+          the mascot (the call keeps going). Folded Skipper: the stage is a
+          drag area, part of "carry it around". */}
+      <div
+        className="min-h-0 flex-1"
+        style={skipper && collapsed ? dragRegion : undefined}
+        onMouseDown={callCard ? () => requestCollapsed(true) : skipper ? undefined : dismiss}
+      />
 
       {/* Bottom row: card + the mascot riding alongside on the transparent
           stage. The row is PADDED so the card's CSS shadow fades inside the
           window instead of clipping at its rectangular edge (which read as
-          a grey rectangle around the card). */}
-      <div className="flex shrink-0 items-end gap-1 px-6 pb-5">
+          a grey rectangle around the card). The paddings are IDENTICAL in
+          both Skipper states — with the corner-anchored window, that pins
+          the mascot to the exact same screen pixels across fold/unfold. */}
+      <div className="flex shrink-0 items-end justify-end gap-1 px-6 pb-5">
+      {!(skipper && collapsed) && (
       <div className="relative min-w-0 flex-1">
       {/* Light skin (#810): near-white card, hairline dark border, dark
           text. The window's native shadow is off (it would outline the
@@ -1047,73 +1072,92 @@ export function QuickAskBar() {
         </TooltipContent>
       </Tooltip>
       </div>
+      )}
 
-      {/* The mascot, full silhouette on the transparent stage — the same
-          TalkingHead the product tour and call tiles render. On the call
-          card it lip-syncs the spoken reply; summoned it bobs, with
-          thinking bubbles while a question is processing. On the Skipper
-          (callCard) the mascot IS the control surface AND the drag handle —
-          the same pins as the folded presentation ride its hat and hull,
-          the status line sits beneath, and grabbing anywhere else on it
-          carries the whole companion around; summoned it stays inert
-          (pointer-events none, clicks neither dismiss nor do anything). */}
+      {/* The mascot column — the Skipper's CONSTANT. One mounted node for
+          both Skipper states (text open or folded): identical size, pins,
+          caption slot, and status chip, at identical offsets from the
+          window's bottom-right corner — which the corner-anchored window
+          keeps fixed on screen, so fold/unfold moves NOTHING here; only the
+          card beside it comes and goes. It is the control surface AND the
+          drag handle. Summoned (no call) it stays the inert 124px bobbing
+          silhouette. */}
       <div
-        className={`relative flex w-[132px] shrink-0 select-none flex-col items-center ${callCard ? 'cursor-grab' : 'pointer-events-none'}`}
-        style={callCard ? dragRegion : undefined}
-        aria-hidden={callCard ? undefined : true}
-        title={callCard ? 'Drag to move your Skipper' : undefined}
+        className={`relative flex w-[132px] shrink-0 select-none flex-col items-center ${skipper ? 'cursor-grab' : 'pointer-events-none'}`}
+        style={skipper ? dragRegion : undefined}
+        aria-hidden={skipper ? undefined : true}
+        title={skipper ? 'Drag to move your Skipper' : undefined}
       >
-        {callCard && (
+        {skipper && (
           <style>{`
             @keyframes listen-ring {
               0% { transform: scale(0.72); opacity: 0.9; }
               100% { transform: scale(1.28); opacity: 0; }
             }
+            @keyframes skipper-pop {
+              0% { opacity: 0; transform: scale(0.5); }
+              100% { opacity: 1; transform: scale(1); }
+            }
           `}</style>
         )}
-        {/* Listening halo — same signal as the tucked mascot: rings pulse
-            around the head while the mic gate is open, so "press ⌘ and
-            speak" is visibly working even with the text panel up. */}
-        {callCard && !callState.micMuted && (callState.status === 'listening' || callState.pttLocked) && (
-          <>
-            <span
-              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
-              style={{ top: '42%', width: 96, height: 96, marginLeft: -48, marginTop: -48, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
-            />
-            <span
-              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
-              style={{ top: '42%', width: 96, height: 96, marginLeft: -48, marginTop: -48, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
-            />
-          </>
-        )}
-        <TalkingHead
-          ttsState={
-            callCard
-              ? callState.status === 'thinking' && callState.ttsState === 'idle'
-                ? 'synthesizing'
-                : callState.ttsState
-              : processing
-                ? 'synthesizing'
-                : 'idle'
-          }
-          getLevel={callCard ? synthLevel : zeroLevel}
-          size={124}
-          hat={callCard ? 'cowboy' : undefined}
-          hatOverlay={
-            callCard ? (
-              <SkipperPins
-                state={callState}
-                sendAction={sendAction}
-                textPin="collapse"
-                onTextPin={() => requestCollapsed(true)}
+        <div
+          className="relative -mb-4"
+          style={skipper ? { animation: 'skipper-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' } : undefined}
+        >
+          {/* Listening halo — rings pulse around the head while the mic
+              gate is open, so "press ⌘ and speak" is visibly working in
+              both states. */}
+          {skipper && !callState.micMuted && (callState.status === 'listening' || callState.pttLocked) && (
+            <>
+              <span
+                className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+                style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
               />
-            ) : undefined
-          }
-        />
-        {callCard && (
-          <div className="-mt-3 flex h-6 items-center">
-            <SkipperStatusChip state={callState} />
-          </div>
+              <span
+                className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+                style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
+              />
+            </>
+          )}
+          <TalkingHead
+            ttsState={
+              skipper
+                ? callState.status === 'thinking' && callState.ttsState === 'idle'
+                  ? 'synthesizing'
+                  : callState.ttsState
+                : processing
+                  ? 'synthesizing'
+                  : 'idle'
+            }
+            getLevel={skipper ? synthLevel : zeroLevel}
+            size={skipper ? 132 : 124}
+            hat={skipper ? 'cowboy' : undefined}
+            hatOverlay={
+              skipper ? (
+                <SkipperPins
+                  state={callState}
+                  sendAction={sendAction}
+                  textPin={collapsed ? 'expand' : 'collapse'}
+                  onTextPin={() => requestCollapsed(!collapsed)}
+                />
+              ) : undefined
+            }
+          />
+        </div>
+        {skipper && (
+          <>
+            {/* Fixed-height caption + chip slots: present in BOTH states so
+                the head never shifts when a caption appears or the text
+                folds. */}
+            <div className="flex h-4 max-w-full items-center px-2">
+              {skipperCaption && (
+                <span className="truncate rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{skipperCaption}</span>
+              )}
+            </div>
+            <div className="flex h-6 items-center">
+              <SkipperStatusChip state={callState} />
+            </div>
+          </>
         )}
       </div>
       </div>
