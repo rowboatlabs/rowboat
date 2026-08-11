@@ -148,3 +148,63 @@ describe('save pipeline generations', () => {
     expect(h.statuses[h.statuses.length - 1]).toBe('saved')
   })
 })
+
+describe('idle / discard / settled (external-change support)', () => {
+  it('isIdle tracks the armed debounce, the in-flight save, and the generations', async () => {
+    const h = harness()
+    expect(h.pipeline.isIdle()).toBe(true)
+
+    h.edit('A')
+    expect(h.pipeline.isIdle()).toBe(false) // debounce armed
+
+    const block = deferred()
+    h.gate.current = block.promise
+    await vi.advanceTimersByTimeAsync(DEBOUNCE)
+    expect(h.pipeline.isIdle()).toBe(false) // write in flight
+
+    h.gate.current = null
+    block.resolve()
+    await h.pipeline.flush()
+    expect(h.pipeline.isIdle()).toBe(true)
+  })
+
+  it('discard abandons pending edits without ever writing', async () => {
+    const h = harness()
+    h.edit('A')
+    expect(h.pipeline.isIdle()).toBe(false)
+
+    h.pipeline.discard()
+    expect(h.pipeline.isIdle()).toBe(true)
+    expect(h.statuses[h.statuses.length - 1]).toBe('clean')
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE * 10)
+    await h.pipeline.flush()
+    expect(h.started).toEqual([])
+    expect(h.writes).toEqual([])
+  })
+
+  it('settled awaits an in-flight save without starting one', async () => {
+    const h = harness()
+    const block = deferred()
+    h.gate.current = block.promise
+    h.edit('A')
+    await vi.advanceTimersByTimeAsync(DEBOUNCE)
+    expect(h.started).toEqual(['A'])
+
+    let settledDone = false
+    const settledPromise = h.pipeline.settled().then(() => {
+      settledDone = true
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settledDone).toBe(false) // blocked behind the gated write
+
+    h.gate.current = null
+    block.resolve()
+    await settledPromise
+    expect(h.writes).toEqual(['A'])
+
+    // And on an idle pipeline it resolves immediately, writing nothing.
+    await h.pipeline.settled()
+    expect(h.started).toEqual(['A'])
+  })
+})

@@ -16,6 +16,7 @@ import {
   PresentationIcon,
   SparklesIcon,
   Trash2Icon,
+  TriangleAlertIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -78,6 +79,7 @@ import {
 } from '@/components/pptx/edit-model'
 import { SlideCanvas, SlideThumbnail } from '@/components/pptx/canvas'
 import { createSavePipeline, type SavePipeline } from '@/components/pptx/save-pipeline'
+import { createDeckFileSync, ExternalChangeError, type DeckFileSync } from '@/components/pptx/file-sync'
 import { PresentationOverlay } from '@/components/pptx/presentation'
 import {
   EditorHeader,
@@ -212,6 +214,9 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const [selectedKey, setSelectedKey] = useState<ShapeKey | null>(null)
   const [editingKey, setEditingKey] = useState<ShapeKey | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('clean')
+  // The file changed underneath us (assistant tool / external write) while
+  // local unsaved edits exist. Nothing is written until the user picks a side.
+  const [externalConflict, setExternalConflict] = useState(false)
   const [zoomMode, setZoomMode] = useState<'fit' | number>('fit')
   const [zoomPercent, setZoomPercent] = useState(100)
   const [selectionTick, setSelectionTick] = useState(0)
@@ -251,6 +256,38 @@ export function PptxEditor({ path }: PptxEditorProps) {
 
   // ------------------------------------------------------------- persistence
 
+  // File-state tracker for this mount: every write is transactional against
+  // the etag of what THIS editor last read or wrote (verified under the main
+  // process file lock), so an assistant tool writing the same deck can never
+  // be silently overwritten by our autosave. Lazy ref like the save pipeline.
+  const fileSyncRef = useRef<DeckFileSync | null>(null)
+  if (fileSyncRef.current === null) {
+    fileSyncRef.current = createDeckFileSync({
+      read: async () => {
+        const res = await window.ipc.invoke('workspace:readFile', { path, encoding: 'base64' })
+        return { data: res.data, etag: res.etag, stat: { mtimeMs: res.stat.mtimeMs, size: res.stat.size } }
+      },
+      write: async (data, expectedEtag) => {
+        const res = await window.ipc.invoke('workspace:writeFile', {
+          path,
+          data,
+          opts: { encoding: 'base64', ...(expectedEtag !== null ? { expectedEtag } : {}) },
+        })
+        return { etag: res.etag, stat: { mtimeMs: res.stat.mtimeMs, size: res.stat.size } }
+      },
+      stat: async () => {
+        try {
+          const s = await window.ipc.invoke('workspace:stat', { path })
+          return { mtimeMs: s.mtimeMs, size: s.size }
+        } catch {
+          return null
+        }
+      },
+      onConflict: () => setExternalConflict(true),
+    })
+  }
+  const fileSync = fileSyncRef.current
+
   // One pipeline per mount (App.tsx keys this component by path). It owns the
   // debounce timer and the dirty generations; the callbacks read refs so it
   // never captures stale edit state. Lazy ref, not useMemo — React may drop
@@ -275,18 +312,15 @@ export function PptxEditor({ path }: PptxEditorProps) {
         )
         return uint8ArrayToBase64(bytes)
       },
-      write: async (data) => {
-        await window.ipc.invoke('workspace:writeFile', {
-          path,
-          data,
-          opts: { encoding: 'base64' },
-        })
-      },
+      write: (data) => fileSync.guardedWrite(data),
       onStatus: (status) => {
         if (status === 'saved') lastSaveErrorRef.current = null
         setSaveStatus(status)
       },
       onError: (err) => {
+        // A refused write after an external change is not a failure to
+        // announce — the conflict banner owns that conversation.
+        if (err instanceof ExternalChangeError) return
         console.error('Failed to save pptx:', err)
         // The edit set is cumulative, so ONE rejected edit makes every later
         // save fail too — silently, until now. Without the reason on screen
@@ -341,19 +375,18 @@ export function PptxEditor({ path }: PptxEditorProps) {
     let cancelled = false
     ;(async () => {
       try {
-        const result = await window.ipc.invoke('workspace:readFile', { path, encoding: 'base64' })
-        let bytes = base64ToUint8Array(result.data)
+        const data = await fileSync.load()
+        let bytes = base64ToUint8Array(data)
         // Decks created by the first version of the deck generator carry
         // scaffolding desktop PowerPoint renders as blank slides, and saves
         // preserve it byte-for-byte — repair the package once, on open.
         try {
           const upgraded = await upgradeGeneratedDeck(bytes)
           if (upgraded && !cancelled) {
-            await window.ipc.invoke('workspace:writeFile', {
-              path,
-              data: uint8ArrayToBase64(upgraded),
-              opts: { encoding: 'base64' },
-            })
+            // Guarded like every other write: if the assistant touched the
+            // file between our read and this repair, keep opening as-is and
+            // let the conflict banner sort it out.
+            await fileSync.guardedWrite(uint8ArrayToBase64(upgraded))
             bytes = upgraded
           }
         } catch (err) {
@@ -390,7 +423,132 @@ export function PptxEditor({ path }: PptxEditorProps) {
       cancelled = true
       if (baseDeckRef.current) disposeDeck(baseDeckRef.current)
     }
-  }, [path])
+  }, [path, fileSync])
+
+  // -------------------------------------------------- external file changes
+
+  /**
+   * Re-reads the file and installs it as the new base: fresh parse, old blob
+   * URLs disposed, local edit state reset — the disk is now the whole truth.
+   * `activeIndex` is deliberately left alone: the currentIndex clamp keeps
+   * the view on the same slide number when it still exists, and on the last
+   * slide when the reloaded deck is shorter.
+   */
+  const reloadFromDisk = useCallback(async () => {
+    try {
+      const data = await fileSync.load()
+      const parsed = await parsePptx(base64ToUint8Array(data))
+      // An edit racing the re-read must not be clobbered silently: back out
+      // and let the banner ask.
+      if (!savePipeline.isIdle()) {
+        disposeDeck(parsed)
+        setExternalConflict(true)
+        return
+      }
+      const old = baseDeckRef.current
+      baseDeckRef.current = parsed
+      setBaseDeck(parsed)
+      if (old && old !== parsed) disposeDeck(old)
+      setHistory([{ edits: EMPTY_DECK_EDITS }])
+      setHistIndex(0)
+      histIndexRef.current = 0
+      editSetRef.current = EMPTY_DECK_EDITS
+      setSelectedKey(null)
+      setEditingKey(null)
+      setExternalConflict(false)
+      try {
+        const themePath = await resolveThemePath(parsed.source.zip)
+        const themeXml = (await parsed.source.zip.file(themePath)?.async('string')) ?? null
+        activeThemeRef.current = themeXml
+        setCurrentThemeXml(themeXml)
+      } catch {
+        activeThemeRef.current = null
+        setCurrentThemeXml(null)
+      }
+      setSaveStatus('clean')
+    } catch (err) {
+      console.error('Failed to reload pptx after external change:', err)
+      toast.error('Could not reload the presentation.', {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }, [fileSync, savePipeline])
+
+  /**
+   * A workspace:didChange / rowboat:deck-touched signal for this path. Our
+   * own saves echo back through the watcher too; checkExternal (stat vs the
+   * snapshot of our last read/write) filters them without reading the file.
+   * Clean editor → reload in place. Unsaved edits → banner; nothing writes
+   * and nothing reloads until the user picks a side (the etag guard enforces
+   * the no-write half even when the autosave debounce fires regardless).
+   */
+  const externalSignalBusyRef = useRef(false)
+  const handleExternalSignal = useCallback(async () => {
+    // Signals during the initial load race the first parse; the load is
+    // reading the newest bytes anyway.
+    if (!baseDeckRef.current) return
+    if (externalSignalBusyRef.current) return
+    externalSignalBusyRef.current = true
+    try {
+      const verdict = await fileSync.checkExternal()
+      if (verdict !== 'external') return
+      if (savePipeline.isIdle()) {
+        await reloadFromDisk()
+      } else {
+        setExternalConflict(true)
+      }
+    } finally {
+      externalSignalBusyRef.current = false
+    }
+  }, [fileSync, savePipeline, reloadFromDisk])
+
+  // The workspace watcher only covers allowlisted roots, so assistant deck
+  // tools additionally announce their writes via this window event (App.tsx).
+  useEffect(() => {
+    const onTouched = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: string }>).detail
+      if (detail?.path === path) void handleExternalSignal()
+    }
+    window.addEventListener('rowboat:deck-touched', onTouched)
+    return () => window.removeEventListener('rowboat:deck-touched', onTouched)
+  }, [path, handleExternalSignal])
+
+  useEffect(() => {
+    const cleanup = window.ipc.on('workspace:didChange', (event) => {
+      switch (event.type) {
+        case 'created':
+        case 'changed':
+          if (event.path === path) void handleExternalSignal()
+          break
+        case 'moved':
+          if (event.to === path) void handleExternalSignal()
+          break
+        case 'bulkChanged':
+          if (!event.paths || event.paths.includes(path)) void handleExternalSignal()
+          break
+        // 'deleted': nothing to reload; the next save simply recreates the file.
+      }
+    })
+    return cleanup
+  }, [path, handleExternalSignal])
+
+  /** Banner: throw away local edits and take what is on disk. */
+  const resolveConflictReload = useCallback(async () => {
+    savePipeline.discard()
+    // A guarded write may still be mid-flight; let it settle (the etag guard
+    // decides its fate), then re-discard whatever generation bookkeeping it
+    // left behind before installing the disk state.
+    await savePipeline.settled()
+    savePipeline.discard()
+    await reloadFromDisk()
+  }, [savePipeline, reloadFromDisk])
+
+  /** Banner: keep local edits; the next save knowingly overwrites the file. */
+  const resolveConflictKeepMine = useCallback(() => {
+    fileSync.keepMine()
+    setExternalConflict(false)
+    void savePipeline.persist()
+  }, [fileSync, savePipeline])
 
   // ------------------------------------------------------------ derived deck
 
@@ -443,12 +601,8 @@ export function PptxEditor({ path }: PptxEditorProps) {
       mergeSlideEdits(toSlideEdits(edits.shapes), insertsToSlideEdits(edits.insertedShapes)),
       { deleteSlides: edits.deletedSlides, addSlides: edits.addedSlides, slideOrder: edits.slideOrder },
     )
-    await window.ipc.invoke('workspace:writeFile', {
-      path,
-      data: uint8ArrayToBase64(bytes),
-      opts: { encoding: 'base64' },
-    })
-  }, [path])
+    await fileSync.guardedWrite(uint8ArrayToBase64(bytes))
+  }, [fileSync])
 
   const activePaletteId = useMemo(() => paletteIdOfTheme(currentThemeXml), [currentThemeXml])
 
@@ -491,9 +645,12 @@ export function PptxEditor({ path }: PptxEditorProps) {
         setEditingKey(null)
       } catch (err) {
         console.error('Failed to change theme:', err)
-        toast.error('Could not change the theme.', {
-          description: err instanceof Error ? err.message : String(err),
-        })
+        // A refused guarded write already raised the conflict banner.
+        if (!(err instanceof ExternalChangeError)) {
+          toast.error('Could not change the theme.', {
+            description: err instanceof Error ? err.message : String(err),
+          })
+        }
       } finally {
         setThemeBusy(false)
       }
@@ -1422,6 +1579,34 @@ export function PptxEditor({ path }: PptxEditorProps) {
           slideNumber={currentIndex + 1}
           slideCount={deck.slides.length}
         />
+
+        {externalConflict && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs"
+          >
+            <TriangleAlertIcon className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="font-medium text-foreground">
+              This file was changed by the assistant.
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void resolveConflictReload()}
+                className="rounded-md border border-border bg-background px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                Reload (discard your unsaved changes)
+              </button>
+              <button
+                type="button"
+                onClick={resolveConflictKeepMine}
+                className="rounded-md border border-border bg-background px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                Keep mine (your next save overwrites)
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex min-h-0 flex-1">
           <nav

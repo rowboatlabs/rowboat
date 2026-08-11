@@ -5869,6 +5869,46 @@ function App() {
     }
   }, [sessionChat.chatState?.conversation, runId, applyAppNavigation])
 
+  // Deck auto-open / refresh: when the assistant writes a .pptx inside the
+  // workspace, open the editor on a brand-new deck (deck-create) and tell an
+  // already-open editor the file changed underneath it. Same seeding semantics
+  // as app-navigation above: transcript entries present on session switch are
+  // marked processed without replaying.
+  const processedDeckToolsRef = useRef<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() })
+  useEffect(() => {
+    const conversation = sessionChat.chatState?.conversation
+    if (!conversation) return
+    const completed = conversation.filter(
+      (item): item is ToolCall =>
+        isToolCall(item) &&
+        (item.name === 'deck-create' ||
+          item.name === 'deck-add-slide' ||
+          item.name === 'deck-edit-slide' ||
+          item.name === 'deck-restyle') &&
+        item.status === 'completed'
+    )
+    if (processedDeckToolsRef.current.key !== runId) {
+      processedDeckToolsRef.current = { key: runId, ids: new Set(completed.map((t) => t.id)) }
+      return
+    }
+    for (const tool of completed) {
+      if (processedDeckToolsRef.current.ids.has(tool.id)) continue
+      processedDeckToolsRef.current.ids.add(tool.id)
+      const result = tool.result as Record<string, unknown> | undefined
+      if (result && result.success && typeof result.workspaceRelPath === 'string') {
+        // Only a brand-new deck steals the view; edits to an existing one
+        // must not yank the user away from what they are doing.
+        if (tool.name === 'deck-create') {
+          void navigateToView({ type: 'file', path: result.workspaceRelPath })
+        }
+        // If the editor is already open on this file the navigation is a
+        // no-op, and the workspace watcher only covers allowlisted roots —
+        // so tell the editor directly that the file changed.
+        window.dispatchEvent(new CustomEvent('rowboat:deck-touched', { detail: { path: result.workspaceRelPath } }))
+      }
+    }
+  }, [sessionChat.chatState?.conversation, runId, navigateToView])
+
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
     if (currentViewState.type !== 'chat') {

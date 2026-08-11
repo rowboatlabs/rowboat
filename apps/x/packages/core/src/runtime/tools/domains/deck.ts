@@ -55,6 +55,14 @@ function assertPptxPath(inputPath: string): void {
     }
 }
 
+/**
+ * Workspace-relative path for the renderer (viewer auto-open / refresh keys
+ * off it, like the spreadsheet tools' meta); null outside the workspace.
+ */
+function workspaceRelPathOf(inputPath: string): string | null {
+    return files.resolveFilePath(inputPath).workspaceRelPath;
+}
+
 async function readDeck(inputPath: string): Promise<SlideDeck> {
     assertPptxPath(inputPath);
     const { buffer } = await files.readBuffer(inputPath);
@@ -119,6 +127,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                     success: true,
                     path: meta.path,
                     resolvedPath: meta.resolvedPath,
+                    workspaceRelPath: workspaceRelPathOf(inputPath),
                     slideCount,
                     palette,
                     ...(droppedSpeakerNotes ? { note: 'speaker notes are not written into the .pptx' } : {}),
@@ -159,6 +168,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                     return {
                         success: true,
                         path: inputPath,
+                        workspaceRelPath: workspaceRelPathOf(inputPath),
                         insertedAt: pos + 1,
                         heading: slide.heading,
                         slideCount: parsed.slides.length + 1,
@@ -197,7 +207,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                     const currentPattern = detectPattern(target);
                     const plan = planSlideEdit(target, currentPattern, slide);
                     if (plan.kind === 'noop') {
-                        return { success: true, path: inputPath, slideNumber, changed: false };
+                        return { success: true, path: inputPath, workspaceRelPath: workspaceRelPathOf(inputPath), slideNumber, changed: false };
                     }
                     let bytes: Uint8Array;
                     if (plan.kind === 'text') {
@@ -230,6 +240,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                     return {
                         success: true,
                         path: inputPath,
+                        workspaceRelPath: workspaceRelPathOf(inputPath),
                         slideNumber,
                         changed: true,
                         mode: plan.kind === 'text' ? 'text-edit' : 'rebuild',
@@ -262,7 +273,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                     const xml = buildThemeXml(paletteById(palette));
                     const bytes = await writeDeck(parsed, new Map(), { replaceTheme: { xml } });
                     await files.writeBuffer(inputPath, Buffer.from(bytes));
-                    return { success: true, path: inputPath, palette, slideCount: parsed.slides.length };
+                    return { success: true, path: inputPath, workspaceRelPath: workspaceRelPathOf(inputPath), palette, slideCount: parsed.slides.length };
                 } finally {
                     disposeDeck(parsed);
                 }
@@ -295,6 +306,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                     return {
                         success: true,
                         path: inputPath,
+                        workspaceRelPath: workspaceRelPathOf(inputPath),
                         title: context.title,
                         slideCount: context.slides.length,
                         slides: context.slides.map((s, i) => ({
