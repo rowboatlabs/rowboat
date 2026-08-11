@@ -1,10 +1,18 @@
 import * as client from 'openid-client';
-import { OAuthTokens, ClientRegistrationResponse } from './types.js';
+import {
+  OAuthTokens,
+  ClientRegistrationRequest,
+  ClientRegistrationResponse,
+} from './types.js';
 
 /**
  * Cached configurations per provider (issuer:clientId -> Configuration)
  */
 const configCache = new Map<string, client.Configuration>();
+
+function configurationCacheKey(issuerUrl: string, clientId: string, hasSecret = false): string {
+  return `${issuerUrl}:${clientId}:${hasSecret ? 'secret' : 'none'}`;
+}
 
 /**
  * Helper to convert openid-client token response to our OAuthTokens type
@@ -40,7 +48,7 @@ export async function discoverConfiguration(
   clientId: string,
   clientSecret?: string
 ): Promise<client.Configuration> {
-  const cacheKey = `${issuerUrl}:${clientId}:${clientSecret ? 'secret' : 'none'}`;
+  const cacheKey = configurationCacheKey(issuerUrl, clientId, Boolean(clientSecret));
 
   const cached = configCache.get(cacheKey);
   if (cached) {
@@ -94,6 +102,33 @@ export function createStaticConfiguration(
 }
 
 /**
+ * Register a public PKCE client against an explicit RFC 7591 endpoint.
+ *
+ * Some providers expose registration_endpoint only in RFC 8414 authorization
+ * server metadata, not in OpenID discovery. Keeping the POST isolated also
+ * makes the trust boundary and request shape independently testable.
+ */
+export async function registerClientAtEndpoint(
+  registrationEndpoint: string,
+  request: ClientRegistrationRequest,
+): Promise<ClientRegistrationResponse> {
+  const response = await fetch(registrationEndpoint, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 1_000);
+    throw new Error(`Dynamic client registration failed (${response.status}): ${detail}`);
+  }
+  return ClientRegistrationResponse.parse(await response.json());
+}
+
+/**
  * Register client via Dynamic Client Registration (RFC 7591)
  * Returns both the Configuration and the registration response (for persistence)
  */
@@ -101,9 +136,34 @@ export async function registerClient(
   issuerUrl: string,
   redirectUris: string[],
   scopes: string[],
-  clientName: string = 'RowboatX Desktop App'
+  clientName: string = 'RowboatX Desktop App',
+  registrationEndpoint?: string,
 ): Promise<{ config: client.Configuration; registration: ClientRegistrationResponse }> {
   console.log(`[OAuth] Registering client via DCR at ${issuerUrl}...`);
+
+  // Some OAuth servers publish Dynamic Client Registration only in their
+  // RFC 8414 authorization-server document, while their OpenID discovery
+  // document omits registration_endpoint. openid-client's convenience DCR
+  // helper uses OpenID discovery and therefore cannot register those valid
+  // providers. When the provider advertises an explicit endpoint, perform the
+  // standard RFC 7591 POST and then use ordinary discovery for auth/token URLs.
+  if (registrationEndpoint) {
+    const registration = await registerClientAtEndpoint(registrationEndpoint, {
+      redirect_uris: redirectUris,
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      client_name: clientName,
+      scope: scopes.join(' '),
+    });
+    // This is a public desktop PKCE client. Ignore any unexpected secret in a
+    // registration response rather than changing the token auth method.
+    const config = await discoverConfiguration(issuerUrl, registration.client_id);
+    const cacheKey = configurationCacheKey(issuerUrl, registration.client_id);
+    configCache.set(cacheKey, config);
+    return { config, registration };
+  }
+
   const config = await client.dynamicClientRegistration(
     new URL(issuerUrl),
     {
@@ -132,7 +192,7 @@ export async function registerClient(
   });
 
   // Cache the configuration
-  const cacheKey = `${issuerUrl}:${metadata.client_id}`;
+  const cacheKey = configurationCacheKey(issuerUrl, metadata.client_id);
   configCache.set(cacheKey, config);
 
   return { config, registration };
@@ -167,6 +227,11 @@ export function buildAuthorizationUrl(
   });
 }
 
+/** Return RFC 8707 token-endpoint parameters for a protected resource. */
+export function resourceParameters(resource?: string): Record<string, string> | undefined {
+  return resource ? { resource } : undefined;
+}
+
 /**
  * Exchange authorization code for tokens
  */
@@ -174,14 +239,15 @@ export async function exchangeCodeForTokens(
   config: client.Configuration,
   callbackUrl: URL,
   codeVerifier: string,
-  expectedState: string
+  expectedState: string,
+  resource?: string,
 ): Promise<OAuthTokens> {
   console.log(`[OAuth] Exchanging authorization code for tokens...`);
 
   const response = await client.authorizationCodeGrant(config, callbackUrl, {
     pkceCodeVerifier: codeVerifier,
     expectedState,
-  });
+  }, resourceParameters(resource));
 
   console.log(`[OAuth] Token exchange successful`);
   return toOAuthTokens(response);
@@ -194,11 +260,16 @@ export async function exchangeCodeForTokens(
 export async function refreshTokens(
   config: client.Configuration,
   refreshToken: string,
-  existingScopes?: string[]
+  existingScopes?: string[],
+  resource?: string,
 ): Promise<OAuthTokens> {
   console.log(`[OAuth] Refreshing access token...`);
 
-  const response = await client.refreshTokenGrant(config, refreshToken);
+  const response = await client.refreshTokenGrant(
+    config,
+    refreshToken,
+    resourceParameters(resource),
+  );
 
   const tokens = toOAuthTokens(response);
 
@@ -232,7 +303,8 @@ export function isTokenExpired(tokens: OAuthTokens): boolean {
  */
 export function clearConfigCache(issuerUrl?: string, clientId?: string): void {
   if (issuerUrl && clientId) {
-    configCache.delete(`${issuerUrl}:${clientId}`);
+    configCache.delete(configurationCacheKey(issuerUrl, clientId));
+    configCache.delete(configurationCacheKey(issuerUrl, clientId, true));
     console.log(`[OAuth] Cleared configuration cache for ${issuerUrl}`);
   } else {
     configCache.clear();
@@ -244,9 +316,9 @@ export function clearConfigCache(issuerUrl?: string, clientId?: string): void {
  * Get cached configuration if available
  */
 export function getCachedConfiguration(issuerUrl: string, clientId: string): client.Configuration | undefined {
-  return configCache.get(`${issuerUrl}:${clientId}`);
+  return configCache.get(configurationCacheKey(issuerUrl, clientId))
+    ?? configCache.get(configurationCacheKey(issuerUrl, clientId, true));
 }
 
 // Re-export Configuration type for external use
 export type { Configuration } from 'openid-client';
-

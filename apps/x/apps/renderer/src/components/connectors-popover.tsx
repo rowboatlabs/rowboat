@@ -135,6 +135,10 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
       const firefliesState = c.providerStates['fireflies-ai']
       if (!firefliesState?.isConnected || c.providerStatus['fireflies-ai']?.error) return true
     }
+    if (c.providers.includes('wispr-flow')) {
+      const wisprState = c.providerStates['wispr-flow']
+      if (!wisprState?.isConnected || c.providerStatus['wispr-flow']?.error) return true
+    }
     return false
   })()
 
@@ -344,6 +348,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
 
                   {/* Fireflies */}
                   {c.providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
+                  {c.providers.includes('wispr-flow') && renderOAuthProvider('wispr-flow', 'Wispr Flow', <Mic className="size-4" />, 'Import finalized Notetaker meetings')}
 
                   <Separator className="my-2" />
                 </>

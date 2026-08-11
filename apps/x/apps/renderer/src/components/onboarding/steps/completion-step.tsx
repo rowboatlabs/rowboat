@@ -103,6 +103,17 @@ export function CompletionStep({ state }: CompletionStepProps) {
                 <span>Fireflies (Meeting transcripts)</span>
               </motion.div>
             )}
+            {connectedProviders.includes('wispr-flow') && (
+              <motion.div
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.57 }}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
+                <span>Wispr Flow (Notetaker meetings)</span>
+              </motion.div>
+            )}
           </div>
         </motion.div>
       )}
