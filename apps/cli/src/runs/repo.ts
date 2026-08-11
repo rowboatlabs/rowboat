@@ -11,6 +11,8 @@ export const ListRunsResponse = z.object({
         id: true,
         createdAt: true,
         agentId: true,
+    }).extend({
+        turnCount: z.number().optional(),
     })),
     nextCursor: z.string().optional(),
 });
@@ -112,24 +114,30 @@ export class FSRunsRepo implements IRunsRepo {
         const selected = files.slice(startIndex, startIndex + PAGE_SIZE);
         const runs: z.infer<typeof ListRunsResponse>['runs'] = [];
 
-        for (const name of selected) {
-            const runId = name.slice(0, -'.jsonl'.length);
-            try {
-                const contents = await fsp.readFile(path.join(runsDir, name), 'utf8');
-                const firstLine = contents.split('\n').find(line => line.trim() !== '');
-                if (!firstLine) {
-                    continue;
-                }
-                const start = StartEvent.parse(JSON.parse(firstLine));
-                runs.push({
-                    id: runId,
-                    createdAt: start.ts!,
-                    agentId: start.agentName,
-                });
-            } catch {
-                continue;
-            }
+    for (const name of selected) {
+    const runId = name.slice(0, -'.jsonl'.length);
+    try {
+        const contents = await fsp.readFile(path.join(runsDir, name), 'utf8');
+        const lines = contents.split('\n').filter(line => line.trim() !== '');
+        if (lines.length === 0) {
+            continue;
         }
+
+        const start = StartEvent.parse(JSON.parse(lines[0]));
+
+        // Calculate actual turns from remaining log lines if present
+        const turnCount = lines.length - 1; 
+
+        runs.push({
+            id: runId,
+            createdAt: start.ts!,
+            agentId: start.agentName,
+            turnCount: turnCount > 0 ? turnCount : 0,
+        });
+    } catch {
+        continue;
+    }
+}
 
         const hasMore = startIndex + PAGE_SIZE < files.length;
         const nextCursor = hasMore && selected.length > 0
