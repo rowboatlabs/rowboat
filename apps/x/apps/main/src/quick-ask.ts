@@ -5,9 +5,11 @@
  * - `summoned` (global ⌥⇧Space): Spotlight-style — the real chat composer in
  *   a card at the bottom of a tall transparent frame, bottom-centered on the
  *   cursor's display. Takes focus; blur or Esc dismisses.
- * - `pinned` (a call's floating surface, the old #video-popout pill): shown
- *   for the whole duration of a screen share, top-right of the primary
- *   display. Never steals focus (showInactive), survives blur, draggable.
+ * - `pinned` (a call's floating surface, the old #video-popout pill). Voice
+ *   sessions land as the SKIPPER: mascot + text panel, one corner-anchored
+ *   draggable unit (text visible by default, foldable to just the mascot —
+ *   folding never moves the mascot). Camera calls use the pill, top-right.
+ *   Both survive blur.
  *
  * The window is created once and shown/hidden on toggle so summoning is
  * instant. It loads the renderer bundle with #quick-ask (see
@@ -48,6 +50,11 @@ const PINNED_MAX_HEIGHT = 560;
 // caption, everything else on hover.
 const TUCKED_WIDTH = 250;
 const TUCKED_HEIGHT = 250;
+// The Skipper card: the pinned text panel + mascot, one unit. Narrower than
+// the summoned frame (it hugs a corner instead of center-stage) but the same
+// tall transparent stage above the card for popovers and panel growth.
+const SKIPPER_FRAME_WIDTH = 560;
+const SKIPPER_FRAME_HEIGHT = 560;
 // Uniform downscale: the window shrinks and the page zooms by the SAME
 // factor, so every proportion of the design survives exactly — unlike
 // hand-shrinking individual sizes, which broke the alignment.
@@ -66,14 +73,42 @@ let tuckOrigin: 'bar' | 'pill' = 'pill';
 // The expanded surface currently applied to the window geometry (so a
 // device flip mid-call can morph card ⇄ pill in place).
 let appliedExpandedSurface: 'card' | 'pill' = 'pill';
-// A tuck was requested from the summoned bar: the NEXT pin starts collapsed,
-// placed near where the bar's mascot stood (bottom of the cursor's display)
-// instead of the pill's canonical top-right. Time-boxed so a tuck the app
-// declined (voice not configured, race) can't leak into an unrelated call.
-// `tuckPendingExpand` flips the landing to the EXPANDED text card instead —
-// the app's "pop this chat out" gesture, where the user was reading text.
+// A tuck was requested from the summoned bar: the NEXT pin lands as the
+// Skipper (text card + mascot, bottom-right of the cursor's display) instead
+// of the pill's canonical top-right. Time-boxed so a tuck the app declined
+// (voice not configured, race) can't leak into an unrelated call. Every
+// Skipper landing arrives text-open, so the old expand-vs-collapsed
+// distinction is gone.
 let tuckPendingAt = 0;
-let tuckPendingExpand = false;
+
+// The Skipper's anchor: the bottom-right corner of the window, i.e. where
+// the MASCOT stands. The user can drag the Skipper anywhere; collapsing and
+// expanding the text panel both keep this corner fixed, so the mascot never
+// jumps — the panel folds toward it and unfolds from it. Updated from
+// user drags (the 'move' listener); programmatic setBounds are guarded out.
+let skipperCorner: { x: number; y: number } | null = null;
+let applyingBounds = false;
+
+function setBoundsGuarded(win: BrowserWindow, bounds: Electron.Rectangle) {
+  applyingBounds = true;
+  win.setBounds(bounds);
+  // 'move' fires async after setBounds — release the guard a tick later.
+  setTimeout(() => { applyingBounds = false; }, 0);
+}
+
+function defaultSkipperCorner(display: Electron.Display): { x: number; y: number } {
+  const wa = display.workArea;
+  return { x: wa.x + wa.width - 24, y: wa.y + wa.height - 24 };
+}
+
+// Corner-anchored bounds: the window's bottom-right pinned to the corner,
+// clamped so the window stays on its display.
+function cornerBounds(corner: { x: number; y: number }, w: number, h: number): Electron.Rectangle {
+  const wa = screen.getDisplayNearestPoint(corner).workArea;
+  const x = Math.max(wa.x + 8, Math.min(corner.x - w, wa.x + wa.width - w - 8));
+  const y = Math.max(wa.y + 8, Math.min(corner.y - h, wa.y + wa.height - h - 8));
+  return { x, y, width: w, height: h };
+}
 
 // Last call state pushed by the app window — replayed when the window
 // (re)loads, so the pill never renders from a blank guess.
@@ -102,9 +137,8 @@ export function isPinnedCollapsed(): boolean {
   return pinnedCollapsed;
 }
 
-export function markTuckPending(expand = false) {
+export function markTuckPending() {
   tuckPendingAt = Date.now();
-  tuckPendingExpand = expand;
 }
 
 /**
@@ -121,7 +155,7 @@ export function popOutCompanion(): boolean {
     win.focus();
     return true;
   }
-  markTuckPending(true);
+  markTuckPending();
   return false;
 }
 
@@ -187,18 +221,24 @@ function createWindow(): BrowserWindow {
   if (process.platform === 'darwin') {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   }
-  // Spotlight behavior: clicking away dismisses the summoned bar. Call
-  // surfaces survive blur — but the expanded CARD of a voice call is big
-  // and Spotlight-like, so blur tucks it back to the mascot (the call keeps
-  // going; only the text gets out of the way). The pill just persists.
+  // Spotlight behavior: clicking away dismisses the summoned bar. Pinned
+  // surfaces (Skipper card AND pill) survive blur — the Skipper is a
+  // companion the user carries around and works next to, so losing focus
+  // must never fold its text away; tucking is an explicit gesture (the
+  // handle, Esc, or clicking the transparent stage).
   win.on('blur', () => {
     if (win.isDestroyed() || !win.isVisible()) return;
     if (mode === 'summoned') {
       mode = 'hidden';
       win.hide();
-    } else if (mode === 'pinned' && !pinnedCollapsed && appliedExpandedSurface === 'card') {
-      setPinnedCollapsed(true);
     }
+  });
+  // Wherever the user drags the Skipper, that becomes its anchor — the
+  // corner survives collapse/expand round-trips.
+  win.on('move', () => {
+    if (applyingBounds || win.isDestroyed() || mode !== 'pinned') return;
+    const b = win.getBounds();
+    skipperCorner = { x: b.x + b.width, y: b.y + b.height };
   });
   win.on('closed', () => {
     if (quickAskWin === win) quickAskWin = null;
@@ -252,7 +292,7 @@ function positionPinned(win: BrowserWindow) {
   // Top-right of the primary display, like the old popout window.
   const workArea = screen.getPrimaryDisplay().workArea;
   const width = scaled(PINNED_WIDTH);
-  win.setBounds({
+  setBoundsGuarded(win, {
     x: workArea.x + workArea.width - width - 24,
     y: workArea.y + 24,
     width,
@@ -358,26 +398,30 @@ export function setCompanionPinned(pinned: boolean) {
     let win = getQuickAskWindow();
     if (!win) win = createWindow();
     const fromTuck = Date.now() - tuckPendingAt < 5000;
-    const expandFromTuck = fromTuck && tuckPendingExpand;
     tuckPendingAt = 0;
-    tuckPendingExpand = false;
     mode = 'pinned';
     tuckOrigin = fromTuck ? 'bar' : 'pill';
-    if (expandFromTuck) {
-      // Pop-out landing: the user was READING this chat in the app — arrive
-      // on the expanded text card, focused and ready to type.
+    if (fromTuck) {
+      // The Skipper lands as ONE unit — mascot with the text panel already
+      // open (text is the default; tucking is the user's gesture, never the
+      // arrival state) — anchored at its corner (last dragged spot, else
+      // bottom-right of the cursor's display).
       pinnedCollapsed = false;
+      if (!skipperCorner) {
+        skipperCorner = defaultSkipperCorner(
+          screen.getDisplayNearestPoint(screen.getCursorScreenPoint()),
+        );
+      }
       applyExpandedSurface(win, 'card');
-    } else if (fromTuck) {
-      pinnedCollapsed = true;
-      positionTucked(win, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()));
     } else {
       pinnedCollapsed = false;
       positionPinned(win);
       appliedExpandedSurface = 'pill';
     }
     pushMode(win);
-    if (expandFromTuck) {
+    if (fromTuck) {
+      // The user just summoned their companion — focus so speaking, typing,
+      // and Esc all work immediately.
       if (!win.isVisible()) win.show();
       win.focus();
     } else if (!win.isVisible()) {
@@ -400,12 +444,11 @@ export function setCompanionPinned(pinned: boolean) {
 }
 
 /**
- * Tucked-mascot ⇄ expanded presentation of the pinned role. The expanded
- * surface is whatever the user tucked FROM: the pill resizes in place
- * (preserving the window's right edge and whichever vertical edge hugs the
- * nearer screen edge); the bar-style card goes back to the bar's canonical
- * spot — bottom-center of the window's display — and takes focus, because
- * asking for the text back means the user is about to read or type.
+ * Text-panel fold/unfold of the Skipper (and the pill's tuck). Both states
+ * anchor on the SAME corner — the mascot's spot — so folding the text never
+ * moves the mascot: the panel collapses toward it and unfolds from it,
+ * wherever the user last dragged it. The pill keeps its edge-preserving
+ * resize (camera surface, different geometry).
  */
 export function setPinnedCollapsed(collapsed: boolean) {
   const win = getQuickAskWindow();
@@ -413,9 +456,7 @@ export function setPinnedCollapsed(collapsed: boolean) {
   pinnedCollapsed = collapsed;
   if (collapsed) {
     if (appliedExpandedSurface === 'card') {
-      // The wide card's edges mean nothing once it's gone — tuck to the
-      // mascot's canonical corner on this display.
-      positionTucked(win, screen.getDisplayMatching(win.getBounds()));
+      positionTucked(win);
     } else {
       const b = win.getBounds();
       const wa = screen.getDisplayMatching(b).workArea;
@@ -426,7 +467,7 @@ export function setPinnedCollapsed(collapsed: boolean) {
       let y = inTopHalf ? b.y : b.y + b.height - h;
       x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
       y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
-      win.setBounds({ x, y, width: w, height: h });
+      setBoundsGuarded(win, { x, y, width: w, height: h });
     }
     pushMode(win);
     return;
@@ -439,17 +480,12 @@ export function setPinnedCollapsed(collapsed: boolean) {
 function applyExpandedSurface(win: BrowserWindow, surface: 'card' | 'pill') {
   appliedExpandedSurface = surface;
   if (surface === 'card') {
-    // The bar's geometry: tall transparent frame, bottom-center of the
-    // display the window is on.
-    const wa = screen.getDisplayMatching(win.getBounds()).workArea;
-    const w = scaled(FRAME_WIDTH);
-    const h = scaled(FRAME_HEIGHT);
-    win.setBounds({
-      x: Math.round(wa.x + (wa.width - w) / 2),
-      y: Math.round(wa.y + wa.height - h - BOTTOM_MARGIN),
-      width: w,
-      height: h,
-    });
+    // Skipper geometry: corner-anchored frame — the card sits at the
+    // bottom with the mascot at its right edge, i.e. at the anchor.
+    if (!skipperCorner) {
+      skipperCorner = defaultSkipperCorner(screen.getDisplayMatching(win.getBounds()));
+    }
+    setBoundsGuarded(win, cornerBounds(skipperCorner, scaled(SKIPPER_FRAME_WIDTH), scaled(SKIPPER_FRAME_HEIGHT)));
     win.setHasShadow(false);
     return;
   }
@@ -462,22 +498,17 @@ function applyExpandedSurface(win: BrowserWindow, surface: 'card' | 'pill') {
   let y = inTopHalf ? b.y : b.y + b.height - h;
   x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
   y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
-  win.setBounds({ x, y, width: w, height: h });
+  setBoundsGuarded(win, { x, y, width: w, height: h });
   win.setHasShadow(false);
 }
 
-function positionTucked(win: BrowserWindow, display: Electron.Display) {
-  // The mascot's canonical corner: bottom right of the given display, near
-  // where it stood beside the card — never teleporting across screens.
-  const wa = display.workArea;
-  const w = scaled(TUCKED_WIDTH);
-  const h = scaled(TUCKED_HEIGHT);
-  win.setBounds({
-    x: wa.x + wa.width - w - 24,
-    y: wa.y + wa.height - h - 48,
-    width: w,
-    height: h,
-  });
+function positionTucked(win: BrowserWindow) {
+  // Fold to the mascot's anchor corner — wherever the Skipper was last
+  // dragged, never a canonical spot that would teleport it.
+  if (!skipperCorner) {
+    skipperCorner = defaultSkipperCorner(screen.getDisplayMatching(win.getBounds()));
+  }
+  setBoundsGuarded(win, cornerBounds(skipperCorner, scaled(TUCKED_WIDTH), scaled(TUCKED_HEIGHT)));
   win.setHasShadow(false);
 }
 
@@ -487,7 +518,7 @@ export function resizeCompanionPinned(height: number) {
   if (!win || mode !== 'pinned' || pinnedCollapsed) return;
   const clamped = scaled(Math.max(PINNED_BASE_HEIGHT, Math.min(PINNED_MAX_HEIGHT, Math.round(height))));
   const bounds = win.getBounds();
-  win.setBounds({ ...bounds, height: clamped });
+  setBoundsGuarded(win, { ...bounds, height: clamped });
 }
 
 /** Cache + forward the app window's call-state push (video:popoutState). */

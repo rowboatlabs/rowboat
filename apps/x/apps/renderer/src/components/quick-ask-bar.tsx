@@ -644,11 +644,14 @@ export function QuickAskBar() {
         void submitRecording()
       }
     }
-    document.addEventListener('keydown', onKeyDown)
-    document.addEventListener('keyup', onKeyUp)
+    // Capture phase: right ⌘ must work even while the embedded composer (or
+    // any popover) has focus — "press ⌘ and speak" is promised in BOTH
+    // Skipper states, and bubble-phase listeners can be swallowed below.
+    document.addEventListener('keydown', onKeyDown, true)
+    document.addEventListener('keyup', onKeyUp, true)
     return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      document.removeEventListener('keyup', onKeyUp)
+      document.removeEventListener('keydown', onKeyDown, true)
+      document.removeEventListener('keyup', onKeyUp, true)
     }
   }, [asked, pinned, surface, collapsed, requestCollapsed, sendAction, startRecording, submitRecording, cancelRecording, reset, dismiss])
 
@@ -1109,10 +1112,39 @@ export function QuickAskBar() {
       {/* The mascot, full silhouette on the transparent stage — the same
           TalkingHead the product tour and call tiles render. On the call
           card it lip-syncs the spoken reply; summoned it bobs, with
-          thinking bubbles while a question is processing. pointer-events-
-          none: clicks on it neither dismiss nor do anything (the tuck
-          handle on the card is the gesture). */}
-      <div className="pointer-events-none w-[124px] shrink-0 select-none" aria-hidden="true">
+          thinking bubbles while a question is processing. On the Skipper
+          (callCard) the mascot IS the drag handle — grab it to carry the
+          whole companion around; summoned it stays inert (pointer-events
+          none, clicks neither dismiss nor do anything). */}
+      <div
+        className={`relative w-[124px] shrink-0 select-none ${callCard ? 'cursor-grab' : 'pointer-events-none'}`}
+        style={callCard ? dragRegion : undefined}
+        aria-hidden="true"
+        title={callCard ? 'Drag to move your Skipper' : undefined}
+      >
+        {callCard && (
+          <style>{`
+            @keyframes listen-ring {
+              0% { transform: scale(0.72); opacity: 0.9; }
+              100% { transform: scale(1.28); opacity: 0; }
+            }
+          `}</style>
+        )}
+        {/* Listening halo — same signal as the tucked mascot: rings pulse
+            around the head while the mic gate is open, so "press ⌘ and
+            speak" is visibly working even with the text panel up. */}
+        {callCard && !callState.micMuted && (callState.status === 'listening' || callState.pttLocked) && (
+          <>
+            <span
+              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+              style={{ top: '42%', width: 96, height: 96, marginLeft: -48, marginTop: -48, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
+            />
+            <span
+              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+              style={{ top: '42%', width: 96, height: 96, marginLeft: -48, marginTop: -48, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
+            />
+          </>
+        )}
         <TalkingHead
           ttsState={
             callCard
