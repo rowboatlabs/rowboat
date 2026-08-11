@@ -20,7 +20,7 @@ import { getTagDefinitions } from './tag_system.js';
 import { knowledgeSourcesRepo } from './sources/repo.js';
 import { syncSlackKnowledgeSources } from './sources/sync_slack.js';
 import type { KnowledgeSourceConfig } from './sources/types.js';
-import { loadUserConfig } from '../config/user_config.js';
+import { getOwnerEmails, loadUserConfig } from '../config/user_config.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -268,12 +268,30 @@ const FREE_MAIL_DOMAINS = new Set([
  * gate, first-person perspective, outbound-email handling) depends on the
  * agent knowing exactly who the user is — never make it guess from headers.
  */
+/** Company domains from owner emails (excludes free-mail). Used by reply gate + owner block. */
+export function ownerCompanyDomains(emails: readonly string[], explicitDomain?: string): string[] {
+    const domains = new Set<string>();
+    if (explicitDomain) {
+        const d = explicitDomain.toLowerCase();
+        if (d && !FREE_MAIL_DOMAINS.has(d)) domains.add(d);
+    }
+    for (const e of emails) {
+        const at = e.lastIndexOf('@');
+        if (at < 0) continue;
+        const d = e.slice(at + 1).toLowerCase();
+        if (d && !FREE_MAIL_DOMAINS.has(d)) domains.add(d);
+    }
+    return [...domains];
+}
+
 export function buildOwnerBlock(): string {
     const user = loadUserConfig();
-    const email = user?.email ?? '';
-    const domainFromEmail = email.includes('@') ? email.split('@')[1].toLowerCase() : '';
-    const domain = (user?.domain ?? domainFromEmail).toLowerCase();
-    const isFreeMail = FREE_MAIL_DOMAINS.has(domain);
+    const emails = user?.emails ?? (user?.email ? [user.email.toLowerCase()] : []);
+    const primary = user?.email ?? emails[0] ?? '';
+    const companyDomains = ownerCompanyDomains(emails, user?.domain);
+    // Display domain: explicit config domain, else primary's domain (may be free-mail).
+    const domainFromEmail = primary.includes('@') ? primary.split('@')[1].toLowerCase() : '';
+    const displayDomain = (user?.domain ?? domainFromEmail).toLowerCase();
 
     // Optional profile lines from Agent Notes/user.md (e.g. role, company) —
     // gives the agent context like "the owner runs Rowboat" so it correctly
@@ -295,10 +313,23 @@ export function buildOwnerBlock(): string {
         // profile lines are best-effort
     }
 
+    const emailLine = emails.length <= 1
+        ? (primary || '(not set)')
+        : emails.join(', ');
+
+    let domainNote: string;
+    if (!displayDomain && companyDomains.length === 0) {
+        domainNote = '(not set)';
+    } else if (companyDomains.length > 0) {
+        domainNote = `${companyDomains.join(', ')} (company domain${companyDomains.length > 1 ? 's' : ''} — same-domain senders are the owner's teammates)`;
+    } else {
+        domainNote = `${displayDomain} (personal free-mail domain — do NOT treat same-domain senders as the owner's colleagues)`;
+    }
+
     let block = `# Owner Of This Memory (authoritative — do not infer identity from email headers)\n\n`;
     block += `- **Name:** ${user?.name || '(not set — resolve from the email address below when needed)'}\n`;
-    block += `- **Email:** ${email || '(not set)'}\n`;
-    block += `- **Email domain:** ${domain || '(not set)'}${isFreeMail ? ' (personal free-mail domain — do NOT treat same-domain senders as the owner\'s colleagues)' : ' (company domain — same-domain senders are the owner\'s teammates)'}\n`;
+    block += `- **Email:** ${emailLine}\n`;
+    block += `- **Email domain:** ${domainNote}\n`;
     if (profileLines) {
         block += `- **Profile:**\n${profileLines.split('\n').map(l => `  ${l}`).join('\n')}\n`;
     }
@@ -320,11 +351,10 @@ export function emailReplyGateBanner(filePath: string, content: string): string 
     // Only email sources have the ### From: thread structure.
     if (!filePath.split(path.sep).includes('gmail_sync')) return null;
     const user = loadUserConfig();
-    if (!user?.email) return null;
-    const email = user.email.toLowerCase();
-    const domainRaw = (user.domain ?? email.split('@')[1] ?? '').toLowerCase();
-    // On a free-mail domain, same-domain senders are strangers, not teammates.
-    const teamDomain = domainRaw && !FREE_MAIL_DOMAINS.has(domainRaw) ? '@' + domainRaw : null;
+    const emails = user?.emails ?? getOwnerEmails();
+    if (emails.length === 0) return null;
+    // Company domains only — free-mail same-domain senders are strangers, not teammates.
+    const teamDomains = ownerCompanyDomains(emails, user?.domain).map((d) => '@' + d);
     const froms = [...content.matchAll(/^### From: (.+)$/gm)].map(m => m[1].toLowerCase());
     if (froms.length === 0) return null;
     // Google Groups rewrites external senders to look like the list address:
@@ -334,7 +364,10 @@ export function emailReplyGateBanner(filePath: string, content: string): string 
     // are also disqualified by the rewrite marker (the group addr differs).
     const isGroupRewrite = (f: string) => /\bvia\b[^<]*</.test(f);
     const replied = froms.some(f =>
-        !isGroupRewrite(f) && (f.includes(email) || (teamDomain !== null && f.includes(teamDomain)))
+        !isGroupRewrite(f) && (
+            emails.some((e) => f.includes(e))
+            || teamDomains.some((td) => f.includes(td))
+        )
     );
     return replied
         ? `> **REPLY-GATE (computed by the system, authoritative): the user HAS sent a message in this thread.** New People/Organization notes are allowed IF the user's reply shows real engagement AND the other gates pass. A decline, brush-off, or unsubscribe-style reply ("not interested", "please remove me", a bare "no thanks") is NOT engagement — treat those threads like purely inbound ones.`
@@ -398,11 +431,18 @@ async function createNotesFromBatch(
     // heavily, and the identity rules are the ones that corrupt the graph
     // when missed. Repeat the critical three right before generation.
     const user = loadUserConfig();
-    if (user?.email) {
-        const ownerLabel = user.name ? `${user.name} <${user.email}>` : user.email;
+    const ownerEmails = user?.emails ?? (user?.email ? [user.email] : []);
+    if (ownerEmails.length > 0) {
+        const primary = user?.email ?? ownerEmails[0];
+        const ownerLabel = user?.name
+            ? `${user.name} <${primary}>`
+            : primary;
+        const fromList = ownerEmails.length === 1
+            ? ownerEmails[0]
+            : `any of ${ownerEmails.join(', ')}`;
         message += `**FINAL REMINDER — the owner of this memory is ${ownerLabel}.** `;
         message += `(1) Never create or update a People note for them; in prose they are "I", never their name. `;
-        message += `(2) Emails FROM ${user.email} are the owner's own actions ("I emailed…"), not an external contact. `;
+        message += `(2) Emails FROM ${fromList} are the owner's own actions ("I emailed…"), not an external contact. `;
         message += `(3) No placeholder text ("Unknown"/"-") and no links between entities that didn't co-occur in one source file.\n`;
     }
 
