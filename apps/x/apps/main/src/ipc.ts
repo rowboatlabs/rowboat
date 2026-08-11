@@ -993,9 +993,8 @@ export function setupIpcHandlers() {
     'app:openPrivacySettings': async (_event, args) => {
       if (process.platform === 'win32') {
         // Windows Settings deep links (ms-settings). Sections without a
-        // Windows equivalent (screen recording, input monitoring,
-        // accessibility, automation are macOS TCC concepts) report failure,
-        // as before.
+        // Windows equivalent (screen recording and input monitoring are
+        // macOS TCC concepts) report failure, as before.
         const winUris: Partial<Record<typeof args.section, string>> = {
           microphone: 'ms-settings:privacy-microphone',
           camera: 'ms-settings:privacy-webcam',
