@@ -1073,8 +1073,8 @@ function App() {
       spokenVoiceRef.current.count += 1
       if (
         (ttsEnabledRef.current || speakTurnRef.current) &&
-        !companionTextModeRef.current &&
-        !suppressSpeechTurnRef.current
+        !suppressSpeechTurnRef.current &&
+        !speakerMutedRef.current
       ) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
@@ -1093,8 +1093,8 @@ function App() {
     if (activeIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
-    // Text mode (the companion's expanded card): no fallback read-aloud.
-    if (companionTextModeRef.current || suppressSpeechTurnRef.current) {
+    // Typed turn or speaker muted: no fallback read-aloud.
+    if (suppressSpeechTurnRef.current || speakerMutedRef.current) {
       turn.pending = false
       return
     }
@@ -1175,12 +1175,16 @@ function App() {
   // future summon starts already sharing, until toggled off.
   const companionVoiceRef = useRef(false)
   const companionVoiceStartingRef = useRef(false)
-  // The companion's expanded CARD is TEXT MODE: replies render as text and
-  // are not spoken (pushed from the bar over quick-ask:text-mode). The
-  // per-turn ref makes the choice stick for a whole turn — a reply to a
-  // text-mode question stays silent even if the user tucks mid-stream.
-  const companionTextModeRef = useRef(false)
+  // Speech follows the QUESTION's modality, not the surface: a spoken
+  // question (PTT utterance) gets a spoken reply — even with the Skipper's
+  // text panel open — while a typed question renders silently. Stamped
+  // per-turn at submit so the choice sticks for the whole reply.
   const suppressSpeechTurnRef = useRef(false)
+  // Output mute (the Skipper's speaker pin): no reply audio while set —
+  // independent of micMuted (which pauses INPUT).
+  const [speakerMuted, setSpeakerMuted] = useState(false)
+  const speakerMutedRef = useRef(false)
+  speakerMutedRef.current = speakerMuted
   // In-call mute: a full input pause, not just audio — mic audio stops
   // reaching Deepgram AND camera/screen frame capture stops, so nothing said
   // or shown while muted ever reaches the assistant. Output is untouched
@@ -1408,6 +1412,7 @@ function App() {
     setPracticeMode(preset === 'practice')
     practiceModeRef.current = preset === 'practice'
     setMicMuted(false)
+    setSpeakerMuted(false)
     // Every preset starts in the floating pill (video included — the camera
     // preview lives in the pill) except practice, where the coaching session
     // is a deliberate face-to-face full screen.
@@ -1747,13 +1752,14 @@ function App() {
         cameraOn: video.cameraOn,
         micMuted,
         screenSharing: video.screenState === 'live',
+        speakerMuted,
         interimText: voice.interimText || null,
         pttLocked: pttStatus === 'locked',
         responseText: callResponseText,
         questionText: callQuestionText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus, callResponseText, callQuestionText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
   // Screen-pointer gate: tell main whether a share is live (call OR
   // quick-ask — this window owns the capture either way). While true the
@@ -1786,6 +1792,22 @@ function App() {
           localStorage.setItem('companion-share-sticky', video.screenState !== 'live' ? '1' : '0')
         }
         void handleToggleScreenShare()
+      }
+      else if (action === 'toggle-speaker') {
+        setSpeakerMuted((muted) => {
+          const next = !muted
+          if (next) {
+            // Muting hushes NOW: silence in-flight speech and drop the
+            // queued backlog (marked as voiced so the fallback net doesn't
+            // read the reply aloud after an unmute).
+            ttsRef.current.cancel()
+            if (voiceSegmentsRef.current) {
+              spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+            }
+            spokeSegmentThisTurnRef.current = true
+          }
+          return next
+        })
       }
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
@@ -1943,21 +1965,8 @@ function App() {
     })
   }, [])
 
-  // Companion text mode (the expanded card): entering it hushes in-flight
-  // speech and skips the queued voice backlog; while it's on, replies are
-  // text only. Voice comes back when the card tucks away.
-  useEffect(() => {
-    return window.ipc.on('quick-ask:text-mode', ({ textMode }) => {
-      companionTextModeRef.current = textMode
-      if (textMode) {
-        ttsRef.current.cancel()
-        if (voiceSegmentsRef.current) {
-          spokenVoiceRef.current.count = voiceSegmentsRef.current.length
-        }
-        spokeSegmentThisTurnRef.current = true
-      }
-    })
-  }, [])
+  // (The old surface-based text-mode hush is gone: speech now follows each
+  // question's modality, plus the explicit speaker mute below.)
 
   // Tuck relay: the bar pushed its text into the mascot — voice-to-voice.
   // This is the voice call preset's long-promised "floating mascot pill"
@@ -3592,9 +3601,12 @@ function App() {
     // outside the bar never start talking.
     speakTurnRef.current =
       !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
-    // A turn submitted from the companion's expanded card is a TEXT turn:
-    // its reply renders silently, even if the user tucks mid-reply.
-    suppressSpeechTurnRef.current = inCallRef.current && companionTextModeRef.current
+    // Modality decides speech on calls: a TYPED question (composer, Skipper
+    // panel, popout input) renders its reply silently; a SPOKEN one (PTT
+    // utterance — pendingVoiceInputRef is set just before submit) is spoken
+    // even with the text panel open. Stamped per-turn so tucking or typing
+    // mid-reply never flips an in-flight answer.
+    suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
 
     if (inCallRef.current || speakTurnRef.current) {
       // A new question supersedes whatever of the previous reply was still

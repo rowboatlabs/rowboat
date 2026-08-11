@@ -118,6 +118,7 @@ type PopoutState = {
   cameraOn: boolean;
   micMuted: boolean;
   screenSharing: boolean;
+  speakerMuted: boolean;
   interimText: string | null;
   pttLocked: boolean;
   responseText: string | null;

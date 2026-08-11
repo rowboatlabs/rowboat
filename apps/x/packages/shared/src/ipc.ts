@@ -1272,16 +1272,10 @@ const ipcSchemas = {
     req: z.object({ collapsed: z.boolean() }),
     res: z.object({}),
   },
-  // Bar → main → app window: the companion's expanded card is TEXT MODE —
-  // replies render silently there (entering it hushes in-flight speech).
-  'quickAsk:setTextMode': {
-    req: z.object({ textMode: z.boolean() }),
-    res: z.object({}),
-  },
-  'quick-ask:text-mode': {
-    req: z.object({ textMode: z.boolean() }),
-    res: z.null(),
-  },
+  // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
+  // whether a reply is SPOKEN now follows the question's modality — spoken
+  // questions get spoken replies, typed ones stay silent — plus the
+  // explicit speaker mute on the Skipper.)
   // App window → main: open the bar (the discoverability toast's "Try it").
   'quickAsk:show': {
     req: z.null(),
@@ -2397,6 +2391,8 @@ const ipcSchemas = {
       // User mute: mic audio and frame capture are both paused.
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
+      // Output mute: replies are not spoken while set (input mute is micMuted).
+      speakerMuted: z.boolean(),
       // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
       // A quick ⌘ tap locked hands-free capture (until the next tap).
@@ -2428,6 +2424,7 @@ const ipcSchemas = {
           cameraOn: z.boolean(),
           micMuted: z.boolean(),
           screenSharing: z.boolean(),
+          speakerMuted: z.boolean(),
           interimText: z.string().nullable(),
           pttLocked: z.boolean(),
           responseText: z.string().nullable(),
@@ -2443,7 +2440,7 @@ const ipcSchemas = {
   // typed message from the popout's input.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
       text: z.string().optional(),
     }),
     res: z.object({}),
@@ -2456,6 +2453,8 @@ const ipcSchemas = {
       cameraOn: z.boolean(),
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
+      // Output mute: replies are not spoken while set (input mute is micMuted).
+      speakerMuted: z.boolean(),
       interimText: z.string().nullable(),
       pttLocked: z.boolean(),
       responseText: z.string().nullable(),
@@ -2466,7 +2465,7 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
       text: z.string().optional(),
     }),
     res: z.null(),

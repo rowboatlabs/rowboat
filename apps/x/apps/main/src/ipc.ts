@@ -1130,10 +1130,6 @@ export function setupIpcHandlers() {
       pushChatContext(args);
       return {};
     },
-    'quickAsk:setTextMode': async (_event, args) => {
-      findMainAppWindow()?.webContents.send('quick-ask:text-mode', args);
-      return {};
-    },
     'quickAsk:popOut': async () => {
       // Already pinned → expanded/focused in place; otherwise arm the
       // expanded-card landing and run the tuck flow (voice session, or the
