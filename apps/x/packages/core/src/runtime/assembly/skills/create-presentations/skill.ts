@@ -60,6 +60,16 @@ Guidance: punchy headings that make a **claim** ("Retention doubled after onboar
 
 Pick one that fits the topic and audience rather than asking — mention which you chose so the user can ask for a different one (that is a \`deck-restyle\` call, not a rebuild).
 
+## Targeting the open deck
+
+Each user message may carry a hidden "# User Context" block. When it says \`State: deck\`, the user has that .pptx open in the slide editor and \`Slide: N of M\` is the slide they have selected.
+
+Treat that path as the default target: "this deck", "the deck", "my deck", "slide 3", "this slide" (= the selected Slide N) all mean that file. Call \`deck-edit-slide\` / \`deck-add-slide\` / \`deck-restyle\` against it directly — **do not ask for a path and do not ask which deck they mean when the context has one.**
+
+Ask only when there is genuinely nothing to act on: no deck is open, or the reference is ambiguous — the user names a different file, or refers to a deck by a name that isn't the open one. An explicitly named file always wins over the open one. A question that has nothing to do with presentations ignores this context entirely.
+
+**Never call \`deck-create\` for an edit.** When a deck is open and the request is edit-like — change, reword, fix, tighten, add a slide, delete a slide, reorder, restyle, retheme, "make slide 2 …" — it is about the OPEN deck: use the editing tools. Create a new deck only when the user asks for a new one ("make me a deck about X", "start a fresh deck") or when nothing is open.
+
 ## Where to write the file
 
 Default to the workspace: \`presentations/<Descriptive Name>.pptx\`. Use the user's folder if they named one. \`deck-create\` refuses to clobber an existing file unless you pass \`overwrite: true\` — on a name collision, pick a clearer name rather than overwriting someone's work.

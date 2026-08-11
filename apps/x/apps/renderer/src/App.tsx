@@ -810,6 +810,10 @@ function App() {
   const [, setFileContent] = useState<string>('')
   const [editorContent, setEditorContent] = useState<string>('')
   const editorContentRef = useRef<string>('')
+  // The open deck's selected slide, reported by PptxEditor — the deck-kind
+  // sibling of editorContentRef: what the middle pane currently SHOWS, read
+  // when building each message's user context. slideNumber is 1-based.
+  const deckStateRef = useRef<{ path: string; slideNumber: number; slideCount: number } | null>(null)
   const [editorContentByPath, setEditorContentByPath] = useState<Record<string, string>>({})
   const editorContentByPathRef = useRef<Map<string, string>>(new Map())
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -887,6 +891,14 @@ function App() {
 
   // Keep the latest selected path in a ref (avoids stale async updates when switching rapidly)
   const selectedPathRef = useRef<string | null>(null)
+  // The slide editor reporting which slide is on screen. Stamped with the path
+  // it belongs to, so a stale report from a deck the user has closed can never
+  // be attributed to whatever is open now.
+  const handleDeckSlideChange = useCallback((slideNumber: number, slideCount: number) => {
+    const path = selectedPathRef.current
+    if (!path) return
+    deckStateRef.current = { path, slideNumber, slideCount }
+  }, [])
   const editorPathRef = useRef<string | null>(null)
   const fileLoadRequestIdRef = useRef(0)
   const initialContentByPathRef = useRef<Map<string, string>>(new Map())
@@ -3547,6 +3559,7 @@ function App() {
   type MiddlePaneContextPayload =
     | { kind: 'note'; path: string; content: string }
     | { kind: 'browser'; url: string; title: string }
+    | { kind: 'deck'; path: string; slideNumber: number; slideCount: number }
   const buildMiddlePaneContext = async (): Promise<MiddlePaneContextPayload | undefined> => {
     // Nothing visible in the middle pane when the right pane is maximized.
     if (isRightPaneMaximized) return undefined
@@ -3565,9 +3578,25 @@ function App() {
       return undefined
     }
 
-    // Note case: only markdown files are meaningfully readable as context.
     const path = selectedPathRef.current
-    if (!path || !path.endsWith('.md')) return undefined
+    if (!path) return undefined
+
+    // Deck case: a .pptx open in the slide editor. The predicate matches the
+    // one that mounts PptxEditor, so the context and the editor can't drift.
+    // No content — a deck's content is what deck-review reads.
+    if (getViewerType(path) === 'pptx') {
+      const deck = deckStateRef.current
+      if (!deck || deck.path !== path) return undefined
+      return {
+        kind: 'deck',
+        path,
+        slideNumber: deck.slideNumber,
+        slideCount: deck.slideCount,
+      }
+    }
+
+    // Note case: only markdown files are meaningfully readable as context.
+    if (!path.endsWith('.md')) return undefined
     const content = editorContentRef.current ?? ''
     return { kind: 'note', path, content }
   }
@@ -7663,7 +7692,11 @@ function App() {
                   </div>
                 ) : selectedPath && getViewerType(selectedPath) === 'pptx' ? (
                   <div className="flex-1 min-h-0 overflow-hidden">
-                    <PptxEditor key={selectedPath} path={selectedPath} />
+                    <PptxEditor
+                      key={selectedPath}
+                      path={selectedPath}
+                      onSlideChange={handleDeckSlideChange}
+                    />
                   </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-hidden">

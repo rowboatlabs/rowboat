@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { deck as deckShared } from '@x/shared'
 import { synthesizeDeckFromOutline } from '@x/shared/dist/pptx/generate.js'
 import { DECK_PALETTES } from '@x/shared/dist/pptx/new-deck.js'
+import { UserMessageContext } from '@x/shared/dist/message.js'
+import { getViewerType } from '@/lib/file-types'
 import { PptxEditor } from './pptx-editor'
 
 // Radix primitives in jsdom.
@@ -180,5 +182,86 @@ describe('pptx editor / assistant write sync', () => {
     expect(disk.state.content).not.toBe(v2)
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     expect(screen.getByRole('button', { name: /^Slide 4/ })).toBeInTheDocument()
+  })
+})
+
+// What the assistant is told the user is looking at. The editor reports its
+// visible slide via onSlideChange; App.tsx stamps that onto deckStateRef and
+// buildMiddlePaneContext turns it into the deck-kind middle-pane payload. This
+// exercises the real editor, the real getViewerType predicate and the real
+// shared schema — only App's few lines of assembly are mirrored here.
+describe('deck context reported to the host', () => {
+  /** App.tsx's wiring: a path-stamped ref plus the deck branch's payload. */
+  function host() {
+    const deckStateRef: { current: { path: string; slideNumber: number; slideCount: number } | null } = {
+      current: null,
+    }
+    const onSlideChange = (slideNumber: number, slideCount: number) => {
+      deckStateRef.current = { path: PATH, slideNumber, slideCount }
+    }
+    const middlePaneContext = () => {
+      if (getViewerType(PATH) !== 'pptx') return undefined
+      const deck = deckStateRef.current
+      if (!deck || deck.path !== PATH) return undefined
+      return {
+        kind: 'deck' as const,
+        path: PATH,
+        slideNumber: deck.slideNumber,
+        slideCount: deck.slideCount,
+      }
+    }
+    return { onSlideChange, middlePaneContext }
+  }
+
+  it('opening a pptx yields a deck-kind context on the first slide', async () => {
+    const disk = makeDisk(v1)
+    installIpc(disk)
+    const h = host()
+    render(<PptxEditor path={PATH} onSlideChange={h.onSlideChange} />)
+
+    await screen.findByRole('button', { name: 'Slide 2: Beta' })
+
+    const context = h.middlePaneContext()
+    expect(context).toEqual({
+      kind: 'deck',
+      path: 'decks/test.pptx',
+      slideNumber: 1,
+      slideCount: 3,
+    })
+    // The payload must satisfy the wire schema the encoder reads.
+    expect(UserMessageContext.safeParse({ middlePane: context }).success).toBe(true)
+  })
+
+  it('selecting another slide updates the reported slide number', async () => {
+    const disk = makeDisk(v1)
+    installIpc(disk)
+    const h = host()
+    render(<PptxEditor path={PATH} onSlideChange={h.onSlideChange} />)
+
+    const card2 = await screen.findByRole('button', { name: 'Slide 2: Beta' })
+    fireEvent.click(card2)
+    await waitFor(() => expect(h.middlePaneContext()?.slideNumber).toBe(2))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Slide 3: Gamma' }))
+    await waitFor(() => expect(h.middlePaneContext()?.slideNumber).toBe(3))
+    expect(h.middlePaneContext()?.slideCount).toBe(3)
+  })
+
+  it('adding a slide updates the reported count', async () => {
+    const disk = makeDisk(v1)
+    installIpc(disk)
+    const h = host()
+    render(<PptxEditor path={PATH} onSlideChange={h.onSlideChange} />)
+
+    await screen.findByRole('button', { name: 'Slide 2: Beta' })
+    expect(h.middlePaneContext()?.slideCount).toBe(3)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add slide' }))
+    await screen.findByRole('button', { name: /^Slide 4/ })
+    await waitFor(() => expect(h.middlePaneContext()?.slideCount).toBe(4))
+  })
+
+  it('is inert for a non-pptx path', () => {
+    expect(getViewerType('knowledge/A.md')).not.toBe('pptx')
   })
 })

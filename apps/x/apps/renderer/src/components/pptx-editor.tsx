@@ -103,6 +103,12 @@ import {
 
 interface PptxEditorProps {
   path: string
+  /**
+   * Reports the slide the user is looking at (1-based) and the deck's length,
+   * so the host can tell the assistant what "this slide" refers to. Fires on
+   * mount once the deck is parsed and on every selection / slide-count change.
+   */
+  onSlideChange?: (slideNumber: number, slideCount: number) => void
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -203,7 +209,7 @@ function textSignature(paras: readonly { runs: readonly { text: string }[] }[]):
   return JSON.stringify(paras.map((p) => p.runs.map((r) => r.text)))
 }
 
-export function PptxEditor({ path }: PptxEditorProps) {
+export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [baseDeck, setBaseDeck] = useState<SlideDeck | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -566,6 +572,19 @@ export function PptxEditor({ path }: PptxEditorProps) {
   const slide = deck?.slides[currentIndex] ?? null
   const selectedShape = findShape(slide, selectedKey)
   const shapeEdit = selectedKey ? editSet.shapes[selectedKey] : undefined
+
+  // Report the visible slide upward (1-based) once the deck is parsed and on
+  // every change, so the host can tell the assistant what "this slide" means.
+  // The callback lives in a ref so an inline arrow from the caller doesn't
+  // re-fire this on every one of the host's renders.
+  const onSlideChangeRef = useRef(onSlideChange)
+  useEffect(() => {
+    onSlideChangeRef.current = onSlideChange
+  }, [onSlideChange])
+  useEffect(() => {
+    if (slideCount === 0) return
+    onSlideChangeRef.current?.(currentIndex + 1, slideCount)
+  }, [currentIndex, slideCount])
 
   // -------------------------------------------------------------- theme swap
 

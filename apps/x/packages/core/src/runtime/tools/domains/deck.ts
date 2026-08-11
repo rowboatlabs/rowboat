@@ -88,7 +88,14 @@ function requireSlide(parsed: SlideDeck, slideNumber: number) {
 const sameNodePath = (a: NodePath, b: NodePath): boolean =>
     a.length === b.length && a.every((v, i) => v === b[i]);
 
-const PathField = z.string().min(1).describe('Deck file path ending in .pptx. Can be absolute, ~/..., or relative to the default root.');
+// deck-create's path names a NEW file, so it must never inherit the open
+// deck's path — that would write over what the user is looking at.
+const NewDeckPathField = z.string().min(1).describe('Destination file path ending in .pptx. Can be absolute, ~/..., or relative to the default root.');
+
+// The four tools that act on an EXISTING deck default to whatever the user has
+// open (the "# User Context" block's `State: deck`), so "restyle this deck"
+// needs no path from the user.
+const PathField = z.string().min(1).describe("Deck file path ending in .pptx. Can be absolute, ~/..., or relative to the default root. Defaults to the deck currently open in the editor when the user refers to 'this deck' or a slide number without naming a file — take it from the '# User Context' block's Path.");
 
 const SlideField = deck.DeckOutlineSlide.describe(
     'The slide in outline form: layout, visual pattern (title | bullets | two-column | big-number | quote | section | closing) and its content fields.',
@@ -103,12 +110,17 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             'pitch deck", "turn this into slides". Writes a real, editable PowerPoint file from a ' +
             'structured outline and opens it in the slide editor (it also opens in PowerPoint, ' +
             'Keynote and Google Slides). ' + ONLY_PATH_RULE + ' ' +
+            'NOT FOR EDITS: when a deck is already open in the editor (the "# User Context" block ' +
+            'says State: deck) and the request is edit-like — change, reword, fix, tighten, add a ' +
+            'slide, delete a slide, reorder, restyle, retheme, "make slide 2 …" — it is about THAT ' +
+            'deck; use deck-edit-slide / deck-add-slide / deck-restyle instead. Create only when the ' +
+            'user asks for a NEW deck, or when nothing is open. ' +
             'Slide 1 is always the title slide (its heading is the deck title on the slide). Vary ' +
             'the visual patterns — bullets, two-column for compare/contrast, big-number for one key ' +
             'metric the user supplied, quote, section for topic shifts, closing at the end — instead ' +
             'of a wall of bullet lists. Speaker notes are not written to the file. ' + HONESTY_RULES,
         inputSchema: z.object({
-            path: PathField,
+            path: NewDeckPathField,
             title: z.string().min(1).describe('Deck title (also used for the title slide)'),
             palette: deck.DeckOutlinePalette.describe('Colour palette for the deck theme'),
             slides: z.array(SlideField).min(1).describe('The slides in order; the first is the title slide'),
