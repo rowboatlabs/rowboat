@@ -8,6 +8,7 @@ import { ThemeProvider } from '@/contexts/theme-context'
 import { configureAnalyticsContext } from './lib/analytics'
 import { MeetingDetectedPopup } from '@/components/meeting-detected-popup'
 import { QuickAskBar } from '@/components/quick-ask-bar'
+import { ScreenPointerOverlay } from '@/components/screen-pointer-overlay'
 
 // Fetch the stable installation ID from main so renderer + main share one
 // PostHog distinct_id. Falls back to PostHog's auto-generated anonymous ID
@@ -73,6 +74,13 @@ if (window.location.hash === '#meeting-detected') {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QuickAskBar />
+    </StrictMode>,
+  )
+} else if (window.location.hash === '#screen-pointer') {
+  // Assistant's pointer over the shared screen; same pattern.
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ScreenPointerOverlay />
     </StrictMode>,
   )
 } else {

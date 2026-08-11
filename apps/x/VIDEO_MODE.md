@@ -276,6 +276,55 @@ Voice input/output prompt sections (`# Voice Input`, `# Voice Output`) are
 reused untouched — calls set `voiceInput` per utterance and force
 `voiceOutput: 'full'`.
 
+## Pointing at the shared screen
+
+During a live screen share the assistant can point at the user's REAL
+display: the `screen-pointer` builtin (attached by the `app-navigation`
+skill) takes fractional coordinates (x/y in 0–1, estimated from the latest
+screen-share frame) plus an optional tiny label, and main draws an animated
+laser-dot + ping rings there. "This dip here is the weekend" now comes with
+a finger on the chart.
+
+- Tool: `packages/core/src/runtime/tools/domains/screen-pointer.ts` —
+  actions `point` (x, y, `label?`, `durationMs?`, default auto-hide 8s) and
+  `hide`. Executes directly in main via the DI seam
+  (`IScreenPointerService`, registered in `main.ts` like browser control) —
+  no renderer round-trip, and it hard-fails with an explanation when no
+  share is live.
+- Share gate: an App.tsx effect reports `video.screenState === 'live'` over
+  `screenPointer:setShareActive` (covers call AND quick-ask shares); share
+  end tears the pointer down instantly.
+- Overlay: `apps/main/src/screen-pointer.ts` creates a transparent,
+  click-through (`setIgnoreMouseEvents`), non-focusable, screen-saver-level
+  NSPanel covering the primary display (the share always captures the
+  primary display), loading the renderer with `#screen-pointer` →
+  `components/screen-pointer-overlay.tsx`. State pushes over
+  `screen-pointer:state` (replayed on load; `nonce` restarts the ping when
+  pointing twice at one spot). The window exists only while something is
+  pointed at — hide destroys it.
+- Prompt surface: a "You can POINT at their screen" bullet in the
+  `# Video Mode` screen-sharing section (`capabilities/modes.ts`) plus a
+  "Pointing at the user's shared screen" section with a worked example in
+  the `app-navigation` skill.
+- **Clicking/typing was explored and removed** (design notes for whoever
+  revisits). A `screen-control` tool (click at frame coordinates + type
+  into the focused field) shipped briefly and worked mechanically, but was
+  pulled: aiming from 1280px-wide frames misses small targets, and the
+  model acts BLIND between actions (frames only arrive with user
+  messages), so it typed into wrong focus and reported success. The
+  missing piece is a post-action verification frame in the tool result.
+  Hard-won lessons if rebuilt: System Events `click at` returns success
+  WITHOUT clicking on modern macOS — post real CGEvents via
+  `osascript -l JavaScript` + the ObjC bridge instead (no native module,
+  Accessibility-only, no Automation consent); CGEventPost from an
+  untrusted process drops events silently, so an upfront
+  `isTrustedAccessibilityClient` self-check is the only reliable gate; and
+  TCC keys grants to the code signature, so ad-hoc builds lose the grant
+  on every rebuild (Developer ID signing fixes it). Web tasks never needed
+  it — the embedded browser (`browser-control`) acts element-precisely
+  with page state returned per action. Full implementation: this branch's
+  history (feat/screen-pointer-control, pre-removal).
+
 ## Driving the app on a call
 
 The assistant can drive the Rowboat UI itself via the extended

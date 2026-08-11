@@ -210,6 +210,7 @@ const HISTORICAL_KEY_ORDER = [
     "deck-edit-slide",
     "deck-restyle",
     "deck-review",
+    "screen-pointer",
     "spawn-agent",
 ];
 

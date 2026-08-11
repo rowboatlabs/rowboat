@@ -42,6 +42,7 @@ import {
   setPinnedCollapsed,
   showQuickAsk,
 } from './quick-ask.js';
+import { screenPointerService } from './screen-pointer.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -85,6 +86,8 @@ import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, ge
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
+import { loadRetentionSettings, saveRetentionSettings } from '@x/core/dist/config/retention.js';
+import { runRetentionSweep } from '@x/core/dist/runtime/sessions/retention.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
@@ -837,6 +840,37 @@ export function markSessionsIndexReady(): void {
   resolveSessionsIndexReady();
 }
 
+// Daily storage-retention sweep (auto-delete old chats & task transcripts).
+// Started from main.ts once the session index is ready; the initial run is
+// delayed so it never competes with startup. The first launch with retention
+// enabled only arms the one-time notice (retention:consumeFirstRunNotice) —
+// sweeping begins on the next launch, after the user has seen it.
+let retentionSweepStarted = false;
+export function startRetentionSweep(): void {
+  if (retentionSweepStarted) return;
+  retentionSweepStarted = true;
+  const sweep = async () => {
+    try {
+      const settings = await loadRetentionSettings();
+      if (!settings.enabled || !settings.noticeShown) return;
+      const result = await runRetentionSweep({
+        sessions: container.resolve<ISessions>('sessions'),
+        turnsRootDir: container.resolve<string>('turnsRootDir'),
+        settings,
+      });
+      if (result.deletedSessions > 0 || result.deletedTurnFiles > 0) {
+        console.log(
+          `[Retention] sweep: deleted ${result.deletedSessions} session(s), ${result.deletedTurnFiles} turn file(s)`,
+        );
+      }
+    } catch (error) {
+      console.error('[Retention] sweep failed:', error);
+    }
+  };
+  setTimeout(() => { void sweep(); }, 90_000);
+  setInterval(() => { void sweep(); }, 24 * 60 * 60 * 1000);
+}
+
 let servicesWatcher: (() => void) | null = null;
 export async function startServicesWatcher(): Promise<void> {
   if (servicesWatcher) {
@@ -993,11 +1027,12 @@ export function setupIpcHandlers() {
     'app:openPrivacySettings': async (_event, args) => {
       if (process.platform === 'win32') {
         // Windows Settings deep links (ms-settings). Sections without a
-        // Windows equivalent (screen recording, input monitoring are macOS
-        // TCC concepts) report failure, as before.
+        // Windows equivalent (screen recording and input monitoring are
+        // macOS TCC concepts) report failure, as before.
         const winUris: Partial<Record<typeof args.section, string>> = {
           microphone: 'ms-settings:privacy-microphone',
           camera: 'ms-settings:privacy-webcam',
+          notifications: 'ms-settings:notifications',
         };
         const uri = winUris[args.section];
         if (!uri) return { success: false };
@@ -1009,19 +1044,91 @@ export function setupIpcHandlers() {
         }
       }
       if (process.platform !== 'darwin') return { success: false };
-      const anchors = {
-        microphone: 'Privacy_Microphone',
-        camera: 'Privacy_Camera',
-        'screen-recording': 'Privacy_ScreenCapture',
-        'input-monitoring': 'Privacy_ListenEvent',
-      } as const;
+      // Notification settings live outside the Privacy & Security pane.
+      const url = args.section === 'notifications'
+        ? 'x-apple.systempreferences:com.apple.Notifications-Settings.extension'
+        : `x-apple.systempreferences:com.apple.preference.security?${({
+            microphone: 'Privacy_Microphone',
+            camera: 'Privacy_Camera',
+            'screen-recording': 'Privacy_ScreenCapture',
+            'input-monitoring': 'Privacy_ListenEvent',
+          } as const)[args.section]}`;
       try {
-        await shell.openExternal(
-          `x-apple.systempreferences:com.apple.preference.security?${anchors[args.section]}`,
-        );
+        await shell.openExternal(url);
         return { success: true };
       } catch {
         return { success: false };
+      }
+    },
+    'permissions:getStatus': async () => {
+      const platform = process.platform === 'darwin' ? 'darwin' as const
+        : process.platform === 'win32' ? 'win32' as const : 'linux' as const;
+      type PermState = ipc.IPCChannels['permissions:getStatus']['res']['microphone'];
+      // getMediaAccessStatus exists on darwin and win32 only.
+      const media = (kind: 'microphone' | 'camera' | 'screen'): PermState => {
+        try {
+          return systemPreferences.getMediaAccessStatus(kind) as PermState;
+        } catch {
+          return 'unknown';
+        }
+      };
+      if (platform === 'linux') {
+        // No OS permission gates for any of these under X11; notifications
+        // vary by desktop and can't be read.
+        return {
+          platform,
+          microphone: 'not-required', camera: 'not-required', screenRecording: 'not-required',
+          inputMonitoring: 'not-required',
+          notifications: 'unknown',
+        };
+      }
+      if (platform === 'win32') {
+        // Desktop apps are gated by the global "let desktop apps access…"
+        // toggles (surfaced through getMediaAccessStatus); everything else
+        // needs no permission on Windows.
+        return {
+          platform,
+          microphone: media('microphone'), camera: media('camera'),
+          screenRecording: 'not-required',
+          inputMonitoring: 'not-required',
+          notifications: 'unknown',
+        };
+      }
+      // macOS. Input monitoring has no read API — infer from the key hook:
+      // events seen = definitely granted; anything else is honestly unknown
+      // (the hook only runs during calls, so absence of events proves
+      // nothing). Notifications can't be read at all.
+      const ptt = getPttStatus();
+      return {
+        platform,
+        microphone: media('microphone'),
+        camera: media('camera'),
+        screenRecording: media('screen'),
+        inputMonitoring: ptt.eventsSeen ? 'granted' : 'unknown',
+        notifications: 'unknown',
+      };
+    },
+    'permissions:request': async (_event, args) => {
+      const darwin = process.platform === 'darwin';
+      switch (args.permission) {
+        case 'microphone':
+        case 'camera': {
+          if (!darwin) return { state: 'unknown' };
+          try {
+            const granted = await systemPreferences.askForMediaAccess(args.permission);
+            return { state: granted ? 'granted' : 'denied' };
+          } catch {
+            return { state: 'unknown' };
+          }
+        }
+        case 'input-monitoring': {
+          if (!darwin) return { state: 'not-required' };
+          // Recreates the uiohook tap: fires the consent prompt if macOS
+          // never asked, and revives a tap created before a grant. The
+          // status stays unknown until real key events arrive (next call).
+          retryPttHook();
+          return { state: 'unknown' };
+        }
       }
     },
     // --- Quick-ask bar relays ---
@@ -1054,10 +1161,6 @@ export function setupIpcHandlers() {
     },
     'quickAsk:chatContext': async (_event, args) => {
       pushChatContext(args);
-      return {};
-    },
-    'quickAsk:setTextMode': async (_event, args) => {
-      findMainAppWindow()?.webContents.send('quick-ask:text-mode', args);
       return {};
     },
     'quickAsk:popOut': async () => {
@@ -2622,6 +2725,15 @@ export function setupIpcHandlers() {
     'video:getPopoutState': async () => {
       return { state: getPopoutState() };
     },
+    'screenPointer:setShareActive': async (_event, args) => {
+      // Gates the assistant's screen-pointer tool and tears the pointer
+      // overlay down the moment the share (call or quick-ask) ends.
+      screenPointerService.setShareActive(args.active);
+      return {};
+    },
+    'screenPointer:getState': async () => {
+      return { state: screenPointerService.getState() };
+    },
     'video:popoutAction': async (_event, args) => {
       // Relay a popout control-bar action to the app window, which owns the
       // call (mic, camera, screen capture) and executes it there. 'expand'
@@ -2975,6 +3087,21 @@ export function setupIpcHandlers() {
     'turnLimits:setSettings': async (_event, args) => {
       await saveTurnLimitsSettings(args);
       return { success: true };
+    },
+    'retention:getSettings': async () => {
+      return await loadRetentionSettings();
+    },
+    'retention:setSettings': async (_event, args) => {
+      await saveRetentionSettings(args);
+      return { success: true };
+    },
+    'retention:consumeFirstRunNotice': async () => {
+      const settings = await loadRetentionSettings();
+      if (settings.enabled && !settings.noticeShown) {
+        await saveRetentionSettings({ noticeShown: true });
+        return { show: true, chatDays: settings.chatDays };
+      }
+      return { show: false, chatDays: settings.chatDays };
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,

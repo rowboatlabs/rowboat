@@ -29,6 +29,7 @@ import { GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { TurnLimitsSettingsSchema } from './turn-limits.js';
+import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
@@ -1174,12 +1175,41 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({ success: z.boolean() }),
   },
-  // Deep-link to a macOS Privacy & Security pane (permission dialogs).
+  // Deep-link to a macOS Privacy & Security pane (permission dialogs and the
+  // Settings → Permissions panel). 'notifications' opens the OS notification
+  // settings (not under Privacy on either platform).
   'app:openPrivacySettings': {
     req: z.object({
-      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring']),
+      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring', 'notifications']),
     }),
     res: z.object({ success: z.boolean() }),
+  },
+  // Aggregate OS-permission snapshot for Settings → Permissions. States are
+  // HONEST: 'unknown' means the OS gives us no way to read it (input
+  // monitoring outside a call, notifications, unprobed automation) — the UI
+  // must say so rather than fake a verdict. 'not-required' rows are hidden
+  // (that permission doesn't exist on this platform).
+  'permissions:getStatus': {
+    req: z.null(),
+    res: z.object({
+      platform: z.enum(['darwin', 'win32', 'linux']),
+      microphone: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      camera: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      screenRecording: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      inputMonitoring: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      notifications: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+    }),
+  },
+  // Fire the OS grant flow for one permission where a programmatic path
+  // exists: mic/camera native prompts, or re-arming the input-monitoring
+  // key hook (its consent prompt). Returns the state afterwards.
+  'permissions:request': {
+    req: z.object({
+      permission: z.enum(['microphone', 'camera', 'input-monitoring']),
+    }),
+    res: z.object({
+      state: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+    }),
   },
   // Relaunch the app — macOS requires it for a fresh Screen Recording grant
   // to take effect.
@@ -1272,16 +1302,10 @@ const ipcSchemas = {
     req: z.object({ collapsed: z.boolean() }),
     res: z.object({}),
   },
-  // Bar → main → app window: the companion's expanded card is TEXT MODE —
-  // replies render silently there (entering it hushes in-flight speech).
-  'quickAsk:setTextMode': {
-    req: z.object({ textMode: z.boolean() }),
-    res: z.object({}),
-  },
-  'quick-ask:text-mode': {
-    req: z.object({ textMode: z.boolean() }),
-    res: z.null(),
-  },
+  // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
+  // whether a reply is SPOKEN now follows the question's modality — spoken
+  // questions get spoken replies, typed ones stay silent — plus the
+  // explicit speaker mute on the Skipper.)
   // App window → main: open the bar (the discoverability toast's "Try it").
   'quickAsk:show': {
     req: z.null(),
@@ -2397,6 +2421,11 @@ const ipcSchemas = {
       // User mute: mic audio and frame capture are both paused.
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
+      // Output mute: replies are not spoken while set (input mute is micMuted).
+      speakerMuted: z.boolean(),
+      // High-level "what's happening" while a turn runs ("Searching the
+      // web…", "Reasoning…") — tool NAMES only, never arguments.
+      activityText: z.string().nullable(),
       // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
       // A quick ⌘ tap locked hands-free capture (until the next tap).
@@ -2428,6 +2457,8 @@ const ipcSchemas = {
           cameraOn: z.boolean(),
           micMuted: z.boolean(),
           screenSharing: z.boolean(),
+          speakerMuted: z.boolean(),
+          activityText: z.string().nullable(),
           interimText: z.string().nullable(),
           pttLocked: z.boolean(),
           responseText: z.string().nullable(),
@@ -2443,7 +2474,7 @@ const ipcSchemas = {
   // typed message from the popout's input.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
       text: z.string().optional(),
     }),
     res: z.object({}),
@@ -2456,6 +2487,11 @@ const ipcSchemas = {
       cameraOn: z.boolean(),
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
+      // Output mute: replies are not spoken while set (input mute is micMuted).
+      speakerMuted: z.boolean(),
+      // High-level "what's happening" while a turn runs ("Searching the
+      // web…", "Reasoning…") — tool NAMES only, never arguments.
+      activityText: z.string().nullable(),
       interimText: z.string().nullable(),
       pttLocked: z.boolean(),
       responseText: z.string().nullable(),
@@ -2466,10 +2502,48 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
       text: z.string().optional(),
     }),
     res: z.null(),
+  },
+  // Renderer → main: whether a screen share (call or quick-ask) is currently
+  // live. Gates the assistant's screen-pointer tool — pointing at a screen
+  // the user isn't sharing would be pure confusion — and tears the pointer
+  // overlay down the moment the share ends.
+  'screenPointer:setShareActive': {
+    req: z.object({ active: z.boolean() }),
+    res: z.object({}),
+  },
+  // Push channel: main → pointer-overlay window with the current pointer
+  // state. `nonce` re-triggers the ping animation when the assistant points
+  // twice at the same spot; coordinates are fractions of the display.
+  'screen-pointer:state': {
+    req: z.object({
+      visible: z.boolean(),
+      x: z.number(),
+      y: z.number(),
+      label: z.string().nullable(),
+      nonce: z.number(),
+    }),
+    res: z.null(),
+  },
+  // Overlay window → fetch the current pointer state on mount. Same race as
+  // video:getPopoutState: the did-finish-load replay can fire before the
+  // React listener registers, and a missed push means an invisible pointer.
+  'screenPointer:getState': {
+    req: z.null(),
+    res: z.object({
+      state: z
+        .object({
+          visible: z.boolean(),
+          x: z.number(),
+          y: z.number(),
+          label: z.string().nullable(),
+          nonce: z.number(),
+        })
+        .nullable(),
+    }),
   },
   'meeting:checkScreenPermission': {
     req: z.null(),
@@ -3207,6 +3281,27 @@ const ipcSchemas = {
     req: TurnLimitsSettingsSchema,
     res: z.object({
       success: z.literal(true),
+    }),
+  },
+  // Storage retention (auto-delete old chats & task transcripts)
+  'retention:getSettings': {
+    req: z.null(),
+    res: RetentionSettingsSchema,
+  },
+  'retention:setSettings': {
+    req: RetentionSettingsUpdateSchema,
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // One-time first-run notice: returns { show: true } exactly once (when
+  // retention is enabled and the notice hasn't been shown), marking it shown.
+  // Same pull-on-boot pattern as app:consumeUpdateInfo.
+  'retention:consumeFirstRunNotice': {
+    req: z.null(),
+    res: z.object({
+      show: z.boolean(),
+      chatDays: z.number().nullable(),
     }),
   },
 } as const;

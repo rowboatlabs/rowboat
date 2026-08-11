@@ -154,9 +154,9 @@ const definitions: SkillDefinition[] = [
   {
     id: "app-navigation",
     title: "App Navigation",
-    summary: "Navigate the app UI - open notes, switch views, answer from an installed Rowboat app's data and surface it, filter/search the knowledge base, and manage saved views.",
+    summary: "Navigate the app UI - open notes, switch views, answer from an installed Rowboat app's data and surface it, filter/search the knowledge base, manage saved views, and point at the user's shared screen during calls.",
     content: appNavigationSkill,
-    tools: ["app-navigation", "app-read-data", "app-set-data"],
+    tools: ["app-navigation", "app-read-data", "app-set-data", "screen-pointer"],
   },
   {
     id: "code-with-agents",
