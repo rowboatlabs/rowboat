@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpRight,
   ChevronDown,
@@ -734,6 +734,23 @@ export function QuickAskBar() {
       : ''
   const skipperCaption = skipper ? (callState.interimText || skipperReplyTail) : ''
 
+  // History includes the chat's LATEST messages — but the current exchange
+  // is already rendered below the "earlier" divider, so trim it off the
+  // tail. Matched on the question text (the reliable key: a streaming reply
+  // can differ from its stored copy): drop the newest user message and
+  // everything after it iff it IS the question on display.
+  const earlierItems = useMemo(() => {
+    if (!historyData) return historyData
+    const current = (panelAsked ?? '').trim()
+    if (!current) return historyData
+    for (let i = historyData.length - 1; i >= 0; i--) {
+      if (historyData[i].role !== 'user') continue
+      if (historyData[i].content.trim() === current) return historyData.slice(0, i)
+      break
+    }
+    return historyData
+  }, [historyData, panelAsked])
+
   return (
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden">
       {/* The invisible stage: popovers open into this zone; clicking it
@@ -955,13 +972,13 @@ export function QuickAskBar() {
             {showHistory && historyData === null && (
               <div className="mb-2 animate-pulse text-xs text-neutral-400">Loading history…</div>
             )}
-            {showHistory && historyData !== null && (
+            {showHistory && earlierItems !== null && (
               <div className="mb-1">
-                {historyData.length === 0 ? (
+                {earlierItems.length === 0 ? (
                   <div className="mb-2 text-xs text-neutral-400">No earlier messages in this chat.</div>
                 ) : (
                   <div className="opacity-75">
-                    {historyData.map((m, i) =>
+                    {earlierItems.map((m, i) =>
                       m.role === 'user' ? (
                         <div key={i} className="mb-1.5 mt-3 text-sm font-medium text-neutral-500 first:mt-0">
                           {m.content}
@@ -977,7 +994,7 @@ export function QuickAskBar() {
                     )}
                   </div>
                 )}
-                {(panelAsked || panelText) && historyData.length > 0 && (
+                {(panelAsked || panelText) && earlierItems.length > 0 && (
                   <div className="my-2 flex items-center gap-2 text-[9px] uppercase tracking-wider text-neutral-400">
                     <span className="h-px flex-1 bg-black/10" />
                     earlier
