@@ -95,6 +95,34 @@ const SlackErrorKindSchema = z.enum([
   'not_authed', 'rate_limited', 'network', 'bad_channel', 'unknown',
 ]);
 
+/**
+ * Privacy-bounded evidence from the macOS Zoom Accessibility helper. The
+ * helper never forwards raw AX nodes, window titles, arbitrary labels, or
+ * transcript text across IPC.
+ */
+export const ZoomAccessibilityEvidence = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('permission'),
+    trusted: z.boolean(),
+    observedAtMs: z.number().int().nonnegative(),
+  }),
+  z.object({
+    type: z.literal('surface'),
+    state: z.enum(['active', 'missing', 'unknown']),
+    observedAtMs: z.number().int().nonnegative(),
+  }),
+  z.object({
+    type: z.literal('speaker'),
+    displayName: z.string().min(1).max(100),
+    isSelf: z.boolean().nullable(),
+    isActive: z.boolean(),
+    isMuted: z.boolean().nullable(),
+    confidence: z.number().min(0).max(1),
+    signals: z.array(z.string().max(64)).max(8),
+    observedAtMs: z.number().int().nonnegative(),
+  }),
+]);
+
 const KnowledgeSourceConfigSchema = z.object({
   id: z.string(),
   provider: z.enum(['gmail', 'meeting', 'voice_memo', 'slack', 'github', 'linear']),
@@ -1101,6 +1129,12 @@ const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
+  // Main → renderer: bounded Zoom active-speaker and meeting-surface evidence
+  // from the optional macOS Accessibility helper.
+  'meeting:zoomAccessibilityEvidence': {
+    req: ZoomAccessibilityEvidence,
+    res: z.null(),
+  },
   // Renderer → main: assistant voice/video call holds the mic — suppresses
   // ambient meeting detection (it would otherwise see our own capture) and
   // runs the global push-to-talk key hook for the duration of the call.
@@ -1148,7 +1182,7 @@ const ipcSchemas = {
   // Deep-link to a macOS Privacy & Security pane (permission dialogs).
   'app:openPrivacySettings': {
     req: z.object({
-      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring']),
+      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring', 'accessibility']),
     }),
     res: z.object({ success: z.boolean() }),
   },

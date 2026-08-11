@@ -1,9 +1,14 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
 import { finalizeDeepgramStream } from '@/lib/deepgram-finalize';
 import { useRowboatAccount } from '@/hooks/useRowboatAccount';
 import { fetchRowboatConfig } from '@/hooks/use-rowboat-config';
+import {
+    appendZoomSpeakerEvidence,
+    resolveZoomSpeakerForInterval,
+    type ZoomSpeakerEvent,
+} from '@/lib/zoom-speaker-evidence';
 
 export type MeetingTranscriptionState = 'idle' | 'connecting' | 'recording' | 'stopping';
 
@@ -173,6 +178,32 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
     onAutoStopRef.current = onAutoStop;
     const dateRef = useRef<string>('');
     const calendarEventRef = useRef<CalendarEventMeta | undefined>(undefined);
+    const captureStartedAtMsRef = useRef<number>(0);
+    const zoomSpeakerTimelineRef = useRef<ZoomSpeakerEvent[]>([]);
+    const accessibilityWarningShownRef = useRef(false);
+
+    useEffect(() => window.ipc.on('meeting:zoomAccessibilityEvidence', (event) => {
+        if (event.type === 'speaker') {
+            zoomSpeakerTimelineRef.current = appendZoomSpeakerEvidence(
+                zoomSpeakerTimelineRef.current,
+                event,
+            );
+            return;
+        }
+        if (event.type === 'permission' && !event.trusted && !accessibilityWarningShownRef.current) {
+            accessibilityWarningShownRef.current = true;
+            toast.info('Enable Accessibility for Zoom speaker names', {
+                description: 'Recording still works, but names will use generic speaker labels until Rowboat is allowed in System Settings.',
+                duration: 10_000,
+                action: {
+                    label: 'Open Settings',
+                    onClick: () => {
+                        void window.ipc.invoke('app:openPrivacySettings', { section: 'accessibility' });
+                    },
+                },
+            });
+        }
+    }), []);
 
     const writeTranscriptToFile = useCallback(async () => {
         if (!notePathRef.current) return;
@@ -350,6 +381,8 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         // Set up WS message handler
         transcriptRef.current = [];
         interimRef.current = new Map();
+        zoomSpeakerTimelineRef.current = [];
+        accessibilityWarningShownRef.current = false;
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (!data.channel?.alternatives?.[0]) return;
@@ -367,7 +400,22 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                 // Use Deepgram diarization speaker ID for system audio channel
                 const words = data.channel.alternatives[0].words;
                 const speakerId = words?.[0]?.speaker;
-                speaker = speakerId != null ? `Speaker ${speakerId}` : 'System audio';
+                const fallback = speakerId != null ? `Speaker ${speakerId}` : 'System audio';
+                const now = Date.now();
+                const relativeStartSeconds = typeof data.start === 'number' ? data.start : null;
+                const durationSeconds = typeof data.duration === 'number' ? data.duration : null;
+                const intervalStartMs = relativeStartSeconds !== null && captureStartedAtMsRef.current > 0
+                    ? captureStartedAtMsRef.current + relativeStartSeconds * 1_000
+                    : now - 2_500;
+                const intervalEndMs = durationSeconds !== null
+                    ? intervalStartMs + durationSeconds * 1_000
+                    : now;
+                speaker = resolveZoomSpeakerForInterval(
+                    zoomSpeakerTimelineRef.current,
+                    intervalStartMs,
+                    intervalEndMs,
+                    fallback,
+                );
             }
 
             if (data.is_final) {
@@ -462,6 +510,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
 
         const processor = audioCtx.createScriptProcessor(4096, 2, 2);
         processorRef.current = processor;
+        captureStartedAtMsRef.current = Date.now();
 
         processor.onaudioprocess = (e) => {
             if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
