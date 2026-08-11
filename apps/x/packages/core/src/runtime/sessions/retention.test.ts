@@ -136,6 +136,76 @@ describe("runRetentionSweep", () => {
         expect(await exists(turnFile("2026-08-02T10-00-00Z-0000006-000"))).toBe(true);
     });
 
+    it("protects an old sub-agent child turn linked from an active chat's old parent turn", async () => {
+        // Active chat (recent activity) whose first turn is old and spawned a
+        // sub-agent — both parent and child are >14d old, so only the child
+        // link discovered by reading the old parent protects the child file.
+        const sessionId = "2026-06-08T10-00-00Z-0000001-000";
+        const parentId = "2026-06-08T10-00-00Z-0000002-000";
+        const childId = "2026-06-08T10-05-00Z-0000003-000";
+        await seedSession(sessionId, parentId, "2026-06-08T10:00:00.000Z");
+        await sessionRepo.append(sessionId, [{
+            type: "title_changed",
+            sessionId,
+            ts: "2026-08-05T10:00:00.000Z",
+            title: "still in use",
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any]);
+        await turnRepo.create(turnCreated(childId, null, "2026-06-08T10:05:00.000Z"));
+        await turnRepo.append(parentId, [
+            {
+                type: "model_call_requested",
+                turnId: parentId,
+                ts: "2026-06-08T10:04:00.000Z",
+                modelCallIndex: 0,
+                request: { messages: ["input"], parameters: {} },
+            },
+            {
+                type: "model_call_completed",
+                turnId: parentId,
+                ts: "2026-06-08T10:04:30.000Z",
+                modelCallIndex: 0,
+                message: {
+                    role: "assistant",
+                    content: [{ type: "tool-call", toolCallId: "tc-1", toolName: "spawn-agent", arguments: {} }],
+                },
+                finishReason: "tool-calls",
+                usage: {},
+            },
+            {
+                type: "tool_invocation_requested",
+                turnId: parentId,
+                ts: "2026-06-08T10:04:31.000Z",
+                toolCallId: "tc-1",
+                toolId: "tool.spawn-agent",
+                toolName: "spawn-agent",
+                execution: "sync",
+                input: {},
+            },
+            {
+                type: "tool_progress",
+                turnId: parentId,
+                ts: "2026-06-08T10:05:00.000Z",
+                toolCallId: "tc-1",
+                source: "sync",
+                progress: { kind: "subagent", childTurnId: childId, agentName: "subagent", task: "t" },
+            },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ] as any);
+
+        await sessions.initialize();
+        const result = await runRetentionSweep({
+            sessions,
+            turnsRootDir: path.join(root, "turns"),
+            settings: { ...DEFAULT_RETENTION_SETTINGS, chatDays: 90, taskDays: 14, noticeShown: true },
+            now: NOW,
+        });
+
+        expect(result).toEqual({ deletedSessions: 0, deletedTurnFiles: 0 });
+        expect(await exists(turnFile(parentId))).toBe(true);
+        expect(await exists(turnFile(childId))).toBe(true);
+    });
+
     it("chatDays null keeps all chats but still cleans old task turns", async () => {
         await seedSession(
             "2026-06-08T10-00-00Z-0000001-000",

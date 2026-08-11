@@ -71,8 +71,8 @@ export async function runRetentionSweep({
     }
 
     // ── 2. Old unreferenced turn files ────────────────────────────
-    const referenced = await collectReferencedTurnIds(sessions);
     const taskCutoff = now - settings.taskDays * DAY_MS;
+    const referenced = await collectReferencedTurnIds(sessions, taskCutoff);
     for (const { turnId, filePath } of await listTurnFiles(turnsRootDir)) {
         if (referenced.has(turnId)) continue;
         if (idDate(turnId) >= taskCutoff) continue;
@@ -89,7 +89,16 @@ export async function runRetentionSweep({
 
 // Every turn id reachable from a live session: the session's turn refs plus
 // the spawn-agent child chain of each (children can nest).
-async function collectReferencedTurnIds(sessions: ISessions): Promise<Set<string>> {
+//
+// Turns newer than `taskCutoff` are added to the set from their id alone —
+// their files are never read. A child turn is created during its parent's
+// run, so it is never older than the parent: a recent parent can only link
+// to recent children, none of which are deletion candidates. Only turns old
+// enough to be protecting other old files need their child links followed.
+async function collectReferencedTurnIds(
+    sessions: ISessions,
+    taskCutoff: number,
+): Promise<Set<string>> {
     const referenced = new Set<string>();
     const queue: string[] = [];
     for (const entry of sessions.listSessions()) {
@@ -104,6 +113,7 @@ async function collectReferencedTurnIds(sessions: ISessions): Promise<Set<string
         const turnId = queue.shift()!;
         if (referenced.has(turnId)) continue;
         referenced.add(turnId);
+        if (idDate(turnId) >= taskCutoff) continue;
         try {
             const turn = await sessions.getTurn(turnId);
             queue.push(...childTurnIdsOf(reduceTurn(turn.events)));
