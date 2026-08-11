@@ -28,6 +28,7 @@ import { GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { TurnLimitsSettingsSchema } from './turn-limits.js';
+import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
@@ -3178,6 +3179,27 @@ const ipcSchemas = {
     req: TurnLimitsSettingsSchema,
     res: z.object({
       success: z.literal(true),
+    }),
+  },
+  // Storage retention (auto-delete old chats & task transcripts)
+  'retention:getSettings': {
+    req: z.null(),
+    res: RetentionSettingsSchema,
+  },
+  'retention:setSettings': {
+    req: RetentionSettingsUpdateSchema,
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // One-time first-run notice: returns { show: true } exactly once (when
+  // retention is enabled and the notice hasn't been shown), marking it shown.
+  // Same pull-on-boot pattern as app:consumeUpdateInfo.
+  'retention:consumeFirstRunNotice': {
+    req: z.null(),
+    res: z.object({
+      show: z.boolean(),
+      chatDays: z.number().nullable(),
     }),
   },
 } as const;

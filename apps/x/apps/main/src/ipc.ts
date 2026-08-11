@@ -85,6 +85,8 @@ import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, ge
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
+import { loadRetentionSettings, saveRetentionSettings } from '@x/core/dist/config/retention.js';
+import { runRetentionSweep } from '@x/core/dist/runtime/sessions/retention.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
@@ -834,6 +836,37 @@ const sessionsIndexReady = new Promise<void>((resolve) => {
 });
 export function markSessionsIndexReady(): void {
   resolveSessionsIndexReady();
+}
+
+// Daily storage-retention sweep (auto-delete old chats & task transcripts).
+// Started from main.ts once the session index is ready; the initial run is
+// delayed so it never competes with startup. The first launch with retention
+// enabled only arms the one-time notice (retention:consumeFirstRunNotice) —
+// sweeping begins on the next launch, after the user has seen it.
+let retentionSweepStarted = false;
+export function startRetentionSweep(): void {
+  if (retentionSweepStarted) return;
+  retentionSweepStarted = true;
+  const sweep = async () => {
+    try {
+      const settings = await loadRetentionSettings();
+      if (!settings.enabled || !settings.noticeShown) return;
+      const result = await runRetentionSweep({
+        sessions: container.resolve<ISessions>('sessions'),
+        turnsRootDir: container.resolve<string>('turnsRootDir'),
+        settings,
+      });
+      if (result.deletedSessions > 0 || result.deletedTurnFiles > 0) {
+        console.log(
+          `[Retention] sweep: deleted ${result.deletedSessions} session(s), ${result.deletedTurnFiles} turn file(s)`,
+        );
+      }
+    } catch (error) {
+      console.error('[Retention] sweep failed:', error);
+    }
+  };
+  setTimeout(() => { void sweep(); }, 90_000);
+  setInterval(() => { void sweep(); }, 24 * 60 * 60 * 1000);
 }
 
 let servicesWatcher: (() => void) | null = null;
@@ -2947,6 +2980,21 @@ export function setupIpcHandlers() {
     'turnLimits:setSettings': async (_event, args) => {
       await saveTurnLimitsSettings(args);
       return { success: true };
+    },
+    'retention:getSettings': async () => {
+      return await loadRetentionSettings();
+    },
+    'retention:setSettings': async (_event, args) => {
+      await saveRetentionSettings(args);
+      return { success: true };
+    },
+    'retention:consumeFirstRunNotice': async () => {
+      const settings = await loadRetentionSettings();
+      if (settings.enabled && !settings.noticeShown) {
+        await saveRetentionSettings({ noticeShown: true });
+        return { show: true, chatDays: settings.chatDays };
+      }
+      return { show: false, chatDays: settings.chatDays };
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,
