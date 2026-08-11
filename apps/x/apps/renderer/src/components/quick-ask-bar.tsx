@@ -201,7 +201,10 @@ export function QuickAskBar() {
     if (next && speakerMutedRef.current) {
       void window.ipc.invoke('video:popoutAction', { action: 'toggle-speaker' }).catch(() => {})
     }
-    setCollapsed(next)
+    // No optimistic local flip: main owns collapsed state and window
+    // geometry as one unit, and answers with a quick-ask:mode push. A local
+    // flip could disagree with the window size (the squeezed-card wedge
+    // where every control looks dead) — one IPC round-trip is imperceptible.
     void window.ipc.invoke('quickAsk:setPinnedCollapsed', { collapsed: next }).catch(() => {})
   }, [])
 

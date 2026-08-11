@@ -327,12 +327,14 @@ function findAppWindow(): BrowserWindow | undefined {
 
 export function toggleQuickAsk(viaShortcut = true) {
   const win = getQuickAskWindow();
-  // While a call pill is up, the shortcut brings the text back — expanding
-  // a tucked mascot and focusing — instead of toggling a second surface
-  // into existence.
+  // While the Skipper is up, the shortcut TOGGLES its text panel: folded →
+  // unfold and focus (about to read or type); open → fold it away. All in
+  // main, so it works even if the window's own controls are wedged — the
+  // keyboard is the escape hatch.
   if (mode === 'pinned' && win) {
-    if (pinnedCollapsed) setPinnedCollapsed(false);
-    win.focus();
+    const expanding = pinnedCollapsed;
+    setPinnedCollapsed(!pinnedCollapsed);
+    if (expanding) win.focus();
     return;
   }
   if (win?.isVisible()) {
@@ -394,6 +396,17 @@ export function setCompanionPinned(pinned: boolean) {
   if (pinned) {
     if (mode === 'pinned') {
       tuckPendingAt = 0;
+      // Already pinned: re-assert the CURRENT presentation instead of
+      // bailing — callSurface flaps in the app (fullscreen ⇄ popout) can
+      // otherwise leave the window sized for one state while the renderer
+      // shows the other.
+      const win0 = getQuickAskWindow();
+      if (win0) {
+        if (pinnedCollapsed) positionTucked(win0);
+        else applyExpandedSurface(win0, getExpandedSurface());
+        pushMode(win0);
+        if (!win0.isVisible()) win0.showInactive();
+      }
       return;
     }
     let win = getQuickAskWindow();
@@ -453,7 +466,12 @@ export function setCompanionPinned(pinned: boolean) {
  */
 export function setPinnedCollapsed(collapsed: boolean) {
   const win = getQuickAskWindow();
-  if (!win || mode !== 'pinned' || pinnedCollapsed === collapsed) return;
+  if (!win || mode !== 'pinned') return;
+  // Deliberately NO same-state short-circuit: geometry is re-applied and
+  // mode re-pushed even when `collapsed` matches, so a renderer that
+  // drifted out of sync (or a window left at the wrong size) self-heals on
+  // the next request instead of wedging — a "no change" request is cheap
+  // and idempotent.
   pinnedCollapsed = collapsed;
   if (collapsed) {
     if (appliedExpandedSurface === 'card') {
