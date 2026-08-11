@@ -241,3 +241,57 @@ describe("availability (catalog visibility)", () => {
     }
   });
 });
+
+// The deck tools are NOT in COPILOT_BASE_TOOLS, so the skill catalog is the
+// only thing that makes them discoverable: the model reads the catalog, loads
+// create-presentations, and that attaches deck-*. If this wiring regresses the
+// model silently falls back to rendering a PDF, which is the bug these pin.
+describe("presentation intent routes to the deck tools", () => {
+  it("create-presentations attaches every deck tool", async () => {
+    const skills = await import("./index.js");
+    const catalog = skills.buildSkillCatalog();
+    const section = catalog.split("## ").find((s) => s.startsWith("Create Presentations"));
+    expect(section).toBeDefined();
+    for (const tool of [
+      "deck-create",
+      "deck-review",
+      "deck-add-slide",
+      "deck-edit-slide",
+      "deck-restyle",
+    ]) {
+      expect(section).toContain(tool);
+    }
+  });
+
+  it("the presentations entry claims the deck vocabulary and never PDF", async () => {
+    const skills = await import("./index.js");
+    const catalog = skills.buildSkillCatalog();
+    const section = catalog.split("## ").find((s) => s.startsWith("Create Presentations"))!;
+    for (const phrase of ["presentation", "slide deck", "pitch deck", ".pptx"]) {
+      expect(section.toLowerCase()).toContain(phrase.toLowerCase());
+    }
+    // The summary must not advertise the PDF path — that ambiguity is what
+    // sent the model to the HTML→PDF pipeline for plain deck requests.
+    const summaryLine = section.split("\n").find((l) => l.includes("Use it for:"))!;
+    expect(summaryLine).not.toMatch(/\bPDF presentations?\b/i);
+  });
+
+  it("pdf-slides is gated to explicit PDF requests and defers to the deck skill", async () => {
+    const skills = await import("./index.js");
+    const resolved = skills.resolveSkill("pdf-slides");
+    expect(resolved).not.toBeNull();
+
+    const section = skills
+      .buildSkillCatalog()
+      .split("## ")
+      .find((s) => s.startsWith("PDF Slides"))!;
+    expect(section).toMatch(/only when the user explicitly asks/i);
+    expect(section).toContain("create-presentations");
+    // It must not attach deck tools, and must not claim the generic intent.
+    expect(section).not.toContain("deck-create");
+
+    // The skill body itself sends a non-PDF request back to the deck skill.
+    expect(resolved!.content).toContain("create-presentations");
+    expect(resolved!.content).toContain("deck-create");
+  });
+});

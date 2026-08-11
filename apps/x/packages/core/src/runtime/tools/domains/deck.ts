@@ -36,6 +36,14 @@ const HONESTY_RULES =
     'visible square-bracket placeholder in the slide text — "[X]% growth", "[Customer name]" — ' +
     "and list the missing facts as short labels in that slide's needsInput.";
 
+// Presentations have exactly one supported production path. The model reaches
+// for PDF/HTML/python-pptx otherwise, which is how a "deck" ends up as a flat
+// file the user cannot edit in the slide editor.
+const ONLY_PATH_RULE =
+    'This is the ONLY way to produce a presentation: never render slides as PDF or HTML, never ' +
+    'hand-write a .pptx via executeCommand / python-pptx / any script or library, and never ' +
+    'fabricate one with file-writeText.';
+
 function errorEnvelope(error: unknown): { success: false; error: string } {
     return {
         success: false,
@@ -90,11 +98,15 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
     'deck-create': {
         permission: "file-boundary",
         description:
-            'Create a .pptx presentation from a structured outline. Slide 1 is always the title ' +
-            'slide (its heading is the deck title on the slide). Vary the visual patterns — bullets, ' +
-            'two-column for compare/contrast, big-number for one key metric the user supplied, quote, ' +
-            'section for topic shifts, closing at the end — instead of a wall of bullet lists. ' +
-            'Speaker notes are not written to the file. ' + HONESTY_RULES,
+            'Create a presentation. USE THIS WHENEVER THE USER ASKS FOR A PRESENTATION, SLIDE DECK, ' +
+            'PITCH DECK, SLIDES, A DECK, OR A .pptx — "make me a deck about X", "put together a ' +
+            'pitch deck", "turn this into slides". Writes a real, editable PowerPoint file from a ' +
+            'structured outline and opens it in the slide editor (it also opens in PowerPoint, ' +
+            'Keynote and Google Slides). ' + ONLY_PATH_RULE + ' ' +
+            'Slide 1 is always the title slide (its heading is the deck title on the slide). Vary ' +
+            'the visual patterns — bullets, two-column for compare/contrast, big-number for one key ' +
+            'metric the user supplied, quote, section for topic shifts, closing at the end — instead ' +
+            'of a wall of bullet lists. Speaker notes are not written to the file. ' + HONESTY_RULES,
         inputSchema: z.object({
             path: PathField,
             title: z.string().min(1).describe('Deck title (also used for the title slide)'),
@@ -141,9 +153,12 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
     'deck-add-slide': {
         permission: "file-boundary",
         description:
-            'Insert ONE new slide into an existing .pptx at a given position. The slide inherits the ' +
-            "deck's current theme. Use deck-review first to see the current slides so the new one " +
-            'fits the flow and repeats no heading. ' + HONESTY_RULES,
+            'Add a slide to an existing presentation. USE THIS WHENEVER THE USER ASKS TO ADD A SLIDE ' +
+            'to a deck — "add a slide about pricing", "put a team slide after the intro", "we need a ' +
+            'closing slide". Inserts ONE new slide at a given position, inheriting the deck\'s current ' +
+            'theme. Use deck-review first to see the current slides so the new one fits the flow and ' +
+            'repeats no heading. Never rebuild the whole deck to add one slide, and never edit the ' +
+            '.pptx by any other means. ' + HONESTY_RULES,
         inputSchema: z.object({
             path: PathField,
             slide: SlideField,
@@ -185,11 +200,14 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
     'deck-edit-slide': {
         permission: "file-boundary",
         description:
-            'Replace the content of one slide of an existing .pptx (1-based slideNumber) with the ' +
-            'given outline-form slide. Keeping the same pattern rewrites the text in place ' +
-            '(preserving styling); changing the pattern rebuilds the slide. Use deck-review first to ' +
-            'see the current content, and return everything you do not mean to change verbatim. ' +
-            HONESTY_RULES,
+            'Change a slide in an existing presentation. USE THIS WHENEVER THE USER ASKS TO EDIT, ' +
+            'reword, fix, tighten or replace a slide — "change slide 3", "reword the intro", "make ' +
+            'the metrics slide a big number". Replaces the content of ONE slide (1-based ' +
+            'slideNumber) with the given outline-form slide: keeping the same pattern rewrites the ' +
+            'text in place (preserving styling), changing the pattern rebuilds that slide. Use ' +
+            'deck-review first to see the current content, and return everything you do not mean to ' +
+            'change verbatim. Never rebuild the whole deck to change one slide, and never edit the ' +
+            '.pptx by any other means. ' + HONESTY_RULES,
         inputSchema: z.object({
             path: PathField,
             slideNumber: z.number().int().min(1).describe('1-based number of the slide to edit'),
@@ -257,8 +275,11 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
     'deck-restyle': {
         permission: "file-boundary",
         description:
-            "Apply one of the built-in colour palettes to an existing .pptx by swapping its theme. " +
-            "Slide content is untouched; anything authored with theme colours recolours to match.",
+            'Restyle a presentation. USE THIS WHENEVER THE USER ASKS TO CHANGE A DECK\'S LOOK — ' +
+            '"restyle my deck", "change the theme", "make it darker", "can we try a different colour ' +
+            'scheme". Applies one of the built-in palettes to an existing .pptx by swapping its ' +
+            'theme: slide content is untouched and anything authored with theme colours recolours to ' +
+            'match. This is the whole job — never rebuild the deck to change its colours.',
         inputSchema: z.object({
             path: PathField,
             palette: deck.DeckOutlinePalette.describe('The palette to apply'),
@@ -286,11 +307,13 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
     'deck-review': {
         permission: "file-boundary",
         description:
-            'Read an existing .pptx and return every slide\'s content (heading, text lines, detected ' +
-            'visual pattern) plus structured model feedback: overall assessment, strengths, per-slide ' +
-            'comments, and factsToFill — the [bracketed] placeholders still to fill and any unsourced ' +
-            'numbers or quotes to verify with the user. Call this before deck-add-slide or ' +
-            'deck-edit-slide to see the current state.',
+            'Read back / review a presentation. USE THIS WHENEVER THE USER ASKS WHAT IS IN A DECK or ' +
+            'for feedback on one — "what\'s in my deck?", "review my pitch deck", "is this deck any ' +
+            'good?" — and ALWAYS before deck-add-slide or deck-edit-slide on a deck you did not just ' +
+            'create. Returns every slide\'s content (heading, text lines, detected visual pattern) ' +
+            'plus structured feedback: overall assessment, strengths, per-slide comments, and ' +
+            'factsToFill — the [bracketed] placeholders still to fill and any unsourced numbers or ' +
+            'quotes to verify with the user. Read-only; use this instead of parseFile for .pptx.',
         inputSchema: z.object({
             path: PathField,
             focus: z.string().optional().describe('Optional aspect to focus the feedback on, e.g. "clarity for investors"'),

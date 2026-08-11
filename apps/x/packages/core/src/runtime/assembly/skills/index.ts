@@ -19,6 +19,7 @@ import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
+import pdfSlidesSkill from "./pdf-slides/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
 import browserControlSkill from "./browser-control/skill.js";
@@ -54,8 +55,22 @@ const definitions: SkillDefinition[] = [
   {
     id: "create-presentations",
     title: "Create Presentations",
-    summary: "Create PDF presentations and slide decks from natural language requests using knowledge base context.",
+    summary: "Build and edit real PowerPoint (.pptx) decks — presentations, slide decks, pitch decks, slides. Load for ANY presentation request, including adding/changing one slide or restyling a deck. Decks are never rendered as PDF or HTML and never hand-written via code.",
     content: createPresentationsSkill,
+    tools: [
+      "deck-create",
+      "deck-review",
+      "deck-add-slide",
+      "deck-edit-slide",
+      "deck-restyle",
+      "file-mkdir",
+    ],
+  },
+  {
+    id: "pdf-slides",
+    title: "PDF Slides (explicit PDF requests only)",
+    summary: "Render flat HTML→PDF slides. ONLY when the user explicitly asks for a PDF or a printable handout. For any normal presentation / slide deck / pitch deck request use create-presentations instead, which produces an editable .pptx.",
+    content: pdfSlidesSkill,
     tools: ["file-writeText", "file-mkdir"],
   },
   {

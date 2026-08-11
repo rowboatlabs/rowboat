@@ -213,6 +213,38 @@ const HISTORICAL_KEY_ORDER = [
     "spawn-agent",
 ];
 
+// A skill's declared tool names are resolved against this catalog at
+// loadSkill time, and an unknown name is only a console.warn — so a typo
+// silently means "the model never gets that tool". Pin the bundled skills'
+// declarations against the live catalog instead.
+describe("bundled skills declare real builtin tools", () => {
+    it("every tool name a bundled skill attaches exists in BuiltinTools", async () => {
+        const { skillToolNames, availableSkills } = await import(
+            "../assembly/skills/index.js"
+        );
+        const unknown: string[] = [];
+        for (const skillId of availableSkills) {
+            for (const name of skillToolNames(skillId)) {
+                if (!BuiltinTools[name]) unknown.push(`${skillId} -> ${name}`);
+            }
+        }
+        expect(unknown).toEqual([]);
+    });
+
+    it("the presentations skill attaches the deck tools", async () => {
+        const { skillToolNames } = await import("../assembly/skills/index.js");
+        expect(skillToolNames("create-presentations")).toEqual(
+            expect.arrayContaining([
+                "deck-create",
+                "deck-review",
+                "deck-add-slide",
+                "deck-edit-slide",
+                "deck-restyle",
+            ]),
+        );
+    });
+});
+
 describe("BuiltinTools catalog key order", () => {
     it("preserves the historical key order byte-for-byte", () => {
         expect(Object.keys(BuiltinTools)).toEqual(HISTORICAL_KEY_ORDER);
