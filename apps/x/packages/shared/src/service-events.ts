@@ -3,6 +3,7 @@ import z from 'zod';
 export const ServiceName = z.enum([
   'graph',
   'gmail',
+  'outlook',
   'calendar',
   'fireflies',
   'granola',

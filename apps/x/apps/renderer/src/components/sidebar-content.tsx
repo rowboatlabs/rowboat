@@ -153,6 +153,7 @@ const MAX_PINNED_CHATS = 3
 
 const SERVICE_LABELS: Record<string, string> = {
   gmail: "Syncing Gmail",
+  outlook: "Syncing Outlook",
   calendar: "Syncing Calendar",
   fireflies: "Syncing Fireflies",
   granola: "Syncing Granola",

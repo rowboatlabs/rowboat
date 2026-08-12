@@ -11,6 +11,11 @@ const CONFIG_FILE = path.join(WorkDir, 'config', 'knowledge_sources.json');
 
 const BUILTIN_SOURCES: KnowledgeSourceConfig[] = [
     {
+        // 'gmail' is the generic email source tag: the Outlook backend writes
+        // its markdown mirrors to the same artifactDir, so this one source
+        // covers whichever email provider is connected. Renaming the id/
+        // provider would require migrating on-disk knowledge_sources.json for
+        // zero behavior change.
         id: 'gmail',
         provider: 'gmail',
         enabled: true,

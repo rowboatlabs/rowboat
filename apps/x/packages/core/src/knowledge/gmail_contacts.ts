@@ -2,8 +2,8 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import type { GmailThreadSnapshot } from './sync_gmail.js';
-import { getAccountEmail } from './sync_gmail.js';
+import type { EmailThreadSnapshot } from './email/store.js';
+import { getAccountEmail } from './email/dispatcher.js';
 import { isAutomatedAddress } from './contact_filters.js';
 
 const CACHE_DIR = path.join(WorkDir, 'inbox_lists');
@@ -63,7 +63,7 @@ function parseAddressList(header: string): Array<{ name: string; email: string }
     return result;
 }
 
-function ingestSnapshot(snapshot: GmailThreadSnapshot, selfEmail: string, map: Map<string, IndexEntry>): void {
+function ingestSnapshot(snapshot: EmailThreadSnapshot, selfEmail: string, map: Map<string, IndexEntry>): void {
     if (!snapshot?.messages) return;
     for (const msg of snapshot.messages) {
         const parsed = msg.date ? Date.parse(msg.date) : NaN;
@@ -132,7 +132,7 @@ async function rebuildIndex(): Promise<Map<string, IndexEntry>> {
         for (const raw of chunks) {
             if (!raw) continue;
             try {
-                const wrapper = JSON.parse(raw) as { snapshot?: GmailThreadSnapshot };
+                const wrapper = JSON.parse(raw) as { snapshot?: EmailThreadSnapshot };
                 if (wrapper.snapshot) ingestSnapshot(wrapper.snapshot, selfEmail, map);
             } catch {
                 continue;

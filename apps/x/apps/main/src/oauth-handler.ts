@@ -11,6 +11,13 @@ import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
+import { triggerSync as triggerOutlookSync } from '@x/core/dist/knowledge/sync_outlook.js';
+import { triggerSync as triggerOutlookCalendarSync } from '@x/core/dist/knowledge/sync_outlook_calendar.js';
+import { purgeEmailCaches } from '@x/core/dist/knowledge/email/store.js';
+import { isEmailProviderConnected } from '@x/core/dist/knowledge/email/active-provider.js';
+import { invalidateContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
+import { invalidateSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
+import { invalidateSentContacts as invalidateOutlookSentContacts } from '@x/core/dist/knowledge/outlook_sent_contacts.js';
 import { emitOAuthEvent } from './ipc.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { capture as analyticsCapture, identify as analyticsIdentify, reset as analyticsReset } from '@x/core/dist/analytics/posthog.js';
@@ -247,6 +254,20 @@ export async function connectProvider(provider: string, credentials?: { clientId
     const oauthRepo = getOAuthRepo();
     const providerConfig = await getProviderConfig(provider);
 
+    // Only one email provider (Google or Microsoft) may be connected at a
+    // time — the inbox cache, contact indexes, and copilot email routing all
+    // assume a single active mailbox.
+    if (provider === 'google' || provider === 'microsoft') {
+      const other = provider === 'google' ? 'microsoft' : 'google';
+      if (await isEmailProviderConnected(other)) {
+        const otherName = other === 'google' ? 'Google' : 'Microsoft';
+        return {
+          success: false,
+          error: `Disconnect ${otherName} first — only one email account can be connected at a time.`,
+        };
+      }
+    }
+
     if (provider === 'google') {
       if (!credentials?.clientId || !credentials?.clientSecret) {
         // No credentials → rowboat mode if the user is signed in to Rowboat
@@ -332,6 +353,9 @@ export async function connectProvider(provider: string, credentials?: { clientId
           if (provider === 'google') {
             triggerGmailSync();
             triggerCalendarSync();
+          } else if (provider === 'microsoft') {
+            triggerOutlookSync();
+            triggerOutlookCalendarSync();
           } else if (provider === 'fireflies-ai') {
             triggerFirefliesSync();
           }
@@ -433,6 +457,9 @@ export async function connectProvider(provider: string, credentials?: { clientId
         // BYOK token expires after ~1h with no way to refresh (it goes stale and
         // every Google call — including the Picker — starts failing).
         ...(provider === 'google' ? { access_type: 'offline', prompt: 'consent' } : {}),
+        // Microsoft: let multi-mailbox users pick which account to connect
+        // instead of silently reusing the browser's active session.
+        ...(provider === 'microsoft' ? { prompt: 'select_account' } : {}),
       });
 
       // Set timeout to clean up abandoned flows. Generous (10 min) because a
@@ -485,8 +512,18 @@ export async function connectProvider(provider: string, credentials?: { clientId
 export async function completeRowboatGoogleConnect(state: string): Promise<void> {
   try {
     console.log('[OAuth] Claiming rowboat-mode Google tokens...');
-    const tokens = await claimTokensViaBackend(state);
     const oauthRepo = getOAuthRepo();
+    // Same one-email-provider-at-a-time rule as connectProvider — this path
+    // bypasses it (deep link from the webapp), so re-check here.
+    if (await isEmailProviderConnected('microsoft')) {
+      emitOAuthEvent({
+        provider: 'google',
+        success: false,
+        error: 'Disconnect Microsoft first — only one email account can be connected at a time.',
+      });
+      return;
+    }
+    const tokens = await claimTokensViaBackend(state);
     await oauthRepo.upsert('google', {
       tokens,
       mode: 'rowboat',
@@ -543,6 +580,15 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
       // any provider). The composer prompts for a new pick.
       await clearRowboatSelections();
       captureProviderDisconnected('rowboat');
+    }
+    // Email caches hold provider-specific thread/message/draft ids — wipe them
+    // so a later connect (same or other provider) starts clean. The gmail_sync/
+    // markdown mirror stays: it's knowledge source material, not an API cache.
+    if (provider === 'google' || provider === 'microsoft') {
+      purgeEmailCaches();
+      invalidateContactIndex();
+      invalidateSentContacts();
+      invalidateOutlookSentContacts();
     }
     // Notify renderer so sidebar, voice, and billing re-check state
     emitOAuthEvent({ provider, success: false });
