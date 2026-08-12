@@ -19,6 +19,7 @@
  */
 
 import type * as deckShared from '../deck.js'
+import { parseInlineEmphasis } from './inline-markdown.js'
 import type { EditedParagraph } from './serialize.js'
 import type { NodePath, Paragraph, Shape, Slide, TextShape } from './types.js'
 
@@ -157,7 +158,7 @@ function slotsFor(
     case 'bullets': {
       if (texts.length < 1) return null
       const slots: Slot[] = [{ shape: texts[0], lines: [heading], uniformStyle: false }]
-      if (texts[1]) slots.push({ shape: texts[1], lines: bodyLinesOf(edited, 5), uniformStyle: true })
+      if (texts[1]) slots.push({ shape: texts[1], lines: bodyLinesOf(edited, 6), uniformStyle: true })
       return slots
     }
     case 'title': {
@@ -374,35 +375,55 @@ export function extractOutlineSlide(slide: Slide): { pattern: DeckSlidePattern; 
 // ----------------------------------------------------------- paragraph build
 
 /**
- * Target lines as EditedParagraph[]. Each paragraph anchors to the original
- * paragraph at its own index (clamped to the last), so a slot whose
- * paragraphs share a style extends naturally and per-index roles are kept;
- * runs carry the anchored run's formatting the way the overlay's commit does.
+ * Target lines as EditedParagraph[], PARAGRAPH-DIFFED against the original.
+ *
+ * A line whose text matches the original paragraph at its own index is
+ * unchanged: that paragraph's runs are reproduced 1:1, each anchored to its
+ * source run, so the writer copies their bytes verbatim and formatting the
+ * user applied by hand (a bolded phrase, a resized run) survives an edit that
+ * only touched OTHER paragraphs. Text comparison is trim-insensitive to match
+ * the planner's own line equality.
+ *
+ * A genuinely changed line rebuilds: it anchors to the original paragraph at
+ * its own index (clamped to the last), so a slot whose paragraphs share a
+ * style extends naturally and per-index roles are kept; runs carry the
+ * anchored run's formatting the way the overlay's commit does. Inline
+ * emphasis markers (**bold**, *italic*, `code`) in the new text split it into
+ * styled runs; an emphasised run drops the srcRun anchor (the writer would
+ * otherwise copy source bytes verbatim when the text happens to match) and
+ * carries the emphasis as its own override.
  */
 export function linesToEditedParagraphs(original: Paragraph[], lines: string[]): EditedParagraph[] {
   if (lines.length === 0) {
     return [{ srcPara: original.length > 0 ? 0 : undefined, runs: [] }]
   }
+  const paraText = (p: Paragraph): string => p.runs.map((r) => r.text).join('').trim()
   return lines.map((text, i) => {
+    // Unchanged paragraph: keep it — runs mapped 1:1 onto their sources.
+    if (i < original.length && paraText(original[i]) === text.trim()) {
+      return {
+        align: original[i].align,
+        srcPara: i,
+        runs: original[i].runs.map((r, j) => ({ ...r, srcPara: i, srcRun: j })),
+      }
+    }
     const srcPara = original.length > 0 ? Math.min(i, original.length - 1) : undefined
     const srcRun = srcPara !== undefined && original[srcPara].runs.length > 0 ? 0 : undefined
     const src = srcPara !== undefined && srcRun !== undefined ? original[srcPara].runs[srcRun] : undefined
     return {
       align: srcPara !== undefined ? original[srcPara].align : undefined,
       srcPara,
-      runs: [
-        {
-          text,
-          srcPara,
-          srcRun,
-          bold: src?.bold,
-          italic: src?.italic,
-          underline: src?.underline,
-          sizePt: src?.sizePt,
-          colorHex: src?.colorHex,
-          latinFont: src?.latinFont,
-        },
-      ],
+      runs: parseInlineEmphasis(text).map((seg) => ({
+        text: seg.text,
+        srcPara,
+        srcRun: seg.bold || seg.italic ? undefined : srcRun,
+        bold: seg.bold || src?.bold,
+        italic: seg.italic || src?.italic,
+        underline: src?.underline,
+        sizePt: src?.sizePt,
+        colorHex: src?.colorHex,
+        latinFont: src?.latinFont,
+      })),
     }
   })
 }

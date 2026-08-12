@@ -233,7 +233,7 @@ describe('slide patterns', () => {
     expect(slideText(slide.shapes)).toContain('Part Two')
   })
 
-  it('bullets: caps at five paragraphs in the body placeholder', async () => {
+  it('bullets: caps at six paragraphs in the body placeholder (the schema cap)', async () => {
     const slide = await renderPattern({
       layout: 'title-body',
       pattern: 'bullets',
@@ -241,7 +241,7 @@ describe('slide patterns', () => {
       bullets: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
     })
     const body = slide.shapes[1] as TextShape
-    expect(body.paragraphs.map((p) => p.runs.map((r) => r.text).join(''))).toEqual(['a', 'b', 'c', 'd', 'e'])
+    expect(body.paragraphs.map((p) => p.runs.map((r) => r.text).join(''))).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
   })
 
   it('composes a mixed-pattern deck in one writeDeck', async () => {

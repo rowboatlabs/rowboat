@@ -30,12 +30,27 @@ export const DeckSlidePattern = z.enum([
 ]);
 export type DeckSlidePattern = z.infer<typeof DeckSlidePattern>;
 
+/**
+ * Hard cap for one newly-authored line of slide text. Slides are not
+ * documents: anything longer wraps into a paragraph and reads as filler.
+ * Violations surface as zod issues, which the one-repair contract
+ * (knowledge/deck_outline.ts) and the tool-call retry both feed back to the
+ * model to shorten.
+ */
+const AuthoredLine = z.string().max(90, 'keep each line of slide text under 90 characters');
+
 /** One card of a 'two-column' slide. */
 export const DeckOutlineColumn = z.object({
     heading: z.string().describe('Card heading; empty string for a headingless card'),
-    lines: z.array(z.string()).describe('Short lines inside the card (at most 4 are rendered)'),
+    lines: z.array(AuthoredLine).max(4, 'a card fits at most 4 lines').describe('Short lines inside the card — at most 4, each under 90 characters'),
 });
 export type DeckOutlineColumn = z.infer<typeof DeckOutlineColumn>;
+
+/** DeckOutlineColumn without the authored-content caps (see DeckOutlineSlideLoose). */
+export const DeckOutlineColumnLoose = z.object({
+    heading: z.string().describe('Card heading; empty string for a headingless card'),
+    lines: z.array(z.string()).describe('Short lines inside the card (at most 4 are rendered)'),
+});
 
 /** The headline metric of a 'big-number' slide. */
 export const DeckOutlineStat = z.object({
@@ -57,7 +72,7 @@ export const DeckOutlineSlide = z.object({
     /** Visual pattern; the synthesizer falls back to 'bullets' when absent. */
     pattern: DeckSlidePattern.optional().describe('Visual pattern; falls back to "bullets" when absent'),
     heading: z.string().min(1).describe('Slide heading — a punchy claim, not a topic label'),
-    bullets: z.array(z.string()).optional().describe('3-5 short bullets for the "bullets" pattern (also the title-slide subtitle fallback)'),
+    bullets: z.array(AuthoredLine).max(6, 'a slide fits at most 6 bullets').optional().describe('3-5 short bullets (hard cap 6, each under 90 characters) for the "bullets" pattern (also the title-slide subtitle fallback)'),
     /** Short narrative alternative to bullets. */
     body: z.string().optional().describe('Short paragraph / subtitle, an alternative to bullets'),
     /** 'two-column' only: exactly the cards to render (max 2 used). */
@@ -75,6 +90,18 @@ export const DeckOutlineSlide = z.object({
     speakerNotes: z.string().optional().describe('1-3 spoken sentences; optional'),
 });
 export type DeckOutlineSlide = z.infer<typeof DeckOutlineSlide>;
+
+/**
+ * DeckOutlineSlide with the authored-content caps removed. The EDIT path
+ * re-submits EXISTING deck text verbatim ("return everything you do not mean
+ * to change verbatim") — a deck written before the caps existed, or made in
+ * PowerPoint, may legitimately exceed them, and a hard cap here would make
+ * that round-trip impossible. Same inferred type; runtime bounds only.
+ */
+export const DeckOutlineSlideLoose = DeckOutlineSlide.extend({
+    bullets: z.array(z.string()).optional().describe('3-5 short bullets for the "bullets" pattern (also the title-slide subtitle fallback)'),
+    columns: z.array(DeckOutlineColumnLoose).optional().describe('"two-column" only: exactly 2 cards'),
+});
 
 // A response is EITHER a clarify round (1-2 questions, no slides) OR a full
 // outline (>=1 slide, no questions) — never both, never neither. The XOR is a

@@ -17,7 +17,8 @@ const FACT_RULES = `HONESTY — NEVER FABRICATE:
 - Use ONLY facts present in the user's request, their clarifying answers, or the existing deck content. Never invent numbers, statistics, valuations, dates, names, customer counts, or quotes.
 - Where a real deck would need a number the user has not provided, emit an explicit square-bracket placeholder — "[X]% month-over-month growth", "[Customer name] quote here" — visibly a placeholder, never a plausible-looking fake.
 - Choose the "big-number" pattern ONLY when the user supplied the number. A "quote" slide may only carry a real quote from the user's material, or a bracketed placeholder quote attributed to "[Source]".
-- Whenever a slide contains placeholders, list the facts the user should fill in as short labels in that slide's "needsInput" (e.g. "MoM growth %", "customer quote").`;
+- Whenever a slide contains placeholders, list the facts the user should fill in as short labels in that slide's "needsInput" (e.g. "MoM growth %", "customer quote").
+- Slide text is PLAIN TEXT. The only inline markup rendered is **bold** and *italic* (use sparingly); backticks are stripped. Anything else — headings, links, leading bullet glyphs like "-" or "•" — appears literally on the slide, so never emit it.`;
 
 const SYSTEM_PROMPT = `You help someone draft a slide deck. You always work in TWO turns:
 

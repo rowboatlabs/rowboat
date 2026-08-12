@@ -62,6 +62,8 @@ The whole intake, in one message:
 - **Ask at most once for any given fact.** A fact the user skipped or declined becomes a bracketed placeholder; that is the honest outcome, not a reason to ask again.
 - **Skip the intake entirely** when the request already covers purpose, length and the facts it needs, or when the user says "just draft something" / "you decide" — then build immediately and say what you assumed.
 
+The intake is enforced, not optional: \`deck-create\` REQUIRES \`purpose\` (pitch | sales | update | teach | other), \`audience\` (who is in the room, in the user's words) and \`lengthChoice\` (quick = 5-6 slides, standard = 8-10, detailed = 12+) as arguments — you cannot build without them. Fill them from the user's answers, or from the request when it already says; when the user skips a question, "you decide" is an answer ("just draft something" → pick the closest purpose, say what you assumed) but a silent guess is not.
+
 **When a fact is still missing at build time:** write a visible square-bracket placeholder in the slide text — \`[X]% month-over-month growth\`, \`[Customer name]\`, \`"[Quote]" — [Source]\` — and list the gaps as short labels in that slide's \`needsInput\` (e.g. \`["MoM growth %", "customer quote"]\`). Never a plausible-looking fake. After building, tell the user which slides need their numbers.
 
 Pull real material from the knowledge base when it is there (\`file-grep\` / \`file-readText\` over notes) rather than asking for what the user already wrote down.
@@ -100,14 +102,16 @@ Stretch an arc for a detailed deck (a \`section\` divider before each beat, trac
 Every slide picks a \`pattern\`. A deck that is nine \`bullets\` slides in a row looks generated; mix them the way a designer would.
 
 - **\`title\`** — the opener. Deck title as \`heading\`, one-line subtitle in \`body\`. Always slide 1.
-- **\`bullets\`** — heading + 3-5 short bullets. The workhorse, but do not overuse it.
-- **\`two-column\`** — compare/contrast, before/after, problem/solution. Exactly 2 \`columns\`, each a heading + up to 4 lines.
+- **\`bullets\`** — heading + 3-5 short bullets (hard cap 6, each one line under 90 characters). The workhorse, but do not overuse it.
+- **\`two-column\`** — compare/contrast, before/after, problem/solution. Exactly 2 \`columns\`, each a heading + up to 4 lines (each under 90 characters).
 - **\`big-number\`** — ONE headline metric (\`stat.value\` + \`stat.caption\`). Only when the user supplied the number.
 - **\`quote\`** — a testimonial or pull quote from the user's material.
 - **\`section\`** — a full-bleed divider announcing a topic shift. Use these to give a longer deck structure.
 - **\`closing\`** — the ask, next steps, or takeaway. Last slide.
 
-Guidance: punchy headings that make a **claim** ("Retention doubled after onboarding v2"), not topic labels ("Retention"). At most 3-5 short lines per slide — detail belongs in \`speakerNotes\` (note: notes are not written into the .pptx file yet, so anything essential must be on the slide). Never repeat a heading. Set \`layout\` to \`"title"\` only for the \`title\` pattern; everything else uses \`"title-body"\`.
+Guidance: punchy headings that make a **claim** ("Retention doubled after onboarding v2"), not topic labels ("Retention"). At most 3-5 short lines per slide, every line under 90 characters — detail belongs in \`speakerNotes\` (note: notes are not written into the .pptx file yet, so anything essential must be on the slide). Never repeat a heading. Set \`layout\` to \`"title"\` only for the \`title\` pattern; everything else uses \`"title-body"\`.
+
+Slide text is plain text. Inline \`**bold**\` and \`*italic*\` render as real emphasis — use them for at most a phrase or two per slide; backticks are stripped. Nothing else is markdown: headings, links, or leading "-" glyphs would appear literally (the renderer draws its own bullets).
 
 ## Palettes
 

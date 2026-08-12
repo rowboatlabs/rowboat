@@ -303,6 +303,24 @@ describe("presentation intent routes to the deck tools", () => {
     expect(body).toMatch(/square-bracket placeholder/);
   });
 
+  it("the skill tells the model the intake is enforced by required tool arguments", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    // The three deck-create arguments that make the intake un-skippable, and
+    // the lengthChoice → slide-count mapping the intake options use.
+    expect(body).toMatch(/REQUIRES \\`purpose\\`/);
+    expect(body).toContain("\\`audience\\`");
+    expect(body).toContain("\\`lengthChoice\\`");
+    expect(body).toContain("quick = 5-6 slides, standard = 8-10, detailed = 12+");
+    // Content guardrails surface in the pattern docs…
+    expect(body).toContain("hard cap 6, each one line under 90 characters");
+    expect(body).toContain("up to 4 lines (each under 90 characters)");
+    // …and the emphasis contract is documented (plain text otherwise).
+    expect(body).toMatch(/\*\*bold\*\*/);
+    expect(body).toMatch(/\*italic\*/);
+  });
+
   // Editing an open deck is the lighter path: review first, at most one
   // options question when the ask is vague, none at all when it is specific,
   // and never a rebuild. The new-deck intake firing on "polish this" would both

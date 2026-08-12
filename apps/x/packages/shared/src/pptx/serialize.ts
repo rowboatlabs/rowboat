@@ -793,13 +793,20 @@ function rebuildParagraphs(
 
     // Changed or new run: synthesize <a:r>, reusing the best-matching rPr
     // bytes we have (own provenance, else the source paragraph's first run's,
-    // else a neighbouring paragraph's).
+    // else a neighbouring paragraph's). When the source paragraph has real
+    // runs that are ALL bare, bare is the answer — its text renders on the
+    // shape's cascade, and the new text should too; walking to a neighbour
+    // here would clone unrelated formatting (e.g. a hand-bolded phrase in the
+    // paragraph below) onto plain replacement text.
     let rPrBytes = ''
     if (item?.rPr) rPrBytes = slice(item.rPr)
     else {
       const fallbackPara = srcP ?? srcParaOf(para.srcPara)
       const donor = fallbackPara?.items.find((it) => it.kind !== 'br' && it.rPr)
-      rPrBytes = donor?.rPr ? slice(donor.rPr) : donorRPrFor(paraIndex)
+      if (donor?.rPr) rPrBytes = slice(donor.rPr)
+      else if (!fallbackPara || !fallbackPara.items.some((it) => it.kind !== 'br')) {
+        rPrBytes = donorRPrFor(paraIndex)
+      }
     }
     // Then the run's OWN properties on top of whatever it inherited.
     rPrBytes = rPrWithOverrides(prefix, rPrBytes, runOverridesOf(nr, origRun))

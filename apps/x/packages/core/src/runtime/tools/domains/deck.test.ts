@@ -264,3 +264,87 @@ describe("deck-review", () => {
         expect(reviewDeckMock).not.toHaveBeenCalled();
     });
 });
+
+// deck-create's purpose/audience/lengthChoice exist to make the intake
+// un-skippable: the tool-call layer validates against this schema, so a model
+// that never asked the user literally cannot produce a valid call. The caps on
+// slide content are the same mechanism pointed at slide quality.
+describe("deck-create input schema (intake enforcement)", () => {
+    const VALID = {
+        path: "decks/plan.pptx",
+        title: "Launch Plan",
+        purpose: "update",
+        audience: "the exec team",
+        lengthChoice: "standard",
+        palette: "navy",
+        slides: OUTLINE_SLIDES,
+    };
+
+    it("accepts a call that carries the intake answers", async () => {
+        const tools = await loadTools();
+        expect(tools["deck-create"].inputSchema.safeParse(VALID).success).toBe(true);
+    });
+
+    it("rejects a call missing purpose, audience or lengthChoice", async () => {
+        const tools = await loadTools();
+        const schema = tools["deck-create"].inputSchema;
+        for (const missing of ["purpose", "audience", "lengthChoice"] as const) {
+            const rest = Object.fromEntries(Object.entries(VALID).filter(([k]) => k !== missing));
+            expect(schema.safeParse(rest).success, `without ${missing}`).toBe(false);
+        }
+        // An empty audience is as good as none.
+        expect(schema.safeParse({ ...VALID, audience: "" }).success).toBe(false);
+        // And the enums are closed.
+        expect(schema.safeParse({ ...VALID, purpose: "vibes" }).success).toBe(false);
+        expect(schema.safeParse({ ...VALID, lengthChoice: "epic" }).success).toBe(false);
+    });
+
+    it("caps newly-authored content: 6 bullets, 4 column lines, 90-char lines", async () => {
+        const tools = await loadTools();
+        const schema = tools["deck-create"].inputSchema;
+        const slideWith = (over: Partial<deck.DeckOutlineSlide>) => ({
+            ...VALID,
+            slides: [{ layout: "title-body", pattern: "bullets", heading: "H", ...over }],
+        });
+
+        expect(schema.safeParse(slideWith({ bullets: ["a", "b", "c", "d", "e", "f"] })).success).toBe(true);
+        expect(schema.safeParse(slideWith({ bullets: ["a", "b", "c", "d", "e", "f", "g"] })).success).toBe(false);
+        expect(schema.safeParse(slideWith({ bullets: ["x".repeat(91)] })).success).toBe(false);
+        expect(
+            schema.safeParse(
+                slideWith({
+                    pattern: "two-column",
+                    columns: [
+                        { heading: "A", lines: ["1", "2", "3", "4", "5"] },
+                        { heading: "B", lines: ["1"] },
+                    ],
+                }),
+            ).success,
+        ).toBe(false);
+    });
+
+    it("deck-add-slide shares the caps; deck-edit-slide round-trips existing long content", async () => {
+        const tools = await loadTools();
+        const sevenBullets = {
+            layout: "title-body",
+            pattern: "bullets",
+            heading: "H",
+            bullets: ["a", "b", "c", "d", "e", "f", "g"],
+        };
+        expect(
+            tools["deck-add-slide"].inputSchema.safeParse({ path: "a.pptx", slide: sevenBullets }).success,
+        ).toBe(false);
+        // The edit path must accept EXISTING content verbatim, caps or not —
+        // an old deck (or a PowerPoint import) may exceed them.
+        expect(
+            tools["deck-edit-slide"].inputSchema.safeParse({ path: "a.pptx", slideNumber: 1, slide: sevenBullets }).success,
+        ).toBe(true);
+        expect(
+            tools["deck-edit-slide"].inputSchema.safeParse({
+                path: "a.pptx",
+                slideNumber: 1,
+                slide: { layout: "title-body", pattern: "bullets", heading: "H", bullets: ["y".repeat(200)] },
+            }).success,
+        ).toBe(true);
+    });
+});

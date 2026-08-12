@@ -97,8 +97,43 @@ const NewDeckPathField = z.string().min(1).describe('Destination file path endin
 // needs no path from the user.
 const PathField = z.string().min(1).describe("Deck file path ending in .pptx. Can be absolute, ~/..., or relative to the default root. Defaults to the deck currently open in the editor when the user refers to 'this deck' or a slide number without naming a file — take it from the '# User Context' block's Path.");
 
+const SLIDE_TEXT_NOTE =
+    ' Slide text is plain; **bold** and *italic* markers render as real emphasis (use sparingly), ' +
+    'backticks are stripped, any other markdown appears literally.';
+
 const SlideField = deck.DeckOutlineSlide.describe(
-    'The slide in outline form: layout, visual pattern (title | bullets | two-column | big-number | quote | section | closing) and its content fields.',
+    'The slide in outline form: layout, visual pattern (title | bullets | two-column | big-number | quote | section | closing) and its content fields. ' +
+    'Hard caps: at most 6 bullets, at most 4 lines per column, every line under 90 characters — write tighter than the caps.' +
+    SLIDE_TEXT_NOTE,
+);
+
+// The edit tool re-submits EXISTING content verbatim, which may legitimately
+// exceed the authored-content caps (older decks, PowerPoint imports) — so it
+// validates against the loose slide schema.
+const EditSlideField = deck.DeckOutlineSlideLoose.describe(
+    'The whole slide in outline form: layout, visual pattern (title | bullets | two-column | big-number | quote | section | closing) and its content fields. ' +
+    'Return every field you do not mean to change verbatim.' +
+    SLIDE_TEXT_NOTE,
+);
+
+// deck-create must not be callable on a thin prompt: these three exist to
+// force the intake conversation (skill: "Ask first — one intake message")
+// before any deck is built. They are validated, not consumed by synthesis.
+const IntakeNote =
+    " Fill this from the user's answers or from their message when it already says; if you do not " +
+    'know, ASK the user first — never guess and never invent it.';
+
+const PurposeField = z.enum(['pitch', 'sales', 'update', 'teach', 'other']).describe(
+    'Why this deck exists: pitch = investors, sales = a customer, update = the team, teach = an event/talk, other = anything else.' +
+    IntakeNote,
+);
+const AudienceField = z.string().min(1).describe(
+    'Who will be in the room, in the user\'s words — e.g. "seed VCs", "the exec team", "CS conference attendees".' +
+    IntakeNote,
+);
+const LengthChoiceField = z.enum(['quick', 'standard', 'detailed']).describe(
+    'The length the user chose: quick = 5-6 slides, standard = 8-10, detailed = 12+.' +
+    IntakeNote,
 );
 
 export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
@@ -123,10 +158,14 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             '— purpose/audience (pitch investors / sell to a customer / update the team / teach at an ' +
             'event), length (quick 5-6 / standard 8-10 / detailed 12+), and the specific facts that ' +
             'purpose needs — never open-ended prompts and never a multi-turn interrogation; then ' +
-            'follow the arc for that purpose. ' + HONESTY_RULES,
+            'follow the arc for that purpose. The purpose, audience and lengthChoice arguments are ' +
+            'REQUIRED and exist to enforce that intake — fill them from the answers. ' + HONESTY_RULES,
         inputSchema: z.object({
             path: NewDeckPathField,
             title: z.string().min(1).describe('Deck title (also used for the title slide)'),
+            purpose: PurposeField,
+            audience: AudienceField,
+            lengthChoice: LengthChoiceField,
             palette: deck.DeckOutlinePalette.describe('Colour palette for the deck theme'),
             slides: z.array(SlideField).min(1).describe('The slides in order; the first is the title slide'),
             overwrite: z.boolean().optional().describe('Replace the file if it already exists (default false)'),
@@ -220,15 +259,17 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             'Change a slide in an existing presentation. USE THIS WHENEVER THE USER ASKS TO EDIT, ' +
             'reword, fix, tighten or replace a slide — "change slide 3", "reword the intro", "make ' +
             'the metrics slide a big number". Replaces the content of ONE slide (1-based ' +
-            'slideNumber) with the given outline-form slide: keeping the same pattern rewrites the ' +
-            'text in place (preserving styling), changing the pattern rebuilds that slide. Use ' +
+            'slideNumber) with the given outline-form slide: keeping the same pattern rewrites only ' +
+            'the changed paragraphs — text returned verbatim keeps the user\'s hand-applied ' +
+            'formatting byte-for-byte — while changing the pattern (layout) rebuilds the slide and ' +
+            'RESETS any hand-applied formatting on it. Use ' +
             'deck-review first to see the current content, and return everything you do not mean to ' +
             'change verbatim. Never rebuild the whole deck to change one slide, and never edit the ' +
             '.pptx by any other means. ' + HONESTY_RULES,
         inputSchema: z.object({
             path: PathField,
             slideNumber: z.number().int().min(1).describe('1-based number of the slide to edit'),
-            slide: SlideField,
+            slide: EditSlideField,
         }),
         execute: async ({ path: inputPath, slideNumber, slide }: {
             path: string;

@@ -22,6 +22,7 @@
  */
 
 import type * as deckShared from '../deck.js'
+import { parseInlineEmphasis, type EmphasisSegment } from './inline-markdown.js'
 import { parseAddedSlide, parsePptx } from './parse.js'
 import { planNewSlide } from './add-slide.js'
 import { writeDeck, type NewSlidePart, type SlideEdit, type EditedParagraph } from './serialize.js'
@@ -128,7 +129,24 @@ function runXml(r: Run): string {
     r.italic ? ' i="1"' : ''
   }`
   const rPr = r.color ? `<a:rPr ${attrs}>${solidFillXml(r.color)}</a:rPr>` : `<a:rPr ${attrs}/>`
-  return `<a:r>${rPr}<a:t>${esc(r.text)}</a:t></a:r>`
+  // Edge whitespace matters once a line splits into several runs.
+  const space = /^\s|\s$/.test(r.text) ? ' xml:space="preserve"' : ''
+  return `<a:r>${rPr}<a:t${space}>${esc(r.text)}</a:t></a:r>`
+}
+
+/**
+ * Outline text as styled runs: inline emphasis markers (**bold**, *italic*,
+ * `code`) become run properties layered over the pattern's base formatting,
+ * so a model that emphasises mid-sentence gets real bold instead of literal
+ * asterisks on the slide.
+ */
+function runsFrom(text: string, base: Omit<Run, 'text'>): Run[] {
+  return parseInlineEmphasis(text).map((seg) => ({
+    ...base,
+    text: seg.text,
+    bold: seg.bold || base.bold,
+    italic: seg.italic || base.italic,
+  }))
 }
 
 function paraXml(p: Para): string {
@@ -253,7 +271,7 @@ function authorTwoColumn(slide: DeckOutlineSlide): string {
     textBoxXml(nextId, {
       name: 'Heading',
       rect: { x: MARGIN, y: headingY, w: CONTENT_W, h: IN(1.0) },
-      paras: [{ runs: [{ text: trimmed(slide.heading), sizePt: SIZE.patternHeading, bold: true, color: TX1 }] }],
+      paras: [{ runs: runsFrom(trimmed(slide.heading), { sizePt: SIZE.patternHeading, bold: true, color: TX1 }) }],
       anchor: 't',
     }),
   )
@@ -301,10 +319,10 @@ function authorTwoColumn(slide: DeckOutlineSlide): string {
     // Text box inset within the card.
     const paras: Para[] = []
     if (col.heading.trim()) {
-      paras.push({ runs: [{ text: col.heading.trim(), sizePt: SIZE.cardHeading, bold: true, color: accents[i] }] })
+      paras.push({ runs: runsFrom(col.heading.trim(), { sizePt: SIZE.cardHeading, bold: true, color: accents[i] }) })
     }
     for (const line of lines(col.lines, 4)) {
-      paras.push({ runs: [{ text: line, sizePt: SIZE.body, color: TX1 }] })
+      paras.push({ runs: runsFrom(line, { sizePt: SIZE.body, color: TX1 }) })
     }
     if (paras.length === 0) paras.push({ runs: [] })
     shapes.push(
@@ -326,7 +344,7 @@ function authorBigNumber(slide: DeckOutlineSlide): string {
     textBoxXml(nextId, {
       name: 'Eyebrow',
       rect: { x: MARGIN, y: IN(0.6), w: CONTENT_W, h: IN(0.6) },
-      paras: [{ runs: [{ text: trimmed(slide.heading), sizePt: SIZE.eyebrow, bold: true, color: ACCENT1 }] }],
+      paras: [{ runs: runsFrom(trimmed(slide.heading), { sizePt: SIZE.eyebrow, bold: true, color: ACCENT1 }) }],
       anchor: 't',
     }),
   )
@@ -335,7 +353,7 @@ function authorBigNumber(slide: DeckOutlineSlide): string {
     textBoxXml(nextId, {
       name: 'Stat',
       rect: { x: MARGIN, y: IN(1.4), w: CONTENT_W, h: IN(2.4) },
-      paras: [{ runs: [{ text: value, sizePt: SIZE.bigNumber, bold: true, color: ACCENT1 }] }],
+      paras: [{ runs: runsFrom(value, { sizePt: SIZE.bigNumber, bold: true, color: ACCENT1 }) }],
       anchor: 't',
     }),
   )
@@ -345,7 +363,7 @@ function authorBigNumber(slide: DeckOutlineSlide): string {
       textBoxXml(nextId, {
         name: 'Caption',
         rect: { x: MARGIN, y: IN(3.9), w: CONTENT_W, h: IN(0.8) },
-        paras: [{ runs: [{ text: caption, sizePt: SIZE.caption, color: TX1 }] }],
+        paras: [{ runs: runsFrom(caption, { sizePt: SIZE.caption, color: TX1 }) }],
         anchor: 't',
       }),
     )
@@ -356,7 +374,7 @@ function authorBigNumber(slide: DeckOutlineSlide): string {
       textBoxXml(nextId, {
         name: 'Support',
         rect: { x: MARGIN, y: IN(4.8), w: CONTENT_W, h: IN(1.4) },
-        paras: support.map((l) => ({ runs: [{ text: l, sizePt: SIZE.body, color: TX1 }] })),
+        paras: support.map((l) => ({ runs: runsFrom(l, { sizePt: SIZE.body, color: TX1 }) })),
         anchor: 't',
       }),
     )
@@ -373,11 +391,11 @@ function authorQuote(slide: DeckOutlineSlide): string {
   )
   const text = slide.quote?.text?.trim() || slide.body?.trim() || trimmed(slide.heading)
   const paras: Para[] = [
-    { runs: [{ text: `“${text}”`, sizePt: SIZE.patternHeading, italic: true, color: TX1 }], align: 'ctr' },
+    { runs: runsFrom(`“${text}”`, { sizePt: SIZE.patternHeading, italic: true, color: TX1 }), align: 'ctr' },
   ]
   const attribution = slide.quote?.attribution?.trim()
   if (attribution) {
-    paras.push({ runs: [{ text: `— ${attribution}`, sizePt: SIZE.lead, color: ACCENT1 }], align: 'ctr' })
+    paras.push({ runs: runsFrom(`— ${attribution}`, { sizePt: SIZE.lead, color: ACCENT1 }), align: 'ctr' })
   }
   shapes.push(
     textBoxXml(nextId, {
@@ -400,10 +418,10 @@ function authorSection(slide: DeckOutlineSlide): string {
     shapeXml(nextId, { name: 'Underline', rect: { x: MARGIN, y: IN(4.1), w: IN(2.2), h: BAR_H }, fill: ACCENT2 }),
   )
   const paras: Para[] = [
-    { runs: [{ text: trimmed(slide.heading), sizePt: SIZE.sectionHeading, bold: true, color: BG1 }] },
+    { runs: runsFrom(trimmed(slide.heading), { sizePt: SIZE.sectionHeading, bold: true, color: BG1 }) },
   ]
   const sub = slide.body?.trim() || (fallbackLines(slide, 1)[0] ?? '')
-  if (sub) paras.push({ runs: [{ text: sub, sizePt: SIZE.lead, color: BG1 }] })
+  if (sub) paras.push({ runs: runsFrom(sub, { sizePt: SIZE.lead, color: BG1 }) })
   shapes.push(
     textBoxXml(nextId, {
       name: 'Section Heading',
@@ -425,7 +443,7 @@ function authorClosing(slide: DeckOutlineSlide): string {
     textBoxXml(nextId, {
       name: 'Closing Heading',
       rect: { x: MARGIN, y: IN(2.9), w: CONTENT_W, h: IN(1.4) },
-      paras: [{ runs: [{ text: trimmed(slide.heading), sizePt: SIZE.titleHeading, bold: true, color: TX1 }] }],
+      paras: [{ runs: runsFrom(trimmed(slide.heading), { sizePt: SIZE.titleHeading, bold: true, color: TX1 }) }],
       anchor: 't',
     }),
   )
@@ -435,7 +453,7 @@ function authorClosing(slide: DeckOutlineSlide): string {
       textBoxXml(nextId, {
         name: 'Closing Line',
         rect: { x: MARGIN, y: IN(4.2), w: CONTENT_W, h: IN(0.8) },
-        paras: [{ runs: [{ text: line, sizePt: SIZE.lead, color: TX1 }] }],
+        paras: [{ runs: runsFrom(line, { sizePt: SIZE.lead, color: TX1 }) }],
         anchor: 't',
       }),
     )
@@ -447,10 +465,10 @@ function authorTitle(slide: DeckOutlineSlide): string {
   const nextId = idAllocator()
   const shapes: string[] = []
   const paras: Para[] = [
-    { runs: [{ text: trimmed(slide.heading), sizePt: SIZE.titleHeading, bold: true, color: TX1 }], align: 'ctr' },
+    { runs: runsFrom(trimmed(slide.heading), { sizePt: SIZE.titleHeading, bold: true, color: TX1 }), align: 'ctr' },
   ]
   const sub = slide.body?.trim() || (fallbackLines(slide, 1)[0] ?? '')
-  if (sub) paras.push({ runs: [{ text: sub, sizePt: SIZE.lead, color: TX1 }], align: 'ctr' })
+  if (sub) paras.push({ runs: runsFrom(sub, { sizePt: SIZE.lead, color: TX1 }), align: 'ctr' })
   shapes.push(
     textBoxXml(nextId, {
       name: 'Title',
@@ -481,14 +499,23 @@ const AUTHORED: Partial<Record<DeckSlidePattern, (slide: DeckOutlineSlide) => st
  * A text edit that replaces a placeholder's paragraphs with `contentLines`.
  * srcPara/srcRun anchor to the shape's first original paragraph so every new
  * paragraph inherits its run/paragraph properties; srcRun is only set when
- * that paragraph actually has a run to inherit from.
+ * that paragraph actually has a run to inherit from. Inline emphasis markers
+ * split a line into styled runs: an emphasised run drops the srcRun anchor
+ * (the writer would otherwise copy the source bytes verbatim when the text
+ * happens to match) and carries bold/italic as its own override instead.
  */
 function textEdit(shape: TextShape, contentLines: string[]): SlideEdit | null {
   if (contentLines.length === 0) return null
   const hasSourceRun = (shape.paragraphs[0]?.runs.length ?? 0) > 0
   const next: EditedParagraph[] = contentLines.map((text) => ({
     srcPara: 0,
-    runs: [{ text, srcPara: 0, ...(hasSourceRun ? { srcRun: 0 } : {}) }],
+    runs: parseInlineEmphasis(text).map((seg) => ({
+      text: seg.text,
+      srcPara: 0,
+      ...(hasSourceRun && !seg.bold && !seg.italic ? { srcRun: 0 } : {}),
+      ...(seg.bold ? { bold: true } : {}),
+      ...(seg.italic ? { italic: true } : {}),
+    })),
   }))
   return { kind: 'text', nodePath: shape.nodePath, original: shape.paragraphs, next }
 }
@@ -582,7 +609,7 @@ export async function buildOutlineSlidePart(
   }
   // 'bullets' (and any fallback): placeholders + text edits.
   const parsed = await parseAddedSlide(base, plan.path, plan.xml, plan.relsXml)
-  return { part: plan, edits: placeholderEdits(parsed, outlineSlide, 5) }
+  return { part: plan, edits: placeholderEdits(parsed, outlineSlide, 6) }
 }
 
 /**
@@ -624,9 +651,17 @@ export async function synthesizeDeckFromOutline(
 
 /** A placeholder shape with baked plain text (inherits layout/master style). */
 function bakedPlaceholderSp(id: number, name: string, phAttrs: string, texts: string[]): string {
+  // Emphasis markers become minimal rPr overrides; plain segments stay bare
+  // so they keep inheriting the layout/master cascade.
+  const segXml = (seg: EmphasisSegment): string => {
+    const props = `${seg.bold ? ' b="1"' : ''}${seg.italic ? ' i="1"' : ''}`
+    const rPr = props ? `<a:rPr lang="en-US"${props}/>` : ''
+    const space = /^\s|\s$/.test(seg.text) ? ' xml:space="preserve"' : ''
+    return `<a:r>${rPr}<a:t${space}>${esc(seg.text)}</a:t></a:r>`
+  }
   const paras =
     texts.length > 0
-      ? texts.map((t) => `<a:p><a:r><a:t>${esc(t)}</a:t></a:r></a:p>`).join('')
+      ? texts.map((t) => `<a:p>${parseInlineEmphasis(t).map(segXml).join('')}</a:p>`).join('')
       : '<a:p><a:endParaRPr lang="en-US"/></a:p>'
   return (
     `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${escAttr(name)}"/>` +
@@ -637,14 +672,14 @@ function bakedPlaceholderSp(id: number, name: string, phAttrs: string, texts: st
 }
 
 /**
- * A self-contained 'bullets' slide: heading + up-to-5 bullets baked into the
+ * A self-contained 'bullets' slide: heading + up-to-6 bullets baked into the
  * title/body placeholders, so the bullets inherit the master's bullet glyphs
  * and the slide needs no separate text edits.
  */
 function authorBulletsSlide(slide: DeckOutlineSlide): string {
   const heading = trimmed(slide.heading)
   const titleSp = bakedPlaceholderSp(2, 'Title 1', 'type="title"', heading ? [heading] : [])
-  const bodySp = bakedPlaceholderSp(3, 'Content Placeholder 2', 'type="body" idx="1"', fallbackLines(slide, 5))
+  const bodySp = bakedPlaceholderSp(3, 'Content Placeholder 2', 'type="body" idx="1"', fallbackLines(slide, 6))
   return slideEnvelope(titleSp + bodySp)
 }
 
