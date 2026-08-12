@@ -118,7 +118,12 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             'Slide 1 is always the title slide (its heading is the deck title on the slide). Vary ' +
             'the visual patterns — bullets, two-column for compare/contrast, big-number for one key ' +
             'metric the user supplied, quote, section for topic shifts, closing at the end — instead ' +
-            'of a wall of bullet lists. Speaker notes are not written to the file. ' + HONESTY_RULES,
+            'of a wall of bullet lists. Speaker notes are not written to the file. ' +
+            'ASK ONCE, THEN BUILD: for a brand-new deck send ONE compact message of lettered options ' +
+            '— purpose/audience (pitch investors / sell to a customer / update the team / teach at an ' +
+            'event), length (quick 5-6 / standard 8-10 / detailed 12+), and the specific facts that ' +
+            'purpose needs — never open-ended prompts and never a multi-turn interrogation; then ' +
+            'follow the arc for that purpose. ' + HONESTY_RULES,
         inputSchema: z.object({
             path: NewDeckPathField,
             title: z.string().min(1).describe('Deck title (also used for the title slide)'),
@@ -325,7 +330,10 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             'create. Returns every slide\'s content (heading, text lines, detected visual pattern) ' +
             'plus structured feedback: overall assessment, strengths, per-slide comments, and ' +
             'factsToFill — the [bracketed] placeholders still to fill and any unsourced numbers or ' +
-            'quotes to verify with the user. Read-only; use this instead of parseFile for .pptx.',
+            'quotes to verify with the user. Editing needs no new-deck intake: ground any question in ' +
+            'these findings, ask at most ONE (with options) when the requested change is ambiguous, ' +
+            'and ask nothing at all for a specific request like "shorten slide 3". ' +
+            'Read-only; use this instead of parseFile for .pptx.',
         inputSchema: z.object({
             path: PathField,
             focus: z.string().optional().describe('Optional aspect to focus the feedback on, e.g. "clarity for investors"'),

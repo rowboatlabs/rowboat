@@ -276,6 +276,88 @@ describe("presentation intent routes to the deck tools", () => {
     expect(summaryLine).not.toMatch(/\bPDF presentations?\b/i);
   });
 
+  // The clarify step is the difference between a real deck and filler: the
+  // agent has to ask a designer's questions as pickable options, in one message,
+  // and then build on a known arc. Open-ended prompts and interrogation loops
+  // are the failure modes these pin.
+  it("the skill body specifies the one-message intake, as answerable options", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    expect(body).toContain("## Ask first — one intake message");
+    // The four intake points, each with its named options.
+    expect(body).toContain(
+      "(a) pitch investors, (b) sell to a customer, (c) update the team, or (d) teach/present at an event",
+    );
+    expect(body).toContain("Quick (5-6 slides), standard (8-10), or detailed (12+)?");
+    expect(body).toContain("Formal, conversational, or punchy?");
+    // Per-purpose fact asks, not a generic "any numbers?".
+    expect(body).toMatch(/traction numbers \(revenue, growth, users\)/);
+    expect(body).toMatch(/the period it covers, the wins, the misses, and next steps/i);
+    // One message, no loops, partial answers still build.
+    expect(body).toContain("**One message, then build.**");
+    expect(body).toMatch(/never an interrogation loop/i);
+    expect(body).toMatch(/at most once for any given fact/i);
+    // The honesty contract it defers to is still spelled out here.
+    expect(body).toContain("needsInput");
+    expect(body).toMatch(/square-bracket placeholder/);
+  });
+
+  // Editing an open deck is the lighter path: review first, at most one
+  // options question when the ask is vague, none at all when it is specific,
+  // and never a rebuild. The new-deck intake firing on "polish this" would both
+  // annoy the user and risk clobbering slides they already edited.
+  it("the skill body gives editing its own lighter intake", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    expect(body).toContain("## Editing an open deck — a lighter intake");
+    // Review before asking.
+    expect(body).toMatch(/\*\*Look before you ask\.\*\* Call \\`deck-review\\` first/);
+    // The single options question, verbatim.
+    expect(body).toContain(
+      "Want me to (a) tighten the text, (b) restructure the flow, (c) restyle the look, or (d) all of it?",
+    );
+    expect(body).toMatch(/At most ONE question, and only when the request is ambiguous/);
+    // A specific request is answered with work, not questions.
+    expect(body).toContain("**A specific request gets NO questions.**");
+    expect(body).toMatch(/Shorten slide 3/);
+    // Edits go through the editing tools, never a rebuild.
+    expect(body).toContain("**Never regenerate the deck.**");
+    expect(body).toMatch(/Rebuilding with \\`deck-create\\` destroys all of that/);
+    // The new-deck intake is explicitly fenced off from edits, from both sides.
+    expect(body).toContain("**The new-deck intake above does NOT fire here**");
+    expect(body).toContain("**This is the intake for a NEW deck.**");
+  });
+
+  it("the skill body gives every deck type an arc to follow", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    expect(body).toContain("## Deck-type arcs");
+    for (const arc of [
+      "problem → solution → market → traction → team → ask",
+      "problem → cost of inaction → solution → proof → pricing → next steps",
+      "period → wins → metrics → misses → next steps",
+      "hook → concept → example → practice → recap",
+    ]) {
+      expect(body).toContain(arc);
+    }
+  });
+
+  it("the rules the intake sits on top of are untouched", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    // The open-deck targeting guidance and the deck-create guard.
+    expect(body).toContain("## Targeting the open deck");
+    expect(body).toContain("**Never call \\`deck-create\\` for an edit.**");
+    // The only-path rule.
+    expect(body).toMatch(/Do NOT render slides as PDF or HTML/);
+    // Absolute rule 2 still points at the section that carries the fact rules.
+    expect(body).toContain('See "Ask first — one intake message" below');
+  });
+
   it("pdf-slides is gated to explicit PDF requests and defers to the deck skill", async () => {
     const skills = await import("./index.js");
     const resolved = skills.resolveSkill("pdf-slides");
