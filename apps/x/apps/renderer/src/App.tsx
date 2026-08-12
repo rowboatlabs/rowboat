@@ -7721,7 +7721,7 @@ function App() {
                   />
                 </div>
               ) : (
-              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
+              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }} onOpenFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="relative min-h-0 flex-1">
                   {chatTabs.map((tab) => {
@@ -7917,6 +7917,7 @@ function App() {
                 isToolOpenForTab={isToolOpenForTab}
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
+                onOpenFile={(path) => { navigateToFile(path) }}
                 onActivate={() => setActiveShortcutPane('right')}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 isRecording={isRecording}
