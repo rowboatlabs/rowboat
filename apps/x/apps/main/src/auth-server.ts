@@ -62,7 +62,13 @@ function tryBindPort(
   opts: CallbackHandlingOpts,
 ): Promise<AuthServerResult> {
   return new Promise((resolve, reject) => {
-    const server = createServer((req, res) => {
+    const handler = (req: import('http').IncomingMessage, res: import('http').ServerResponse): void => {
+      // No keep-alive, ever. These servers are per-flow and short-lived; a
+      // pooled connection outlives server.close() (close() only stops
+      // listening) and the browser then delivers the NEXT flow's callback to
+      // this DEAD flow's handler. Seen live: Chrome reused the Rowboat
+      // sign-in's socket for the Microsoft connect redirect minutes later.
+      res.setHeader('Connection', 'close');
       if (!req.url) {
         res.writeHead(400);
         res.end('Bad Request');
@@ -76,6 +82,7 @@ function tryBindPort(
         // onCallback (a stale tab's redirect must never settle a live flow).
         const rejection = opts.validateCallback?.(url) ?? null;
         if (rejection) {
+          console.warn(`[OAuth] Callback server rejected ${req.method} ${url.pathname} (state=${url.searchParams.get('state') ?? '<none>'}): ${rejection}`);
           renderErrorPage(res, rejection);
           return;
         }
@@ -87,39 +94,98 @@ function tryBindPort(
           // cancels consent) so the caller can settle its flow instead of
           // waiting for the timeout. Callers that don't opt in keep the old
           // behaviour: the error page renders and the flow times out.
+          console.warn(`[OAuth] Callback carried provider error: ${error}`);
           opts.onError?.(error);
           renderErrorPage(res, `Error: ${error}`);
           return;
         }
 
-        // Handle callback - pass full URL so params like iss (OpenID Connect) are preserved for token exchange
-        onCallback(url);
+        console.log(`[OAuth] Callback server handling ${req.method} ${url.pathname} (state=${url.searchParams.get('state') ?? '<none>'})`);
 
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Authorization Successful</title>
-              <style>
-                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-                .success { color: #2e7d32; }
-              </style>
-            </head>
-            <body>
-              <h1 class="success">Authorization Successful</h1>
-              <p>You can close this window.</p>
-              <script>setTimeout(() => window.close(), 2000);</script>
-            </body>
-          </html>
-        `);
+        // Await the handler before responding: the browser tab must reflect
+        // what actually happened. Rendering "Authorization Successful" while
+        // the handler failed hides the failure from the user and leaves the
+        // app-side flow spinning with no visible cause.
+        Promise.resolve(onCallback(url)).then(() => {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Authorization Successful</title>
+                <style>
+                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                  .success { color: #2e7d32; }
+                </style>
+              </head>
+              <body>
+                <h1 class="success">Authorization Successful</h1>
+                <p>You can close this window.</p>
+                <script>setTimeout(() => window.close(), 2000);</script>
+              </body>
+            </html>
+          `);
+        }).catch((err: unknown) => {
+          console.error('[OAuth] Callback handling failed:', err);
+          renderErrorPage(res, err instanceof Error ? err.message : 'Callback handling failed');
+        });
       } else {
+        console.log(`[OAuth] Callback server ignoring ${req.method} ${url.pathname} (404)`);
         res.writeHead(404);
         res.end('Not Found');
       }
-    });
+    };
 
-    server.listen(port, 'localhost', () => {
+    const server = createServer(handler);
+
+    // Bind both loopback families. Browsers deliver the localhost redirect on
+    // whichever family they pick (Happy Eyeballs), and a single-family bind
+    // leaves the other one connection-refused — the redirect then dies before
+    // the app ever sees it. IPv4 is the primary bind (port availability is
+    // judged on it); ::1 is best-effort, mirroring apps/server.ts.
+    server.listen(port, '127.0.0.1', () => {
+      const twin = createServer(handler);
+      let twinListening = false;
+      let closed = false;
+      twin.on('listening', () => {
+        twinListening = true;
+        if (closed) twin.close();
+      });
+      twin.on('error', (err: NodeJS.ErrnoException) => {
+        console.warn(`[OAuth] IPv6 loopback bind failed on port ${port} (${err.code}); continuing IPv4-only`);
+      });
+      twin.listen(port, '::1');
+
+      // Callers hold only the primary server; closing it must tear down the
+      // twin too, or the port stays half-occupied for the next flow. Also
+      // destroy IDLE accepted sockets (e.g. browser preconnects that never
+      // carried a request): close() alone leaves them alive with this flow's
+      // (now dead) handler attached. Idle-only, NOT closeAllConnections —
+      // callers close from inside onCallback, before the awaited success page
+      // has flushed, and killing that in-flight socket makes the browser show
+      // a connection error instead of the page. The socket that served the
+      // callback can't be reused later anyway: every response carries
+      // Connection: close (see handler above).
+      const originalClose = server.close.bind(server);
+      server.close = ((cb?: (err?: Error) => void) => {
+        closed = true;
+        if (twinListening) {
+          twin.close();
+          twin.closeIdleConnections();
+        }
+        const result = originalClose(cb);
+        server.closeIdleConnections();
+        // closeIdleConnections spares sockets that never carried a request
+        // (browser preconnects), which would otherwise linger attached to
+        // this dead handler. Destroy all stragglers once the in-flight
+        // response has had ample time to flush.
+        setTimeout(() => {
+          server.closeAllConnections();
+          twin.closeAllConnections();
+        }, 5000).unref();
+        return result;
+      }) as typeof server.close;
+
       resolve({ server, port });
     });
 

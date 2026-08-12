@@ -288,25 +288,18 @@ export async function connectProvider(provider: string, credentials?: { clientId
     const { server, port: boundPort } = await createAuthServer(
       startPort,
       async (callbackUrl) => {
-        // Guard against duplicate callbacks (browser may send multiple requests)
+        // Guard against duplicate callbacks (browser may send multiple
+        // requests). validateCallback below has already matched `state`, so
+        // only genuine duplicates of the live callback are dropped here — a
+        // stale or foreign request can no longer consume the one-shot guard.
         if (callbackHandled) return;
         callbackHandled = true;
-        const receivedState = callbackUrl.searchParams.get('state');
-        if (receivedState == null || receivedState === '') {
-          throw new Error(
-            'OAuth callback missing state parameter. Complete sign-in in the browser or check the redirect URI.'
-          );
-        }
-        if (receivedState !== state) {
-          throw new Error('Invalid state parameter - possible CSRF attack');
-        }
-
-        const flow = activeFlows.get(state);
-        if (!flow || flow.provider !== provider) {
-          throw new Error('Invalid OAuth flow state');
-        }
 
         try {
+          const flow = activeFlows.get(state);
+          if (!flow || flow.provider !== provider) {
+            throw new Error('Invalid OAuth flow state');
+          }
           // Use full callback URL (includes iss, scope, etc.) so openid-client validation succeeds
           console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
           const tokens = await oauthClient.exchangeCodeForTokens(
@@ -398,7 +391,44 @@ export async function connectProvider(provider: string, credentials?: { clientId
       // Static providers (Google BYOK) keep fixed-port behaviour to match the
       // pre-registered redirect URI at the provider's console. DCR providers
       // can fall back since we register the actual bound port below.
-      { fallback: !isStaticClient },
+      {
+        fallback: !isStaticClient,
+        // Gatekeeper: requests whose `state` doesn't match the live flow (a
+        // leftover tab from an earlier sign-in, a prefetch, a scanner) get a
+        // polite close-this-tab page and never reach onError/onCallback — so
+        // they can neither settle nor poison the live flow. Runs before the
+        // provider-error branch too, keeping stale access_denied tabs inert.
+        validateCallback: (url) => {
+          const receivedState = url.searchParams.get('state');
+          if (receivedState == null || receivedState === '') {
+            return 'The sign-in response is missing its state parameter. Close this tab and retry from Rowboat.';
+          }
+          if (receivedState !== state) {
+            console.warn(`[OAuth] ${provider}: received state ${receivedState} does not match live flow state ${state || '<unset>'}`);
+            return 'This sign-in attempt is no longer active. Close this tab and retry from Rowboat.';
+          }
+          return null;
+        },
+        // Provider returned an error for the live flow (state already matched
+        // above) — e.g. the user declined consent. Settle immediately instead
+        // of leaving the renderer spinning until the 10-minute timeout.
+        onError: (error) => {
+          console.error(`[OAuth] Provider returned error for ${provider}: ${error}`);
+          emitOAuthEvent({
+            provider,
+            success: false,
+            error: error === 'access_denied'
+              ? 'Sign-in was cancelled in the browser.'
+              : `Sign-in failed: ${error}`,
+          });
+          activeFlows.delete(state);
+          if (activeFlow && activeFlow.state === state) {
+            clearTimeout(activeFlow.cleanupTimeout);
+            activeFlow.server.close();
+            activeFlow = null;
+          }
+        },
+      },
     );
 
     // Server is bound. Any throw between here and `activeFlow = ...` would
@@ -454,6 +484,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
       };
 
       // Open in system browser (shares cookies/sessions with user's regular browser)
+      console.log(`[OAuth] ${provider}: opening browser with flow state=${state} (authUrl state=${authUrl.searchParams.get('state') ?? '<missing>'})`);
       shell.openExternal(authUrl.toString());
 
       return { success: true };
