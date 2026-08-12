@@ -75,6 +75,9 @@ export const AskHumanRequestEvent = BaseRunEvent.extend({
     toolCallId: z.string(),
     query: z.string(),
     options: z.array(z.string()).optional(),
+    // Render options as multi-select (pick all that apply); the answer is the
+    // selected labels joined with ", ".
+    multiSelect: z.boolean().optional(),
 });
 
 export const AskHumanResponseEvent = BaseRunEvent.extend({

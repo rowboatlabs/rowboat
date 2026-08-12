@@ -92,6 +92,17 @@ export function ChatSessionPane({
     busy: isActive && activeIsProcessing ? true : undefined,
   })
 
+  // Batched ask-human calls (several questions in one model response) render
+  // ONE card at a time, numbered "1 of N". The pending map only holds
+  // unanswered questions, so remember the batch's high-water mark while it
+  // drains to know N (and which question we're on); reset once it empties.
+  // A lone question (the common sequential case) never shows a counter.
+  const pendingAsks = Array.from(tabState.pendingAskHumanRequests.values())
+  const askBatchMaxRef = React.useRef(0)
+  askBatchMaxRef.current = pendingAsks.length === 0 ? 0 : Math.max(askBatchMaxRef.current, pendingAsks.length)
+  const askBatchTotal = askBatchMaxRef.current
+  const currentAsk = pendingAsks[0]
+
   const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
   const tabConversationContentClassName = cn(
     'mx-auto w-full max-w-4xl',
@@ -136,15 +147,21 @@ export function ChatSessionPane({
               />
 
 
-              {onAskHumanResponse && Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
+              {onAskHumanResponse && currentAsk && (
                 <AskHumanRequest
-                  key={request.toolCallId}
-                  query={request.query}
-                  options={request.options}
-                  onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
+                  key={currentAsk.toolCallId}
+                  query={currentAsk.query}
+                  options={currentAsk.options}
+                  multiSelect={currentAsk.multiSelect}
+                  progress={
+                    askBatchTotal > 1
+                      ? { current: askBatchTotal - pendingAsks.length + 1, total: askBatchTotal }
+                      : undefined
+                  }
+                  onResponse={(response) => onAskHumanResponse(currentAsk.toolCallId, currentAsk.subflow, response)}
                   isProcessing={isActive && activeIsWorking}
                 />
-              ))}
+              )}
 
               {/* In-flight model call's thought stream: open with a
                   "Thinking..." shimmer while reasoning streams, auto-collapses

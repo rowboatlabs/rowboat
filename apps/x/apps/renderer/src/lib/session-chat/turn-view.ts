@@ -515,16 +515,16 @@ export function buildSessionChatState(
     }
     for (const tc of outstandingAsyncTools(latest)) {
       if (tc.toolName !== 'ask-human') continue
-      const input = (tc.input ?? {}) as { question?: unknown; options?: unknown }
+      const input = (tc.input ?? {}) as { question?: unknown; options?: unknown; multiSelect?: unknown }
+      const hasOptions = Array.isArray(input.options) && input.options.every((o) => typeof o === 'string')
       pendingAskHumanRequests.set(tc.toolCallId, {
         runId: latestTurnId,
         type: 'ask-human-request',
         toolCallId: tc.toolCallId,
         subflow: [],
         query: typeof input.question === 'string' ? input.question : '',
-        ...(Array.isArray(input.options) && input.options.every((o) => typeof o === 'string')
-          ? { options: input.options }
-          : {}),
+        ...(hasOptions ? { options: input.options as string[] } : {}),
+        ...(hasOptions && input.multiSelect === true ? { multiSelect: true } : {}),
       })
     }
   }
