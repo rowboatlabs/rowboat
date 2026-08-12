@@ -627,6 +627,38 @@ describe('buildSessionChatState', () => {
     expect(state.isWaitingOnHuman).toBe(true)
   })
 
+  it('marks the turn as waiting when automatic permission classification denies with a human available', () => {
+    const turnCreated = created(T1, S1)
+    const turn = reduceTurn([
+      {
+        ...turnCreated,
+        config: { ...turnCreated.config, autoPermission: true },
+      },
+      requested(T1, 0),
+      completed(T1, 0, assistantCalls(toolCallPart('p1', 'executeCommand'))),
+      {
+        type: 'tool_permission_required',
+        turnId: T1,
+        ts: TS,
+        toolCallId: 'p1',
+        toolName: 'executeCommand',
+        request: { kind: 'command', commandNames: ['rm'] },
+      },
+      {
+        type: 'tool_permission_classified',
+        turnId: T1,
+        ts: TS,
+        toolCallId: 'p1',
+        decision: 'deny',
+        reason: 'destructive command',
+      },
+    ])
+    const state = buildSessionChatState([turn], emptyOverlay())
+    expect(state.allPermissionRequests.has('p1')).toBe(true)
+    expect(state.isProcessing).toBe(true)
+    expect(state.isWaitingOnHuman).toBe(true)
+  })
+
   it('tracks reasoning only between reasoning_start and reasoning_end', () => {
     const events: TEvent[] = [
       created(T1, S1),

@@ -838,7 +838,10 @@ describe("automatic permission classification (26.4)", () => {
 
     it("handles allow, deny, and defer in one batch with a human available", async () => {
         const { runtime, repo, classifier } = makeRuntime({
-            models: [respond(completedResp(batch))],
+            models: [
+                respond(completedResp(batch)),
+                respond(completedResp(assistantText("done"))),
+            ],
             checker: new FakePermissionChecker(checkerRules),
             classifier: new FakePermissionClassifier(classifierImpl),
         });
@@ -847,10 +850,13 @@ describe("automatic permission classification (26.4)", () => {
         });
         const { outcome } = await advanceAndSettle(runtime, turnId);
 
-        // Deferred call asks the human.
+        // Denied and deferred calls both escalate to the human.
         expect(outcome).toMatchObject({
             status: "suspended",
-            pendingPermissions: [expect.objectContaining({ toolCallId: "CF" })],
+            pendingPermissions: [
+                expect.objectContaining({ toolCallId: "CD" }),
+                expect.objectContaining({ toolCallId: "CF" }),
+            ],
         });
         expect(classifier.batches).toHaveLength(1);
         expect(classifier.batches[0].map((r) => r.toolCallId)).toEqual([
@@ -864,28 +870,44 @@ describe("automatic permission classification (26.4)", () => {
             messageCount: 2,
         });
 
-        const log = await persisted(repo, turnId);
-        // Classifier provenance and effective decisions are distinct records.
+        let log = await persisted(repo, turnId);
+        // Classifier provenance and effective decisions are distinct records:
+        // the deny is on record but only the allow resolved.
         expect(
             log.filter((e) => e.type === "tool_permission_classified"),
         ).toHaveLength(3);
-        const resolved = log.filter((e) => e.type === "tool_permission_resolved");
-        expect(resolved).toEqual([
+        expect(log.filter((e) => e.type === "tool_permission_resolved")).toEqual([
             expect.objectContaining({ toolCallId: "CA", decision: "allow", source: "classifier" }),
-            expect.objectContaining({ toolCallId: "CD", decision: "deny", source: "classifier" }),
         ]);
-        // Allow executed; deny got an error result without invocation.
         expect(
             log.some((e) => e.type === "tool_result" && e.toolCallId === "CA" && e.source === "sync"),
         ).toBe(true);
+
+        // The human overrides the classifier's deny; their decisions resolve.
+        await advanceAndSettle(runtime, turnId, {
+            type: "permission_decision",
+            toolCallId: "CD",
+            decision: "allow",
+        });
+        const final = await advanceAndSettle(runtime, turnId, {
+            type: "permission_decision",
+            toolCallId: "CF",
+            decision: "deny",
+        });
+        expect(final.outcome?.status).toBe("completed");
+
+        log = await persisted(repo, turnId);
         expect(
-            log.some(
-                (e) => e.type === "tool_invocation_requested" && e.toolCallId === "CD",
+            log.find(
+                (e) => e.type === "tool_permission_resolved" && e.toolCallId === "CD",
             ),
-        ).toBe(false);
+        ).toMatchObject({ decision: "allow", source: "human" });
+        expect(
+            log.some((e) => e.type === "tool_result" && e.toolCallId === "CD" && e.source === "sync"),
+        ).toBe(true);
     });
 
-    it("denies deferred calls when no human is available", async () => {
+    it("denies deferred and denied calls when no human is available", async () => {
         const { runtime, repo } = makeRuntime({
             models: [
                 respond(completedResp(batch)),
@@ -905,6 +927,23 @@ describe("automatic permission classification (26.4)", () => {
                 (e) => e.type === "tool_permission_resolved" && e.toolCallId === "CF",
             ),
         ).toMatchObject({ decision: "deny", source: "human_unavailable" });
+        // The classifier's deny hard-denies with its reason on the result.
+        expect(
+            log.find(
+                (e) => e.type === "tool_permission_resolved" && e.toolCallId === "CD",
+            ),
+        ).toMatchObject({ decision: "deny", source: "classifier" });
+        expect(
+            log.find((e) => e.type === "tool_result" && e.toolCallId === "CD"),
+        ).toMatchObject({
+            source: "runtime",
+            result: { isError: true, output: "Permission denied: because deny" },
+        });
+        expect(
+            log.some(
+                (e) => e.type === "tool_invocation_requested" && e.toolCallId === "CD",
+            ),
+        ).toBe(false);
     });
 
     it("classifier failure records the failure and defers to the human", async () => {
