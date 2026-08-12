@@ -158,6 +158,8 @@ class FakeRuntime implements ITurnRuntime {
     async getTurn() {
         return { turnId: TURN_ID, events: this.log };
     }
+
+    async deleteTurn(): Promise<void> {}
 }
 
 const completedOutcome: TurnOutcome = {
@@ -230,6 +232,8 @@ describe("HeadlessAgentRunner", () => {
         const handle = await runner.start({
             agentId: "worker",
             message: "go",
+            useCase: "knowledge_sync",
+            subUseCase: "tag_notes",
             model: "m",
             provider: "fake",
         });
@@ -240,6 +244,10 @@ describe("HeadlessAgentRunner", () => {
             sessionId: null,
             context: [],
             input: { role: "user", content: "go" },
+            analytics: {
+                useCase: "knowledge_sync",
+                subUseCase: "tag_notes",
+            },
             config: { autoPermission: true, humanAvailable: false },
         });
         const result = await handle.done;

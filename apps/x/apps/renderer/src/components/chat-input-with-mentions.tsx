@@ -16,7 +16,9 @@ import {
   FolderOpen,
   Globe,
   ImagePlus,
+  ListTodo,
   LoaderIcon,
+  MessageCircle,
   Lock,
   Mic,
   MoreHorizontal,
@@ -42,7 +44,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ModelSelector, type ModelRef, type ReasoningEffortLevel } from '@/components/model-selector'
+import { ModelSelector, type ModelRef, type ModelSelection } from '@/components/model-selector'
 import { useModels } from '@/hooks/use-models'
 import {
   type AttachmentIconKind,
@@ -89,8 +91,10 @@ type RecentWorkDir = {
 
 // The picker itself lives in ModelSelector; these aliases keep the composer's
 // public prop surface stable for existing consumers (chat-sidebar, App).
+// SelectedModel is the frozen/locked ref shape; ModelSelection is THE
+// canonical value (ref + effort) the composer holds and reports.
 export type SelectedModel = ModelRef
-export type { ReasoningEffortLevel } from '@/components/model-selector'
+export type { ModelSelection, ReasoningEffortLevel } from '@/components/model-selector'
 
 export type PermissionMode = 'manual' | 'auto'
 
@@ -232,13 +236,21 @@ interface ChatInputInnerProps {
   onEndCall?: () => void
   /** Calls need both voice input (STT) and voice output (TTS) configured. */
   callAvailable?: boolean
-  /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
-  onSelectedModelChange?: (model: SelectedModel | null) => void
   /**
-   * Fired when the user picks a reasoning effort (null = auto). Unlike model,
-   * effort is never frozen on a run — it applies per turn.
+   * Fired whenever this chat's selection (model + effort, one value)
+   * changes: the settings seed on mount, a picker interaction, or a
+   * locked-chat effort pick. Never null after the seed resolves.
    */
-  onReasoningEffortChange?: (effort: ReasoningEffortLevel | null) => void
+  onSelectionChange?: (selection: ModelSelection | null) => void
+  /** The chat's prior selection (per-tab continuity within the app run); seeds the state before anything else. */
+  initialSelection?: ModelSelection | null
+  /**
+   * A reopened session's last-turn selection: undefined = session still
+   * loading (hold the settings seed), a value = adopt it, null = session
+   * has no turns (fall through to the settings seed). Ignored once the
+   * selection is set.
+   */
+  restoredSelection?: ModelSelection | null
   /** Work directory for this chat (per-chat). Null when none is set. */
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
@@ -249,6 +261,9 @@ interface ChatInputInnerProps {
    * them server-side regardless, so the composer must not pretend otherwise.
    */
   codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
+  contextChip?: { label: string; icon?: 'todo' | 'reply'; quote?: string; onDismiss: () => void }
+  placeholder?: string
+  focusSignal?: number
 }
 
 function ChatInputInner({
@@ -274,11 +289,15 @@ function ChatInputInner({
   onStartCall,
   onEndCall,
   callAvailable,
-  onSelectedModelChange,
-  onReasoningEffortChange,
+  onSelectionChange,
+  initialSelection = null,
+  restoredSelection,
   workDir = null,
   onWorkDirChange,
   codeSessionLock = null,
+  contextChip,
+  placeholder,
+  focusSignal,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -289,11 +308,13 @@ function ChatInputInner({
 
   // Shared model-catalog store (one fetch app-wide); sign-in state also
   // gates search availability below.
-  const { isRowboatConnected, refresh: refreshModels } = useModels()
-  const [selectedModel, setSelectedModel] = useState<SelectedModel | null>(null)
+  const { isRowboatConnected, defaultModel, defaultEffort, refresh: refreshModels } = useModels()
+  // THE chat's selection (model + effort, one value). Initialized from the
+  // tab's prior selection when the caller has one, else seeded once from the
+  // settings pair when the catalog loads; thereafter it changes only on
+  // picker interactions. null only before the seed resolves.
+  const [selection, setSelection] = useState<ModelSelection | null>(initialSelection)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
-  // '' = auto. Effort is per-turn config: reported up, never persisted.
-  const [reasoningEffort, setReasoningEffort] = useState<'' | ReasoningEffortLevel>('')
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
@@ -335,7 +356,7 @@ function ChatInputInner({
   // no-dep effect below still re-collapses if any toggle happens to widen the row.
   useLayoutEffect(() => {
     setCollapseLevel(0)
-  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, selectedModel])
+  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, selection])
 
   // After each render, if the left group still overflows, collapse one more step.
   // Runs before paint, so the intermediate (overflowing) state is never visible.
@@ -551,26 +572,54 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
-  // Selecting a model here is PER-CHAT: it affects the next run created
-  // from this tab (frozen once a run exists) and nothing else. The config's
-  // assistantModel is the durable default — new tabs and background work
-  // always start from it, and only the settings Assistant picker (or a
-  // provider connect's initial selection) writes it.
-  const handleModelChange = useCallback((model: SelectedModel | null) => {
-    if (lockedModel) return
+  // Selecting here is PER-CHAT: it affects the next run created from this
+  // tab and nothing else. The config's assistantModel is the durable
+  // default — new tabs and background work always start from it, and only
+  // the settings Assistant picker (or a provider connect's initial
+  // selection) writes it. On a locked chat the model is frozen but the
+  // picker still commits effort-only selections carrying the locked ref.
+  const handleSelectionChange = useCallback((next: ModelSelection | null) => {
     // null = the sentinel row, which the composer never renders (no
     // defaultOption) — guard for the widened onChange contract only.
-    if (!model) return
-    setSelectedModel(model)
-    onSelectedModelChange?.(model)
-  }, [lockedModel, onSelectedModelChange])
+    if (!next) return
+    if (lockedModel && next.model !== lockedModel.model) return
+    setSelection(next)
+    onSelectionChange?.(next)
+  }, [lockedModel, onSelectionChange])
 
-  // Effort is per-turn and unpersisted; ModelSelector reports '' when the
-  // effective model loses reasoning support so a stale effort never sticks.
-  const handleReasoningEffortChange = useCallback((effort: '' | ReasoningEffortLevel) => {
-    setReasoningEffort(effort)
-    onReasoningEffortChange?.(effort === '' ? null : effort)
-  }, [onReasoningEffortChange])
+  // Seed order for an unset selection: an existing session restores its
+  // last turn's selection (waiting for the session to load rather than
+  // flashing the settings pair); drafts and no-turn sessions adopt the
+  // settings pair once the catalog delivers it. Either way the result is
+  // ONE explicit snapshot — the state never tracks later settings edits.
+  useEffect(() => {
+    if (selection !== null) return
+    if (runId) {
+      if (restoredSelection === undefined) return
+      if (restoredSelection) {
+        setSelection(restoredSelection)
+        onSelectionChange?.(restoredSelection)
+        return
+      }
+    }
+    if (!defaultModel) return
+    const seeded: ModelSelection = { ...defaultModel, ...(defaultEffort ? { effort: defaultEffort } : {}) }
+    setSelection(seeded)
+    onSelectionChange?.(seeded)
+  }, [selection, runId, restoredSelection, defaultModel, defaultEffort, onSelectionChange])
+
+  // "New chat" reuses the tab (and this component instance) in place — the
+  // runId dropping back to null is the reset signal: clear the selection so
+  // the seed effect above restarts it from the CURRENT settings pair.
+  const prevRunIdRef = useRef(runId)
+  useEffect(() => {
+    const prev = prevRunIdRef.current
+    prevRunIdRef.current = runId
+    if (prev && !runId) {
+      setSelection(null)
+      onSelectionChange?.(null)
+    }
+  }, [runId, onSelectionChange])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -643,8 +692,13 @@ function ChatInputInner({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
+      return
     }
-  }, [handleSubmit])
+    if (e.key === 'Escape' && contextChip) {
+      e.preventDefault()
+      contextChip.onDismiss()
+    }
+  }, [handleSubmit, contextChip])
 
   useEffect(() => {
     if (!isActive) return
@@ -683,7 +737,13 @@ function ChatInputInner({
   const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
-    <div data-tour-id="chat-composer" className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
+    <div
+      data-tour-id="chat-composer"
+      className={cn(
+        'rowboat-chat-input rounded-lg border bg-background shadow-none',
+        contextChip ? 'border-primary/40 ring-1 ring-primary/25' : 'border-border',
+      )}
+    >
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
           {attachments.map((attachment) => {
@@ -786,12 +846,37 @@ function ChatInputInner({
       ) : (
         /* ── Normal input ── */
         <>
+      {contextChip && (
+        <div className="px-4 pt-3">
+          <div className="flex items-center">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-0.5 text-xs font-semibold text-primary-foreground">
+              {contextChip.icon === 'reply' ? <MessageCircle className="h-3 w-3" /> : <ListTodo className="h-3 w-3" />}
+              {contextChip.label}
+              <button
+                type="button"
+                onClick={contextChip.onDismiss}
+                aria-label="Back to chat"
+                className="rounded-full opacity-70 hover:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          </div>
+          {contextChip.quote && (
+            /* WhatsApp-style quoted context: what you're replying to, right
+               above where you type. */
+            <div className="mt-1.5 line-clamp-2 border-l-2 border-border pl-2 text-xs text-muted-foreground">
+              {contextChip.quote}
+            </div>
+          )}
+        </div>
+      )}
       <div className="px-4 pt-4 pb-2">
         <PromptInputTextarea
-          placeholder="Type your message..."
+          placeholder={placeholder ?? 'Type your message...'}
           onKeyDown={handleKeyDown}
           autoFocus={isActive}
-          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}` : undefined}
+          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}:${focusSignal ?? 0}` : undefined}
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
@@ -1164,11 +1249,10 @@ function ChatInputInner({
         )}
         <div className="flex-1" />
         <ModelSelector
-          value={selectedModel}
-          onChange={handleModelChange}
+          value={selection}
+          onChange={handleSelectionChange}
           lockedModel={lockedModel}
-          effort={reasoningEffort}
-          onEffortChange={handleReasoningEffortChange}
+          effortSelectable
         />
         {onStartCall && (
           <div className="flex shrink-0 items-center">
@@ -1408,12 +1492,21 @@ export interface ChatInputWithMentionsProps {
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
   callAvailable?: boolean
-  onSelectedModelChange?: (model: SelectedModel | null) => void
-  onReasoningEffortChange?: (effort: ReasoningEffortLevel | null) => void
+  onSelectionChange?: (selection: ModelSelection | null) => void
+  initialSelection?: ModelSelection | null
+  restoredSelection?: ModelSelection | null
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
   codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
+  /** Destination chip: the composer is visibly writing somewhere other than
+   * the chat (e.g. "To-do"). Rendered above the input with a dismiss ✕;
+   * Escape also dismisses. */
+  contextChip?: { label: string; icon?: 'todo' | 'reply'; quote?: string; onDismiss: () => void }
+  /** Placeholder override (pairs with contextChip). */
+  placeholder?: string
+  /** Bump to focus the input from outside (e.g. the list's ＋ affordance). */
+  focusSignal?: number
 }
 
 export function ChatInputWithMentions({
@@ -1442,11 +1535,15 @@ export function ChatInputWithMentions({
   onStartCall,
   onEndCall,
   callAvailable,
-  onSelectedModelChange,
-  onReasoningEffortChange,
+  onSelectionChange,
+  initialSelection,
+  restoredSelection,
   workDir,
   onWorkDirChange,
   codeSessionLock,
+  contextChip,
+  placeholder,
+  focusSignal,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -1473,11 +1570,15 @@ export function ChatInputWithMentions({
         onStartCall={onStartCall}
         onEndCall={onEndCall}
         callAvailable={callAvailable}
-        onSelectedModelChange={onSelectedModelChange}
-        onReasoningEffortChange={onReasoningEffortChange}
+        onSelectionChange={onSelectionChange}
+        initialSelection={initialSelection}
+        restoredSelection={restoredSelection}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
         codeSessionLock={codeSessionLock}
+        contextChip={contextChip}
+        placeholder={placeholder}
+        focusSignal={focusSignal}
       />
     </PromptInputProvider>
   )

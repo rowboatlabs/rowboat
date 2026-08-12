@@ -1,12 +1,15 @@
 import type { z } from "zod";
 import {
     type ConversationMessage,
+    type ModelDescriptor,
     type ResolvedAgent,
     type ResolvedAgentSnapshot,
     type TurnContext,
     TurnCorruptionError,
+    deriveTurnStatus,
     isInheritedSnapshot,
     reduceTurn,
+    stripProviderContinuation,
     turnTranscript,
 } from "@x/shared/dist/turns.js";
 import type { ITurnRepo } from "./repo.js";
@@ -16,9 +19,21 @@ import type { ITurnRepo } from "./repo.js";
 // transcript by walking the chain down to its inline base. Resolution always
 // reads durable state, so normal execution and crash recovery share one
 // path. A missing or corrupt referenced turn is an infrastructure error.
+//
+// currentModel is the model the materialized context is about to be sent
+// to. Segments produced by that exact model in a cleanly completed turn
+// replay verbatim — provider round-trip metadata (thinking signatures,
+// encrypted reasoning) included, which same-model continuations rely on.
+// Everything else (a mid-session model switch, a failed or cancelled
+// producing turn, the inline base whose origin is unrecorded) passes
+// through stripProviderContinuation: the opaque payloads are sealed to the
+// minting endpoint and poison requests to any other. Stripping happens at
+// materialization only — durable turn files keep full fidelity, so
+// switching back to the original model restores verbatim replay.
 export interface IContextResolver {
     resolve(
         context: z.infer<typeof TurnContext>,
+        currentModel: z.infer<typeof ModelDescriptor>,
     ): Promise<Array<z.infer<typeof ConversationMessage>>>;
     // Materializes an inherited agent snapshot by walking inheritedFrom to
     // the nearest concrete snapshot (same discipline as context references:
@@ -41,6 +56,7 @@ export class TurnRepoContextResolver implements IContextResolver {
 
     async resolve(
         context: z.infer<typeof TurnContext>,
+        currentModel: z.infer<typeof ModelDescriptor>,
     ): Promise<Array<z.infer<typeof ConversationMessage>>> {
         // Walk the reference chain back to the inline base, then concatenate
         // transcripts oldest-first. Iterative to bound stack depth; a visited
@@ -58,10 +74,25 @@ export class TurnRepoContextResolver implements IContextResolver {
             visited.add(turnId);
             const events = await this.turnRepo.read(turnId);
             const state = reduceTurn(events);
-            segments.push(turnTranscript(state));
+            // Provider continuation metadata replays only for segments this
+            // exact model produced in a cleanly completed turn (see the
+            // interface note). The model comparison is deliberately strict
+            // on the provider-instance id: a false-positive strip degrades
+            // gracefully, a false-negative keeps the poisoned replay.
+            const producedBy = state.definition.agent.resolved.model;
+            const replayable =
+                producedBy.provider === currentModel.provider &&
+                producedBy.model === currentModel.model &&
+                deriveTurnStatus(state) === "completed";
+            const transcript = turnTranscript(state);
+            segments.push(
+                replayable ? transcript : stripProviderContinuation(transcript),
+            );
             current = state.definition.context;
         }
-        segments.push(current);
+        // The inline base records no producing model, so it takes the
+        // conservative path (migrated runs may carry foreign metadata).
+        segments.push(stripProviderContinuation(current));
         segments.reverse();
         return segments.flat();
     }

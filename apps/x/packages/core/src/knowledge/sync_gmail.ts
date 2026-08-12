@@ -32,6 +32,8 @@ import {
     stripQuotedReplyText,
     sanitizeReplyBody,
     decodeHtmlEntities,
+    escapeHtml,
+    textToHtml,
 } from './email/store.js';
 import type {
     EmailProvider,
@@ -1069,6 +1071,13 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
 
         console.log(`Found ${changes.length} history records.`);
         const threadIds = new Set<string>();
+        // Threads that gained a message someone else sent. The user's own
+        // outbound mail (SENT — e.g. a reply fired off from their phone or
+        // Gmail web) must still sync the thread, but it is not a "new email":
+        // notifying for it pings the user about their own message, and the
+        // notification's deep link goes nowhere useful when the thread only
+        // lives in their Sent folder.
+        const inboundThreadIds = new Set<string>();
 
         for (const record of changes) {
             if (record.messagesAdded) {
@@ -1085,6 +1094,9 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
                     if (labels.includes('DRAFT')) continue;
                     if (item.message?.threadId) {
                         threadIds.add(item.message.threadId);
+                        if (!labels.includes('SENT')) {
+                            inboundThreadIds.add(item.message.threadId);
+                        }
                     }
                 }
             }
@@ -1118,8 +1130,9 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
             if (result) synced.push(result);
         }
         // Notify for the history-derived new threads only — before the older
-        // backfilled threads are merged in below, so backfill stays silent.
-        notifyNewEmails(synced);
+        // backfilled threads are merged in below, so backfill stays silent —
+        // and only for threads with genuinely inbound mail (see inboundThreadIds).
+        notifyNewEmails(synced.filter((t) => inboundThreadIds.has(t.threadId)));
         const backfilled = await backfillMissingRecentThreads(auth, syncDir, attachmentsDir, stateFile, lookbackDays);
         synced.push(...backfilled);
 
@@ -1465,11 +1478,88 @@ function sanitizeAttachmentName(name: string): string {
     return (name || 'attachment').replace(/[\r\n"\\]/g, '_').trim() || 'attachment';
 }
 
+// `From:` header value for outgoing mail: `Name <email>` when the account's
+// display name is known, bare address otherwise (matching what Gmail's own
+// clients send, so recipients see a name instead of a raw address).
+export function formatFromHeader(name: string | null, email: string): string {
+    const cleanEmail = requireSafeHeaderValue('From', email);
+    const cleanName = name?.replace(/[\r\n"<>]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!cleanName) return cleanEmail;
+    // eslint-disable-next-line no-control-regex
+    if (/^[\x00-\x7F]*$/.test(cleanName)) return `"${cleanName}" <${cleanEmail}>`;
+    // RFC 2047 encoded-words must not be wrapped in a quoted-string.
+    return `=?UTF-8?B?${Buffer.from(cleanName).toString('base64')}?= <${cleanEmail}>`;
+}
+
+// Drop inline images we embedded as data: URIs for display (see
+// inlineCidImages) before quoting a message back out — mailing megabytes of
+// base64 back to the recipient helps no one, and Gmail hides data: images
+// anyway. Remote http(s) images are kept, matching Gmail's own quoting.
+function stripDataUriImages(html: string): string {
+    return html.replace(/<img\b[^>]*\bsrc\s*=\s*["']data:[^"']*["'][^>]*>/gi, '');
+}
+
+/**
+ * The quoted conversation trail ("On <date>, <sender> wrote:" + blockquote)
+ * appended below a threaded reply. Every mail client includes this trail on
+ * reply; without it the sent email carries none of the conversation it
+ * belongs to. Quotes the message being replied to (whose own body nests the
+ * earlier history, so the full chain survives).
+ */
+export function buildQuotedReplyTrailFromMessages(
+    messages: EmailThreadSnapshot['messages'],
+    inReplyTo?: string,
+): { text: string; html: string } | null {
+    const visible = messages.filter((m) => !m.isDraft);
+    if (visible.length === 0) return null;
+    const quoted = (inReplyTo && visible.find((m) => m.messageIdHeader === inReplyTo))
+        || visible[visible.length - 1]!;
+
+    const quotedText = (quoted.body || '').trim();
+    const quotedHtml = stripDataUriImages((quoted.bodyHtml || '').trim());
+    if (!quotedText && !quotedHtml) return null;
+
+    // Ends in "wrote:" so our own quote-boundary detection (and every mail
+    // client's) recognizes it when this reply is itself replied to.
+    const attribution = `On ${(quoted.date || 'an earlier date').trim()}, ${(quoted.from || 'unknown sender').trim()} wrote:`;
+    const text = [
+        attribution,
+        ...(quotedText || '(no text version)').split('\n').map((line) => `> ${line}`),
+    ].join('\n');
+    const html = `<br /><div class="gmail_quote gmail_quote_container">`
+        + `<div dir="ltr" class="gmail_attr">${escapeHtml(attribution)}<br /></div>`
+        + `<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">`
+        + (quotedHtml || textToHtml(quotedText))
+        + `</blockquote></div>`;
+    return { text, html };
+}
+
+/**
+ * Trail for a threaded send, built from the locally cached thread snapshot
+ * (inbox cache first, then the search index). Returns null when the thread
+ * isn't cached — the send still goes out, just without a trail.
+ */
+function buildQuotedReplyTrail(
+    threadId: string,
+    inReplyTo?: string,
+): { text: string; html: string } | null {
+    const snapshot = readCachedSnapshot(threadId)?.snapshot
+        ?? readSearchSnapshot(threadId)?.snapshot;
+    if (!snapshot?.messages) return null;
+    return buildQuotedReplyTrailFromMessages(snapshot.messages, inReplyTo);
+}
+
 // Build the raw (base64url) RFC 2822 message shared by both send and draft-save.
 // Recipient headers are omitted when blank, so an in-progress draft with no
 // `To` yet still produces a valid message. `isEmpty` lets callers reject a
-// whitespace-only body without re-parsing the result.
-function buildRawMimeMessage(opts: SaveDraftOptions, userEmail: string): { raw: string; isEmpty: boolean } {
+// whitespace-only body without re-parsing the result. `quotedTrail` (send only
+// — drafts stay trail-less so the composer reopens just the user's words) is
+// appended below the sanitized body in both MIME parts.
+function buildRawMimeMessage(
+    opts: SaveDraftOptions,
+    fromHeader: string,
+    quotedTrail?: { text: string; html: string } | null,
+): { raw: string; isEmpty: boolean } {
     const safeTo = opts.to?.trim() ? requireSafeHeaderValue('To', opts.to) : undefined;
     const safeCc = opts.cc?.trim() ? requireSafeHeaderValue('Cc', opts.cc) : undefined;
     const safeBcc = opts.bcc?.trim() ? requireSafeHeaderValue('Bcc', opts.bcc) : undefined;
@@ -1480,12 +1570,21 @@ function buildRawMimeMessage(opts: SaveDraftOptions, userEmail: string): { raw: 
         : { bodyHtml: opts.bodyHtml.trim(), bodyText: opts.bodyText.trim() };
     const isEmpty = !replyBody.bodyText.trim();
 
+    // The user's words first, the quoted conversation below — the layout every
+    // mail client produces on reply.
+    const outText = quotedTrail && !isEmpty
+        ? `${replyBody.bodyText}\n\n${quotedTrail.text}`
+        : replyBody.bodyText;
+    const outHtml = quotedTrail && !isEmpty
+        ? `${replyBody.bodyHtml}${quotedTrail.html}`
+        : replyBody.bodyHtml;
+
     const seed = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const altBoundary = `alt_${seed}`;
     const attachments = (opts.attachments ?? []).filter((a) => a.contentBase64);
 
     const headers: string[] = [];
-    headers.push(`From: ${requireSafeHeaderValue('From', userEmail)}`);
+    headers.push(`From: ${requireSafeHeaderValue('From', fromHeader)}`);
     if (safeTo) headers.push(`To: ${safeTo}`);
     if (safeCc) headers.push(`Cc: ${safeCc}`);
     if (safeBcc) headers.push(`Bcc: ${safeBcc}`);
@@ -1500,13 +1599,13 @@ function buildRawMimeMessage(opts: SaveDraftOptions, userEmail: string): { raw: 
     altParts.push('Content-Type: text/plain; charset="UTF-8"');
     altParts.push('Content-Transfer-Encoding: base64');
     altParts.push('');
-    altParts.push(encodeMimeBase64(replyBody.bodyText));
+    altParts.push(encodeMimeBase64(outText));
     altParts.push('');
     altParts.push(`--${altBoundary}`);
     altParts.push('Content-Type: text/html; charset="UTF-8"');
     altParts.push('Content-Transfer-Encoding: base64');
     altParts.push('');
-    altParts.push(encodeMimeBase64(replyBody.bodyHtml));
+    altParts.push(encodeMimeBase64(outHtml));
     altParts.push('');
     altParts.push(`--${altBoundary}--`);
 
@@ -1557,7 +1656,11 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
         if (!userEmail) return { error: 'Could not determine your Gmail address.' };
 
         if (!opts.to?.trim()) return { error: 'Add at least one recipient.' };
-        const built = buildRawMimeMessage(opts, userEmail);
+        const fromHeader = formatFromHeader(await getAccountName(), userEmail);
+        const quotedTrail = opts.threadId
+            ? buildQuotedReplyTrail(opts.threadId, opts.inReplyTo)
+            : null;
+        const built = buildRawMimeMessage(opts, fromHeader, quotedTrail);
         if (built.isEmpty) return { error: 'Draft is empty.' };
 
         const requestBody: gmail.Schema$Message = { raw: built.raw };
@@ -1613,7 +1716,7 @@ export async function saveThreadDraft(opts: SaveDraftOptions): Promise<SaveDraft
         const userEmail = await getUserEmail(auth);
         if (!userEmail) return { error: 'Could not determine your Gmail address.' };
 
-        const built = buildRawMimeMessage(opts, userEmail);
+        const built = buildRawMimeMessage(opts, formatFromHeader(await getAccountName(), userEmail));
         if (built.isEmpty) return { error: 'Draft is empty.' };
 
         const message: gmail.Schema$Message = { raw: built.raw };

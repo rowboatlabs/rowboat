@@ -22,6 +22,8 @@ import { modelTools } from "./domains/models.js";
 import { liveNoteTools } from "./domains/live-note.js";
 import { backgroundTaskTools } from "./domains/background-tasks.js";
 import { notificationTools } from "./domains/notifications.js";
+import { todoTools } from "./domains/todo.js";
+import { screenPointerTools } from "./domains/screen-pointer.js";
 import { BuiltinToolsSchema } from "./types.js";
 export { coalesceCodeRunEvents } from "./domains/code.js";
 
@@ -94,6 +96,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...backgroundTaskTools,
     ...codeTaskTools,
     ...notificationTools,
+    ...todoTools,
+    ...screenPointerTools,
 
     [SPAWN_AGENT_TOOL_NAME]: {
         permission: "none",

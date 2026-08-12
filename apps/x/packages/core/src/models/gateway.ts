@@ -5,7 +5,9 @@ import { getCurrentUseCase } from '../analytics/use_case.js';
 import { API_URL } from '../config/env.js';
 import { annotateReasoningFlags } from './models-dev.js';
 
-const authedFetch: typeof fetch = async (input, init) => {
+// Exported for transport-level verification; production passes this directly
+// to the Rowboat OpenRouter provider.
+export const authedFetch: typeof fetch = async (input, init) => {
     const token = await getAccessToken();
     const headers = new Headers(init?.headers);
     headers.set('Authorization', `Bearer ${token}`);

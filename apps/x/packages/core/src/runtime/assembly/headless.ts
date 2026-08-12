@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { UseCase } from "@x/shared/dist/analytics.js";
 import type { AssistantMessage } from "@x/shared/dist/message.js";
 import {
     type RequestedAgent,
@@ -32,6 +33,8 @@ export interface HeadlessAgentOptions {
     // overrides). Takes precedence over agentId/model/provider.
     agent?: z.infer<typeof RequestedAgent>;
     message: string;
+    useCase?: UseCase;
+    subUseCase?: string;
     // Model id; when set without provider, the app-default provider applies.
     model?: string;
     provider?: string;
@@ -154,6 +157,12 @@ export class HeadlessAgentRunner implements IHeadlessAgentRunner {
             sessionId: null,
             context: [],
             input: { role: "user", content: options.message },
+            analytics: {
+                useCase: options.useCase ?? "copilot_chat",
+                ...(options.subUseCase
+                    ? { subUseCase: options.subUseCase }
+                    : {}),
+            },
             config: {
                 autoPermission: true,
                 humanAvailable: false,

@@ -170,6 +170,8 @@ function frame(source: "camera" | "screen") {
 }
 
 const T1 = "2026-07-02T10-00-00Z-0000001-000";
+// Matches the fixture turn logs' model, so resolution replays verbatim.
+const FIXTURE_MODEL = { provider: "fake", model: "m" };
 
 describe("elideHistoricToolResults", () => {
     it("replaces tool results above the threshold with a placeholder", () => {
@@ -335,7 +337,7 @@ describe("createContextResolver", () => {
         const resolved = await createContextResolver({
             turnRepo: repo,
             loadPolicy: () => DEFAULT_ELISION_POLICY,
-        }).resolve({ previousTurnId: T1 });
+        }).resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
         const tool = resolved.find((m) => m.role === "tool");
         expect(tool?.content).toContain("elided");
         expect(tool?.content.length).toBeLessThan(1000);
@@ -356,7 +358,7 @@ describe("ElidingContextResolver", () => {
         const resolved = await resolver(repo, {
             ...POLICY_OFF,
             toolResults: true,
-        }).resolve({ previousTurnId: T1 });
+        }).resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
         const tool = resolved.find((m) => m.role === "tool");
         expect(tool?.content).toContain("elided");
         // The rest of the transcript is intact.
@@ -372,9 +374,7 @@ describe("ElidingContextResolver", () => {
         const repo = new InMemoryTurnRepo();
         const output = "x".repeat(200);
         repo.seed(toolTurnLog(T1, [], output));
-        const resolved = await resolver(repo, POLICY_OFF).resolve({
-            previousTurnId: T1,
-        });
+        const resolved = await resolver(repo, POLICY_OFF).resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
         const tool = resolved.find((m) => m.role === "tool");
         expect(tool?.content).toBe(output);
     });
@@ -385,7 +385,7 @@ describe("ElidingContextResolver", () => {
         const resolved = await resolver(repo, {
             ...POLICY_OFF,
             toolResults: true,
-        }).resolve({ previousTurnId: T1 });
+        }).resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
         const tool = resolved.find((m) => m.role === "tool");
         expect(tool?.content).toBe("small");
     });
@@ -410,7 +410,7 @@ describe("ElidingContextResolver", () => {
         const resolved = await resolver(repo, {
             ...POLICY_OFF,
             images: true,
-        }).resolve({ previousTurnId: T1 });
+        }).resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
         const input = resolved[0];
         if (input.role !== "user" || typeof input.content === "string") {
             throw new Error("expected user message with parts");
@@ -430,7 +430,7 @@ describe("ElidingContextResolver", () => {
         const resolved = await resolver(repo, {
             ...POLICY_OFF,
             middlePaneContent: true,
-        }).resolve({ previousTurnId: T1 });
+        }).resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
         const input = resolved[0];
         if (input.role !== "user") throw new Error("expected user message");
         const middlePane = input.userMessageContext?.middlePane;
@@ -458,7 +458,7 @@ describe("ElidingContextResolver", () => {
         const resolved = await resolver(repo, {
             ...POLICY_OFF,
             toolResults: true,
-        }).resolve({ previousTurnId: T2 });
+        }).resolve({ previousTurnId: T2 }, FIXTURE_MODEL);
         const tools = resolved.filter((m) => m.role === "tool");
         expect(tools).toHaveLength(2);
         for (const tool of tools) {
@@ -478,8 +478,8 @@ describe("ElidingContextResolver", () => {
                 return { ...POLICY_OFF, toolResults: loads > 1 };
             },
         });
-        const first = await eliding.resolve({ previousTurnId: T1 });
-        const second = await eliding.resolve({ previousTurnId: T1 });
+        const first = await eliding.resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
+        const second = await eliding.resolve({ previousTurnId: T1 }, FIXTURE_MODEL);
         expect(loads).toBe(2);
         expect(first.find((m) => m.role === "tool")?.content).toBe(output);
         expect(second.find((m) => m.role === "tool")?.content).toContain("elided");

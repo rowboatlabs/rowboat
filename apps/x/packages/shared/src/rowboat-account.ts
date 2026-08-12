@@ -1,6 +1,23 @@
 import { z } from 'zod';
 import { BillingCatalogSchema } from './billing.js';
 import { CreditActivationCatalogEntrySchema } from './credits.js';
+import { ReasoningEffort } from './models.js';
+
+// One recommended slot on the wire: a bare model id (legacy — effort Auto)
+// or { model, effort? }. Effort is MORE lenient than stored config: any
+// unrecognized value (not just null/"auto") normalizes to undefined (= Auto)
+// — a backend experimenting with a new level (e.g. "minimal") must degrade
+// this hint, never fail the whole /v1/config parse that auth and billing
+// also ride on.
+const RecommendedChoice = z.union([
+  z.string(),
+  z.object({
+    model: z.string(),
+    effort: z.unknown().transform((v) =>
+      v === 'low' || v === 'medium' || v === 'high' ? v : undefined,
+    ).optional(),
+  }),
+]);
 
 export const RowboatApiConfig = z.object({
   appUrl: z.string(),
@@ -28,17 +45,28 @@ export const RowboatApiConfig = z.object({
   modelRecommendations: z.record(z.string(), z.union([
     z.string(),
     z.object({
-      assistantModel: z.string(),
-      taskModels: z.record(z.string(), z.string()).optional(),
+      assistantModel: RecommendedChoice,
+      taskModels: z.record(z.string(), RecommendedChoice).optional(),
     }),
   ])).optional(),
 });
 
 export type ModelRecommendations = NonNullable<z.infer<typeof RowboatApiConfig>['modelRecommendations']>;
 
+/** A recommendation slot in canonical form: model id + normalized effort. */
+export interface RecommendedModelChoice {
+  model: string;
+  effort?: z.infer<typeof ReasoningEffort>;
+}
+
 export interface NormalizedModelRecommendation {
-  assistantModel: string;
-  taskModels: Record<string, string>;
+  assistantModel: RecommendedModelChoice;
+  taskModels: Record<string, RecommendedModelChoice>;
+}
+
+function normalizeChoice(raw: z.infer<typeof RecommendedChoice>): RecommendedModelChoice {
+  if (typeof raw === 'string') return { model: raw };
+  return { model: raw.model, ...(raw.effort ? { effort: raw.effort } : {}) };
 }
 
 /** One provider's recommendation in canonical form; null when absent. */
@@ -48,6 +76,11 @@ export function normalizeModelRecommendation(
 ): NormalizedModelRecommendation | null {
   const raw = recommendations?.[flavor];
   if (!raw) return null;
-  if (typeof raw === 'string') return { assistantModel: raw, taskModels: {} };
-  return { assistantModel: raw.assistantModel, taskModels: raw.taskModels ?? {} };
+  if (typeof raw === 'string') return { assistantModel: { model: raw }, taskModels: {} };
+  return {
+    assistantModel: normalizeChoice(raw.assistantModel),
+    taskModels: Object.fromEntries(
+      Object.entries(raw.taskModels ?? {}).map(([key, value]) => [key, normalizeChoice(value)]),
+    ),
+  };
 }

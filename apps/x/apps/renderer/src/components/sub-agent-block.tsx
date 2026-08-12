@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
-import { CompactConversation } from '@/components/compact-conversation'
+import { TurnConversation } from '@/components/turn-conversation'
 import { turnStateToTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
 import { toToolState, type ToolCall } from '@/lib/chat-conversation'
 import { useTurn } from '@/hooks/use-turn'
@@ -42,22 +42,24 @@ export function SubAgentBlock({
   const rawName = item.subAgent?.agentName || input?.agent_id || input?.name || ''
   const name = rawName === 'subagent' ? '' : humanizeName(rawName)
   const task = (item.subAgent?.task || input?.task || '').trim()
-  // The collapsed row must say what is happening, not just that an agent
-  // exists: lead with the name when the model gave one, then the task (the
-  // header truncates with a hover tooltip carrying the full text).
-  const title = task ? `${name || 'Agent'}: ${task}` : name || 'Agent'
   const running = item.status === 'pending' || item.status === 'running'
   const transcript = useChildTranscript(item.subAgent?.childTurnId, open)
 
   return (
     <Tool open={open} onOpenChange={onOpenChange}>
-      <ToolHeader title={title} type="tool-spawn-agent" state={toToolState(item.status)} />
+      <ToolHeader
+        summary={{ verb: name || 'Agent', detail: task || undefined }}
+        type="tool-spawn-agent"
+        state={toToolState(item.status)}
+      />
       <ToolContent>
-        <div className="flex flex-col gap-3 px-4 pb-4">
+        <div className="flex flex-col py-1">
           {transcript ? (
             // The transcript opens with the child's user message — the task —
-            // so no separate task chip is rendered here.
-            <CompactConversation items={transcript.items} />
+            // so no separate task chip is rendered here. Same shared renderer
+            // as the chat transcript, so tool rows, usage footer, and copy
+            // behave identically inside the nested turn.
+            <TurnConversation items={transcript.items} />
           ) : (
             <div className="px-1 text-sm text-muted-foreground">
               {item.subAgent

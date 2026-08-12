@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { TurnAnalytics } from "@x/shared/dist/analytics.js";
 import type { AssistantMessage, UserMessage } from "@x/shared/dist/message.js";
 import type {
     JsonValue,
@@ -16,6 +17,7 @@ export interface CreateTurnInput {
     sessionId?: string | null;
     context: z.infer<typeof TurnContext>;
     input: z.infer<typeof UserMessage>;
+    analytics?: TurnAnalytics;
     config: {
         autoPermission?: boolean;
         humanAvailable: boolean;
@@ -93,6 +95,10 @@ export interface ITurnRuntime {
         options?: { signal?: AbortSignal },
     ): TurnExecution;
     getTurn(turnId: string): Promise<Turn>;
+    // Removes the turn's file. Idempotent — a missing turn is not an error.
+    // Callers own lifecycle safety: never delete a turn that may still be
+    // advancing (session deletion stops live advances first).
+    deleteTurn(turnId: string): Promise<void>;
 }
 
 // An external input that does not match the turn's current durable pending

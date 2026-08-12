@@ -6,9 +6,9 @@ import { PostHogProvider } from 'posthog-js/react'
 import type { CaptureResult } from 'posthog-js'
 import { ThemeProvider } from '@/contexts/theme-context'
 import { configureAnalyticsContext } from './lib/analytics'
-import { VideoPopout } from '@/components/video-popout'
 import { MeetingDetectedPopup } from '@/components/meeting-detected-popup'
 import { QuickAskBar } from '@/components/quick-ask-bar'
+import { ScreenPointerOverlay } from '@/components/screen-pointer-overlay'
 
 // Fetch the stable installation ID from main so renderer + main share one
 // PostHog distinct_id. Falls back to PostHog's auto-generated anonymous ID
@@ -60,15 +60,9 @@ async function bootstrap() {
   // The loaded callback applies api_url/app_version once PostHog has initialized.
 }
 
-// The video-mode popout window loads the same bundle with a hash route and
-// renders only the mini-call UI — no analytics or app bootstrap needed.
-if (window.location.hash === '#video-popout') {
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <VideoPopout />
-    </StrictMode>,
-  )
-} else if (window.location.hash === '#meeting-detected') {
+// Utility windows load the same bundle with a hash route and render only
+// their own UI — no analytics or app bootstrap needed.
+if (window.location.hash === '#meeting-detected') {
   // "Meeting detected — Take Notes?" popup window; same pattern.
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
@@ -80,6 +74,13 @@ if (window.location.hash === '#video-popout') {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QuickAskBar />
+    </StrictMode>,
+  )
+} else if (window.location.hash === '#screen-pointer') {
+  // Assistant's pointer over the shared screen; same pattern.
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ScreenPointerOverlay />
     </StrictMode>,
   )
 } else {

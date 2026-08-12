@@ -29,6 +29,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Covers apps/main, apps/preload, and packages/*; apps/renderer is
+      # excluded until its lint debt is paid down (see eslint.config.mts).
+      - name: Lint apps/x
+        run: npm run lint
+
       # Builds @x/shared (core/renderer tests import its dist), then runs
       # the shared, core, and renderer vitest suites in order.
       - name: Run apps/x Vitest suites

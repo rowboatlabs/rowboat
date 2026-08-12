@@ -34,6 +34,7 @@ import type {
 } from "./permission.js";
 import { composeModelRequest } from "./compose-model-request.js";
 import { TurnRuntime } from "./runtime.js";
+import { getCurrentUseCase } from "../../analytics/use_case.js";
 import type {
     IToolRegistry,
     RuntimeTool,
@@ -408,11 +409,13 @@ async function advanceAndSettle(
 class FakeUsageReporter {
     reports: Array<{
         agentId: string;
+        analytics: { useCase: string; subUseCase?: string };
         model: { provider: string; model: string };
         usage: Record<string, number | undefined>;
     }> = [];
     reportModelUsage(report: {
         agentId: string;
+        analytics: { useCase: string; subUseCase?: string };
         model: { provider: string; model: string };
         usage: Record<string, number | undefined>;
     }): void {
@@ -445,6 +448,34 @@ async function persisted(
 // ---------------------------------------------------------------------------
 
 describe("plain model response (26.1)", () => {
+    it("defaults pre-attribution turn records to copilot_chat", async () => {
+        const contexts: Array<ReturnType<typeof getCurrentUseCase>> = [];
+        const legacyCall: ScriptedCall = async function* () {
+            contexts.push(getCurrentUseCase());
+            yield completedResp(assistantText("done"));
+        };
+        const { runtime, repo, usage } = makeRuntime({
+            models: [legacyCall],
+        });
+        const turnId = await newTurn(runtime);
+        const legacyLog = await repo.read(turnId);
+        if (legacyLog[0].type !== "turn_created") {
+            throw new Error("fixture has no turn_created event");
+        }
+        delete legacyLog[0].analytics;
+        repo.seed(legacyLog);
+
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+
+        expect(outcome?.status).toBe("completed");
+        expect(contexts).toEqual([
+            { useCase: "copilot_chat", agentName: "copilot" },
+        ]);
+        expect(usage.reports[0].analytics).toEqual({
+            useCase: "copilot_chat",
+        });
+    });
+
     it("runs one model step to completion with exact persisted request", async () => {
         const { runtime, repo, models, bus, usage } = makeRuntime({
             models: [
@@ -486,6 +517,7 @@ describe("plain model response (26.1)", () => {
         expect(usage.reports).toEqual([
             {
                 agentId: "copilot",
+                analytics: { useCase: "copilot_chat" },
                 model: defaultAgent.model,
                 usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
             },
@@ -994,6 +1026,50 @@ describe("automatic permission classification (26.4)", () => {
 // ---------------------------------------------------------------------------
 
 describe("human-dependent tools", () => {
+    it("restores persisted analytics for the initial and resumed advances", async () => {
+        const contexts: Array<ReturnType<typeof getCurrentUseCase>> = [];
+        const respondWithContext = (...events: LlmStreamEvent[]): ScriptedCall =>
+            async function* () {
+                contexts.push(getCurrentUseCase());
+                yield* events;
+            };
+        const { runtime, repo, usage } = makeRuntime({
+            models: [
+                respondWithContext(
+                    completedResp(assistantCalls(toolCallPart("H", "ask-human"))),
+                ),
+                respondWithContext(completedResp(assistantText("done"))),
+            ],
+        });
+        const analytics = {
+            useCase: "live_note_agent" as const,
+            subUseCase: "manual",
+        };
+        const turnId = await newTurn(runtime, { analytics });
+
+        const first = await advanceAndSettle(runtime, turnId);
+        expect(first.outcome?.status).toBe("suspended");
+
+        const second = await advanceAndSettle(runtime, turnId, {
+            type: "async_tool_result",
+            toolCallId: "H",
+            result: { output: "42", isError: false },
+        });
+        expect(second.outcome?.status).toBe("completed");
+
+        const [created] = await persisted(repo, turnId);
+        expect(created).toMatchObject({ type: "turn_created", analytics });
+        expect(contexts).toEqual([
+            { ...analytics, agentName: "copilot" },
+            { ...analytics, agentName: "copilot" },
+        ]);
+        expect(usage.reports).toHaveLength(2);
+        expect(usage.reports.map((report) => report.analytics)).toEqual([
+            analytics,
+            analytics,
+        ]);
+    });
+
     it("ask-human suspends as a pending async tool when a human is available", async () => {
         const { runtime } = makeRuntime({
             models: [

@@ -1,6 +1,7 @@
 import {
     generateObject,
     NoObjectGeneratedError,
+    type JSONValue,
     type LanguageModel,
     type LanguageModelUsage,
 } from "ai";
@@ -23,6 +24,15 @@ export interface GenerateObjectSafeOptions<T> {
      * run on a local model should enable this.
      */
     retry?: boolean;
+    /**
+     * Extra generation options forwarded verbatim to generateObject on both
+     * attempts — the shape directCallReasoningOptions returns (providerOptions
+     * for the effort mapping, maxOutputTokens for the Anthropic budget floor).
+     */
+    generateOptions?: {
+        providerOptions?: Record<string, Record<string, JSONValue>>;
+        maxOutputTokens?: number;
+    };
 }
 
 export interface GenerateObjectSafeResult<T> {
@@ -47,6 +57,7 @@ export async function generateObjectSafe<T>(
             ...(options.system ? { instructions: options.system } : {}),
             prompt: options.prompt,
             schema: options.schema,
+            ...(options.generateOptions ?? {}),
         });
         return { object: result.object, usage: result.usage };
     } catch (error) {
@@ -71,6 +82,7 @@ export async function generateObjectSafe<T>(
                 instructions: system,
                 prompt: options.prompt,
                 schema: options.schema,
+                ...(options.generateOptions ?? {}),
             });
             return { object: result.object, usage: result.usage };
         } catch (retryError) {

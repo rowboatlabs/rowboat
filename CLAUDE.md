@@ -117,8 +117,8 @@ Long-form docs for specific features. Read the relevant file before making chang
 
 ### LLM configuration
 - Config file: `~/.rowboat/config/models.json` (v2; v1 files are migrated on boot by `core/models/migrate.ts`)
-- Schema: `{ version: 2, providers: { <id>: { flavor, apiKey?, baseURL?, … } }, assistantModel?: { provider, model }, taskModels?: { knowledgeGraph?, meetingNotes?, liveNoteAgent?, autoPermissionDecision?, chatTitle? }, deferBackgroundTasks? }`
-- Providers carry credentials only (no model fields) — model lists are always fetched live via the unified catalog (`core/models/catalog.ts`, `models:list` IPC). Model choices live in `assistantModel` (the one primary) and `taskModels` (optional overrides that otherwise inherit the assistant).
+- Schema: `{ version: 2, providers: { <id>: { flavor, apiKey?, baseURL?, … } }, assistantModel?: { provider, model, effort? }, taskModels?: { knowledgeGraph?, meetingNotes?, liveNoteAgent?, autoPermissionDecision?, chatTitle?, backgroundTask?, subagent? }, deferBackgroundTasks? }`
+- Providers carry credentials only (no model fields) — model lists are always fetched live via the unified catalog (`core/models/catalog.ts`, `models:list` IPC). Model choices live in `assistantModel` (the one primary) and `taskModels` (optional overrides that otherwise inherit the assistant). Every choice is a `{ provider, model, effort? }` pair — `effort` is the reasoning effort picked with the model (`low`/`medium`/`high`; missing, `null`, or `"auto"` all mean Auto = provider default).
 - Models catalog cache: `~/.rowboat/config/models.dev.json` (OpenAI/Anthropic/Google only)
 
 ### Add a new shared type

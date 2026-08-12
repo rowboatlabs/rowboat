@@ -192,6 +192,12 @@ export class SessionsImpl implements ISessions {
                     ? { previousTurnId: state.latestTurnId }
                     : [],
                 input,
+                analytics: {
+                    useCase: config.useCase ?? "copilot_chat",
+                    ...(config.subUseCase
+                        ? { subUseCase: config.subUseCase }
+                        : {}),
+                },
                 config: {
                     humanAvailable: true,
                     ...(config.autoPermission === undefined
@@ -381,14 +387,67 @@ export class SessionsImpl implements ISessions {
         });
     }
 
-    // §9.4: removes the session file and index entry only. Referenced turn
-    // files stay behind as inert orphans.
+    // §9.4: removes the session file, the index entry, and every turn file
+    // the session references (following sub-agent child-turn links). Live
+    // advances are aborted first so nothing appends to a deleted file.
+    // Session-file-first ordering: a crash mid-cleanup leaves unreferenced
+    // turn files behind — the same inert orphans the pre-cleanup design
+    // produced, invisible and harmless.
     async deleteSession(sessionId: string): Promise<void> {
+        // Abort every live advance this process is driving for the session
+        // and wait for them to settle (mirrors stopTurn's abort path).
+        const advances = [...this.active.values()]
+            .flatMap((set) => [...set])
+            .filter((advance) => advance.sessionId === sessionId);
+        for (const advance of advances) {
+            advance.controller.abort();
+        }
+        await Promise.all(
+            advances.map((a) => a.execution.outcome.catch(() => undefined)),
+        );
+
         await this.sessionRepo.withLock(sessionId, async () => {
+            // Collect the reference chain before the session file disappears —
+            // turns are only discoverable through it. A corrupt session file
+            // still gets deleted; its turns stay orphaned as before.
+            let turnIds: string[] = [];
+            try {
+                const state = reduceSession(await this.sessionRepo.read(sessionId));
+                turnIds = state.turns.map((ref) => ref.turnId);
+            } catch {
+                // Unreadable session — nothing to traverse.
+            }
             await this.sessionRepo.delete(sessionId);
             this.index.remove(sessionId);
             this.sessionBus.publish({ kind: "index-changed", sessionId, entry: null });
+            await this.deleteTurnFiles(turnIds);
         });
+    }
+
+    // Best-effort removal of a session's turn files, following spawn-agent
+    // child links breadth-first so sub-agent transcripts go too. Individual
+    // failures are swallowed: a leftover file is an inert orphan, not a fault.
+    private async deleteTurnFiles(rootTurnIds: string[]): Promise<void> {
+        const seen = new Set<string>();
+        const queue = [...rootTurnIds];
+        while (queue.length > 0) {
+            const turnId = queue.shift()!;
+            if (seen.has(turnId)) {
+                continue;
+            }
+            seen.add(turnId);
+            try {
+                const turn = await this.turnRuntime.getTurn(turnId);
+                queue.push(...childTurnIdsOf(reduceTurn(turn.events)));
+            } catch {
+                // Missing or corrupt turn — still attempt the delete below.
+            }
+            try {
+                await this.turnRuntime.deleteTurn(turnId);
+            } catch {
+                // Leftovers are inert orphans.
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -604,4 +663,28 @@ function defaultTitle(input: z.infer<typeof UserMessage>): string {
         return "New session";
     }
     return collapsed.length > 80 ? `${collapsed.slice(0, 79)}…` : collapsed;
+}
+
+// spawn-agent records one durable 'subagent' tool_progress entry per child
+// turn (see spawn-agent.ts) — the same parent→child link the UI uses to
+// fetch child transcripts. Extracting it here lets session deletion (and the
+// retention sweep) follow the chain and treat sub-agent turn files correctly.
+export function childTurnIdsOf(state: TurnState): string[] {
+    const ids: string[] = [];
+    for (const toolCall of state.toolCalls) {
+        for (const progress of toolCall.progress) {
+            const entry = progress.progress;
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+                continue;
+            }
+            const { kind, childTurnId } = entry as {
+                kind?: unknown;
+                childTurnId?: unknown;
+            };
+            if (kind === "subagent" && typeof childTurnId === "string") {
+                ids.push(childTurnId);
+            }
+        }
+    }
+    return ids;
 }

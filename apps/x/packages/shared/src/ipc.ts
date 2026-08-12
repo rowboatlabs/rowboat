@@ -1,12 +1,14 @@
 import { z } from 'zod';
+import { UseCase } from './analytics.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmProvider, ModelRef, ReasoningEffort } from './models.js';
+import { LlmProvider, ModelRef, ModelSelection, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
+import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -22,16 +24,62 @@ import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
-import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
+import { GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { TurnLimitsSettingsSchema } from './turn-limits.js';
+import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
 // ============================================================================
+
+// Everything the in-app composer's onSubmit carries, so a bar question
+// behaves exactly like a composer message: mentions and attachments flow
+// into the turn, and the per-turn config (search/code/permissions) plus the
+// bar's model/effort picks are applied by the app window before submitting.
+const QuickAskSubmitPayload = z.object({
+  text: z.string(),
+  mentions: z
+    .array(
+      z.object({
+        id: z.string(),
+        path: z.string(),
+        displayName: z.string(),
+        lineNumber: z.number().optional(),
+      }),
+    )
+    .optional(),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        path: z.string(),
+        filename: z.string(),
+        mimeType: z.string(),
+        isImage: z.boolean(),
+        size: z.number(),
+        thumbnailUrl: z.string().optional(),
+      }),
+    )
+    .optional(),
+  searchEnabled: z.boolean().optional(),
+  codeMode: z.enum(['claude', 'codex']).optional(),
+  permissionMode: z.enum(['manual', 'auto']).optional(),
+  model: ModelRef.nullable().optional(),
+  reasoningEffort: ReasoningEffort.nullable().optional(),
+});
+
+// Which chat the bar's submits land in (title shown as the bar's
+// destination chip) plus recents for its switcher — pushed by the app
+// window whenever tabs/runs change.
+const QuickAskChatContext = z.object({
+  activeRunId: z.string().nullable(),
+  activeTitle: z.string().nullable(),
+  recent: z.array(z.object({ id: z.string(), title: z.string() })),
+});
 
 const KnowledgeSourceScopeSchema = z.object({
   type: z.string(),
@@ -70,7 +118,7 @@ const UpdaterStatusSchema = z.object({
   reason: z.enum(['dev', 'platform', 'not-in-applications']).optional(),
   newVersion: z.string().optional(),
   // Markdown body of the staged update's GitHub release, when known — the
-  // restart card renders it as "What's new".
+  // restart card renders it verbatim.
   releaseNotes: z.string().optional(),
   error: z.string().optional(),
   lastCheckedAt: z.number().optional(),
@@ -171,6 +219,31 @@ const ipcSchemas = {
     }),
     res: z.object({
       ok: z.literal(true),
+    }),
+  },
+  // Pick an image from disk for insertion into a document. Returns the bytes
+  // rather than a path: the renderer holds them in its edit set until save.
+  'workspace:pickImage': {
+    req: z.object({}),
+    res: z.object({
+      picked: z.boolean(),
+      name: z.string().optional(),
+      /** Lowercase extension without the dot. */
+      ext: z.string().optional(),
+      dataBase64: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Copy a workspace file OUT to a user-chosen location. The destination comes
+  // from the OS save dialog, which is also what confirms any overwrite.
+  'workspace:exportCopy': {
+    req: z.object({
+      path: RelPath,
+    }),
+    res: z.object({
+      saved: z.boolean(),
+      dest: z.string().optional(),
+      error: z.string().optional(),
     }),
   },
   'workspace:didChange': {
@@ -556,6 +629,8 @@ const ipcSchemas = {
       input: UserMessage,
       config: z.object({
         agent: RequestedAgent,
+        useCase: UseCase.optional(),
+        subUseCase: z.string().optional(),
         autoPermission: z.boolean().optional(),
         maxModelCalls: z.number().int().positive().optional(),
         reasoningEffort: ReasoningEffort.optional(),
@@ -646,6 +721,10 @@ const ipcSchemas = {
     req: BackgroundTaskAgentEvent,
     res: z.null(),
   },
+  'todo:events': {
+    req: TodoEvent,
+    res: z.null(),
+  },
   // The unified model catalog (core/models/catalog.ts): every connected
   // provider — Rowboat gateway, ChatGPT subscription (codex), BYOK keys,
   // local/custom endpoints — listed the same way, with per-provider status.
@@ -675,8 +754,9 @@ const ipcSchemas = {
           reasoning: z.boolean().optional(),
         })),
       })),
-      // The effective runtime default (what runs when nothing is picked).
-      defaultModel: ModelRef.nullable(),
+      // The effective runtime default (what runs when nothing is picked),
+      // effort included — it seeds new chats' composer state.
+      defaultModel: ModelSelection.nullable(),
     }),
   },
   'models:test': {
@@ -762,15 +842,15 @@ const ipcSchemas = {
         baseURL: z.string().optional(),
         hasApiKey: z.boolean(),
       })),
-      assistantModel: ModelRef.nullable(),
+      assistantModel: ModelSelection.nullable(),
       taskModels: z.object({
-        knowledgeGraph: ModelRef.nullable(),
-        meetingNotes: ModelRef.nullable(),
-        liveNoteAgent: ModelRef.nullable(),
-        autoPermissionDecision: ModelRef.nullable(),
-        chatTitle: ModelRef.nullable(),
-        backgroundTask: ModelRef.nullable(),
-        subagent: ModelRef.nullable(),
+        knowledgeGraph: ModelSelection.nullable(),
+        meetingNotes: ModelSelection.nullable(),
+        liveNoteAgent: ModelSelection.nullable(),
+        autoPermissionDecision: ModelSelection.nullable(),
+        chatTitle: ModelSelection.nullable(),
+        backgroundTask: ModelSelection.nullable(),
+        subagent: ModelSelection.nullable(),
       }),
       deferBackgroundTasks: z.boolean(),
     }),
@@ -780,15 +860,15 @@ const ipcSchemas = {
   // assistant model again). taskModels merges per-key.
   'models:updateConfig': {
     req: z.object({
-      assistantModel: ModelRef.nullable().optional(),
+      assistantModel: ModelSelection.nullable().optional(),
       taskModels: z.object({
-        knowledgeGraph: ModelRef.nullable().optional(),
-        meetingNotes: ModelRef.nullable().optional(),
-        liveNoteAgent: ModelRef.nullable().optional(),
-        autoPermissionDecision: ModelRef.nullable().optional(),
-        chatTitle: ModelRef.nullable().optional(),
-        backgroundTask: ModelRef.nullable().optional(),
-        subagent: ModelRef.nullable().optional(),
+        knowledgeGraph: ModelSelection.nullable().optional(),
+        meetingNotes: ModelSelection.nullable().optional(),
+        liveNoteAgent: ModelSelection.nullable().optional(),
+        autoPermissionDecision: ModelSelection.nullable().optional(),
+        chatTitle: ModelSelection.nullable().optional(),
+        backgroundTask: ModelSelection.nullable().optional(),
+        subagent: ModelSelection.nullable().optional(),
       }).optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
@@ -1066,12 +1146,41 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({ success: z.boolean() }),
   },
-  // Deep-link to a macOS Privacy & Security pane (permission dialogs).
+  // Deep-link to a macOS Privacy & Security pane (permission dialogs and the
+  // Settings → Permissions panel). 'notifications' opens the OS notification
+  // settings (not under Privacy on either platform).
   'app:openPrivacySettings': {
     req: z.object({
-      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring']),
+      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring', 'notifications']),
     }),
     res: z.object({ success: z.boolean() }),
+  },
+  // Aggregate OS-permission snapshot for Settings → Permissions. States are
+  // HONEST: 'unknown' means the OS gives us no way to read it (input
+  // monitoring outside a call, notifications, unprobed automation) — the UI
+  // must say so rather than fake a verdict. 'not-required' rows are hidden
+  // (that permission doesn't exist on this platform).
+  'permissions:getStatus': {
+    req: z.null(),
+    res: z.object({
+      platform: z.enum(['darwin', 'win32', 'linux']),
+      microphone: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      camera: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      screenRecording: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      inputMonitoring: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+      notifications: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+    }),
+  },
+  // Fire the OS grant flow for one permission where a programmatic path
+  // exists: mic/camera native prompts, or re-arming the input-monitoring
+  // key hook (its consent prompt). Returns the state afterwards.
+  'permissions:request': {
+    req: z.object({
+      permission: z.enum(['microphone', 'camera', 'input-monitoring']),
+    }),
+    res: z.object({
+      state: z.enum(['granted', 'denied', 'not-determined', 'restricted', 'unknown', 'not-required']),
+    }),
   },
   // Relaunch the app — macOS requires it for a fresh Screen Recording grant
   // to take effect.
@@ -1080,14 +1189,24 @@ const ipcSchemas = {
     res: z.object({}),
   },
   // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
-  // Bar → main: relay a typed/spoken question into the app window's chat.
+  // Bar → main: relay a composer submit into the app window's chat.
   'quickAsk:submit': {
-    req: z.object({ text: z.string() }),
+    req: QuickAskSubmitPayload,
     res: z.object({}),
   },
-  // Push channel: main → app window with the relayed question.
+  // Push channel: main → app window with the relayed submit.
   'quick-ask:submit': {
-    req: z.object({ text: z.string() }),
+    req: QuickAskSubmitPayload,
+    res: z.null(),
+  },
+  // Bar → main → app window: stop the in-flight turn (the bar composer's
+  // send button becomes Stop while processing, same as in the app).
+  'quickAsk:stop': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  'quick-ask:stop': {
+    req: z.null(),
     res: z.null(),
   },
   // Bar → main: dismiss the bar (Esc).
@@ -1095,6 +1214,69 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
+  // Main → bar: the window was just summoned. viaShortcut distinguishes the
+  // global chord (⌥⇧Space — hold-to-talk starts capturing immediately) from
+  // programmatic shows (the discoverability toast), which must not touch
+  // the mic.
+  'quick-ask:summoned': {
+    req: z.object({ viaShortcut: z.boolean() }),
+    res: z.null(),
+  },
+  // The companion window's current role: summoned Spotlight bar, pinned
+  // call pill, or hidden. `collapsed` is the pinned pill tucked down to just
+  // the mascot (voice-to-voice). Pushed on every transition; the invoke
+  // covers the load race (the window may finish loading after a transition
+  // fired).
+  'quickAsk:getMode': {
+    req: z.null(),
+    res: z.object({
+      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      collapsed: z.boolean(),
+      // Which surface the pinned role expands to: untuck returns you to the
+      // surface you tucked FROM — 'card' (the bar-style text card, for
+      // bar-originated sessions; screen share keeps the card, its consent
+      // badge rides the card's strip) or 'pill' (only a live CAMERA forces
+      // the pill's tiles).
+      surface: z.enum(['card', 'pill']),
+    }),
+  },
+  'quick-ask:mode': {
+    req: z.object({
+      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      collapsed: z.boolean(),
+      surface: z.enum(['card', 'pill']),
+    }),
+    res: z.null(),
+  },
+  // Bar → main → app window: tuck the text into the mascot. The app starts
+  // the voice-preset call (mascot-only floating surface) — or, if a call is
+  // already live, just minimizes it to the floating surface.
+  'quickAsk:tuck': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // App window → main: pop the ACTIVE chat out into the floating companion,
+  // landing on the expanded text card (the mirror of the card's ↗). Starts
+  // a companion session so the popped chat survives blur (tucking to the
+  // mascot instead of dying like a plain summon would).
+  'quickAsk:popOut': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  'quick-ask:tuck': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Pill ⇄ tucked-mascot presentation of the pinned role (main resizes the
+  // window in place and re-pushes quick-ask:mode).
+  'quickAsk:setPinnedCollapsed': {
+    req: z.object({ collapsed: z.boolean() }),
+    res: z.object({}),
+  },
+  // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
+  // whether a reply is SPOKEN now follows the question's modality — spoken
+  // questions get spoken replies, typed ones stay silent — plus the
+  // explicit speaker mute on the Skipper.)
   // App window → main: open the bar (the discoverability toast's "Try it").
   'quickAsk:show': {
     req: z.null(),
@@ -1147,6 +1329,26 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // App window → main → bar: the destination-chat context (see
+  // QuickAskChatContext). Cached in main and replayed on bar load.
+  'quickAsk:chatContext': {
+    req: QuickAskChatContext,
+    res: z.object({}),
+  },
+  'quick-ask:chat-context': {
+    req: QuickAskChatContext,
+    res: z.null(),
+  },
+  // Bar → main → app window: rebind the bar (= the app's active chat tab)
+  // to one of the recent chats from the chip's switcher.
+  'quickAsk:selectChat': {
+    req: z.object({ runId: z.string() }),
+    res: z.object({}),
+  },
+  'quick-ask:select-chat': {
+    req: z.object({ runId: z.string() }),
+    res: z.null(),
+  },
   // Bar → main: start a fresh chat for the next question (the app stays in
   // the background; only the conversation resets).
   'quickAsk:newChat': {
@@ -1157,11 +1359,6 @@ const ipcSchemas = {
   'quick-ask:new-chat': {
     req: z.null(),
     res: z.null(),
-  },
-  // Bar → main: grow/shrink the window as the response area changes.
-  'quickAsk:resize': {
-    req: z.object({ height: z.number() }),
-    res: z.object({}),
   },
   // App window → main: mirror of the in-flight answer for the bar
   // (streaming text while processing, final text when done).
@@ -2195,6 +2392,11 @@ const ipcSchemas = {
       // User mute: mic audio and frame capture are both paused.
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
+      // Output mute: replies are not spoken while set (input mute is micMuted).
+      speakerMuted: z.boolean(),
+      // High-level "what's happening" while a turn runs ("Searching the
+      // web…", "Reasoning…") — tool NAMES only, never arguments.
+      activityText: z.string().nullable(),
       // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
       // A quick ⌘ tap locked hands-free capture (until the next tap).
@@ -2226,6 +2428,8 @@ const ipcSchemas = {
           cameraOn: z.boolean(),
           micMuted: z.boolean(),
           screenSharing: z.boolean(),
+          speakerMuted: z.boolean(),
+          activityText: z.string().nullable(),
           interimText: z.string().nullable(),
           pttLocked: z.boolean(),
           responseText: z.string().nullable(),
@@ -2241,7 +2445,7 @@ const ipcSchemas = {
   // typed message from the popout's input.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
       text: z.string().optional(),
     }),
     res: z.object({}),
@@ -2254,6 +2458,11 @@ const ipcSchemas = {
       cameraOn: z.boolean(),
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
+      // Output mute: replies are not spoken while set (input mute is micMuted).
+      speakerMuted: z.boolean(),
+      // High-level "what's happening" while a turn runs ("Searching the
+      // web…", "Reasoning…") — tool NAMES only, never arguments.
+      activityText: z.string().nullable(),
       interimText: z.string().nullable(),
       pttLocked: z.boolean(),
       responseText: z.string().nullable(),
@@ -2264,10 +2473,48 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
       text: z.string().optional(),
     }),
     res: z.null(),
+  },
+  // Renderer → main: whether a screen share (call or quick-ask) is currently
+  // live. Gates the assistant's screen-pointer tool — pointing at a screen
+  // the user isn't sharing would be pure confusion — and tears the pointer
+  // overlay down the moment the share ends.
+  'screenPointer:setShareActive': {
+    req: z.object({ active: z.boolean() }),
+    res: z.object({}),
+  },
+  // Push channel: main → pointer-overlay window with the current pointer
+  // state. `nonce` re-triggers the ping animation when the assistant points
+  // twice at the same spot; coordinates are fractions of the display.
+  'screen-pointer:state': {
+    req: z.object({
+      visible: z.boolean(),
+      x: z.number(),
+      y: z.number(),
+      label: z.string().nullable(),
+      nonce: z.number(),
+    }),
+    res: z.null(),
+  },
+  // Overlay window → fetch the current pointer state on mount. Same race as
+  // video:getPopoutState: the did-finish-load replay can fire before the
+  // React listener registers, and a missed push means an invisible pointer.
+  'screenPointer:getState': {
+    req: z.null(),
+    res: z.object({
+      state: z
+        .object({
+          visible: z.boolean(),
+          x: z.number(),
+          y: z.number(),
+          label: z.string().nullable(),
+          nonce: z.number(),
+        })
+        .nullable(),
+    }),
   },
   'meeting:checkScreenPermission': {
     req: z.null(),
@@ -2449,6 +2696,299 @@ const ipcSchemas = {
         isActive: z.boolean(),
         objective: z.string(),
       })),
+    }),
+  },
+  // Todo (home to-do list) channels
+  'todo:get': {
+    req: z.null(),
+    res: z.object({
+      list: TodoListSchema,
+      // Keys of items with a run currently in flight — ephemeral state, never
+      // in the file; the renderer overlays spinners from this + todo:events.
+      running: z.array(z.string()),
+      // Item key → sessionId for items whose thread exists; "open in chat"
+      // binds the chat dock to that session.
+      sessions: z.record(z.string(), z.string()),
+      // Pending planner suggestions (todo/suggestions.md) — accepted onto
+      // the list or declined, never auto-added.
+      suggestions: z.array(z.string()),
+    }),
+  },
+  // Full-model save from the renderer. Core re-normalizes keys and merges
+  // against disk so receipts that landed after the renderer's last read
+  // survive stale saves.
+  'todo:save': {
+    req: z.object({
+      list: TodoListSchema,
+    }),
+    res: z.object({
+      success: z.boolean(),
+      list: TodoListSchema.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'todo:addItem': {
+    req: z.object({
+      text: z.string(),
+      // Fire the item's run immediately (composer delegate / @rowboat typed).
+      run: z.boolean(),
+      // Files given at creation — copied into todo/attachments and linked
+      // on the item's line.
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      // Composer model selection — overrides the todo agent's model when
+      // the item runs now.
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Fire a run for one item, identified by its normalized line text.
+  // Fire-and-forget: progress and completion arrive on todo:events.
+  'todo:runItem': {
+    req: z.object({
+      key: z.string(),
+      context: z.string().optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Stop the live run on one item (or `chat:<sessionId>` thread) — the
+  // mistaken-assign escape hatch. The cancelled turn settles as 'Stopped'
+  // on todo:events, which clears the spinner.
+  'todo:stopRun': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Home-stream chat threads: a plain message from the home composer starts
+  // a copilot session; replies continue it. Events ride todo:events keyed
+  // `chat:<sessionId>`.
+  'todo:startChat': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      sessionId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'todo:chatReply': {
+    req: z.object({
+      sessionId: z.string(),
+      message: z.string(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The compact bubble lens over any session (stream threads).
+  'todo:getSessionConversation': {
+    req: z.object({
+      sessionId: z.string(),
+    }),
+    res: z.object({
+      bubbles: z.array(TodoChatBubbleSchema),
+    }),
+  },
+  // Add a sub-item under an existing top-level item (one level only).
+  'todo:addSubItem': {
+    req: z.object({
+      parentKey: z.string(),
+      text: z.string(),
+      run: z.boolean(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Compact conversation view of an item's session: each turn's user message
+  // and the agent's final reply (with todo-report links). Derived, not stored.
+  'todo:getConversation': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      sessionId: z.string().nullable(),
+      bubbles: z.array(TodoChatBubbleSchema),
+    }),
+  },
+  // Inline comment on an item — the next user message in its session
+  // (answers a pending ask-human question when one is waiting). Reopens a
+  // checked item. Fire-and-forget like todo:runItem.
+  'todo:comment': {
+    req: z.object({
+      key: z.string(),
+      message: z.string(),
+      attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+      })).optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).optional(),
+      // Chat-parity permission posture for the run: 'auto' (default) uses
+      // the permission judge; 'manual' suspends for the user's approval.
+      permissionMode: z.enum(['auto', 'manual']).optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Archive checked items (receipts intact) to todo/archive/<YYYY-MM>.md.
+  'todo:clearCompleted': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+      archived: z.number().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Dismiss = move to the archive (never delete); restorable from the
+  // "Done & dismissed" section. wasProposed lets the renderer offer the
+  // "don't suggest things like this" teaching affordance.
+  'todo:dismiss': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      wasProposed: z.boolean().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Accept a pending suggestion: it leaves the tray and joins the list
+  // (with its via-rowboat badge); recorded as a positive 'kept' signal.
+  'todo:acceptSuggestion': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Decline a pending suggestion: leaves the tray, recorded as 'dismissed'.
+  'todo:declineSuggestion': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The planner's Home-surface controls: on/off + frequency presets.
+  'todo:getPlanner': {
+    req: z.null(),
+    res: z.object({
+      slug: z.string().nullable(),
+      active: z.boolean(),
+      frequency: z.enum(['morning', 'twice', 'thrice']),
+    }),
+  },
+  'todo:setPlanner': {
+    req: z.object({
+      active: z.boolean().optional(),
+      frequency: z.enum(['morning', 'twice', 'thrice']).optional(),
+    }),
+    res: z.object({
+      slug: z.string().nullable(),
+      active: z.boolean(),
+      frequency: z.enum(['morning', 'twice', 'thrice']),
+    }),
+  },
+  // "Don't suggest things like this" — writes a rule into the Your-rules
+  // section of todo/preferences.md and records the signal.
+  'todo:teach': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Recent archived items (done + dismissed), newest first.
+  'todo:listArchived': {
+    req: z.null(),
+    res: z.object({
+      items: z.array(z.object({
+        month: z.string(),
+        blockIndex: z.number(),
+        date: z.string().nullable(),
+        item: TodoItemSchema,
+      })),
+    }),
+  },
+  // Permanently delete an archived item — the one true delete, only
+  // reachable from the archive. Same handle contract as todo:restore.
+  'todo:deleteArchived': {
+    req: z.object({
+      month: z.string(),
+      blockIndex: z.number(),
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Bring an archived item back onto the list (unchecked). The
+  // (month, blockIndex) handle comes from todo:listArchived; key guards
+  // against staleness.
+  'todo:restore': {
+    req: z.object({
+      month: z.string(),
+      blockIndex: z.number(),
+      key: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
     }),
   },
   // Background-task channels
@@ -2712,6 +3252,27 @@ const ipcSchemas = {
     req: TurnLimitsSettingsSchema,
     res: z.object({
       success: z.literal(true),
+    }),
+  },
+  // Storage retention (auto-delete old chats & task transcripts)
+  'retention:getSettings': {
+    req: z.null(),
+    res: RetentionSettingsSchema,
+  },
+  'retention:setSettings': {
+    req: RetentionSettingsUpdateSchema,
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // One-time first-run notice: returns { show: true } exactly once (when
+  // retention is enabled and the notice hasn't been shown), marking it shown.
+  // Same pull-on-boot pattern as app:consumeUpdateInfo.
+  'retention:consumeFirstRunNotice': {
+    req: z.null(),
+    res: z.object({
+      show: z.boolean(),
+      chatDays: z.number().nullable(),
     }),
   },
 } as const;

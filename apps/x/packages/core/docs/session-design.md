@@ -96,8 +96,8 @@ interface ISessionRepo {
 - `create` fails if the file exists.
 - `listSessionIds` enumerates the partition directories for the startup
   scan.
-- `delete` removes the session file only. Turn files referenced by the
-  session are left in place as harmless orphans (see section 9, deletion).
+- `delete` removes the session file only. Deleting the referenced turn
+  files is the session layer's job (see section 9.4, deletion).
 - `withLock` is in-process per-session exclusion, mirroring the turn repo.
 
 ## 5. Event schemas
@@ -354,9 +354,15 @@ runtime's job; the session layer passes its errors through.
 
 ### 9.4 Deletion
 
-`deleteSession` removes the session file and the index entry, and publishes
-`session-index-changed`. Referenced turn files are retained as orphans:
-turns are only discoverable by reference, so orphaned files are inert.
+`deleteSession` aborts any live advances for the session (mirroring
+`stopTurn`), then removes the session file, the index entry, and every turn
+file the session references — following spawn-agent's durable `subagent`
+tool_progress links so sub-agent child turn files are removed too — and
+publishes `session-index-changed`. The session file goes first: turns are
+only discoverable by reference, so a crash mid-cleanup leaves unreferenced
+turn files behind — the same inert orphans the v1 design retained on every
+delete. Turn-file removal is best-effort (`ITurnRepo.delete` is idempotent;
+missing files are not errors) and never blocks the session delete itself.
 Deleting an entity's file is not a violation of append-only discipline,
 which governs mutation of live logs, not their removal.
 

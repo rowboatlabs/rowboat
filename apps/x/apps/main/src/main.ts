@@ -3,13 +3,14 @@ import path from "node:path";
 import os from "node:os";
 import {
   setupIpcHandlers,
-  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady,
+  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady, startRetentionSweep,
   startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
+  startTodoWatcher,
   startWorkspaceWatcher,
   stopRunsWatcher,
   stopServicesWatcher,
@@ -29,6 +30,7 @@ import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js"
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { DEV_SERVER_URL } from "./dev-server.js";
 import { init as initChannels } from "@x/core/dist/channels/service.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
@@ -55,13 +57,14 @@ import started from "electron-squirrel-startup";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
+import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { setupBrowserExtensions } from "./browser/extensions.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
+import { screenPointerService } from "./screen-pointer.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
   DEEP_LINK_SCHEME,
@@ -432,7 +435,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   // Returns true when the URL was external and routed to the system browser.
   const routeExternalNavigation = (url: string): boolean => {
     const isInternal =
-      url.startsWith("app://") || url.startsWith("http://localhost:5173");
+      url.startsWith("app://") || url.startsWith(DEV_SERVER_URL);
     if (isInternal) return false;
     shell.openExternal(url);
     return true;
@@ -468,7 +471,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   if (app.isPackaged) {
     win.loadURL("app://-/index.html");
   } else {
-    win.loadURL("http://localhost:5173");
+    win.loadURL(DEV_SERVER_URL);
   }
 }
 
@@ -523,6 +526,7 @@ app.whenReady().then(async () => {
 
   registerBrowserControlService(new ElectronBrowserControlService());
   registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
+  registerScreenPointerService(screenPointerService);
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
@@ -662,6 +666,8 @@ app.whenReady().then(async () => {
     markSessionsIndexReady();
   }
   startSessionsWatcher();
+  // Daily auto-delete of old chats & task transcripts (delayed first run).
+  startRetentionSweep();
   // Turn event spine: durable events of every turn (session, headless,
   // sub-agent) → renderer, for turnId-keyed live views.
   startTurnEventsWatcher();
@@ -685,6 +691,12 @@ app.whenReady().then(async () => {
 
   // start bg-task agent event watcher (forwards bus → renderer)
   startBackgroundTaskAgentWatcher();
+
+  // start todo event watcher (forwards bus → renderer)
+  startTodoWatcher();
+
+  // seed the morning planner background task (once, best-effort)
+  void import("@x/core/dist/todo/planner-task.js").then((m) => m.ensureMorningPlannerTask());
 
   // start live-note scheduler (cron / window)
   initLiveNoteScheduler();

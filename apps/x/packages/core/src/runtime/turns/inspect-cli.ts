@@ -74,7 +74,10 @@ async function inspectTurn(
     full: boolean,
 ): Promise<void> {
     const state = reduceTurn(events);
-    const prefix = await resolver.resolve(state.definition.context);
+    const prefix = await resolver.resolve(
+        state.definition.context,
+        state.definition.agent.resolved.model,
+    );
     const agent = await resolver.resolveAgent(state.definition.agent.resolved);
 
     const inherited =

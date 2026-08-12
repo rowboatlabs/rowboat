@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
@@ -12,15 +12,17 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
-import { ChatEmptyState } from './components/chat-empty-state';
-import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
-import { ChatMessageAttachments } from '@/components/chat-message-attachments'
+import { ChatSessionPane, ChatSessionComposer } from './components/chat-session';
+// Value import: the Home to-do surface mounts a standalone composer directly
+// (not tab-bound); chat tabs render theirs through ChatSessionComposer.
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
 import { DocxFileViewer } from '@/components/docx-file-viewer';
+import { PptxEditor } from '@/components/pptx-editor';
 import { PersistentViewerCache } from '@/components/persistent-viewer-cache';
 import { UnsupportedFileViewer } from '@/components/unsupported-file-viewer';
 import { getViewerType, isCacheableViewerPath } from '@/lib/file-types';
@@ -32,43 +34,21 @@ import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
-import { CodingRunBlock } from '@/components/coding-run';
-import { SubAgentBlock } from '@/components/sub-agent-block';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
+import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
 import { CodeChat } from '@/components/code/code-chat';
 import { ResizableRightPane } from '@/components/code/resizable-right-pane';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from '@/components/ai-elements/conversation';
-import {
-  Message,
-  MessageContent,
-  MessageCopyButton,
-  MessageResponse,
-} from '@/components/ai-elements/message';
-import {
   type PromptInputMessage,
   type FileMention,
 } from '@/components/ai-elements/prompt-input';
 
-import { TurnActivityIndicator } from '@/components/turn-activity-indicator';
-import { useSmoothedText } from './hooks/useSmoothedText';
-import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
-import { WebSearchResult } from '@/components/ai-elements/web-search-result';
-import { AppActionCard } from '@/components/ai-elements/app-action-card';
-import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
-import { PermissionRequest } from '@/components/ai-elements/permission-request';
-import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision';
-import { TerminalOutput } from '@/components/terminal-output';
-import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { ToolPermissionAutoDecisionEvent, ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -77,11 +57,11 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { SettingsDialog } from "@/components/settings-dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
-import { BillingErrorNotice } from "@/components/billing-error-notice"
 import { CreditCelebration } from "@/components/credit-celebration"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
@@ -96,9 +76,6 @@ import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
-import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
-import { defaultRemarkPlugins } from 'streamdown'
-import remarkBreaks from 'remark-breaks'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import { CaffeinateIndicator } from '@/components/caffeinate-indicator'
 import {
@@ -108,28 +85,19 @@ import {
   type ConversationItem,
   type ToolCall,
   createEmptyChatTabViewState,
-  getWebSearchCardData,
-  getAppActionCardData,
-  getComposioConnectCardData,
   getToolDisplayName,
-  groupConversationItems,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
   isToolCall,
-  isToolGroup,
-  isTurnUsageMessage,
   normalizeToolInput,
-  normalizeToolOutput,
-  parseAttachedFiles,
-  REASONING_EFFORT_LABELS,
-  toToolState,
 } from '@/lib/chat-conversation'
 import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { CALL_VOICE_HOLDER, acquireVoice, releaseVoice, useVoiceOwner, voiceOwnerId } from '@/lib/voice-ownership'
 import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { VideoCallView } from '@/components/video-call-view'
@@ -140,7 +108,6 @@ import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 import { playAckCue, playAlertCue, playPopCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
-import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -148,43 +115,6 @@ type RunEventType = z.infer<typeof RunEvent>
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
   loaded?: boolean
-}
-
-const streamdownComponents = { pre: MarkdownPreOverride }
-
-// Render user messages with markdown so bullets, bold, links, etc. survive the
-// round-trip from the input textarea. `remarkBreaks` turns single newlines
-// into <br> so typed line breaks are preserved without requiring blank lines.
-const userMessageRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks]
-
-function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
-  const smoothText = useSmoothedText(text)
-  return <MessageResponse components={components}>{smoothText}</MessageResponse>
-}
-
-function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
-  const ref = useRef<HTMLPreElement>(null)
-  const stickToBottom = useRef(true)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (el && stickToBottom.current) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [children])
-
-  const handleScroll = useCallback(() => {
-    const el = ref.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-    stickToBottom.current = atBottom
-  }, [])
-
-  return (
-    <pre ref={ref} onScroll={handleScroll} className={className}>
-      {children}
-    </pre>
-  )
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
@@ -675,6 +605,14 @@ const collectFilePaths = (nodes: TreeNode[]): string[] =>
   nodes.flatMap(n => n.kind === 'file' ? [n.path] : (n.children ? collectFilePaths(n.children) : []))
 
 /** A snapshot of which view the user is on */
+// Where the Home composer's next send goes — set by the list's ＋/reply
+// affordances, shown as a destination chip. Null = plain assistant chat.
+export type HomeComposeTarget =
+  | { kind: 'todo'; prefill?: string }
+  | { kind: 'sub'; parentKey: string; parentText: string; prefill?: string }
+  | { kind: 'comment'; key: string; itemText: string; quote?: string }
+  | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
+
 type ViewState =
   | { type: 'chat'; runId: string | null }
   | { type: 'file'; path: string }
@@ -896,6 +834,9 @@ function App() {
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
   // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
+  // Home surface: the to-do list is the primary tab; the legacy dashboard
+  // stays reachable via its Overview toggle.
+  const [homeTab, setHomeTab] = useState<'todos' | 'overview'>('todos')
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
   // Search query pushed into the email view's search box (e.g. the assistant's
@@ -1131,7 +1072,11 @@ function App() {
       if (pttStatusRef.current !== 'idle') break
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
-      if (ttsEnabledRef.current || speakTurnRef.current) {
+      if (
+        (ttsEnabledRef.current || speakTurnRef.current) &&
+        !suppressSpeechTurnRef.current &&
+        !speakerMutedRef.current
+      ) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
         spokeSegmentThisTurnRef.current = true
@@ -1149,6 +1094,11 @@ function App() {
     if (activeIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
+    // Typed turn or speaker muted: no fallback read-aloud.
+    if (suppressSpeechTurnRef.current || speakerMutedRef.current) {
+      turn.pending = false
+      return
+    }
     // Speaking this turn: call TTS, or the quick-ask voice toggle.
     if (!(inCallRef.current ? ttsEnabledRef.current : speakTurnRef.current)) {
       turn.pending = false
@@ -1200,6 +1150,9 @@ function App() {
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice
+  // Which chat (or the call engine) holds the mic — render gating for the
+  // per-chat recording UI reads this instead of "is this the active tab".
+  const voiceOwner = useVoiceOwner()
 
   // Calls: one engine (hands-free voice loop + forced read-aloud TTS + frame
   // capture), started via presets that only differ in device defaults. The
@@ -1218,6 +1171,21 @@ function App() {
   const inCallRef = useRef(false)
   // User explicitly shrank the full-screen call to the floating pill.
   const [callMinimized, setCallMinimized] = useState(false)
+  // A voice session started from the companion (⌥⇧Space summon or the
+  // card's tuck handle): its share toggle is STICKY — opted in once, every
+  // future summon starts already sharing, until toggled off.
+  const companionVoiceRef = useRef(false)
+  const companionVoiceStartingRef = useRef(false)
+  // Speech follows the QUESTION's modality, not the surface: a spoken
+  // question (PTT utterance) gets a spoken reply — even with the Skipper's
+  // text panel open — while a typed question renders silently. Stamped
+  // per-turn at submit so the choice sticks for the whole reply.
+  const suppressSpeechTurnRef = useRef(false)
+  // Output mute (the Skipper's speaker pin): no reply audio while set —
+  // independent of micMuted (which pauses INPUT).
+  const [speakerMuted, setSpeakerMuted] = useState(false)
+  const speakerMutedRef = useRef(false)
+  speakerMutedRef.current = speakerMuted
   // In-call mute: a full input pause, not just audio — mic audio stops
   // reaching Deepgram AND camera/screen frame capture stops, so nothing said
   // or shown while muted ever reaches the assistant. Output is untouched
@@ -1317,19 +1285,29 @@ function App() {
     void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
   }, [permissionDialog])
 
-  const handleStartRecording = useCallback(() => {
+  // Steal handler for PTT: another holder is taking the mic — drop the
+  // in-flight recording without releasing ownership (the thief owns it now).
+  const cancelPttForSteal = useCallback(() => {
+    voice.cancel()
+    setIsRecording(false)
+    isRecordingRef.current = false
+  }, [voice])
+
+  const handleStartRecording = useCallback((holderId: string) => {
     // A live call owns the mic — ignore push-to-talk while one is running.
     if (inCallRef.current) return
+    acquireVoice(holderId, cancelPttForSteal)
     setIsRecording(true)
     isRecordingRef.current = true
     void voice.start().then((result) => {
       if (result === 'mic-denied') {
         setIsRecording(false)
         isRecordingRef.current = false
+        releaseVoice(holderId)
         setPermissionDialog('microphone')
       }
     })
-  }, [voice])
+  }, [voice, cancelPttForSteal])
 
   const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
@@ -1344,6 +1322,8 @@ function App() {
     const text = await voice.submit()
     setIsRecording(false)
     isRecordingRef.current = false
+    const holder = voiceOwnerId()
+    if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
     if (text) {
       pendingVoiceInputRef.current = true
       handlePromptSubmitRef.current?.({ text, files: [] })
@@ -1354,6 +1334,8 @@ function App() {
     voice.cancel()
     setIsRecording(false)
     isRecordingRef.current = false
+    const holder = voiceOwnerId()
+    if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
   }, [voice])
 
   // Start a call. Presets only differ in device defaults — the engine
@@ -1369,10 +1351,16 @@ function App() {
 
   const startCall = useCallback(async (preset: CallPreset) => {
     if (inCallRef.current) return
+    // The call engine owns the mic for the call's whole duration; any live
+    // push-to-talk recording is stolen (cancelled cleanly) here. Nothing
+    // steals FROM a call — handleStartRecording defers while in-call — so
+    // the call's own onStolen is defensively a no-op.
+    acquireVoice(CALL_VOICE_HOLDER, () => {})
     const camera = preset === 'video' || preset === 'practice'
     const ok = await video.start({ camera })
     if (!ok) {
       // Camera denied/unavailable — stay out of the call, and say why.
+      releaseVoice(CALL_VOICE_HOLDER)
       if (camera) setPermissionDialog('camera')
       return
     }
@@ -1425,6 +1413,7 @@ function App() {
     setPracticeMode(preset === 'practice')
     practiceModeRef.current = preset === 'practice'
     setMicMuted(false)
+    setSpeakerMuted(false)
     // Every preset starts in the floating pill (video included — the camera
     // preview lives in the pill) except practice, where the coaching session
     // is a deliberate face-to-face full screen.
@@ -1454,6 +1443,8 @@ function App() {
     setCallMinimized(false)
     inCallRef.current = false
     setInCall(false)
+    companionVoiceRef.current = false
+    releaseVoice(CALL_VOICE_HOLDER)
   }, [video, setPttState])
 
   // The user-mute half that lives in the video pipeline: stop sampling
@@ -1750,6 +1741,26 @@ function App() {
     }
   }
 
+  // What's happening right now, at tool-NAME level ("Searching the web…",
+  // "Reasoning…" — never arguments): the most recent activity wins — a
+  // running tool by display name, else reasoning, else plain thinking.
+  // Feeds the summoned bar's status line AND the Skipper's chip/panel.
+  const liveActivityText = useMemo(() => {
+    if (!activeIsProcessing) return null
+    let label = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
+    for (let i = liveConversation.length - 1; i >= 0; i--) {
+      const item = liveConversation[i]
+      if (isToolCall(item)) {
+        if (item.status === 'pending' || item.status === 'running') {
+          label = `${getToolDisplayName(item)}…`
+        }
+        break
+      }
+      if (isChatMessage(item)) break
+    }
+    return label
+  }, [activeIsProcessing, activeIsReasoning, liveConversation])
+
   // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
   // The main process caches the latest state and replays it when the popout
   // loads.
@@ -1762,13 +1773,31 @@ function App() {
         cameraOn: video.cameraOn,
         micMuted,
         screenSharing: video.screenState === 'live',
+        speakerMuted,
+        activityText: liveActivityText,
         interimText: voice.interimText || null,
         pttLocked: pttStatus === 'locked',
         responseText: callResponseText,
         questionText: callQuestionText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus, callResponseText, callQuestionText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, liveActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
+
+  // Screen-pointer gate: tell main whether a share is live (call OR
+  // quick-ask — this window owns the capture either way). While true the
+  // assistant's screen-pointer tool may draw on the shared display; flipping
+  // false tears the pointer overlay down instantly.
+  useEffect(() => {
+    try {
+      void window.ipc
+        .invoke('screenPointer:setShareActive', { active: video.screenState === 'live' })
+        .catch((err) => console.warn('[screen-pointer] setShareActive failed:', err))
+    } catch (err) {
+      // A stale preload (app not restarted since the channel was added)
+      // throws synchronously from schema validation — must not break the app.
+      console.warn('[screen-pointer] setShareActive failed:', err)
+    }
+  }, [video.screenState])
 
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full
@@ -1778,7 +1807,30 @@ function App() {
     return window.ipc.on('video:popout-action', ({ action, text }) => {
       if (action === 'toggle-mic') handleToggleMic()
       else if (action === 'toggle-camera') handleToggleCamera()
-      else if (action === 'toggle-share') void handleToggleScreenShare()
+      else if (action === 'toggle-share') {
+        // Companion voice sessions remember the choice: sharing becomes the
+        // default for future summons until turned off.
+        if (companionVoiceRef.current) {
+          localStorage.setItem('companion-share-sticky', video.screenState !== 'live' ? '1' : '0')
+        }
+        void handleToggleScreenShare()
+      }
+      else if (action === 'toggle-speaker') {
+        setSpeakerMuted((muted) => {
+          const next = !muted
+          if (next) {
+            // Muting hushes NOW: silence in-flight speech and drop the
+            // queued backlog (marked as voiced so the fallback net doesn't
+            // read the reply aloud after an unmute).
+            ttsRef.current.cancel()
+            if (voiceSegmentsRef.current) {
+              spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+            }
+            spokeSegmentThisTurnRef.current = true
+          }
+          return next
+        })
+      }
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
       else if (action === 'ptt-up') handlePttUp()
@@ -1882,19 +1934,96 @@ function App() {
       .catch(() => {})
   }, [inCall, video.screenState])
 
-  // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
-  // in the current chat exactly like a composer message.
+  // Quick-ask bar: a submit from the global ⌥⇧Space bar lands in the current
+  // chat exactly like a composer message. The bar hosts the REAL composer,
+  // so the payload carries everything an in-app submit does — mentions,
+  // attachments, per-turn config — plus the bar's model/effort picks, which
+  // are applied to the active tab the same way its own composer would.
   const quickAskActiveRef = useRef(false)
   const quickAskStartedAtRef = useRef(0)
   useEffect(() => {
-    return window.ipc.on('quick-ask:submit', ({ text }) => {
-      const trimmed = text.trim()
-      if (!trimmed) return
+    return window.ipc.on('quick-ask:submit', (payload) => {
+      const trimmed = payload.text.trim()
+      if (!trimmed && !payload.attachments?.length) return
       quickAskActiveRef.current = true
       quickAskStartedAtRef.current = Date.now()
-      handlePromptSubmitRef.current?.({ text: trimmed, files: [] })
+      // Model/effort now ride ONE ModelSelection keyed by chatId. The bar's
+      // picks overlay the tab's existing selection; effort-only picks need
+      // a model to attach to (fresh-tab effort still applies via the
+      // hover fast-thinking fallback in handlePromptSubmit).
+      const tabId = activeChatTabIdRef.current
+      if (payload.model || payload.reasoningEffort) {
+        const key = chatIdForTab(tabId)
+        const prev = selectionByTabRef.current.get(key)
+        const model = payload.model ?? prev
+        if (model) {
+          selectionByTabRef.current.set(key, {
+            provider: model.provider,
+            model: model.model,
+            ...(payload.reasoningEffort
+              ? { effort: payload.reasoningEffort }
+              : prev?.effort
+                ? { effort: prev.effort }
+                : {}),
+          })
+        }
+      }
+      void handlePromptSubmitRef.current?.(
+        { text: trimmed, files: [] },
+        payload.mentions,
+        payload.attachments ?? [],
+        payload.searchEnabled,
+        payload.codeMode,
+        payload.permissionMode,
+      )
     })
   }, [])
+
+  // Stop relay: the bar composer's send button becomes Stop while a turn is
+  // processing, same as in the app.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:stop', () => {
+      void stopRunRef.current?.()
+    })
+  }, [])
+
+  // (The old surface-based text-mode hush is gone: speech now follows each
+  // question's modality, plus the explicit speaker mute below.)
+
+  // Tuck relay: the bar pushed its text into the mascot — voice-to-voice.
+  // This is the voice call preset's long-promised "floating mascot pill"
+  // surface: start one (it opens minimized → callSurface 'popout' → the
+  // companion pins collapsed). If a call is already live, just minimize it
+  // to the floating surface instead of starting a second one.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:tuck', () => {
+      if (inCallRef.current) {
+        setCallMinimized(true)
+        return
+      }
+      if (companionVoiceStartingRef.current) return
+      if (voiceAvailable && ttsAvailable) {
+        companionVoiceRef.current = true
+        companionVoiceStartingRef.current = true
+        void startCall('voice')
+          .then(() => {
+            // Sticky screen share: opted in once from the mascot's share
+            // pin → every summon starts already sharing, until toggled off.
+            if (localStorage.getItem('companion-share-sticky') === '1') {
+              void video.startScreenShare().then((shared) => {
+                if (!shared) setPermissionDialog('screen-recording')
+              })
+            }
+          })
+          .finally(() => {
+            companionVoiceStartingRef.current = false
+          })
+      } else {
+        // Voice-first has no voice — fall back to the text card.
+        void window.ipc.invoke('quickAsk:show', null).catch(() => {})
+      }
+    })
+  }, [voiceAvailable, ttsAvailable, startCall, video])
 
   // Mirror the in-flight answer back to the bar while a quick-ask turn is
   // live: streaming text while generating, the final assistant message when
@@ -1919,28 +2048,11 @@ function App() {
     // Nothing new yet (run not started / no fresh answer): pushing would
     // only flicker the bar's local "Thinking…" state away.
     if (!text && !activeIsProcessing) return
-    // What's happening right now, for the bar's blinking status line: the
-    // most recent activity wins — a running tool by name, else reasoning,
-    // else plain thinking.
-    let statusText: string | null = null
-    if (activeIsProcessing) {
-      statusText = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
-      for (let i = liveConversation.length - 1; i >= 0; i--) {
-        const item = liveConversation[i]
-        if (isToolCall(item)) {
-          if (item.status === 'pending' || item.status === 'running') {
-            statusText = `${getToolDisplayName(item)}…`
-          }
-          break
-        }
-        if (isChatMessage(item)) break
-      }
-    }
     void window.ipc
-      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText })
+      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText: liveActivityText })
       .catch(() => {})
     if (!activeIsProcessing && text) quickAskActiveRef.current = false
-  }, [activeIsProcessing, activeIsReasoning, liveAssistantMessage, liveConversation])
+  }, [activeIsProcessing, liveActivityText, liveAssistantMessage, liveConversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -1972,19 +2084,25 @@ function App() {
   const [runs, setRuns] = useState<RunListItem[]>([])
 
   // Chat tab state
-  const [chatTabs, setChatTabs] = useState<ChatTab[]>([{ id: 'default-chat-tab', runId: null }])
+  const [chatTabs, setChatTabs] = useState<ChatTab[]>(() => [{ id: 'default-chat-tab', runId: null, chatId: crypto.randomUUID() }])
   const chatTabsRef = useRef(chatTabs)
   chatTabsRef.current = chatTabs
+  // A tab's current chat identity (see ChatTab.chatId). Session-scoped maps
+  // below are keyed by chatId, not tab id, so rebinding a tab to another
+  // session can never leak the previous chat's draft/model/effort into it.
+  const chatIdForTab = useCallback((tabId: string) => (
+    chatTabsRef.current.find((t) => t.id === tabId)?.chatId ?? tabId
+  ), [])
   const [activeChatTabId, setActiveChatTabId] = useState('default-chat-tab')
   const [chatViewStateByTab, setChatViewStateByTab] = useState<Record<string, ChatTabViewState>>({
     'default-chat-tab': createEmptyChatTabViewState(),
   })
   const chatViewStateByTabRef = useRef(chatViewStateByTab)
   const chatDraftsRef = useRef(new Map<string, string>())
-  const selectedModelByTabRef = useRef(new Map<string, { provider: string; model: string }>())
-  // Reasoning effort is per-tab, next-turn intent like the model selection —
-  // but unlike model it is never frozen on a run; it applies turn by turn.
-  const reasoningEffortByTabRef = useRef(new Map<string, 'low' | 'medium' | 'high'>())
+  // Per-tab selection (model + effort as ONE value) — the composer reports
+  // every change (settings seed included) and reads it back on remount, so
+  // a tab's selection survives tab switches for the life of the app.
+  const selectionByTabRef = useRef(new Map<string, { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }>())
   // Work directory is per-chat. Keyed by tab id; null/absent means none set.
   const [workDirByTab, setWorkDirByTab] = useState<Record<string, string | null>>({})
   const workDirByTabRef = useRef(workDirByTab)
@@ -1995,12 +2113,13 @@ function App() {
   const activeChatTabIdRef = useRef(activeChatTabId)
   activeChatTabIdRef.current = activeChatTabId
   const setChatDraftForTab = useCallback((tabId: string, text: string) => {
+    const chatId = chatIdForTab(tabId)
     if (text) {
-      chatDraftsRef.current.set(tabId, text)
+      chatDraftsRef.current.set(chatId, text)
     } else {
-      chatDraftsRef.current.delete(tabId)
+      chatDraftsRef.current.delete(chatId)
     }
-  }, [])
+  }, [chatIdForTab])
   // Persist a run's work directory to its per-run sidecar config file. The agent
   // runtime reads this same file (config/workdir-<runId>.json) on each turn.
   const persistRunWorkDir = useCallback(async (runId: string, value: string | null) => {
@@ -2154,7 +2273,10 @@ function App() {
       runId,
       conversation,
       currentAssistantMessage,
-      sessionUsage: {},
+      // The legacy mirrors this snapshot is built from never carried usage,
+      // so inactive tabs showed zero tokens; take it from the live session
+      // store instead.
+      sessionUsage: sessionChat.chatState?.sessionUsage ?? {},
       pendingAskHumanRequests: new Map(pendingAskHumanRequests),
       allPermissionRequests: new Map(allPermissionRequests),
       permissionResponses: new Map(permissionResponses),
@@ -2166,6 +2288,7 @@ function App() {
     runId,
     conversation,
     currentAssistantMessage,
+    sessionChat.chatState,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
@@ -2992,8 +3115,11 @@ function App() {
     setPermissionResponses(new Map())
     setAutoPermissionDecisions(new Map())
     try {
-      // Restore the session's per-chat work directory into the active tab.
-      const tabId = activeChatTabIdRef.current
+      // Restore the session's per-chat work directory into the tab BOUND to
+      // this run when one exists — targeting the active tab is racy under
+      // fast switching (the guard below narrows but can't close the gap).
+      const tabId = chatTabsRef.current.find((t) => t.runId === id)?.id
+        ?? activeChatTabIdRef.current
       const wd = await loadRunWorkDir(id)
       if (loadRunRequestIdRef.current !== requestId) return
       setWorkDirByTab((prev) => ({ ...prev, [tabId]: wd }))
@@ -3480,6 +3606,12 @@ function App() {
     // outside the bar never start talking.
     speakTurnRef.current =
       !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
+    // Modality decides speech on calls: a TYPED question (composer, Skipper
+    // panel, popout input) renders its reply silently; a SPOKEN one (PTT
+    // utterance — pendingVoiceInputRef is set just before submit) is spoken
+    // even with the text panel open. Stamped per-turn so tucking or typing
+    // mid-reply never flips an in-flight answer.
+    suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
 
     if (inCallRef.current || speakTurnRef.current) {
       // A new question supersedes whatever of the previous reply was still
@@ -3537,7 +3669,7 @@ function App() {
       let currentRunId = runId
       let isNewRun = false
       let newRunCreatedAt: string | null = null
-      const selected = selectedModelByTabRef.current.get(submitTabId)
+      const selected = selectionByTabRef.current.get(chatIdForTab(submitTabId))
       if (!currentRunId) {
         const createdSession = await window.ipc.invoke('sessions:create', {})
         currentRunId = createdSession.sessionId
@@ -3563,7 +3695,15 @@ function App() {
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
-      const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
+      // Effort rides the ModelSelection. Hover-mode turns (companion voice
+      // sessions and bar submits) default to FAST thinking when there's no
+      // explicit pick — voice-to-first-word is the experience, and a long
+      // reasoning phase is dead air.
+      const reasoningEffort =
+        selected?.effort ??
+        ((inCallRef.current && companionVoiceRef.current) || quickAskActiveRef.current
+          ? ('low' as const)
+          : undefined)
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.
@@ -3571,9 +3711,13 @@ function App() {
         .invoke('turnLimits:getSettings', null)
         .then((settings) => settings.chatMaxModelCalls)
         .catch(() => undefined)
+      // A to-do item's session keeps its own agent on continuation — typing
+      // in that chat steers the item's work, it doesn't summon the copilot.
+      const sessionAgentId = runs.find((r) => r.id === currentRunId)?.agentId
+      const effectiveAgentId = sessionAgentId === 'todo-item-agent' ? sessionAgentId : agentId
       const sendConfig = {
         agent: {
-          agentId,
+          agentId: effectiveAgentId,
           overrides: {
             ...(selected ? { model: { provider: selected.provider, model: selected.model } } : {}),
             composition: {
@@ -3593,7 +3737,11 @@ function App() {
             },
           },
         },
-        autoPermission: (permissionMode ?? 'manual') === 'auto',
+        // Default matches the composer toggle's default (auto): submissions
+        // that don't thread a mode — voice/PTT utterances, quick-ask, popout
+        // text — must not silently fall back to manual, which skipped the
+        // auto-permission classifier and carded EVERY gated tool mid-call.
+        autoPermission: (permissionMode ?? 'auto') === 'auto',
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
@@ -3849,8 +3997,11 @@ function App() {
       ...prev,
       [activeChatTabIdRef.current]: createEmptyChatTabViewState(),
     }))
-    // A brand-new chat starts with no work directory.
+    // A brand-new chat starts with no work directory and restarts its
+    // selection from the settings pair (the composer re-seeds when its
+    // runId prop drops to null; clearing here keeps the map in lockstep).
     setWorkDirByTab(prev => ({ ...prev, [activeChatTabIdRef.current]: null }))
+    selectionByTabRef.current.delete(chatIdForTab(activeChatTabIdRef.current))
   }, [setChatViewportAnchor])
 
   // Chat tab operations
@@ -3951,7 +4102,8 @@ function App() {
       return
     }
     setChatTabs((prev) => prev.map((t) => (
-      t.id === activeChatTabIdRef.current ? { ...t, runId: rowboatSessionId } : t
+      // Rebinding to a different session = a different chat identity.
+      t.id === activeChatTabIdRef.current ? { ...t, runId: rowboatSessionId, chatId: crypto.randomUUID() } : t
     )))
     loadRun(rowboatSessionId)
   }, [switchChatTab, loadRun])
@@ -3961,6 +4113,8 @@ function App() {
     const idx = chatTabs.findIndex(t => t.id === tabId)
     if (idx === -1) return
     saveChatScrollForTab(tabId)
+    // Resolve before the tab list changes — chat-keyed maps below.
+    const closingChatId = chatIdForTab(tabId)
     const nextTabs = chatTabs.filter(t => t.id !== tabId)
     setChatTabs(nextTabs)
     setChatViewStateByTab(prev => {
@@ -3969,9 +4123,8 @@ function App() {
       delete next[tabId]
       return next
     })
-    chatDraftsRef.current.delete(tabId)
-    selectedModelByTabRef.current.delete(tabId)
-    reasoningEffortByTabRef.current.delete(tabId)
+    chatDraftsRef.current.delete(closingChatId)
+    selectionByTabRef.current.delete(closingChatId)
     chatScrollTopByTabRef.current.delete(tabId)
     setWorkDirByTab((prev) => {
       if (!(tabId in prev)) return prev
@@ -4422,8 +4575,8 @@ function App() {
 
   const handleNewChatTab = useCallback(() => {
     // Single-chat model: reset the one conversation in place instead of
-    // opening a new tab.
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null }])
+    // opening a new tab. Fresh chatId = fresh chat-session instance.
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId: crypto.randomUUID() }])
     dismissBrowserOverlay()
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
@@ -4447,9 +4600,31 @@ function App() {
     setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
   }, [dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen])
 
+  // A chat was deleted (sessions:delete succeeded): drop it from the recents
+  // list and — because closeChatTab no-ops on the last tab in the single-chat
+  // model — reset the chat surface to a fresh conversation when the deleted
+  // chat is the one currently bound, so a dead transcript never stays on
+  // screen.
+  const handleRunDeleted = useCallback((rid: string) => {
+    setRuns((prev) => prev.filter((r) => r.id !== rid))
+    const openTab = chatTabs.find((t) => t.runId === rid)
+    if (!openTab) return
+    if (chatTabs.length > 1) {
+      closeChatTab(openTab.id)
+    } else {
+      handleNewChatTab()
+    }
+  }, [chatTabs, closeChatTab, handleNewChatTab])
+
   // Sidebar variant: reset the chat in place without leaving file/graph context.
-  const handleNewChatTabInSidebar = useCallback(() => {
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null }])
+  // A caller with a selection already chosen for the fresh chat (the Home
+  // composer handoff) passes it here so the map entry exists BEFORE the
+  // rebind commit — the remounted composer's initialSelection then shows the
+  // same pair the sends will use, instead of racing the settings seed.
+  const handleNewChatTabInSidebar = useCallback((initialSelection?: ModelSelection | null) => {
+    const chatId = crypto.randomUUID()
+    if (initialSelection) selectionByTabRef.current.set(chatId, initialSelection)
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId }])
     handleNewChat()
   }, [handleNewChat])
 
@@ -4459,6 +4634,34 @@ function App() {
       handleNewChatTabInSidebar()
     })
   }, [handleNewChatTabInSidebar])
+
+  // Companion-bar chat context: which chat a bar submit lands in (shown as
+  // the bar's destination chip) plus recents for its switcher. Pushed on
+  // every tab/run change; main caches and replays it on bar load.
+  useEffect(() => {
+    const activeTab = chatTabs.find((t) => t.id === activeChatTabId)
+    void window.ipc
+      .invoke('quickAsk:chatContext', {
+        activeRunId: activeTab?.runId ?? null,
+        activeTitle: activeTab ? getChatTabTitle(activeTab) : null,
+        recent: runs.slice(0, 10).map((r) => ({ id: r.id, title: r.title || '(Untitled chat)' })),
+      })
+      .catch(() => {})
+  }, [chatTabs, activeChatTabId, runs, getChatTabTitle])
+
+  // The bar's chip switcher picked a chat: bind the active tab to it — the
+  // same pattern as the sidebar's recent-chats list.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:select-chat', ({ runId: rid }) => {
+      const existingTab = chatTabs.find((t) => t.runId === rid)
+      if (existingTab) {
+        switchChatTab(existingTab.id)
+        return
+      }
+      setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid } : t)))
+      void loadRun(rid)
+    })
+  }, [chatTabs, activeChatTabId, switchChatTab, loadRun])
 
   // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
   // queues the message; the pending-submit effect (below) flushes it once state has settled
@@ -4492,6 +4695,96 @@ function App() {
     )
     setPendingPaletteSubmit(null)
   }, [pendingPaletteSubmit])
+
+  // Home composer → a fresh dock chat. Same settle-then-flush dance as the
+  // palette: the fresh tab's null runId must be visible to handlePromptSubmit
+  // before the message goes out. Model/effort picked on the Home composer are
+  // copied onto the fresh tab at flush time.
+  // The Home composer's selection (model + effort as one value) — handed to
+  // todo:* calls and onto the chat tab a home submit turns into.
+  const homeSelectionRef = useRef<ModelSelection | null>(null)
+  // Destination chip: when set, the Home composer writes to the to-do list
+  // instead of the chat. Entered via the list's ＋ affordances, announced by
+  // the chip + tint, cleared on send/Escape/✕.
+  const [homeComposeTarget, setHomeComposeTarget] = useState<HomeComposeTarget | null>(null)
+  const [homeComposerFocusSignal, setHomeComposerFocusSignal] = useState(0)
+  const [homeComposerPreset, setHomeComposerPreset] = useState<string | undefined>(undefined)
+  const composeTodoOnHome = useCallback((target: HomeComposeTarget) => {
+    setHomeComposeTarget(target)
+    if ((target.kind === 'todo' || target.kind === 'sub') && target.prefill) {
+      // Mid-thought handoff from an inline row — carry the typed text along.
+      setHomeComposerPreset(target.prefill.endsWith(' ') ? target.prefill : `${target.prefill} `)
+    }
+    setHomeComposerFocusSignal((n) => n + 1)
+  }, [])
+  const [pendingHomeSubmit, setPendingHomeSubmit] = useState<{
+    message: PromptInputMessage
+    mentions?: FileMention[]
+    attachments: StagedAttachment[]
+    searchEnabled?: boolean
+    codeMode?: 'claude' | 'codex'
+    permissionMode?: PermissionMode
+  } | null>(null)
+
+  const handleHomeComposerSubmit = useCallback((
+    message: PromptInputMessage,
+    mentions?: FileMention[],
+    stagedAttachments: StagedAttachment[] = [],
+    searchEnabled?: boolean,
+    codeMode?: 'claude' | 'codex',
+    permissionMode?: PermissionMode,
+  ) => {
+    const text = message.text?.trim() ?? ''
+    if (!text && stagedAttachments.length === 0) return
+    // Destination chip set → this is a to-do (or a step), not a chat. The
+    // composer's attachments become links on the line; its model selection
+    // rides along for the run when the item is delegated.
+    const target = homeComposeTargetRef.current
+    if (target) {
+      if (!text) return
+      const attachments = stagedAttachments.length > 0
+        ? stagedAttachments.map((a) => ({ path: a.path, name: a.filename }))
+        : undefined
+      // todo:* schemas carry a bare {provider, model} ref today; effort
+      // threading through the todo runner is a follow-up.
+      const model = homeSelectionRef.current
+        ? { provider: homeSelectionRef.current.provider, model: homeSelectionRef.current.model }
+        : undefined
+      if (target.kind === 'comment') {
+        void window.ipc.invoke('todo:comment', { key: target.key, message: text, attachments, model, permissionMode })
+      } else if (target.kind === 'chatReply') {
+        void window.ipc.invoke('todo:chatReply', { sessionId: target.sessionId, message: text, attachments, model, permissionMode })
+      } else if (target.kind === 'sub') {
+        void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
+      } else {
+        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
+      }
+      setHomeComposeTarget(null)
+      return
+    }
+    // Chat mode has NO routing rules: mentions here just address the
+    // assistant. Tasks are born via the chip, the list, or by asking.
+    setIsChatSidebarOpen(true)
+    handleNewChatTabInSidebar(homeSelectionRef.current)
+    setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode })
+  }, [handleNewChatTabInSidebar])
+  const homeComposeTargetRef = useRef(homeComposeTarget)
+  useEffect(() => { homeComposeTargetRef.current = homeComposeTarget }, [homeComposeTarget])
+
+  useEffect(() => {
+    if (!pendingHomeSubmit) return
+    const tabId = activeChatTabIdRef.current
+    if (homeSelectionRef.current) selectionByTabRef.current.set(chatIdForTab(tabId), homeSelectionRef.current)
+    void handlePromptSubmitRef.current?.(
+      pendingHomeSubmit.message,
+      pendingHomeSubmit.mentions,
+      pendingHomeSubmit.attachments,
+      pendingHomeSubmit.searchEnabled,
+      pendingHomeSubmit.codeMode,
+      pendingHomeSubmit.permissionMode,
+    )
+    setPendingHomeSubmit(null)
+  }, [pendingHomeSubmit])
 
   // Listener for "Edit with Copilot" events from the live-note panel.
   useEffect(() => {
@@ -5188,7 +5481,8 @@ function App() {
             setActiveChatTabId(existingTab.id)
           } else {
             setChatTabs((prev) => prev.map((tab) => (
-              tab.id === activeChatTabIdRef.current ? { ...tab, runId: targetRunId } : tab
+              // Rebinding to a different session = a different chat identity.
+              tab.id === activeChatTabIdRef.current ? { ...tab, runId: targetRunId, chatId: crypto.randomUUID() } : tab
             )))
           }
           await loadRun(targetRunId)
@@ -5321,6 +5615,17 @@ function App() {
         duration: 10000,
       })
     })
+  }, [])
+
+  // One-time storage-retention notice: a modal on the first launch with
+  // retention enabled; the actual sweep starts on the NEXT launch so months
+  // of history are never deleted before the user has seen this.
+  const [retentionNotice, setRetentionNotice] = useState<{ chatDays: number | null } | null>(null)
+  const [retentionSettingsOpen, setRetentionSettingsOpen] = useState(false)
+  useEffect(() => {
+    void window.ipc.invoke('retention:consumeFirstRunNotice', null).then(({ show, chatDays }) => {
+      if (show) setRetentionNotice({ chatDays })
+    }).catch(() => { /* settings unavailable — try again next launch */ })
   }, [])
 
   // Report the UI theme to the apps server (spec §7.1): apps read it from
@@ -6581,194 +6886,6 @@ function App() {
     }
   }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePaths])
 
-  const renderConversationItem = (
-    item: ConversationItem,
-    tabId: string,
-    options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
-  ) => {
-    if (isChatMessage(item)) {
-      if (item.role === 'user') {
-        if (item.attachments && item.attachments.length > 0) {
-          return (
-            <Message key={item.id} from={item.role} data-message-id={item.id}>
-              <MessageContent className="group-[.is-user]:bg-transparent group-[.is-user]:px-0 group-[.is-user]:py-0 group-[.is-user]:rounded-none">
-                <ChatMessageAttachments attachments={item.attachments} />
-              </MessageContent>
-              {item.content && (
-                <div className="flex flex-col items-end">
-                  <MessageContent>
-                    <MessageResponse
-                      components={streamdownComponents}
-                      remarkPlugins={userMessageRemarkPlugins}
-                    >
-                      {item.content}
-                    </MessageResponse>
-                  </MessageContent>
-                  <MessageCopyButton text={item.content} className="mt-0.5" />
-                </div>
-              )}
-            </Message>
-          )
-        }
-        const { message, files } = parseAttachedFiles(item.content)
-        return (
-          <Message key={item.id} from={item.role} data-message-id={item.id}>
-            <div className="flex flex-col items-end">
-              <MessageContent>
-                {files.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {files.map((filePath, index) => (
-                      <span
-                        key={index}
-                        className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
-                      >
-                        @{wikiLabel(filePath)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <MessageResponse
-                  components={streamdownComponents}
-                  remarkPlugins={userMessageRemarkPlugins}
-                >
-                  {message}
-                </MessageResponse>
-              </MessageContent>
-              <MessageCopyButton text={message} className="mt-0.5" />
-            </div>
-          </Message>
-        )
-      }
-      return (
-        <Message key={item.id} from={item.role} data-message-id={item.id}>
-          <MessageContent>
-            <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
-          </MessageContent>
-        </Message>
-      )
-    }
-
-    if (isToolCall(item)) {
-      if (item.name === 'code_agent_run') {
-        return (
-          <CodingRunBlock
-            key={item.id}
-            item={item}
-            open={isToolOpenForTab(tabId, item.id)}
-            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-            onPermissionDecision={(decision) => {
-              if (item.pendingCodePermission) {
-                handleCodePermissionResponse(item.id, item.pendingCodePermission.requestId, decision)
-              }
-            }}
-          />
-        )
-      }
-      if (item.name === 'spawn-agent') {
-        return (
-          <SubAgentBlock
-            key={item.id}
-            item={item}
-            open={isToolOpenForTab(tabId, item.id)}
-            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-          />
-        )
-      }
-      const appActionData = getAppActionCardData(item)
-      if (appActionData) {
-        return <AppActionCard key={item.id} data={appActionData} status={item.status} />
-      }
-      const webSearchData = getWebSearchCardData(item)
-      if (webSearchData) {
-        return (
-          <WebSearchResult
-            key={item.id}
-            query={webSearchData.query}
-            results={webSearchData.results}
-            status={item.status}
-            title={webSearchData.title}
-          />
-        )
-      }
-      const composioConnectData = getComposioConnectCardData(item)
-      if (composioConnectData) {
-        // Skip rendering if this is a duplicate "already connected" card
-        if (composioConnectData.hidden) return null
-        return (
-          <ComposioConnectCard
-            key={item.id}
-            toolkitSlug={composioConnectData.toolkitSlug}
-            toolkitDisplayName={composioConnectData.toolkitDisplayName}
-            status={item.status}
-            alreadyConnected={composioConnectData.alreadyConnected}
-            onConnected={handleComposioConnected}
-          />
-        )
-      }
-      const toolTitle = getToolDisplayName(item)
-      const errorText = item.status === 'error' ? 'Tool error' : ''
-      const output = normalizeToolOutput(item.result, item.status)
-      const input = normalizeToolInput(item.input)
-      return (
-        <Tool
-          key={item.id}
-          open={isToolOpenForTab(tabId, item.id)}
-          onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
-          autoPermissionDetail={options?.autoPermissionDetail}
-        >
-          <ToolHeader
-            title={toolTitle}
-            type={`tool-${item.name}`}
-            state={toToolState(item.status)}
-          />
-          <ToolContent>
-            {item.streamingOutput ? (
-              <AutoScrollPre className="max-h-80 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap text-foreground/90">
-                <TerminalOutput raw={item.streamingOutput} />
-              </AutoScrollPre>
-            ) : (
-              <ToolTabbedContent input={input} output={output} errorText={errorText} />
-            )}
-          </ToolContent>
-        </Tool>
-      )
-    }
-
-    if (isTurnUsageMessage(item)) {
-      return (
-        <div key={item.id} className="-mt-6 -ml-1 flex items-center justify-start gap-1" data-message-id={item.id}>
-          <TokenUsageMenu
-            usage={item.usage}
-            scope="turn"
-            modelCallCount={item.modelCallCount}
-            align="start"
-          />
-          {item.reasoningEffort && (
-            <span className="text-xs text-muted-foreground/70">
-              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
-            </span>
-          )}
-        </div>
-      )
-    }
-
-    if (isErrorMessage(item)) {
-      const billingMatch = matchBillingError(item.message)
-      if (billingMatch) {
-        return <BillingErrorNotice key={item.id} id={item.id} match={billingMatch} />
-      }
-      return (
-        <Message key={item.id} from="assistant" data-message-id={item.id}>
-          <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
-            <pre className="whitespace-pre-wrap font-mono text-xs">{item.message}</pre>
-          </MessageContent>
-        </Message>
-      )
-    }
-
-    return null
-  }
-
   // The active chat's view state, backed by the sessions hook (legacy
   // standalone states remain only as the pre-load fallback until stage 7).
   const activeChatTabState = React.useMemo<ChatTabViewState>(() => (
@@ -6897,11 +7014,7 @@ function App() {
               }}
               onDeleteRun={(rid) => {
                 void window.ipc.invoke('sessions:delete', { sessionId: rid })
-                  .then(() => {
-                    setRuns((prev) => prev.filter((r) => r.id !== rid))
-                    const openTab = chatTabs.find((t) => t.runId === rid)
-                    if (openTab) closeChatTab(openTab.id)
-                  })
+                  .then(() => handleRunDeleted(rid))
                   .catch((err) => console.error('Failed to delete chat:', err))
               }}
               onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
@@ -7072,19 +7185,89 @@ function App() {
                 />
               ) : isHomeOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <HomeView
-                    tree={tree}
-                    runs={runs}
-                    bgTaskSummaries={bgTaskSummaries}
-                    onOpenEmail={() => openEmailView()}
-                    onOpenMeetings={openMeetingsView}
-                    onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                    onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                    onOpenNote={(path) => navigateToFile(path)}
-                    onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                    onTakeMeetingNotes={() => { void handleToggleMeeting() }}
-                    onOpenChat={handleNewChatTab}
-                  />
+                  {homeTab === 'todos' ? (
+                    <TodoView
+                      composer={
+                        <ChatInputWithMentions
+                          knowledgeFiles={knowledgeFiles}
+                          recentFiles={recentWikiFiles}
+                          visibleFiles={visibleKnowledgeFiles}
+                          onSubmit={handleHomeComposerSubmit}
+                          isProcessing={false}
+                          runId={null}
+                          presetMessage={homeComposerPreset}
+                          onPresetMessageConsumed={() => setHomeComposerPreset(undefined)}
+                          onSelectionChange={(selection) => { homeSelectionRef.current = selection }}
+                          workDir={null}
+                          focusSignal={homeComposerFocusSignal}
+                          contextChip={homeComposeTarget ? {
+                            label: homeComposeTarget.kind === 'sub'
+                              ? `Step of: ${homeComposeTarget.parentText.slice(0, 40)}`
+                              : homeComposeTarget.kind === 'comment'
+                                ? `Reply: ${homeComposeTarget.itemText.slice(0, 40)}`
+                                : homeComposeTarget.kind === 'chatReply'
+                                  ? `Reply: ${homeComposeTarget.title.slice(0, 40)}`
+                                  : 'To-do',
+                            icon: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply' ? 'reply' : 'todo',
+                            quote: homeComposeTarget.kind === 'comment' || homeComposeTarget.kind === 'chatReply'
+                              ? homeComposeTarget.quote
+                              : undefined,
+                            onDismiss: () => setHomeComposeTarget(null),
+                          } : undefined}
+                          placeholder={homeComposeTarget
+                            ? (homeComposeTarget.kind === 'sub'
+                                ? 'Add a step… @rowboat hands it off'
+                                : homeComposeTarget.kind === 'comment'
+                                  ? 'Tell @rowboat what to change…'
+                                  : homeComposeTarget.kind === 'chatReply'
+                                    ? 'Reply…'
+                                    : 'Add a to-do… @rowboat hands it off')
+                            : undefined}
+                        />
+                      }
+                      onComposeTodo={composeTodoOnHome}
+                      composeTarget={homeComposeTarget}
+                      onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
+                      onOpenNote={(path) => navigateToFile(path)}
+                      onOpenInChat={(sessionId) => {
+                        // Bind the dock (not the full-screen chat) to the
+                        // item's session — same pattern as ChatSidebar's
+                        // onSelectRun.
+                        const existingTab = chatTabs.find((t) => t.runId === sessionId)
+                        if (existingTab) {
+                          switchChatTab(existingTab.id)
+                        } else {
+                          setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: sessionId } : t))
+                          void loadRun(sessionId)
+                        }
+                        setIsChatSidebarOpen(true)
+                      }}
+                      onShowOverview={() => setHomeTab('overview')}
+                    />
+                  ) : (
+                    <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setHomeTab('todos')}
+                        className="absolute right-6 top-4 z-10 rounded-md border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+                      >
+                        ← To-dos
+                      </button>
+                      <HomeView
+                        tree={tree}
+                        runs={runs}
+                        bgTaskSummaries={bgTaskSummaries}
+                        onOpenEmail={() => openEmailView()}
+                        onOpenMeetings={openMeetingsView}
+                        onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                        onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                        onOpenNote={(path) => navigateToFile(path)}
+                        onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                        onTakeMeetingNotes={() => { void handleToggleMeeting() }}
+                        onOpenChat={handleNewChatTab}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : isSuggestedTopicsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -7236,6 +7419,7 @@ function App() {
                     onDeleteRun={async (rid) => {
                       try {
                         await window.ipc.invoke('sessions:delete', { sessionId: rid })
+                        handleRunDeleted(rid)
                         await loadRuns()
                       } catch (err) {
                         console.error('Failed to delete run:', err)
@@ -7429,6 +7613,10 @@ function App() {
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <DocxFileViewer path={selectedPath} />
                   </div>
+                ) : selectedPath && getViewerType(selectedPath) === 'pptx' ? (
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <PptxEditor key={selectedPath} path={selectedPath} />
+                  </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <UnsupportedFileViewer path={selectedPath} />
@@ -7457,124 +7645,27 @@ function App() {
                 <div className="relative min-h-0 flex-1">
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId
-                    const tabState = getChatTabStateForRender(tab.id)
-                    const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
-                    const tabConversationContentClassName = tabHasConversation
-                      ? "mx-auto w-full max-w-4xl pb-28"
-                      : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
                     return (
-                      <div
-                        key={tab.id}
-                        className={cn(
-                          'min-h-0 h-full flex-col',
-                          isActive
-                            ? 'flex'
-                            : 'pointer-events-none invisible absolute inset-0 flex'
-                        )}
-                        data-chat-tab-panel={tab.id}
-                        aria-hidden={!isActive}
-                      >
-                        <Conversation
-                          anchorMessageId={chatViewportAnchorByTab[tab.id]?.messageId}
-                          anchorRequestKey={chatViewportAnchorByTab[tab.id]?.requestKey}
-                          className="relative flex-1"
-                        >
-                          <ConversationContent className={tabConversationContentClassName}>
-                            {!tabHasConversation ? (
-                              <ChatEmptyState
-                                wide
-                                onPickPrompt={setPresetMessage}
-                              />
-                            ) : (
-                              <>
-                                {groupConversationItems(
-                                  tabState.conversation,
-                                  (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
-                                ).map(item => {
-                                  if (isToolGroup(item)) {
-                                    return (
-                                      <ToolGroupComponent
-                                        key={item.groupId}
-                                        group={item}
-                                        isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
-                                        onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
-                                      />
-                                    )
-                                  }
-                                  const autoDecision = isToolCall(item)
-                                    ? tabState.autoPermissionDecisions.get(item.id)
-                                    : undefined
-                                  const rendered = renderConversationItem(
-                                    item,
-                                    tab.id,
-                                    autoDecision?.decision === 'allow'
-                                      ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
-                                      : undefined,
-                                  )
-                                  if (isToolCall(item)) {
-                                    const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
-                                    const permRequest = tabState.allPermissionRequests.get(item.id)
-                                    if (deniedAutoDecision || permRequest) {
-                                      const response = tabState.permissionResponses.get(item.id) || null
-                                      return (
-                                        <React.Fragment key={item.id}>
-                                          {deniedAutoDecision && (
-                                            <AutoPermissionDecision
-                                              toolCall={deniedAutoDecision.toolCall}
-                                              permission={deniedAutoDecision.permission}
-                                              decision={deniedAutoDecision.decision}
-                                              reason={deniedAutoDecision.reason}
-                                            />
-                                          )}
-                                          {permRequest && (
-                                            <PermissionRequest
-                                              toolCall={permRequest.toolCall}
-                                              permission={permRequest.permission}
-                                              onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                              onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                              isProcessing={isActive && activeIsWorking}
-                                              response={response}
-                                            />
-                                          )}
-                                          {rendered}
-                                        </React.Fragment>
-                                      )
-                                    }
-                                  }
-                                  return rendered
-                                })}
-
-                                {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
-                                  <AskHumanRequest
-                                    key={request.toolCallId}
-                                    query={request.query}
-                                    options={request.options}
-                                    onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                    isProcessing={isActive && activeIsWorking}
-                                  />
-                                ))}
-
-                                {tabState.currentAssistantMessage && (
-                                  <Message from="assistant">
-                                    <MessageContent>
-                                      <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
-                                    </MessageContent>
-                                  </Message>
-                                )}
-
-                                {isActive && activeIsProcessing && (
-                                  <Message from="assistant">
-                                    <MessageContent>
-                                      <TurnActivityIndicator isReasoning={activeIsReasoning} />
-                                    </MessageContent>
-                                  </Message>
-                                )}
-                              </>
-                            )}
-                          </ConversationContent>
-                          <ConversationScrollButton />
-                        </Conversation>
-                      </div>
+                      <ChatSessionPane
+                        // Keyed by CHAT identity: rebinding this tab to a
+                        // different session remounts the panel (fresh
+                        // scroll/DOM state); first-send runId binding does not.
+                        key={tab.chatId}
+                        tab={tab}
+                        isActive={isActive}
+                        tabState={getChatTabStateForRender(tab.id)}
+                        viewportAnchor={chatViewportAnchorByTab[tab.id]}
+                        onPickPrompt={setPresetMessage}
+                        isToolOpenForTab={isToolOpenForTab}
+                        setToolOpenForTab={setToolOpenForTab}
+                        onPermissionResponse={handlePermissionResponse}
+                        onAskHumanResponse={handleAskHumanResponse}
+                        onCodePermissionResponse={handleCodePermissionResponse}
+                        onComposioConnected={handleComposioConnected}
+                        activeIsWorking={activeIsWorking}
+                        activeIsProcessing={activeIsProcessing}
+                        activeIsReasoning={activeIsReasoning}
+                      />
                     )
                   })}
                 </div>
@@ -7584,59 +7675,62 @@ function App() {
                   <div className="mx-auto w-full max-w-4xl px-4">
                     {chatTabs.map((tab) => {
                       const isActive = tab.id === activeChatTabId
-                      const tabState = getChatTabStateForRender(tab.id)
                       return (
-                        <div
-                          key={tab.id}
-                          className={isActive ? 'block' : 'hidden'}
-                          data-chat-input-panel={tab.id}
-                          aria-hidden={!isActive}
-                        >
-                          <ChatInputWithMentions
-                            knowledgeFiles={knowledgeFiles}
-                            recentFiles={recentWikiFiles}
-                            visibleFiles={visibleKnowledgeFiles}
-                            onSubmit={handlePromptSubmit}
-                            onStop={handleStop}
-                            isProcessing={isActive && activeIsProcessing}
-                            isStopping={isActive && isStopping}
-                            isActive={isActive}
-                            presetMessage={isActive ? presetMessage : undefined}
-                            onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
-                            runId={tabState.runId}
-                            codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
-                            initialDraft={chatDraftsRef.current.get(tab.id)}
-                            onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
-                            onSelectedModelChange={(m) => {
-                              if (m) {
-                                selectedModelByTabRef.current.set(tab.id, m)
-                              } else {
-                                selectedModelByTabRef.current.delete(tab.id)
-                              }
-                            }}
-                            onReasoningEffortChange={(effort) => {
-                              if (effort) {
-                                reasoningEffortByTabRef.current.set(tab.id, effort)
-                              } else {
-                                reasoningEffortByTabRef.current.delete(tab.id)
-                              }
-                            }}
-                            workDir={workDirByTab[tab.id] ?? null}
-                            onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
-                            isRecording={isActive && isRecording}
-                            recordingText={isActive ? voice.interimText : undefined}
-                            recordingState={isActive ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
-                            audioLevelsRef={voice.audioLevelsRef}
-                            onStartRecording={isActive ? handleStartRecording : undefined}
-                            onSubmitRecording={isActive ? handleSubmitRecording : undefined}
-                            onCancelRecording={isActive ? handleCancelRecording : undefined}
-                            voiceAvailable={isActive && voiceAvailable}
-                            inCall={inCall}
-                            onStartCall={isActive ? startCall : undefined}
-                            onEndCall={isActive ? endCall : undefined}
-                            callAvailable={voiceAvailable && ttsAvailable}
-                          />
-                        </div>
+                        <ChatSessionComposer
+                          // Composer instance per CHAT (see chat panel key
+                          // above): a rebound tab gets a fresh composer, so
+                          // attachments/toggles/selection can't leak across
+                          // sessions; first-send binding keeps the instance.
+                          key={tab.chatId}
+                          tab={tab}
+                          isActive={isActive}
+                          tabState={getChatTabStateForRender(tab.id)}
+                          knowledgeFiles={knowledgeFiles}
+                          recentFiles={recentWikiFiles}
+                          visibleFiles={visibleKnowledgeFiles}
+                          onSubmit={handlePromptSubmit}
+                          onStop={handleStop}
+                          activeIsProcessing={activeIsProcessing}
+                          isStopping={isStopping}
+                          presetMessage={presetMessage}
+                          onPresetMessageConsumed={() => setPresetMessage(undefined)}
+                          codeSessionLocks={codeSessionLocks}
+                          initialDraft={chatDraftsRef.current.get(tab.chatId)}
+                          onDraftChange={setChatDraftForTab}
+                          onSelectionChange={(t, selection) => {
+                            if (selection) {
+                              selectionByTabRef.current.set(t.chatId, selection)
+                            } else {
+                              selectionByTabRef.current.delete(t.chatId)
+                            }
+                          }}
+                          initialSelection={selectionByTabRef.current.get(tab.chatId) ?? null}
+                          // Last-turn restore: the single session store is
+                          // bound to the ACTIVE tab's run, so only that tab
+                          // gets a resolved value; others stay undefined
+                          // (loading) until activated. lastSelection is null
+                          // for a session with no turns (settings seed).
+                          restoredSelection={
+                            isActive && tab.runId
+                              && sessionChat.sessionId === tab.runId
+                              && sessionChat.chatState
+                              ? sessionChat.chatState.lastSelection
+                              : undefined
+                          }
+                          workDirByTab={workDirByTab}
+                          onWorkDirChange={setTabWorkDir}
+                          isRecording={isRecording}
+                          voiceOwner={voiceOwner}
+                          voice={voice}
+                          onStartRecording={handleStartRecording}
+                          onSubmitRecording={handleSubmitRecording}
+                          onCancelRecording={handleCancelRecording}
+                          voiceAvailable={voiceAvailable}
+                          inCall={inCall}
+                          onStartCall={startCall}
+                          onEndCall={endCall}
+                          ttsAvailable={ttsAvailable}
+                        />
                       )
                     })}
                   </div>
@@ -7673,7 +7767,7 @@ function App() {
                 chatTabs={chatTabs}
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
-                onNewChatTab={handleNewChatTabInSidebar}
+                onNewChatTab={() => handleNewChatTabInSidebar()}
                 recentRuns={runs}
                 onSelectRun={(rid) => {
                   const existingTab = chatTabs.find((t) => t.runId === rid)
@@ -7681,13 +7775,15 @@ function App() {
                     switchChatTab(existingTab.id)
                     return
                   }
-                  setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid } : t)))
+                  setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid, chatId: crypto.randomUUID() } : t)))
                   loadRun(rid)
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
+                onPopOut={() => void window.ipc.invoke('quickAsk:popOut', null).catch(() => {})}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
+                currentReasoning={activeChatTabState.currentReasoning}
                 sessionUsage={activeChatTabState.sessionUsage}
                 chatTabStates={chatTabStatesForRender}
                 viewportAnchors={chatViewportAnchorByTab}
@@ -7701,22 +7797,21 @@ function App() {
                 runId={runId}
                 presetMessage={presetMessage}
                 onPresetMessageConsumed={() => setPresetMessage(undefined)}
-                getInitialDraft={(tabId) => chatDraftsRef.current.get(tabId)}
+                getInitialDraft={(tabId) => chatDraftsRef.current.get(chatIdForTab(tabId))}
                 onDraftChangeForTab={setChatDraftForTab}
-                onSelectedModelChangeForTab={(tabId, m) => {
-                  if (m) {
-                    selectedModelByTabRef.current.set(tabId, m)
+                onSelectionChangeForTab={(tabId, selection) => {
+                  if (selection) {
+                    selectionByTabRef.current.set(chatIdForTab(tabId), selection)
                   } else {
-                    selectedModelByTabRef.current.delete(tabId)
+                    selectionByTabRef.current.delete(chatIdForTab(tabId))
                   }
                 }}
-                onReasoningEffortChangeForTab={(tabId, effort) => {
-                  if (effort) {
-                    reasoningEffortByTabRef.current.set(tabId, effort)
-                  } else {
-                    reasoningEffortByTabRef.current.delete(tabId)
-                  }
-                }}
+                getInitialSelection={(tabId) => selectionByTabRef.current.get(chatIdForTab(tabId)) ?? null}
+                restoredSelectionForActive={
+                  runId && sessionChat.sessionId === runId && sessionChat.chatState
+                    ? sessionChat.chatState.lastSelection
+                    : undefined
+                }
                 workDirByTab={workDirByTab}
                 onWorkDirChangeForTab={setTabWorkDir}
                 codeSessionLocks={codeSessionLocks}
@@ -7737,6 +7832,7 @@ function App() {
                 isWaitingOnHuman={activeIsWaitingOnHuman}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
+                onCodePermissionResponse={handleCodePermissionResponse}
                 isToolOpenForTab={isToolOpenForTab}
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
@@ -7746,7 +7842,7 @@ function App() {
                 recordingText={voice.interimText}
                 recordingState={voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'}
                 audioLevelsRef={voice.audioLevelsRef}
-                onStartRecording={handleStartRecording}
+                onStartRecording={() => handleStartRecording(chatIdForTab(activeChatTabIdRef.current))}
                 onSubmitRecording={handleSubmitRecording}
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
@@ -7825,6 +7921,37 @@ function App() {
         open={billingErrorOpen}
         match={billingErrorMatch}
         onOpenChange={setBillingErrorOpen}
+      />
+      {/* One-time storage-retention notice (see retention:consumeFirstRunNotice). */}
+      <Dialog open={retentionNotice !== null} onOpenChange={(open) => { if (!open) setRetentionNotice(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Old chats are cleaned up automatically</DialogTitle>
+            <DialogDescription className="pt-1 leading-relaxed">
+              {retentionNotice?.chatDays != null
+                ? `To save disk space, Rowboat now deletes chats that have been inactive for ${retentionNotice.chatDays}+ days, along with old background-task transcripts.`
+                : 'To save disk space, Rowboat now deletes old background-task transcripts.'}
+              {' '}Notes and files created by agents are never touched. Cleanup starts from the next launch, and you can change or turn this off anytime.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRetentionNotice(null)
+                setRetentionSettingsOpen(true)
+              }}
+            >
+              Open Settings
+            </Button>
+            <Button onClick={() => setRetentionNotice(null)}>Got it</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <SettingsDialog
+        open={retentionSettingsOpen}
+        onOpenChange={setRetentionSettingsOpen}
+        defaultTab="advanced"
       />
       <OnboardingModal
         open={showOnboarding}

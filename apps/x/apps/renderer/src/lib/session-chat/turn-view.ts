@@ -21,6 +21,7 @@ import type {
   ErrorMessage,
   MessageAttachment,
   PermissionResponse,
+  ReasoningMessage,
   TokenUsage,
   ToolCall,
 } from '@/lib/chat-conversation'
@@ -75,7 +76,9 @@ const VOICE_OPEN_TAG = '<voice>'
 // Early speech: once an open block has this many unconsumed chars, its last
 // complete clause is emitted immediately instead of waiting for </voice> —
 // TTS starts on the first clause while the rest of the sentence generates.
-const EARLY_SPEECH_MIN_CHARS = 60
+// 40 (down from 60): voice-to-first-audio was the companion's biggest
+// perceived lag, and a shorter first clause is worth the prosody risk.
+const EARLY_SPEECH_MIN_CHARS = 40
 // ...but never emit a fragment shorter than this (prosody suffers).
 const EARLY_SPEECH_MIN_EMIT = 30
 // Clause boundaries (punctuation, optionally inside closing quote/paren,
@@ -295,6 +298,22 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
   for (const call of state.modelCalls) {
     if (call.response === undefined) continue
     const content = call.response.content
+    // The model's thought process precedes what it produced. Encrypted-only
+    // reasoning has no text and yields no item.
+    const reasoning = Array.isArray(content)
+      ? content
+          .map((part) => (part.type === 'reasoning' ? part.text : ''))
+          .filter((text) => text.trim())
+          .join('\n\n')
+      : ''
+    if (reasoning) {
+      items.push({
+        id: `${turnId}:r${call.index}`,
+        kind: 'reasoning',
+        content: reasoning,
+        timestamp: ts(),
+      } satisfies ReasoningMessage)
+    }
     // Voice tags are model-facing markup, never shown (parity with the
     // legacy path's display-time strip).
     const text = stripVoiceTags(
@@ -371,6 +390,10 @@ type PermMeta = z.infer<typeof ToolPermissionMetadata>
 export type SessionChatState = {
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  // Reasoning text streaming for the in-flight model call; the durable
+  // reasoning item supersedes it when the call completes (same lifecycle as
+  // currentAssistantMessage).
+  currentReasoning: string
   sessionUsage: TokenUsage
   // See LiveOverlay.voiceSegments.
   voiceSegments: string[]
@@ -387,6 +410,10 @@ export type SessionChatState = {
   // Kept separate from processing so permission/ask-human controls remain
   // interactive while the turn is suspended for user input.
   isWaitingOnHuman: boolean
+  // The latest turn's model selection — resolved model + the reasoning
+  // effort it ran with. A reopened session's composer restores its
+  // selection from this (settings only seed brand-new chats).
+  lastSelection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } | null
 }
 
 function toolCallPartOf(tc: ToolCallState) {
@@ -504,9 +531,19 @@ export function buildSessionChatState(
 
   const settled = status === 'completed' || status === 'failed' || status === 'cancelled'
   const waitingOnHuman = allPermissionRequests.size > 0 || pendingAskHumanRequests.size > 0
+  const lastModel = latest?.definition.agent.resolved.model
+  const lastEffort = latest?.definition.config.reasoningEffort
   return {
+    lastSelection: lastModel
+      ? {
+          provider: lastModel.provider,
+          model: lastModel.model,
+          ...(lastEffort ? { effort: lastEffort } : {}),
+        }
+      : null,
     conversation,
     currentAssistantMessage: stripVoiceTags(overlay.text),
+    currentReasoning: overlay.reasoning,
     sessionUsage,
     voiceSegments: overlay.voiceSegments,
     pendingAskHumanRequests,

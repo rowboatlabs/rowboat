@@ -1,9 +1,9 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { CheckCircle2Icon, ShieldAlertIcon, Terminal } from "lucide-react";
-import type { ComponentProps } from "react";
+import { ChevronDownIcon } from "lucide-react";
+import { useState, type ComponentProps } from "react";
+import { quietRowContainerClass, quietRowGlyphSlotClass, quietRowTriggerClass } from "@/components/ai-elements/tool";
 import { ToolCallPart } from "@x/shared/dist/message.js";
 import { ToolPermissionMetadata } from "@x/shared/dist/runs.js";
 import z from "zod";
@@ -16,13 +16,16 @@ export type AutoPermissionDecisionProps = ComponentProps<"div"> & {
 };
 
 const fileActionLabels: Record<string, string> = {
-  read: "Read file",
-  list: "List folder",
-  search: "Search files",
-  write: "Write files",
-  delete: "Delete path",
+  read: "read",
+  list: "list",
+  search: "search",
+  write: "write to",
+  delete: "delete",
 };
 
+// Quiet row for an automatic permission decision. In practice only denials
+// render here — allowed calls carry a shield glyph on the tool row itself
+// (ToolHeader autoApproved) instead of a separate transcript entry.
 export function AutoPermissionDecision({
   className,
   toolCall,
@@ -38,63 +41,64 @@ export function AutoPermissionDecision({
     : null;
   const filePermission = permission?.kind === "file" ? permission : null;
   const allowed = decision === "allow";
+  const [expanded, setExpanded] = useState(false);
+
+  const detail = command
+    ? command.split("\n")[0]
+    : filePermission
+      ? `${fileActionLabels[filePermission.operation] ?? filePermission.operation} ${filePermission.paths[0] ?? filePermission.pathPrefix}`
+      : toolCall.toolName;
 
   return (
-    <div
-      className={cn(
-        "not-prose mb-4 w-full rounded-md border",
-        allowed
-          ? "border-green-500/50 bg-green-50/80 dark:border-green-500/35 dark:bg-green-950/30"
-          : "border-[#fa2525]/60 bg-[#fa2525]/15 dark:border-[#fa2525]/50 dark:bg-[#fa2525]/20",
-        className,
-      )}
-      {...props}
-    >
-      <div className="space-y-3 p-4">
-        <div className="flex items-start gap-3">
-          {allowed ? (
-            <CheckCircle2Icon className="mt-0.5 size-5 shrink-0 text-green-600 dark:text-green-400" />
-          ) : (
-            <ShieldAlertIcon className="mt-0.5 size-5 shrink-0 text-destructive" />
+    <div className={cn(quietRowContainerClass, className)} {...props}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className={quietRowTriggerClass}
+      >
+        <span className={quietRowGlyphSlotClass}>
+          {!allowed && <span className="size-1.5 rounded-full bg-red-600 dark:bg-red-500" />}
+        </span>
+        <span className={cn("shrink-0 font-medium", allowed ? "text-muted-foreground" : "text-foreground")}>
+          {allowed ? "Auto-allowed" : "Auto-denied"}
+        </span>
+        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{detail}</span>
+        <ChevronDownIcon
+          className={cn(
+            "ml-auto size-3 shrink-0 text-muted-foreground/50 opacity-0 transition-[opacity,transform] group-hover/row:opacity-100",
+            expanded && "rotate-180 opacity-100",
           )}
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold text-foreground">
-                {allowed ? "Auto Allowed" : "Auto Denied"}
-              </h3>
-              <Badge variant="secondary" className="bg-secondary text-foreground">
-                <Terminal className="mr-1 size-3" />
-                {toolCall.toolName}
-              </Badge>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">{reason}</p>
+        />
+      </button>
+      {!allowed && !expanded && (
+        <p className="mb-0.5 ml-5 truncate text-xs text-muted-foreground" title={reason}>
+          {reason}
+        </p>
+      )}
+      {expanded && (
+        <div className="my-1 ml-[2.5px] flex flex-col gap-2 border-l-2 border-border pl-3">
+          <div className="min-w-0">
+            <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Reason</p>
+            <p className="text-xs text-muted-foreground">{reason}</p>
           </div>
-        </div>
-        {command && (
-          <div className="rounded-md border bg-background/50 p-3">
-            <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Command</p>
-            <pre className="whitespace-pre-wrap break-all font-mono text-xs text-foreground">{command}</pre>
-          </div>
-        )}
-        {filePermission && (
-          <div className="space-y-3 rounded-md border bg-background/50 p-3">
-            <div>
-              <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Action</p>
-              <p className="text-xs font-medium text-foreground">
-                {fileActionLabels[filePermission.operation] ?? filePermission.operation}
-              </p>
+          {command && (
+            <div className="min-w-0">
+              <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Command</p>
+              <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{command}</pre>
             </div>
-            <div>
-              <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          )}
+          {filePermission && (
+            <div className="min-w-0">
+              <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
                 Path{filePermission.paths.length === 1 ? "" : "s"}
               </p>
-              <pre className="whitespace-pre-wrap break-all font-mono text-xs text-foreground">
+              <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
                 {filePermission.paths.join("\n")}
               </pre>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

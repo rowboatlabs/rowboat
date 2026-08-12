@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { TurnAnalytics } from "@x/shared/dist/analytics.js";
 import type { ModelDescriptor, TurnUsage } from "@x/shared/dist/turns.js";
 
 // Analytics seam for the turn loop: invoked once per completed model call,
@@ -6,6 +7,7 @@ import type { ModelDescriptor, TurnUsage } from "@x/shared/dist/turns.js";
 // throw into the loop and must not block it (fire-and-forget).
 export interface ModelUsageReport {
     agentId: string;
+    analytics: TurnAnalytics;
     model: z.infer<typeof ModelDescriptor>;
     usage: z.infer<typeof TurnUsage>;
 }

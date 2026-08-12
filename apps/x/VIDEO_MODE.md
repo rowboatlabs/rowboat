@@ -50,11 +50,13 @@ mute, camera toggle (silhouette avatar while off, no webcam frames
 captured), screen share toggle, mascot ⇄ "R" letter avatar, end call. The
 status chip walks the user through PTT: "Hold right ⌘ to talk · tap to go
 hands-free" when idle, "Listening — release to send" while capturing,
-"Hands-free — tap ⌘ to send" while locked. The popout additionally has a
-small text input — typed messages land in the chat like composer messages,
-frames riding along — and a collapsible **response panel**: the latest
-assistant reply of the call streams into the pill (auto-opens on each new
-turn, `video:popoutResize` grows the window), so a typed question can be
+"Hands-free — tap ⌘ to send" while locked. The popout additionally embeds
+the REAL chat composer (`ChatInputWithMentions`) as its typed input —
+@-mentions, attachments, and per-turn config all work mid-call, and
+messages land in the chat like composer messages, frames riding along —
+and a collapsible **response panel**: the latest assistant reply of the
+call streams into the pill (auto-opens on each new turn,
+`video:popoutResize` grows the window), so a typed question can be
 read right there without switching back to the app. Replies are spoken
 too; the panel is the readable half. **Mute is a full input
 pause**, not just audio — mic audio stops reaching Deepgram
@@ -84,11 +86,14 @@ The call button is disabled unless both voice input (Deepgram) and voice
 output (TTS) are configured. `call_started` (with `preset`) is captured in
 PostHog — the adoption metric for this feature.
 
-**Popout mechanics**: a small always-on-top frameless window (camera tile
-when on + mascot tile, live caption, control bar) floating over every app —
-including Rowboat. Control-bar actions round-trip `video:popoutAction` →
-main → `video:popout-action` → app window, which owns the mic/camera/capture;
-`expand` also refocuses the app window (handled in main).
+**Popout mechanics**: the floating pill is the COMPANION WINDOW's pinned
+role — the same always-on-top window as the ⌥⇧Space quick-ask bar, swapped
+to the pill layout (camera tile when on + mascot tile, live caption,
+control bar, composer) and repositioned top-right. It floats over every
+app — including Rowboat. Control-bar actions round-trip
+`video:popoutAction` → main → `video:popout-action` → app window, which
+owns the mic/camera/capture; `expand` also refocuses the app window
+(handled in main).
 
 ## Frame pipeline
 
@@ -183,9 +188,14 @@ and starts the PTT session; ending restores everything. Composer dictation
 is disabled while a call owns the mic. Mute blocks PTT entirely (pressing
 the key while muted does nothing; muting mid-capture discards it).
 
-## Popout window
+## The pill = the companion window's pinned role
 
-- The popout is an NSPanel (`type: 'panel'`) with
+There is no separate popout window anymore: the quick-ask window
+(`apps/main/src/quick-ask.ts`, renderer `components/quick-ask-bar.tsx`,
+hash `#quick-ask`) plays both floating roles, switched by a mode pushed
+over `quick-ask:mode` (`'summoned' | 'pinned'`).
+
+- The window is an NSPanel (`type: 'panel'`) with
   `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true,
   skipTransformProcessType: true })`: it floats over every Space INCLUDING
   other apps' fullscreen Spaces, and `skipTransformProcessType` keeps the
@@ -193,21 +203,45 @@ the key while muted does nothing; muting mid-capture discards it).
   "agent" app while the window exists — looks like Rowboat vanished). It is
   also `fullscreenable: false` — a window created while the active Space is
   fullscreen can otherwise open AS a fullscreen window (the pill swallowing
-  the whole screen). The quick-ask bar uses the same setup.
-- Shown iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
-  Renderer asks `video:setPopout {show}`; main creates a frameless,
-  `alwaysOnTop` ('floating'), all-workspaces BrowserWindow at the top-right
-  of the primary display, loading the renderer bundle with `#video-popout`
-  (`apps/renderer/src/main.tsx` branches on the hash →
-  `components/video-popout.tsx`).
-- Call state streams over the `video:popout-state` push channel; main caches
-  the last payload and replays it on popout load. Shown with
-  `showInactive()` so it never steals focus.
-- The popout captures its **own** camera preview (MediaStreams can't cross
-  windows) and synthesizes the mascot mouth level (no audio in that window).
-- `video:popoutAction` relays control-bar actions to the app window, matched
-  only by real app-window URLs — `getAllWindows()` also contains hidden
-  utility windows (PDF export) that must not be shown or messaged.
+  the whole screen).
+- Pinned iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
+  Renderer asks `video:setPopout {show}`; main repositions the companion
+  window to the old popout geometry (top-right of the primary display,
+  content-sized; `video:popoutResize` grows it for the response panel) and
+  shows it with `showInactive()` so it never steals focus. Blur does NOT
+  hide it in this mode (Spotlight blur-dismiss applies to the summoned role
+  only), Esc never dismisses it, and ⌥⇧Space focuses it instead of
+  toggling.
+- Call state streams over the `video:popout-state` push channel; main
+  caches the last payload (in quick-ask.ts) and replays it on window load.
+- The pill captures its **own** camera preview (MediaStreams can't cross
+  windows) and synthesizes the mascot mouth level (no audio in that
+  window).
+- **Tiles show live pixels; controls show capabilities.** A voice-only
+  call (camera off, no share) renders the pill WITHOUT the "You" tile —
+  mascot + response + composer + controls — so untucking a voice call
+  never reads as a video call the user didn't start. Toggling camera or
+  share morphs the tile/badge in, in place.
+- `video:popoutAction` relays control-bar actions to the app window,
+  matched only by real app-window URLs — `getAllWindows()` also contains
+  the companion window and hidden utility windows (PDF export) that must
+  not be shown or messaged. Right ⌘ pressed while the pill has focus also
+  relays as ptt-down/ptt-up actions (no Input Monitoring needed for that
+  case).
+- **Tucked (mascot-only voice-to-voice)**: the pinned pill can collapse to
+  just the mascot (`quickAsk:setPinnedCollapsed`; presentation state is
+  pushed with `quick-ask:mode`). The mascot is the drag handle; hover
+  reveals hold-to-talk / bring-text-back / end-call; a one-line caption
+  shows interim speech and the spoken reply's tail; an active screen share
+  KEEPS its consent badge. The summoned bar's tuck handle (») enters this
+  state via `quickAsk:tuck` → `quick-ask:tuck` → the app starts the
+  `voice`-preset call (which opens minimized → floating surface) or, if a
+  call is already live, minimizes it. Tucking from the bar places the
+  mascot bottom-right of the cursor's display (it stays with the user);
+  collapsing an existing pill shrinks it in place toward its nearest
+  corner. ⌥⇧Space while tucked brings the text back; tuck/untuck never
+  ends the call — only the end-call control does. This is the `voice`
+  preset's "floating mascot pill" surface, finally shipped.
 
 ## Permissions
 
@@ -241,6 +275,55 @@ the key while muted does nothing; muting mid-capture discards it).
 Voice input/output prompt sections (`# Voice Input`, `# Voice Output`) are
 reused untouched — calls set `voiceInput` per utterance and force
 `voiceOutput: 'full'`.
+
+## Pointing at the shared screen
+
+During a live screen share the assistant can point at the user's REAL
+display: the `screen-pointer` builtin (attached by the `app-navigation`
+skill) takes fractional coordinates (x/y in 0–1, estimated from the latest
+screen-share frame) plus an optional tiny label, and main draws an animated
+laser-dot + ping rings there. "This dip here is the weekend" now comes with
+a finger on the chart.
+
+- Tool: `packages/core/src/runtime/tools/domains/screen-pointer.ts` —
+  actions `point` (x, y, `label?`, `durationMs?`, default auto-hide 8s) and
+  `hide`. Executes directly in main via the DI seam
+  (`IScreenPointerService`, registered in `main.ts` like browser control) —
+  no renderer round-trip, and it hard-fails with an explanation when no
+  share is live.
+- Share gate: an App.tsx effect reports `video.screenState === 'live'` over
+  `screenPointer:setShareActive` (covers call AND quick-ask shares); share
+  end tears the pointer down instantly.
+- Overlay: `apps/main/src/screen-pointer.ts` creates a transparent,
+  click-through (`setIgnoreMouseEvents`), non-focusable, screen-saver-level
+  NSPanel covering the primary display (the share always captures the
+  primary display), loading the renderer with `#screen-pointer` →
+  `components/screen-pointer-overlay.tsx`. State pushes over
+  `screen-pointer:state` (replayed on load; `nonce` restarts the ping when
+  pointing twice at one spot). The window exists only while something is
+  pointed at — hide destroys it.
+- Prompt surface: a "You can POINT at their screen" bullet in the
+  `# Video Mode` screen-sharing section (`capabilities/modes.ts`) plus a
+  "Pointing at the user's shared screen" section with a worked example in
+  the `app-navigation` skill.
+- **Clicking/typing was explored and removed** (design notes for whoever
+  revisits). A `screen-control` tool (click at frame coordinates + type
+  into the focused field) shipped briefly and worked mechanically, but was
+  pulled: aiming from 1280px-wide frames misses small targets, and the
+  model acts BLIND between actions (frames only arrive with user
+  messages), so it typed into wrong focus and reported success. The
+  missing piece is a post-action verification frame in the tool result.
+  Hard-won lessons if rebuilt: System Events `click at` returns success
+  WITHOUT clicking on modern macOS — post real CGEvents via
+  `osascript -l JavaScript` + the ObjC bridge instead (no native module,
+  Accessibility-only, no Automation consent); CGEventPost from an
+  untrusted process drops events silently, so an upfront
+  `isTrustedAccessibilityClient` self-check is the only reliable gate; and
+  TCC keys grants to the code signature, so ad-hoc builds lose the grant
+  on every rebuild (Developer ID signing fixes it). Web tasks never needed
+  it — the embedded browser (`browser-control`) acts element-precisely
+  with page state returned per action. Full implementation: this branch's
+  history (feat/screen-pointer-control, pre-removal).
 
 ## Driving the app on a call
 
@@ -286,18 +369,25 @@ distribution (utterance → submit → first speak → audio playing):
 - **Acknowledgment cue** (`lib/call-sounds.ts`): a soft blip the instant an
   utterance is accepted — perceived latency matters as much as measured.
 
-## Quick-ask bar (related surface)
+## Quick-ask bar (the companion window's summoned role)
 
-Global ⌥⇧Space summons a Spotlight-style bar over any app
-(`apps/main/src/quick-ask.ts` window + `components/quick-ask-bar.tsx`
-renderer, hash `#quick-ask`). Type — or hold Right ⌘ for local dictation
-(DOM events; the bar has focus, no Input Monitoring needed) — and the
-question relays through main into the current chat (`quickAsk:submit` →
-`quick-ask:submit` → `handlePromptSubmit`); the answer mirrors back over
+Global ⌥⇧Space summons a Spotlight-style bar over any app — the SAME
+window as the call pill above, in its `summoned` mode. The input is the
+real chat composer (`ChatInputWithMentions`): @-mentions over knowledge
+notes, attachments, model/effort picker, search/code/permission toggles.
+Type — or hold Right ⌘ for local dictation (DOM events; the bar has
+focus, no Input Monitoring needed) — and the submit relays through main
+into the current chat with the FULL composer payload (`quickAsk:submit`
+→ `quick-ask:submit` → `handlePromptSubmit`, with the bar's model/effort
+applied to the active tab first); the answer mirrors back over
 `quickAsk:state` → `quick-ask:state` (streaming text from
-`currentAssistantMessage`, final text from the conversation — only messages
-timestamped after the submit count). The window is hidden, not destroyed,
-on dismiss (blur or Esc); it grows to show the answer via `quickAsk:resize`.
+`currentAssistantMessage`, final text from the conversation — only
+messages timestamped after the submit count), and `quickAsk:stop` relays
+the composer's Stop. The window is hidden, not destroyed, on dismiss
+(blur or Esc). Geometry: a FIXED tall transparent frame — only the
+bottom card paints; composer popovers open upward into the transparent
+zone, a click there dismisses, and no window resizing happens in this
+mode.
 
 **Optional toggles** (`quickAsk:setOptions` → `quick-ask:set-options`;
 actual state echoes back over `quickAsk:optionsState` →

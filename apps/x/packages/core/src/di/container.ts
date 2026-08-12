@@ -28,6 +28,7 @@ import { CodeSessionService } from "../code-mode/sessions/service.js";
 import { CodeSessionStatusTracker } from "../code-mode/sessions/status-tracker.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
+import type { IScreenPointerService } from "../application/screen-pointer/service.js";
 import { SystemClock, type IClock } from "../runtime/turns/clock.js";
 import { FSTurnRepo } from "../runtime/turns/fs-repo.js";
 import type { ITurnRepo } from "../runtime/turns/repo.js";
@@ -128,7 +129,9 @@ container.register({
     // Process-wide turn event spine: every turn's events, tagged with
     // sessionId and durable file offsets, regardless of who started the turn.
     turnEventBus: asClass<ITurnEventBus>(TurnEventHub).singleton(),
-    usageReporter: asClass<IUsageReporter>(RealUsageReporter).singleton(),
+    usageReporter: asFunction<IUsageReporter>(
+        () => new RealUsageReporter(),
+    ).singleton(),
     agentResolver: asFunction<IAgentResolver>(
         () =>
             new DispatchingAgentResolver(
@@ -161,5 +164,11 @@ export function registerBrowserControlService(service: IBrowserControlService): 
 export function registerNotificationService(service: INotificationService): void {
     container.register({
         notificationService: asValue(service),
+    });
+}
+
+export function registerScreenPointerService(service: IScreenPointerService): void {
+    container.register({
+        screenPointerService: asValue(service),
     });
 }

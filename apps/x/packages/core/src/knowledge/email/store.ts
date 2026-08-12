@@ -643,8 +643,9 @@ export function isEmailTooOldToNotify(dateMs: number, now: number = Date.now()):
 /**
  * Fire one OS notification per genuinely-new email thread. Only ever called
  * from the incremental sync path, so a first-time connect (full sync) never
- * notifies. Suppressed while the app is focused, and for stale backlog (see
- * isEmailTooOldToNotify).
+ * notifies. The Gmail caller pre-filters out threads whose only new mail is
+ * the user's own outbound (SENT) messages. Suppressed while the app is
+ * focused, and for stale backlog (see isEmailTooOldToNotify).
  */
 export function notifyNewEmailThreads(threadIds: string[]): void {
     const now = Date.now();
