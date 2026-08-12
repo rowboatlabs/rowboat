@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -33,10 +33,11 @@ import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { ModelSelectionSection } from "@/components/settings/model-selection-section"
+import { PermissionsSettings } from "@/components/settings/permissions-settings"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "advanced" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -105,6 +106,12 @@ const tabs: TabConfig[] = [
     description: "Choose which notifications you receive",
   },
   {
+    id: "permissions",
+    label: "Permissions",
+    icon: ShieldCheck,
+    description: "What Rowboat can access, and how to grant it",
+  },
+  {
     id: "note-tagging",
     label: "Note Tagging",
     icon: Tags,
@@ -129,7 +136,7 @@ const tabs: TabConfig[] = [
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
-  { label: "App", ids: ["appearance", "notifications", "help"] },
+  { label: "App", ids: ["appearance", "notifications", "permissions", "help"] },
 ]
 
 interface SettingsDialogProps {
@@ -1601,6 +1608,10 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [globalLimit, setGlobalLimit] = useState("")
   const [chatLimit, setChatLimit] = useState("")
   const [loaded, setLoaded] = useState(false)
+  // Storage retention (auto-delete old chats & task transcripts).
+  // chatDays null = never delete chats (transcript cleanup still runs).
+  const [retentionEnabled, setRetentionEnabled] = useState(true)
+  const [retentionChatDays, setRetentionChatDays] = useState<number | null>(60)
 
   useEffect(() => {
     if (!dialogOpen) return
@@ -1621,8 +1632,25 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
       .catch(() => {
         if (!cancelled) toast.error("Failed to load advanced settings")
       })
+    window.ipc.invoke("retention:getSettings", null)
+      .then((settings) => {
+        if (cancelled) return
+        setRetentionEnabled(settings.enabled)
+        setRetentionChatDays(settings.chatDays)
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load auto-delete settings")
+      })
     return () => { cancelled = true }
   }, [dialogOpen])
+
+  const saveRetention = useCallback(async (patch: { enabled?: boolean; chatDays?: number | null }) => {
+    try {
+      await window.ipc.invoke("retention:setSettings", patch)
+    } catch {
+      toast.error("Failed to save auto-delete settings")
+    }
+  }, [])
 
   // Saves silently on success (a toast per stepper click would be noisy,
   // matching the notification toggles); errors still surface.
@@ -1727,6 +1755,56 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
             />
           </div>
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Auto-delete old chats &amp; task history</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Deletes chats inactive for longer than the period below, and background run
+              transcripts (note creation, background tasks, knowledge sync) older than 14 days.
+              Notes and files created by agents are never touched.
+            </div>
+          </div>
+          <Switch
+            checked={retentionEnabled}
+            onCheckedChange={(checked) => {
+              setRetentionEnabled(checked)
+              void saveRetention({ enabled: checked })
+            }}
+            aria-label="Auto-delete old chats and task history"
+          />
+        </div>
+
+        {retentionEnabled && (
+          <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">Delete chats after</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Measured from the chat&apos;s last activity, not when it was created.
+              </div>
+            </div>
+            <Select
+              value={retentionChatDays === null ? "never" : String(retentionChatDays)}
+              onValueChange={(value) => {
+                const days = value === "never" ? null : Number(value)
+                setRetentionChatDays(days)
+                void saveRetention({ chatDays: days })
+              }}
+            >
+              <SelectTrigger className="w-32 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="30">30 days</SelectItem>
+                <SelectItem value="60">60 days</SelectItem>
+                <SelectItem value="90">90 days</SelectItem>
+                <SelectItem value="never">Never</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1943,6 +2021,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <AppearanceSettings />
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
+              ) : activeTab === "permissions" ? (
+                <PermissionsSettings dialogOpen={open} />
               ) : activeTab === "advanced" ? (
                 <AdvancedSettings dialogOpen={open} />
               ) : activeTab === "help" ? (

@@ -261,6 +261,10 @@ class FakeTurnRuntime implements ITurnRuntime {
         return { turnId, events: structuredClone(log) };
     }
 
+    async deleteTurn(turnId: string): Promise<void> {
+        this.logs.delete(turnId);
+    }
+
     setLog(turnId: string, events: TEvent[]): void {
         this.logs.set(turnId, events);
     }
@@ -812,7 +816,7 @@ describe("event forwarding and index maintenance (13.6, 13.7)", () => {
         });
     });
 
-    it("deleteSession removes the file and entry; turn files stay; late settles don't resurrect", async () => {
+    it("deleteSession removes the file, entry, and turn files; live advances abort first", async () => {
         const { sessions, repo, fake, bus } = makeSessions();
         fake.script = () => ({ untilAbort: true });
         const sessionId = await sessions.createSession();
@@ -820,6 +824,8 @@ describe("event forwarding and index maintenance (13.6, 13.7)", () => {
             agent: { agentId: "copilot" },
         });
 
+        // The advance is still live (untilAbort): deleteSession aborts it,
+        // waits for it to settle, then removes both files.
         await sessions.deleteSession(sessionId);
         await expect(
             (repo as InMemorySessionRepo).read(sessionId),
@@ -830,13 +836,91 @@ describe("event forwarding and index maintenance (13.6, 13.7)", () => {
             sessionId,
             entry: null,
         });
-        // Turn file untouched (orphaned, inert).
-        expect(fake.logs.has(turnId)).toBe(true);
+        // Turn file deleted along with the session.
+        expect(fake.logs.has(turnId)).toBe(false);
 
-        // The still-running advance settles after deletion: no resurrection.
-        await sessions.stopTurn(turnId);
         await flush();
         expect(sessions.listSessions()).toEqual([]);
+    });
+
+    it("deleteSession follows sub-agent child links and deletes child turn files", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("go"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+
+        // Seed a child turn plus the durable 'subagent' tool_progress trail
+        // spawn-agent records on the parent (model call → invocation →
+        // progress, so the reducer accepts the log).
+        const childTurnId = "2026-07-02T10-00-00Z-9999999-000";
+        fake.setLog(childTurnId, [
+            createdEvent(childTurnId, {
+                agent: { agentId: "subagent" },
+                sessionId: null,
+                context: [],
+                input: user("child task"),
+                config: { humanAvailable: false },
+            }),
+        ]);
+        const parentLog = fake.logs.get(turnId)!;
+        fake.setLog(turnId, [
+            ...parentLog,
+            {
+                type: "model_call_requested",
+                turnId,
+                ts: TS,
+                modelCallIndex: 0,
+                request: { messages: ["input"], parameters: {} },
+            },
+            {
+                type: "model_call_completed",
+                turnId,
+                ts: TS,
+                modelCallIndex: 0,
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "tool-call",
+                            toolCallId: "tc-1",
+                            toolName: "spawn-agent",
+                            arguments: {},
+                        },
+                    ],
+                },
+                finishReason: "tool-calls",
+                usage: {},
+            },
+            {
+                type: "tool_invocation_requested",
+                turnId,
+                ts: TS,
+                toolCallId: "tc-1",
+                toolId: "tool.spawn-agent",
+                toolName: "spawn-agent",
+                execution: "sync",
+                input: {},
+            },
+            {
+                type: "tool_progress",
+                turnId,
+                ts: TS,
+                toolCallId: "tc-1",
+                source: "sync",
+                progress: {
+                    kind: "subagent",
+                    childTurnId,
+                    agentName: "subagent",
+                    task: "child task",
+                },
+            },
+        ] as TEvent[]);
+
+        await sessions.deleteSession(sessionId);
+        expect(fake.logs.has(turnId)).toBe(false);
+        expect(fake.logs.has(childTurnId)).toBe(false);
     });
 });
 

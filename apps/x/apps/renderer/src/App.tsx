@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
@@ -23,6 +23,7 @@ import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
 import { DocxFileViewer } from '@/components/docx-file-viewer';
 import { SpreadsheetFileViewer } from '@/components/spreadsheet-file-viewer';
+import { PptxEditor } from '@/components/pptx-editor';
 import { PersistentViewerCache } from '@/components/persistent-viewer-cache';
 import { UnsupportedFileViewer } from '@/components/unsupported-file-viewer';
 import { getViewerType, isCacheableViewerPath } from '@/lib/file-types';
@@ -57,6 +58,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { SettingsDialog } from "@/components/settings-dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
@@ -1073,8 +1075,8 @@ function App() {
       spokenVoiceRef.current.count += 1
       if (
         (ttsEnabledRef.current || speakTurnRef.current) &&
-        !companionTextModeRef.current &&
-        !suppressSpeechTurnRef.current
+        !suppressSpeechTurnRef.current &&
+        !speakerMutedRef.current
       ) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
@@ -1093,8 +1095,8 @@ function App() {
     if (activeIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
-    // Text mode (the companion's expanded card): no fallback read-aloud.
-    if (companionTextModeRef.current || suppressSpeechTurnRef.current) {
+    // Typed turn or speaker muted: no fallback read-aloud.
+    if (suppressSpeechTurnRef.current || speakerMutedRef.current) {
       turn.pending = false
       return
     }
@@ -1175,12 +1177,16 @@ function App() {
   // future summon starts already sharing, until toggled off.
   const companionVoiceRef = useRef(false)
   const companionVoiceStartingRef = useRef(false)
-  // The companion's expanded CARD is TEXT MODE: replies render as text and
-  // are not spoken (pushed from the bar over quick-ask:text-mode). The
-  // per-turn ref makes the choice stick for a whole turn — a reply to a
-  // text-mode question stays silent even if the user tucks mid-stream.
-  const companionTextModeRef = useRef(false)
+  // Speech follows the QUESTION's modality, not the surface: a spoken
+  // question (PTT utterance) gets a spoken reply — even with the Skipper's
+  // text panel open — while a typed question renders silently. Stamped
+  // per-turn at submit so the choice sticks for the whole reply.
   const suppressSpeechTurnRef = useRef(false)
+  // Output mute (the Skipper's speaker pin): no reply audio while set —
+  // independent of micMuted (which pauses INPUT).
+  const [speakerMuted, setSpeakerMuted] = useState(false)
+  const speakerMutedRef = useRef(false)
+  speakerMutedRef.current = speakerMuted
   // In-call mute: a full input pause, not just audio — mic audio stops
   // reaching Deepgram AND camera/screen frame capture stops, so nothing said
   // or shown while muted ever reaches the assistant. Output is untouched
@@ -1408,6 +1414,7 @@ function App() {
     setPracticeMode(preset === 'practice')
     practiceModeRef.current = preset === 'practice'
     setMicMuted(false)
+    setSpeakerMuted(false)
     // Every preset starts in the floating pill (video included — the camera
     // preview lives in the pill) except practice, where the coaching session
     // is a deliberate face-to-face full screen.
@@ -1735,6 +1742,26 @@ function App() {
     }
   }
 
+  // What's happening right now, at tool-NAME level ("Searching the web…",
+  // "Reasoning…" — never arguments): the most recent activity wins — a
+  // running tool by display name, else reasoning, else plain thinking.
+  // Feeds the summoned bar's status line AND the Skipper's chip/panel.
+  const liveActivityText = useMemo(() => {
+    if (!activeIsProcessing) return null
+    let label = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
+    for (let i = liveConversation.length - 1; i >= 0; i--) {
+      const item = liveConversation[i]
+      if (isToolCall(item)) {
+        if (item.status === 'pending' || item.status === 'running') {
+          label = `${getToolDisplayName(item)}…`
+        }
+        break
+      }
+      if (isChatMessage(item)) break
+    }
+    return label
+  }, [activeIsProcessing, activeIsReasoning, liveConversation])
+
   // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
   // The main process caches the latest state and replays it when the popout
   // loads.
@@ -1747,13 +1774,31 @@ function App() {
         cameraOn: video.cameraOn,
         micMuted,
         screenSharing: video.screenState === 'live',
+        speakerMuted,
+        activityText: liveActivityText,
         interimText: voice.interimText || null,
         pttLocked: pttStatus === 'locked',
         responseText: callResponseText,
         questionText: callQuestionText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus, callResponseText, callQuestionText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, liveActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
+
+  // Screen-pointer gate: tell main whether a share is live (call OR
+  // quick-ask — this window owns the capture either way). While true the
+  // assistant's screen-pointer tool may draw on the shared display; flipping
+  // false tears the pointer overlay down instantly.
+  useEffect(() => {
+    try {
+      void window.ipc
+        .invoke('screenPointer:setShareActive', { active: video.screenState === 'live' })
+        .catch((err) => console.warn('[screen-pointer] setShareActive failed:', err))
+    } catch (err) {
+      // A stale preload (app not restarted since the channel was added)
+      // throws synchronously from schema validation — must not break the app.
+      console.warn('[screen-pointer] setShareActive failed:', err)
+    }
+  }, [video.screenState])
 
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full
@@ -1770,6 +1815,22 @@ function App() {
           localStorage.setItem('companion-share-sticky', video.screenState !== 'live' ? '1' : '0')
         }
         void handleToggleScreenShare()
+      }
+      else if (action === 'toggle-speaker') {
+        setSpeakerMuted((muted) => {
+          const next = !muted
+          if (next) {
+            // Muting hushes NOW: silence in-flight speech and drop the
+            // queued backlog (marked as voiced so the fallback net doesn't
+            // read the reply aloud after an unmute).
+            ttsRef.current.cancel()
+            if (voiceSegmentsRef.current) {
+              spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+            }
+            spokeSegmentThisTurnRef.current = true
+          }
+          return next
+        })
       }
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
@@ -1927,21 +1988,8 @@ function App() {
     })
   }, [])
 
-  // Companion text mode (the expanded card): entering it hushes in-flight
-  // speech and skips the queued voice backlog; while it's on, replies are
-  // text only. Voice comes back when the card tucks away.
-  useEffect(() => {
-    return window.ipc.on('quick-ask:text-mode', ({ textMode }) => {
-      companionTextModeRef.current = textMode
-      if (textMode) {
-        ttsRef.current.cancel()
-        if (voiceSegmentsRef.current) {
-          spokenVoiceRef.current.count = voiceSegmentsRef.current.length
-        }
-        spokeSegmentThisTurnRef.current = true
-      }
-    })
-  }, [])
+  // (The old surface-based text-mode hush is gone: speech now follows each
+  // question's modality, plus the explicit speaker mute below.)
 
   // Tuck relay: the bar pushed its text into the mascot — voice-to-voice.
   // This is the voice call preset's long-promised "floating mascot pill"
@@ -2001,28 +2049,11 @@ function App() {
     // Nothing new yet (run not started / no fresh answer): pushing would
     // only flicker the bar's local "Thinking…" state away.
     if (!text && !activeIsProcessing) return
-    // What's happening right now, for the bar's blinking status line: the
-    // most recent activity wins — a running tool by name, else reasoning,
-    // else plain thinking.
-    let statusText: string | null = null
-    if (activeIsProcessing) {
-      statusText = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
-      for (let i = liveConversation.length - 1; i >= 0; i--) {
-        const item = liveConversation[i]
-        if (isToolCall(item)) {
-          if (item.status === 'pending' || item.status === 'running') {
-            statusText = `${getToolDisplayName(item)}…`
-          }
-          break
-        }
-        if (isChatMessage(item)) break
-      }
-    }
     void window.ipc
-      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText })
+      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText: liveActivityText })
       .catch(() => {})
     if (!activeIsProcessing && text) quickAskActiveRef.current = false
-  }, [activeIsProcessing, activeIsReasoning, liveAssistantMessage, liveConversation])
+  }, [activeIsProcessing, liveActivityText, liveAssistantMessage, liveConversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -3576,9 +3607,12 @@ function App() {
     // outside the bar never start talking.
     speakTurnRef.current =
       !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
-    // A turn submitted from the companion's expanded card is a TEXT turn:
-    // its reply renders silently, even if the user tucks mid-reply.
-    suppressSpeechTurnRef.current = inCallRef.current && companionTextModeRef.current
+    // Modality decides speech on calls: a TYPED question (composer, Skipper
+    // panel, popout input) renders its reply silently; a SPOKEN one (PTT
+    // utterance — pendingVoiceInputRef is set just before submit) is spoken
+    // even with the text panel open. Stamped per-turn so tucking or typing
+    // mid-reply never flips an in-flight answer.
+    suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
 
     if (inCallRef.current || speakTurnRef.current) {
       // A new question supersedes whatever of the previous reply was still
@@ -3704,7 +3738,11 @@ function App() {
             },
           },
         },
-        autoPermission: (permissionMode ?? 'manual') === 'auto',
+        // Default matches the composer toggle's default (auto): submissions
+        // that don't thread a mode — voice/PTT utterances, quick-ask, popout
+        // text — must not silently fall back to manual, which skipped the
+        // auto-permission classifier and carded EVERY gated tool mid-call.
+        autoPermission: (permissionMode ?? 'auto') === 'auto',
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
@@ -4562,6 +4600,22 @@ function App() {
     setIsSuggestedTopicsOpen(false)
     setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
   }, [dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen])
+
+  // A chat was deleted (sessions:delete succeeded): drop it from the recents
+  // list and — because closeChatTab no-ops on the last tab in the single-chat
+  // model — reset the chat surface to a fresh conversation when the deleted
+  // chat is the one currently bound, so a dead transcript never stays on
+  // screen.
+  const handleRunDeleted = useCallback((rid: string) => {
+    setRuns((prev) => prev.filter((r) => r.id !== rid))
+    const openTab = chatTabs.find((t) => t.runId === rid)
+    if (!openTab) return
+    if (chatTabs.length > 1) {
+      closeChatTab(openTab.id)
+    } else {
+      handleNewChatTab()
+    }
+  }, [chatTabs, closeChatTab, handleNewChatTab])
 
   // Sidebar variant: reset the chat in place without leaving file/graph context.
   // A caller with a selection already chosen for the fresh chat (the Home
@@ -5562,6 +5616,17 @@ function App() {
         duration: 10000,
       })
     })
+  }, [])
+
+  // One-time storage-retention notice: a modal on the first launch with
+  // retention enabled; the actual sweep starts on the NEXT launch so months
+  // of history are never deleted before the user has seen this.
+  const [retentionNotice, setRetentionNotice] = useState<{ chatDays: number | null } | null>(null)
+  const [retentionSettingsOpen, setRetentionSettingsOpen] = useState(false)
+  useEffect(() => {
+    void window.ipc.invoke('retention:consumeFirstRunNotice', null).then(({ show, chatDays }) => {
+      if (show) setRetentionNotice({ chatDays })
+    }).catch(() => { /* settings unavailable — try again next launch */ })
   }, [])
 
   // Report the UI theme to the apps server (spec §7.1): apps read it from
@@ -6983,11 +7048,7 @@ function App() {
               }}
               onDeleteRun={(rid) => {
                 void window.ipc.invoke('sessions:delete', { sessionId: rid })
-                  .then(() => {
-                    setRuns((prev) => prev.filter((r) => r.id !== rid))
-                    const openTab = chatTabs.find((t) => t.runId === rid)
-                    if (openTab) closeChatTab(openTab.id)
-                  })
+                  .then(() => handleRunDeleted(rid))
                   .catch((err) => console.error('Failed to delete chat:', err))
               }}
               onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
@@ -7392,6 +7453,7 @@ function App() {
                     onDeleteRun={async (rid) => {
                       try {
                         await window.ipc.invoke('sessions:delete', { sessionId: rid })
+                        handleRunDeleted(rid)
                         await loadRuns()
                       } catch (err) {
                         console.error('Failed to delete run:', err)
@@ -7588,6 +7650,10 @@ function App() {
                 ) : selectedPath && getViewerType(selectedPath) === 'spreadsheet' ? (
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <SpreadsheetFileViewer path={selectedPath} />
+                  </div>
+                ) : selectedPath && getViewerType(selectedPath) === 'pptx' ? (
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <PptxEditor key={selectedPath} path={selectedPath} />
                   </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-hidden">
@@ -7894,6 +7960,37 @@ function App() {
         open={billingErrorOpen}
         match={billingErrorMatch}
         onOpenChange={setBillingErrorOpen}
+      />
+      {/* One-time storage-retention notice (see retention:consumeFirstRunNotice). */}
+      <Dialog open={retentionNotice !== null} onOpenChange={(open) => { if (!open) setRetentionNotice(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Old chats are cleaned up automatically</DialogTitle>
+            <DialogDescription className="pt-1 leading-relaxed">
+              {retentionNotice?.chatDays != null
+                ? `To save disk space, Rowboat now deletes chats that have been inactive for ${retentionNotice.chatDays}+ days, along with old background-task transcripts.`
+                : 'To save disk space, Rowboat now deletes old background-task transcripts.'}
+              {' '}Notes and files created by agents are never touched. Cleanup starts from the next launch, and you can change or turn this off anytime.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRetentionNotice(null)
+                setRetentionSettingsOpen(true)
+              }}
+            >
+              Open Settings
+            </Button>
+            <Button onClick={() => setRetentionNotice(null)}>Got it</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <SettingsDialog
+        open={retentionSettingsOpen}
+        onOpenChange={setRetentionSettingsOpen}
+        defaultTab="advanced"
       />
       <OnboardingModal
         open={showOnboarding}

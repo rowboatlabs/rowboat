@@ -95,6 +95,10 @@ export interface ITurnRuntime {
         options?: { signal?: AbortSignal },
     ): TurnExecution;
     getTurn(turnId: string): Promise<Turn>;
+    // Removes the turn's file. Idempotent — a missing turn is not an error.
+    // Callers own lifecycle safety: never delete a turn that may still be
+    // advancing (session deletion stops live advances first).
+    deleteTurn(turnId: string): Promise<void>;
 }
 
 // An external input that does not match the turn's current durable pending

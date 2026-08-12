@@ -205,6 +205,7 @@ const HISTORICAL_KEY_ORDER = [
     "todo-add",
     "todo-propose",
     "todo-report",
+    "screen-pointer",
     "spreadsheet-create",
     "spreadsheet-edit",
     "spawn-agent",
