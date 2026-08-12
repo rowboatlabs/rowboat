@@ -821,13 +821,16 @@ Only `tool_permission_resolved` is an effective execution decision.
 | --- | --- | --- |
 | false | true | Ask human and suspend. |
 | false | false | Deny and continue with an error tool result. |
-| true | true | Classify; deferred calls ask human. |
-| true | false | Classify; deferred calls are denied. |
+| true | true | Classify; deferred and denied calls ask human. |
+| true | false | Classify; deferred and denied calls are denied. |
 
 Classifier decisions behave as follows:
 
 - `allow`: resolve allow and execute/dispatch immediately.
-- `deny`: resolve deny and create an error tool result.
+- `deny`: with a human available, escalate to them (the classified event keeps
+  the objection on record; the human makes the effective decision); otherwise
+  resolve deny and create an error tool result carrying the classifier's
+  reason.
 - `defer`: ask a human if available; otherwise deny.
 - Classifier failure or omitted decision: record failure and treat as `defer`.
 
@@ -1821,7 +1824,8 @@ Assertions:
 
 - Classifier decisions and effective decisions are distinct records.
 - Allow executes.
-- Deny creates an error result without invocation.
+- Deny escalates to a human when available; their allow executes the call.
+- Deny creates an error result without invocation when no human is available.
 - Defer asks a human when available.
 - Defer denies when no human is available.
 - Classifier failure and missing decisions normalize to defer.

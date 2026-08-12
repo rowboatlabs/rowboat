@@ -852,24 +852,31 @@ class TurnAdvance {
                     ),
                 );
             } else if (decision.decision === "deny") {
-                await this.append(
-                    resolvedEvent(
-                        this.turnId,
-                        this.now(),
-                        tc.toolCallId,
-                        "deny",
-                        "classifier",
-                        decision.reason,
-                    ),
-                );
-                await this.append(
-                    runtimeResultEvent(this.turnId, this.now(), tc, {
-                        output: `Permission denied: ${decision.reason}`,
-                        isError: true,
-                    }),
-                );
+                // With a human available, a classifier deny escalates to them
+                // instead of resolving: the classified event keeps the
+                // objection on record while the human makes the effective
+                // decision. Hard denies are reserved for unattended turns.
+                if (!this.definition.config.humanAvailable) {
+                    await this.append(
+                        resolvedEvent(
+                            this.turnId,
+                            this.now(),
+                            tc.toolCallId,
+                            "deny",
+                            "classifier",
+                            decision.reason,
+                        ),
+                    );
+                    await this.append(
+                        runtimeResultEvent(this.turnId, this.now(), tc, {
+                            output: `Permission denied: ${decision.reason}`,
+                            isError: true,
+                        }),
+                    );
+                }
             }
-            // "defer" falls through to the human/deny fallback.
+            // "defer" (and escalated "deny") falls through to the human/deny
+            // fallback.
         }
     }
 

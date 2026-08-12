@@ -426,10 +426,11 @@ function toolCallPartOf(tc: ToolCallState) {
 }
 
 // An unresolved permission is not necessarily waiting on the user. In auto
-// mode the classifier advances it without human input unless it defers (or
-// cannot classify the request). Keeping this distinction here prevents both
-// a transient permission card and a false human-wait state while the classifier
-// is working.
+// mode the classifier advances it without human input unless it defers,
+// denies (a deny with a human available escalates to them rather than
+// resolving), or cannot classify the request. Keeping this distinction here
+// prevents both a transient permission card and a false human-wait state
+// while the classifier is working.
 function permissionNeedsHuman(state: TurnState, tc: ToolCallState): boolean {
   if (!state.definition.config.humanAvailable) return false
   if (!state.definition.config.autoPermission) return true
@@ -437,7 +438,8 @@ function permissionNeedsHuman(state: TurnState, tc: ToolCallState): boolean {
   return (
     permission?.required.checkerError !== undefined ||
     permission?.classificationFailed === true ||
-    permission?.classification?.decision === 'defer'
+    permission?.classification?.decision === 'defer' ||
+    permission?.classification?.decision === 'deny'
   )
 }
 
