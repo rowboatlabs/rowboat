@@ -1715,6 +1715,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
 
   // ---- The Deck: fed by the main-process thread registry ----
   const [deckThreads, setDeckThreads] = useState<HomeThread[]>([])
+  const deckThreadsRef = useRef(deckThreads)
+  deckThreadsRef.current = deckThreads
   // A strip jump flashes its source row with the spotlight treatment.
   const [flashKey, setFlashKey] = useState<string | null>(null)
   const deckCycleRef = useRef(0)
@@ -1760,8 +1762,18 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   // Every door into a session marks it read — expand, or off to the sidebar.
   const openInChat = useCallback((sessionId: string) => {
     markSessionSeen(sessionId)
+    // Code threads open in the Code section instead of the dock: the
+    // workbench (diffs, terminal, run timeline) carries the SAME
+    // conversation in its right pane — a code session IS a chat session —
+    // so the dock alone would just hide the diff half of the work. Every
+    // Home door (item trays, receipts, approve chips, stream rows) funnels
+    // through here and inherits the routing.
+    if (onOpenCodeSession && deckThreadsRef.current.some((t) => t.sessionId === sessionId && t.kind === 'code')) {
+      onOpenCodeSession(sessionId)
+      return
+    }
     onOpenInChat(sessionId)
-  }, [markSessionSeen, onOpenInChat])
+  }, [markSessionSeen, onOpenInChat, onOpenCodeSession])
 
   // A Deck strip's click: spotlight the source item in place; threads with
   // no list row (chats, code sessions) open in the dock instead.
@@ -1784,16 +1796,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   const jumpToStripRef = useRef(jumpToStrip)
   useEffect(() => { jumpToStripRef.current = jumpToStrip }, [jumpToStrip])
 
-  // ⏎ / ↗ on a strip: code threads open the Code section (diffs, terminal),
-  // everything else the chat dock.
+  // ⏎ / ↗ on a strip — openInChat is kind-aware, so code strips land in
+  // the Code section and everything else in the dock.
   const openStrip = useCallback((thread: HomeThread) => {
-    if (thread.kind === 'code' && onOpenCodeSession) {
-      markSessionSeen(thread.sessionId)
-      onOpenCodeSession(thread.sessionId)
-      return
-    }
     openInChat(thread.sessionId)
-  }, [onOpenCodeSession, openInChat, markSessionSeen])
+  }, [openInChat])
 
   const togglePin = useCallback((thread: HomeThread) => {
     void window.ipc.invoke('home:setPinned', { sessionId: thread.sessionId, pinned: !thread.pinned })
@@ -1924,8 +1931,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
     .sort((a, b) => (a.startedAt ?? a.updatedAt).localeCompare(b.startedAt ?? b.updatedAt))
   const deckNeedsYouRef = useRef(deckNeedsYou)
   deckNeedsYouRef.current = deckNeedsYou
-  const deckThreadsRef = useRef(deckThreads)
-  deckThreadsRef.current = deckThreads
   // The J-cursor's last stop — what H snoozes.
   const lastJumpedRef = useRef<HomeThread | null>(null)
 
