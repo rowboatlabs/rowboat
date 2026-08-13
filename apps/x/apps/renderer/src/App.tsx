@@ -5613,6 +5613,7 @@ function App() {
           onClick: () => window.open(`https://github.com/rowboatlabs/rowboat/releases/tag/v${version}`, '_blank'),
         },
         duration: 10000,
+        closeButton: true,
       })
     })
   }, [])
