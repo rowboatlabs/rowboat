@@ -1259,6 +1259,13 @@ const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
+  // App → main: the tuck relay was received and a session is starting —
+  // cancel the "nothing answered" text-card fallback (device acquisition can
+  // take seconds; the fallback must not flash meanwhile).
+  'quickAsk:tuckAck': {
+    req: z.null(),
+    res: z.object({}),
+  },
   // Pill ⇄ tucked-mascot presentation of the pinned role (main resizes the
   // window in place and re-pushes quick-ask:mode).
   'quickAsk:setPinnedCollapsed': {

@@ -1477,6 +1477,10 @@ function App() {
   // the Skipper surface. Sticky screen share replays the user's standing
   // choice; without voice configured it falls back to the text card.
   const startHoverCall = useCallback(async () => {
+    // Tell main the relay landed and a session is coming — cancels the
+    // "nothing answered" text-card fallback so slow device startup can't
+    // flash the old summoned bar before the Skipper pins.
+    void window.ipc.invoke('quickAsk:tuckAck', null).catch(() => {})
     if (inCallRef.current) {
       // Already on a call — just make sure the floating surface is up
       // (re-assert even when callSurface didn't change, so a destroyed or

@@ -74,6 +74,22 @@ let appliedExpandedSurface: 'card' | 'pill' = 'pill';
 // the shortcut is never a silent no-op. Time-boxed so a stale summon can't
 // leak into an unrelated call.
 let summonPendingAt = 0;
+// The ⌥⇧Space no-op fallback: shows the text card if nothing answers the
+// tuck relay. Cancelled the moment the app ACKS the relay (it may then take
+// seconds to acquire devices — that must not flash the text card).
+let summonFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearSummonFallback() {
+  if (summonFallbackTimer) {
+    clearTimeout(summonFallbackTimer);
+    summonFallbackTimer = null;
+  }
+}
+
+/** The app window acknowledged a tuck relay and is starting the session. */
+export function ackSummon() {
+  clearSummonFallback();
+}
 
 // The Skipper's anchor: the bottom-right corner of the window, i.e. where
 // the MASCOT stands. The user can drag the Skipper anywhere; collapsing and
@@ -331,11 +347,10 @@ export function toggleQuickAsk(viaShortcut = true) {
     if (appWin) {
       markSummonPending();
       appWin.webContents.send('quick-ask:tuck', null);
-      const armedAt = summonPendingAt;
-      setTimeout(() => {
-        if (mode === 'hidden' && summonPendingAt === armedAt && summonPendingAt !== 0) {
-          showSummonedCard(false);
-        }
+      clearSummonFallback();
+      summonFallbackTimer = setTimeout(() => {
+        summonFallbackTimer = null;
+        if (mode === 'hidden') showSummonedCard(false);
       }, 1500);
       return;
     }
@@ -347,6 +362,7 @@ function showSummonedCard(viaShortcut: boolean) {
   // A voice summon that fell back here must not leave its hint armed — the
   // next unrelated call would grab focus.
   summonPendingAt = 0;
+  clearSummonFallback();
   let win = getQuickAskWindow();
   if (!win) win = createWindow();
   mode = 'summoned';
@@ -378,6 +394,7 @@ export function showQuickAsk() {
  */
 export function setCompanionPinned(pinned: boolean) {
   if (pinned) {
+    clearSummonFallback();
     if (mode === 'pinned') {
       summonPendingAt = 0;
       // Already pinned: re-assert the CURRENT presentation instead of

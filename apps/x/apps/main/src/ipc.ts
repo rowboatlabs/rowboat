@@ -34,6 +34,7 @@ import {
   hideQuickAsk,
   isPinnedCollapsed,
   markSummonPending,
+  ackSummon,
   pushChatContext,
   pushPopoutState,
   resizeCompanionPinned,
@@ -1152,6 +1153,10 @@ export function setupIpcHandlers() {
       // minimize a live call to the floating surface).
       markSummonPending();
       findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
+      return {};
+    },
+    'quickAsk:tuckAck': async () => {
+      ackSummon();
       return {};
     },
     'quickAsk:setPinnedCollapsed': async (_event, args) => {
