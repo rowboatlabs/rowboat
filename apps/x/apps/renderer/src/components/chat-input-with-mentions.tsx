@@ -21,6 +21,7 @@ import {
   MessageCircle,
   Lock,
   Mic,
+  MonitorUp,
   MoreHorizontal,
   Phone,
   PhoneOff,
@@ -29,7 +30,6 @@ import {
   ShieldCheck,
   Square,
   Terminal,
-  Video,
   X,
 } from 'lucide-react'
 
@@ -197,15 +197,12 @@ function compactWorkDirPath(path: string) {
 
 // Call presets: front doors into the same call engine, differing only in
 // starting devices. 'share' is the call button's main click — the "work
-// together" default (screen shared, camera off, floating pill). The chevron
-// menu holds the deviations.
+// together" default (the hover companion — same surface as ⌥⇧Space). The
+// chevron menu holds the deviations.
 export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
 
 const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: string; Icon: typeof Phone }> = [
-  // 'voice' was dropped from the menu (the quick-ask bar with its voice
-  // toggle covers the talk-without-devices case); the preset itself stays
-  // valid for programmatic callers.
-  { preset: 'video', label: 'Video call', description: 'Camera on, face to face — it sees your expressions', Icon: Video },
+  { preset: 'share', label: 'Share screen', description: 'Hover mode with your screen shared from the start', Icon: MonitorUp },
   { preset: 'practice', label: 'Practice session', description: 'Rehearse a pitch or interview with live coaching', Icon: Presentation },
 ]
 
@@ -238,6 +235,10 @@ interface ChatInputInnerProps {
   voiceAvailable?: boolean
   /** A call is live (hands-free voice loop + spoken responses). */
   inCall?: boolean
+  /** While a call is live: does it belong to THIS composer's chat? True →
+   *  the button is End call; false → it re-points the call here. Defaults
+   *  true so unwired hosts keep the plain end-call behavior. */
+  callOnThisChat?: boolean
   /** Start a call with the given preset's device defaults. */
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
@@ -294,6 +295,7 @@ function ChatInputInner({
   onCancelRecording,
   voiceAvailable,
   inCall,
+  callOnThisChat = true,
   onStartCall,
   onEndCall,
   callAvailable,
@@ -1270,30 +1272,35 @@ function ChatInputInner({
                 <button
                   type="button"
                   onClick={() => {
-                    if (inCall) {
+                    if (inCall && callOnThisChat) {
                       onEndCall?.()
                     } else if (callAvailable) {
-                      onStartCall('share')
+                      // Voice hover companion — the same surface ⌥⇧Space
+                      // summons. During a live call on ANOTHER chat this
+                      // re-points the call at this one (same devices).
+                      onStartCall('voice')
                     }
                   }}
                   className={cn(
                     'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
-                    inCall
+                    inCall && callOnThisChat
                       ? 'bg-red-600 text-white hover:bg-red-500'
                       : callAvailable
                         ? 'text-muted-foreground hover:bg-muted hover:text-foreground'
                         : 'cursor-default text-muted-foreground/40'
                   )}
-                  aria-label={inCall ? 'End call' : 'Start a call'}
+                  aria-label={inCall ? (callOnThisChat ? 'End call' : 'Bring this chat into the call') : 'Start a call'}
                 >
-                  {inCall ? <PhoneOff className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
+                  {inCall && callOnThisChat ? <PhoneOff className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
                 {inCall
-                  ? 'End call'
+                  ? (callOnThisChat
+                      ? 'End call'
+                      : 'On a call about another chat — click to bring THIS chat into it')
                   : callAvailable
-                    ? 'Start a call — it sees your screen while you talk it through'
+                    ? 'Talk it through — summons your hover companion (⌥⇧Space)'
                     : 'Calls need voice input and output configured'}
               </TooltipContent>
             </Tooltip>
@@ -1500,6 +1507,10 @@ export interface ChatInputWithMentionsProps {
   onCancelRecording?: () => void
   voiceAvailable?: boolean
   inCall?: boolean
+  /** While a call is live: does it belong to THIS composer's chat? True →
+   *  the button is End call; false → it re-points the call here. Defaults
+   *  true so unwired hosts keep the plain end-call behavior. */
+  callOnThisChat?: boolean
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
   callAvailable?: boolean
@@ -1544,6 +1555,7 @@ export function ChatInputWithMentions({
   onCancelRecording,
   voiceAvailable,
   inCall,
+  callOnThisChat = true,
   onStartCall,
   onEndCall,
   callAvailable,
@@ -1580,6 +1592,7 @@ export function ChatInputWithMentions({
         onCancelRecording={onCancelRecording}
         voiceAvailable={voiceAvailable}
         inCall={inCall}
+        callOnThisChat={callOnThisChat}
         onStartCall={onStartCall}
         onEndCall={onEndCall}
         callAvailable={callAvailable}

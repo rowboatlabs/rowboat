@@ -56,6 +56,7 @@ import type { ISessionRepo } from "../runtime/sessions/repo.js";
 import { EmitterSessionBus, type ISessionBus } from "../runtime/sessions/bus.js";
 import { SessionsImpl } from "../runtime/sessions/sessions.js";
 import type { ISessions } from "../runtime/sessions/api.js";
+import type { JsonValue } from "@x/shared/dist/turns.js";
 import {
     DefaultModelResolver,
     type IDefaultModelResolver,
@@ -108,8 +109,9 @@ container.register({
     // durable record is the settle-time code-run-events-batch).
     codeRunFeed: asClass(CodeRunFeed).singleton(),
 
-    // Code section: project registry, session metadata, the direct-drive
-    // session service, and the live status tracker.
+    // Code section: project registry, session metadata, the session service
+    // (meta + workspace lifecycle; the conversation is an ordinary chat
+    // session), and the live status tracker.
     codeProjectsRepo: asClass<ICodeProjectsRepo>(FSCodeProjectsRepo).singleton(),
     codeSessionsRepo: asClass<ICodeSessionsRepo>(FSCodeSessionsRepo).singleton(),
     codeSessionService: asClass(CodeSessionService).singleton(),
@@ -147,6 +149,17 @@ container.register({
     sessionRepo: asClass<ISessionRepo>(FSSessionRepo).singleton(),
     sessionBus: asClass<ISessionBus>(EmitterSessionBus).singleton(),
     sessions: asClass<ISessions>(SessionsImpl).singleton(),
+    // Code-section sessions pin their coding agent + working directory into
+    // every turn's composition, server-side — "is this a code session" is
+    // never a client-side decision (voice/quick-ask/composer all get the
+    // same prompt). Null for ordinary chats.
+    sessionCompositionPins: asFunction(
+        ({ codeSessionsRepo }: { codeSessionsRepo: ICodeSessionsRepo }) =>
+            async (sessionId: string): Promise<Record<string, JsonValue> | null> => {
+                const meta = await codeSessionsRepo.get(sessionId).catch(() => null);
+                return meta ? { codeMode: meta.agent, codeCwd: meta.cwd } : null;
+            },
+    ).singleton(),
     defaultModelResolver:
         asClass<IDefaultModelResolver>(DefaultModelResolver).singleton(),
     headlessAgentRunner:

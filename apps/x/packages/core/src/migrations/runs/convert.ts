@@ -29,7 +29,8 @@ import { reduceSession, SessionEvent } from "@x/shared/dist/sessions.js";
 //                           background-task history views (which store that id
 //                           and already fetch turn-first via sessions:getTurn)
 //                           resolve it with no code change.
-//   - code_session runs are skipped by the runner; nothing to migrate there.
+//   - code_session runs migrate too (they're ordinary chat sessions now);
+//     their code-* timeline rows are dropped, the conversation survives.
 //
 // The synthesized turn log is validated against reduceTurn before it is
 // returned; anything the reducer would reject throws and the runner quarantines
@@ -497,7 +498,9 @@ export function convertRun(log: RunEventT[], runId: string): ConvertResult {
         throw new RunConversionError("run has no user messages");
     }
 
-    if (useCase === "copilot_chat") {
+    if (useCase === "copilot_chat" || useCase === "code_session") {
+        // Chat-shaped runs (copilot chats, and code sessions — which ARE chat
+        // sessions since the 2026-08 unification) become a session + turns.
         // Session id reuses the original runId; turns get derived ids.
         const sessionId = runId;
         const turns: ConvertedTurn[] = [];

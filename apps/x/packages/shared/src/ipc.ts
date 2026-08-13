@@ -29,7 +29,7 @@ import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent 
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
-import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
+import { CodeProject, CodeSession, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
 // ============================================================================
@@ -1298,17 +1298,16 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
-  // App window → main: pop the ACTIVE chat out into the floating companion,
-  // landing on the expanded text card (the mirror of the card's ↗). Starts
-  // a companion session so the popped chat survives blur (tucking to the
-  // mascot instead of dying like a plain summon would).
-  'quickAsk:popOut': {
-    req: z.null(),
-    res: z.object({}),
-  },
   'quick-ask:tuck': {
     req: z.null(),
     res: z.null(),
+  },
+  // App → main: the tuck relay was received and a session is starting —
+  // cancel the "nothing answered" text-card fallback (device acquisition can
+  // take seconds; the fallback must not flash meanwhile).
+  'quickAsk:tuckAck': {
+    req: z.null(),
+    res: z.object({}),
   },
   // Pill ⇄ tucked-mascot presentation of the pinned role (main resizes the
   // window in place and re-pushes quick-ask:mode).
@@ -1587,15 +1586,11 @@ const ipcSchemas = {
       projectId: z.string(),
       title: z.string().optional(),
       agent: CodingAgent,
-      mode: CodeSessionMode,
       policy: ApprovalPolicy,
       isolation: z.enum(['in-repo', 'worktree']),
-      // LLM for Rowboat-mode turns. Unset = the configured default. Like any
-      // chat, the model is fixed once the session's run exists.
-      model: z.string().optional(),
-      provider: z.string().optional(),
-      // The coding agent's own model + reasoning effort (ACP engine). Unlike the
-      // Rowboat model these are re-applied each turn, so they stay editable.
+      // The coding agent's own model + reasoning effort (ACP engine),
+      // re-applied each turn so they stay editable. The copilot LLM is
+      // whatever the chat composer picks — same as any other chat.
       agentModel: z.string().optional(),
       agentEffort: z.string().optional(),
     }),
@@ -1613,7 +1608,7 @@ const ipcSchemas = {
   'codeSession:update': {
     req: z.object({
       sessionId: z.string(),
-      patch: CodeSession.pick({ title: true, mode: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
+      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
     }),
     res: z.object({
       session: CodeSession,
@@ -1633,18 +1628,6 @@ const ipcSchemas = {
     }),
     res: z.object({
       success: z.literal(true),
-    }),
-  },
-  // Direct-drive: send the user's message straight to the session's ACP agent
-  // (no copilot LLM in between). Streams back over `runs:events`.
-  'codeSession:sendMessage': {
-    req: z.object({
-      sessionId: z.string(),
-      text: z.string().min(1),
-    }),
-    res: z.object({
-      accepted: z.boolean(),
-      error: z.string().optional(),
     }),
   },
   'codeSession:stop': {
@@ -2524,12 +2507,10 @@ const ipcSchemas = {
   // Popout control bar → main process → relayed to the app window, which
   // executes the action on the live call. 'expand' additionally focuses the
   // main app window (handled in the main process). 'ptt-down'/'ptt-up' are
-  // the on-screen talk button's press/release edges; 'send-text' carries a
-  // typed message from the popout's input.
+  // the on-screen talk button's press/release edges.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
-      text: z.string().optional(),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'end-call', 'expand']),
     }),
     res: z.object({}),
   },
@@ -2556,8 +2537,7 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
-      text: z.string().optional(),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'end-call', 'expand']),
     }),
     res: z.null(),
   },

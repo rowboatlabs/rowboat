@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, Check, ChevronDown, FileText, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, ChevronDown, FileText, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, SquarePen, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
@@ -17,6 +17,10 @@ type TodoViewProps = {
   /** Bind the chat dock to an item's session — the full thread view. */
   onOpenInChat: (sessionId: string) => void
   onShowOverview: () => void
+  /** Start a brand-new chat (the app's canonical new-chat flow). */
+  onNewChat?: () => void
+  /** Focus the page-bottom composer — the "c" shortcut's landing spot. */
+  onFocusComposer?: () => void
   /** The real assistant composer, mounted by App (full features, submits
    * through the app's chat machinery). Falls back to a basic input. */
   composer?: React.ReactNode
@@ -41,6 +45,16 @@ const CALLOUT_KEY = 'todo.firstReceiptCalloutDone'
 
 function mentionsRowboat(text: string): boolean {
   return ROWBOAT_MENTION_RE.test(text)
+}
+
+// True when a keyboard event originated in a text-entry context, so
+// single-letter shortcuts must stay inert (email-view's convention).
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  return Boolean(
+    el
+    && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable),
+  )
 }
 
 // Mirrors core fileops key derivation — the renderer computes keys locally
@@ -511,7 +525,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
             onClick={onToggleCollapsed}
             aria-label={isCollapsed ? 'Expand' : 'Collapse'}
             className={`absolute -left-5 top-[7px] rounded p-0.5 text-muted-foreground/40 transition-[opacity,color] hover:text-foreground ${
-              isCollapsed ? '' : 'opacity-0 group-hover/todo:opacity-100'
+              isCollapsed ? '' : 'opacity-0 focus-visible:opacity-100 group-hover/todo:opacity-100'
             }`}
           >
             <ChevronDown className={`size-3.5 transition-transform ${isCollapsed ? '-rotate-90' : ''} motion-reduce:transition-none`} />
@@ -547,7 +561,18 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
         ) : (
           <div
             onClick={() => { if (!item.checked) { setDraft(item.text); setEditing(true) } }}
-            className={`cursor-text text-sm ${item.checked ? 'text-muted-foreground line-through' : changed ? 'font-semibold' : ''}`}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return
+              if ((e.key === 'Enter' || e.key === ' ') && !item.checked) {
+                e.preventDefault()
+                setDraft(item.text)
+                setEditing(true)
+              }
+            }}
+            role={item.checked ? undefined : 'button'}
+            tabIndex={item.checked ? undefined : 0}
+            aria-label={item.checked ? undefined : `Edit to-do: ${item.text}`}
+            className={`cursor-text rounded text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${item.checked ? 'text-muted-foreground line-through' : changed ? 'font-semibold' : ''}`}
           >
             <TextWithMentions text={item.text} onOpenLink={(l) => openLink(l, onOpenNote)} />
             {item.proposed && (
@@ -603,7 +628,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onCommitText(`@rowboat ${item.text}`) }}
-                className={`${CHIP} ml-2 border border-border text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/todo:opacity-100`}
+                className={`${CHIP} ml-2 border border-border text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/todo:opacity-100`}
               >
                 <Bot className="size-3" /> assign
               </button>
@@ -649,10 +674,11 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
           </>
         )}
       </div>
-      {/* One floating action tray on hover — Slack's grammar: zero
-          resting clutter, one surface to learn. Kept inside the row's own
-          band so it never reads as the previous row's controls. */}
-      <div className="absolute right-1 top-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/todo:flex">
+      {/* One floating action tray on hover or keyboard focus — Slack's
+          grammar: zero resting clutter, one surface to learn. Kept inside
+          the row's own band so it never reads as the previous row's
+          controls. Opacity (not display) so Tab can reach the buttons. */}
+      <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 opacity-0 shadow-md transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/todo:pointer-events-auto group-hover/todo:opacity-100">
         {!showConversation && (
           <IconTip label="Reply — tell @rowboat something about this">
             <button
@@ -752,10 +778,24 @@ function Composer({ onSubmit }: { onSubmit: (text: string, kind: 'task' | 'chat'
 }
 
 // The to-do door, where to-dos live: a slim always-there row at the end of
-// the list. Enter appends the line — no model, no modes.
-function AddItemRow({ onAdd, onHandoff }: { onAdd: (text: string) => void; onHandoff?: (text: string) => void }) {
+// the list. Enter appends the line — no model, no modes. The header's
+// "New to-do" button and the N shortcut land here via focusSignal.
+function AddItemRow({ onAdd, onHandoff, focusSignal }: {
+  onAdd: (text: string) => void
+  onHandoff?: (text: string) => void
+  focusSignal?: number
+}) {
   const [text, setText] = useState('')
   const mention = useMention(text, setText)
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!focusSignal) return
+    inputRef.current?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      block: 'center',
+    })
+    inputRef.current?.focus()
+  }, [focusSignal])
   // Delegation is a message to the agent — the moment the mention lands,
   // composition moves to the full composer where model/attachments apply.
   useEffect(() => {
@@ -765,10 +805,11 @@ function AddItemRow({ onAdd, onHandoff }: { onAdd: (text: string) => void; onHan
     }
   }, [text, onHandoff])
   return (
-    <div className="relative mt-1 flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+    <div className="group/add relative mt-1 flex items-center gap-2.5 rounded-lg px-2 py-1.5 focus-within:bg-accent/30">
       {mention.show && <MentionPopup onPick={mention.complete} />}
       <Plus className="size-4 shrink-0 text-muted-foreground/50" />
       <input
+        ref={inputRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -778,10 +819,17 @@ function AddItemRow({ onAdd, onHandoff }: { onAdd: (text: string) => void; onHan
             onAdd(text.trim())
             setText('')
           }
+          if (e.key === 'Escape') e.currentTarget.blur()
         }}
         placeholder="Add a to-do… @rowboat hands it off"
+        aria-label="Add a to-do"
         className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
       />
+      {!text && (
+        <kbd className="rounded border border-border bg-muted px-1 py-px font-mono text-[10px] text-muted-foreground/70 group-focus-within/add:hidden">
+          N
+        </kbd>
+      )}
     </div>
   )
 }
@@ -852,10 +900,13 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   return stripBubbleMarkup(last.text) || links
 }
 
-function ConversationsSection({ threads, total = 0, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
+function ConversationsSection({ threads, total = 0, loaded = false, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onNewChat, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
   threads: StreamThread[]
   /** Threads that exist beyond the cap — the footer says so when > shown. */
   total?: number
+  /** The sessions list has answered at least once — distinguishes the
+   * empty state from the initial load (which renders nothing). */
+  loaded?: boolean
   running: Set<string>
   /** Runs suspended on a permission prompt, keyed `chat:<sessionId>`. */
   needsApproval?: Record<string, string>
@@ -872,16 +923,39 @@ function ConversationsSection({ threads, total = 0, running, needsApproval, conv
   onHide?: (sessionId: string) => void
   /** Everything, in the chat history view. */
   onViewAll?: () => void
+  /** Start a brand-new chat. */
+  onNewChat?: () => void
   onToggle: (sessionId: string) => void
   onReply: (sessionId: string) => void
   onSendReply: (sessionId: string, message: string) => void
   onOpenNote: (path: string) => void
   onOpenInChat: (sessionId: string) => void
 }) {
-  if (threads.length === 0) return null
+  // Nothing renders until the sessions list has answered once — an empty
+  // flash would read as "no chats" during load.
+  if (threads.length === 0 && !loaded) return null
   return (
     <div className={`flex flex-col gap-1 transition-opacity duration-200 ${dimAll ? 'opacity-60' : ''}`}>
-      <div className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">Conversations</div>
+      <div className="flex items-center justify-between px-1">
+        <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Conversations</div>
+        {onNewChat && (
+          <IconTip label="Start a new chat — ⌘N">
+            <button
+              type="button"
+              onClick={onNewChat}
+              aria-keyshortcuts="Meta+N"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <SquarePen className="size-3" /> New chat
+            </button>
+          </IconTip>
+        )}
+      </div>
+      {threads.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border/60 px-3 py-3 text-[13px] text-muted-foreground">
+          No conversations yet — ask anything in the composer below, or start a new chat. Every chat lands here.
+        </div>
+      ) : (
       <div>
         {threads.map((t) => {
           const isRunning = running.has(`chat:${t.sessionId}`)
@@ -900,8 +974,14 @@ function ConversationsSection({ threads, total = 0, running, needsApproval, conv
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => onToggle(t.sessionId)}
-                  className="relative min-w-0 flex-1 text-left"
+                  onClick={(e) => {
+                    // ⌘click skips the peek and resumes the chat directly —
+                    // the chat-history rows' gesture, same muscle memory.
+                    if (e.metaKey || e.ctrlKey) { onOpenInChat(t.sessionId); return }
+                    onToggle(t.sessionId)
+                  }}
+                  aria-expanded={isOpen}
+                  className="relative min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   {changedSessionIds?.has(t.sessionId) && (
                     <span
@@ -931,8 +1011,9 @@ function ConversationsSection({ threads, total = 0, running, needsApproval, conv
                 {isRunning && !approvalMsg && <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
                 <span className="shrink-0 text-[11px] text-muted-foreground/60">{relativeTime(t.updatedAt)}</span>
                 {/* Same floating tray as items — one grammar everywhere,
-                    inside the row's own band (never over the previous row). */}
-                <div className="absolute right-1 top-1 z-10 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-md group-hover/thread:flex">
+                    inside the row's own band (never over the previous row).
+                    Opacity (not display) so Tab can reach the buttons. */}
+                <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 opacity-0 shadow-md transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100">
                   <IconTip label="Reply">
                     <button
                       type="button"
@@ -1029,6 +1110,7 @@ function ConversationsSection({ threads, total = 0, running, needsApproval, conv
           </button>
         )}
       </div>
+      )}
     </div>
   )
 }
@@ -1085,7 +1167,7 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
                   type="button"
                   onClick={() => onRestore(entry)}
                   aria-label="Restore"
-                  className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/arch:opacity-100"
+                  className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/arch:opacity-100"
                 >
                   <RotateCcw className="size-3" /> restore
                 </button>
@@ -1095,7 +1177,7 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
                   type="button"
                   onClick={() => onDelete(entry)}
                   aria-label="Delete forever"
-                  className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-600 group-hover/arch:opacity-100 dark:hover:text-red-400"
+                  className="mt-0.5 flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-600 focus-visible:opacity-100 group-hover/arch:opacity-100 dark:hover:text-red-400"
                 >
                   <Trash2 className="size-3" /> delete
                 </button>
@@ -1108,7 +1190,7 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, onComposeTodo, composeTarget, onOpenChatHistory }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
@@ -1149,6 +1231,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
   const [streamThreads, setStreamThreads] = useState<StreamThread[]>([])
   // How many threads exist beyond the cap — for the section's footer line.
   const [streamTotal, setStreamTotal] = useState(0)
+  // Sessions list answered at least once — gates the stream's empty state.
+  const [streamLoaded, setStreamLoaded] = useState(false)
+  // Bumped by the header's "New to-do" button and the N shortcut; the
+  // add-row scrolls into view and takes focus.
+  const [addFocusSignal, setAddFocusSignal] = useState(0)
+  const focusAddRow = useCallback(() => setAddFocusSignal((n) => n + 1), [])
   const [streamConvs, setStreamConvs] = useState<Record<string, TodoChatBubble[]>>({})
   const [expandedThread, setExpandedThread] = useState<string | null>(null)
   const [chatReplyFor, setChatReplyFor] = useState<string | null>(null)
@@ -1216,6 +1304,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
     // active threads (running, or changed since the user last looked) win
     // the slots, everything else is in "View all".
     void window.ipc.invoke('sessions:list', {}).then(({ sessions: all }) => {
+      setStreamLoaded(true)
       const todoSessionIds = new Set(Object.values(res.sessions))
       setSessionUpdatedAt(Object.fromEntries(all.map((s) => [s.sessionId, s.updatedAt])))
       const candidates = all
@@ -1412,6 +1501,25 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     if (dirtyRef.current) void saveNowRef.current()
   }, [])
+
+  // Home's quick keys, inert while typing: N lands in the add-row, C in the
+  // composer. Their visible counterparts live in the section headers, so
+  // the keys are an accelerator, not the only door.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      if (isEditableTarget(e.target)) return
+      if (e.key === 'n') {
+        e.preventDefault()
+        focusAddRow()
+      } else if (e.key === 'c' && onFocusComposer) {
+        e.preventDefault()
+        onFocusComposer()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [focusAddRow, onFocusComposer])
 
   // Dock chats advance without todo:events — follow the session index feed
   // (debounced: it fires per turn event) so the stream stays current.
@@ -1764,7 +1872,19 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
 
           {/* The list */}
           <div className={`transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
-            <div className="px-1 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Tasks</div>
+            <div className="flex items-center justify-between px-1 pb-1">
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Tasks</div>
+              <IconTip label="New to-do — press N">
+                <button
+                  type="button"
+                  onClick={focusAddRow}
+                  aria-keyshortcuts="n"
+                  className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <Plus className="size-3" /> New to-do
+                </button>
+              </IconTip>
+            </div>
             {blocks === null ? (
               <div className="px-2 py-6 text-center text-sm text-muted-foreground">Loading…</div>
             ) : (
@@ -1901,6 +2021,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
                 )
               })
             )}
+            {blocks !== null && !itemBlocks.some(({ block }) => block.kind === 'item') && (
+              <div className="rounded-lg border border-dashed border-border/60 px-3 py-3 text-[13px] text-muted-foreground">
+                <TextWithMentions text="Nothing on the list — add your first to-do below, or mention @rowboat to hand one off." />
+              </div>
+            )}
             {blocks !== null && (
               // Plain to-dos are typed in place — no chat chrome. Typing
               // @rowboat hands the text off to the composer below, where
@@ -1908,6 +2033,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
               <AddItemRow
                 onAdd={(text) => void addItem(text)}
                 onHandoff={onComposeTodo ? (text) => onComposeTodo({ kind: 'todo', prefill: text }) : undefined}
+                focusSignal={addFocusSignal}
               />
             )}
           </div>
@@ -1956,6 +2082,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer, o
           <ConversationsSection
             threads={streamThreads}
             total={streamTotal}
+            loaded={streamLoaded}
+            onNewChat={onNewChat}
             running={running}
             needsApproval={needsApproval}
             conversations={streamConvs}

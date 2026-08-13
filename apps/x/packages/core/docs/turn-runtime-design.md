@@ -2,7 +2,8 @@
 
 Status: implemented and live. All chat, background, and knowledge callers
 run on this runtime; the legacy runs runtime (`src/runtime/legacy/`) remains
-only for code-mode sessions and the mini-apps host API, and is deleted as a
+only for the mini-apps host API (code-mode sessions moved onto this runtime
+in the 2026-08 unification — a code session IS a chat session), and is deleted as a
 unit when those migrate. The companion session layer is specified in
 `session-design.md`.
 

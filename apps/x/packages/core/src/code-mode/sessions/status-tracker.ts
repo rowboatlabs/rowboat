@@ -1,6 +1,5 @@
-import z from 'zod';
-import { RunEvent } from '@x/shared/dist/runs.js';
-import type { IBus } from '../../application/lib/bus.js';
+import type { TurnBusEvent } from '@x/shared/dist/turns.js';
+import type { ITurnEventBus } from '../../runtime/turns/event-hub.js';
 import type { ICodeSessionsRepo } from './repo.js';
 import { notifyIfEnabled } from '../../application/notification/notifier.js';
 import type { CodeSessionStatus, CodeSession } from '@x/shared/dist/code-sessions.js';
@@ -8,11 +7,11 @@ import type { CodeSessionStatus, CodeSession } from '@x/shared/dist/code-session
 export type StatusListener = (sessionId: string, status: CodeSessionStatus) => void;
 
 // Authoritative live status for Code-section sessions, derived in the main
-// process from the run event stream. Works for both modes uniformly because
-// direct turns and Rowboat-mode code_agent_run turns publish the same event
-// types on the bus. The renderer just renders what this pushes.
+// process from the turn event spine (a code session IS a chat session, so its
+// turns flow there like any other chat's). The renderer just renders what
+// this pushes.
 export class CodeSessionStatusTracker {
-    private readonly bus: IBus;
+    private readonly turnEventBus: ITurnEventBus;
     private readonly codeSessionsRepo: ICodeSessionsRepo;
     private readonly statuses = new Map<string, CodeSessionStatus>();
     private readonly busySince = new Map<string, number>();
@@ -21,21 +20,30 @@ export class CodeSessionStatusTracker {
     // Session ids known to be code sessions; refreshed lazily on unknown ids so
     // sessions created after start() are picked up without explicit wiring.
     private knownSessions = new Set<string>();
-    // Ids confirmed NOT to be sessions (regular chat runs). Safe to cache
-    // permanently: a session's meta file is written before its first turn, so
-    // an id that misses the refresh can never become a session later.
+    // Ids confirmed NOT to be code sessions (regular chats). Safe to cache
+    // permanently: a code session's meta file is written before its first
+    // turn, so an id that misses the refresh can never become one later.
     private readonly knownNonSessions = new Set<string>();
 
-    constructor({ bus, codeSessionsRepo }: { bus: IBus; codeSessionsRepo: ICodeSessionsRepo }) {
-        this.bus = bus;
+    constructor({ turnEventBus, codeSessionsRepo }: { turnEventBus: ITurnEventBus; codeSessionsRepo: ICodeSessionsRepo }) {
+        this.turnEventBus = turnEventBus;
         this.codeSessionsRepo = codeSessionsRepo;
     }
+
+    // Events are processed strictly in arrival order: handle() awaits repo
+    // lookups, and the spine delivers synchronously — without this chain two
+    // events could interleave and apply their transitions out of order
+    // (e.g. a terminal event finishing before the turn_created that preceded
+    // it, leaving a session spinning forever).
+    private queue: Promise<void> = Promise.resolve();
 
     async start(): Promise<void> {
         if (this.unsubscribe) return;
         await this.refreshKnownSessions();
-        this.unsubscribe = await this.bus.subscribe('*', async (event) => {
-            await this.handle(event);
+        this.unsubscribe = this.turnEventBus.subscribeAll((event) => {
+            this.queue = this.queue
+                .then(() => this.handle(event))
+                .catch(() => { /* status is best-effort; never break the chain */ });
         });
     }
 
@@ -58,51 +66,81 @@ export class CodeSessionStatusTracker {
         this.knownSessions = new Set(sessions.map((s) => s.id));
     }
 
-    private async isCodeSession(runId: string): Promise<boolean> {
-        if (this.knownSessions.has(runId)) return true;
-        if (this.knownNonSessions.has(runId)) return false;
+    private async isCodeSession(sessionId: string): Promise<boolean> {
+        if (this.knownSessions.has(sessionId)) return true;
+        if (this.knownNonSessions.has(sessionId)) return false;
         // Unknown id — maybe a session created since the last refresh.
         await this.refreshKnownSessions();
-        if (this.knownSessions.has(runId)) return true;
-        this.knownNonSessions.add(runId);
+        if (this.knownSessions.has(sessionId)) return true;
+        this.knownNonSessions.add(sessionId);
         return false;
     }
 
-    private async handle(event: z.infer<typeof RunEvent>): Promise<void> {
-        const relevant = event.type === 'run-processing-start'
-            || event.type === 'run-processing-end'
-            || event.type === 'run-stopped'
-            || event.type === 'error'
-            || event.type === 'code-run-permission-request'
-            || (event.type === 'code-run-event' && event.event.type === 'permission');
-        if (!relevant) return;
-        if (!await this.isCodeSession(event.runId)) return;
-
-        const previous = this.statuses.get(event.runId) ?? 'idle';
-        let next: CodeSessionStatus = previous;
-        switch (event.type) {
-            case 'run-processing-start':
-                next = 'working';
-                break;
-            case 'code-run-permission-request':
-                next = 'needs-you';
-                break;
-            case 'code-run-event':
-                // A permission resolution while the turn is still running.
-                if (previous === 'needs-you') next = 'working';
-                break;
-            case 'run-processing-end':
-            case 'run-stopped':
-            case 'error':
-                next = 'idle';
-                break;
+    // What a spine event means for a code session's status. Returns null for
+    // events that don't move the needle (deltas, tool results, ...).
+    private transition(event: TurnBusEvent, previous: CodeSessionStatus): CodeSessionStatus | null {
+        const e = event.event;
+        switch (e.type) {
+            case 'turn_created':
+                return 'working';
+            // The copilot's own permission gate, and the coding agent's inline
+            // approval card (durable tool_progress) both need the user.
+            case 'tool_permission_required':
+            case 'turn_suspended':
+                return 'needs-you';
+            case 'tool_permission_resolved':
+                return previous === 'needs-you' ? 'working' : null;
+            // An answered ask-human arrives as an async tool_result (there is
+            // no *_resolved event for it) — without this the badge said
+            // "needs your attention" forever after the user replied, and the
+            // completion notification never fired.
+            case 'tool_result':
+                return previous === 'needs-you' ? 'working' : null;
+            case 'tool_progress': {
+                const progress = e.progress;
+                if (progress && typeof progress === 'object' && !Array.isArray(progress)) {
+                    const kind = (progress as { kind?: unknown }).kind;
+                    if (kind === 'code-run-permission-request') return 'needs-you';
+                    if (kind === 'code-run-permission-resolved') return previous === 'needs-you' ? 'working' : null;
+                }
+                return null;
+            }
+            case 'turn_completed':
+            case 'turn_failed':
+            case 'turn_cancelled':
+                return 'idle';
+            default:
+                return null;
         }
-        if (next === previous) return;
-        if (previous === 'idle' && next !== 'idle') this.busySince.set(event.runId, Date.now());
-        this.statuses.set(event.runId, next);
-        for (const listener of this.listeners) listener(event.runId, next);
-        await this.notify(event.runId, previous, next);
-        if (next === 'idle') this.busySince.delete(event.runId);
+    }
+
+    private async handle(event: TurnBusEvent): Promise<void> {
+        const sessionId = event.sessionId;
+        if (!sessionId) return;
+        const previous = this.statuses.get(sessionId) ?? 'idle';
+        const next = this.transition(event, previous);
+        if (next === null || next === previous) return;
+        if (!await this.isCodeSession(sessionId)) return;
+
+        if (previous === 'idle' && next !== 'idle') {
+            this.busySince.set(sessionId, Date.now());
+            // Activity bump for the session rail's recency sort (best-effort).
+            void this.touchMeta(sessionId);
+        }
+        this.statuses.set(sessionId, next);
+        for (const listener of this.listeners) listener(sessionId, next);
+        await this.notify(sessionId, previous, next);
+        if (next === 'idle') this.busySince.delete(sessionId);
+    }
+
+    private async touchMeta(sessionId: string): Promise<void> {
+        try {
+            const session = await this.codeSessionsRepo.get(sessionId);
+            if (!session) return;
+            await this.codeSessionsRepo.save({ ...session, lastActivityAt: new Date().toISOString() });
+        } catch {
+            // Recency sort just stays where it was.
+        }
     }
 
     private async notify(sessionId: string, previous: CodeSessionStatus, next: CodeSessionStatus): Promise<void> {

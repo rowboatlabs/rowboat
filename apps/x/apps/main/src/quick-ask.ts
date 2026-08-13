@@ -67,23 +67,33 @@ const scaled = (v: number) => Math.round(v * SCALE);
 
 let quickAskWin: BrowserWindow | null = null;
 let mode: CompanionMode = 'hidden';
-// Pinned presentation: full pill vs tucked down to just the mascot.
+// Pinned presentation: full surface vs tucked down to just the mascot.
 let pinnedCollapsed = false;
-// Where this pin came from: 'bar' (the summoned card's tuck handle) or
-// 'pill' (the call engine's normal floating surface). Untuck returns the
-// user to the surface they tucked FROM — a voice call entered via the bar
-// expands back to the bar-style text card, not the video pill.
-let tuckOrigin: 'bar' | 'pill' = 'pill';
 // The expanded surface currently applied to the window geometry (so a
 // device flip mid-call can morph card ⇄ pill in place).
 let appliedExpandedSurface: 'card' | 'pill' = 'pill';
-// A tuck was requested from the summoned bar: the NEXT pin lands as the
-// Skipper (text card + mascot, bottom-right of the cursor's display) instead
-// of the pill's canonical top-right. Time-boxed so a tuck the app declined
-// (voice not configured, race) can't leak into an unrelated call. Every
-// Skipper landing arrives text-open, so the old expand-vs-collapsed
-// distinction is gone.
-let tuckPendingAt = 0;
+// A hover summon (⌥⇧Space or the composer's call button relay) is in
+// flight: the NEXT pin gets focus (the user just asked for their
+// companion), and if no pin arrives shortly the text card falls back so
+// the shortcut is never a silent no-op. Time-boxed so a stale summon can't
+// leak into an unrelated call.
+let summonPendingAt = 0;
+// The ⌥⇧Space no-op fallback: shows the text card if nothing answers the
+// tuck relay. Cancelled the moment the app ACKS the relay (it may then take
+// seconds to acquire devices — that must not flash the text card).
+let summonFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearSummonFallback() {
+  if (summonFallbackTimer) {
+    clearTimeout(summonFallbackTimer);
+    summonFallbackTimer = null;
+  }
+}
+
+/** The app window acknowledged a tuck relay and is starting the session. */
+export function ackSummon() {
+  clearSummonFallback();
+}
 
 // The Skipper's anchor: the bottom-right corner of the window, i.e. where
 // the MASCOT stands. The user can drag the Skipper anywhere; collapsing and
@@ -143,38 +153,20 @@ export function isPinnedCollapsed(): boolean {
   return pinnedCollapsed;
 }
 
-export function markTuckPending() {
-  tuckPendingAt = Date.now();
+export function markSummonPending() {
+  summonPendingAt = Date.now();
 }
 
 /**
- * Pop the app's active chat out into the companion. Already pinned: just
- * expand/focus (the chat is the active tab — the destination chip already
- * tracks it). Otherwise arm an EXPANDED-card landing and let the caller
- * relay the tuck to the app (which starts the voice session or falls back
- * to the plain summoned card when voice isn't configured).
- */
-export function popOutCompanion(): boolean {
-  const win = getQuickAskWindow();
-  if (mode === 'pinned' && win) {
-    if (pinnedCollapsed) setPinnedCollapsed(false);
-    win.focus();
-    return true;
-  }
-  markTuckPending();
-  return false;
-}
-
-/**
- * Which surface the pinned role expands to. Bar-originated sessions go back
- * to the bar-style text card; only a live CAMERA forces the pill — a screen
- * share shows no pixels in the pill either (just the consent badge, which
- * the card's strip carries too), so sharing must never hijack the text
- * pull-out into a video-call surface.
+ * Which surface the pinned role expands to. There is ONE hover surface —
+ * the Skipper card (mascot + pins + text panel) — regardless of how the
+ * session was started (⌥⇧Space, the composer's call button, a minimized
+ * call). Only a live CAMERA forces the pill, because the pill is where the
+ * self-view lives; a screen share shows no pixels in the pill either, so
+ * sharing never hijacks the card.
  */
 export function getExpandedSurface(): 'card' | 'pill' {
-  const s = lastPopoutState;
-  return tuckOrigin === 'bar' && !s?.cameraOn ? 'card' : 'pill';
+  return lastPopoutState?.cameraOn ? 'pill' : 'card';
 }
 
 function pushMode(win: BrowserWindow) {
@@ -349,15 +341,21 @@ export function toggleQuickAsk(viaShortcut = true) {
   }
   // VOICE-FIRST: the shortcut summons the mascot on a live voice session —
   // the same relay as the card's tuck handle (the app starts the
-  // voice-preset call, and this window pins tucked near the cursor). The
-  // text card is the FALLBACK: programmatic shows (the toast), no app
-  // window to relay to, or the app declining because voice isn't
-  // configured (it calls quickAsk:show, which lands in the card path).
+  // voice-preset call, and this window pins near the cursor). The text
+  // card is the FALLBACK: programmatic shows (the toast), no app window to
+  // relay to, the app declining because voice isn't configured (it calls
+  // quickAsk:show), or — via the timer below — the app simply never
+  // answering the relay, so the shortcut is never a silent no-op.
   if (viaShortcut) {
     const appWin = findAppWindow();
     if (appWin) {
-      markTuckPending();
+      markSummonPending();
       appWin.webContents.send('quick-ask:tuck', null);
+      clearSummonFallback();
+      summonFallbackTimer = setTimeout(() => {
+        summonFallbackTimer = null;
+        if (mode === 'hidden') showSummonedCard(false);
+      }, 1500);
       return;
     }
   }
@@ -365,9 +363,10 @@ export function toggleQuickAsk(viaShortcut = true) {
 }
 
 function showSummonedCard(viaShortcut: boolean) {
-  // A voice summon that fell back here must not leave its tuck hint armed —
-  // the next unrelated call would start collapsed.
-  tuckPendingAt = 0;
+  // A voice summon that fell back here must not leave its hint armed — the
+  // next unrelated call would grab focus.
+  summonPendingAt = 0;
+  clearSummonFallback();
   let win = getQuickAskWindow();
   if (!win) win = createWindow();
   mode = 'summoned';
@@ -399,46 +398,46 @@ export function showQuickAsk() {
  */
 export function setCompanionPinned(pinned: boolean) {
   if (pinned) {
+    clearSummonFallback();
     if (mode === 'pinned') {
-      tuckPendingAt = 0;
+      summonPendingAt = 0;
       // Already pinned: re-assert the CURRENT presentation instead of
       // bailing — callSurface flaps in the app (fullscreen ⇄ popout) can
       // otherwise leave the window sized for one state while the renderer
-      // shows the other.
-      const win0 = getQuickAskWindow();
-      if (win0) {
-        if (pinnedCollapsed) positionTucked(win0);
-        else applyExpandedSurface(win0, getExpandedSurface());
-        pushMode(win0);
-        if (!win0.isVisible()) win0.showInactive();
-      }
+      // shows the other. Recreate the window if it was destroyed — a live
+      // call must never be left with no surface at all.
+      const win0 = getQuickAskWindow() ?? createWindow();
+      if (pinnedCollapsed) positionTucked(win0);
+      else applyExpandedSurface(win0, getExpandedSurface());
+      pushMode(win0);
+      if (!win0.isVisible()) win0.showInactive();
       return;
     }
     let win = getQuickAskWindow();
     if (!win) win = createWindow();
-    const fromTuck = Date.now() - tuckPendingAt < 5000;
-    tuckPendingAt = 0;
+    const fromSummon = Date.now() - summonPendingAt < 5000;
+    summonPendingAt = 0;
     mode = 'pinned';
-    tuckOrigin = fromTuck ? 'bar' : 'pill';
-    if (fromTuck) {
-      // The Skipper lands as ONE unit — mascot with the text panel already
-      // open (text is the default; tucking is the user's gesture, never the
-      // arrival state) — anchored at its corner (last dragged spot, else
-      // bottom-right of the cursor's display).
-      pinnedCollapsed = false;
-      if (!skipperCorner) {
-        skipperCorner = defaultSkipperCorner(
-          screen.getDisplayNearestPoint(screen.getCursorScreenPoint()),
-        );
-      }
+    // ONE landing for every entry point: the Skipper lands as one unit —
+    // mascot with the text panel already open (text is the default;
+    // tucking is the user's gesture, never the arrival state) — anchored
+    // at its corner (last dragged spot, else bottom-right of the cursor's
+    // display). A camera-on call lands as the pill instead (self-view).
+    pinnedCollapsed = false;
+    const surface = getExpandedSurface();
+    if (surface === 'card' && !skipperCorner) {
+      skipperCorner = defaultSkipperCorner(
+        screen.getDisplayNearestPoint(screen.getCursorScreenPoint()),
+      );
+    }
+    if (surface === 'card') {
       applyExpandedSurface(win, 'card');
     } else {
-      pinnedCollapsed = false;
       positionPinned(win);
       appliedExpandedSurface = 'pill';
     }
     pushMode(win);
-    if (fromTuck) {
+    if (fromSummon) {
       // The user just summoned their companion — focus so speaking, typing,
       // and Esc all work immediately.
       if (!win.isVisible()) win.show();
@@ -452,8 +451,11 @@ export function setCompanionPinned(pinned: boolean) {
     if (mode !== 'pinned') return;
     mode = 'hidden';
     pinnedCollapsed = false;
-    tuckOrigin = 'pill';
-    tuckPendingAt = 0;
+    summonPendingAt = 0;
+    // The call is over — its device state must not leak into the next
+    // summon (a stale cameraOn here made the next companion flash the
+    // camera pill before morphing to the card).
+    lastPopoutState = null;
     const win = getQuickAskWindow();
     if (win) {
       pushMode(win);
