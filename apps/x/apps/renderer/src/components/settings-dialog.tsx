@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, Keyboard } from "lucide-react"
 
 import {
   Dialog,
@@ -34,10 +34,11 @@ import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { ModelSelectionSection } from "@/components/settings/model-selection-section"
 import { PermissionsSettings } from "@/components/settings/permissions-settings"
+import { ShortcutSettings } from "@/components/settings/shortcut-settings"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -100,6 +101,12 @@ const tabs: TabConfig[] = [
     description: "Customize the look and feel",
   },
   {
+    id: "shortcuts",
+    label: "Shortcuts",
+    icon: Keyboard,
+    description: "Customize keyboard shortcuts",
+  },
+  {
     id: "notifications",
     label: "Notifications",
     icon: Bell,
@@ -136,7 +143,7 @@ const tabs: TabConfig[] = [
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
-  { label: "App", ids: ["appearance", "notifications", "permissions", "help"] },
+  { label: "App", ids: ["appearance", "shortcuts", "notifications", "permissions", "help"] },
 ]
 
 interface SettingsDialogProps {
@@ -1856,7 +1863,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications" || tab === "advanced") return
+    if (tab === "appearance" || tab === "shortcuts" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications" || tab === "advanced") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -1925,7 +1932,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
     <Dialog open={open} onOpenChange={setOpen}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent
-        className="max-w-[900px]! w-[900px] h-[600px] p-0 gap-0 overflow-hidden"
+        className="max-w-[900px]! w-[900px] h-[660px] max-h-[85vh] p-0 gap-0 overflow-hidden"
       >
         <div className="flex h-full overflow-hidden">
           {/* Sidebar */}
@@ -2019,6 +2026,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
+              ) : activeTab === "shortcuts" ? (
+                <ShortcutSettings />
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
               ) : activeTab === "permissions" ? (

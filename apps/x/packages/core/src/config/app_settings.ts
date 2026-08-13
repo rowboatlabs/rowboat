@@ -20,6 +20,13 @@ export interface AppSettings {
      * rewrites that registry entry in place (see apps/main/src/login_item.ts).
      */
     loginItemRegisteredV2?: boolean;
+    /**
+     * Custom global quick-ask chord (Electron accelerator format, e.g.
+     * "Control+Alt+K"). Absent = the default (Alt+Shift+Space). Validated
+     * against the shared chord rules on load — an invalid hand-edited value
+     * falls back to the default.
+     */
+    quickAskShortcut?: string;
 }
 
 export function loadAppSettings(): AppSettings {

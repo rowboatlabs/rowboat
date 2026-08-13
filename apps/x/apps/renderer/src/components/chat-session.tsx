@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Clock, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   Conversation,
@@ -22,6 +23,7 @@ import { streamdownComponents } from '@/lib/markdown-render'
 import { useSmoothedText } from '@/hooks/useSmoothedText'
 import type { useVoiceMode } from '@/hooks/useVoiceMode'
 import type { PermissionDecision } from '@x/shared/src/code-mode.js'
+import type { QueuedSessionMessage } from '@x/shared/src/sessions.js'
 import { ChatEmptyState } from './chat-empty-state'
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './chat-input-with-mentions'
 import { type ChatTab } from './tab-bar'
@@ -35,6 +37,18 @@ import {
 function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
   const smoothText = useSmoothedText(text)
   return <MessageResponse components={components}>{smoothText}</MessageResponse>
+}
+
+// The typed text of a queued (not-yet-delivered) message — for the pending
+// chip's preview and for restoring the text into the composer (chip pull-back,
+// stop-drained queue). Attachment/image parts are elided.
+export function queuedMessageText(message: QueuedSessionMessage['message']): string {
+  if (typeof message.content === 'string') return message.content.trim()
+  return message.content
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim()
 }
 
 export interface ChatSessionPaneProps {
@@ -203,6 +217,16 @@ export interface ChatSessionComposerProps {
   onStop?: () => void | Promise<void>
   activeIsProcessing: boolean
   isStopping?: boolean
+  /**
+   * Messages waiting in this session's pending queue (sent while the latest
+   * turn was still running) — rendered as chips above the input until they
+   * steer the live turn or start the next one.
+   */
+  queued?: QueuedSessionMessage[]
+  /** Discard a queued message (chip ×). */
+  onRemoveQueued?: (queueId: string) => void
+  /** Pull a queued message back into the composer for editing (chip body click). */
+  onPullQueued?: (queueId: string) => void
   presetMessage: string | undefined
   onPresetMessageConsumed: () => void
   codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
@@ -258,6 +282,9 @@ export function ChatSessionComposer({
   onStop,
   activeIsProcessing,
   isStopping,
+  queued = [],
+  onRemoveQueued,
+  onPullQueued,
   presetMessage,
   onPresetMessageConsumed,
   codeSessionLocks,
@@ -290,6 +317,38 @@ export function ChatSessionComposer({
       data-chat-input-panel={tab.id}
       aria-hidden={!isActive}
     >
+      {queued.length > 0 && (
+        /* Pending queue: messages accepted mid-turn, waiting to steer the live
+           turn (or start the next one). Clicking a chip pulls it back into the
+           composer for editing; ✕ discards it. */
+        <div className="mb-1.5 flex flex-col gap-1">
+          {queued.map((entry) => (
+            <div
+              key={entry.queueId}
+              className="group flex items-center gap-2 rounded-lg border border-border/50 bg-muted/60 px-2.5 py-1.5 text-xs text-muted-foreground"
+            >
+              <Clock className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
+              <button
+                type="button"
+                onClick={() => onPullQueued?.(entry.queueId)}
+                className="min-w-0 flex-1 truncate text-left transition-colors hover:text-foreground"
+                title="Queued — click to edit"
+              >
+                {queuedMessageText(entry.message) || 'Attachment'}
+              </button>
+              <span className="shrink-0 text-[10px] uppercase tracking-wider opacity-60">Queued</span>
+              <button
+                type="button"
+                onClick={() => onRemoveQueued?.(entry.queueId)}
+                aria-label="Remove queued message"
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full opacity-60 transition-[opacity,color] hover:opacity-100 hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <ChatInputWithMentions
         knowledgeFiles={knowledgeFiles}
         recentFiles={recentFiles}
@@ -297,6 +356,9 @@ export function ChatSessionComposer({
         onSubmit={onSubmit}
         onStop={onStop}
         isProcessing={isActive && activeIsProcessing}
+        // Session chats never drop a mid-turn send: Enter queues/steers via
+        // sessions:sendOrQueueMessage (the Stop button still shows while busy).
+        allowSubmitWhileProcessing
         isStopping={isActive && isStopping}
         isActive={isActive}
         presetMessage={isActive ? presetMessage : undefined}

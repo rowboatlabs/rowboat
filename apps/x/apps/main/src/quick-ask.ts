@@ -31,6 +31,10 @@
  */
 import { DEV_SERVER_URL } from './dev-server.js';
 import { app, BrowserWindow, globalShortcut, screen } from 'electron';
+import { loadAppSettings, saveAppSettings } from '@x/core/dist/config/app_settings.js';
+import { quickAskShortcut } from '@x/shared';
+
+const { DEFAULT_QUICK_ASK_SHORTCUT, normalizeShortcut, isSystemReservedShortcut } = quickAskShortcut;
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -578,15 +582,152 @@ export function pushChatContext(ctx: ChatContext) {
   getQuickAskWindow()?.webContents.send('quick-ask:chat-context', ctx);
 }
 
-export function initQuickAsk() {
-  // ⌥⇧Space: plain ⌥Space is the most contested launcher chord on macOS
-  // (Raycast, ChatGPT desktop, …) — registering it would silently lose or,
-  // worse, double-fire alongside whatever owns it.
-  const ok = globalShortcut.register('Alt+Shift+Space', toggleQuickAsk);
+// --- Customizable global chord ---
+// One accelerator is the source of truth (app_settings.json). `registered`
+// tracks whether the OS actually granted it — false means another app owns
+// the chord and quick-ask is unreachable until the user rebinds (we notify,
+// we never silently rebind: a shortcut that moves on its own is worse than
+// one that's honestly broken).
+let currentShortcut = DEFAULT_QUICK_ASK_SHORTCUT;
+let shortcutRegistered = false;
+// Subscribers outside this module (the tray menu shows the chord next to
+// "Quick Ask") — a callback instead of an import, because tray.ts already
+// imports toggleQuickAsk from here.
+const shortcutChangeListeners: (() => void)[] = [];
+export function onQuickAskShortcutChanged(listener: () => void) {
+  shortcutChangeListeners.push(listener);
+}
+
+export function getQuickAskShortcutState(): {
+  accelerator: string;
+  registered: boolean;
+  isDefault: boolean;
+} {
+  return {
+    accelerator: currentShortcut,
+    registered: shortcutRegistered,
+    isDefault: currentShortcut === DEFAULT_QUICK_ASK_SHORTCUT,
+  };
+}
+
+function broadcastShortcutState() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    win.webContents.send('quick-ask:shortcut-changed', {
+      accelerator: currentShortcut,
+      registered: shortcutRegistered,
+    });
+  }
+  for (const listener of shortcutChangeListeners) listener();
+}
+
+// The shortcut-recorder modal is capturing keys: the current chord is
+// released so pressing it lands in the modal as keystrokes to display,
+// instead of summoning the bar over the recorder.
+let captureSuspended = false;
+
+export function setShortcutCaptureActive(active: boolean) {
+  if (captureSuspended === active) return;
+  captureSuspended = active;
+  if (!shortcutRegistered) return;
+  if (active) {
+    globalShortcut.unregister(currentShortcut);
+    return;
+  }
+  // Resume. The grab can fail if another app snatched the chord during the
+  // capture window — same treatment as a boot-time conflict (broadcast so
+  // the settings row shows the "not active" notice).
+  let ok = false;
+  try {
+    ok = globalShortcut.register(currentShortcut, toggleQuickAsk);
+  } catch {
+    ok = false;
+  }
   if (!ok) {
-    // Another app owns the chord — quick-ask is simply unavailable rather
-    // than fighting over it.
-    console.warn('[quick-ask] failed to register Alt+Shift+Space (already taken?)');
+    shortcutRegistered = false;
+    broadcastShortcutState();
+  }
+}
+
+/**
+ * Rebind the global chord (null = reset to default). The NEW chord is
+ * registered before the old one is released — a rejected rebind (invalid,
+ * system-reserved, or owned by another app) leaves the current binding
+ * fully intact. register() returning false is the OS-level conflict signal
+ * (RegisterEventHotKey / RegisterHotKey failing because another app holds
+ * the chord); macOS system chords that would "register" but never fire are
+ * rejected up front via the shared blocklist.
+ */
+export function setQuickAskShortcut(accelerator: string | null): {
+  ok: boolean;
+  accelerator: string;
+  registered: boolean;
+  error: string | null;
+} {
+  const requested = accelerator === null
+    ? DEFAULT_QUICK_ASK_SHORTCUT
+    : normalizeShortcut(accelerator);
+  const fail = (error: string) => ({
+    ok: false,
+    accelerator: currentShortcut,
+    registered: shortcutRegistered,
+    error,
+  });
+  if (!requested) {
+    return fail('Use one or two modifier keys plus a regular key.');
+  }
+  if (isSystemReservedShortcut(requested, process.platform)) {
+    return fail('That shortcut is reserved by the system.');
+  }
+  if (requested === currentShortcut && shortcutRegistered) {
+    return { ok: true, accelerator: currentShortcut, registered: true, error: null };
+  }
+  const previous = currentShortcut;
+  const previousRegistered = shortcutRegistered;
+  let ok = false;
+  try {
+    ok = globalShortcut.register(requested, toggleQuickAsk);
+  } catch {
+    return fail('That key combination can’t be used as a shortcut.');
+  }
+  if (!ok) {
+    return fail('That shortcut is already in use by another app.');
+  }
+  // While the recorder modal is capturing, nothing may stay grabbed — the
+  // register() above was purely the conflict check. The resume in
+  // setShortcutCaptureActive re-grabs whatever chord is current by then.
+  if (captureSuspended) {
+    globalShortcut.unregister(requested);
+  }
+  if (previousRegistered && previous !== requested && !captureSuspended) {
+    globalShortcut.unregister(previous);
+  }
+  currentShortcut = requested;
+  shortcutRegistered = true;
+  saveAppSettings({
+    quickAskShortcut: requested === DEFAULT_QUICK_ASK_SHORTCUT ? undefined : requested,
+  });
+  broadcastShortcutState();
+  return { ok: true, accelerator: currentShortcut, registered: true, error: null };
+}
+
+export function initQuickAsk() {
+  // Default ⌥⇧Space: plain ⌥Space is the most contested launcher chord on
+  // macOS (Raycast, ChatGPT desktop, …) — registering it would silently
+  // lose or, worse, double-fire alongside whatever owns it.
+  const saved = loadAppSettings().quickAskShortcut;
+  currentShortcut =
+    (saved ? normalizeShortcut(saved) : null) ?? DEFAULT_QUICK_ASK_SHORTCUT;
+  try {
+    shortcutRegistered = globalShortcut.register(currentShortcut, toggleQuickAsk);
+  } catch {
+    shortcutRegistered = false;
+  }
+  if (!shortcutRegistered) {
+    // Another app owns the chord — quick-ask stays unavailable rather than
+    // fighting over it. The app window surfaces this on boot (it invokes
+    // quickAsk:getShortcut) with a "Change shortcut" action.
+    console.warn(`[quick-ask] failed to register ${currentShortcut} (already taken?)`);
   }
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();

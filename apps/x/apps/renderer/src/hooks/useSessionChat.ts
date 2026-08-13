@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { ipcSessionsClient } from '@/lib/session-chat/client'
 import { subscribeTurnFeed } from '@/lib/turn-feed'
+import { subscribeSessionFeed } from '@/lib/session-chat/feed'
 import { SessionChatStore, type SessionChatStoreDeps } from '@/lib/session-chat/store'
 
 // Declare "this window is watching turn X" so main forwards its deltas.
@@ -16,6 +17,7 @@ function subscribeDeltas(turnId: string): () => void {
 const defaultDeps: SessionChatStoreDeps = {
   client: ipcSessionsClient,
   subscribeTurnFeed,
+  subscribeSessionFeed,
   subscribeDeltas,
 }
 
@@ -36,6 +38,9 @@ export function useSessionChat(
     () => ({
       ...snapshot,
       sendMessage: store.sendMessage,
+      sendOrQueueMessage: store.sendOrQueueMessage,
+      editQueued: store.editQueued,
+      removeQueued: store.removeQueued,
       respondToPermission: store.respondToPermission,
       answerAskHuman: store.answerAskHuman,
       stop: store.stop,
