@@ -1,5 +1,9 @@
 import { app, Menu, Tray, nativeImage } from "electron";
-import { toggleQuickAsk } from "./quick-ask.js";
+import {
+  getQuickAskShortcutState,
+  onQuickAskShortcutChanged,
+  toggleQuickAsk,
+} from "./quick-ask.js";
 
 /**
  * Menu bar / system tray presence (Granola-style resident app).
@@ -69,6 +73,8 @@ export function createAppTray(trayActions: TrayActions): void {
   }
 
   rebuildMenu();
+  // The menu shows the quick-ask chord — follow rebinds live.
+  onQuickAskShortcutChanged(() => rebuildMenu());
 
   // macOS opens the context menu on any click. On Windows/Linux a plain
   // left-click should open the app; the menu stays on right-click.
@@ -153,10 +159,13 @@ function rebuildMenu(): void {
     { label: "Open Rowboat", click: () => actions?.openApp() },
     // Permanent discoverability for the global quick-ask shortcut — the
     // accelerator renders next to the label (display only; the real binding
-    // is the globalShortcut in quick-ask.ts).
+    // is the globalShortcut in quick-ask.ts). Hidden while the chord is
+    // unregistered (another app owns it) — showing a dead chord would lie.
     {
       label: "Quick Ask",
-      accelerator: "Alt+Shift+Space",
+      ...(getQuickAskShortcutState().registered
+        ? { accelerator: getQuickAskShortcutState().accelerator }
+        : {}),
       registerAccelerator: false,
       click: () => toggleQuickAsk(),
     },

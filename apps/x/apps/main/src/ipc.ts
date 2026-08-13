@@ -30,6 +30,7 @@ import {
   getCompanionMode,
   getExpandedSurface,
   getPopoutState,
+  getQuickAskShortcutState,
   getQuickAskWindow,
   hideQuickAsk,
   isPinnedCollapsed,
@@ -40,6 +41,8 @@ import {
   resizeCompanionPinned,
   setCompanionPinned,
   setPinnedCollapsed,
+  setQuickAskShortcut,
+  setShortcutCaptureActive,
   showQuickAsk,
 } from './quick-ask.js';
 import { screenPointerService } from './screen-pointer.js';
@@ -1132,6 +1135,16 @@ export function setupIpcHandlers() {
       }
     },
     // --- Quick-ask bar relays ---
+    'quickAsk:getShortcut': async () => {
+      return getQuickAskShortcutState();
+    },
+    'quickAsk:setShortcut': async (_event, args) => {
+      return setQuickAskShortcut(args.accelerator);
+    },
+    'quickAsk:setShortcutCaptureActive': async (_event, args) => {
+      setShortcutCaptureActive(args.active);
+      return {};
+    },
     'quickAsk:submit': async (_event, args) => {
       findMainAppWindow()?.webContents.send('quick-ask:submit', args);
       return {};

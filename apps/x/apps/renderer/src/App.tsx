@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
-import { workspace } from '@x/shared';
+import { workspace, quickAskShortcut } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
@@ -1848,14 +1848,19 @@ function App() {
   }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
 
   // Discoverability: nothing else in the UI reveals the global quick-ask
-  // shortcut. One toast, once per install, shortly after launch.
+  // shortcut. One toast, once per install, shortly after launch. The chord
+  // is fetched at fire time — it's customizable (Settings → Shortcuts).
   useEffect(() => {
     if (localStorage.getItem('quick-ask-tip-shown')) return
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       localStorage.setItem('quick-ask-tip-shown', '1')
+      const accelerator = await window.ipc
+        .invoke('quickAsk:getShortcut', null)
+        .then((s) => s.accelerator)
+        .catch(() => quickAskShortcut.DEFAULT_QUICK_ASK_SHORTCUT)
       playPopCue()
       toast('Ask Rowboat from anywhere', {
-        description: `Press ${isMac ? '⌥⇧Space' : 'Alt+Shift+Space'} in any app for a quick question — the answer shows up right there and in your chat.`,
+        description: `Press ${quickAskShortcut.formatShortcut(accelerator, isMac)} in any app for a quick question — the answer shows up right there and in your chat.`,
         duration: 12000,
         closeButton: true,
         // Lift the card off the page, and move sonner's close button (which
@@ -5628,6 +5633,31 @@ function App() {
     }).catch(() => { /* settings unavailable — try again next launch */ })
   }, [])
 
+  // The quick-ask chord failed to register at boot — another app owns it.
+  // Say so (once per launch) with a path to fix it, instead of quick-ask
+  // being silently dead. Deliberately no automatic rebinding: a shortcut
+  // that moves on its own is worse than one that's honestly broken.
+  const [shortcutSettingsOpen, setShortcutSettingsOpen] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const s = await window.ipc.invoke('quickAsk:getShortcut', null)
+        if (s.registered) return
+        const isMacHere = navigator.platform.toLowerCase().includes('mac')
+        toast.warning('Quick Ask shortcut unavailable', {
+          description: `${quickAskShortcut.formatShortcut(s.accelerator, isMacHere)} is in use by another app, so Quick Ask can't be summoned right now. Pick a different shortcut in Settings.`,
+          duration: 15000,
+          closeButton: true,
+          action: {
+            label: 'Change shortcut',
+            onClick: () => setShortcutSettingsOpen(true),
+          },
+        })
+      } catch { /* stale preload — channel not there yet */ }
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [])
+
   // Report the UI theme to the apps server (spec §7.1): apps read it from
   // GET /_rowboat/app and get live changes via the SSE theme event.
   useEffect(() => {
@@ -7952,6 +7982,11 @@ function App() {
         open={retentionSettingsOpen}
         onOpenChange={setRetentionSettingsOpen}
         defaultTab="advanced"
+      />
+      <SettingsDialog
+        open={shortcutSettingsOpen}
+        onOpenChange={setShortcutSettingsOpen}
+        defaultTab="shortcuts"
       />
       <OnboardingModal
         open={showOnboarding}

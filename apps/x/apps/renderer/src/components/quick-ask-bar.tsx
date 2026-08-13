@@ -37,6 +37,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { reduceTurn } from '@x/shared/src/turns.js'
+import * as quickAskShortcut from '@x/shared/src/quick-ask-shortcut.js'
+import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
 
 import { TalkingHead } from '@/components/talking-head'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
@@ -126,6 +128,9 @@ const PINNED_RESPONSE_HEIGHT = 560
  * click there dismisses the bar — preserving the click-away feel.
  */
 export function QuickAskBar() {
+  // The global summon chord (customizable) — drives hold-to-talk release
+  // detection, so it must track rebinds live.
+  const shortcut = useQuickAskShortcut()
   const [asked, setAsked] = useState<string | null>(null)
   const [answer, setAnswer] = useState<{ processing: boolean; text: string; statusText: string | null } | null>(null)
   // Only answer pushes that follow OUR submit render — the app window's chat
@@ -487,11 +492,12 @@ export function QuickAskBar() {
     setRecording(false)
   }, [voice])
 
-  // Hold-⌥⇧Space-to-talk (the Wispr gesture): a chord summon starts
+  // Hold-chord-to-talk (the Wispr gesture, default ⌥⇧Space — the chord is
+  // customizable in Settings → Shortcuts): a chord summon starts
   // capturing IMMEDIATELY — one gesture from anywhere to a spoken question.
   // Electron's global shortcut can't see the key-UP, so the release is
-  // detected here once the window has focus: any chord key's keyup (Space /
-  // Alt / Shift), or any event whose modifier state shows Alt+Shift are no
+  // detected here once the window has focus: any chord key's keyup, or any
+  // event whose modifier state shows the chord's modifiers are no
   // longer held, finalizes and submits. A quick TAP falls out for free —
   // nothing was said, the transcript comes back empty, and an empty
   // transcript doesn't submit, leaving the composer focused for typing.
@@ -519,9 +525,10 @@ export function QuickAskBar() {
     })
   }, [pinned, startRecording])
   useEffect(() => {
-    const CHORD_CODES = ['Space', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight']
+    const chordCodes = quickAskShortcut.shortcutChordCodes(shortcut.accelerator)
+    const chordModifiers = quickAskShortcut.shortcutModifierStates(shortcut.accelerator)
     const onKeyUp = (e: KeyboardEvent) => {
-      if (chordRef.current && CHORD_CODES.includes(e.code)) endChord('submit')
+      if (chordRef.current && chordCodes.includes(e.code)) endChord('submit')
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (!chordRef.current) return
@@ -530,12 +537,12 @@ export function QuickAskBar() {
         return
       }
       // A non-chord key means they're typing — get out of the way.
-      if (!CHORD_CODES.includes(e.code)) endChord('cancel')
+      if (!chordCodes.includes(e.code)) endChord('cancel')
     }
     const onMouseMove = (e: MouseEvent) => {
       // Backup release signal: the chord's modifiers are no longer held
       // (its keyups were delivered before this window took focus).
-      if (chordRef.current && !e.getModifierState('Alt') && !e.getModifierState('Shift')) {
+      if (chordRef.current && chordModifiers.every((m) => !e.getModifierState(m))) {
         endChord('submit')
       }
     }
@@ -557,7 +564,7 @@ export function QuickAskBar() {
       window.removeEventListener('blur', onBlur)
       clearInterval(cap)
     }
-  }, [endChord])
+  }, [endChord, shortcut.accelerator])
   useEffect(() => {
     capStartedAtRef.current = recording ? Date.now() : null
   }, [recording])
@@ -1257,6 +1264,11 @@ function SkipperPins({
   textPin: 'expand' | 'collapse'
   onTextPin: () => void
 }) {
+  const shortcutState = useQuickAskShortcut()
+  const shortcutLabel = quickAskShortcut.formatShortcut(
+    shortcutState.accelerator,
+    typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac'),
+  )
   // The mic and Stop are exclusive states of ONE control: while a turn is
   // in flight the mic is dead anyway, so the hat's single pin morphs.
   const busy = state.status === 'thinking' || state.status === 'speaking'
@@ -1336,7 +1348,7 @@ function SkipperPins({
         type="button"
         onClick={onTextPin}
         aria-label={textPin === 'expand' ? 'Bring the text back' : 'Tuck the text away'}
-        title={textPin === 'expand' ? 'Bring the text back (⌥⇧Space works too)' : 'Tuck the text away — the session keeps going'}
+        title={textPin === 'expand' ? `Bring the text back (${shortcutLabel} works too)` : 'Tuck the text away — the session keeps going'}
         className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
         style={{ ...noDragRegion, left: '18%', top: '68%' }}
       >
