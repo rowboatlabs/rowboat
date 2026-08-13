@@ -49,6 +49,12 @@ export interface SessionsDependencies {
     idGenerator: IMonotonicallyIncreasingIdGenerator;
     clock: IClock;
     sessionBus: ISessionBus;
+    // Optional: authoritative per-session composition pins (e.g. a Code
+    // section session's coding agent + working directory), merged into every
+    // turn's composition SERVER-side so prompt assembly never depends on
+    // which client surface sent the message. Injected by DI; the session
+    // layer knows nothing about what the pins mean.
+    sessionCompositionPins?: (sessionId: string) => Promise<Record<string, JsonValue> | null>;
 }
 
 interface ActiveAdvance {
@@ -68,6 +74,9 @@ export class SessionsImpl implements ISessions {
     private readonly idGenerator: IMonotonicallyIncreasingIdGenerator;
     private readonly clock: IClock;
     private readonly sessionBus: ISessionBus;
+    private readonly sessionCompositionPins?: (
+        sessionId: string,
+    ) => Promise<Record<string, JsonValue> | null>;
 
     private readonly index = new SessionIndex();
     // Ephemeral: executions this process started, for stopTurn's abort path.
@@ -82,12 +91,14 @@ export class SessionsImpl implements ISessions {
         idGenerator,
         clock,
         sessionBus,
+        sessionCompositionPins,
     }: SessionsDependencies) {
         this.sessionRepo = sessionRepo;
         this.turnRuntime = turnRuntime;
         this.idGenerator = idGenerator;
         this.clock = clock;
         this.sessionBus = sessionBus;
+        this.sessionCompositionPins = sessionCompositionPins;
     }
 
     // §8.2: scan session files, read each session's latest turn for status.
@@ -185,6 +196,31 @@ export class SessionsImpl implements ISessions {
                 );
             }
 
+            // Server-side session pins: whatever surface sent this message
+            // (composer, voice, quick-ask, a background runner), the session's
+            // pinned composition is the same — the client's copy is at most a
+            // cosmetic hint, and the pins win on conflict.
+            if (this.sessionCompositionPins && !isInlineAgentRequest(agentRequest)) {
+                const pins = await this.sessionCompositionPins(sessionId).catch(() => null);
+                if (pins && Object.keys(pins).length > 0) {
+                    const provided = agentRequest.overrides?.composition;
+                    const base: { [key: string]: JsonValue } =
+                        provided !== undefined &&
+                        provided !== null &&
+                        typeof provided === "object" &&
+                        !Array.isArray(provided)
+                            ? (provided as { [key: string]: JsonValue })
+                            : {};
+                    agentRequest = {
+                        ...agentRequest,
+                        overrides: {
+                            ...agentRequest.overrides,
+                            composition: { ...base, ...pins },
+                        },
+                    };
+                }
+            }
+
             const turnId = await this.turnRuntime.createTurn({
                 agent: agentRequest,
                 sessionId,
@@ -199,7 +235,7 @@ export class SessionsImpl implements ISessions {
                         : {}),
                 },
                 config: {
-                    humanAvailable: true,
+                    humanAvailable: config.humanAvailable ?? true,
                     ...(config.autoPermission === undefined
                         ? {}
                         : { autoPermission: config.autoPermission }),

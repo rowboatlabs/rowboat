@@ -431,6 +431,10 @@ export function setCompanionPinned(pinned: boolean) {
     mode = 'hidden';
     pinnedCollapsed = false;
     summonPendingAt = 0;
+    // The call is over — its device state must not leak into the next
+    // summon (a stale cameraOn here made the next companion flash the
+    // camera pill before morphing to the card).
+    lastPopoutState = null;
     const win = getQuickAskWindow();
     if (win) {
       pushMode(win);

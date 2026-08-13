@@ -1462,6 +1462,14 @@ function App() {
     setInCall(false)
     companionVoiceRef.current = false
     releaseVoice(CALL_VOICE_HOLDER)
+    // A call seeded from the app's own chat was just a mirror of it — release
+    // the companion binding so its second store unsubscribes instead of
+    // double-processing that conversation forever. ⌥⇧Space-born conversations
+    // (hover ≠ app chat) keep continuity for the next summon.
+    if (hoverRunIdRef.current && hoverRunIdRef.current === runIdRef.current) {
+      hoverRunIdRef.current = null
+      setHoverRunId(null)
+    }
   }, [video, setPttState])
 
   // ONE hover mode: the ⌥⇧Space relay, the card's tuck handle, and the
@@ -2462,7 +2470,6 @@ function App() {
   const [activeCodeSession, setActiveCodeSession] = useState<ActiveCodeSession | null>(null)
   // A file the code chat asked to review — consumed by the workspace pane.
   const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
-  const boundCodeSessionRef = useRef<string | null>(null)
   // Composer locks for runs that are code sessions: the session's cwd + agent
   // are frozen in the chat input (the backend pins them server-side anyway).
   // Kept after the Code view unmounts — the chat stays bound to the session.
@@ -4235,15 +4242,20 @@ function App() {
     cancelRecordingIfActive()
     saveChatScrollForTab(activeChatTabIdRef.current)
     setChatTabs((prev) => prev.map((t) => (
-      // Rebinding to a different session = a different chat identity.
-      t.id === activeChatTabIdRef.current ? { ...t, runId: rid, chatId: crypto.randomUUID() } : t
+      // Rebinding to a different session = a different chat identity — but a
+      // DETERMINISTIC one (the session id), so switching A→B→A restores A's
+      // draft/selection instead of silently dropping half-typed input.
+      t.id === activeChatTabIdRef.current ? { ...t, runId: rid, chatId: rid } : t
     )))
     void loadRun(rid)
   }, [cancelRecordingIfActive, loadRun, saveChatScrollForTab])
   bindChatToRunRef.current = bindChatToRun
 
   // A code session was selected in the Code view: bind the chat to it — the
-  // conversation IS the assistant chat, no separate chat surface.
+  // conversation IS the assistant chat, no separate chat surface. No local
+  // "already bound" guard here: bindChatToRun dedupes on the live binding,
+  // and a stale guard is exactly how re-selecting a session after opening
+  // another chat used to do nothing (the stuck-binding family).
   const handleCodeSessionSelected = useCallback((active: ActiveCodeSession | null) => {
     setActiveCodeSession(active)
     if (active) {
@@ -4255,12 +4267,7 @@ function App() {
       ))
     }
     const sessionId = active?.session.id ?? null
-    if (!sessionId) {
-      boundCodeSessionRef.current = null
-      return
-    }
-    if (boundCodeSessionRef.current === sessionId) return
-    boundCodeSessionRef.current = sessionId
+    if (!sessionId) return
     bindChatToRun(sessionId)
     // The conversation lives in the dock — selecting a session must show it.
     setIsChatSidebarOpen(true)
@@ -4734,7 +4741,9 @@ function App() {
     if (document.body.style.pointerEvents === 'none') {
       document.body.style.pointerEvents = ''
     }
-  }, [currentViewState.type])
+    // Keyed on the whole view state (not just .type): file→file navigation
+    // must also clear the lock.
+  }, [currentViewState])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]

@@ -198,7 +198,17 @@ export function CodeView({
           sessions={sessions}
           statusOf={statusOf}
           selectedSessionId={selectedSessionId}
-          onSelectSession={setSelectedSessionId}
+          onSelectSession={(id) => {
+            setSelectedSessionId(id)
+            // Re-clicking the already-selected session is a no-op for React
+            // state, but the user means "show me this session's chat" — the
+            // dock may have been rebound to another conversation meanwhile.
+            // Re-notify so App re-asserts the binding (it dedupes).
+            if (id === selectedSessionId) {
+              const session = sessions.find((s) => s.id === id)
+              if (session) onSessionSelected?.({ session, status: statusOf(session.id) })
+            }
+          }}
           onAddProject={() => void handleAddProject()}
           onRemoveProject={(id) => void handleRemoveProject(id)}
           onNewSession={setNewSessionProjectId}

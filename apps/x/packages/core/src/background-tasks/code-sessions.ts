@@ -335,6 +335,11 @@ TASK>>>`;
             } else if (e.type === 'turn_cancelled') {
                 error = 'The session was stopped before it finished.';
                 settleResolve?.();
+            } else if (e.type === 'turn_suspended') {
+                // Shouldn't happen with humanAvailable:false — but if a turn
+                // suspends anyway, fail fast rather than idling to timeout.
+                error = 'The task suspended waiting on input no one can provide.';
+                settleResolve?.();
             }
         });
 
@@ -342,13 +347,20 @@ TASK>>>`;
             const { turnId } = await sessions.sendMessage(
                 session.id,
                 { role: 'user', content: copilotMessage },
-                { agent: { agentId: 'copilot' }, useCase: 'code_session', autoPermission: true },
+                // humanAvailable false: there is no human on a background task —
+                // the turn must fail fast instead of suspending for 90 minutes
+                // on an approval card nobody will answer.
+                { agent: { agentId: 'copilot' }, useCase: 'code_session', autoPermission: true, humanAvailable: false },
             );
             sentTurnId = turnId;
+            let watchTimer: ReturnType<typeof setTimeout> | undefined;
             await Promise.race([
                 settled,
-                new Promise<void>((resolve) => setTimeout(() => { timedOut = true; resolve(); }, MAX_WATCH_MS)),
+                new Promise<void>((resolve) => {
+                    watchTimer = setTimeout(() => { timedOut = true; resolve(); }, MAX_WATCH_MS);
+                }),
             ]);
+            if (watchTimer) clearTimeout(watchTimer);
         } catch (err) {
             error = err instanceof Error ? err.message : String(err);
             log.log(`${taskSlug} — session ${session.id} errored: ${error}`);

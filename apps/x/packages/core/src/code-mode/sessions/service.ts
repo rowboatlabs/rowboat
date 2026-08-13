@@ -76,10 +76,19 @@ export class CodeSessionService {
 
     // Sessions created before code mode moved onto the turns runtime have meta
     // files but no chat-session file, so the chat pane could not open them.
-    // Backfill an empty session file per orphaned meta (id and createdAt are
-    // preserved; the old run JSONL history stays on disk, inert). Runs before
-    // the session index's startup scan so backfilled sessions get indexed.
+    // The runs->turns migration converts their old JSONL history into real
+    // sessions; this backfill is the fallback for metas whose legacy run is
+    // gone (deleted, quarantined). Runs before the session index's startup
+    // scan so backfilled sessions get indexed — and exactly ONCE per install
+    // (marker file), so boots converge instead of rescanning forever.
     async backfillChatSessions(): Promise<void> {
+        const marker = path.join(WorkDir, 'code-mode', '.chat-sessions-backfilled');
+        try {
+            await fs.access(marker);
+            return; // already ran
+        } catch {
+            // first run — proceed
+        }
         const metas = await this.codeSessionsRepo.list().catch(() => [] as CodeSession[]);
         for (const meta of metas) {
             try {
@@ -91,10 +100,12 @@ export class CodeSessionService {
                     title: meta.title,
                 });
             } catch {
-                // Already backfilled (the create is exclusive), or an id shape
-                // the session store can't hold — either way, nothing to do.
+                // Already exists (migrated with history, or a prior backfill),
+                // or an id shape the session store can't hold — nothing to do.
             }
         }
+        await fs.mkdir(path.dirname(marker), { recursive: true }).catch(() => {});
+        await fs.writeFile(marker, new Date().toISOString()).catch(() => {});
     }
 
     async create(args: CreateSessionArgs): Promise<CodeSession> {

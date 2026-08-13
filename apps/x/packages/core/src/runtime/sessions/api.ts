@@ -18,6 +18,10 @@ export interface SendMessageConfig {
     useCase?: UseCase;
     subUseCase?: string;
     autoPermission?: boolean;
+    // Default true (a chat has a human). Autonomous senders (background code
+    // tasks) pass false so the turn never suspends waiting for an answer
+    // that can't come — ask-human is unavailable and gated tools auto-deny.
+    humanAvailable?: boolean;
     maxModelCalls?: number;
     reasoningEffort?: "low" | "medium" | "high";
 }

@@ -48,7 +48,7 @@ Every `llm_usage` emit point in the codebase:
 
 | `use_case` | `sub_use_case` | `agent_name`? | Where | File:line |
 |---|---|---|---|---|
-| `copilot_chat` | (none) | yes | User chat in renderer (the durable default when no caller sets a use case) | `packages/core/src/runtime/turns/bridges/real-usage-reporter.ts` (`reportModelUsage`); legacy runs (code-mode carve-out) still emit from `packages/core/src/runtime/legacy/engine.ts` (`streamLlm` finish-step) |
+| `copilot_chat` | (none) | yes | User chat in renderer (the durable default when no caller sets a use case) | `packages/core/src/runtime/turns/bridges/real-usage-reporter.ts` (`reportModelUsage`); legacy runs (now mini-apps host API only) still emit from `packages/core/src/runtime/legacy/engine.ts` (`streamLlm` finish-step) |
 | `copilot_chat` | `scheduled` | yes | Background scheduled agent runner | `packages/core/src/agent-schedule/runner.ts:167` |
 | `copilot_chat` | `file_parse` | inherits | `parseFile` builtin tool inside any chat | `packages/core/src/runtime/tools/domains/parsing.ts:179` |
 | `copilot_chat` | `chat_title` | no | Auto-naming a chat from its first user message (`generateText`) | `packages/core/src/knowledge/generate_title.ts` |
@@ -65,7 +65,7 @@ Every `llm_usage` emit point in the codebase:
 | `knowledge_sync` | `inline_task_run` | yes | Inline `@rowboat` task execution (two call sites) | `packages/core/src/knowledge/inline_tasks.ts` (`runWhenPossible`) |
 | `knowledge_sync` | `inline_task_classify` | no | Inline task scheduling classifier (`generateText`) | `packages/core/src/knowledge/inline_tasks.ts:673` |
 | `knowledge_sync` | `pre_built` | yes | Pre-built scheduled agents | `packages/core/src/pre_built/runner.ts` (`runWhenPossible`) |
-| `code_session` | (none) | yes | Code-section coding session in Rowboat mode (direct mode talks to the on-device coding agent and emits no `llm_usage`) | `packages/core/src/code-mode/sessions/service.ts` (createRun) |
+| `code_session` | (none) | yes | Code-section coding session — an ordinary chat session driving `code_agent_run` (direct drive removed 2026-08) | `packages/core/src/code-mode/sessions/service.ts` (create) + background code tasks |
 
 ##### `live_note_agent` sub-use-case shape
 

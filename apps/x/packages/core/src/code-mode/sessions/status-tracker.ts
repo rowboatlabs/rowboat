@@ -30,11 +30,20 @@ export class CodeSessionStatusTracker {
         this.codeSessionsRepo = codeSessionsRepo;
     }
 
+    // Events are processed strictly in arrival order: handle() awaits repo
+    // lookups, and the spine delivers synchronously — without this chain two
+    // events could interleave and apply their transitions out of order
+    // (e.g. a terminal event finishing before the turn_created that preceded
+    // it, leaving a session spinning forever).
+    private queue: Promise<void> = Promise.resolve();
+
     async start(): Promise<void> {
         if (this.unsubscribe) return;
         await this.refreshKnownSessions();
         this.unsubscribe = this.turnEventBus.subscribeAll((event) => {
-            void this.handle(event);
+            this.queue = this.queue
+                .then(() => this.handle(event))
+                .catch(() => { /* status is best-effort; never break the chain */ });
         });
     }
 
@@ -80,6 +89,12 @@ export class CodeSessionStatusTracker {
             case 'turn_suspended':
                 return 'needs-you';
             case 'tool_permission_resolved':
+                return previous === 'needs-you' ? 'working' : null;
+            // An answered ask-human arrives as an async tool_result (there is
+            // no *_resolved event for it) — without this the badge said
+            // "needs your attention" forever after the user replied, and the
+            // completion notification never fired.
+            case 'tool_result':
                 return previous === 'needs-you' ? 'working' : null;
             case 'tool_progress': {
                 const progress = e.progress;
