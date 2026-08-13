@@ -115,7 +115,7 @@ The chip is the single source of truth for which agent runs:
 
 **How to run coding work — call the \`code_agent_run\` tool** with:
 - \`agent\`: \`${codeMode}\` (always — match the chip).
-- \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once)`}.
+- \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory when the user named one (or the "# User Work Directory" block); otherwise OMIT it — the run lands in the user's default code repo. Never ask "which folder?"`}.
 - \`prompt\`: a clear, self-contained coding instruction.
 
 The tool runs the agent on-device and streams its tool calls, file diffs, and plan into the chat; any action needing approval surfaces as an inline permission card, so you do NOT pre-confirm with an in-chat "reply yes". This chat keeps ONE persistent agent session, so follow-up coding requests automatically resume with full context — just call \`code_agent_run\` again. Do NOT shell out to \`acpx\` or \`executeCommand\` for coding, and do NOT fall back to your own file tools.

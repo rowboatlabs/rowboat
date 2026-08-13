@@ -187,6 +187,32 @@ export class CodeSessionService {
         return session;
     }
 
+    /**
+     * The repo coding work defaults into when no path is named: the
+     * configured default project, or — when exactly one project is
+     * registered — that project implicitly (the common single-repo case
+     * needs no setup at all). Null when there are zero or several projects
+     * and no explicit choice.
+     */
+    async resolveDefaultProject(): Promise<{ id: string; path: string; name: string } | null> {
+        const projects = await this.codeProjectsRepo.list().catch(() => []);
+        if (projects.length === 0) return null;
+        try {
+            const { lazyResolve } = await import('../../di/lazy-resolve.js');
+            const configRepo = await lazyResolve<{ getConfig(): Promise<{ defaultProjectId?: string }> }>('codeModeConfigRepo');
+            const configured = (await configRepo.getConfig()).defaultProjectId;
+            if (configured) {
+                const match = projects.find((p) => p.id === configured);
+                if (match) return match;
+                // A stale id (project was removed) falls through to the
+                // single-project rule rather than dead-ending.
+            }
+        } catch {
+            // Config unavailable — the single-project rule still applies.
+        }
+        return projects.length === 1 ? projects[0] : null;
+    }
+
     /** The registered project containing an absolute path, if any — longest
      * path wins so nested registrations resolve to the closest project. */
     async findProjectForPath(absPath: string): Promise<{ id: string; path: string; name: string } | null> {

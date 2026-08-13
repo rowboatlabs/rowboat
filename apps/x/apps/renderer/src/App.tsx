@@ -4613,12 +4613,24 @@ function App() {
   useEffect(() => { homeCodeProjectRef.current = homeCodeProject }, [homeCodeProject])
   const homeCodeIsolationRef = useRef(homeCodeIsolation)
   useEffect(() => { homeCodeIsolationRef.current = homeCodeIsolation }, [homeCodeIsolation])
+  const [homeDefaultProjectId, setHomeDefaultProjectId] = useState<string | null>(null)
   useEffect(() => {
     if (homeComposeTarget?.kind !== 'todo') return
     let cancelled = false
-    void window.ipc.invoke('codeProject:list', null)
-      .then((res) => { if (!cancelled) setHomeCodeProjects(res.projects.map((p) => ({ id: p.project.id, name: p.project.name }))) })
-      .catch(() => {})
+    void Promise.all([
+      window.ipc.invoke('codeProject:list', null),
+      window.ipc.invoke('codeMode:getConfig', null).catch(() => null),
+    ]).then(([list, config]) => {
+      if (cancelled) return
+      const projects = list.projects.map((p) => ({ id: p.project.id, name: p.project.name }))
+      // The default repo (explicit, or the only one registered) leads the
+      // lane row — one click, and it's the same repo voice dispatch uses.
+      const defaultId = config?.defaultProjectId ?? (projects.length === 1 ? projects[0].id : null)
+      setHomeDefaultProjectId(defaultId)
+      setHomeCodeProjects(defaultId
+        ? [...projects.filter((p) => p.id === defaultId), ...projects.filter((p) => p.id !== defaultId)]
+        : projects)
+    }).catch(() => {})
     return () => { cancelled = true }
   }, [homeComposeTarget?.kind])
   useEffect(() => {
@@ -6539,6 +6551,7 @@ function App() {
                                   }`}
                                 >
                                   {p.name}
+                                  {p.id === homeDefaultProjectId && <span className="ml-1 opacity-60">· default</span>}
                                 </button>
                               ))}
                               {homeCodeProject && (

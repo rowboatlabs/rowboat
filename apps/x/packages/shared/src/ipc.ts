@@ -1541,12 +1541,17 @@ const ipcSchemas = {
     res: z.object({
       enabled: z.boolean(),
       approvalPolicy: ApprovalPolicy.optional(),
+      // The repo coding work defaults into when none is named — set once in
+      // Settings → Code. With exactly one registered project, that project
+      // is the implicit default and this stays unset.
+      defaultProjectId: z.string().optional(),
     }),
   },
   'codeMode:setConfig': {
     req: z.object({
       enabled: z.boolean(),
       approvalPolicy: ApprovalPolicy.optional(),
+      defaultProjectId: z.string().optional(),
     }),
     res: z.object({
       success: z.literal(true),
