@@ -43,9 +43,12 @@ function slugify(input: string): string {
         .replace(/^-+|-+$/g, "");
 }
 
+// vendor/model, the only id shape OpenRouter accepts.
+const MODEL_ID_SHAPE = /^[\w.-]+\/[\w.:-]+$/;
+
 // Readable failure text for the common OpenRouter image-generation faults;
 // always carries the underlying error message so nothing is swallowed.
-function describeImageError(error: unknown): string {
+function describeImageError(error: unknown, modelId: string): string {
     const message = error instanceof Error ? error.message : String(error);
     if (NoImageGeneratedError.isInstance(error)) {
         return `Model returned no image — it may not support image output. (${message})`;
@@ -55,7 +58,7 @@ function describeImageError(error: unknown): string {
         return `OpenRouter account is out of credits (HTTP 402). Add credits at openrouter.ai to generate images. (${message})`;
     }
     if (statusCode === 404 || message.includes("404") || /model.*not.*found/i.test(message)) {
-        return `Image model '${DEFAULT_IMAGE_MODEL}' was not found on OpenRouter (HTTP 404). (${message})`;
+        return `Image model '${modelId}' was not found on OpenRouter (HTTP 404). (${message})`;
     }
     return `Image generation failed: ${message}`;
 }
@@ -103,46 +106,67 @@ async function saveGeneratedImage(
 export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
     'generate-image': {
         permission: "none",
-        description: "Generate an image from a text prompt. Use this tool whenever the user asks to generate, create, or draw an image or picture. It renders the prompt with an image model and saves the result as a PNG file, returning the saved file's absolute path. After a successful call, present that path to the user wrapped in a ```filepath code block. The prompt should be a vivid, self-contained description of the desired image.",
+        description: "Generate an image from a text prompt. Use this tool whenever the user asks to generate, create, or draw an image or picture. It renders the prompt with the default image model — unless the user explicitly names one — and saves the result as a PNG file, returning the saved file's absolute path. After a successful call, present that path to the user wrapped in a ```filepath code block. The prompt should be a vivid, self-contained description of the desired image.",
         inputSchema: z.object({
             prompt: z.string().describe('A vivid, self-contained description of the image to generate. Include the subject, style, setting, and any important details.'),
             filename: z.string().optional().describe('Short kebab-case basename for the saved file, without extension (e.g. "sunset-over-lake"). Derived from the prompt when omitted.'),
             aspectRatio: z.string().optional().describe('Aspect ratio of the image, e.g. "1:1" or "16:9". Only pass this when the user asks for a specific shape.'),
+            model: z.string().optional().describe('OpenRouter image-model id like "x-ai/grok-imagine" or "black-forest-labs/flux.2-pro". Pass ONLY when the user explicitly names an image model or provider (e.g. "use gpt-5-image", "grok se banao", "FLUX"); omit otherwise to use the default model.'),
         }),
         isAvailable: async () => {
             if (await isSignedIn()) return true;
             return (await findOpenRouterProvider()) !== null;
         },
-        execute: async ({ prompt, filename, aspectRatio }: { prompt: string; filename?: string; aspectRatio?: string }) => {
+        execute: async ({ prompt, filename, aspectRatio, model }: { prompt: string; filename?: string; aspectRatio?: string; model?: string }) => {
             const aspect = aspectRatio ? { aspectRatio: aspectRatio as `${number}:${number}` } : {};
+
+            const modelOverride = model?.trim() || undefined;
+            if (modelOverride && !MODEL_ID_SHAPE.test(modelOverride)) {
+                return {
+                    success: false,
+                    error: `Invalid image model id '${modelOverride}'. Expected an OpenRouter id in vendor/model form, e.g. "x-ai/grok-imagine" or "black-forest-labs/flux.2-pro".`,
+                };
+            }
 
             // Signed-in: the gateway is the primary path; BYOK (when
             // configured) is the fallback, with the gateway failure noted on
-            // the result.
+            // the result. The gateway always renders GATEWAY_IMAGE_MODEL —
+            // gateway billing is Rowboat's; per-call overrides there are a
+            // founder decision — so an explicit model choice skips it and
+            // runs on the user's own OpenRouter key.
             let gatewayNote: string | undefined;
             if (await isSignedIn()) {
-                try {
-                    const result = await generateImage({
-                        model: getGatewayProvider().imageModel(GATEWAY_IMAGE_MODEL),
-                        prompt,
-                        ...aspect,
-                    });
-                    const filePath = await saveGeneratedImage(result, filename, prompt);
-                    return {
-                        success: true,
-                        path: filePath,
-                        provider: "rowboat",
-                        model: GATEWAY_IMAGE_MODEL,
-                    };
-                } catch (error) {
+                if (modelOverride) {
                     if (!(await findOpenRouterProvider())) {
                         return {
                             success: false,
-                            error: describeGatewayError(error),
+                            error: `Choosing a specific image model currently requires your own OpenRouter key. Add an OpenRouter provider in model settings, or omit the model to use the default (${GATEWAY_IMAGE_MODEL}).`,
                         };
                     }
-                    const message = error instanceof Error ? error.message : String(error);
-                    gatewayNote = `Rowboat gateway image call failed (${message.slice(0, 120)}); used your OpenRouter key instead.`;
+                } else {
+                    try {
+                        const result = await generateImage({
+                            model: getGatewayProvider().imageModel(GATEWAY_IMAGE_MODEL),
+                            prompt,
+                            ...aspect,
+                        });
+                        const filePath = await saveGeneratedImage(result, filename, prompt);
+                        return {
+                            success: true,
+                            path: filePath,
+                            provider: "rowboat",
+                            model: GATEWAY_IMAGE_MODEL,
+                        };
+                    } catch (error) {
+                        if (!(await findOpenRouterProvider())) {
+                            return {
+                                success: false,
+                                error: describeGatewayError(error),
+                            };
+                        }
+                        const message = error instanceof Error ? error.message : String(error);
+                        gatewayNote = `Rowboat gateway image call failed (${message.slice(0, 120)}); used your OpenRouter key instead.`;
+                    }
                 }
             }
 
@@ -162,9 +186,10 @@ export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
                 headers: provider.headers,
             });
 
+            const byokModel = modelOverride ?? DEFAULT_IMAGE_MODEL;
             try {
                 const result = await generateImage({
-                    model: openrouter.imageModel(DEFAULT_IMAGE_MODEL),
+                    model: openrouter.imageModel(byokModel),
                     prompt,
                     ...aspect,
                 });
@@ -173,13 +198,13 @@ export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
                     success: true,
                     path: filePath,
                     provider: "openrouter",
-                    model: DEFAULT_IMAGE_MODEL,
+                    model: byokModel,
                     ...(gatewayNote ? { note: gatewayNote } : {}),
                 };
             } catch (error) {
                 return {
                     success: false,
-                    error: describeImageError(error),
+                    error: describeImageError(error, byokModel),
                 };
             }
         },
