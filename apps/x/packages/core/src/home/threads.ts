@@ -1,0 +1,314 @@
+import fs from 'fs/promises';
+import fsSync from 'fs';
+import path from 'path';
+import type { TurnBusEvent } from '@x/shared/dist/turns.js';
+import type { HomeThread, HomeThreadStatus } from '@x/shared/dist/home-threads.js';
+import type { TodoItem, TodoList } from '@x/shared/dist/todo.js';
+import { WorkDir } from '../config/config.js';
+import { withFileLock } from '../knowledge/file-lock.js';
+import type { ITurnEventBus } from '../runtime/turns/event-hub.js';
+import type { ISessions } from '../runtime/sessions/api.js';
+// The concrete bus: ISessionBus is publish-only by design; subscribing is an
+// app-layer affordance (same resolution pattern as main's sessions watcher).
+import type { EmitterSessionBus } from '../runtime/sessions/bus.js';
+import type { ICodeSessionsRepo } from '../code-mode/sessions/repo.js';
+import { readTodo } from '../todo/fileops.js';
+import { getSessionIndex } from '../todo/session-index.js';
+import { todoBus } from '../todo/bus.js';
+
+// ---------------------------------------------------------------------------
+// The Home thread registry — one main-process derivation of every thread of
+// delegated work, seen through the attention lens the Deck renders: what is
+// underway, what needs the user, what's idle. Generalizes the transition
+// semantics of code-mode/sessions/status-tracker.ts to ALL sessions (the
+// durable index has no "running" status by design — live state exists only
+// on the turn event spine, so a spine subscriber is the only way to know).
+//
+// Composition sources, all read fresh per snapshot (cheap at Home's scale):
+//   - sessions.listSessions()      — the index: title, updatedAt, statuses
+//   - todo/sessions.json           — item key ↔ sessionId (kind: task)
+//   - todo.md receipts             — unanswered questions = durable needs-you
+//   - code-session meta            — kind: code, project/agent/branch context
+//   - home/state.json              — seen marks + pins (workspace-durable,
+//                                    NOT localStorage: notifications and the
+//                                    companion read the same truth)
+// ---------------------------------------------------------------------------
+
+const STATE_PATH = path.join(WorkDir, 'home', 'state.json');
+const PING_DEBOUNCE_MS = 250;
+
+interface HomeState {
+    seen: Record<string, string>;
+    pins: string[];
+}
+
+export interface LiveTurnState {
+    status: Exclude<HomeThreadStatus, 'ready'>;
+    activity?: string;
+    attention?: string;
+    startedAt?: string;
+}
+
+/**
+ * What a spine event means for a thread's live status — pure, so the
+ * semantics are testable. Same transitions as the code-session tracker
+ * (status-tracker.ts), plus the activity line the Deck's strips show.
+ * Returns the next state, 'clear' on terminal events, or null when the
+ * event doesn't move the needle.
+ */
+export function transitionLive(
+    prev: LiveTurnState | undefined,
+    e: TurnBusEvent['event'],
+): LiveTurnState | 'clear' | null {
+    switch (e.type) {
+        case 'turn_created':
+            return { status: 'underway', activity: 'starting', startedAt: e.ts };
+        case 'model_call_requested':
+            return { ...(prev ?? { status: 'underway' }), status: prev?.status === 'needs-you' ? prev.status : 'underway', activity: 'thinking' };
+        case 'tool_invocation_requested':
+            return { ...(prev ?? { status: 'underway' }), status: prev?.status === 'needs-you' ? prev.status : 'underway', activity: e.toolName };
+        case 'tool_permission_required':
+            return { ...(prev ?? { status: 'needs-you' }), status: 'needs-you', attention: `waiting for your approval: ${e.toolName}` };
+        case 'turn_suspended': {
+            const ask = e.pendingAsyncTools.find((t) => t.toolName === 'ask-human');
+            const question = ask
+                ? (typeof (ask.input as { question?: unknown } | null)?.question === 'string'
+                    ? String((ask.input as { question: string }).question)
+                    : 'The agent needs your input.')
+                : undefined;
+            return {
+                ...(prev ?? { status: 'needs-you' }),
+                status: 'needs-you',
+                attention: question ?? (e.pendingPermissions.length > 0 ? 'waiting for your approval' : 'waiting on you'),
+            };
+        }
+        case 'tool_permission_resolved':
+        case 'tool_result':
+            if (prev?.status === 'needs-you') {
+                return { ...prev, status: 'underway', attention: undefined };
+            }
+            return null;
+        case 'tool_progress': {
+            const progress = e.progress;
+            if (progress && typeof progress === 'object' && !Array.isArray(progress)) {
+                const kind = (progress as { kind?: unknown }).kind;
+                if (kind === 'code-run-permission-request') {
+                    return { ...(prev ?? { status: 'needs-you' }), status: 'needs-you', attention: 'the coding agent needs your approval' };
+                }
+                if (kind === 'code-run-permission-resolved' && prev?.status === 'needs-you') {
+                    return { ...prev, status: 'underway', attention: undefined };
+                }
+            }
+            return null;
+        }
+        case 'turn_completed':
+        case 'turn_failed':
+        case 'turn_cancelled':
+            return 'clear';
+        default:
+            return null;
+    }
+}
+
+async function readState(): Promise<HomeState> {
+    try {
+        const raw = await fs.readFile(STATE_PATH, 'utf-8');
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            const obj = parsed as { seen?: unknown; pins?: unknown };
+            return {
+                seen:
+                    obj.seen && typeof obj.seen === 'object' && !Array.isArray(obj.seen)
+                        ? Object.fromEntries(
+                              Object.entries(obj.seen as Record<string, unknown>).filter(
+                                  (e): e is [string, string] => typeof e[1] === 'string',
+                              ),
+                          )
+                        : {},
+                pins: Array.isArray(obj.pins) ? obj.pins.filter((p): p is string => typeof p === 'string') : [],
+            };
+        }
+    } catch {
+        // missing or corrupt — start fresh; seen/pins are losable attention
+        // state, never work state.
+    }
+    return { seen: {}, pins: [] };
+}
+
+async function writeState(mutate: (state: HomeState) => void): Promise<void> {
+    await withFileLock(STATE_PATH, async () => {
+        const state = await readState();
+        mutate(state);
+        const dir = path.dirname(STATE_PATH);
+        if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });
+        await fs.writeFile(STATE_PATH, JSON.stringify(state, null, 2), 'utf-8');
+    });
+}
+
+/** Walk a todo list into a flat key → item map (children included). */
+function itemsByKey(list: TodoList): Map<string, TodoItem> {
+    const map = new Map<string, TodoItem>();
+    for (const block of list.blocks) {
+        if (block.kind !== 'item') continue;
+        map.set(block.item.key, block.item);
+        for (const child of block.item.children) map.set(child.key, child);
+    }
+    return map;
+}
+
+export class HomeThreadsTracker {
+    private readonly turnEventBus: ITurnEventBus;
+    private readonly sessions: ISessions;
+    private readonly sessionBus: EmitterSessionBus;
+    private readonly codeSessionsRepo: ICodeSessionsRepo;
+
+    private readonly live = new Map<string, LiveTurnState>();
+    private readonly listeners = new Set<() => void>();
+    private readonly unsubscribes: Array<() => void> = [];
+    private pingTimer: ReturnType<typeof setTimeout> | null = null;
+    private started = false;
+
+    constructor({
+        turnEventBus,
+        sessions,
+        sessionBus,
+        codeSessionsRepo,
+    }: {
+        turnEventBus: ITurnEventBus;
+        sessions: ISessions;
+        sessionBus: EmitterSessionBus;
+        codeSessionsRepo: ICodeSessionsRepo;
+    }) {
+        this.turnEventBus = turnEventBus;
+        this.sessions = sessions;
+        this.sessionBus = sessionBus;
+        this.codeSessionsRepo = codeSessionsRepo;
+    }
+
+    start(): void {
+        if (this.started) return;
+        this.started = true;
+        this.unsubscribes.push(
+            this.turnEventBus.subscribeAll((event) => this.handleTurnEvent(event)),
+            // Title changes and deletions don't ride the turn spine.
+            this.sessionBus.subscribe(() => this.ping()),
+            // Receipt changes (question landed / answered) move needs-you.
+            todoBus.subscribe(() => this.ping()),
+        );
+    }
+
+    stop(): void {
+        for (const unsubscribe of this.unsubscribes) unsubscribe();
+        this.unsubscribes.length = 0;
+        if (this.pingTimer) clearTimeout(this.pingTimer);
+        this.pingTimer = null;
+        this.started = false;
+    }
+
+    /** Debounced change signal — consumers refetch the snapshot. */
+    onChange(listener: () => void): () => void {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    }
+
+    private ping(): void {
+        if (this.pingTimer) return;
+        this.pingTimer = setTimeout(() => {
+            this.pingTimer = null;
+            for (const listener of this.listeners) listener();
+        }, PING_DEBOUNCE_MS);
+    }
+
+    private handleTurnEvent(event: TurnBusEvent): void {
+        const sessionId = event.sessionId;
+        if (!sessionId) return; // headless turns have no thread
+        const next = transitionLive(this.live.get(sessionId), event.event);
+        if (next === null) return;
+        if (next === 'clear') this.live.delete(sessionId);
+        else this.live.set(sessionId, next);
+        this.ping();
+    }
+
+    async markSeen(sessionId: string): Promise<void> {
+        await writeState((state) => {
+            state.seen[sessionId] = new Date().toISOString();
+        });
+        this.ping();
+    }
+
+    async setPinned(sessionId: string, pinned: boolean): Promise<void> {
+        await writeState((state) => {
+            const set = new Set(state.pins);
+            if (pinned) set.add(sessionId);
+            else set.delete(sessionId);
+            state.pins = [...set];
+        });
+        this.ping();
+    }
+
+    async snapshot(): Promise<HomeThread[]> {
+        const entries = this.sessions.listSessions();
+        const [todoIndex, todoList, codeMetas, state] = await Promise.all([
+            getSessionIndex().catch(() => ({}) as Record<string, string>),
+            readTodo().catch(() => ({ blocks: [] }) as TodoList),
+            this.codeSessionsRepo.list().catch(() => []),
+            readState(),
+        ]);
+        const keyBySession = new Map(Object.entries(todoIndex).map(([key, sid]) => [sid, key]));
+        const items = itemsByKey(todoList);
+        const codeById = new Map(codeMetas.map((meta) => [meta.id, meta]));
+        const pins = new Set(state.pins);
+
+        const threads: HomeThread[] = [];
+        for (const entry of entries) {
+            // Empty shells (created, never used) aren't threads yet.
+            if (entry.turnCount === 0 && !entry.title && !codeById.has(entry.sessionId)) continue;
+
+            const todoKey = keyBySession.get(entry.sessionId);
+            const item = todoKey ? items.get(todoKey) : undefined;
+            const code = codeById.get(entry.sessionId);
+            const live = this.live.get(entry.sessionId);
+
+            let status: HomeThreadStatus;
+            let attention: string | undefined;
+            if (live) {
+                status = live.status;
+                attention = live.attention;
+            } else if (entry.latestTurnStatus === 'suspended') {
+                status = 'needs-you';
+                attention = 'waiting on you — open the chat';
+            } else {
+                status = 'idle';
+            }
+            // Durable needs-you: an unanswered question receipt on an open
+            // item (the live suspension may be long gone after a restart).
+            if (status === 'idle' && item && !item.checked) {
+                const last = item.receipts[item.receipts.length - 1];
+                if (last?.kind === 'question') {
+                    status = 'needs-you';
+                    attention = last.text;
+                }
+            }
+
+            const seenAt = state.seen[entry.sessionId];
+            threads.push({
+                sessionId: entry.sessionId,
+                kind: code ? 'code' : todoKey ? 'task' : 'chat',
+                status,
+                title: item?.text ?? entry.title ?? code?.title ?? 'Untitled',
+                attention,
+                activity: live?.activity,
+                todoKey,
+                code: code ? { projectId: code.projectId, agent: code.agent, branch: code.worktree?.branch } : undefined,
+                updatedAt: entry.updatedAt,
+                startedAt: live?.startedAt,
+                pinned: pins.has(entry.sessionId),
+                // Never-seen threads are NOT unseen — the registry adopts the
+                // existing world silently; marks begin at the first open.
+                unseen: seenAt ? entry.updatedAt > seenAt : false,
+            });
+        }
+        threads.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+        return threads;
+    }
+}

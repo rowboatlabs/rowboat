@@ -26,6 +26,7 @@ import { FSCodeProjectsRepo, ICodeProjectsRepo } from "../code-mode/projects/rep
 import { FSCodeSessionsRepo, ICodeSessionsRepo } from "../code-mode/sessions/repo.js";
 import { CodeSessionService } from "../code-mode/sessions/service.js";
 import { CodeSessionStatusTracker } from "../code-mode/sessions/status-tracker.js";
+import { HomeThreadsTracker } from "../home/threads.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
 import type { IScreenPointerService } from "../application/screen-pointer/service.js";
@@ -116,6 +117,10 @@ container.register({
     codeSessionsRepo: asClass<ICodeSessionsRepo>(FSCodeSessionsRepo).singleton(),
     codeSessionService: asClass(CodeSessionService).singleton(),
     codeSessionStatusTracker: asClass(CodeSessionStatusTracker).singleton(),
+
+    // Home's thread registry (the Deck): live per-session status from the
+    // turn event spine + composition over sessions/todo/code-session state.
+    homeThreadsTracker: asClass(HomeThreadsTracker).singleton(),
 
     // New turn/session runtime (turn-runtime-design.md / session-design.md).
     // Bridges are constructed via asFunction so their optional test seams

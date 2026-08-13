@@ -9,6 +9,7 @@ import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
 import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
+import type { HomeThread } from './home-threads.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -766,6 +767,31 @@ const ipcSchemas = {
   },
   'todo:events': {
     req: TodoEvent,
+    res: z.null(),
+  },
+  // ── Home thread registry (the Deck) ──────────────────────────────────────
+  // One main-process snapshot of every thread through the attention lens:
+  // kind (task/code/chat), status (underway/needs-you/ready/idle), live
+  // activity, seen marks and pins. Derived in core/home/threads.ts; the
+  // Deck, triage pills, and Skipper's sitrep all read this one feed.
+  'home:threads': {
+    req: z.object({}),
+    res: z.object({ threads: z.array(z.custom<HomeThread>()) }),
+  },
+  'home:markSeen': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // The operator's watch flag — a pinned thread keeps its Deck strip even
+  // while idle, and takes a 1–9 recall slot.
+  'home:setPinned': {
+    req: z.object({ sessionId: z.string(), pinned: z.boolean() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Push ping: the registry changed — refetch home:threads. Debounced in
+  // the tracker; carries no payload by design (the snapshot is the truth).
+  'home:threadsChanged': {
+    req: z.object({}),
     res: z.null(),
   },
   // The unified model catalog (core/models/catalog.ts): every connected

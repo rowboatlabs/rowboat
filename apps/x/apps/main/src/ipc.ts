@@ -72,6 +72,7 @@ import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js'
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
 import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import { HomeThreadsTracker } from '@x/core/dist/home/threads.js';
 import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
@@ -731,6 +732,20 @@ export async function startCodeSessionStatusWatcher(): Promise<void> {
   await tracker.start();
   codeSessionStatusWatcher = tracker.onTransition((sessionId, status) => {
     broadcastToWindows('codeSession:status', { sessionId, status });
+  });
+}
+
+// Home thread registry (the Deck): live status from the turn spine → a
+// debounced ping; the renderer refetches home:threads on it.
+let homeThreadsWatcher: (() => void) | null = null;
+export function startHomeThreadsWatcher(): void {
+  if (homeThreadsWatcher) {
+    return;
+  }
+  const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+  tracker.start();
+  homeThreadsWatcher = tracker.onChange(() => {
+    broadcastToWindows('home:threadsChanged', {});
   });
 }
 
@@ -2860,6 +2875,28 @@ export function setupIpcHandlers() {
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'home:threads': async () => {
+      const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+      return { threads: await tracker.snapshot() };
+    },
+    'home:markSeen': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.markSeen(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:setPinned': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.setPinned(args.sessionId, args.pinned);
+        return { success: true };
+      } catch {
+        return { success: false };
       }
     },
     'todo:stopRun': async (_event, args) => {

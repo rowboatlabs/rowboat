@@ -3,6 +3,7 @@ import { ArrowUpRight, Bot, Check, ChevronDown, FileText, LayoutGrid, ListPlus, 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
+import type { HomeThread } from '@x/shared/dist/home-threads.js'
 
 // ---------------------------------------------------------------------------
 // The home to-do list — one rolling ~/.rowboat/todo.md shared with @rowboat.
@@ -507,7 +508,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
   const collapsedPreview = isCollapsed && bubbles.length > 0 ? previewLine(bubbles) : null
 
   return (
-    <div className={`group/todo relative flex items-start gap-2.5 px-2 py-2 transition-[opacity,transform,box-shadow] duration-200 hover:bg-accent/30 ${depth === 0 ? 'border-b border-border/40' : 'rounded-lg'} ${dimmed ? 'opacity-35' : ''} ${
+    <div data-todo-key={item.key} className={`group/todo relative flex items-start gap-2.5 px-2 py-2 transition-[opacity,transform,box-shadow] duration-200 hover:bg-accent/30 ${depth === 0 ? 'border-b border-border/40' : 'rounded-lg'} ${dimmed ? 'opacity-35' : ''} ${
       spotlight ? 'scale-[1.005] bg-card shadow-md ring-1 ring-primary/25 motion-reduce:transform-none' : ''
     }`}>
       {changed && (
@@ -1193,6 +1194,87 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   )
 }
 
+// ---------------------------------------------------------------------------
+// The Deck — the operator band above the ledger. Two bays in fixed order:
+// "Needs you" (amber, oldest first — the queue J burns to zero) and
+// "Underway" (live threads with a one-line activity feed). A strip is a
+// projection of a thread — task, code session, or chat — never a second
+// home: clicking one jumps to the item in place or opens the thread in the
+// dock. The whole band collapses to nothing when both bays are empty.
+// ---------------------------------------------------------------------------
+
+/** Friendly labels for the registry's raw activity (a builtin tool name). */
+const ACTIVITY_LABELS: Record<string, string> = {
+  starting: 'starting…',
+  thinking: 'thinking…',
+  'web-search': 'searching the web…',
+  'fetch-url': 'reading a page…',
+  code_agent_run: 'coding…',
+  executeCommand: 'running a command…',
+  'file-readText': 'reading files…',
+  'file-write': 'writing…',
+  'file-grep': 'searching files…',
+}
+
+function activityLabel(activity?: string): string {
+  if (!activity) return ''
+  return ACTIVITY_LABELS[activity] ?? `${activity}…`
+}
+
+/** Strip titles are plain text: markdown links and the @rowboat mention
+ * collapse away (the row below renders them properly). */
+function stripTitle(thread: HomeThread): string {
+  return thread.title
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(^|\s)@rowboat\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Untitled'
+}
+
+function DeckStrip({ thread, onJump, onOpen }: {
+  thread: HomeThread
+  /** Click: spotlight the source in place (falls back to the dock). */
+  onJump: () => void
+  /** ⏎ / the ↗ button: the full conversation in the sidebar. */
+  onOpen: () => void
+}) {
+  const needs = thread.status === 'needs-you' || thread.status === 'ready'
+  const live = thread.status === 'underway'
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onJump}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onOpen() } }}
+      className="group/strip relative flex cursor-pointer items-center gap-2 border-b border-border/40 px-2 py-1.5 transition-colors hover:bg-accent/30 focus-visible:bg-accent/30 focus-visible:outline-none"
+    >
+      <span className={`h-4 w-[2.5px] shrink-0 rounded ${needs ? 'bg-amber-500/80' : live ? 'bg-primary/50' : 'bg-border'}`} />
+      <span className="w-9 shrink-0 font-mono text-[9.5px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">{thread.kind}</span>
+      {thread.unseen && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
+      <span className="max-w-[40%] shrink-0 truncate text-[13px] font-medium">{stripTitle(thread)}</span>
+      {thread.code && (
+        <span className="shrink-0 rounded bg-accent/60 px-1.5 text-[10px] text-muted-foreground">
+          {thread.code.branch ?? thread.code.projectId} · {thread.code.agent}
+        </span>
+      )}
+      {live && <span className="size-1.5 shrink-0 rounded-full bg-primary motion-safe:animate-pulse" />}
+      <span className={`min-w-0 flex-1 truncate text-[12px] ${needs ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+        {needs ? (thread.attention ?? 'waiting on you') : activityLabel(thread.activity)}
+      </span>
+      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">{relativeTime(thread.startedAt ?? thread.updatedAt)}</span>
+      <IconTip label="Open the full conversation in the sidebar">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onOpen() }}
+          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/strip:opacity-100"
+        >
+          <ArrowUpRight className="size-3.5" />
+        </button>
+      </IconTip>
+    </div>
+  )
+}
+
 export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
@@ -1257,6 +1339,10 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
   const sessionSeenAtRef = useRef(sessionSeenAt)
   useEffect(() => { sessionSeenAtRef.current = sessionSeenAt }, [sessionSeenAt])
   const markSessionSeen = useCallback((sessionId: string) => {
+    // Dual-write while the seen-state migrates: the workspace registry is
+    // what the Deck (and later Skipper/notifications) read; localStorage
+    // still drives the row dots until phase 4 retires it.
+    void window.ipc.invoke('home:markSeen', { sessionId }).catch(() => {})
     setSessionSeenAt((m) => {
       const next = { ...m, [sessionId]: new Date().toISOString() }
       // Bounded: drop the oldest marks past 300 — old sessions age out of
@@ -1518,6 +1604,16 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
       } else if (e.key === 'c' && onFocusComposer) {
         e.preventDefault()
         onFocusComposer()
+      } else if (e.key === 'j') {
+        // The idle-worker key: cycle the needs-you queue, oldest first —
+        // each press jumps to the next thread waiting on you.
+        const strips = deckNeedsYouRef.current
+        if (strips.length > 0) {
+          e.preventDefault()
+          const target = strips[deckCycleRef.current % strips.length]
+          deckCycleRef.current += 1
+          jumpToStripRef.current(target)
+        }
       }
     }
     document.addEventListener('keydown', onKey)
@@ -1537,6 +1633,26 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
       if (timer) clearTimeout(timer)
     }
   }, [refetch])
+
+  // ---- The Deck: fed by the main-process thread registry ----
+  const [deckThreads, setDeckThreads] = useState<HomeThread[]>([])
+  // A strip jump flashes its source row with the spotlight treatment.
+  const [flashKey, setFlashKey] = useState<string | null>(null)
+  const deckCycleRef = useRef(0)
+  useEffect(() => {
+    let cancelled = false
+    const fetchThreads = async () => {
+      try {
+        const res = await window.ipc.invoke('home:threads', {})
+        if (!cancelled) setDeckThreads(res.threads)
+      } catch {
+        // Registry unavailable — the Deck simply stays empty.
+      }
+    }
+    void fetchThreads()
+    const off = window.ipc.on('home:threadsChanged', () => { void fetchThreads() })
+    return () => { cancelled = true; off() }
+  }, [])
 
   const runItem = useCallback((key: string) => {
     setRunning((s) => new Set(s).add(key))
@@ -1567,6 +1683,27 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
     markSessionSeen(sessionId)
     onOpenInChat(sessionId)
   }, [markSessionSeen, onOpenInChat])
+
+  // A Deck strip's click: spotlight the source item in place; threads with
+  // no list row (chats, code sessions) open in the dock instead.
+  const jumpToStrip = useCallback((thread: HomeThread) => {
+    if (thread.todoKey) {
+      const el = document.querySelector(`[data-todo-key="${CSS.escape(thread.todoKey)}"]`)
+      if (el) {
+        el.scrollIntoView({
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+          block: 'center',
+        })
+        const key = thread.todoKey
+        setFlashKey(key)
+        window.setTimeout(() => setFlashKey((k) => (k === key ? null : k)), 1800)
+        return
+      }
+    }
+    openInChat(thread.sessionId)
+  }, [openInChat])
+  const jumpToStripRef = useRef(jumpToStrip)
+  useEffect(() => { jumpToStripRef.current = jumpToStrip }, [jumpToStrip])
 
   const startChat = useCallback(async (text: string) => {
     const res = await window.ipc.invoke('todo:startChat', { text })
@@ -1670,6 +1807,19 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
   const needsYouCount = allItems.filter(needsYou).length
   const runningCount = allItems.filter((i) => running.has(i.key)).length
   const doneCount = allItems.filter((i) => i.checked).length
+
+  // ---- Deck bays: projections of the registry, fixed order ----
+  // Needs-you is the queue: oldest first, so J always serves the longest
+  // wait. Underway orders by start; pinned idle threads keep their strip
+  // (the watch flag).
+  const deckNeedsYou = deckThreads
+    .filter((t) => t.status === 'needs-you' || t.status === 'ready')
+    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+  const deckUnderway = deckThreads
+    .filter((t) => t.status === 'underway' || (t.pinned && t.status === 'idle'))
+    .sort((a, b) => (a.startedAt ?? a.updatedAt).localeCompare(b.startedAt ?? b.updatedAt))
+  const deckNeedsYouRef = useRef(deckNeedsYou)
+  deckNeedsYouRef.current = deckNeedsYou
 
   const isChanged = (key: string): boolean => {
     const sid = sessions[key]
@@ -1821,6 +1971,37 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
             </div>
           </div>
 
+          {/* The Deck — every thread needing eyes or underway, across the
+              whole app (tasks, code sessions, chats). Collapses to nothing
+              when quiet: a calm morning looks exactly like before. */}
+          {(deckNeedsYou.length > 0 || deckUnderway.length > 0) && (
+            <div className="flex flex-col gap-2.5">
+              {deckNeedsYou.length > 0 && (
+                <div>
+                  <div className="flex items-baseline justify-between px-1 pb-1">
+                    <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-amber-600/90 dark:text-amber-400/90">
+                      Needs you · {deckNeedsYou.length}
+                    </div>
+                    <div className="text-[10.5px] text-muted-foreground/60">J cycles the queue</div>
+                  </div>
+                  {deckNeedsYou.map((t) => (
+                    <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openInChat(t.sessionId)} />
+                  ))}
+                </div>
+              )}
+              {deckUnderway.length > 0 && (
+                <div>
+                  <div className="px-1 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                    Underway · {deckUnderway.filter((t) => t.status === 'underway').length}
+                  </div>
+                  {deckUnderway.map((t) => (
+                    <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openInChat(t.sessionId)} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* While you were away — dismissable catch-up */}
           {changedItems.length > 0 && (
             <div className="flex items-center gap-2 border-y border-border/60 px-1 py-2 text-[13px] text-muted-foreground">
@@ -1908,7 +2089,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                     depth={0}
                     changed={isChanged(item.key)}
                     dimmed={(triageFilter !== null && !blockMatches(item)) || (spotKey !== null && !blockContainsSpot(item))}
-                    spotlight={item.key === spotKey}
+                    spotlight={item.key === spotKey || item.key === flashKey}
                     collapsed={collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0}
                     onToggleCollapsed={() => {
                       const wasCollapsed = collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0
@@ -1971,7 +2152,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                             depth={1}
                             changed={isChanged(child.key)}
                             dimmed={triageFilter !== null && !triageMatch(child)}
-                            spotlight={child.key === spotKey}
+                            spotlight={child.key === spotKey || child.key === flashKey}
                             collapsed={collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0}
                             onToggleCollapsed={() => {
                               const wasCollapsed = collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0

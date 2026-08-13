@@ -7,6 +7,7 @@ import {
   startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
+  startHomeThreadsWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
@@ -691,6 +692,9 @@ app.whenReady().then(async () => {
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
+
+  // start the Home thread registry (the Deck's underway/needs-you feed)
+  startHomeThreadsWatcher();
 
   // start services watcher
   startServicesWatcher();
