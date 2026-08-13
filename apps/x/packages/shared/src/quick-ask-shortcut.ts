@@ -205,3 +205,11 @@ export function shortcutModifierStates(accelerator: string): string[] {
   };
   return [...new Set(parsed.modifiers.map((m) => map[m]))];
 }
+
+// The push-to-talk key's user-facing name. macOS: right ⌘. Windows/Linux:
+// right Ctrl (the right Win key's physical position is OS-owned — a tap
+// opens the Start menu). Keep in step with PTT_KEYCODE in main/ptt.ts and
+// the DOM fallbacks' event codes.
+export function pttKeyLabel(isMac: boolean): string {
+  return isMac ? 'right \u2318' : 'right Ctrl';
+}

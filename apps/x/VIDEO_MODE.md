@@ -2,7 +2,7 @@
 
 Calls let the user talk to the assistant while it *sees* them (webcam) and
 their screen (screen share). There is ONE call engine — push-to-talk voice
-input (hold Right ⌘ to talk, quick-tap to lock hands-free), forced
+input (hold the PTT key — right ⌘ on macOS, right Ctrl on Windows/Linux — to talk, quick-tap to lock hands-free), forced
 read-aloud TTS, frame capture — entered through four presets that differ
 only in starting devices. This doc covers the product flow, the technical
 pipeline, and the LLM prompt surface with exact pointers.

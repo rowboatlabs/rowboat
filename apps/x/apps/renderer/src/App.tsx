@@ -134,6 +134,11 @@ const graphPalette = [
 // submits). PTT_EDGE_ECHO_MS collapses the same key edge arriving from two
 // sources at once (global uiohook hook + in-window DOM listener).
 const PTT_TAP_MS = 350
+// The PTT key per platform (matches main/ptt.ts's global hook): right ⌘ on
+// macOS, right Ctrl elsewhere (the right Win key is OS-owned on Windows).
+const APP_IS_MAC = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
+const PTT_EVENT_CODE = APP_IS_MAC ? 'MetaRight' : 'ControlRight'
+const PTT_KEY_LABEL = quickAskShortcut.pttKeyLabel(APP_IS_MAC)
 // Mic-ownership token for the Home composer (chat composers use their chatId).
 const HOME_VOICE_HOLDER = 'home-composer'
 const PTT_EDGE_ECHO_MS = 80
@@ -1689,7 +1694,7 @@ function App() {
       if (shown < 2) {
         localStorage.setItem('ptt-hold-tip-shown', String(shown + 1))
         toast('No need to keep holding', {
-          description: 'For longer turns, quick-tap right ⌘ instead — talk hands-free, then tap again to send.',
+          description: `For longer turns, quick-tap ${PTT_KEY_LABEL} instead — talk hands-free, then tap again to send.`,
           duration: 6000,
         })
       }
@@ -1726,7 +1731,7 @@ function App() {
       else handlePttChord()
     })
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight') {
+      if (e.code === PTT_EVENT_CODE) {
         if (!e.repeat) handlePttDown()
         return
       }
@@ -1739,7 +1744,7 @@ function App() {
       else if (pttStatusRef.current === 'locked' && e.metaKey) handlePttChord()
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight') handlePttUp()
+      if (e.code === PTT_EVENT_CODE) handlePttUp()
     }
     document.addEventListener('keydown', onKeyDown)
     document.addEventListener('keyup', onKeyUp)

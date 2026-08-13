@@ -59,6 +59,7 @@ import type { FileMention, PromptInputMessage } from '@/components/ai-elements/p
 // menu) — right Ctrl is the safe equivalent there.
 const IS_MAC = navigator.platform.startsWith('Mac')
 const PTT_CODE = IS_MAC ? 'MetaRight' : 'ControlRight'
+const PTT_KEY_LABEL = IS_MAC ? 'right \u2318' : 'right Ctrl'
 
 type CompanionMode = 'hidden' | 'summoned' | 'pinned'
 
@@ -1206,7 +1207,7 @@ export function QuickAskBar() {
 }
 
 const STATUS_DISPLAY: Record<NonNullable<CallState['status']>, { label: string; dotClass: string }> = {
-  idle: { label: 'Hold right ⌘ to talk', dotClass: 'bg-neutral-500' },
+  idle: { label: `Hold ${PTT_KEY_LABEL} to talk`, dotClass: 'bg-neutral-500' },
   listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
@@ -1301,7 +1302,7 @@ function SkipperPins({
             if (!state.micMuted) sendAction('ptt-up')
           }}
           aria-label="Hold to talk — tap for hands-free"
-          title="Hold to talk (tap for hands-free) — or hold the right ⌘ key"
+          title={`Hold to talk (tap for hands-free) — or hold the ${PTT_KEY_LABEL} key`}
           className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
           style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
         >
@@ -1411,7 +1412,7 @@ function SkipperStatusChip({ state, activity }: { state: CallState; activity?: s
         <>
           <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
           {state.status === 'idle'
-            ? 'Hold the mic — or right ⌘'
+            ? `Hold the mic — or ${PTT_KEY_LABEL}`
             : state.status === 'thinking' && activity
               ? activity
               : statusDisplay.label}

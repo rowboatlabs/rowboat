@@ -18,8 +18,11 @@ import { BrowserWindow, shell } from 'electron';
 
 type PttKeyEvent = { type: 'down' | 'up' | 'chord' };
 
-// libuiohook VC_META_R — the Right ⌘ key.
-const META_RIGHT = 3676;
+// The PTT key, per platform. macOS: libuiohook VC_META_R (right ⌘).
+// Windows/Linux: VC_CONTROL_R (right Ctrl) — the right-Meta position is the
+// right Win key there, which the OS owns (a tap opens the Start menu), so
+// hooking it made PTT effectively unusable outside macOS.
+const META_RIGHT = process.platform === 'darwin' ? 3676 /* VC_META_R */ : 3613 /* VC_CONTROL_R */;
 
 type UiohookModule = typeof import('uiohook-napi');
 
