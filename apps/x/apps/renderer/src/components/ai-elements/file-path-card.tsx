@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, FileIcon, FileText, Image, Music, Pause, Play, Video } from 'lucide-react'
+import { BookOpen, ExternalLink, FileIcon, FileText, Image, Music, Pause, Play, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useFileCard } from '@/contexts/file-card-context'
 import { useSidebarSection } from '@/contexts/sidebar-context'
+import { isImageFilePath } from '@/lib/file-utils'
 import { wikiLabel } from '@/lib/wiki-links'
 
 const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac'])
@@ -213,6 +214,68 @@ function SystemFileCard({ filePath }: { filePath: string }) {
   )
 }
 
+// --- Inline Image ---
+
+// ChatGPT-style bare image for image filepaths: no card chrome, just the
+// picture (clickable, with a hover-only open button). Any load failure falls
+// back to the plain SystemFileCard — never a broken-image glyph.
+function InlineImageFile({ filePath }: { filePath: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const name = filePath.split('/').pop() || filePath
+
+  useEffect(() => {
+    let cancelled = false
+    window.ipc.invoke('shell:readFileBase64', { path: filePath })
+      .then((result) => {
+        if (!cancelled) {
+          setDataUrl(`data:${result.mimeType};base64,${result.data}`)
+        }
+      })
+      .catch((err) => {
+        console.debug('InlineImageFile: falling back to file card', filePath, err)
+        if (!cancelled) setFailed(true)
+      })
+    return () => { cancelled = true }
+  }, [filePath])
+
+  if (failed) {
+    return <SystemFileCard filePath={filePath} />
+  }
+
+  if (!dataUrl) {
+    return null
+  }
+
+  const handleOpen = () => {
+    void window.ipc.invoke('shell:openPath', { path: filePath })
+  }
+
+  return (
+    <div className="group relative my-2 w-fit max-w-full">
+      <img
+        src={dataUrl}
+        alt={name}
+        aria-label={name}
+        role="button"
+        tabIndex={0}
+        onClick={handleOpen}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpen() } }}
+        onError={() => setFailed(true)}
+        className="block max-h-[420px] max-w-[min(100%,480px)] w-auto rounded-2xl object-contain cursor-pointer"
+      />
+      <button
+        type="button"
+        aria-label={`Open ${name}`}
+        onClick={(e) => { e.stopPropagation(); handleOpen() }}
+        className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/65"
+      >
+        <ExternalLink className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
+}
+
 // --- Main FilePathCard ---
 
 export function FilePathCard({ filePath }: { filePath: string }) {
@@ -225,6 +288,10 @@ export function FilePathCard({ filePath }: { filePath: string }) {
   const ext = getExtension(trimmed)
   if (AUDIO_EXTENSIONS.has(ext)) {
     return <AudioFileCard filePath={trimmed} />
+  }
+
+  if (isImageFilePath(trimmed)) {
+    return <InlineImageFile filePath={trimmed} />
   }
 
   return <SystemFileCard filePath={trimmed} />
