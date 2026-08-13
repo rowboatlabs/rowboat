@@ -12,6 +12,7 @@ import type { ISessions } from '../runtime/sessions/api.js';
 // app-layer affordance (same resolution pattern as main's sessions watcher).
 import type { EmitterSessionBus } from '../runtime/sessions/bus.js';
 import type { ICodeSessionsRepo } from '../code-mode/sessions/repo.js';
+import type { ICodeProjectsRepo } from '../code-mode/projects/repo.js';
 import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { worktreeDiffstatLine } from '../code-mode/sessions/review.js';
 import { readTodo } from '../todo/fileops.js';
@@ -163,6 +164,7 @@ export class HomeThreadsTracker {
     private readonly sessions: ISessions;
     private readonly sessionBus: EmitterSessionBus;
     private readonly codeSessionsRepo: ICodeSessionsRepo;
+    private readonly codeProjectsRepo: ICodeProjectsRepo;
 
     private readonly live = new Map<string, LiveTurnState>();
     // Review-debt lines ("+42 −18 across 5 files…") per code session — git
@@ -180,16 +182,19 @@ export class HomeThreadsTracker {
         sessions,
         sessionBus,
         codeSessionsRepo,
+        codeProjectsRepo,
     }: {
         turnEventBus: ITurnEventBus;
         sessions: ISessions;
         sessionBus: EmitterSessionBus;
         codeSessionsRepo: ICodeSessionsRepo;
+        codeProjectsRepo: ICodeProjectsRepo;
     }) {
         this.turnEventBus = turnEventBus;
         this.sessions = sessions;
         this.sessionBus = sessionBus;
         this.codeSessionsRepo = codeSessionsRepo;
+        this.codeProjectsRepo = codeProjectsRepo;
     }
 
     start(): void {
@@ -277,12 +282,14 @@ export class HomeThreadsTracker {
 
     async snapshot(): Promise<HomeThread[]> {
         const entries = this.sessions.listSessions();
-        const [todoIndex, todoList, codeMetas, state] = await Promise.all([
+        const [todoIndex, todoList, codeMetas, projects, state] = await Promise.all([
             getSessionIndex().catch(() => ({}) as Record<string, string>),
             readTodo().catch(() => ({ blocks: [] }) as TodoList),
             this.codeSessionsRepo.list().catch(() => []),
+            this.codeProjectsRepo.list().catch(() => []),
             readState(),
         ]);
+        const projectNames = new Map(projects.map((p) => [p.id, p.name]));
         const keyBySession = new Map(Object.entries(todoIndex).map(([key, sid]) => [sid, key]));
         const items = itemsByKey(todoList);
         const codeById = new Map(codeMetas.map((meta) => [meta.id, meta]));
@@ -346,7 +353,14 @@ export class HomeThreadsTracker {
                 attention,
                 activity: live?.activity,
                 todoKey,
-                code: code ? { projectId: code.projectId, agent: code.agent, branch: code.worktree?.branch } : undefined,
+                code: code
+                    ? {
+                          projectId: code.projectId,
+                          projectName: projectNames.get(code.projectId) ?? code.projectId,
+                          agent: code.agent,
+                          branch: code.worktree?.branch,
+                      }
+                    : undefined,
                 updatedAt: entry.updatedAt,
                 startedAt: live?.startedAt,
                 pinned: pins.has(entry.sessionId),

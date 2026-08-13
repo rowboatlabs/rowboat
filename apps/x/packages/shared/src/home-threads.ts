@@ -44,7 +44,7 @@ export interface HomeThread {
      * on the list. */
     todoKey?: string;
     /** Code-session context when kind is 'code'. */
-    code?: { projectId: string; agent: string; branch?: string };
+    code?: { projectId: string; projectName: string; agent: string; branch?: string };
     updatedAt: string;
     /** When the live turn started, while underway (elapsed display). */
     startedAt?: string;

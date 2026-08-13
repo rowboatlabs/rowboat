@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
 import type { HomeThread } from '@x/shared/dist/home-threads.js'
+import { TalkingHead } from '@/components/talking-head'
 
 // ---------------------------------------------------------------------------
 // The home to-do list — one rolling ~/.rowboat/todo.md shared with @rowboat.
@@ -38,6 +39,9 @@ type TodoViewProps = {
   /** A code strip's door: the Code section (diffs, terminal, worktree),
    * focused on the session. Falls back to the chat dock when absent. */
   onOpenCodeSession?: (sessionId: string) => void
+  /** Clicking Skipper starts a voice call (the companion flow). Absent when
+   * voice isn't configured — the mascot still keeps the watch. */
+  onSkipperCall?: () => void
 }
 
 type ComposeTarget =
@@ -1206,6 +1210,9 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
 // dock. The whole band collapses to nothing when both bays are empty.
 // ---------------------------------------------------------------------------
 
+/** Stable no-op audio level for the header mascot (no TTS on this surface). */
+const ZERO_LEVEL = () => 0
+
 /** Friendly labels for the registry's raw activity (a builtin tool name). */
 const ACTIVITY_LABELS: Record<string, string> = {
   starting: 'starting…',
@@ -1257,7 +1264,7 @@ function DeckStrip({ thread, onJump, onOpen }: {
       <span className="max-w-[40%] shrink-0 truncate text-[13px] font-medium">{stripTitle(thread)}</span>
       {thread.code && (
         <span className="shrink-0 rounded bg-accent/60 px-1.5 text-[10px] text-muted-foreground">
-          {thread.code.branch ?? thread.code.projectId} · {thread.code.agent}
+          {thread.code.branch ?? thread.code.projectName} · {thread.code.agent}
         </span>
       )}
       {live && <span className="size-1.5 shrink-0 rounded-full bg-primary motion-safe:animate-pulse" />}
@@ -1278,7 +1285,7 @@ function DeckStrip({ thread, onJump, onOpen }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession, onSkipperCall }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
@@ -1835,6 +1842,16 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
   const deckNeedsYouRef = useRef(deckNeedsYou)
   deckNeedsYouRef.current = deckNeedsYou
 
+  // Skipper's watch: the fleet state as one glance (and one sentence).
+  const skipperUnderway = deckThreads.filter((t) => t.status === 'underway').length
+  const skipperNeeds = deckThreads.filter((t) => t.status === 'needs-you').length
+  const skipperReady = deckThreads.filter((t) => t.status === 'ready').length
+  const sitrep = [
+    skipperUnderway > 0 && `${skipperUnderway} underway`,
+    skipperNeeds > 0 && `${skipperNeeds} need${skipperNeeds === 1 ? 's' : ''} you`,
+    skipperReady > 0 && `${skipperReady} ready for review`,
+  ].filter(Boolean).join(' · ') || 'All quiet'
+
   const isChanged = (key: string): boolean => {
     const sid = sessions[key]
     if (!sid) return false
@@ -1982,6 +1999,25 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
               >
                 <LayoutGrid className="size-3.5" /> Overview
               </button>
+              {/* Skipper takes the watch — the ambient channel: rowing while
+                  threads are underway, an amber count when something needs
+                  you, a sitrep on hover, voice on click. */}
+              <IconTip label={`${sitrep}${onSkipperCall ? ' — click to talk' : ''}`}>
+                <button
+                  type="button"
+                  onClick={onSkipperCall}
+                  disabled={!onSkipperCall}
+                  aria-label={`Skipper: ${sitrep}`}
+                  className="relative -my-2 shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-default"
+                >
+                  <TalkingHead ttsState="idle" getLevel={ZERO_LEVEL} size={46} rowing={skipperUnderway > 0} />
+                  {skipperNeeds + skipperReady > 0 && (
+                    <span className="absolute -right-0.5 top-0 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[9.5px] font-semibold leading-none text-white">
+                      {skipperNeeds + skipperReady}
+                    </span>
+                  )}
+                </button>
+              </IconTip>
             </div>
           </div>
 
@@ -2006,7 +2042,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
               {deckUnderway.length > 0 && (
                 <div>
                   <div className="px-1 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
-                    Underway · {deckUnderway.filter((t) => t.status === 'underway').length}
+                    {/* Count only live threads — a bay holding just pinned
+                        idle strips says "Underway" without the number. */}
+                    Underway{skipperUnderway > 0 ? ` · ${skipperUnderway}` : ''}
                   </div>
                   {deckUnderway.map((t) => (
                     <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openStrip(t)} />

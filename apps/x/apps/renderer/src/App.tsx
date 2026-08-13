@@ -6628,6 +6628,7 @@ function App() {
                         setCodeFocusSessionId(sessionId)
                         void navigateToView({ type: 'code' })
                       }}
+                      onSkipperCall={voiceAvailable && ttsAvailable ? () => handleStartCall('voice') : undefined}
                       onShowOverview={() => setHomeTab('overview')}
                     />
                   ) : (
