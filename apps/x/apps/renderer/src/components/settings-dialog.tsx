@@ -1420,7 +1420,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Notification Settings ---
 
-type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "meeting_detection" | "meeting_notes_ready"
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready"
 
 const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
@@ -1442,6 +1442,11 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     key: "background_task",
     label: "Background agents",
     description: "When a background agent you've set up has something to surface. Click to open it on the background tasks page.",
+  },
+  {
+    key: "todo",
+    label: "To-do list",
+    description: "When a to-do you delegated finishes or has something ready for review. Click to open Home.",
   },
   {
     key: "meeting_detection",

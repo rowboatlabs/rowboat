@@ -247,7 +247,7 @@ async function landSettled(
             }
             log.log(`done turn=${turnId} summary="${truncate(settled.text)}"`);
             todoBus.publish({ type: 'run_complete', key: norm, summary: settled.text ?? undefined });
-            void notifyIfEnabled('background_task', {
+            void notifyIfEnabled('todo', {
                 title: '✓ To-do finished',
                 message: settled.text ?? itemText,
                 link: 'rowboat://open?type=home',
@@ -296,7 +296,7 @@ async function driveTurn(
     sessionId: string,
     message: string,
     subUseCase: string,
-    modelOverride?: { provider: string; model: string },
+    modelOverride?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' },
     autoPermission = true,
 ): Promise<TodoRunResult> {
     const { sessions, turnEventBus } = await resolveDeps();
@@ -304,10 +304,8 @@ async function driveTurn(
     try {
         let sent: { turnId: string };
         try {
-            // Chat parity: the assistant selection (model + effort) unless the
-            // composer overrode the model — an override carries no effort of
-            // its own yet (todo:* sends a bare ref; effort rides only with
-            // the assistant pair, per the pairing rule).
+            // Chat parity: the composer's selection (model + its paired
+            // effort) when it overrode the picker, else the assistant pair.
             const selection: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } =
                 modelOverride ?? await getDefaultModelAndProvider();
             const { model, provider } = selection;
@@ -385,7 +383,7 @@ async function driveTurn(
 export async function runTodoItem(
     key: string,
     context?: string,
-    opts?: { model?: { provider: string; model: string }; autoPermission?: boolean },
+    opts?: { model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }; autoPermission?: boolean },
 ): Promise<TodoRunResult> {
     const norm = normalizeKey(key);
     if (runningItems.has(norm)) {
@@ -432,7 +430,7 @@ export interface HomeChatResult {
 async function driveChatTurn(
     sessionId: string,
     message: string,
-    modelOverride?: { provider: string; model: string },
+    modelOverride?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' },
     autoPermission = true,
 ): Promise<HomeChatResult> {
     const key = `chat:${sessionId}`;
@@ -526,7 +524,7 @@ export async function startHomeChat(text: string): Promise<HomeChatResult> {
 export async function replyHomeChat(
     sessionId: string,
     message: string,
-    opts?: { model?: { provider: string; model: string }; autoPermission?: boolean },
+    opts?: { model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }; autoPermission?: boolean },
 ): Promise<HomeChatResult> {
     return driveChatTurn(sessionId, message, opts?.model, opts?.autoPermission ?? true);
 }
@@ -540,7 +538,7 @@ export async function replyHomeChat(
 export async function commentOnTodoItem(
     key: string,
     message: string,
-    opts?: { model?: { provider: string; model: string }; autoPermission?: boolean },
+    opts?: { model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }; autoPermission?: boolean },
 ): Promise<TodoRunResult> {
     const norm = normalizeKey(key);
     if (runningItems.has(norm)) {

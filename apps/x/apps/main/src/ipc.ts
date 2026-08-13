@@ -2856,7 +2856,7 @@ export function setupIpcHandlers() {
     },
     'todo:runItem': async (_event, args) => {
       try {
-        void runTodoItem(args.key, args.context).catch(() => {});
+        void runTodoItem(args.key, args.context, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

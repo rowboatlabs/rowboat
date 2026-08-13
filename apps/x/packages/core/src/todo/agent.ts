@@ -75,14 +75,18 @@ Avoid: "Done!", "I have completed the task."
 `;
 
 export function buildTodoItemAgent(): z.infer<typeof Agent> {
-    // Copilot-parity toolset: shell and coding-agent runs included — the
-    // permission system (auto judge, or manual suspension the user approves
-    // from the item's chat) is the guardrail, same as chat. Only the
-    // bg-task self-management trio stays out (recursive-cascade risk).
+    // Full builtin toolset (a superset of the copilot's 16-tool base):
+    // shell and coding-agent runs included — the permission system (auto
+    // judge, or manual suspension the user approves from the item's chat)
+    // is the guardrail, same as chat. Excluded: the bg-task
+    // self-management trio (recursive-cascade risk) and launch-code-task,
+    // which requires a background-task slug with a projectId that a todo
+    // run can never supply — coding work goes through code_agent_run.
     const EXCLUDED = new Set([
         'run-background-task-agent',
         'create-background-task',
         'patch-background-task',
+        'launch-code-task',
     ]);
 
     const tools: Record<string, z.infer<typeof ToolAttachment>> = {};

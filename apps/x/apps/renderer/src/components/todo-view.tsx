@@ -31,6 +31,9 @@ type TodoViewProps = {
   /** The composer's current destination (from App) — drives the spotlight
    * connecting the source row to the composer while a reply is composed. */
   composeTarget?: ComposeTarget | null
+  /** The composer's live model pick (model + paired effort) — run/retry
+   * chips and inline comments honor it, same as composer-born runs. */
+  getRunModel?: () => { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } | undefined
 }
 
 type ComposeTarget =
@@ -1190,7 +1193,7 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
@@ -1537,16 +1540,16 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
 
   const runItem = useCallback((key: string) => {
     setRunning((s) => new Set(s).add(key))
-    void window.ipc.invoke('todo:runItem', { key })
-  }, [])
+    void window.ipc.invoke('todo:runItem', { key, model: getRunModel?.() })
+  }, [getRunModel])
 
   const commentOnItem = useCallback((key: string, message: string) => {
     setCommentKey(null)
     setRunning((s) => new Set(s).add(key))
     // Optimistic bubble; the canonical one arrives with the next refetch.
     setConversations((c) => ({ ...c, [key]: [...(c[key] ?? []), { role: 'user', text: message, links: [] }] }))
-    void window.ipc.invoke('todo:comment', { key, message })
-  }, [])
+    void window.ipc.invoke('todo:comment', { key, message, model: getRunModel?.() })
+  }, [getRunModel])
 
   const toggleThread = useCallback((sessionId: string) => {
     // Opening IS reading — the dot clears the moment the thread expands.

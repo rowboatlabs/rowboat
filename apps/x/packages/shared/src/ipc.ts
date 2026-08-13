@@ -2801,11 +2801,12 @@ const ipcSchemas = {
         path: z.string(),
         name: z.string(),
       })).optional(),
-      // Composer model selection — overrides the todo agent's model when
-      // the item runs now.
+      // Composer model selection (with its paired reasoning effort) —
+      // overrides the todo agent's model when the item runs now.
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2818,10 +2819,19 @@ const ipcSchemas = {
   },
   // Fire a run for one item, identified by its normalized line text.
   // Fire-and-forget: progress and completion arrive on todo:events.
+  // Carries the same model/permission overrides as todo:addItem so the run
+  // and retry chips honor the composer's picker instead of silently falling
+  // back to the default model.
   'todo:runItem': {
     req: z.object({
       key: z.string(),
       context: z.string().optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
+      }).optional(),
+      permissionMode: z.enum(['auto', 'manual']).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2864,6 +2874,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2896,6 +2907,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2931,6 +2943,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.

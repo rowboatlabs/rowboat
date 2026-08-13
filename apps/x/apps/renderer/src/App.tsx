@@ -4638,10 +4638,10 @@ function App() {
       const attachments = stagedAttachments.length > 0
         ? stagedAttachments.map((a) => ({ path: a.path, name: a.filename }))
         : undefined
-      // todo:* schemas carry a bare {provider, model} ref today; effort
-      // threading through the todo runner is a follow-up.
+      // The full selection — model plus its paired reasoning effort —
+      // rides todo:* into the runner, matching chat.
       const model = homeSelectionRef.current
-        ? { provider: homeSelectionRef.current.provider, model: homeSelectionRef.current.model }
+        ? { provider: homeSelectionRef.current.provider, model: homeSelectionRef.current.model, effort: homeSelectionRef.current.effort }
         : undefined
       if (target.kind === 'comment') {
         void window.ipc.invoke('todo:comment', { key: target.key, message: text, attachments, model, permissionMode })
@@ -6546,6 +6546,7 @@ function App() {
                       }
                       onComposeTodo={composeTodoOnHome}
                       composeTarget={homeComposeTarget}
+                      getRunModel={() => homeSelectionRef.current ?? undefined}
                       onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                       onNewChat={handleNewChatTab}
                       onFocusComposer={() => setHomeComposerFocusSignal((n) => n + 1)}
