@@ -1603,10 +1603,12 @@ function App() {
     }
     // An interrupted turn must not fallback-speak its (aborted) reply.
     callTurnVoiceRef.current.pending = false
-    if (activeIsProcessing) {
-      void stopRunRef.current?.()
+    // Speech comes from the COMPANION's session — stop THAT turn, not
+    // whatever chat the app window happens to be showing.
+    if (hoverChatRef.current.chatState?.isProcessing) {
+      void hoverChatRef.current.stop().catch(() => {})
     }
-  }, [voiceSegments, activeIsProcessing])
+  }, [voiceSegments])
 
   // --- Push-to-talk state machine ---
   // One edge-triggered machine fed by every source: the global key hook
@@ -1615,6 +1617,11 @@ function App() {
   // focused, so identical edges arriving within the echo window collapse
   // into one.
   const pttDownAtRef = useRef(0)
+  // The assistant was audibly speaking (or about to) when this press began:
+  // a quick TAP then means "stop talking" — full interrupt, mic stays shut —
+  // not "lock hands-free capture". A HOLD still barges in (silence + talk)
+  // in one gesture, and the next tap after a stop behaves normally.
+  const pttSpokeAtDownRef = useRef(false)
   const pttLastEdgeRef = useRef<{ type: 'down' | 'up'; at: number } | null>(null)
   // Right ⌘ was used as a modifier (⌘C etc.) during this press — the
   // matching release must not commit/lock.
@@ -1633,10 +1640,14 @@ function App() {
     pttChordedRef.current = false
     pttDownAtRef.current = performance.now()
     if (pttStatusRef.current === 'idle') {
+      // Captured BEFORE the cancel below wipes it — the release edge needs
+      // to know whether this press interrupted speech.
+      pttSpokeAtDownRef.current = ttsRef.current.state !== 'idle'
       // Silence the assistant's AUDIO the moment the user starts talking —
       // but do NOT abort the run or discard its reply: an accidental or
       // empty press must never cost the answer. The run is stopped only
-      // when a real utterance actually submits (handlePromptSubmit).
+      // when a real utterance actually submits (handlePromptSubmit), or by
+      // a deliberate stop-tap (see handlePttUp).
       ttsRef.current.cancel()
       setAssistantCaption('')
       voiceRef.current.pttBegin()
@@ -1654,7 +1665,18 @@ function App() {
     }
     const heldMs = performance.now() - pttDownAtRef.current
     if (pttStatusRef.current === 'held' && heldMs < PTT_TAP_MS) {
-      // Quick tap: lock hands-free capture until the next press.
+      if (pttSpokeAtDownRef.current) {
+        // Tap while the assistant was talking = "stop": full interrupt
+        // (silence + drop the queued reply + stop generation, so it can't
+        // resume a beat later) with the mic left CLOSED — never a hot mic
+        // the user didn't ask for. The next tap lists as usual.
+        pttSpokeAtDownRef.current = false
+        voiceRef.current.pttCancel()
+        setPttState('idle')
+        handleInterruptAssistant()
+        return
+      }
+      // Quick tap in silence: lock hands-free capture until the next press.
       setPttState('locked')
       return
     }
@@ -1672,7 +1694,7 @@ function App() {
     // Releasing a hold (or pressing again while locked) submits.
     setPttState('idle')
     void voiceRef.current.pttEnd()
-  }, [pttEdgeIsEcho, setPttState])
+  }, [pttEdgeIsEcho, setPttState, handleInterruptAssistant])
 
   const handlePttCancel = useCallback(() => {
     if (pttStatusRef.current === 'idle') return

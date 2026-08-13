@@ -143,7 +143,10 @@ Gestures (Right ⌘, or the on-screen talk button on either surface):
 
 - **Hold** (≥350ms): mic gate open while held; release submits the
   utterance.
-- **Quick tap** (<350ms): locks hands-free capture; the next press submits.
+- **Quick tap** (<350ms): while the assistant is speaking, a tap is a STOP —
+  full interrupt (audio + queued reply + generation), mic left closed; the
+  next tap behaves normally. In silence, a tap locks hands-free capture; the
+  next press submits.
   While locked there is still no auto-submit — the closing tap is the
   endpoint.
 - **Chord** (any other key/click while Right ⌘ is down): the press was a
