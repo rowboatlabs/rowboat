@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { UserMessage } from "./message.js";
 import { ModelDescriptor, type TurnStatus } from "./turns.js";
 
 // Durable session contract for the session layer (see
@@ -167,14 +168,35 @@ export interface SessionIndexEntry {
     error?: string;
 }
 
+// A message accepted while the session's latest turn was still running,
+// waiting in the EPHEMERAL pending queue (deliberately not durable: it
+// becomes durable only at delivery — as an input_added turn event when it
+// steers the live turn, or as turn_created.input when it is promoted to a
+// new turn after settle; see session-design.md §12.1). Held in main-process
+// memory, mirrored to the renderer via queue-changed, editable and removable
+// until delivered. A crash loses it along with the turn it was steering.
+export interface QueuedSessionMessage {
+    queueId: string;
+    message: z.infer<typeof UserMessage>;
+    ts: string;
+}
+
 // What the renderer's session-feed consumer receives over IPC: session index
-// updates only. Turn events (durable + deltas) travel on the turns:events
-// spine (TurnBusEvent in turns.ts). entry: null signals deletion.
-export type SessionBusEvent = {
-    kind: "index-changed";
-    sessionId: string;
-    entry: SessionIndexEntry | null;
-};
+// updates and pending-queue mirrors. Turn events (durable + deltas) travel on
+// the turns:events spine (TurnBusEvent in turns.ts). entry: null signals
+// deletion. queue-changed carries the full pending queue (small by nature),
+// so consumers replace rather than patch.
+export type SessionBusEvent =
+    | {
+          kind: "index-changed";
+          sessionId: string;
+          entry: SessionIndexEntry | null;
+      }
+    | {
+          kind: "queue-changed";
+          sessionId: string;
+          queue: QueuedSessionMessage[];
+      };
 
 export function sessionIndexEntry(
     state: SessionState,

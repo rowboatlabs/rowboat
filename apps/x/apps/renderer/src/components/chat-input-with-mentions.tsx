@@ -213,6 +213,13 @@ interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
+  /**
+   * Let Enter submit while a turn is processing (the message queues/steers
+   * instead of being dropped). Session-chat only — other consumers keep the
+   * legacy submit-blocked-while-busy behavior. The Stop button still replaces
+   * the send button while processing either way.
+   */
+  allowSubmitWhileProcessing?: boolean
   isStopping?: boolean
   isActive: boolean
   presetMessage?: string
@@ -270,6 +277,7 @@ function ChatInputInner({
   onSubmit,
   onStop,
   isProcessing,
+  allowSubmitWhileProcessing = false,
   isStopping,
   isActive,
   presetMessage,
@@ -304,7 +312,8 @@ function ChatInputInner({
   const [attachments, setAttachments] = useState<StagedAttachment[]>([])
   const [focusNonce, setFocusNonce] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const canSubmit = (Boolean(message.trim()) || attachments.length > 0) && !isProcessing
+  const canSubmit = (Boolean(message.trim()) || attachments.length > 0)
+    && (allowSubmitWhileProcessing || !isProcessing)
 
   // Shared model-catalog store (one fetch app-wide); sign-in state also
   // gates search availability below.
@@ -1473,6 +1482,8 @@ export interface ChatInputWithMentionsProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
+  /** Let Enter submit while processing (queue/steer) — see ChatInputInner. */
+  allowSubmitWhileProcessing?: boolean
   isStopping?: boolean
   isActive?: boolean
   presetMessage?: string
@@ -1516,6 +1527,7 @@ export function ChatInputWithMentions({
   onSubmit,
   onStop,
   isProcessing,
+  allowSubmitWhileProcessing,
   isStopping,
   isActive = true,
   presetMessage,
@@ -1551,6 +1563,7 @@ export function ChatInputWithMentions({
         onSubmit={onSubmit}
         onStop={onStop}
         isProcessing={isProcessing}
+        allowSubmitWhileProcessing={allowSubmitWhileProcessing}
         isStopping={isStopping}
         isActive={isActive}
         presetMessage={presetMessage}

@@ -1503,6 +1503,20 @@ export function setupIpcHandlers() {
     'sessions:sendMessage': async (_event, args) => {
       return container.resolve<ISessions>('sessions').sendMessage(args.sessionId, args.input, args.config);
     },
+    'sessions:sendOrQueueMessage': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').sendOrQueueMessage(args.sessionId, args.input, args.config);
+    },
+    'sessions:listQueued': async (_event, args) => {
+      return { queue: container.resolve<ISessions>('sessions').listQueued(args.sessionId) };
+    },
+    'sessions:editQueued': async (_event, args) => {
+      container.resolve<ISessions>('sessions').editQueued(args.sessionId, args.queueId, args.message);
+      return { success: true };
+    },
+    'sessions:removeQueued': async (_event, args) => {
+      const removed = container.resolve<ISessions>('sessions').removeQueued(args.sessionId, args.queueId);
+      return { removed: removed ?? null };
+    },
     'sessions:respondToPermission': async (_event, args) => {
       await container.resolve<ISessions>('sessions').respondToPermission(args.turnId, args.toolCallId, args.decision, args.metadata);
       return { success: true };
@@ -1512,8 +1526,8 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'sessions:stopTurn': async (_event, args) => {
-      await container.resolve<ISessions>('sessions').stopTurn(args.turnId, args.reason);
-      return { success: true };
+      const { dequeued } = await container.resolve<ISessions>('sessions').stopTurn(args.turnId, args.reason);
+      return { success: true, dequeued };
     },
     'sessions:resumeTurn': async (_event, args) => {
       await container.resolve<ISessions>('sessions').resumeTurn(args.sessionId);

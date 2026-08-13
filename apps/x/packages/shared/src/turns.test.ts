@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
     type JsonValue,
+    InputAdded,
     ModelCallCompleted,
     ModelCallFailed,
     ModelCallRequested,
+    ModelRequestMessageRef,
     ModelStepEvent,
     MODEL_CALL_LIMIT_ERROR_CODE,
     ToolDescriptor,
@@ -23,12 +25,17 @@ import {
     TurnEvent,
     TurnFailed,
     TurnSuspended,
+    addedInputMessagesAt,
     deriveTurnStatus,
     effectiveTools,
     extendedToolsFor,
+    inputRef,
+    modelCallBudgetBase,
     outstandingAsyncTools,
     outstandingPermissions,
+    parseRequestRef,
     reduceTurn,
+    requestMessagesFor,
     turnTranscript,
 } from "./turns.js";
 
@@ -1576,5 +1583,260 @@ describe("mid-turn tool extension", () => {
             ],
             /model call is unsettled/,
         );
+    });
+});
+
+describe("added inputs (steering)", () => {
+    function inputAdded(
+        inputIndex: number,
+        text: string,
+    ): z.infer<typeof InputAdded> {
+        return {
+            type: "input_added",
+            turnId: TURN_ID,
+            ts: TS,
+            inputIndex,
+            message: user(text),
+        };
+    }
+
+    // One sync tool round trip with a steer injected at the batch boundary.
+    function steeredSequence(): TEvent[] {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        return [
+            created(),
+            requested(0, ["input"]),
+            completed(0, call0),
+            permRequired("tc1", "echo"),
+            permResolved("tc1", "allow"),
+            invocation("tc1"),
+            result("tc1", "echo"),
+            inputAdded(1, "actually, use the other file"),
+            requested(1, ["assistant:0", "toolResult:tc1", "input:1"]),
+            completed(1, assistantText("done")),
+            turnCompletedEv(),
+        ];
+    }
+
+    it("ref helpers parse and print every input spelling", () => {
+        expect(inputRef(0)).toBe("input");
+        expect(inputRef(3)).toBe("input:3");
+        expect(parseRequestRef("input")).toEqual({ kind: "input", inputIndex: 0 });
+        expect(parseRequestRef("input:2")).toEqual({ kind: "input", inputIndex: 2 });
+        expect(() => parseRequestRef("input:0")).toThrowError(/malformed/);
+        expect(() => parseRequestRef("input:-1")).toThrowError(/malformed/);
+        expect(ModelRequestMessageRef.safeParse("input:1").success).toBe(true);
+        expect(ModelRequestMessageRef.safeParse("input:0").success).toBe(false);
+        expect(ModelRequestMessageRef.safeParse("input:01").success).toBe(false);
+    });
+
+    it("folds an input at the batch boundary and threads it through refs, request messages, and transcript", () => {
+        const state = reduceTurn(steeredSequence());
+        expect(state.addedInputs).toHaveLength(1);
+        expect(state.addedInputs[0].firstAffectedModelCallIndex).toBe(1);
+        expect(addedInputMessagesAt(state, 1)).toEqual([
+            user("actually, use the other file"),
+        ]);
+        expect(addedInputMessagesAt(state, 0)).toEqual([]);
+        expect(requestMessagesFor(state, 1)).toEqual([
+            assistantCalls(toolCallPart("tc1", "echo")),
+            toolMsg("tc1", "echo"),
+            user("actually, use the other file"),
+        ]);
+        expect(turnTranscript(state)).toEqual([
+            user("hello"),
+            assistantCalls(toolCallPart("tc1", "echo")),
+            toolMsg("tc1", "echo"),
+            user("actually, use the other file"),
+            assistantText("done"),
+        ]);
+    });
+
+    it("accepts an input before the first model call, referenced by call 0", () => {
+        const state = reduceTurn([
+            created(),
+            inputAdded(1, "one more thing"),
+            requested(0, ["input", "input:1"]),
+            completed(0, assistantText("done")),
+            turnCompletedEv(),
+        ]);
+        expect(state.addedInputs[0].firstAffectedModelCallIndex).toBe(0);
+        expect(requestMessagesFor(state, 0)).toEqual([
+            user("hello"),
+            user("one more thing"),
+        ]);
+    });
+
+    it("coalesces several inputs at one boundary in acceptance order", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        const state = reduceTurn([
+            created(),
+            requested(0, ["input"]),
+            completed(0, call0),
+            permRequired("tc1", "echo"),
+            permResolved("tc1", "allow"),
+            invocation("tc1"),
+            result("tc1", "echo"),
+            inputAdded(1, "first"),
+            inputAdded(2, "second"),
+            requested(1, ["assistant:0", "toolResult:tc1", "input:1", "input:2"]),
+            completed(1, assistantText("done")),
+            turnCompletedEv(),
+        ]);
+        expect(state.addedInputs.map((a) => a.event.inputIndex)).toEqual([1, 2]);
+    });
+
+    it("keeps a trailing input (accepted, then cancelled before the next call) in the transcript", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        const state = reduceTurn([
+            created(),
+            requested(0, ["input"]),
+            completed(0, call0),
+            permRequired("tc1", "echo"),
+            permResolved("tc1", "allow"),
+            invocation("tc1"),
+            result("tc1", "echo"),
+            inputAdded(1, "wait--"),
+            turnCancelledEv("user stop"),
+        ]);
+        expect(turnTranscript(state)).toEqual([
+            user("hello"),
+            assistantCalls(toolCallPart("tc1", "echo")),
+            toolMsg("tc1", "echo"),
+            user("wait--"),
+        ]);
+    });
+
+    it("keeps the boundary input when its first model call failed", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        const state = reduceTurn([
+            created(),
+            requested(0, ["input"]),
+            completed(0, call0),
+            permRequired("tc1", "echo"),
+            permResolved("tc1", "allow"),
+            invocation("tc1"),
+            result("tc1", "echo"),
+            inputAdded(1, "steer"),
+            requested(1, ["assistant:0", "toolResult:tc1", "input:1"]),
+            callFailed(1),
+            turnFailedEv("provider exploded"),
+        ]);
+        expect(turnTranscript(state)).toEqual([
+            user("hello"),
+            assistantCalls(toolCallPart("tc1", "echo")),
+            toolMsg("tc1", "echo"),
+            user("steer"),
+        ]);
+    });
+
+    it("resets the model-call budget at each accepted input", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        const base: TEvent[] = [
+            created({ config: { autoPermission: false, humanAvailable: true, maxModelCalls: 1 } }),
+            requested(0, ["input"]),
+            completed(0, call0),
+            permRequired("tc1", "echo"),
+            permResolved("tc1", "allow"),
+            invocation("tc1"),
+            result("tc1", "echo"),
+        ];
+        // Without an input, call 1 exceeds maxModelCalls 1.
+        expectCorruption(
+            [...base, requested(1, ["assistant:0", "toolResult:tc1"])],
+            /exceeds maxModelCalls/,
+        );
+        // An accepted input resets the allowance; the budget base moves.
+        const steered = reduceTurn([
+            ...base,
+            inputAdded(1, "keep going"),
+            requested(1, ["assistant:0", "toolResult:tc1", "input:1"]),
+            completed(1, assistantText("done")),
+            turnCompletedEv(),
+        ]);
+        expect(modelCallBudgetBase(steered)).toBe(1);
+    });
+
+    it("rejects an input while a model call is unsettled", () => {
+        expectCorruption(
+            [created(), requested(0, ["input"]), inputAdded(1, "nope")],
+            /input added while a model call is unsettled/,
+        );
+    });
+
+    it("rejects an input while tool calls are unresolved", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        expectCorruption(
+            [
+                created(),
+                requested(0, ["input"]),
+                completed(0, call0),
+                inputAdded(1, "nope"),
+            ],
+            /input added while tool calls are unresolved/,
+        );
+    });
+
+    it("rejects out-of-order input indices", () => {
+        expectCorruption(
+            [created(), inputAdded(2, "skipped ahead")],
+            /input index 2 out of order; expected 1/,
+        );
+        expectCorruption(
+            [created(), inputAdded(1, "a"), inputAdded(1, "b")],
+            /input index 1 out of order; expected 2/,
+        );
+    });
+
+    it("rejects a request that omits an accepted input", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        expectCorruption(
+            [
+                created(),
+                requested(0, ["input"]),
+                completed(0, call0),
+                permRequired("tc1", "echo"),
+                permResolved("tc1", "allow"),
+                invocation("tc1"),
+                result("tc1", "echo"),
+                inputAdded(1, "must ride the next call"),
+                requested(1, ["assistant:0", "toolResult:tc1"]),
+            ],
+            /references do not match/,
+        );
+    });
+
+    it("rejects a request referencing an input that was never added", () => {
+        expectCorruption(
+            [created(), requested(0, ["input", "input:1"])],
+            /references do not match/,
+        );
+    });
+
+    it("rejects an input after a terminal event", () => {
+        expectCorruption(
+            [
+                created(),
+                requested(0, ["input"]),
+                completed(0, assistantText("done")),
+                turnCompletedEv(),
+                inputAdded(1, "too late"),
+            ],
+            /event after terminal turn event/,
+        );
+    });
+
+    it("a re-issued call after an interruption carries the boundary's inputs", () => {
+        const state = reduceTurn([
+            created(),
+            requested(0, ["input"]),
+            callFailed(0, "interrupted"),
+            inputAdded(1, "and also this"),
+            requested(1, ["input:1"]),
+            completed(1, assistantText("done")),
+            turnCompletedEv(),
+        ]);
+        expect(state.addedInputs[0].firstAffectedModelCallIndex).toBe(1);
+        expect(requestMessagesFor(state, 1)).toEqual([user("and also this")]);
     });
 });
