@@ -41,6 +41,11 @@ type TodoViewProps = {
   /** Clicking Skipper starts a voice call (the companion flow). Absent when
    * voice isn't configured — the mascot still keeps the watch. */
   onSkipperCall?: () => void
+  /** The thread the user is ATTENDING right now (the live call's
+   * conversation). It earns no Deck strip and no counts — the Deck is for
+   * unattended work; without this, the operator channel's own turns pop a
+   * strip in and out on every utterance, bouncing the whole page. */
+  attendedSessionId?: string | null
 }
 
 type ComposeTarget =
@@ -1331,7 +1336,7 @@ function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession, onSkipperCall }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession, onSkipperCall, attendedSessionId }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
@@ -1908,11 +1913,13 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   // Needs-you is the queue: oldest first, so J always serves the longest
   // wait; snoozed threads are parked out of it (they return on time or on
   // activity). Underway orders by start; pinned idle threads keep their
-  // strip (the watch flag).
-  const deckNeedsYou = deckThreads
+  // strip (the watch flag). The attended thread (the live call's own
+  // conversation) is excluded everywhere — the Deck is for unattended work.
+  const deckVisible = deckThreads.filter((t) => t.sessionId !== attendedSessionId)
+  const deckNeedsYou = deckVisible
     .filter((t) => (t.status === 'needs-you' || t.status === 'ready') && !t.snoozed)
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
-  const deckUnderway = deckThreads
+  const deckUnderway = deckVisible
     .filter((t) => t.status === 'underway' || (t.pinned && (t.snoozed || t.status === 'idle')))
     .sort((a, b) => (a.startedAt ?? a.updatedAt).localeCompare(b.startedAt ?? b.updatedAt))
   const deckNeedsYouRef = useRef(deckNeedsYou)
@@ -1923,10 +1930,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   const lastJumpedRef = useRef<HomeThread | null>(null)
 
   // Skipper's watch: the fleet state as one glance (and one sentence).
-  // Snoozed threads are deliberately parked — they don't count.
-  const skipperUnderway = deckThreads.filter((t) => t.status === 'underway').length
-  const skipperNeeds = deckThreads.filter((t) => t.status === 'needs-you' && !t.snoozed).length
-  const skipperReady = deckThreads.filter((t) => t.status === 'ready' && !t.snoozed).length
+  // Snoozed threads are deliberately parked, and the attended thread is the
+  // user's own conversation — neither counts.
+  const skipperUnderway = deckVisible.filter((t) => t.status === 'underway').length
+  const skipperNeeds = deckVisible.filter((t) => t.status === 'needs-you' && !t.snoozed).length
+  const skipperReady = deckVisible.filter((t) => t.status === 'ready' && !t.snoozed).length
   const sitrep = [
     skipperUnderway > 0 && `${skipperUnderway} underway`,
     skipperNeeds > 0 && `${skipperNeeds} need${skipperNeeds === 1 ? 's' : ''} you`,

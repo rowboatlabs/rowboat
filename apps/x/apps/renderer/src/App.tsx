@@ -6673,6 +6673,7 @@ function App() {
                         void navigateToView({ type: 'code' })
                       }}
                       onSkipperCall={voiceAvailable && ttsAvailable ? startCommandCenterCall : undefined}
+                      attendedSessionId={inCall ? hoverRunId : null}
                     />
                 </div>
               ) : isSuggestedTopicsOpen ? (

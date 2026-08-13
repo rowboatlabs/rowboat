@@ -111,7 +111,18 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
             // would silently drop the coding agent's ACP context. Scratch
             // runs outside registered projects stay plain chats.
             const adoptionService = !pinned && ctx.sessionId && candidate ? resolveService() : null;
-            if (adoptionService && ctx.sessionId && candidate) {
+            // The Command Center session is the DISPATCHER — it assigns
+            // coding work to other threads and must never itself become a
+            // code session (that would pin the operator channel to one
+            // repo/worktree). Its doctrine forbids code_agent_run there;
+            // this guard makes a slip harmless rather than structural.
+            let adoptable = !!adoptionService;
+            if (adoptable) {
+                const { getCommandCenterSessionId } = await import("../../../home/command-center.js");
+                const commandCenterId = await getCommandCenterSessionId().catch(() => null);
+                if (commandCenterId && commandCenterId === ctx.sessionId) adoptable = false;
+            }
+            if (adoptable && adoptionService && ctx.sessionId && candidate) {
                 const project = defaultProject ?? await adoptionService.findProjectForPath(candidate).catch(() => null);
                 if (project) {
                     const alreadyCoded = await readStoredSession(ctx.sessionId).catch(() => null);
