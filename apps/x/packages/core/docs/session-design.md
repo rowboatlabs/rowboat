@@ -1,7 +1,7 @@
 # Session Layer Technical Specification
 
-Status: design complete for the session layer v1. No implementation exists
-yet.
+Status: implemented and live (`core/src/runtime/sessions/`), including the
+post-v1 queued-messages + steering design of sections 12.1/12.4.
 
 This document specifies the session layer that sits above the turn runtime
 defined in `turn-runtime-design.md`. That document is assumed context; this
@@ -25,8 +25,10 @@ The session layer must:
 
 ## 2. Non-goals (v1)
 
-- Queued user messages. The committed future shape is in section 12.1.
-- Steering / mid-turn message injection (section 12.4).
+- Queued user messages — SINCE IMPLEMENTED; the as-built design is in
+  section 12.1 (which supersedes the originally committed durable shape).
+- Steering / mid-turn message injection — SINCE IMPLEMENTED; see section
+  12.4.
 - Session-scoped permission grants ("always allow for this chat"); every
   applicable tool call prompts in v1 (section 12.2).
 - Context compaction; a viable mechanism sketch is recorded in section 12.3.
@@ -273,6 +275,16 @@ interface ISessions {
     config: SendMessageConfig,
   ): Promise<{ turnId: string }>;
 
+  // Deliver-ASAP send + ephemeral pending-queue operations (section 12.1).
+  sendOrQueueMessage(
+    sessionId: string,
+    input: UserMessage,
+    config: SendMessageConfig,
+  ): Promise<{ queued: false; turnId: string } | { queued: true; queueId: string }>;
+  listQueued(sessionId: string): QueuedSessionMessage[];
+  editQueued(sessionId: string, queueId: string, message: UserMessage): void;
+  removeQueued(sessionId: string, queueId: string): QueuedSessionMessage | undefined;
+
   respondToPermission(
     turnId: string,
     toolCallId: string,
@@ -292,7 +304,10 @@ interface ISessions {
     result: ToolResultData,
   ): Promise<void>;
 
-  stopTurn(turnId: string, reason?: string): Promise<void>;
+  // Also drains the session's pending queue (a stop must never be followed
+  // by a queued message auto-starting work) and returns the drained
+  // messages so the UI can restore their text to the composer.
+  stopTurn(turnId: string, reason?: string): Promise<{ dequeued: QueuedSessionMessage[] }>;
   resumeTurn(sessionId: string): Promise<void>;
 
   setTitle(sessionId: string, title: string): Promise<void>;
@@ -412,23 +427,65 @@ function runHeadlessTurn(input: {
 - Standalone turns never appear in the index; callers keep their own turn
   IDs if they need history.
 
-## 12. Deferred designs with committed shapes
+## 12. Follow-on designs
 
-These are not implemented in v1. Their shapes are recorded so v1 decisions
-stay compatible; each arrives as a session schema version bump.
+12.1 and 12.4 are IMPLEMENTED (they shipped together as one deliver-ASAP
+feature); the remaining subsections stay deferred with committed shapes.
 
-### 12.1 Queued messages
+### 12.1 Queued messages (implemented — ephemeral, superseding the committed durable shape)
 
-```ts
-{ type: "message_queued", queueId, message, ts }
-{ type: "queued_message_replaced", queueId, message, ts } // edit
-{ type: "queued_message_removed", queueId, ts }           // cancel
-// promotion: turn_appended gains consumedQueueIds?: string[]
-```
+This section originally committed durable session events
+(`message_queued` / `queued_message_replaced` / `queued_message_removed`,
+with `turn_appended.consumedQueueIds` for promotion). The implementation
+deliberately supersedes that shape: **the pending queue is process memory
+only** (`SessionsImpl.pending`), never written to the session file. A
+message becomes durable exactly once, at delivery — as an `input_added`
+turn event when it steers the live turn, or as `turn_created.input` when it
+is promoted into a new turn.
 
-The reducer derives the pending queue by supersession. Promotion rules
-(collapse-into-one-turn vs FIFO, behavior after failed turns) are decided
-together with steering.
+Why ephemeral won:
+
+- One durability point. The durable-queue design needed cross-file
+  consistency between the session file (queue state) and the turn file
+  (consumption), with `queueId` reconciliation to avoid double delivery
+  after a crash. Ephemeral pending state deletes that seam entirely.
+- Consistency with §4.2 of the turn spec: durable events record facts, not
+  intent. A pending message is intent-not-yet-acted-on — kin to the
+  composer draft, which is also not durable.
+- Coherent crash loss. A crash kills the in-flight turn (it comes back
+  `idle`, needing manual resume); losing the message that was steering it
+  is the consistent outcome, and matches the no-auto-resume stance — a
+  durable queue promoting at startup would start model calls unprompted.
+- Precedent: pi's steering/follow-up queues are in-memory; opencode's
+  shipping desktop queue is client-side state.
+
+Accepted trade-off, recorded deliberately: a remote sender (channel
+bridge) whose message is queued loses it silently if the app crashes;
+the local user at least sees the chip vanish. The bridge still uses strict
+`sendMessage` today, so nothing regresses until it opts in.
+
+Behavior (one user-facing mode — deliver-ASAP; there is no queue-vs-steer
+choice):
+
+- `sendOrQueueMessage` starts a turn when the session is settled and the
+  queue is empty; otherwise it appends `{queueId, message, config, ts}` to
+  the pending queue (arrival order is preserved even against a
+  settled-but-unpromoted queue).
+- Pending entries steer the live turn at its next model-call boundary
+  (section 12.4). Entries still pending when a turn settles are promoted:
+  the head becomes a new turn via the normal locked send path, using the
+  config it arrived with; the remainder stays queued and steers the new
+  turn at its first boundary (call 0) — the earliest the model can see it.
+- The enqueue and the settled-check share one session-lock hold, and
+  promotion re-checks everything under the same lock, so a concurrent
+  settle cannot strand a message (no lost wakeup).
+- Promotion failure (e.g. agent resolution) leaves the entry queued,
+  visible, and editable rather than silently dropping user text.
+- `stopTurn` drains the queue first and returns the drained messages; a
+  stop is never followed by queued work auto-starting.
+- The renderer mirror rides a new `queue-changed` session-bus event kind
+  carrying the full queue (`QueuedSessionMessage[]` in shared/sessions.ts);
+  `listQueued` seeds it on session open. Edit/remove are plain methods.
 
 ### 12.2 Session permission grants
 
@@ -449,12 +506,43 @@ after a compaction uses **inline** context (summary message + kept
 transcript), which restarts the reference chain and bounds resolution depth
 by construction. Trigger policy and summarizer design are unspecified.
 
-### 12.4 Steering
+### 12.4 Steering (implemented)
 
-Rides the queue events with a different promotion rule, and additionally
-requires a turn-level `steer` external input (a turn schema bump) with an
-injection boundary after tool-batch completion. Recorded here so the session
-design does not foreclose it.
+A pending message reaches the RUNNING turn at its next model-call boundary.
+Mechanism (see turn-runtime-design.md §8.6/§15.2 for the turn half):
+
+- Every advance the session layer starts — sendMessage, promotion,
+  permission/ask-human/async-result routing, resumeTurn — passes a
+  `takeInputs` drain callback in `advanceTurn` options. The loop polls it
+  once per iteration at the boundary (batch settled, completion ruled out,
+  before the budget check and the next request) and appends the drained
+  messages as durable `input_added` turn events, which the very next
+  `model_call_requested` must reference (`input:<n>` refs).
+- No `steer` external input was needed, contrary to this section's original
+  sketch: a suspended turn's queue drains automatically when the advance
+  that answers its permission/async result reaches the boundary.
+- Injection is purely additive (never cancels in-flight work), the message
+  lands as a plain user message after the batch's tool results, and each
+  accepted input resets the turn's model-call budget (counts since last
+  input) — fresh user input buys the allowance a fresh turn would get.
+- If the final response is already streaming (no next model call), the turn
+  completes normally and the message promotes as a new turn instead;
+  delivery is "earliest safe point", never "guaranteed same turn".
+
+Rejected alternative, recorded for the road not taken: **supersede-at-
+boundary** (gracefully cancel the running turn at the batch boundary with
+`reason: "steered"`, then promote the message as a new turn referencing
+it). Zero turn-schema change and it collapses queueing/steering into one
+promotion path, but it loses on behavior: (a) transmit-time elision
+(context-elision.ts) would replace the just-executed batch's large tool
+results with placeholders at the very next call — the model forgets what
+it just read precisely when steered mid-task; (b) cross-turn provider
+continuation stripping (shared/turns.ts) would drop reasoning
+signatures/blobs of a cancelled turn, breaking interleaved-thinking
+continuity on every steer; (c) it is destructive by construction to turns
+suspended on permissions (cancelling their pending calls), violating the
+additive-only property. Within-turn injection preserves all three by
+construction.
 
 ### 12.5 Persisted index cache
 
@@ -533,6 +621,21 @@ All tests use the in-memory/mocked turn runtime and repo fakes.
 - Standalone turns: `sessionId: null`, auto permission, human unavailable,
   absent from the index.
 
+### 13.9 Pending queue (12.1/12.4)
+
+- `sendOrQueueMessage`: immediate start on a settled session; queue while
+  the latest turn is non-terminal (queue-changed mirrored on the bus).
+- Arrival order preserved when the session settled but promotion has not
+  run yet.
+- The steer drain hands every advance the pending queue and empties it.
+- Promotion on settle: head becomes a new turn with its arrival config and
+  a context reference to the settled turn; the rest stays queued.
+- Edit/remove before delivery; unknown queueIds error/return undefined.
+- `stopTurn` drains first, returns the drained messages, and no promotion
+  fires afterward.
+- Promotion failure keeps the entry queued.
+- `deleteSession` drops the pending queue.
+
 ## 14. Suggested module layout
 
 ```text
@@ -580,8 +683,10 @@ The session layer is implementation-complete only when:
 2. Session files follow the partitioned append-only JSONL layout with
    strict validation.
 3. Turn-file-first write ordering is enforced; orphan turns are benign.
-4. `sendMessage` rejects non-terminal latest turns with a typed error; no
-   implicit queueing, steering, or ask-human routing exists.
+4. `sendMessage` rejects non-terminal latest turns with a typed error and
+   never routes to ask-human. Queueing and steering are explicit opt-in
+   through `sendOrQueueMessage` only (section 12.1); programmatic callers
+   keep the strict contract.
 5. Ask-human answers flow only through the dedicated endpoint.
 6. The index is write-through with a startup scan, no watcher, and no
    persisted cache; single-instance is enforced.
