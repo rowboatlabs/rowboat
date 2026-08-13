@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
+import { ChatFilesPanel } from '@/components/chat-files-panel'
+import type { SessionFileEntry } from '@/lib/session-files'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { type ChatTab } from '@/components/tab-bar'
@@ -113,6 +115,10 @@ interface ChatSidebarProps {
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
   onOpenKnowledgeFile?: (path: string) => void
+  /** Files-created-in-chat panel wiring (shared state with the full-screen chat). */
+  sessionFiles?: SessionFileEntry[]
+  filesPanelOpen?: boolean
+  onToggleFilesPanel?: () => void
   onActivate?: () => void
   collapsedLeftPaddingPx?: number
   // Voice / TTS props
@@ -187,6 +193,9 @@ export function ChatSidebar({
   isToolOpenForTab,
   onToolOpenChangeForTab,
   onOpenKnowledgeFile,
+  sessionFiles,
+  filesPanelOpen,
+  onToggleFilesPanel,
   onActivate,
   collapsedLeftPaddingPx = 196,
   isRecording,
@@ -404,6 +413,9 @@ export function ChatSidebar({
                 sessionUsage={activeTabState.sessionUsage}
                 onSelectRun={onSelectRun}
                 onOpenChatHistory={onOpenChatHistory}
+                filesCount={sessionFiles?.length ?? 0}
+                filesPanelOpen={filesPanelOpen}
+                onToggleFilesPanel={onToggleFilesPanel}
               />
             )}
             {onOpenFullScreen && (
@@ -427,7 +439,7 @@ export function ChatSidebar({
           </header>
 
           <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})}>
-            <div className="flex min-h-0 flex-1 flex-col">
+            <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Pane padding lives here, on the container — the shared chat pane renders identically on every surface. */}
               <div className="relative min-h-0 flex-1 px-3">
                 {chatTabs.map((tab) => {
@@ -510,6 +522,18 @@ export function ChatSidebar({
                   })}
                 </div>
               </div>
+
+              {/* Files panel — overlays the conversation; the pane is too
+                  narrow for a side-by-side split like the full-screen chat. */}
+              {filesPanelOpen && onToggleFilesPanel && (
+                <div className="absolute inset-0 z-20 bg-background">
+                  <ChatFilesPanel
+                    files={sessionFiles ?? []}
+                    onClose={onToggleFilesPanel}
+                    className="h-full w-full border-l-0"
+                  />
+                </div>
+              )}
             </div>
           </FileCardProvider>
         </>
