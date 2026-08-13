@@ -10,6 +10,8 @@ import { ASK_HUMAN_TOOL } from '../runtime/turns/bridges/real-agent-resolver.js'
 import { attachReceipt, findItem, getItem, normalizeKey, setChecked, TODO_REL_PATH } from './fileops.js';
 import { getSessionId, setSessionId } from './session-index.js';
 import { todoBus } from './bus.js';
+import type { CodeSessionService } from '../code-mode/sessions/service.js';
+import type { ICodeSessionsRepo } from '../code-mode/sessions/repo.js';
 
 const log = new PrefixLogger('Todo:Runner');
 
@@ -47,6 +49,7 @@ function buildFirstMessage(
     context?: string,
     parentText?: string,
     children?: { text: string; checked: boolean }[],
+    code?: { cwd: string },
 ): string {
     const now = new Date();
     const localNow = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
@@ -62,9 +65,14 @@ function buildFirstMessage(
     const report = parentText
         ? `report the outcome with \`todo-report\` (item text exactly as above, parent exactly as in **Part of**)`
         : `report the outcome with \`todo-report\` (item text exactly as above)`;
+    // A code-dispatched item runs in a real code session pinned to this
+    // thread: code_agent_run resolves the repo/worktree/engine server-side.
+    const codeBlock = code
+        ? `\n**Code:** This is coding work in \`${code.cwd}\`. Do ALL repo work through \`code_agent_run\` — it resumes this thread's pinned coding session (repo, worktree, engine). The changes stay on this thread's branch for the user's review: report \`ready\` when the work is done (never \`done\` — merging is the user's check), summarizing what changed and how you verified it.`
+        : '';
     const base = `Work on this item from the user's to-do list at \`${TODO_REL_PATH}\`:
 
-**Item:** ${text}${partOf}${steps}
+**Item:** ${text}${partOf}${steps}${codeBlock}
 **Time:** ${localNow} (${tz})
 
 Start by calling \`file-readText\` on \`${TODO_REL_PATH}\` — the surrounding list often carries context this item's phrasing assumes. Then do the work per your instructions, and ${report}.`;
@@ -229,6 +237,23 @@ async function ensureSession(
     return { sessionId, isNew: true };
 }
 
+/**
+ * One-line git truth for a code thread's receipt: what its worktree carries
+ * over the base branch. Null for non-code sessions, in-repo runs, and empty
+ * diffs — the receipt only appears when there is something to review.
+ */
+async function codeDiffstatLine(sessionId: string): Promise<string | null> {
+    try {
+        const { lazyResolve } = await import('../di/lazy-resolve.js');
+        const repo = await lazyResolve<ICodeSessionsRepo>('codeSessionsRepo');
+        const meta = await repo.get(sessionId);
+        const { worktreeDiffstatLine } = await import('../code-mode/sessions/review.js');
+        return await worktreeDiffstatLine(meta);
+    } catch {
+        return null;
+    }
+}
+
 async function landSettled(
     norm: string,
     itemText: string,
@@ -244,6 +269,12 @@ async function landSettled(
             const after = await getItem(norm);
             if (after && !after.checked && after.receipts.length === receiptsBefore && settled.text) {
                 await attachReceipt(norm, { kind: 'result', text: truncate(settled.text, 300), links: [] });
+            }
+            // Code threads get git's own accounting alongside the agent's
+            // narrative — the review card's mechanical half.
+            const diff = await codeDiffstatLine(sessionId);
+            if (diff) {
+                await attachReceipt(norm, { kind: 'result', text: `ready for review — ${diff}`, links: [] }).catch(() => {});
             }
             log.log(`done turn=${turnId} summary="${truncate(settled.text)}"`);
             todoBus.publish({ type: 'run_complete', key: norm, summary: settled.text ?? undefined });
@@ -383,7 +414,15 @@ async function driveTurn(
 export async function runTodoItem(
     key: string,
     context?: string,
-    opts?: { model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }; autoPermission?: boolean },
+    opts?: {
+        model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' };
+        autoPermission?: boolean;
+        // Code dispatch (the Helm): materialize a real code session on this
+        // item's thread before the first turn — worktree lane by default,
+        // visible in the Code section, status-tracked. code_agent_run then
+        // resolves the pin server-side like any Code-section session.
+        code?: { projectId: string; agent?: 'claude' | 'codex'; isolation?: 'in-repo' | 'worktree' };
+    },
 ): Promise<TodoRunResult> {
     const norm = normalizeKey(key);
     if (runningItems.has(norm)) {
@@ -408,7 +447,32 @@ export async function runTodoItem(
         const { sessions } = await resolveDeps();
         const title = parent ? `${item.text} · ${parent.text}` : item.text;
         const { sessionId } = await ensureSession(sessions, item.key, title);
-        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, buildFirstMessage(item.text, context, parent?.text, item.children), 'manual', opts?.model, opts?.autoPermission ?? true);
+        // Code dispatch: the session becomes a real code session (meta +
+        // worktree) BEFORE the first turn, so isolation exists before the
+        // agent edits anything. A failed setup surfaces like any run
+        // failure — never a silent downgrade to untracked coding.
+        let codeCwd: string | undefined;
+        if (opts?.code) {
+            try {
+                const { lazyResolve } = await import('../di/lazy-resolve.js');
+                const service = await lazyResolve<CodeSessionService>('codeSessionService');
+                const meta = await service.createForSession(sessionId, {
+                    projectId: opts.code.projectId,
+                    agent: opts.code.agent ?? 'claude',
+                    policy: (opts.autoPermission ?? true) ? 'auto-approve-reads' : 'ask',
+                    isolation: opts.code.isolation ?? 'worktree',
+                    title,
+                });
+                codeCwd = meta.cwd;
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                await attachReceipt(norm, { kind: 'error', text: errorLine(`code setup failed: ${msg}`), links: [] }).catch(() => {});
+                todoBus.publish({ type: 'run_error', key: norm, error: msg });
+                return { key: norm, sessionId, turnId: null, summary: null, error: msg };
+            }
+        }
+        const firstMessage = buildFirstMessage(item.text, context, parent?.text, item.children, codeCwd ? { cwd: codeCwd } : undefined);
+        return await driveTurn(item.key, item.text, item.receipts.length, sessionId, firstMessage, 'manual', opts?.model, opts?.autoPermission ?? true);
     } finally {
         runningItems.delete(norm);
     }

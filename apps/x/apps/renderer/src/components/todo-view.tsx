@@ -35,6 +35,9 @@ type TodoViewProps = {
   /** The composer's live model pick (model + paired effort) — run/retry
    * chips and inline comments honor it, same as composer-born runs. */
   getRunModel?: () => { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } | undefined
+  /** A code strip's door: the Code section (diffs, terminal, worktree),
+   * focused on the session. Falls back to the chat dock when absent. */
+  onOpenCodeSession?: (sessionId: string) => void
 }
 
 type ComposeTarget =
@@ -1262,7 +1265,7 @@ function DeckStrip({ thread, onJump, onOpen }: {
         {needs ? (thread.attention ?? 'waiting on you') : activityLabel(thread.activity)}
       </span>
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">{relativeTime(thread.startedAt ?? thread.updatedAt)}</span>
-      <IconTip label="Open the full conversation in the sidebar">
+      <IconTip label={thread.kind === 'code' ? 'Open in the Code section — diffs, terminal, worktree' : 'Open the full conversation in the sidebar'}>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onOpen() }}
@@ -1275,7 +1278,7 @@ function DeckStrip({ thread, onJump, onOpen }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
@@ -1705,6 +1708,17 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
   const jumpToStripRef = useRef(jumpToStrip)
   useEffect(() => { jumpToStripRef.current = jumpToStrip }, [jumpToStrip])
 
+  // ⏎ / ↗ on a strip: code threads open the Code section (diffs, terminal),
+  // everything else the chat dock.
+  const openStrip = useCallback((thread: HomeThread) => {
+    if (thread.kind === 'code' && onOpenCodeSession) {
+      markSessionSeen(thread.sessionId)
+      onOpenCodeSession(thread.sessionId)
+      return
+    }
+    openInChat(thread.sessionId)
+  }, [onOpenCodeSession, openInChat, markSessionSeen])
+
   const startChat = useCallback(async (text: string) => {
     const res = await window.ipc.invoke('todo:startChat', { text })
     if (res.success && res.sessionId) {
@@ -1985,7 +1999,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                     <div className="text-[10.5px] text-muted-foreground/60">J cycles the queue</div>
                   </div>
                   {deckNeedsYou.map((t) => (
-                    <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openInChat(t.sessionId)} />
+                    <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openStrip(t)} />
                   ))}
                 </div>
               )}
@@ -1995,7 +2009,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                     Underway · {deckUnderway.filter((t) => t.status === 'underway').length}
                   </div>
                   {deckUnderway.map((t) => (
-                    <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openInChat(t.sessionId)} />
+                    <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openStrip(t)} />
                   ))}
                 </div>
               )}

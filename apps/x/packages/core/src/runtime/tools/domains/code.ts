@@ -9,6 +9,7 @@ import container from "../../../di/container.js";
 import type { CodeModeManager } from "../../../code-mode/acp/manager.js";
 import type { CodePermissionRegistry } from "../../../code-mode/acp/permission-registry.js";
 import type { ICodeSessionsRepo } from "../../../code-mode/sessions/repo.js";
+import type { CodeSessionService } from "../../../code-mode/sessions/service.js";
 import { ICodeModeConfigRepo } from "../../../code-mode/repo.js";
 import type { ApprovalPolicy, CodeRunEvent as CodeRunEventType } from "@x/shared/dist/code-mode.js";
 import type { CodeRunFeed } from "../../../code-mode/feed.js";
@@ -63,6 +64,46 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                 const sessionsRepo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
                 pinned = await sessionsRepo.get(ctx.sessionId).catch(() => null);
             }
+            // Fallback approval policy (used for un-pinned runs and adoption):
+            // the composer chip's, else global settings, else ask the user.
+            let fallbackPolicy: ApprovalPolicy = 'ask';
+            if (ctx.codePolicy) {
+                fallbackPolicy = ctx.codePolicy;
+            } else {
+                try {
+                    const cfg = await container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo').getConfig();
+                    if (cfg.approvalPolicy) fallbackPolicy = cfg.approvalPolicy;
+                } catch {
+                    // fall back to 'ask'
+                }
+            }
+            // The adoption rule: any session that runs a coding engine IS a
+            // code session. A session with no meta whose cwd resolves inside
+            // a registered project gets meta written on the spot — the run
+            // shows up in the Code section, status-tracked and resumable.
+            // Isolation is NOT retrofittable: adopted sessions work in-repo
+            // at the cwd this run targeted (worktrees exist only when chosen
+            // at dispatch), and scratch runs outside registered projects
+            // stay plain chats.
+            if (!pinned && ctx.sessionId) {
+                try {
+                    const candidate = path.resolve(expandHomePath(ctx.codeCwd ?? cwd));
+                    const service = container.resolve<CodeSessionService>('codeSessionService');
+                    const project = await service.findProjectForPath(candidate);
+                    if (project) {
+                        pinned = await service.createForSession(ctx.sessionId, {
+                            projectId: project.id,
+                            agent: ctx.codeMode ?? agent,
+                            policy: fallbackPolicy,
+                            isolation: 'in-repo',
+                            cwd: candidate,
+                        });
+                    }
+                } catch {
+                    // Adoption is best-effort — the run proceeds untracked
+                    // rather than failing coding work over bookkeeping.
+                }
+            }
             // The composer chip is the source of truth for the agent outside a Code
             // session. The model's `agent` argument is only a fallback for the
             // ask-human flow (code mode not active, no chip set) — otherwise it can
@@ -84,21 +125,9 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
             const manager = container.resolve<CodeModeManager>('codeModeManager');
             const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
 
-            // Approval policy: the session's (Code section) wins, else global settings,
-            // else default to asking the user.
-            let policy: ApprovalPolicy = 'ask';
-            if (pinned?.policy) {
-                policy = pinned.policy;
-            } else if (ctx.codePolicy) {
-                policy = ctx.codePolicy;
-            } else {
-                try {
-                    const cfg = await container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo').getConfig();
-                    if (cfg.approvalPolicy) policy = cfg.approvalPolicy;
-                } catch {
-                    // fall back to 'ask'
-                }
-            }
+            // Approval policy: the session's (pinned meta) wins, else the
+            // fallback chain resolved above.
+            const policy: ApprovalPolicy = pinned?.policy ?? fallbackPolicy;
 
             // On stop, unblock any pending approval card so the broker stops waiting for
             // an answer that will never come. The ACP cancel + force-kill backstop that

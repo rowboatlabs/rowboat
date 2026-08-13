@@ -74,14 +74,26 @@ export function CodeView({
   onSessionSelected,
   openDiffPath,
   onDiffOpened,
+  focusSessionId,
+  onFocusConsumed,
 }: {
   onSessionSelected?: (active: ActiveCodeSession | null) => void
   // A file path the chat asked to review (clicking a changed file in a tool call).
   openDiffPath?: string | null
   onDiffOpened?: () => void
+  // Deep-link from elsewhere (a Home Deck strip): select this session on
+  // mount/change instead of the remembered one.
+  focusSessionId?: string | null
+  onFocusConsumed?: () => void
 }) {
   const { projects, sessions, statusOf, refresh } = useCodeSessions()
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(readStoredSelectedSessionId)
+
+  useEffect(() => {
+    if (!focusSessionId) return
+    setSelectedSessionId(focusSessionId)
+    onFocusConsumed?.()
+  }, [focusSessionId, onFocusConsumed])
   const [newSessionProjectId, setNewSessionProjectId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CodeSession | null>(null)
   const [terminalOpen, setTerminalOpen] = useState(false)

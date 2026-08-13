@@ -2499,6 +2499,9 @@ function App() {
   // The code session that owns the right-hand chat pane: selecting a session
   // binds the assistant chat to it (a code session IS a chat session).
   const [activeCodeSession, setActiveCodeSession] = useState<ActiveCodeSession | null>(null)
+  // Deep-link into the Code section (a Home Deck strip's door): select this
+  // session when the view opens, then clear.
+  const [codeFocusSessionId, setCodeFocusSessionId] = useState<string | null>(null)
   // A file the code chat asked to review — consumed by the workspace pane.
   const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
   // Composer locks for runs that are code sessions: the session's cwd + agent
@@ -4602,6 +4605,31 @@ function App() {
   const [homeComposeTarget, setHomeComposeTarget] = useState<HomeComposeTarget | null>(null)
   const [homeComposerFocusSignal, setHomeComposerFocusSignal] = useState(0)
   const [homeComposerPreset, setHomeComposerPreset] = useState<string | undefined>(undefined)
+  // Code dispatch from Home (the Helm): an optional repo lane for the to-do
+  // being composed. Picking a lane makes the item a real code session
+  // (worktree by default) before its first turn — see todo:addItem `code`.
+  const [homeCodeProjects, setHomeCodeProjects] = useState<{ id: string; name: string }[]>([])
+  const [homeCodeProject, setHomeCodeProject] = useState<{ id: string; name: string } | null>(null)
+  const [homeCodeIsolation, setHomeCodeIsolation] = useState<'worktree' | 'in-repo'>('worktree')
+  const homeCodeProjectRef = useRef(homeCodeProject)
+  useEffect(() => { homeCodeProjectRef.current = homeCodeProject }, [homeCodeProject])
+  const homeCodeIsolationRef = useRef(homeCodeIsolation)
+  useEffect(() => { homeCodeIsolationRef.current = homeCodeIsolation }, [homeCodeIsolation])
+  useEffect(() => {
+    if (homeComposeTarget?.kind !== 'todo') return
+    let cancelled = false
+    void window.ipc.invoke('codeProject:list', null)
+      .then((res) => { if (!cancelled) setHomeCodeProjects(res.projects.map((p) => ({ id: p.project.id, name: p.project.name }))) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [homeComposeTarget?.kind])
+  useEffect(() => {
+    // The lane lives and dies with the destination chip.
+    if (!homeComposeTarget) {
+      setHomeCodeProject(null)
+      setHomeCodeIsolation('worktree')
+    }
+  }, [homeComposeTarget])
   const composeTodoOnHome = useCallback((target: HomeComposeTarget) => {
     setHomeComposeTarget(target)
     if ((target.kind === 'todo' || target.kind === 'sub') && target.prefill) {
@@ -4650,7 +4678,13 @@ function App() {
       } else if (target.kind === 'sub') {
         void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
       } else {
-        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
+        // A picked code lane is delegation intent as explicit as @rowboat —
+        // the item runs immediately in its repo.
+        const codeProject = homeCodeProjectRef.current
+        const code = codeProject
+          ? { projectId: codeProject.id, agent: codeMode, isolation: homeCodeIsolationRef.current }
+          : undefined
+        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text) || !!code, attachments, model, permissionMode, code })
       }
       setHomeComposeTarget(null)
       return
@@ -6492,7 +6526,37 @@ function App() {
                   {homeTab === 'todos' ? (
                     <TodoView
                       composer={
-                        <ChatInputWithMentions
+                        <div className="flex flex-col gap-1.5">
+                          {homeComposeTarget?.kind === 'todo' && homeCodeProjects.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 px-1">
+                              <span className="text-[11px] font-medium text-muted-foreground">Code lane:</span>
+                              {homeCodeProjects.slice(0, 6).map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => setHomeCodeProject((cur) => (cur?.id === p.id ? null : p))}
+                                  className={`rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+                                    homeCodeProject?.id === p.id
+                                      ? 'border-primary bg-primary text-primary-foreground'
+                                      : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
+                                  }`}
+                                >
+                                  {p.name}
+                                </button>
+                              ))}
+                              {homeCodeProject && (
+                                <button
+                                  type="button"
+                                  onClick={() => setHomeCodeIsolation((v) => (v === 'worktree' ? 'in-repo' : 'worktree'))}
+                                  title="Where the agent works: an isolated worktree branch (parallel-safe, reviewed before merge), or directly in the repo"
+                                  className="rounded-md border border-dashed border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                  {homeCodeIsolation}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <ChatInputWithMentions
                           knowledgeFiles={knowledgeFiles}
                           recentFiles={recentWikiFiles}
                           visibleFiles={visibleKnowledgeFiles}
@@ -6542,7 +6606,8 @@ function App() {
                           onStartCall={handleStartCall}
                           onEndCall={endCall}
                           callAvailable={voiceAvailable && ttsAvailable}
-                        />
+                          />
+                        </div>
                       }
                       onComposeTodo={composeTodoOnHome}
                       composeTarget={homeComposeTarget}
@@ -6556,6 +6621,12 @@ function App() {
                         // item's session.
                         bindChatToRun(sessionId)
                         setIsChatSidebarOpen(true)
+                      }}
+                      onOpenCodeSession={(sessionId) => {
+                        // A code strip's door: the Code section (diffs,
+                        // terminal, worktree), focused on this session.
+                        setCodeFocusSessionId(sessionId)
+                        void navigateToView({ type: 'code' })
                       }}
                       onShowOverview={() => setHomeTab('overview')}
                     />
@@ -6608,6 +6679,8 @@ function App() {
                     onSessionSelected={handleCodeSessionSelected}
                     openDiffPath={codeDiffPath}
                     onDiffOpened={() => setCodeDiffPath(null)}
+                    focusSessionId={codeFocusSessionId}
+                    onFocusConsumed={() => setCodeFocusSessionId(null)}
                   />
                 </div>
               ) : isLiveNotesOpen ? (

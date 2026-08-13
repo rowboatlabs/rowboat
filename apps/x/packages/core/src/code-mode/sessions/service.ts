@@ -21,6 +21,10 @@ export interface CreateSessionArgs {
     // the engine default. Re-applied to the ACP session on every turn.
     agentModel?: string;
     agentEffort?: string;
+    // In-repo only: pin a working directory inside the project (an adopted
+    // run may target a subdirectory). Worktree isolation always works in the
+    // worktree root.
+    cwd?: string;
 }
 
 function worktreeRoot(projectId: string, sessionId: string): string {
@@ -117,8 +121,32 @@ export class CodeSessionService {
         // cards, history) works on it with no code-mode special casing.
         const title = args.title?.trim() || `${project.name} session`;
         const sessionId = await this.sessions.createSession({ title });
+        return this.createForSession(sessionId, { ...args, title });
+    }
 
-        let cwd = project.path;
+    /**
+     * Adopt an EXISTING chat session as a code session: write the meta (and
+     * optional worktree) keyed by its id. This is how Home's code dispatch
+     * and the code_agent_run adoption hook materialize code sessions — the
+     * session already exists (a to-do item's thread, a plain chat), and after
+     * this the server-side pinning in code_agent_run resolves it like any
+     * Code-section session. Adopt-once: existing meta is returned untouched.
+     */
+    async createForSession(sessionId: string, args: CreateSessionArgs): Promise<CodeSession> {
+        const existing = await this.codeSessionsRepo.get(sessionId);
+        if (existing) return existing;
+        const project = await this.codeProjectsRepo.get(args.projectId);
+        if (!project) throw new Error(`Unknown project: ${args.projectId}`);
+
+        // Meta title: the caller's, else the chat's own (a to-do session is
+        // titled by its item text — keep that identity in the Code rail).
+        let title = args.title?.trim();
+        if (!title) {
+            title = await this.sessions.getSession(sessionId).then((s) => s.title?.trim()).catch(() => undefined);
+        }
+        title = title || `${project.name} session`;
+
+        let cwd = args.cwd ?? project.path;
         let worktree: CodeSession['worktree'];
         if (args.isolation === 'worktree') {
             const info = await gitService.repoInfo(project.path);
@@ -146,7 +174,31 @@ export class CodeSessionService {
         };
         await this.codeSessionsRepo.save(session);
         await persistRunWorkDir(sessionId, cwd);
+        // The status tracker caches "not a code session" verdicts; adoption
+        // is the one path where a plain chat BECOMES one mid-life.
+        try {
+            const { lazyResolve } = await import('../../di/lazy-resolve.js');
+            const tracker = await lazyResolve<{ noteCodeSession(id: string): void }>('codeSessionStatusTracker');
+            tracker.noteCodeSession(sessionId);
+        } catch {
+            // Best-effort (absent in tests) — the tracker also self-heals on
+            // its next unknown-id refresh.
+        }
         return session;
+    }
+
+    /** The registered project containing an absolute path, if any — longest
+     * path wins so nested registrations resolve to the closest project. */
+    async findProjectForPath(absPath: string): Promise<{ id: string; path: string; name: string } | null> {
+        const projects = await this.codeProjectsRepo.list().catch(() => []);
+        let best: { id: string; path: string; name: string } | null = null;
+        for (const project of projects) {
+            const root = path.resolve(project.path);
+            if (absPath === root || absPath.startsWith(root + path.sep)) {
+                if (!best || root.length > path.resolve(best.path).length) best = project;
+            }
+        }
+        return best;
     }
 
     async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'policy' | 'agent' | 'agentModel' | 'agentEffort'>>): Promise<CodeSession> {

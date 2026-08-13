@@ -12,6 +12,8 @@ import type { ISessions } from '../runtime/sessions/api.js';
 // app-layer affordance (same resolution pattern as main's sessions watcher).
 import type { EmitterSessionBus } from '../runtime/sessions/bus.js';
 import type { ICodeSessionsRepo } from '../code-mode/sessions/repo.js';
+import type { CodeSession } from '@x/shared/dist/code-sessions.js';
+import { worktreeDiffstatLine } from '../code-mode/sessions/review.js';
 import { readTodo } from '../todo/fileops.js';
 import { getSessionIndex } from '../todo/session-index.js';
 import { todoBus } from '../todo/bus.js';
@@ -163,6 +165,11 @@ export class HomeThreadsTracker {
     private readonly codeSessionsRepo: ICodeSessionsRepo;
 
     private readonly live = new Map<string, LiveTurnState>();
+    // Review-debt lines ("+42 −18 across 5 files…") per code session — git
+    // runs at most once per settle, never per snapshot. null = empty diff
+    // (nothing to review); absent = not computed yet.
+    private readonly reviewLines = new Map<string, string | null>();
+    private readonly reviewPending = new Set<string>();
     private readonly listeners = new Set<() => void>();
     private readonly unsubscribes: Array<() => void> = [];
     private pingTimer: ReturnType<typeof setTimeout> | null = null;
@@ -224,9 +231,31 @@ export class HomeThreadsTracker {
         if (!sessionId) return; // headless turns have no thread
         const next = transitionLive(this.live.get(sessionId), event.event);
         if (next === null) return;
-        if (next === 'clear') this.live.delete(sessionId);
-        else this.live.set(sessionId, next);
+        if (next === 'clear') {
+            this.live.delete(sessionId);
+            // A settled turn may have changed the diff — recompute lazily.
+            this.reviewLines.delete(sessionId);
+        } else {
+            this.live.set(sessionId, next);
+        }
         this.ping();
+    }
+
+    /** Cached review-debt line for a code session; kicks off one async git
+     * computation when unknown and pings on arrival. undefined = computing. */
+    private reviewLineFor(meta: CodeSession): string | null | undefined {
+        if (this.reviewLines.has(meta.id)) return this.reviewLines.get(meta.id);
+        if (!this.reviewPending.has(meta.id)) {
+            this.reviewPending.add(meta.id);
+            void worktreeDiffstatLine(meta)
+                .then((line) => {
+                    this.reviewLines.set(meta.id, line);
+                    this.reviewPending.delete(meta.id);
+                    this.ping();
+                })
+                .catch(() => this.reviewPending.delete(meta.id));
+        }
+        return undefined;
     }
 
     async markSeen(sessionId: string): Promise<void> {
@@ -287,6 +316,24 @@ export class HomeThreadsTracker {
                 if (last?.kind === 'question') {
                     status = 'needs-you';
                     attention = last.text;
+                }
+            }
+            // Review debt: a code thread whose worktree carries an actual
+            // unmerged diff after a completed turn awaits the user's review
+            // — it stays in the needs-you bay until merged or cleaned up.
+            // An empty diff never nags (the git accounting is cached per
+            // settle, see reviewLineFor).
+            if (
+                status === 'idle' &&
+                code?.worktree &&
+                !code.worktree.mergedAt &&
+                !code.worktree.removedAt &&
+                entry.latestTurnStatus === 'completed'
+            ) {
+                const line = this.reviewLineFor(code);
+                if (line) {
+                    status = 'ready';
+                    attention = `ready for review — ${line}`;
                 }
             }
 

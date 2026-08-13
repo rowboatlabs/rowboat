@@ -2861,7 +2861,7 @@ export function setupIpcHandlers() {
         const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
         const item = await addTodoItem(text);
         if (args.run || item.delegated) {
-          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual', code: args.code }).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return { success: true };

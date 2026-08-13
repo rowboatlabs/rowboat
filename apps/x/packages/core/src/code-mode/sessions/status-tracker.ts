@@ -20,9 +20,10 @@ export class CodeSessionStatusTracker {
     // Session ids known to be code sessions; refreshed lazily on unknown ids so
     // sessions created after start() are picked up without explicit wiring.
     private knownSessions = new Set<string>();
-    // Ids confirmed NOT to be code sessions (regular chats). Safe to cache
-    // permanently: a code session's meta file is written before its first
-    // turn, so an id that misses the refresh can never become one later.
+    // Ids confirmed NOT to be code sessions (regular chats). Mostly stable —
+    // but adoption (CodeSessionService.createForSession) is the one path
+    // where a plain chat BECOMES a code session mid-life, so the service
+    // clears the verdict via noteCodeSession() when it writes meta.
     private readonly knownNonSessions = new Set<string>();
 
     constructor({ turnEventBus, codeSessionsRepo }: { turnEventBus: ITurnEventBus; codeSessionsRepo: ICodeSessionsRepo }) {
@@ -59,6 +60,14 @@ export class CodeSessionStatusTracker {
 
     getStatuses(): Record<string, CodeSessionStatus> {
         return Object.fromEntries(this.statuses);
+    }
+
+    /** An existing chat was adopted as a code session (meta written after
+     * its first turns) — un-cache the "not a code session" verdict so its
+     * events start counting. */
+    noteCodeSession(sessionId: string): void {
+        this.knownSessions.add(sessionId);
+        this.knownNonSessions.delete(sessionId);
     }
 
     private async refreshKnownSessions(): Promise<void> {

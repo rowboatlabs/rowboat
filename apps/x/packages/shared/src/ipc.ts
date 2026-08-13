@@ -2837,6 +2837,15 @@ const ipcSchemas = {
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
       permissionMode: z.enum(['auto', 'manual']).optional(),
+      // Code dispatch (the Helm): materialize a real code session on the
+      // item's thread before it runs — worktree lane by default, a row in
+      // the Code section, status tracking. The agent's code_agent_run then
+      // resolves the pin server-side.
+      code: z.object({
+        projectId: z.string(),
+        agent: z.enum(['claude', 'codex']).optional(),
+        isolation: z.enum(['in-repo', 'worktree']).optional(),
+      }).optional(),
     }),
     res: z.object({
       success: z.boolean(),
