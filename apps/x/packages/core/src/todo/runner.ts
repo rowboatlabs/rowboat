@@ -282,6 +282,9 @@ async function landSettled(
                 title: '✓ To-do finished',
                 message: settled.text ?? itemText,
                 link: 'rowboat://open?type=home',
+                // The receipt lands visibly on Home — no toast needed while
+                // the user is already looking at the app.
+                onlyWhenBackground: true,
             });
             return { key: norm, sessionId, turnId, summary: settled.text };
         }

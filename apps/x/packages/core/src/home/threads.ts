@@ -43,6 +43,10 @@ const PING_DEBOUNCE_MS = 250;
 interface HomeState {
     seen: Record<string, string>;
     pins: string[];
+    /** Snoozes: until = expiry, since = when snoozed (activity after `since`
+     * trips the wire early). Stale entries are harmless — they stop matching
+     * and get overwritten by the next snooze. */
+    snoozed: Record<string, { until: string; since: string }>;
 }
 
 export interface LiveTurnState {
@@ -118,7 +122,16 @@ async function readState(): Promise<HomeState> {
         const raw = await fs.readFile(STATE_PATH, 'utf-8');
         const parsed: unknown = JSON.parse(raw);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            const obj = parsed as { seen?: unknown; pins?: unknown };
+            const obj = parsed as { seen?: unknown; pins?: unknown; snoozed?: unknown };
+            const snoozed: HomeState['snoozed'] = {};
+            if (obj.snoozed && typeof obj.snoozed === 'object' && !Array.isArray(obj.snoozed)) {
+                for (const [key, value] of Object.entries(obj.snoozed as Record<string, unknown>)) {
+                    const v = value as { until?: unknown; since?: unknown } | null;
+                    if (typeof v?.until === 'string' && typeof v?.since === 'string') {
+                        snoozed[key] = { until: v.until, since: v.since };
+                    }
+                }
+            }
             return {
                 seen:
                     obj.seen && typeof obj.seen === 'object' && !Array.isArray(obj.seen)
@@ -129,13 +142,14 @@ async function readState(): Promise<HomeState> {
                           )
                         : {},
                 pins: Array.isArray(obj.pins) ? obj.pins.filter((p): p is string => typeof p === 'string') : [],
+                snoozed,
             };
         }
     } catch {
-        // missing or corrupt — start fresh; seen/pins are losable attention
-        // state, never work state.
+        // missing or corrupt — start fresh; seen/pins/snoozes are losable
+        // attention state, never work state.
     }
-    return { seen: {}, pins: [] };
+    return { seen: {}, pins: [], snoozed: {} };
 }
 
 async function writeState(mutate: (state: HomeState) => void): Promise<void> {
@@ -175,6 +189,9 @@ export class HomeThreadsTracker {
     private readonly listeners = new Set<() => void>();
     private readonly unsubscribes: Array<() => void> = [];
     private pingTimer: ReturnType<typeof setTimeout> | null = null;
+    // One wake timer for the earliest snooze expiry — expiries emit no event,
+    // so the registry wakes itself to resurface the thread on time.
+    private snoozeWake: { at: number; timer: ReturnType<typeof setTimeout> } | null = null;
     private started = false;
 
     constructor({
@@ -214,7 +231,23 @@ export class HomeThreadsTracker {
         this.unsubscribes.length = 0;
         if (this.pingTimer) clearTimeout(this.pingTimer);
         this.pingTimer = null;
+        if (this.snoozeWake) clearTimeout(this.snoozeWake.timer);
+        this.snoozeWake = null;
         this.started = false;
+    }
+
+    private scheduleSnoozeWake(untilIso: string): void {
+        const at = Date.parse(untilIso);
+        if (!Number.isFinite(at) || at <= Date.now()) return;
+        if (this.snoozeWake && this.snoozeWake.at <= at) return; // an earlier wake covers it
+        if (this.snoozeWake) clearTimeout(this.snoozeWake.timer);
+        this.snoozeWake = {
+            at,
+            timer: setTimeout(() => {
+                this.snoozeWake = null;
+                this.ping();
+            }, Math.min(at - Date.now() + 250, 2_147_000_000)),
+        };
     }
 
     /** Debounced change signal — consumers refetch the snapshot. */
@@ -280,6 +313,18 @@ export class HomeThreadsTracker {
         this.ping();
     }
 
+    /** Snooze a thread out of the needs-you bay: back at `hours` from now,
+     * or the moment the session sees new activity — whichever comes first. */
+    async snooze(sessionId: string, hours = 4): Promise<void> {
+        const now = new Date();
+        const until = new Date(now.getTime() + hours * 3_600_000);
+        await writeState((state) => {
+            state.snoozed[sessionId] = { until: until.toISOString(), since: now.toISOString() };
+        });
+        this.scheduleSnoozeWake(until.toISOString());
+        this.ping();
+    }
+
     async snapshot(): Promise<HomeThread[]> {
         const entries = this.sessions.listSessions();
         const [todoIndex, todoList, codeMetas, projects, state] = await Promise.all([
@@ -294,6 +339,9 @@ export class HomeThreadsTracker {
         const items = itemsByKey(todoList);
         const codeById = new Map(codeMetas.map((meta) => [meta.id, meta]));
         const pins = new Set(state.pins);
+        // Slot = position in the pin ORDER, so 1–9 recall never reshuffles.
+        const pinIndexById = new Map(state.pins.map((id, i) => [id, i]));
+        const now = new Date().toISOString();
 
         const threads: HomeThread[] = [];
         for (const entry of entries) {
@@ -344,7 +392,15 @@ export class HomeThreadsTracker {
                 }
             }
 
+            // The tripwire: a live snooze suppresses the needs-you bay until
+            // its time passes OR the session moves again — whichever first.
+            const snoozeEntry = state.snoozed[entry.sessionId];
+            const snoozed = !!snoozeEntry && now < snoozeEntry.until && entry.updatedAt <= snoozeEntry.since;
+            // Boot-persisted snoozes need their wake re-armed.
+            if (snoozed) this.scheduleSnoozeWake(snoozeEntry.until);
+
             const seenAt = state.seen[entry.sessionId];
+            const pinIndex = pinIndexById.get(entry.sessionId);
             threads.push({
                 sessionId: entry.sessionId,
                 kind: code ? 'code' : todoKey ? 'task' : 'chat',
@@ -353,6 +409,8 @@ export class HomeThreadsTracker {
                 attention,
                 activity: live?.activity,
                 todoKey,
+                ...(pinIndex !== undefined ? { pinIndex } : {}),
+                ...(snoozed ? { snoozed } : {}),
                 code: code
                     ? {
                           projectId: code.projectId,

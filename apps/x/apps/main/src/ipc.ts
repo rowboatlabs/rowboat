@@ -2899,6 +2899,15 @@ export function setupIpcHandlers() {
         return { success: false };
       }
     },
+    'home:snooze': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.snooze(args.sessionId, args.hours);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
     'todo:stopRun': async (_event, args) => {
       try {
         const stopped = await stopTodoRun(args.key);

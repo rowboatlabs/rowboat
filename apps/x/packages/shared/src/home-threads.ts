@@ -50,6 +50,12 @@ export interface HomeThread {
     startedAt?: string;
     /** Kept on the Deck even while idle (the operator's watch flag). */
     pinned: boolean;
+    /** Stable recall slot when pinned (0-based; keys 1–9 jump by slot).
+     * Order is the pin order, so slots never reshuffle. */
+    pinIndex?: number;
+    /** Snoozed out of the needs-you bay — returns at the chosen time or on
+     * new activity, whichever comes first (the Linear tripwire). */
+    snoozed?: boolean;
     /** Updated since the user last looked at this thread. */
     unseen: boolean;
 }

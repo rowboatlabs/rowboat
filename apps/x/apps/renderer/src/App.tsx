@@ -37,7 +37,6 @@ import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
-import { HomeView } from '@/components/home-view';
 import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
@@ -818,7 +817,6 @@ function App() {
   const [isHomeOpen, setIsHomeOpen] = useState(true)
   // Home surface: the to-do list is the primary tab; the legacy dashboard
   // stays reachable via its Overview toggle.
-  const [homeTab, setHomeTab] = useState<'todos' | 'overview'>('todos')
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
   // Search query pushed into the email view's search box (e.g. the assistant's
@@ -3244,8 +3242,8 @@ function App() {
           modifiedAt: event.entry.updatedAt,
           agentId: event.entry.lastAgentId ?? 'copilot',
         }
-        // Re-sort: chat-header and home-view slice the top of this list
-        // without sorting, so it must stay newest-first like sessions:list.
+        // Re-sort: chat-header slices the top of this list without sorting,
+        // so it must stay newest-first like sessions:list.
         const recency = (run: RunListItem) => {
           const ms = new Date(run.modifiedAt).getTime()
           return Number.isNaN(ms) ? 0 : ms
@@ -6523,7 +6521,6 @@ function App() {
                 />
               ) : isHomeOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  {homeTab === 'todos' ? (
                     <TodoView
                       composer={
                         <div className="flex flex-col gap-1.5">
@@ -6629,32 +6626,7 @@ function App() {
                         void navigateToView({ type: 'code' })
                       }}
                       onSkipperCall={voiceAvailable && ttsAvailable ? () => handleStartCall('voice') : undefined}
-                      onShowOverview={() => setHomeTab('overview')}
                     />
-                  ) : (
-                    <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setHomeTab('todos')}
-                        className="absolute right-6 top-4 z-10 rounded-md border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
-                      >
-                        ← To-dos
-                      </button>
-                      <HomeView
-                        tree={tree}
-                        runs={runs}
-                        bgTaskSummaries={bgTaskSummaries}
-                        onOpenEmail={() => openEmailView()}
-                        onOpenMeetings={openMeetingsView}
-                        onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                        onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                        onOpenNote={(path) => navigateToFile(path)}
-                        onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                        onTakeMeetingNotes={() => { void handleToggleMeeting() }}
-                        onOpenChat={handleNewChatTab}
-                      />
-                    </div>
-                  )}
                 </div>
               ) : isSuggestedTopicsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

@@ -788,6 +788,13 @@ const ipcSchemas = {
     req: z.object({ sessionId: z.string(), pinned: z.boolean() }),
     res: z.object({ success: z.boolean() }),
   },
+  // Snooze a needs-you thread out of the bay. It returns at the chosen time
+  // or on new session activity, whichever comes first — a tripwire, never a
+  // mute. Default 4 hours.
+  'home:snooze': {
+    req: z.object({ sessionId: z.string(), hours: z.number().positive().max(168).optional() }),
+    res: z.object({ success: z.boolean() }),
+  },
   // Push ping: the registry changed — refetch home:threads. Debounced in
   // the tracker; carries no payload by design (the snapshot is the truth).
   'home:threadsChanged': {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, Check, ChevronDown, FileText, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, ChevronDown, Clock, FileText, ListPlus, Loader2, MessageCircle, Pin, Plus, RotateCcw, Sparkles, Square, SquarePen, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
@@ -18,7 +18,6 @@ type TodoViewProps = {
   onOpenNote: (path: string) => void
   /** Bind the chat dock to an item's session — the full thread view. */
   onOpenInChat: (sessionId: string) => void
-  onShowOverview: () => void
   /** Start a brand-new chat (the app's canonical new-chat flow). */
   onNewChat?: () => void
   /** Focus the page-bottom composer — the "c" shortcut's landing spot. */
@@ -911,7 +910,7 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   return stripBubbleMarkup(last.text) || links
 }
 
-function ConversationsSection({ threads, total = 0, loaded = false, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onNewChat, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
+function ConversationsSection({ threads, total = 0, loaded = false, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onNewChat, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat, pinnedIds, onTogglePin }: {
   threads: StreamThread[]
   /** Threads that exist beyond the cap — the footer says so when > shown. */
   total?: number
@@ -932,6 +931,9 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
   changedSessionIds?: Set<string>
   /** Hide from Home (attention filter — the session stays in history). */
   onHide?: (sessionId: string) => void
+  /** Threads pinned to the Deck (the watch flag) + its toggle. */
+  pinnedIds?: Set<string>
+  onTogglePin?: (sessionId: string, pinned: boolean) => void
   /** Everything, in the chat history view. */
   onViewAll?: () => void
   /** Start a brand-new chat. */
@@ -1045,6 +1047,18 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
                       <ArrowUpRight className="size-3.5" />
                     </button>
                   </IconTip>
+                  {onTogglePin && (
+                    <IconTip label={pinnedIds?.has(t.sessionId) ? 'Unpin from the Deck' : 'Pin to the Deck — keeps a strip even while idle'}>
+                      <button
+                        type="button"
+                        onClick={() => onTogglePin(t.sessionId, !pinnedIds?.has(t.sessionId))}
+                        aria-label="Pin to the Deck"
+                        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <Pin className={`size-3.5 ${pinnedIds?.has(t.sessionId) ? 'fill-current' : ''}`} />
+                      </button>
+                    </IconTip>
+                  )}
                   {onHide && (
                     <IconTip label="Hide from Home — stays in your chat history">
                       <button
@@ -1241,12 +1255,18 @@ function stripTitle(thread: HomeThread): string {
     .trim() || 'Untitled'
 }
 
-function DeckStrip({ thread, onJump, onOpen }: {
+const STRIP_HOVER_BTN = 'shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/strip:opacity-100'
+
+function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze }: {
   thread: HomeThread
   /** Click: spotlight the source in place (falls back to the dock). */
   onJump: () => void
   /** ⏎ / the ↗ button: the full conversation in the sidebar. */
   onOpen: () => void
+  /** The watch flag — pinned strips stay on the Deck and get a number key. */
+  onTogglePin: () => void
+  /** Needs-you bay only: park it for 4h or until the thread moves. */
+  onSnooze?: () => void
 }) {
   const needs = thread.status === 'needs-you' || thread.status === 'ready'
   const live = thread.status === 'underway'
@@ -1272,11 +1292,37 @@ function DeckStrip({ thread, onJump, onOpen }: {
         {needs ? (thread.attention ?? 'waiting on you') : activityLabel(thread.activity)}
       </span>
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">{relativeTime(thread.startedAt ?? thread.updatedAt)}</span>
+      {thread.pinIndex !== undefined && thread.pinIndex < 9 && (
+        <span
+          title={`Press ${thread.pinIndex + 1} to jump here`}
+          className="shrink-0 rounded border border-border px-1 font-mono text-[9px] leading-4 text-muted-foreground/70"
+        >
+          {thread.pinIndex + 1}
+        </span>
+      )}
+      {onSnooze && (
+        <IconTip label="Snooze 4h — returns early if the thread moves">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onSnooze() }} className={STRIP_HOVER_BTN}>
+            <Clock className="size-3.5" />
+          </button>
+        </IconTip>
+      )}
+      <IconTip label={thread.pinned ? 'Unpin — drops off the Deck when idle' : 'Pin to the Deck — stays while idle, gets a number key'}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onTogglePin() }}
+          className={thread.pinned
+            ? 'shrink-0 rounded p-0.5 text-foreground/70 transition-colors hover:bg-accent'
+            : STRIP_HOVER_BTN}
+        >
+          <Pin className={`size-3.5 ${thread.pinned ? 'fill-current' : ''}`} />
+        </button>
+      </IconTip>
       <IconTip label={thread.kind === 'code' ? 'Open in the Code section — diffs, terminal, worktree' : 'Open the full conversation in the sidebar'}>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onOpen() }}
-          className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/strip:opacity-100"
+          className={STRIP_HOVER_BTN}
         >
           <ArrowUpRight className="size-3.5" />
         </button>
@@ -1285,7 +1331,7 @@ function DeckStrip({ thread, onJump, onOpen }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession, onSkipperCall }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession, onSkipperCall }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
@@ -1622,7 +1668,25 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
           e.preventDefault()
           const target = strips[deckCycleRef.current % strips.length]
           deckCycleRef.current += 1
+          lastJumpedRef.current = target
           jumpToStripRef.current(target)
+        }
+      } else if (e.key >= '1' && e.key <= '9') {
+        // Control groups: pinned strips answer to their number key.
+        const slot = Number(e.key) - 1
+        const target = deckThreadsRef.current.find((t) => t.pinIndex === slot)
+        if (target) {
+          e.preventDefault()
+          lastJumpedRef.current = target
+          jumpToStripRef.current(target)
+        }
+      } else if (e.key === 'h') {
+        // Snooze the J-cursor's last stop (needs-you only) — the tripwire.
+        const target = lastJumpedRef.current
+        if (target && (target.status === 'needs-you' || target.status === 'ready')) {
+          e.preventDefault()
+          snoozeThreadRef.current(target)
+          lastJumpedRef.current = null
         }
       }
     }
@@ -1725,6 +1789,17 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
     }
     openInChat(thread.sessionId)
   }, [onOpenCodeSession, openInChat, markSessionSeen])
+
+  const togglePin = useCallback((thread: HomeThread) => {
+    void window.ipc.invoke('home:setPinned', { sessionId: thread.sessionId, pinned: !thread.pinned })
+  }, [])
+  const snoozeThread = useCallback((thread: HomeThread) => {
+    void window.ipc.invoke('home:snooze', { sessionId: thread.sessionId })
+    toast('Snoozed — back in 4h, or sooner if the thread moves')
+  }, [])
+  const snoozeThreadRef = useRef(snoozeThread)
+  useEffect(() => { snoozeThreadRef.current = snoozeThread }, [snoozeThread])
+  const pinnedIds = new Set(deckThreads.filter((t) => t.pinned).map((t) => t.sessionId))
 
   const startChat = useCallback(async (text: string) => {
     const res = await window.ipc.invoke('todo:startChat', { text })
@@ -1831,21 +1906,27 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
 
   // ---- Deck bays: projections of the registry, fixed order ----
   // Needs-you is the queue: oldest first, so J always serves the longest
-  // wait. Underway orders by start; pinned idle threads keep their strip
-  // (the watch flag).
+  // wait; snoozed threads are parked out of it (they return on time or on
+  // activity). Underway orders by start; pinned idle threads keep their
+  // strip (the watch flag).
   const deckNeedsYou = deckThreads
-    .filter((t) => t.status === 'needs-you' || t.status === 'ready')
+    .filter((t) => (t.status === 'needs-you' || t.status === 'ready') && !t.snoozed)
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
   const deckUnderway = deckThreads
-    .filter((t) => t.status === 'underway' || (t.pinned && t.status === 'idle'))
+    .filter((t) => t.status === 'underway' || (t.pinned && (t.snoozed || t.status === 'idle')))
     .sort((a, b) => (a.startedAt ?? a.updatedAt).localeCompare(b.startedAt ?? b.updatedAt))
   const deckNeedsYouRef = useRef(deckNeedsYou)
   deckNeedsYouRef.current = deckNeedsYou
+  const deckThreadsRef = useRef(deckThreads)
+  deckThreadsRef.current = deckThreads
+  // The J-cursor's last stop — what H snoozes.
+  const lastJumpedRef = useRef<HomeThread | null>(null)
 
   // Skipper's watch: the fleet state as one glance (and one sentence).
+  // Snoozed threads are deliberately parked — they don't count.
   const skipperUnderway = deckThreads.filter((t) => t.status === 'underway').length
-  const skipperNeeds = deckThreads.filter((t) => t.status === 'needs-you').length
-  const skipperReady = deckThreads.filter((t) => t.status === 'ready').length
+  const skipperNeeds = deckThreads.filter((t) => t.status === 'needs-you' && !t.snoozed).length
+  const skipperReady = deckThreads.filter((t) => t.status === 'ready' && !t.snoozed).length
   const sitrep = [
     skipperUnderway > 0 && `${skipperUnderway} underway`,
     skipperNeeds > 0 && `${skipperNeeds} need${skipperNeeds === 1 ? 's' : ''} you`,
@@ -1992,13 +2073,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                   Clear done
                 </button>
               )}
-              <button
-                type="button"
-                onClick={onShowOverview}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <LayoutGrid className="size-3.5" /> Overview
-              </button>
               {/* Skipper takes the watch — the ambient channel: rowing while
                   threads are underway, an amber count when something needs
                   you, a sitrep on hover, voice on click. */}
@@ -2035,7 +2109,14 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                     <div className="text-[10.5px] text-muted-foreground/60">J cycles the queue</div>
                   </div>
                   {deckNeedsYou.map((t) => (
-                    <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openStrip(t)} />
+                    <DeckStrip
+                      key={t.sessionId}
+                      thread={t}
+                      onJump={() => { lastJumpedRef.current = t; jumpToStrip(t) }}
+                      onOpen={() => openStrip(t)}
+                      onTogglePin={() => togglePin(t)}
+                      onSnooze={() => snoozeThread(t)}
+                    />
                   ))}
                 </div>
               )}
@@ -2047,8 +2128,21 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                     Underway{skipperUnderway > 0 ? ` · ${skipperUnderway}` : ''}
                   </div>
                   {deckUnderway.map((t) => (
-                    <DeckStrip key={t.sessionId} thread={t} onJump={() => jumpToStrip(t)} onOpen={() => openStrip(t)} />
+                    <DeckStrip
+                      key={t.sessionId}
+                      thread={t}
+                      onJump={() => jumpToStrip(t)}
+                      onOpen={() => openStrip(t)}
+                      onTogglePin={() => togglePin(t)}
+                    />
                   ))}
+                  {/* Little's law, softly: every thread you start joins the
+                      divisor under everything else. Never a cap. */}
+                  {skipperUnderway >= 6 && (
+                    <div className="px-2 pt-1 text-[11px] text-muted-foreground/60">
+                      {skipperUnderway} underway — landing one beats launching one.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2331,6 +2425,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
               .filter((t) => t.updatedAt > seenBaseline && t.updatedAt > (sessionSeenAt[t.sessionId] ?? ''))
               .map((t) => t.sessionId))}
             onHide={hideThread}
+            pinnedIds={pinnedIds}
+            onTogglePin={(sessionId, pinned) => void window.ipc.invoke('home:setPinned', { sessionId, pinned })}
             onViewAll={onOpenChatHistory}
             onToggle={toggleThread}
             onReply={(sid) => (onComposeTodo

@@ -174,6 +174,9 @@ export class CodeSessionStatusTracker {
                 await notifyIfEnabled('chat_completion', {
                     title,
                     message: 'The coding agent finished its turn.',
+                    // The category's own contract ("while the app is in the
+                    // background") — the session row already shows the settle.
+                    onlyWhenBackground: true,
                 });
             }
         }
