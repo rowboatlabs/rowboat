@@ -65,6 +65,21 @@ class FakeClient implements SessionsClient {
     this.record('sendMessage', sessionId, input, config)
     return { turnId: 'turn-next' }
   }
+  async sendOrQueueMessage(sessionId: string, input: unknown, config: unknown) {
+    this.record('sendOrQueueMessage', sessionId, input, config)
+    return { queued: false as const, turnId: 'turn-next' }
+  }
+  async listQueued(sessionId: string) {
+    this.record('listQueued', sessionId)
+    return { queue: [] }
+  }
+  async editQueued(...args: unknown[]) {
+    this.record('editQueued', ...args)
+  }
+  async removeQueued(...args: unknown[]) {
+    this.record('removeQueued', ...args)
+    return { removed: null }
+  }
   async respondToPermission(...args: unknown[]) {
     this.record('respondToPermission', ...args)
   }
@@ -73,6 +88,7 @@ class FakeClient implements SessionsClient {
   }
   async stopTurn(...args: unknown[]) {
     this.record('stopTurn', ...args)
+    return { dequeued: [] }
   }
   async resumeTurn(...args: unknown[]) {
     this.record('resumeTurn', ...args)
@@ -104,6 +120,7 @@ function makeStore() {
         emit = () => undefined
       }
     },
+    subscribeSessionFeed: () => () => undefined,
     subscribeDeltas: (turnId) => {
       deltaSubs.push(turnId)
       return () => {
@@ -289,7 +306,11 @@ describe('SessionChatStore', () => {
     await store.answerAskHuman('ah1', '42')
     await store.stop()
 
-    expect(client.calls.filter((c) => c.method !== 'get' && c.method !== 'getTurn')).toEqual([
+    expect(
+      client.calls.filter(
+        (c) => c.method !== 'get' && c.method !== 'getTurn' && c.method !== 'listQueued',
+      ),
+    ).toEqual([
       { method: 'sendMessage', args: [S1, user('next'), { agent: { agentId: 'copilot' } }] },
       { method: 'respondToPermission', args: ['turn-1', 'tc1', 'allow', undefined] },
       { method: 'respondToAskHuman', args: ['turn-1', 'ah1', '42'] },

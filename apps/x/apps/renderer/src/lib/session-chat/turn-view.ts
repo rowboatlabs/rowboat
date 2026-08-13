@@ -282,20 +282,36 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
   let seq = 0
   const ts = () => Date.parse(state.definition.ts) + seq++
 
-  const userText = extractText(state.definition.input.content)
-  const attachments = extractAttachments(state.definition.input.content)
-  if (userText || attachments) {
-    items.push({
-      id: `${turnId}:user`,
-      role: 'user',
-      content: userText,
-      timestamp: ts(),
-      ...(attachments ? { attachments } : {}),
-    } satisfies ChatMessage)
+  const pushUser = (
+    message: TurnState['definition']['input'],
+    idSuffix: string,
+  ) => {
+    const userText = extractText(message.content)
+    const attachments = extractAttachments(message.content)
+    if (userText || attachments) {
+      items.push({
+        id: `${turnId}:user${idSuffix}`,
+        role: 'user',
+        content: userText,
+        timestamp: ts(),
+        ...(attachments ? { attachments } : {}),
+      } satisfies ChatMessage)
+    }
+  }
+  pushUser(state.definition.input, '')
+  // Steered messages (input_added) render at the boundary the model saw
+  // them: before the model call that first transmitted them.
+  const pushAddedInputs = (boundary: number) => {
+    for (const added of state.addedInputs) {
+      if (added.firstAffectedModelCallIndex === boundary) {
+        pushUser(added.event.message, `:${added.event.inputIndex}`)
+      }
+    }
   }
 
   const toolCallsById = new Map(state.toolCalls.map((tc) => [tc.toolCallId, tc]))
   for (const call of state.modelCalls) {
+    pushAddedInputs(call.index)
     if (call.response === undefined) continue
     const content = call.response.content
     // The model's thought process precedes what it produced. Encrypted-only
@@ -349,6 +365,10 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
       }
     }
   }
+
+  // Inputs accepted after the last requested call (turn stopped before the
+  // next request) still render — they were durably accepted.
+  pushAddedInputs(state.modelCalls.length)
 
   if (state.terminal?.type === 'turn_failed') {
     // Interactive turns normally wrap up gracefully before hitting the

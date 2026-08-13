@@ -17,7 +17,7 @@ import {
 } from './background-task.js';
 import { UserMessage, UserMessageContent } from './message.js';
 import { RequestedAgent, type TurnBusEvent, type TurnEvent } from './turns.js';
-import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
+import type { QueuedSessionMessage, SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
@@ -638,6 +638,43 @@ const ipcSchemas = {
     }),
     res: z.object({ turnId: z.string() }),
   },
+  // Deliver-ASAP send: starts a turn when the session is settled, otherwise
+  // queues (ephemeral, main-process memory) — queued messages steer the live
+  // turn at its next model-call boundary or promote to a new turn at settle.
+  'sessions:sendOrQueueMessage': {
+    req: z.object({
+      sessionId: z.string(),
+      input: UserMessage,
+      config: z.object({
+        agent: RequestedAgent,
+        useCase: UseCase.optional(),
+        subUseCase: z.string().optional(),
+        autoPermission: z.boolean().optional(),
+        maxModelCalls: z.number().int().positive().optional(),
+        reasoningEffort: ReasoningEffort.optional(),
+      }),
+    }),
+    res: z.union([
+      z.object({ queued: z.literal(false), turnId: z.string() }),
+      z.object({ queued: z.literal(true), queueId: z.string() }),
+    ]),
+  },
+  'sessions:listQueued': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ queue: z.array(z.custom<QueuedSessionMessage>()) }),
+  },
+  'sessions:editQueued': {
+    req: z.object({
+      sessionId: z.string(),
+      queueId: z.string(),
+      message: UserMessage,
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:removeQueued': {
+    req: z.object({ sessionId: z.string(), queueId: z.string() }),
+    res: z.object({ removed: z.custom<QueuedSessionMessage>().nullable() }),
+  },
   'sessions:respondToPermission': {
     req: z.object({
       turnId: z.string(),
@@ -660,7 +697,13 @@ const ipcSchemas = {
       turnId: z.string(),
       reason: z.string().optional(),
     }),
-    res: z.object({ success: z.literal(true) }),
+    // dequeued: pending messages drained by the stop (a stop must not be
+    // followed by a queued message auto-starting) — the UI restores their
+    // text to the composer.
+    res: z.object({
+      success: z.literal(true),
+      dequeued: z.array(z.custom<QueuedSessionMessage>()),
+    }),
   },
   'sessions:resumeTurn': {
     req: z.object({ sessionId: z.string() }),

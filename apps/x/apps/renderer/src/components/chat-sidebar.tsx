@@ -10,6 +10,7 @@ import { FileCardProvider } from '@/contexts/file-card-context'
 import { type ChatTab } from '@/components/tab-bar'
 import { type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from '@/components/chat-input-with-mentions'
 import { ChatSessionPane, ChatSessionComposer } from '@/components/chat-session'
+import type { QueuedSessionMessage } from '@x/shared/src/sessions.js'
 import { useTabMeta } from '@/lib/tab-meta'
 import { useSidebar } from '@/components/ui/sidebar'
 import type { ChatPaneSize } from '@/contexts/theme-context'
@@ -79,6 +80,10 @@ interface ChatSidebarProps {
   isStopping?: boolean
   onStop?: () => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
+  /** Pending-queue mirror for the ACTIVE tab's session (single store — see App). */
+  queuedForActive?: QueuedSessionMessage[]
+  onRemoveQueued?: (queueId: string) => void
+  onPullQueued?: (queueId: string) => void
   knowledgeFiles?: string[]
   recentFiles?: string[]
   visibleFiles?: string[]
@@ -156,6 +161,9 @@ export function ChatSidebar({
   isStopping,
   onStop,
   onSubmit,
+  queuedForActive,
+  onRemoveQueued,
+  onPullQueued,
   knowledgeFiles = [],
   recentFiles = [],
   visibleFiles = [],
@@ -483,6 +491,9 @@ export function ChatSidebar({
                         onStop={onStop}
                         activeIsProcessing={isProcessing}
                         isStopping={isStopping}
+                        queued={isActive ? queuedForActive : undefined}
+                        onRemoveQueued={onRemoveQueued}
+                        onPullQueued={onPullQueued}
                         presetMessage={localPresetMessage ?? presetMessage}
                         onPresetMessageConsumed={() => {
                           setLocalPresetMessage(undefined)

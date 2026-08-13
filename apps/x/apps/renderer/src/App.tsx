@@ -12,7 +12,7 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
-import { ChatSessionPane, ChatSessionComposer } from './components/chat-session';
+import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './components/chat-session';
 // Value import: the Home to-do surface mounts a standalone composer directly
 // (not tab-bound); chat tabs render theirs through ChatSessionComposer.
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
@@ -3577,12 +3577,12 @@ function App() {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => {
-    if (activeIsProcessing) {
+    if (activeIsProcessing && (inCallRef.current || quickAskActiveRef.current)) {
       // In-call and quick-ask input arrives at arbitrary moments — a hard
       // drop here silently ate utterances submitted while the previous turn
       // was still stopping (the PTT interrupt is async). Finish the stop and
-      // proceed with this message instead.
-      if (!inCallRef.current && !quickAskActiveRef.current) return
+      // proceed with this message instead. Ordinary typed sends proceed while
+      // busy: sessions:sendOrQueueMessage queues them to steer the live turn.
       await stopRunRef.current?.()
     }
 
@@ -3767,19 +3767,13 @@ function App() {
         }
       }
 
-      // One retry: an in-call submit can land while the previous turn's
-      // abort hasn't fully settled in the runtime — losing the message (and
-      // its spoken answer) over that race is much worse than a short delay.
-      const sendSessionMessage = async (payload: Parameters<typeof window.ipc.invoke<'sessions:sendMessage'>>[1]) => {
-        try {
-          await window.ipc.invoke('sessions:sendMessage', payload)
-        } catch (err) {
-          console.error('[chat] sendMessage failed, retrying once:', err)
-          await new Promise((resolve) => setTimeout(resolve, 600))
-          await window.ipc.invoke('sessions:sendMessage', payload)
-        }
-      }
+      // Deliver-ASAP: a busy session queues the message (it steers the live
+      // turn at the next model-call boundary or starts the next turn), so a
+      // mid-turn send is never rejected or dropped.
+      const sendSessionMessage = (payload: Parameters<typeof window.ipc.invoke<'sessions:sendOrQueueMessage'>>[1]) =>
+        window.ipc.invoke('sessions:sendOrQueueMessage', payload)
 
+      let sendResult: Awaited<ReturnType<typeof sendSessionMessage>>
       if (hasAttachments || hasMentions || videoFrames.length > 0) {
         type ContentPart =
           | { type: 'text'; text: string }
@@ -3840,7 +3834,7 @@ function App() {
         }
 
         const middlePaneContext = await buildMiddlePaneContext()
-        await sendSessionMessage({
+        sendResult = await sendSessionMessage({
           sessionId: currentRunId,
           input: {
             role: 'user',
@@ -3856,7 +3850,7 @@ function App() {
         })
       } else {
         const middlePaneContext = await buildMiddlePaneContext()
-        await sendSessionMessage({
+        sendResult = await sendSessionMessage({
           sessionId: currentRunId,
           input: {
             role: 'user',
@@ -3870,6 +3864,14 @@ function App() {
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
         })
+      }
+
+      // Queued (the latest turn was still running): there is no turn for
+      // this message yet — the pending chip above the composer represents it,
+      // and the real bubble arrives via turn events when it is delivered.
+      // Retract the optimistic bubble so it can't double-render.
+      if (sendResult.queued) {
+        setConversation((prev) => prev.filter((item) => item.id !== userMessageId))
       }
 
       pendingVoiceInputRef.current = false
@@ -3918,12 +3920,44 @@ function App() {
     ttsRef.current.cancel()
     setAssistantCaption('')
     try {
-      await sessionChat.stop()
+      // Stop drains the pending queue (queued messages must not auto-start
+      // after an explicit stop) — restore their text into the composer so
+      // nothing the user typed is lost.
+      const dequeued = await sessionChat.stop()
+      const drainedText = dequeued
+        .map((entry) => queuedMessageText(entry.message))
+        .filter(Boolean)
+        .join('\n\n')
+      if (drainedText) {
+        const draft = chatDraftsRef.current
+          .get(chatIdForTab(activeChatTabIdRef.current))
+          ?.trim()
+        setPresetMessage(draft ? `${draft}\n\n${drainedText}` : drainedText)
+      }
     } catch (error) {
       console.error('Failed to stop turn:', error)
     }
-  }, [runId, sessionChat])
+  }, [runId, sessionChat, chatIdForTab])
   stopRunRef.current = handleStop
+
+  // Pending-queue chips (messages sent while the turn was running): ✕
+  // discards the message; clicking the chip body pulls it back out of the
+  // queue and into the composer for editing.
+  const handleRemoveQueued = useCallback((queueId: string) => {
+    sessionChat.removeQueued(queueId).catch((error) => {
+      console.error('Failed to remove queued message:', error)
+    })
+  }, [sessionChat])
+
+  const handlePullQueued = useCallback(async (queueId: string) => {
+    try {
+      const removed = await sessionChat.removeQueued(queueId)
+      const text = removed ? queuedMessageText(removed.message) : ''
+      if (text) setPresetMessage(text)
+    } catch (error) {
+      console.error('Failed to pull back queued message:', error)
+    }
+  }, [sessionChat])
 
   const handlePermissionResponse = useCallback(async (
     toolCallId: string,
@@ -7692,6 +7726,15 @@ function App() {
                           onStop={handleStop}
                           activeIsProcessing={activeIsProcessing}
                           isStopping={isStopping}
+                          // The single session store follows the ACTIVE tab's
+                          // run — only that tab's composer shows its queue.
+                          queued={
+                            isActive && tab.runId && sessionChat.sessionId === tab.runId
+                              ? sessionChat.queued
+                              : undefined
+                          }
+                          onRemoveQueued={handleRemoveQueued}
+                          onPullQueued={handlePullQueued}
                           presetMessage={presetMessage}
                           onPresetMessageConsumed={() => setPresetMessage(undefined)}
                           codeSessionLocks={codeSessionLocks}
@@ -7791,6 +7834,11 @@ function App() {
                 isStopping={isStopping}
                 onStop={handleStop}
                 onSubmit={handlePromptSubmit}
+                queuedForActive={
+                  runId && sessionChat.sessionId === runId ? sessionChat.queued : undefined
+                }
+                onRemoveQueued={handleRemoveQueued}
+                onPullQueued={handlePullQueued}
                 knowledgeFiles={knowledgeFiles}
                 recentFiles={recentWikiFiles}
                 visibleFiles={visibleKnowledgeFiles}
