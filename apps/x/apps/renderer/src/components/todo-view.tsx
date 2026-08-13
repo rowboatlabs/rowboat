@@ -55,7 +55,12 @@ type ComposeTarget =
   | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
 
 const ROWBOAT_MENTION_RE = /(^|\s)@rowboat\b/i
-const CHIP = 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-4'
+// Notion-idiom chrome: 4px-radius chips, ink-alpha hovers, ≤100ms color
+// transitions, hierarchy by alpha not size. Rows carry NO borders — hover
+// backgrounds and whitespace do the separating.
+const CHIP = 'inline-flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium leading-4'
+const ROW_HOVER = 'rounded-md transition-colors duration-100 hover:bg-foreground/[0.045]'
+const SECTION_LABEL = 'text-[12px] font-medium text-muted-foreground'
 const CALLOUT_KEY = 'todo.firstReceiptCalloutDone'
 
 function mentionsRowboat(text: string): boolean {
@@ -519,8 +524,8 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
   const collapsedPreview = isCollapsed && bubbles.length > 0 ? previewLine(bubbles) : null
 
   return (
-    <div data-todo-key={item.key} className={`group/todo relative flex items-start gap-2.5 px-2 py-2 transition-[opacity,transform,box-shadow] duration-200 hover:bg-accent/30 ${depth === 0 ? 'border-b border-border/40' : 'rounded-lg'} ${dimmed ? 'opacity-35' : ''} ${
-      spotlight ? 'scale-[1.005] bg-card shadow-md ring-1 ring-primary/25 motion-reduce:transform-none' : ''
+    <div data-todo-key={item.key} className={`group/todo relative flex items-start gap-2.5 rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.045] ${dimmed ? 'opacity-35' : ''} ${
+      spotlight ? 'bg-card shadow-md ring-1 ring-primary/25' : ''
     }`}>
       {changed && (
         <span
@@ -551,7 +556,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
         type="checkbox"
         checked={item.checked}
         onChange={(e) => onToggle(e.target.checked)}
-        className="mt-[3px] size-4 shrink-0 cursor-pointer accent-primary"
+        className="mt-[3px] size-4 shrink-0 cursor-pointer accent-[#2383E2]"
       />
       <div className="min-w-0 flex-1">
         {editing ? (
@@ -587,7 +592,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
             role={item.checked ? undefined : 'button'}
             tabIndex={item.checked ? undefined : 0}
             aria-label={item.checked ? undefined : `Edit to-do: ${item.text}`}
-            className={`cursor-text rounded text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${item.checked ? 'text-muted-foreground line-through' : changed ? 'font-semibold' : ''}`}
+            className={`cursor-text rounded text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${item.checked ? 'text-foreground/40 line-through' : changed ? 'font-semibold' : ''}`}
           >
             <TextWithMentions text={item.text} onOpenLink={(l) => openLink(l, onOpenNote)} />
             {item.proposed && (
@@ -626,14 +631,14 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onStop() }}
                   aria-label="Stop this run"
-                  className={`${CHIP} ml-1 border border-border text-muted-foreground hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400`}
+                  className={`${CHIP} ml-1 bg-foreground/[0.05] text-muted-foreground transition-colors duration-100 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400`}
                 >
                   <Square className="size-2.5 fill-current" /> stop
                 </button>
               </IconTip>
             )}
             {showGoChip && !lastReceipt && (
-              <button type="button" onClick={(e) => { e.stopPropagation(); onRun() }} className={`${CHIP} ml-2 border border-border text-muted-foreground hover:bg-accent hover:text-foreground`}>
+              <button type="button" onClick={(e) => { e.stopPropagation(); onRun() }} className={`${CHIP} ml-2 bg-foreground/[0.05] text-muted-foreground transition-colors duration-100 hover:bg-foreground/[0.09] hover:text-foreground`}>
                 <Bot className="size-3" /> run
               </button>
             )}
@@ -643,7 +648,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onCommitText(`@rowboat ${item.text}`) }}
-                className={`${CHIP} ml-2 border border-border text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/todo:opacity-100`}
+                className={`${CHIP} ml-2 bg-foreground/[0.05] text-muted-foreground opacity-0 transition-opacity duration-100 hover:bg-foreground/[0.09] hover:text-foreground focus-visible:opacity-100 group-hover/todo:opacity-100`}
               >
                 <Bot className="size-3" /> assign
               </button>
@@ -693,7 +698,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
           grammar: zero resting clutter, one surface to learn. Kept inside
           the row's own band so it never reads as the previous row's
           controls. Opacity (not display) so Tab can reach the buttons. */}
-      <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 opacity-0 shadow-md transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/todo:pointer-events-auto group-hover/todo:opacity-100">
+      <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-popover p-0.5 opacity-0 shadow-[0_0_0_1px_rgba(15,15,15,0.06),0_3px_6px_rgba(15,15,15,0.08),0_9px_24px_rgba(15,15,15,0.14)] transition-opacity duration-100 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4)] focus-within:pointer-events-auto focus-within:opacity-100 group-hover/todo:pointer-events-auto group-hover/todo:opacity-100">
         {!showConversation && (
           <IconTip label="Reply — tell @rowboat something about this">
             <button
@@ -820,7 +825,7 @@ function AddItemRow({ onAdd, onHandoff, focusSignal }: {
     }
   }, [text, onHandoff])
   return (
-    <div className="group/add relative mt-1 flex items-center gap-2.5 rounded-lg px-2 py-1.5 focus-within:bg-accent/30">
+    <div className="group/add relative mt-0.5 flex items-center gap-2.5 rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.03] focus-within:bg-foreground/[0.03]">
       {mention.show && <MentionPopup onPick={mention.complete} />}
       <Plus className="size-4 shrink-0 text-muted-foreground/50" />
       <input
@@ -955,7 +960,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
   return (
     <div className={`flex flex-col gap-1 transition-opacity duration-200 ${dimAll ? 'opacity-60' : ''}`}>
       <div className="flex items-center justify-between px-1">
-        <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Conversations</div>
+        <div className={SECTION_LABEL}>Conversations</div>
         {onNewChat && (
           <IconTip label="Start a new chat — ⌘N">
             <button
@@ -970,7 +975,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
         )}
       </div>
       {threads.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border/60 px-3 py-3 text-[13px] text-muted-foreground">
+        <div className="px-2 py-2 text-[13px] text-muted-foreground/70">
           No conversations yet — ask anything in the composer below, or start a new chat. Every chat lands here.
         </div>
       ) : (
@@ -985,8 +990,8 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
           return (
             <div
               key={t.sessionId}
-              className={`group/thread relative border-b border-border/40 py-1.5 transition-[opacity,transform,box-shadow] duration-200 last:border-b-0 ${
-                isSpot ? 'scale-[1.005] rounded-lg bg-accent/30 px-2 ring-1 ring-primary/20 motion-reduce:transform-none' : ''
+              className={`group/thread relative rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.045] ${
+                isSpot ? 'bg-card shadow-md ring-1 ring-primary/20' : ''
               } ${spotlightSessionId && !isSpot ? 'opacity-40' : ''}`}
             >
               <div className="flex items-center gap-2">
@@ -1031,7 +1036,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
                 {/* Same floating tray as items — one grammar everywhere,
                     inside the row's own band (never over the previous row).
                     Opacity (not display) so Tab can reach the buttons. */}
-                <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 opacity-0 shadow-md transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100">
+                <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-popover p-0.5 opacity-0 shadow-[0_0_0_1px_rgba(15,15,15,0.06),0_3px_6px_rgba(15,15,15,0.08),0_9px_24px_rgba(15,15,15,0.14)] transition-opacity duration-100 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4)] focus-within:pointer-events-auto focus-within:opacity-100 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100">
                   <IconTip label="Reply">
                     <button
                       type="button"
@@ -1260,7 +1265,7 @@ function stripTitle(thread: HomeThread): string {
     .trim() || 'Untitled'
 }
 
-const STRIP_HOVER_BTN = 'shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/strip:opacity-100'
+const STRIP_HOVER_BTN = 'shrink-0 rounded-[4px] p-0.5 text-muted-foreground/70 opacity-0 transition-opacity duration-100 hover:bg-foreground/[0.08] hover:text-foreground focus-visible:opacity-100 group-hover/strip:opacity-100'
 
 function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze }: {
   thread: HomeThread
@@ -1281,10 +1286,10 @@ function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze }: {
       tabIndex={0}
       onClick={onJump}
       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onOpen() } }}
-      className="group/strip relative flex cursor-pointer items-center gap-2 border-b border-border/40 px-2 py-1.5 transition-colors hover:bg-accent/30 focus-visible:bg-accent/30 focus-visible:outline-none"
+      className={`group/strip relative flex cursor-pointer items-center gap-2 px-2 py-[5px] ${ROW_HOVER} focus-visible:bg-foreground/[0.045] focus-visible:outline-none`}
     >
-      <span className={`h-4 w-[2.5px] shrink-0 rounded ${needs ? 'bg-amber-500/80' : live ? 'bg-primary/50' : 'bg-border'}`} />
-      <span className="w-9 shrink-0 font-mono text-[9.5px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">{thread.kind}</span>
+      <span className={`h-4 w-[2px] shrink-0 rounded-full ${needs ? 'bg-amber-500/80' : live ? 'bg-primary/50' : 'bg-foreground/[0.16]'}`} />
+      <span className="w-9 shrink-0 text-[10.5px] lowercase tracking-[0.02em] text-muted-foreground/60">{thread.kind}</span>
       {thread.unseen && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
       <span className="max-w-[40%] shrink-0 truncate text-[13px] font-medium">{stripTitle(thread)}</span>
       {thread.code && (
@@ -1979,29 +1984,34 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
       <button
         type="button"
         onClick={() => setTriageFilter(triageFilter === filter ? null : filter)}
-        className={`rounded px-1 text-[12px] transition-colors ${
-          triageFilter === filter ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+        className={`rounded-[4px] px-1.5 py-0.5 text-[12px] transition-colors duration-100 ${
+          triageFilter === filter ? 'bg-foreground/[0.08] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
         }`}
       >
-        <span className={`font-semibold ${tone}`}>{count}</span> {label}
+        <span className={`font-medium ${tone}`}>{count}</span> {label}
       </button>
     )
   )
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
-      <div className="flex-1 overflow-y-auto px-9 py-7">
-        <div className="mx-auto flex max-w-[720px] flex-col gap-4">
+      <div className="flex-1 overflow-y-auto px-9 pb-8 pt-12">
+        <div className="mx-auto flex max-w-[720px] flex-col gap-5">
 
-          {/* Header */}
-          <div className="flex items-center gap-3">
-            <h1 className="text-[28px] font-semibold tracking-tight">{todayLabel}</h1>
-            <div className="flex items-center gap-1.5">
-              {triagePill('needs_you', 'need you', needsYouCount, 'text-amber-600 dark:text-amber-400')}
-              {triagePill('running', 'running', runningCount, 'text-primary')}
-              {triagePill('done', 'done', doneCount, 'text-muted-foreground')}
+          {/* Header — Notion page anatomy: the title stands alone; the
+              triage pills sit under it like quiet page properties. */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em]">{todayLabel}</h1>
+              {(needsYouCount > 0 || runningCount > 0 || doneCount > 0) && (
+                <div className="mt-1.5 -ml-1.5 flex items-center gap-0.5">
+                  {triagePill('needs_you', 'need you', needsYouCount, 'text-amber-600 dark:text-amber-400')}
+                  {triagePill('running', 'running', runningCount, 'text-primary')}
+                  {triagePill('done', 'done', doneCount, 'text-muted-foreground')}
+                </div>
+              )}
             </div>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2 pt-1.5">
               {suggestions.length > 0 && (
                 <IconTip label="Suggestions waiting for your accept — jump to them">
                   <button
@@ -2023,7 +2033,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
                       type="button"
                       onClick={() => void runPlannerNow()}
                       disabled={suggesting}
-                      className="flex items-center gap-1.5 rounded-l-md border border-r-0 border-border px-2 py-1 text-xs font-medium text-muted-foreground enabled:hover:bg-accent enabled:hover:text-foreground disabled:opacity-60"
+                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors duration-100 enabled:hover:bg-foreground/[0.06] enabled:hover:text-foreground disabled:opacity-40"
                     >
                       {suggesting ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                       Suggest
@@ -2033,12 +2043,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
                     type="button"
                     onClick={() => setPlannerMenuOpen((v) => !v)}
                     aria-label="Suggestion settings"
-                    className="rounded-r-md border border-border px-1 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="rounded-md px-1 py-1 text-muted-foreground/70 transition-colors duration-100 hover:bg-foreground/[0.06] hover:text-foreground"
                   >
                     <ChevronDown className="size-3.5" />
                   </button>
                   {plannerMenuOpen && (
-                    <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-border bg-background p-3 shadow-md">
+                    <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-md bg-popover p-3 shadow-[0_0_0_1px_rgba(15,15,15,0.05),0_3px_6px_rgba(15,15,15,0.1),0_9px_24px_rgba(15,15,15,0.2)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_4px_12px_rgba(0,0,0,0.4)]">
                       <div className="text-sm font-medium">Suggest automatically</div>
                       {/* Off is the default — the schedule spends tokens only
                           after an explicit opt-in. ✦ Suggest always works. */}
@@ -2081,7 +2091,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
                 <button
                   type="button"
                   onClick={() => void clearCompleted()}
-                  className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:bg-foreground/[0.06] hover:text-foreground"
                 >
                   Clear done
                 </button>
@@ -2116,10 +2126,10 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
               {deckNeedsYou.length > 0 && (
                 <div>
                   <div className="flex items-baseline justify-between px-1 pb-1">
-                    <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-amber-600/90 dark:text-amber-400/90">
+                    <div className="text-[12px] font-medium text-amber-600/90 dark:text-amber-400/90">
                       Needs you · {deckNeedsYou.length}
                     </div>
-                    <div className="text-[10.5px] text-muted-foreground/60">J cycles the queue</div>
+                    <div className="text-[11px] text-muted-foreground/50">J cycles the queue</div>
                   </div>
                   {deckNeedsYou.map((t) => (
                     <DeckStrip
@@ -2135,7 +2145,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
               )}
               {deckUnderway.length > 0 && (
                 <div>
-                  <div className="px-1 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                  <div className={`px-1 pb-1 ${SECTION_LABEL}`}>
                     {/* Count only live threads — a bay holding just pinned
                         idle strips says "Underway" without the number. */}
                     Underway{skipperUnderway > 0 ? ` · ${skipperUnderway}` : ''}
@@ -2163,7 +2173,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
 
           {/* While you were away — dismissable catch-up */}
           {changedItems.length > 0 && (
-            <div className="flex items-center gap-2 border-y border-border/60 px-1 py-2 text-[13px] text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
               <span className="size-1.5 shrink-0 rounded-full bg-foreground" />
               <span className="flex-1">
                 While you were away:
@@ -2185,7 +2195,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
           {/* First-proposals explainer — shown once, ever */}
           {!plannerIntroSeen
             && (suggestions.length > 0 || itemBlocks.some(({ block }) => block.kind === 'item' && block.item.proposed && !block.item.checked)) && (
-            <div className="flex items-center gap-2 border-y border-border/60 px-1 py-2 text-[13px] text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
               <Bot className="size-3.5 shrink-0" />
               <span className="flex-1">Rowboat has suggestions from your mail and calendar — accept the useful ones to add them to your list; declining teaches it what not to suggest. Nothing is added or run without you.</span>
               <button
@@ -2200,7 +2210,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
 
           {/* First-completion callout — shown once, ever */}
           {showCallout && (
-            <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-4 py-2.5 text-sm">
               <Bot className="size-4 shrink-0 text-primary" />
               <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Hit ＋ on the row to refine the work with a comment; 💬 opens the whole conversation in the sidebar.</span>
               <button
@@ -2216,7 +2226,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
           {/* The list */}
           <div className={`transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
             <div className="flex items-center justify-between px-1 pb-1">
-              <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Tasks</div>
+              <div className={SECTION_LABEL}>Tasks</div>
               <IconTip label="New to-do — press N">
                 <button
                   type="button"
@@ -2365,7 +2375,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
               })
             )}
             {blocks !== null && !itemBlocks.some(({ block }) => block.kind === 'item') && (
-              <div className="rounded-lg border border-dashed border-border/60 px-3 py-3 text-[13px] text-muted-foreground">
+              <div className="px-2 py-2 text-[13px] text-muted-foreground/70">
                 <TextWithMentions text="Nothing on the list — add your first to-do below, or mention @rowboat to hand one off." />
               </div>
             )}
@@ -2386,11 +2396,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
               surface's "needs your decision" color — the one tinted block
               on the page. */}
           {suggestions.length > 0 && (
-            <div ref={suggestionsRef} className="flex flex-col gap-1 rounded-lg bg-amber-500/[0.06] px-2.5 py-2 ring-1 ring-amber-500/15">
-              <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-amber-600/80 dark:text-amber-400/80">Suggested</div>
+            <div ref={suggestionsRef} className="flex flex-col gap-1 rounded-lg bg-amber-500/[0.06] px-2.5 py-2">
+              <div className="px-1 text-[12px] font-medium text-amber-600/80 dark:text-amber-400/80">Suggested</div>
               <div>
                 {suggestions.map((text) => (
-                  <div key={text} className="group/sugg flex items-center gap-2.5 border-b border-amber-500/10 px-2 py-2 last:border-0">
+                  <div key={text} className="group/sugg flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors duration-100 hover:bg-amber-500/[0.07]">
                     <Sparkles className="size-3.5 shrink-0 text-amber-500/70" />
                     <span className="min-w-0 flex-1 text-sm">
                       <TextWithMentions text={text} onOpenLink={(l) => openLink(l, onOpenNote)} />
@@ -2400,7 +2410,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
                         type="button"
                         onClick={() => void acceptSuggestion(text)}
                         aria-label="Accept suggestion"
-                        className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:bg-foreground/[0.06] hover:text-foreground"
                       >
                         <Check className="size-3" /> Add
                       </button>
@@ -2478,7 +2488,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
       {/* The assistant composer — pinned to the bottom like any chat
           surface; everything above scrolls. Tasks are born in the list's
           add-row or by @rowboat mention. */}
-      <div className="shrink-0 border-t border-border/40 bg-background px-9 pb-5 pt-3">
+      <div className="shrink-0 border-t border-foreground/[0.06] bg-background px-9 pb-5 pt-3">
         <div className="mx-auto max-w-[720px]">
           {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
         </div>
