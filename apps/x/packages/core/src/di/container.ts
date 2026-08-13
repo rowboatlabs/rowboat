@@ -154,15 +154,28 @@ container.register({
     sessionRepo: asClass<ISessionRepo>(FSSessionRepo).singleton(),
     sessionBus: asClass<ISessionBus>(EmitterSessionBus).singleton(),
     sessions: asClass<ISessions>(SessionsImpl).singleton(),
-    // Code-section sessions pin their coding agent + working directory into
-    // every turn's composition, server-side — "is this a code session" is
-    // never a client-side decision (voice/quick-ask/composer all get the
-    // same prompt). Null for ordinary chats.
+    // Session-identity composition pins, applied server-side so no surface
+    // (voice/quick-ask/composer) has to know what a session IS:
+    // - Code sessions pin their coding agent + working directory.
+    // - The Command Center session pins the operator frame — directives on
+    //   that one conversation are operations on Home (to-dos, dispatch,
+    //   status), never "just chat".
+    // Null for ordinary chats.
     sessionCompositionPins: asFunction(
         ({ codeSessionsRepo }: { codeSessionsRepo: ICodeSessionsRepo }) =>
             async (sessionId: string): Promise<Record<string, JsonValue> | null> => {
+                const pins: Record<string, JsonValue> = {};
                 const meta = await codeSessionsRepo.get(sessionId).catch(() => null);
-                return meta ? { codeMode: meta.agent, codeCwd: meta.cwd } : null;
+                if (meta) {
+                    pins.codeMode = meta.agent;
+                    pins.codeCwd = meta.cwd;
+                }
+                const { getCommandCenterSessionId } = await import("../home/command-center.js");
+                const commandCenterId = await getCommandCenterSessionId().catch(() => null);
+                if (commandCenterId && commandCenterId === sessionId) {
+                    pins.commandCenter = true;
+                }
+                return Object.keys(pins).length > 0 ? pins : null;
             },
     ).singleton(),
     defaultModelResolver:

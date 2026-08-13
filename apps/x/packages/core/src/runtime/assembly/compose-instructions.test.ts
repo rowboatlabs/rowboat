@@ -26,6 +26,7 @@ function input(
         codeCwd: null,
         videoMode: false,
         coachMode: false,
+        commandCenter: false,
         ...overrides,
     };
 }

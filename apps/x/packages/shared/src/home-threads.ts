@@ -11,6 +11,11 @@ import { z } from "zod";
 // read the same feed instead of re-deriving it client-side.
 // ---------------------------------------------------------------------------
 
+/** Companion-bar switcher sentinel meaning "bind to THE Command Center
+ * session" — the app window resolves it via home:commandCenter (creating
+ * the session on first use), so the bar never needs the real id. */
+export const COMMAND_CENTER_CHAT_SENTINEL = "__command_center__";
+
 export const HomeThreadKindSchema = z.enum(["task", "code", "chat"]);
 export type HomeThreadKind = z.infer<typeof HomeThreadKindSchema>;
 

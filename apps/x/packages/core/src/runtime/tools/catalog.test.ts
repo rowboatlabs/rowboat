@@ -206,6 +206,7 @@ const HISTORICAL_KEY_ORDER = [
     "todo-propose",
     "todo-report",
     "screen-pointer",
+    "home-status",
     "spawn-agent",
 ];
 

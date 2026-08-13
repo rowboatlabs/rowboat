@@ -26,6 +26,10 @@ export const COPILOT_BASE_TOOLS: readonly string[] = [
     // "Add X to my list" must work in any chat — the to-do list is the home
     // surface and list-writing has no skill signal to trigger on.
     "todo-add",
+    // "What's running / what needs me?" reads the live thread registry —
+    // essential on the Command Center channel, useful in any chat, and like
+    // todo-add it has no skill signal to trigger on.
+    "home-status",
     "executeCommand",
     "spawn-agent",
     "code_agent_run",

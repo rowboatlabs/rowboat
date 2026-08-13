@@ -90,6 +90,7 @@ import {
   normalizeToolInput,
 } from '@/lib/chat-conversation'
 import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
+import { COMMAND_CENTER_CHAT_SENTINEL } from '@x/shared/src/home-threads.js'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
@@ -1541,6 +1542,30 @@ function App() {
       void startCall(preset)
     }
   }, [startHoverCall, startCall])
+
+  // Skipper's click on Home starts the call on THE Command Center session —
+  // the standing operator channel — not whatever chat happens to be active.
+  // The operator frame rides server-side composition pins, so the first
+  // utterance is already "operate my command center", no preamble needed.
+  const startCommandCenterCall = useCallback(() => {
+    void (async () => {
+      try {
+        const { sessionId } = await window.ipc.invoke('home:commandCenter', {})
+        hoverRunIdRef.current = sessionId
+        setHoverRunId(sessionId)
+        bindAppChatOnHoverCreateRef.current = null
+      } catch {
+        // Couldn't resolve the operator session — a plain hover call still
+        // beats a dead click.
+      }
+      if (inCallRef.current) {
+        ttsRef.current.cancel()
+        void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+        return
+      }
+      void startHoverCall()
+    })()
+  }, [startHoverCall])
 
   // The user-mute half that lives in the video pipeline: stop sampling
   // camera/screen frames while muted (see useVideoMode.setCapturePaused).
@@ -4550,9 +4575,18 @@ function App() {
   }, [hoverRunId, runs])
 
   // The bar's chip switcher picked a chat: rebind the COMPANION to it. The
-  // app window keeps showing whatever it was showing.
+  // app window keeps showing whatever it was showing. The Command Center
+  // sentinel resolves to THE standing operator session (created on first
+  // use) — its frame rides server-side composition pins, so nothing else
+  // here changes.
   useEffect(() => {
     return window.ipc.on('quick-ask:select-chat', ({ runId: rid }) => {
+      if (rid === COMMAND_CENTER_CHAT_SENTINEL) {
+        void window.ipc.invoke('home:commandCenter', {})
+          .then(({ sessionId }) => setHoverRunId(sessionId))
+          .catch(() => {})
+        return
+      }
       setHoverRunId(rid)
     })
   }, [])
@@ -6638,7 +6672,7 @@ function App() {
                         setCodeFocusSessionId(sessionId)
                         void navigateToView({ type: 'code' })
                       }}
-                      onSkipperCall={voiceAvailable && ttsAvailable ? () => handleStartCall('voice') : undefined}
+                      onSkipperCall={voiceAvailable && ttsAvailable ? startCommandCenterCall : undefined}
                     />
                 </div>
               ) : isSuggestedTopicsOpen ? (

@@ -5,6 +5,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronsDown,
+  Anchor,
   ChevronsUp,
   ChevronUp,
   Maximize2,
@@ -34,8 +35,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { COMMAND_CENTER_CHAT_SENTINEL } from '@x/shared/src/home-threads.js'
 import { reduceTurn } from '@x/shared/src/turns.js'
 import * as quickAskShortcut from '@x/shared/src/quick-ask-shortcut.js'
 import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
@@ -839,6 +842,17 @@ export function QuickAskBar() {
               </TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="start" side="top" className="max-h-72 w-72 overflow-y-auto">
+              {/* The standing operator channel, always first: pick it and
+                  every utterance operates Home — to-dos, dispatch, status —
+                  with no "this is about my command center" preamble. */}
+              <DropdownMenuItem onSelect={() => selectChat(COMMAND_CENTER_CHAT_SENTINEL)}>
+                <Anchor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-medium">Command Center</span>
+                {chatContext?.activeTitle === 'Command Center' && (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">current</span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               {(chatContext?.recent ?? []).map((r) => (
                 <DropdownMenuItem key={r.id} onSelect={() => selectChat(r.id)}>
                   <span className={`min-w-0 flex-1 truncate ${r.id === chatContext?.activeRunId ? 'font-semibold' : ''}`}>

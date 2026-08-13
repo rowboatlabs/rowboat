@@ -43,6 +43,9 @@ export const ModeFlags = z.object({
     codeCwd: z.string().nullable().default(null),
     videoMode: z.boolean().default(false),
     coachMode: z.boolean().default(false),
+    // Pinned server-side (sessionCompositionPins) on the one Command Center
+    // session — the standing operator channel for Home.
+    commandCenter: z.boolean().default(false),
 });
 export type ModeFlags = z.infer<typeof ModeFlags>;
 

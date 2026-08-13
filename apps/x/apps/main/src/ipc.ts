@@ -2908,6 +2908,11 @@ export function setupIpcHandlers() {
         return { success: false };
       }
     },
+    'home:commandCenter': async () => {
+      const { ensureCommandCenterSession } = await import('@x/core/dist/home/command-center.js');
+      const sessionId = await ensureCommandCenterSession(container.resolve<ISessions>('sessions'));
+      return { sessionId };
+    },
     'todo:stopRun': async (_event, args) => {
       try {
         const stopped = await stopTodoRun(args.key);

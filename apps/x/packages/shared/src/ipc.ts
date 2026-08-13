@@ -801,6 +801,13 @@ const ipcSchemas = {
     req: z.object({}),
     res: z.null(),
   },
+  // The Command Center session — get-or-create the ONE persistent operator
+  // conversation. Any turn on it is command-center-framed server-side
+  // (sessionCompositionPins), whatever surface sends it.
+  'home:commandCenter': {
+    req: z.object({}),
+    res: z.object({ sessionId: z.string() }),
+  },
   // The unified model catalog (core/models/catalog.ts): every connected
   // provider — Rowboat gateway, ChatGPT subscription (codex), BYOK keys,
   // local/custom endpoints — listed the same way, with per-provider status.
