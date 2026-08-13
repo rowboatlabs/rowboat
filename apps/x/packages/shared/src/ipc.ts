@@ -1383,6 +1383,46 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // Any window → main: the current global quick-ask chord and whether the
+  // OS actually granted it (false = another app owns it — quick-ask is
+  // unreachable until the user picks a different chord).
+  'quickAsk:getShortcut': {
+    req: z.null(),
+    res: z.object({
+      accelerator: z.string(),
+      registered: z.boolean(),
+      isDefault: z.boolean(),
+    }),
+  },
+  // Settings → main: rebind the global chord (null = reset to default).
+  // Main registers the NEW chord before releasing the old one — a rejected
+  // rebind (invalid, system-reserved, or taken by another app) leaves the
+  // old binding untouched and comes back ok:false with a human-readable
+  // reason for the recorder to show inline.
+  'quickAsk:setShortcut': {
+    req: z.object({ accelerator: z.string().nullable() }),
+    res: z.object({
+      ok: z.boolean(),
+      accelerator: z.string(),
+      registered: z.boolean(),
+      error: z.string().nullable(),
+    }),
+  },
+  // Settings → main: the shortcut-recorder modal is capturing keys. While
+  // active, main releases the current global chord so pressing it lands in
+  // the modal (as keys to display) instead of summoning the quick-ask bar
+  // over the recorder. Re-registered when capture ends.
+  'quickAsk:setShortcutCaptureActive': {
+    req: z.object({ active: z.boolean() }),
+    res: z.object({}),
+  },
+  // Push: main → every window after a successful rebind (or a boot-time
+  // registration failure), so the tray tooltip, toast copy, and the bar's
+  // hold-to-talk chord detection all follow the one source of truth.
+  'quick-ask:shortcut-changed': {
+    req: z.object({ accelerator: z.string(), registered: z.boolean() }),
+    res: z.null(),
+  },
   // --- Ambient meeting detection popup (own always-on-top window) ---
   // Main → popup: the detection to display.
   'meetingDetect:payload': {
