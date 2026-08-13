@@ -381,7 +381,7 @@ export function ChatSidebar({
                   </div>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  This chat is pinned to the coding session — leave the Code view to switch chats.
+                  This chat drives the selected coding session — pick another session (or leave Code) to switch chats.
                 </TooltipContent>
               </Tooltip>
             ) : (

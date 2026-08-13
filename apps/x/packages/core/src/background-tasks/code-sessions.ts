@@ -4,8 +4,10 @@ import type { GitStatusFile } from '@x/shared/dist/code-sessions.js';
 import container from '../di/container.js';
 import type { CodeSessionService } from '../code-mode/sessions/service.js';
 import type { ICodeProjectsRepo } from '../code-mode/projects/repo.js';
+import type { ISessions } from '../runtime/sessions/api.js';
+import type { ITurnEventBus } from '../runtime/turns/event-hub.js';
+import { assistantText } from '../runtime/assembly/headless.js';
 import * as gitService from '../code-mode/git/service.js';
-import { extractAgentResponse } from '../runtime/legacy/utils.js';
 import { withFileLock } from '../knowledge/file-lock.js';
 import { fetchTask, taskIndexPath } from './fileops.js';
 
@@ -184,14 +186,10 @@ async function finalizeBlock(slug: string, sessionId: string, block: string): Pr
 // final message and rewrite the row.
 async function finalizeFromResult(
     slug: string,
-    args: { sessionId: string; title: string; items: string; branch: string; worktreePath: string; baseBranch?: string; timedOut?: boolean; error?: string },
+    args: { sessionId: string; title: string; items: string; branch: string; worktreePath: string; baseBranch?: string; timedOut?: boolean; error?: string; summary?: string },
 ): Promise<void> {
     const { sessionId, title, items, branch, worktreePath, baseBranch, timedOut, error } = args;
-
-    let summary = '';
-    try {
-        summary = (await extractAgentResponse(sessionId)) ?? '';
-    } catch { /* best effort */ }
+    const summary = args.summary ?? '';
 
     // Count everything the session changed since it forked — including commits
     // (the autonomous scaffold tells the agent to commit, so working-tree status
@@ -244,10 +242,11 @@ async function finalizeFromResult(
 /**
  * Launch a coding session for a bg-task, asynchronously.
  *
- * Creates an isolated worktree session (yolo, direct, claude), fires the prompt
- * without waiting, writes a "running" row into the task's index.md, and detaches
- * a watcher that finalizes the row once the turn settles. Returns as soon as the
- * session exists so the bg-task agent can launch more groups (or finish).
+ * Creates an isolated worktree session (yolo, claude), sends the prompt as an
+ * ordinary chat turn (the copilot relays it to code_agent_run, pinned to the
+ * session's worktree), writes a "running" row into the task's index.md, and
+ * detaches a watcher that finalizes the row once the turn settles. Returns as
+ * soon as the session exists so the bg-task agent can launch more groups.
  */
 export async function launchCodeTask(args: LaunchCodeTaskArgs): Promise<LaunchCodeTaskResult> {
     const { taskSlug, meeting, title, items, prompt, context, runId } = args;
@@ -283,7 +282,6 @@ export async function launchCodeTask(args: LaunchCodeTaskArgs): Promise<LaunchCo
             projectId: project.id,
             title,
             agent: 'claude',
-            mode: 'direct',
             policy: 'yolo',
             isolation: 'worktree',
         });
@@ -300,28 +298,68 @@ export async function launchCodeTask(args: LaunchCodeTaskArgs): Promise<LaunchCo
         sessionId: session.id, title, items, branch, worktreePath,
     }));
 
-    const wrapped = buildCodePrompt({ prompt, branch, ...(context ? { context } : {}) });
+    const codeAgentPrompt = buildCodePrompt({ prompt, branch, ...(context ? { context } : {}) });
+    // The turn is an ordinary copilot chat on the session — the copilot relays
+    // the scaffolded task to code_agent_run (the session pins cwd/agent/policy).
+    const copilotMessage = `Run the following coding task to completion with the \`code_agent_run\` tool. Pass the ENTIRE task text between the markers below as the tool's \`prompt\`, verbatim — do not summarize, trim, or rewrite it. This session is pinned to the right repository, coding agent, and approval policy; the tool resolves them automatically. Make exactly one code_agent_run call; when it settles, reply with only the run's summary.
+
+<<<TASK
+${codeAgentPrompt}
+TASK>>>`;
 
     log.log(`${taskSlug} — launched session ${session.id} on ${branch}`);
 
     // Detached: drive the turn to completion, then finalize the index.md row.
-    // `sendMessage` resolves when the turn settles (it awaits the engine and
-    // never rejects on engine errors), so we don't need a separate completion
-    // subscription — but we still cap it with a timeout so a wedged engine can't
-    // pin the row at "running" forever.
+    // Subscribe to the turn event spine BEFORE sending so no settle slips past,
+    // and cap with a timeout so a wedged engine can't pin the row at "running".
     void (async () => {
+        const sessions = container.resolve<ISessions>('sessions');
+        const turnEventBus = container.resolve<ITurnEventBus>('turnEventBus');
+
         let timedOut = false;
+        let error: string | undefined;
+        let summary = '';
+        let settleResolve: (() => void) | null = null;
+        let sentTurnId: string | null = null;
+        const settled = new Promise<void>((resolve) => { settleResolve = resolve; });
+        const unsubscribe = turnEventBus.subscribeAll((event) => {
+            if (event.sessionId !== session.id) return;
+            if (sentTurnId && event.turnId !== sentTurnId) return;
+            const e = event.event;
+            if (e.type === 'turn_completed') {
+                summary = assistantText(e.output) ?? '';
+                settleResolve?.();
+            } else if (e.type === 'turn_failed') {
+                error = e.error;
+                settleResolve?.();
+            } else if (e.type === 'turn_cancelled') {
+                error = 'The session was stopped before it finished.';
+                settleResolve?.();
+            }
+        });
+
         try {
+            const { turnId } = await sessions.sendMessage(
+                session.id,
+                { role: 'user', content: copilotMessage },
+                { agent: { agentId: 'copilot' }, useCase: 'code_session', autoPermission: true },
+            );
+            sentTurnId = turnId;
             await Promise.race([
-                codeSessionService.sendMessage(session.id, wrapped),
+                settled,
                 new Promise<void>((resolve) => setTimeout(() => { timedOut = true; resolve(); }, MAX_WATCH_MS)),
             ]);
         } catch (err) {
-            log.log(`${taskSlug} — session ${session.id} errored: ${err instanceof Error ? err.message : String(err)}`);
+            error = err instanceof Error ? err.message : String(err);
+            log.log(`${taskSlug} — session ${session.id} errored: ${error}`);
+        } finally {
+            unsubscribe();
         }
         try {
             await finalizeFromResult(taskSlug, {
                 sessionId: session.id, title, items, branch, worktreePath, timedOut,
+                ...(error ? { error } : {}),
+                ...(summary ? { summary } : {}),
                 ...(baseBranch ? { baseBranch } : {}),
             });
         } catch (err) {

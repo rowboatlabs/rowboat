@@ -982,6 +982,7 @@ class TurnAdvance {
         try {
             const result = await syncTool.execute(tc.input, {
                 turnId: this.turnId,
+                sessionId: this.definition.sessionId,
                 toolCallId: tc.toolCallId,
                 signal: this.signal,
                 reportProgress: async (progress) => {

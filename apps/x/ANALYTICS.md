@@ -184,10 +184,9 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 
 **Apps** — all **(main)**, in `apps/main/src/ipc.ts` (pre-existing except `app_rolled_back`): `app_created`, `app_installed`, `app_uninstalled`, `app_updated`, `app_rolled_back`, `app_published`, `app_starred`, `app_deleted`. Plus renderer-side `app_opened` — `{ folder }` — an installed app's UI was opened (`components/apps/app-frame.tsx`).
 
-**Code mode** — both **(main/core)**:
+**Code mode** — **(main)**:
 
-- `code_session_created` — `{ mode: 'direct' | 'rowboat', agent }` — captured in the `codeSession:create` IPC handler. This is the direct-vs-rowboat session split.
-- `code_session_message_sent` — `{ mode, agent }` — one per direct-drive message (`packages/core/src/code-mode/sessions/service.ts`). Direct turns bypass the agent runtime and emit no `llm_usage`, so this is the only usage-depth signal for direct mode; Rowboat-mode depth comes from `llm_usage where use_case = code_session`.
+- `code_session_created` — `{ agent }` — captured in the `codeSession:create` IPC handler. All code sessions are Rowboat-driven (direct drive was removed 2026-08); usage depth comes from `llm_usage where use_case = code_session`. (`code_session_message_sent` and the `mode` property died with direct drive.)
 
 **Billing** (`components/billing-error-dialog.tsx`):
 

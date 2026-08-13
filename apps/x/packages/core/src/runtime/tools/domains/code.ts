@@ -8,6 +8,7 @@ import * as fs from "fs/promises";
 import container from "../../../di/container.js";
 import type { CodeModeManager } from "../../../code-mode/acp/manager.js";
 import type { CodePermissionRegistry } from "../../../code-mode/acp/permission-registry.js";
+import type { ICodeSessionsRepo } from "../../../code-mode/sessions/repo.js";
 import { ICodeModeConfigRepo } from "../../../code-mode/repo.js";
 import type { ApprovalPolicy, CodeRunEvent as CodeRunEventType } from "@x/shared/dist/code-mode.js";
 import type { CodeRunFeed } from "../../../code-mode/feed.js";
@@ -53,16 +54,24 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
             if (!ctx) {
                 throw new Error('code_agent_run requires run context (runId / streaming).');
             }
-            // The composer chip is the source of truth for the agent. The model's `agent`
-            // argument is only a fallback for the ask-human flow (code mode not active, no
-            // chip set) — otherwise it can anchor on the thread's earlier agent and ignore a
-            // chip change. Honor the chip so switching it deterministically switches agents.
-            const effectiveAgent = ctx.codeMode ?? agent;
-            // Code-section sessions pin the working directory — never trust the model's
-            // cwd argument over the session's. Expand `~` and resolve to an absolute path:
-            // the engine is spawned with this as the child's cwd, and `child_process.spawn`
-            // does NO shell tilde expansion.
-            const effectiveCwd = path.resolve(expandHomePath(ctx.codeCwd ?? cwd));
+            // Code-section sessions pin agent/cwd/policy/model server-side: the
+            // turn's chat session id IS the code session id, so resolve the meta
+            // directly. This is authoritative — the model's arguments and the
+            // composer chip are fallbacks for ad-hoc coding from a regular chat.
+            let pinned = null;
+            if (ctx.sessionId) {
+                const sessionsRepo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+                pinned = await sessionsRepo.get(ctx.sessionId).catch(() => null);
+            }
+            // The composer chip is the source of truth for the agent outside a Code
+            // session. The model's `agent` argument is only a fallback for the
+            // ask-human flow (code mode not active, no chip set) — otherwise it can
+            // anchor on the thread's earlier agent and ignore a chip change.
+            const effectiveAgent = pinned?.agent ?? ctx.codeMode ?? agent;
+            // Never trust the model's cwd argument over the session's. Expand `~` and
+            // resolve to an absolute path: the engine is spawned with this as the
+            // child's cwd, and `child_process.spawn` does NO shell tilde expansion.
+            const effectiveCwd = path.resolve(expandHomePath(pinned?.cwd ?? ctx.codeCwd ?? cwd));
             // Fail loudly if the directory is missing. Otherwise the spawn below fails with
             // Node's misleading "spawn <command> ENOENT" (it blames the executable, not the
             // bad cwd), which reads as "the coding engine isn't installed" — see the enriched
@@ -78,7 +87,9 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
             // Approval policy: the session's (Code section) wins, else global settings,
             // else default to asking the user.
             let policy: ApprovalPolicy = 'ask';
-            if (ctx.codePolicy) {
+            if (pinned?.policy) {
+                policy = pinned.policy;
+            } else if (ctx.codePolicy) {
                 policy = ctx.codePolicy;
             } else {
                 try {
@@ -105,11 +116,16 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
             const feed = container.resolve<CodeRunFeed>('codeRunFeed');
             try {
                 const result = await manager.runPrompt({
-                    runId: ctx.runId,
+                    // Key the persistent ACP conversation by the chat session so
+                    // follow-up turns resume the coding agent's context; headless
+                    // turns (no session) stay keyed per turn.
+                    runId: ctx.sessionId ?? ctx.runId,
                     agent: effectiveAgent,
                     cwd: effectiveCwd,
                     prompt,
                     policy,
+                    ...(pinned?.agentModel ? { model: pinned.agentModel } : {}),
+                    ...(pinned?.agentEffort ? { effort: pinned.agentEffort } : {}),
                     signal: ctx.signal,
                     onEvent: (event) => {
                         if (event.type === 'message' && event.role === 'agent') finalText += event.text;

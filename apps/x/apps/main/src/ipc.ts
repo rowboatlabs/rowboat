@@ -1771,7 +1771,7 @@ export function setupIpcHandlers() {
     'codeSession:create': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       const session = await service.create(args);
-      capture('code_session_created', { mode: session.mode, agent: session.agent });
+      capture('code_session_created', { agent: session.agent });
       return { session };
     },
     'codeSession:list': async () => {
@@ -1795,20 +1795,6 @@ export function setupIpcHandlers() {
         deleteBranch: args.deleteBranch,
       });
       return { success: true };
-    },
-    'codeSession:sendMessage': async (_event, args) => {
-      const service = container.resolve<CodeSessionService>('codeSessionService');
-      // Intentionally not awaited: the turn can run for minutes and streams over
-      // runs:events. sendMessage validates synchronously enough that busy/unknown
-      // errors are reported via the run's error events instead.
-      const resultPromise = service.sendMessage(args.sessionId, args.text);
-      // Surface immediate rejections (busy session, unknown id) to the caller.
-      const result = await Promise.race([
-        resultPromise,
-        new Promise<{ accepted: true }>((resolve) => setTimeout(() => resolve({ accepted: true }), 300)),
-      ]);
-      resultPromise.catch((err) => console.error('codeSession:sendMessage failed', err));
-      return result;
     },
     'codeSession:stop': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');

@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, ChevronDown, ChevronUp, Code2, GitBranch, Terminal as TerminalIcon } from 'lucide-react'
+import { ChevronDown, ChevronUp, Code2, GitBranch, Terminal as TerminalIcon } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
 import { fetchCodeAgentOptions, toSelectorOptions, withDefault, optionLabel } from './code-agent-options'
 import { ModelSelector } from '@/components/model-selector'
 import type { ApprovalPolicy } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -69,8 +68,8 @@ export interface ActiveCodeSession {
 
 // The Code section's middle pane: session rail + workspace (diffs/files).
 // The conversation lives in the RIGHT pane — the assistant chat bound to the
-// session's run when Rowboat drives, or the direct-drive chat otherwise.
-// App.tsx learns which via onSessionSelected and renders the right pane.
+// session (a code session IS a chat session). App.tsx learns which via
+// onSessionSelected and binds the right pane.
 export function CodeView({
   onSessionSelected,
   openDiffPath,
@@ -180,7 +179,7 @@ export function CodeView({
     }
   }, [refresh, selectedSessionId])
 
-  const handleUpdateSession = useCallback(async (patch: { mode?: 'direct' | 'rowboat'; policy?: ApprovalPolicy; agent?: 'claude' | 'codex'; agentModel?: string; agentEffort?: string }) => {
+  const handleUpdateSession = useCallback(async (patch: { policy?: ApprovalPolicy; agent?: 'claude' | 'codex'; agentModel?: string; agentEffort?: string }) => {
     if (!selectedSessionId) return
     try {
       await window.ipc.invoke('codeSession:update', { sessionId: selectedSessionId, patch })
@@ -189,8 +188,6 @@ export function CodeView({
       toast.error(err instanceof Error ? err.message : 'Failed to update session')
     }
   }, [refresh, selectedSessionId])
-
-  const busy = selectedStatus === 'working' || selectedStatus === 'needs-you'
 
   return (
     <div className="flex h-full min-h-0">
@@ -282,15 +279,6 @@ export function CodeView({
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-                  <Bot className="size-3.5" />
-                  <span className="whitespace-nowrap">Rowboat drives</span>
-                  <Switch
-                    checked={selectedSession.mode === 'rowboat'}
-                    disabled={busy}
-                    onCheckedChange={(checked) => void handleUpdateSession({ mode: checked ? 'rowboat' : 'direct' })}
-                  />
-                </label>
               </div>
             </div>
             <div className="min-h-0 flex-1">
@@ -344,9 +332,8 @@ export function CodeView({
             <Code2 className="size-10 text-muted-foreground/40" />
             <div className="text-sm font-medium">Code with agents</div>
             <p className="max-w-sm px-6 text-xs text-muted-foreground">
-              Run Claude Code or Codex on your projects — let Rowboat drive them, or talk to them
-              directly. The conversation happens in the chat pane on the right; changes and files
-              show here.
+              Rowboat runs Claude Code or Codex on your projects. Chat on the right like any other
+              conversation — changes and files show here.
             </p>
             {projects.length === 0 ? (
               <Button size="sm" onClick={() => void handleAddProject()}>Add a project to get started</Button>

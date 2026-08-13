@@ -7,6 +7,10 @@ import type {
 
 export interface ToolExecutionContext {
     turnId: string;
+    // The chat session this turn belongs to; null for standalone (headless)
+    // turns. Tools that keep per-conversation state (e.g. code_agent_run's
+    // persistent ACP session) key on this so context survives across turns.
+    sessionId: string | null;
     toolCallId: string;
     signal: AbortSignal;
     // The loop appends a durable tool_progress event before resolving.

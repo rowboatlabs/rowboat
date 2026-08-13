@@ -108,8 +108,9 @@ container.register({
     // durable record is the settle-time code-run-events-batch).
     codeRunFeed: asClass(CodeRunFeed).singleton(),
 
-    // Code section: project registry, session metadata, the direct-drive
-    // session service, and the live status tracker.
+    // Code section: project registry, session metadata, the session service
+    // (meta + workspace lifecycle; the conversation is an ordinary chat
+    // session), and the live status tracker.
     codeProjectsRepo: asClass<ICodeProjectsRepo>(FSCodeProjectsRepo).singleton(),
     codeSessionsRepo: asClass<ICodeSessionsRepo>(FSCodeSessionsRepo).singleton(),
     codeSessionService: asClass(CodeSessionService).singleton(),

@@ -29,7 +29,7 @@ import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent 
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
-import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
+import { CodeProject, CodeSession, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
 // ============================================================================
@@ -1504,15 +1504,11 @@ const ipcSchemas = {
       projectId: z.string(),
       title: z.string().optional(),
       agent: CodingAgent,
-      mode: CodeSessionMode,
       policy: ApprovalPolicy,
       isolation: z.enum(['in-repo', 'worktree']),
-      // LLM for Rowboat-mode turns. Unset = the configured default. Like any
-      // chat, the model is fixed once the session's run exists.
-      model: z.string().optional(),
-      provider: z.string().optional(),
-      // The coding agent's own model + reasoning effort (ACP engine). Unlike the
-      // Rowboat model these are re-applied each turn, so they stay editable.
+      // The coding agent's own model + reasoning effort (ACP engine),
+      // re-applied each turn so they stay editable. The copilot LLM is
+      // whatever the chat composer picks — same as any other chat.
       agentModel: z.string().optional(),
       agentEffort: z.string().optional(),
     }),
@@ -1530,7 +1526,7 @@ const ipcSchemas = {
   'codeSession:update': {
     req: z.object({
       sessionId: z.string(),
-      patch: CodeSession.pick({ title: true, mode: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
+      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
     }),
     res: z.object({
       session: CodeSession,
@@ -1550,18 +1546,6 @@ const ipcSchemas = {
     }),
     res: z.object({
       success: z.literal(true),
-    }),
-  },
-  // Direct-drive: send the user's message straight to the session's ACP agent
-  // (no copilot LLM in between). Streams back over `runs:events`.
-  'codeSession:sendMessage': {
-    req: z.object({
-      sessionId: z.string(),
-      text: z.string().min(1),
-    }),
-    res: z.object({
-      accepted: z.boolean(),
-      error: z.string().optional(),
     }),
   },
   'codeSession:stop': {
