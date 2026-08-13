@@ -959,22 +959,21 @@ export function QuickAskBar() {
             </>
           )}
           {/* Jump-to-app stays on the right — it's a window action, not a
-              destination choice. */}
-          {!callCard && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={openInApp}
-                  aria-label="Open in Rowboat"
-                  className="flex h-7 w-7 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
-                >
-                  <ArrowUpRight className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">Open in Rowboat</TooltipContent>
-            </Tooltip>
-          )}
+              destination choice. Present on EVERY surface (Skipper card
+              included): the one bridge from hover to the app's side pane. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={openInApp}
+                aria-label="Open in Rowboat"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+              >
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Open this chat in Rowboat's side pane</TooltipContent>
+          </Tooltip>
         </div>
 
         {(panelAsked || panelText || showHistory) && (

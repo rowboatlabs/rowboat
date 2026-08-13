@@ -120,6 +120,7 @@ interface ChatSidebarProps {
   onCancelRecording?: () => void
   voiceAvailable?: boolean
   inCall?: boolean
+  callOnThisChat?: boolean
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
   callAvailable?: boolean
@@ -189,6 +190,7 @@ export function ChatSidebar({
   onCancelRecording,
   voiceAvailable,
   inCall,
+  callOnThisChat,
   onStartCall,
   onEndCall,
   callAvailable,
@@ -488,6 +490,7 @@ export function ChatSidebar({
                         onCancelRecording={onCancelRecording}
                         voiceAvailable={voiceAvailable}
                         inCall={inCall}
+                        callOnThisChat={callOnThisChat}
                         onStartCall={onStartCall}
                         onEndCall={onEndCall}
                         callAvailable={callAvailable}

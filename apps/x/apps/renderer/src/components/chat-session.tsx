@@ -239,6 +239,7 @@ export interface ChatSessionComposerProps {
   onCancelRecording?: () => void
   voiceAvailable?: boolean
   inCall?: boolean
+  callOnThisChat?: boolean
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
   ttsAvailable?: boolean
@@ -276,6 +277,7 @@ export function ChatSessionComposer({
   onCancelRecording,
   voiceAvailable,
   inCall,
+  callOnThisChat,
   onStartCall,
   onEndCall,
   ttsAvailable,
@@ -323,6 +325,7 @@ export function ChatSessionComposer({
         onCancelRecording={isActive ? onCancelRecording : undefined}
         voiceAvailable={isActive && voiceAvailable}
         inCall={inCall}
+        callOnThisChat={callOnThisChat}
         onStartCall={isActive ? onStartCall : undefined}
         onEndCall={isActive ? onEndCall : undefined}
         callAvailable={callAvailable ?? (voiceAvailable && ttsAvailable)}

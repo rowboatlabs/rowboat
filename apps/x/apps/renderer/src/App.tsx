@@ -1308,6 +1308,13 @@ function App() {
   // Late-bound handle to bindChatToRun (declared with the chat plumbing far
   // below) for early-declared effects like quick-ask open-chat.
   const bindChatToRunRef = useRef<((rid: string) => void) | null>(null)
+  const loadRunRef = useRef<((id: string) => Promise<void>) | null>(null)
+  // A call was started from a FRESH (unbound) chat: when the hover session
+  // materializes on the first utterance, bind that chat to it too — the
+  // call button means "float THIS chat", so both surfaces must end up on
+  // the same conversation instead of hover minting an orphan chat. Chat
+  // identity is captured so a user who switched away is never hijacked.
+  const bindAppChatOnHoverCreateRef = useRef<{ tabId: string; chatId: string } | null>(null)
   // The Home composer's submit (routes to a to-do target or a fresh chat);
   // dictation started from the Home composer flows through it, so a spoken
   // to-do lands on the list, not in some chat.
@@ -1491,14 +1498,33 @@ function App() {
     }
   }, [voiceAvailable, ttsAvailable, startCall, video])
 
-  // Composer call buttons: seed the companion's conversation from the chat
-  // the call was started on (so "talk about this" keeps its context), then
-  // run the ONE hover flow for 'voice' or the fullscreen presets. From then
-  // on the bindings are independent — switching chats in the app never
-  // retargets the call. ⌥⇧Space summons keep the companion's previous
+  // Composer call buttons: the call button on a chat always means "float
+  // THIS chat". No call yet → start the hover session bound to it; call
+  // already live on another chat → re-point the live call at it (same
+  // devices, same Skipper — only the conversation switches); a fresh
+  // (unbound) chat defer-binds, so the first utterance creates ONE session
+  // both surfaces share. ⌥⇧Space summons keep the companion's previous
   // conversation instead (no composer context to seed from).
   const handleStartCall = useCallback((preset: CallPreset) => {
-    if (!inCallRef.current && runIdRef.current) setHoverRunId(runIdRef.current)
+    const activeTab = chatTabsRef.current.find((t) => t.id === activeChatTabIdRef.current)
+    const seedRunId = activeTab?.runId ?? null
+    if (seedRunId) {
+      hoverRunIdRef.current = seedRunId
+      setHoverRunId(seedRunId)
+      bindAppChatOnHoverCreateRef.current = null
+    } else if (activeTab) {
+      hoverRunIdRef.current = null
+      setHoverRunId(null)
+      bindAppChatOnHoverCreateRef.current = { tabId: activeTab.id, chatId: activeTab.chatId }
+    }
+    if (inCallRef.current) {
+      // Live-call retarget: silence whatever of the OLD conversation's reply
+      // was still playing, and make sure the floating surface is up. The
+      // segment player re-keys itself off the new hover binding.
+      ttsRef.current.cancel()
+      void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+      return
+    }
     if (preset === 'voice') {
       void startHoverCall()
     } else {
@@ -1936,8 +1962,10 @@ function App() {
     return window.ipc.on('quick-ask:open-chat', () => {
       const hoverId = hoverRunIdRef.current
       if (hoverId) bindChatToRunRef.current?.(hoverId)
+      // Side pane, not the maximized full view — the user keeps whatever
+      // they were working on in the middle.
       setIsChatSidebarOpen(true)
-      setIsRightPaneMaximized(true)
+      setIsRightPaneMaximized(false)
     })
   }, [])
 
@@ -2059,6 +2087,24 @@ function App() {
         hoverRunIdRef.current = sessionId
         setHoverRunId(sessionId)
         analytics.chatSessionCreated(sessionId)
+        // The call was started from a fresh chat: bind that chat to the
+        // session we just created — both surfaces show ONE conversation.
+        // Only if the user hasn't switched or reset that chat since (its
+        // chat identity still matches) and it's still unbound.
+        const pending = bindAppChatOnHoverCreateRef.current
+        if (pending) {
+          bindAppChatOnHoverCreateRef.current = null
+          const activeTab = chatTabsRef.current.find((t) => t.id === pending.tabId)
+          if (activeTab && activeTab.chatId === pending.chatId && !activeTab.runId) {
+            const boundSessionId = sessionId
+            setChatTabs((prev) => prev.map((t) => (
+              // Keep the chatId: same conversation identity getting its
+              // session, exactly like a first composer send — no remount.
+              t.id === pending.tabId ? { ...t, runId: boundSessionId } : t
+            )))
+            void loadRunRef.current?.(boundSessionId)
+          }
+        }
       }
 
       const selected = hoverSelectionRef.current
@@ -3291,6 +3337,7 @@ function App() {
       console.error('Failed to load session work dir:', err)
     }
   }, [loadRunWorkDir])
+  loadRunRef.current = loadRun
 
   const getStreamingBuffer = useCallback((id: string) => {
     const existing = streamingBuffersRef.current.get(id)
@@ -4396,6 +4443,11 @@ function App() {
   // a fresh conversation so a dead transcript never stays visible.
   const handleRunDeleted = useCallback((rid: string) => {
     setRuns((prev) => prev.filter((r) => r.id !== rid))
+    // The companion must not keep pointing at a deleted conversation.
+    if (hoverRunIdRef.current === rid) {
+      hoverRunIdRef.current = null
+      setHoverRunId(null)
+    }
     const openTab = chatTabs.find((t) => t.runId === rid)
     if (!openTab) return
     handleNewChatTabInSidebar()
@@ -5263,6 +5315,13 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
+  // The call button on a chat means "float THIS chat": it reads as End call
+  // only on the chat the live call is actually bound to; on any other chat
+  // it stays a call button that re-points the live call (see handleStartCall).
+  const callOnActiveChat = inCall
+    && hoverRunId != null
+    && chatTabs.find((t) => t.id === activeChatTabId)?.runId === hoverRunId
+
   const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -6379,6 +6438,7 @@ function App() {
                           onCancelRecording={handleCancelRecording}
                           voiceAvailable={voiceAvailable}
                           inCall={inCall}
+                          callOnThisChat={callOnActiveChat}
                           onStartCall={handleStartCall}
                           onEndCall={endCall}
                           callAvailable={voiceAvailable && ttsAvailable}
@@ -6868,6 +6928,7 @@ function App() {
                           onCancelRecording={handleCancelRecording}
                           voiceAvailable={voiceAvailable}
                           inCall={inCall}
+                          callOnThisChat={callOnActiveChat}
                           onStartCall={handleStartCall}
                           onEndCall={endCall}
                           ttsAvailable={ttsAvailable}
@@ -6968,6 +7029,7 @@ function App() {
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
                 inCall={inCall}
+                callOnThisChat={callOnActiveChat}
                 onStartCall={handleStartCall}
                 onEndCall={endCall}
                 callAvailable={voiceAvailable && ttsAvailable}
