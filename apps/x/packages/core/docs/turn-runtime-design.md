@@ -38,7 +38,8 @@ The turn runtime must:
 The first implementation will not include:
 
 - Session storage or session scheduling.
-- Queued user messages.
+- Queued user messages. (The queue stayed a session concern when it later
+  shipped; the turn loop's half is the `takeInputs` drain of section 8.6.)
 - Enforcement of the session-level one-active-turn rule.
 - Context pruning or compaction.
 - Agent-as-tool behavior. An agent tool handler may implement this separately,
@@ -61,7 +62,10 @@ The first implementation will not include:
 ### 3.1 Turn
 
 A turn starts with one intentional user message and contains all agent work
-caused by that message:
+caused by that message. The caller may offer ADDITIONAL user messages while
+the turn runs (steering); each is accepted durably at a model-call boundary
+as an `input_added` event (section 8.6), so a turn has one or more inputs —
+the first arriving in `turn_created`. A turn's work includes:
 
 - Model requests and responses.
 - Permission checks and decisions.
@@ -601,7 +605,8 @@ execution is controlled manually by the turn loop.
 ```ts
 // Compact string refs, so raw JSONL reads naturally:
 //   "context"                  the inline context block
-//   "input"                    the turn's user message
+//   "input"                    the turn's user message (input index 0)
+//   "input:<n>"                → the nth input_added message (n >= 1)
 //   "assistant:<index>"        → that model_call_completed's message
 //   "toolResult:<toolCallId>"  → that tool_result
 type ModelRequestMessageRef = string;
@@ -628,7 +633,10 @@ is new since the previous model call — call 0 is `["context"?, "input"]`
 (context only when inline and nonempty; cross-turn prefixes ride
 `contextRef`); call N is `["assistant:N-1", …that batch's
 "toolResult:<id>" refs in source order]`; a re-issued call after an
-interruption is `[]`. The system
+interruption is `[]`. Every base list is followed by the `input:<n>` refs
+of inputs accepted at that boundary (section 8.6) — a request MUST
+reference every input added before it, so an accepted message can never be
+silently dropped. The system
 prompt and tool set are not repeated: they are byte-identical to
 `turn_created.agent.resolved` by construction.
 
@@ -712,6 +720,47 @@ Only the primary model calls directly controlled by the turn loop are recorded
 as model calls. Internal model calls hidden inside the permission classifier or
 tool implementations belong to those dependencies and are not turn-loop model
 calls.
+
+### 8.6 Added inputs (steering)
+
+```ts
+interface InputAdded extends BaseTurnEvent {
+  type: "input_added";
+  inputIndex: number; // 1-based; index 0 is turn_created.input
+  message: UserMessage;
+}
+```
+
+A user message accepted into the RUNNING turn at a model-call boundary.
+Like `tools_extended`, this is a sanctioned, durable, ordered exception to
+turn-definition immutability. Rules:
+
+- The messages come from a caller-supplied drain (`takeInputs`,
+  section 15.2) polled once per loop iteration at the boundary: the tool
+  batch has settled, completion was ruled out, the budget check and the
+  next `model_call_requested` are about to run. The loop never learns where
+  the messages come from (session queue, test fixture).
+- Injection is purely additive. It never interrupts an in-flight model
+  stream or tool execution and never cancels pending work; the message
+  lands as a plain user message positioned after the batch's tool results.
+- The very next `model_call_requested` must reference every input added
+  before it (`input:<n>` refs) — the reducer enforces this, which is also
+  what makes recovery correct: an `input_added` orphaned by a crash before
+  its request is picked up by the re-issued request's refs.
+- `input_added` may not appear while a model call is unsettled or while
+  tool calls lack terminal results; `inputIndex` is strictly sequential.
+- Each accepted input RESETS the model-call budget: the limit counts calls
+  since the last input (section 20). Fresh user input buys the allowance a
+  fresh turn would get.
+- `turnTranscript` and the request composer place added inputs at the
+  boundary the model saw them, so cross-turn context, the classifier's
+  conversation view, and the UI all render them in position. Inputs
+  accepted after the last request (turn cancelled first) close the
+  transcript, so the next turn still sees them.
+- If the model's final response has no tool calls, the turn completes even
+  if the caller still has pending messages — there is no next call to
+  inject before; the session layer promotes them into a new turn instead.
+  Delivery is "earliest safe point", never "guaranteed same turn".
 
 ## 9. Permission model
 
@@ -1123,6 +1172,7 @@ type TurnEvent =
   | ToolInvocationRequested
   | ToolProgress
   | ToolResult
+  | InputAdded
   | TurnSuspended
   | TurnCompleted
   | TurnFailed
@@ -1337,13 +1387,20 @@ interface CreateTurnInput {
   };
 }
 
+// Steering drain (section 8.6): returned messages are treated as consumed
+// and appended durably as input_added events at the boundary. The dual of
+// the abort signal — both are ephemeral per-invocation channels into a live
+// advance that become durable only when acted on (turn_cancelled /
+// input_added respectively).
+type TakeAddedInputs = () => UserMessage[] | Promise<UserMessage[]>;
+
 interface ITurnRuntime {
   createTurn(input: CreateTurnInput): Promise<string>;
 
   advanceTurn(
     turnId: string,
     input?: TurnExternalInput,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; takeInputs?: TakeAddedInputs },
   ): TurnExecution;
 
   getTurn(turnId: string): Promise<Turn>;
@@ -1534,19 +1591,22 @@ At a high level, `advanceTurn` performs:
    d. Expose eligible async tools.
    e. If external work remains, append turn_suspended and settle.
    f. If a tool batch is complete, build ordered tool-result messages.
-   g. If no model-call budget remains, fail.
-   h. Append model_call_requested with exact input.
-   i. Call streamText for one step.
-   j. Persist normalized non-delta events and stream deltas.
-   k. Append model_call_completed or model_call_failed.
-   l. Complete when the response has no tool calls.
+   g. Drain takeInputs; append input_added for each accepted message.
+   h. If no model-call budget remains (counted since the last input), fail.
+   i. Append model_call_requested with exact input.
+   j. Call streamText for one step.
+   k. Persist normalized non-delta events and stream deltas.
+   l. Append model_call_completed or model_call_failed.
+   m. Complete when the response has no tool calls.
 11. Publish turn-processing-end in finalization.
 12. Release the lock.
 13. Resolve/reject outcome and close/error event stream.
 ```
 
-The loop does not read session queues, accept new user messages, switch agents,
-or transform context.
+The loop does not read session queues, switch agents, or transform context.
+Additional user input arrives only through the caller-supplied `takeInputs`
+drain at the section 8.6 boundary — the loop stays ignorant of where the
+messages come from.
 
 ## 19. Context and model requests
 
@@ -1569,7 +1629,11 @@ Within-turn storage size is not treated as a constraint.
 ## 20. Model-call limit
 
 `maxModelCalls` limits primary agent model calls, not permission-classifier or
-tool-internal model calls.
+tool-internal model calls. The budget counts calls SINCE THE LAST ACCEPTED
+INPUT (`input_added`, section 8.6): a turn with no added inputs behaves
+exactly as before, and each steer resets the allowance — the same budget a
+fresh turn would have granted. The reducer enforces the same rule as its
+append gate.
 
 When the final allowed model call returns tool calls:
 
@@ -1667,6 +1731,7 @@ Calling `advanceTurn(turnId)` with no external input is the recovery entry point
 | Async `tool_invocation_requested` without result | Remain suspended awaiting external result. |
 | Some async results present | Preserve them and await remaining inputs. |
 | All tool results present before next model request | Safely initiate the next model call. |
+| `input_added` without a following `model_call_requested` | The next request's refs carry the input by construction (section 8.6); nothing special to do. |
 | Terminal event present | Return existing outcome without writing or executing. |
 | Corrupt JSONL | Reject as infrastructure error. |
 
@@ -1719,7 +1784,10 @@ but the first turn implementation does not enforce it.
 - Request references that do not match the transcript: call 0 must be
   `[{context}?, {input}]`; call N must reference the previous completed
   call's response and its batch's tool results in source order (or nothing,
-  after an interrupted call).
+  after an interrupted call); every list is followed by exactly the
+  `input:<n>` refs of inputs accepted at that boundary (section 8.6).
+- `input_added` while a model call is unsettled, while tool calls lack
+  terminal results, or with a non-sequential `inputIndex`.
 
 The reducer validates `context` structurally but treats it as opaque; it
 never resolves references (section 6.6).
@@ -1995,8 +2063,9 @@ implicitly added to the turn loop:
 The session layer is specified in `session-design.md`. It covers the session
 JSONL schema, turn references and ordering, one-active-turn enforcement,
 context assembly through turn references, the in-memory index, session UI
-projections, and startup reconciliation. Queued user messages, steering,
-session-level permission grants, and compaction remain deferred there with
+projections, and startup reconciliation. Queued user messages and steering
+shipped there (its sections 12.1/12.4, riding this document's section 8.6);
+session-level permission grants and compaction remain deferred with
 committed future shapes.
 
 ### 29.2 Agent-as-tool

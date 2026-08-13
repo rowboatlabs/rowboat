@@ -9,7 +9,10 @@ import {
     type ModelRequest,
     type ResolvedAgent,
     type ResolvedAgentSnapshot,
+    addedInputMessagesAt,
     assistantRef,
+    inputRef,
+    modelCallBudgetBase,
     toolResultRef,
     type ToolCallState,
     ToolDescriptor,
@@ -34,6 +37,7 @@ import type { IAgentResolver } from "./agent-resolver.js";
 import {
     type CreateTurnInput,
     type ITurnRuntime,
+    type TakeAddedInputs,
     type Turn,
     TurnDependencyError,
     type TurnExecution,
@@ -200,12 +204,12 @@ export class TurnRuntime implements ITurnRuntime {
     advanceTurn(
         turnId: string,
         input?: TurnExternalInput,
-        options?: { signal?: AbortSignal },
+        options?: { signal?: AbortSignal; takeInputs?: TakeAddedInputs },
     ): TurnExecution {
         const stream = new HotStream<TurnStreamEvent, TurnOutcome>();
         void this.turnRepo
             .withLock(turnId, () =>
-                this.advanceLocked(turnId, input, options?.signal, stream),
+                this.advanceLocked(turnId, input, options, stream),
             )
             .then(
                 (outcome) => stream.end(outcome),
@@ -217,12 +221,12 @@ export class TurnRuntime implements ITurnRuntime {
     private async advanceLocked(
         turnId: string,
         input: TurnExternalInput | undefined,
-        externalSignal: AbortSignal | undefined,
+        options: { signal?: AbortSignal; takeInputs?: TakeAddedInputs } | undefined,
         stream: HotStream<TurnStreamEvent, TurnOutcome>,
     ): Promise<TurnOutcome> {
         this.lifecycleBus.publish({ type: "turn-processing-start", turnId });
         try {
-            return await this.advance(turnId, input, externalSignal, stream);
+            return await this.advance(turnId, input, options, stream);
         } finally {
             this.lifecycleBus.publish({ type: "turn-processing-end", turnId });
         }
@@ -237,9 +241,10 @@ export class TurnRuntime implements ITurnRuntime {
     private async advance(
         turnId: string,
         input: TurnExternalInput | undefined,
-        externalSignal: AbortSignal | undefined,
+        options: { signal?: AbortSignal; takeInputs?: TakeAddedInputs } | undefined,
         stream: HotStream<TurnStreamEvent, TurnOutcome>,
     ): Promise<TurnOutcome> {
+        const externalSignal = options?.signal;
         const events = await this.turnRepo.read(turnId);
         const state = reduceTurn(events);
 
@@ -311,6 +316,7 @@ export class TurnRuntime implements ITurnRuntime {
             usageReporter: this.usageReporter,
             resolveTool: (descriptor) => this.toolRegistry.resolve(descriptor),
             signal: controller.signal,
+            takeInputs: options?.takeInputs,
             turnRepo: this.turnRepo,
             clock: this.clock,
             permissionChecker: this.permissionChecker,
@@ -368,6 +374,7 @@ class TurnAdvance {
         descriptor: z.infer<typeof ToolDescriptor>,
     ) => Promise<RuntimeTool>;
     private readonly signal: AbortSignal;
+    private readonly takeInputs: TakeAddedInputs | undefined;
     private readonly turnRepo: ITurnRepo;
     private readonly clock: IClock;
     private readonly permissionChecker: IPermissionChecker;
@@ -392,6 +399,7 @@ class TurnAdvance {
             descriptor: z.infer<typeof ToolDescriptor>,
         ) => Promise<RuntimeTool>;
         signal: AbortSignal;
+        takeInputs: TakeAddedInputs | undefined;
         turnRepo: ITurnRepo;
         clock: IClock;
         permissionChecker: IPermissionChecker;
@@ -407,6 +415,7 @@ class TurnAdvance {
         this.usageReporter = init.usageReporter;
         this.resolveTool = init.resolveTool;
         this.signal = init.signal;
+        this.takeInputs = init.takeInputs;
         this.turnRepo = init.turnRepo;
         this.clock = init.clock;
         this.permissionChecker = init.permissionChecker;
@@ -559,6 +568,7 @@ class TurnAdvance {
             if (completed) {
                 return completed;
             }
+            await this.drainAddedInputs();
             const exhausted = await this.failIfExhausted();
             if (exhausted) {
                 return exhausted;
@@ -568,6 +578,33 @@ class TurnAdvance {
                 return settled;
             }
         }
+    }
+
+    // Steering: drain caller-offered user messages at the model-call
+    // boundary — after the batch settled, after completion was ruled out,
+    // before the budget check (an accepted input resets the budget, so a
+    // steer can rescue a turn about to exhaust) and before the next request
+    // is composed (the reducer requires that request to reference every
+    // accepted input). appendWith computes indices inside the serialized
+    // commit slot, so straggler appends cannot race the numbering.
+    private async drainAddedInputs(): Promise<void> {
+        if (!this.takeInputs || this.signal.aborted) {
+            return;
+        }
+        const messages = await this.takeInputs();
+        if (messages.length === 0) {
+            return;
+        }
+        await this.appendWith(() => {
+            const base = this.state.addedInputs.length;
+            return messages.map((message, i) => ({
+                type: "input_added" as const,
+                turnId: this.turnId,
+                ts: this.now(),
+                inputIndex: base + i + 1,
+                message,
+            }));
+        });
     }
 
     // §11.2: exactly one input, validated against durable pending state.
@@ -757,14 +794,16 @@ class TurnAdvance {
         }
     }
 
-    // Conversation context for the classifier: resolved context, the turn
-    // input, and completed assistant responses (the current batch's tool
-    // results are not yet terminal, so tool messages are omitted).
+    // Conversation context for the classifier: resolved context, the turn's
+    // inputs in the positions the model saw them, and completed assistant
+    // responses (the current batch's tool results are not yet terminal, so
+    // tool messages are omitted).
     private conversationSoFar(): Array<z.infer<typeof ConversationMessage>> {
         const messages: Array<z.infer<typeof ConversationMessage>> = [
             this.state.definition.input,
         ];
         for (const call of this.state.modelCalls) {
+            messages.push(...addedInputMessagesAt(this.state, call.index));
             if (call.response !== undefined) {
                 messages.push(call.response);
             }
@@ -1151,9 +1190,14 @@ class TurnAdvance {
     }
 
     // §20: limit exhaustion is a distinguishable outcome; the transcript is
-    // structurally complete, so sessions can offer continuation.
+    // structurally complete, so sessions can offer continuation. The budget
+    // counts calls since the last accepted input (mirrors the reducer's
+    // append gate): each steer buys the allowance a fresh turn would get.
     private async failIfExhausted(): Promise<TurnOutcome | undefined> {
-        if (this.state.modelCalls.length < this.definition.config.maxModelCalls) {
+        if (
+            this.state.modelCalls.length - modelCallBudgetBase(this.state) <
+            this.definition.config.maxModelCalls
+        ) {
             return undefined;
         }
         const error = `Model call limit of ${this.definition.config.maxModelCalls} reached before the turn completed.`;
@@ -1202,6 +1246,14 @@ class TurnAdvance {
                       ]
                     : []; // re-issue after an interrupted call adds nothing new
         }
+        // Inputs accepted at this boundary (a fresh drain, or ones left
+        // unreferenced by a crash between input_added and the request —
+        // recovery picks them up here by construction).
+        refs.push(
+            ...this.state.addedInputs
+                .filter((added) => added.firstAffectedModelCallIndex === index)
+                .map((added) => inputRef(added.event.inputIndex)),
+        );
         // The turn's reasoning effort is stamped on every call's persisted
         // parameters (turn-runtime-design.md §8.3): each step durably records
         // what it ran with, and the model bridge maps the canonical value to
