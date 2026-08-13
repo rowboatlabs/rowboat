@@ -1255,14 +1255,6 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
-  // App window → main: pop the ACTIVE chat out into the floating companion,
-  // landing on the expanded text card (the mirror of the card's ↗). Starts
-  // a companion session so the popped chat survives blur (tucking to the
-  // mascot instead of dying like a plain summon would).
-  'quickAsk:popOut': {
-    req: z.null(),
-    res: z.object({}),
-  },
   'quick-ask:tuck': {
     req: z.null(),
     res: z.null(),
@@ -2425,12 +2417,10 @@ const ipcSchemas = {
   // Popout control bar → main process → relayed to the app window, which
   // executes the action on the live call. 'expand' additionally focuses the
   // main app window (handled in the main process). 'ptt-down'/'ptt-up' are
-  // the on-screen talk button's press/release edges; 'send-text' carries a
-  // typed message from the popout's input.
+  // the on-screen talk button's press/release edges.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
-      text: z.string().optional(),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'end-call', 'expand']),
     }),
     res: z.object({}),
   },
@@ -2457,8 +2447,7 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
-      text: z.string().optional(),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'end-call', 'expand']),
     }),
     res: z.null(),
   },

@@ -33,8 +33,7 @@ import {
   getQuickAskWindow,
   hideQuickAsk,
   isPinnedCollapsed,
-  markTuckPending,
-  popOutCompanion,
+  markSummonPending,
   pushChatContext,
   pushPopoutState,
   resizeCompanionPinned,
@@ -1148,10 +1147,10 @@ export function setupIpcHandlers() {
       };
     },
     'quickAsk:tuck': async () => {
-      // The next pin starts collapsed near the bar's mascot; the app window
-      // decides HOW to get there (start a voice call, or minimize a live
-      // call to the floating surface).
-      markTuckPending();
+      // The next pin gets focus (the user asked for their companion); the
+      // app window decides HOW to get there (start a voice call, or
+      // minimize a live call to the floating surface).
+      markSummonPending();
       findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
       return {};
     },
@@ -1161,15 +1160,6 @@ export function setupIpcHandlers() {
     },
     'quickAsk:chatContext': async (_event, args) => {
       pushChatContext(args);
-      return {};
-    },
-    'quickAsk:popOut': async () => {
-      // Already pinned → expanded/focused in place; otherwise arm the
-      // expanded-card landing and run the tuck flow (voice session, or the
-      // app falls back to the plain summoned card without voice).
-      if (!popOutCompanion()) {
-        findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
-      }
       return {};
     },
     'quickAsk:selectChat': async (_event, args) => {

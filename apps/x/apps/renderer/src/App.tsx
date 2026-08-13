@@ -171,6 +171,9 @@ const WORKSPACE_ROOT = 'knowledge/Workspace'
 // strip — sections are plain view state now.
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
+// Stable empty conversation for unbound sessions (identity-stable for deps).
+const EMPTY_CONVERSATION: ConversationItem[] = []
+
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
@@ -907,6 +910,25 @@ function App() {
   // runId IS the session id in the sessions runtime.
   const sessionChat = useSessionChat(runId)
 
+  // The companion's OWN conversation binding. The hover bar, the Skipper,
+  // and every call talk to THIS session — never to whatever chat the app
+  // happens to be showing. Seeded from the chat a call was started on;
+  // switched from the bar's chip; untouched by app navigation, so hovering
+  // and browsing the app are fully independent.
+  const [hoverRunId, setHoverRunId] = useState<string | null>(null)
+  const hoverRunIdRef = useRef<string | null>(null)
+  hoverRunIdRef.current = hoverRunId
+  const hoverChat = useSessionChat(hoverRunId)
+  const hoverChatRef = useRef(hoverChat)
+  hoverChatRef.current = hoverChat
+  // The bar's model/effort picks — scoped to the companion, never overlaid
+  // onto the app chat's selection.
+  const hoverSelectionRef = useRef<ModelSelection | null>(null)
+  const hoverIsProcessing = hoverChat.chatState?.isProcessing ?? false
+  const hoverIsReasoning = hoverChat.chatState?.isReasoning ?? false
+  const hoverConversation = hoverChat.chatState?.conversation ?? EMPTY_CONVERSATION
+  const hoverAssistantMessage = hoverChat.chatState?.currentAssistantMessage ?? ''
+
   // Watch the conversation that is actually rendered — the sessions-runtime
   // one when loaded, the legacy state otherwise — so billing failures
   // (out of credits, subscription lapsed) always pop the upgrade dialog.
@@ -941,13 +963,8 @@ function App() {
   const activeIsReasoning = sessionChat.chatState?.isReasoning ?? false
   const activeIsWaitingOnHuman = sessionChat.chatState?.isWaitingOnHuman ?? false
   const activeIsWorking = activeIsProcessing && !activeIsWaitingOnHuman
-  // LIVE chat data: the new runtime streams through sessionChat.chatState —
-  // the standalone conversation/currentAssistantMessage states are only the
-  // legacy pre-load fallback (see activeChatTabState). Anything mirroring
-  // the in-flight reply (pill response panel, fallback speech) must read
-  // these, never the legacy states.
-  const liveConversation = sessionChat.chatState?.conversation ?? conversation
-  const liveAssistantMessage = sessionChat.chatState?.currentAssistantMessage ?? currentAssistantMessage
+  // (The in-flight-reply mirrors — pill response panel, fallback speech,
+  // quick-ask state — read the HOVER session's store, declared above.)
   // A failed session load must be visible, not a blank chat.
   const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
     sessionChat.error
@@ -1001,12 +1018,12 @@ function App() {
     setPttStatus(s)
   }, [])
 
-  // Speak newly completed <voice> blocks from the new runtime's live stream
-  // (parity with the legacy text-delta voice extraction below). The store
-  // accumulates completed blocks in chatState.voiceSegments; we speak only
-  // segments that appeared after the current session became active.
+  // Speak newly completed <voice> blocks from the new runtime's live stream.
+  // Speech is a COMPANION concern (calls + the bar's voice toggle), so the
+  // segments come from the hover session's store — the app's visible chat
+  // never starts talking, whatever it's bound to.
   const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
-  const voiceSegments = sessionChat.chatState?.voiceSegments
+  const voiceSegments = hoverChat.chatState?.voiceSegments
   const voiceSegmentsRef = useRef(voiceSegments)
   voiceSegmentsRef.current = voiceSegments
   // Whether any voice segment of the CURRENT call turn has been spoken —
@@ -1025,9 +1042,9 @@ function App() {
   })
   useEffect(() => {
     if (!voiceSegments) return
-    if (spokenVoiceRef.current.key !== runId) {
+    if (spokenVoiceRef.current.key !== hoverRunId) {
       // Session switch: skip anything already streamed before we arrived.
-      spokenVoiceRef.current = { key: runId, count: voiceSegments.length }
+      spokenVoiceRef.current = { key: hoverRunId, count: voiceSegments.length }
       return
     }
     // The overlay's segment list is PER-TURN: the store resets it to [] on
@@ -1058,14 +1075,14 @@ function App() {
         setAssistantCaption(segment)
       }
     }
-  }, [voiceSegments, runId, pttStatus])
+  }, [voiceSegments, hoverRunId, pttStatus])
 
   // Consistency net: 'full' voice output relies on the model wrapping its
   // reply in <voice> tags — when it doesn't, the turn used to end in total
   // silence. If a call turn finishes with no voice segment, read the reply
   // text itself aloud.
   useEffect(() => {
-    if (activeIsProcessing) return
+    if (hoverIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
     // Typed turn or speaker muted: no fallback read-aloud.
@@ -1087,8 +1104,8 @@ function App() {
       turn.pending = false
       return
     }
-    for (let i = liveConversation.length - 1; i >= 0; i--) {
-      const item = liveConversation[i]
+    for (let i = hoverConversation.length - 1; i >= 0; i--) {
+      const item = hoverConversation[i]
       if (!isChatMessage(item) || item.role !== 'assistant') continue
       // Only a reply from THIS turn counts — an errored turn would otherwise
       // re-speak the previous answer. An older newest-message means this
@@ -1104,7 +1121,7 @@ function App() {
       }
       break
     }
-  }, [activeIsProcessing, liveConversation, pttStatus])
+  }, [hoverIsProcessing, hoverConversation, pttStatus])
 
   // Emit the turn's voice-to-voice latency breakdown once audio is audible.
   useEffect(() => {
@@ -1284,6 +1301,13 @@ function App() {
   }, [voice, cancelPttForSteal])
 
   const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  // Companion sends (bar submits, call utterances) — filled once
+  // handleHoverSubmit exists; early callers (startCall's PTT callback) fire
+  // at event time, long after render.
+  const handleHoverSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  // Late-bound handle to bindChatToRun (declared with the chat plumbing far
+  // below) for early-declared effects like quick-ask open-chat.
+  const bindChatToRunRef = useRef<((rid: string) => void) | null>(null)
   // The Home composer's submit (routes to a to-do target or a fresh chat);
   // dictation started from the Home composer flows through it, so a spoken
   // to-do lands on the list, not in some chat.
@@ -1387,7 +1411,9 @@ function App() {
         playAckCue()
         callTurnMarksRef.current = { t0: performance.now() }
         pendingVoiceInputRef.current = true
-        handlePromptSubmitRef.current?.({ text, files: [] })
+        // Calls talk to the companion's session — the app window can browse
+        // any chat mid-call without retargeting the conversation.
+        handleHoverSubmitRef.current?.({ text, files: [] })
       })
       .then((result) => {
         if (result === 'mic-denied') setPermissionDialog('microphone')
@@ -1430,6 +1456,55 @@ function App() {
     companionVoiceRef.current = false
     releaseVoice(CALL_VOICE_HOLDER)
   }, [video, setPttState])
+
+  // ONE hover mode: the ⌥⇧Space relay, the card's tuck handle, and the
+  // composer's call button all start THIS — a companion voice session on
+  // the Skipper surface. Sticky screen share replays the user's standing
+  // choice; without voice configured it falls back to the text card.
+  const startHoverCall = useCallback(async () => {
+    if (inCallRef.current) {
+      // Already on a call — just make sure the floating surface is up
+      // (re-assert even when callSurface didn't change, so a destroyed or
+      // desynced companion window self-heals).
+      setCallMinimized(true)
+      void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+      return
+    }
+    if (companionVoiceStartingRef.current) return
+    if (!(voiceAvailable && ttsAvailable)) {
+      // Voice-first has no voice — fall back to the text card.
+      void window.ipc.invoke('quickAsk:show', null).catch(() => {})
+      return
+    }
+    companionVoiceRef.current = true
+    companionVoiceStartingRef.current = true
+    try {
+      await startCall('voice')
+      // Sticky screen share: opted in once from the mascot's share pin →
+      // every summon starts already sharing, until toggled off.
+      if (localStorage.getItem('companion-share-sticky') === '1') {
+        const shared = await video.startScreenShare()
+        if (!shared) setPermissionDialog('screen-recording')
+      }
+    } finally {
+      companionVoiceStartingRef.current = false
+    }
+  }, [voiceAvailable, ttsAvailable, startCall, video])
+
+  // Composer call buttons: seed the companion's conversation from the chat
+  // the call was started on (so "talk about this" keeps its context), then
+  // run the ONE hover flow for 'voice' or the fullscreen presets. From then
+  // on the bindings are independent — switching chats in the app never
+  // retargets the call. ⌥⇧Space summons keep the companion's previous
+  // conversation instead (no composer context to seed from).
+  const handleStartCall = useCallback((preset: CallPreset) => {
+    if (!inCallRef.current && runIdRef.current) setHoverRunId(runIdRef.current)
+    if (preset === 'voice') {
+      void startHoverCall()
+    } else {
+      void startCall(preset)
+    }
+  }, [startHoverCall, startCall])
 
   // The user-mute half that lives in the video pipeline: stop sampling
   // camera/screen frames while muted (see useVideoMode.setCapturePaused).
@@ -1650,7 +1725,7 @@ function App() {
         ? 'listening'
         : tts.state === 'speaking'
           ? 'speaking'
-          : tts.state === 'synthesizing' || activeIsProcessing
+          : tts.state === 'synthesizing' || hoverIsProcessing
             ? 'thinking'
             : 'idle'
       : null
@@ -1696,10 +1771,12 @@ function App() {
   let callResponseText: string | null = null
   let callQuestionText: string | null = null
   if (inCall) {
-    // The question the reply answers — shown above it in the pill's panel.
+    // The question the reply answers — shown above it in the panel. All of
+    // this reads the HOVER session: the call's conversation, regardless of
+    // what the app window is showing.
     let questionAt = 0
-    for (let i = liveConversation.length - 1; i >= 0; i--) {
-      const item = liveConversation[i]
+    for (let i = hoverConversation.length - 1; i >= 0; i--) {
+      const item = hoverConversation[i]
       if (isChatMessage(item) && item.role === 'user') {
         if (item.timestamp >= callStartedEpochRef.current) {
           callQuestionText = item.content
@@ -1708,10 +1785,10 @@ function App() {
         break
       }
     }
-    callResponseText = liveAssistantMessage || null
+    callResponseText = hoverAssistantMessage || null
     if (!callResponseText) {
-      for (let i = liveConversation.length - 1; i >= 0; i--) {
-        const item = liveConversation[i]
+      for (let i = hoverConversation.length - 1; i >= 0; i--) {
+        const item = hoverConversation[i]
         if (isChatMessage(item) && item.role === 'assistant') {
           // Only a reply to the CURRENT question counts — right after a
           // submit the newest assistant message is still the previous
@@ -1728,12 +1805,13 @@ function App() {
   // What's happening right now, at tool-NAME level ("Searching the web…",
   // "Reasoning…" — never arguments): the most recent activity wins — a
   // running tool by display name, else reasoning, else plain thinking.
-  // Feeds the summoned bar's status line AND the Skipper's chip/panel.
-  const liveActivityText = useMemo(() => {
-    if (!activeIsProcessing) return null
-    let label = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
-    for (let i = liveConversation.length - 1; i >= 0; i--) {
-      const item = liveConversation[i]
+  // Feeds the summoned bar's status line AND the Skipper's chip/panel, so
+  // it reads the HOVER session's turn.
+  const hoverActivityText = useMemo(() => {
+    if (!hoverIsProcessing) return null
+    let label = hoverIsReasoning ? 'Reasoning…' : 'Thinking…'
+    for (let i = hoverConversation.length - 1; i >= 0; i--) {
+      const item = hoverConversation[i]
       if (isToolCall(item)) {
         if (item.status === 'pending' || item.status === 'running') {
           label = `${getToolDisplayName(item)}…`
@@ -1743,7 +1821,7 @@ function App() {
       if (isChatMessage(item)) break
     }
     return label
-  }, [activeIsProcessing, activeIsReasoning, liveConversation])
+  }, [hoverIsProcessing, hoverIsReasoning, hoverConversation])
 
   // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
   // The main process caches the latest state and replays it when the popout
@@ -1758,14 +1836,14 @@ function App() {
         micMuted,
         screenSharing: video.screenState === 'live',
         speakerMuted,
-        activityText: liveActivityText,
+        activityText: hoverActivityText,
         interimText: voice.interimText || null,
         pttLocked: pttStatus === 'locked',
         responseText: callResponseText,
         questionText: callQuestionText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, liveActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, hoverActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
   // Screen-pointer gate: tell main whether a share is live (call OR
   // quick-ask — this window owns the capture either way). While true the
@@ -1788,7 +1866,7 @@ function App() {
   // screen, which by the exclusivity rule stops any running share; the main
   // process already refocused the app window.
   useEffect(() => {
-    return window.ipc.on('video:popout-action', ({ action, text }) => {
+    return window.ipc.on('video:popout-action', ({ action }) => {
       if (action === 'toggle-mic') handleToggleMic()
       else if (action === 'toggle-camera') handleToggleCamera()
       else if (action === 'toggle-share') {
@@ -1818,11 +1896,6 @@ function App() {
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
       else if (action === 'ptt-up') handlePttUp()
-      else if (action === 'send-text') {
-        // Typed from the popout: exactly a composer message — frames ride
-        // along via handlePromptSubmit as with any typed mid-call message.
-        if (text?.trim()) handlePromptSubmitRef.current?.({ text: text.trim(), files: [] })
-      }
       else if (action === 'end-call') endCall()
       else if (action === 'expand') {
         if (video.screenState === 'live') video.stopScreenShare()
@@ -1855,10 +1928,14 @@ function App() {
     return () => clearTimeout(timer)
   }, [])
 
-  // Quick-ask "Open in Rowboat": land on the conversation full-view — chat
-  // pane open and maximized, no middle pane.
+  // Quick-ask "Open in Rowboat": the ONE deliberate bridge between the
+  // companion and the app — bind the app's chat to the companion's
+  // conversation and land on it full-view. (Everything else keeps the two
+  // bindings independent.)
   useEffect(() => {
     return window.ipc.on('quick-ask:open-chat', () => {
+      const hoverId = hoverRunIdRef.current
+      if (hoverId) bindChatToRunRef.current?.(hoverId)
       setIsChatSidebarOpen(true)
       setIsRightPaneMaximized(true)
     })
@@ -1918,41 +1995,203 @@ function App() {
       .catch(() => {})
   }, [inCall, video.screenState])
 
-  // Quick-ask bar: a submit from the global ⌥⇧Space bar lands in the current
-  // chat exactly like a composer message. The bar hosts the REAL composer,
-  // so the payload carries everything an in-app submit does — mentions,
-  // attachments, per-turn config — plus the bar's model/effort picks, which
-  // are applied to the active tab the same way its own composer would.
+  // Quick-ask bar: a submit from the companion lands in the COMPANION's own
+  // session — never in whatever chat the app window is showing. The bar
+  // hosts the REAL composer, so the payload carries everything an in-app
+  // submit does; its model/effort picks are companion-scoped.
   const quickAskActiveRef = useRef(false)
   const quickAskStartedAtRef = useRef(0)
+
+  // Send into the COMPANION's session. The lean twin of handlePromptSubmit:
+  // same per-turn config (voice flags, frames, search/code, permissions,
+  // fast-thinking default) but no middle-pane context and none of the
+  // visible-chat bookkeeping — the app window's conversation is not
+  // involved, whatever it's currently bound to.
+  const handleHoverSubmit = useCallback(async (
+    message: PromptInputMessage,
+    mentions?: FileMention[],
+    stagedAttachments: StagedAttachment[] = [],
+    searchEnabled?: boolean,
+    codeMode?: 'claude' | 'codex',
+    permissionMode?: PermissionMode,
+  ) => {
+    const userMessage = message.text.trim()
+    const hasAttachments = stagedAttachments.length > 0
+    if (!userMessage && !hasAttachments) return
+
+    if (hoverChatRef.current.chatState?.isProcessing) {
+      // In-call and quick-ask input arrives at arbitrary moments — finish
+      // the previous turn's stop and proceed instead of dropping the message.
+      await hoverChatRef.current.stop().catch(() => {})
+    }
+
+    const marks = callTurnMarksRef.current
+    if (inCallRef.current && marks && marks.submit === undefined) {
+      marks.submit = performance.now()
+    }
+    // Quick-ask voice toggle: this turn speaks its reply even without a call.
+    speakTurnRef.current =
+      !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
+    // Modality decides speech on calls: a TYPED question renders its reply
+    // silently; a SPOKEN one (PTT utterance) is read aloud.
+    suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
+    if (inCallRef.current || speakTurnRef.current) {
+      // A new question supersedes whatever of the previous reply was still
+      // unspoken — silence it and drop the frozen backlog.
+      ttsRef.current.cancel()
+      if (voiceSegmentsRef.current) {
+        spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+      }
+      spokeSegmentThisTurnRef.current = false
+      callTurnVoiceRef.current = { pending: true, submitAt: Date.now() }
+    }
+
+    // Frames ride along whenever capture is live — calls, and quick-ask
+    // questions with the share toggle on.
+    const videoFrames =
+      inCallRef.current || video.screenState === 'live' ? video.collectFrames() : []
+
+    try {
+      let sessionId = hoverRunIdRef.current
+      if (!sessionId) {
+        const created = await window.ipc.invoke('sessions:create', {})
+        sessionId = created.sessionId
+        hoverRunIdRef.current = sessionId
+        setHoverRunId(sessionId)
+        analytics.chatSessionCreated(sessionId)
+      }
+
+      const selected = hoverSelectionRef.current
+      // Hover turns default to FAST thinking when there's no explicit pick —
+      // voice-to-first-word is the experience, and a long reasoning phase is
+      // dead air.
+      const reasoningEffort =
+        selected?.effort ??
+        ((inCallRef.current && companionVoiceRef.current) || quickAskActiveRef.current
+          ? ('low' as const)
+          : undefined)
+      const chatMaxModelCalls = await window.ipc
+        .invoke('turnLimits:getSettings', null)
+        .then((settings) => settings.chatMaxModelCalls)
+        .catch(() => undefined)
+      const sendConfig = {
+        agent: {
+          agentId: 'copilot',
+          overrides: {
+            ...(selected ? { model: { provider: selected.provider, model: selected.model } } : {}),
+            composition: {
+              workDirId: sessionId,
+              ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
+              ...(ttsEnabledRef.current
+                ? { voiceOutput: ttsModeRef.current }
+                : speakTurnRef.current
+                  ? { voiceOutput: 'full' as const }
+                  : {}),
+              ...(searchEnabled ? { searchEnabled: true } : {}),
+              ...(codeMode ? { codeMode } : {}),
+              ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
+                ? { videoMode: true }
+                : {}),
+              ...(practiceModeRef.current ? { coachMode: true } : {}),
+            },
+          },
+        },
+        autoPermission: (permissionMode ?? 'auto') === 'auto',
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
+      }
+      const userMessageContext = {
+        currentDateTime: `${new Date().toLocaleString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
+        middlePane: { kind: 'empty' as const },
+      }
+
+      type HoverContentPart =
+        | { type: 'text'; text: string }
+        | { type: 'attachment'; path: string; filename: string; mimeType: string; size?: number; lineNumber?: number }
+        | { type: 'image'; data: string; mediaType: string; source: 'camera' | 'screen'; capturedAt: string }
+      const hasMentions = (mentions?.length ?? 0) > 0
+      const content: string | HoverContentPart[] = hasAttachments || hasMentions || videoFrames.length > 0
+        ? [
+            ...(mentions ?? []).map((mention): HoverContentPart => ({
+              type: 'attachment',
+              path: mention.path,
+              filename: mention.displayName || mention.path.split('/').pop() || mention.path,
+              mimeType: 'text/markdown',
+              ...(mention.lineNumber !== undefined ? { lineNumber: mention.lineNumber } : {}),
+            })),
+            ...stagedAttachments.map((attachment): HoverContentPart => ({
+              type: 'attachment',
+              path: attachment.path,
+              filename: attachment.filename,
+              mimeType: attachment.mimeType,
+              size: attachment.size,
+            })),
+            ...(userMessage ? [{ type: 'text', text: userMessage } satisfies HoverContentPart] : []),
+            ...videoFrames.map((frame): HoverContentPart => ({
+              type: 'image',
+              data: frame.data,
+              mediaType: frame.mediaType,
+              source: frame.source,
+              capturedAt: frame.capturedAt,
+            })),
+          ]
+        : userMessage
+
+      // One retry: an in-call submit can land while the previous turn's
+      // abort hasn't fully settled in the runtime.
+      const payload = {
+        sessionId,
+        input: { role: 'user' as const, content, userMessageContext },
+        config: sendConfig,
+      }
+      try {
+        await window.ipc.invoke('sessions:sendMessage', payload)
+      } catch (err) {
+        console.error('[hover] sendMessage failed, retrying once:', err)
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        await window.ipc.invoke('sessions:sendMessage', payload)
+      }
+      analytics.chatMessageSent({
+        voiceInput: pendingVoiceInputRef.current || undefined,
+        voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+        searchEnabled: searchEnabled || undefined,
+      })
+    } catch (err) {
+      console.error('[hover] submit failed:', err)
+    } finally {
+      pendingVoiceInputRef.current = false
+    }
+  }, [video])
+  handleHoverSubmitRef.current = handleHoverSubmit
+
   useEffect(() => {
     return window.ipc.on('quick-ask:submit', (payload) => {
       const trimmed = payload.text.trim()
       if (!trimmed && !payload.attachments?.length) return
       quickAskActiveRef.current = true
       quickAskStartedAtRef.current = Date.now()
-      // Model/effort now ride ONE ModelSelection keyed by chatId. The bar's
-      // picks overlay the tab's existing selection; effort-only picks need
-      // a model to attach to (fresh-tab effort still applies via the
-      // hover fast-thinking fallback in handlePromptSubmit).
-      const tabId = activeChatTabIdRef.current
-      if (payload.model || payload.reasoningEffort) {
-        const key = chatIdForTab(tabId)
-        const prev = selectionByTabRef.current.get(key)
-        const model = payload.model ?? prev
-        if (model) {
-          selectionByTabRef.current.set(key, {
-            provider: model.provider,
-            model: model.model,
-            ...(payload.reasoningEffort
-              ? { effort: payload.reasoningEffort }
-              : prev?.effort
-                ? { effort: prev.effort }
-                : {}),
-          })
+      if (payload.model) {
+        hoverSelectionRef.current = {
+          provider: payload.model.provider,
+          model: payload.model.model,
+          ...(payload.reasoningEffort
+            ? { effort: payload.reasoningEffort }
+            : hoverSelectionRef.current?.effort
+              ? { effort: hoverSelectionRef.current.effort }
+              : {}),
         }
+      } else if (payload.reasoningEffort && hoverSelectionRef.current) {
+        hoverSelectionRef.current = { ...hoverSelectionRef.current, effort: payload.reasoningEffort }
       }
-      void handlePromptSubmitRef.current?.(
+      void handleHoverSubmitRef.current?.(
         { text: trimmed, files: [] },
         payload.mentions,
         payload.attachments ?? [],
@@ -1964,50 +2203,22 @@ function App() {
   }, [])
 
   // Stop relay: the bar composer's send button becomes Stop while a turn is
-  // processing, same as in the app.
+  // processing — the COMPANION's turn, not the app chat's.
   useEffect(() => {
     return window.ipc.on('quick-ask:stop', () => {
-      void stopRunRef.current?.()
+      void hoverChatRef.current.stop().catch(() => {})
     })
   }, [])
 
   // (The old surface-based text-mode hush is gone: speech now follows each
   // question's modality, plus the explicit speaker mute below.)
 
-  // Tuck relay: the bar pushed its text into the mascot — voice-to-voice.
-  // This is the voice call preset's long-promised "floating mascot pill"
-  // surface: start one (it opens minimized → callSurface 'popout' → the
-  // companion pins collapsed). If a call is already live, just minimize it
-  // to the floating surface instead of starting a second one.
+  // Tuck relay (⌥⇧Space, the card's tuck handle): the ONE hover flow.
   useEffect(() => {
     return window.ipc.on('quick-ask:tuck', () => {
-      if (inCallRef.current) {
-        setCallMinimized(true)
-        return
-      }
-      if (companionVoiceStartingRef.current) return
-      if (voiceAvailable && ttsAvailable) {
-        companionVoiceRef.current = true
-        companionVoiceStartingRef.current = true
-        void startCall('voice')
-          .then(() => {
-            // Sticky screen share: opted in once from the mascot's share
-            // pin → every summon starts already sharing, until toggled off.
-            if (localStorage.getItem('companion-share-sticky') === '1') {
-              void video.startScreenShare().then((shared) => {
-                if (!shared) setPermissionDialog('screen-recording')
-              })
-            }
-          })
-          .finally(() => {
-            companionVoiceStartingRef.current = false
-          })
-      } else {
-        // Voice-first has no voice — fall back to the text card.
-        void window.ipc.invoke('quickAsk:show', null).catch(() => {})
-      }
+      void startHoverCall()
     })
-  }, [voiceAvailable, ttsAvailable, startCall, video])
+  }, [startHoverCall])
 
   // Mirror the in-flight answer back to the bar while a quick-ask turn is
   // live: streaming text while generating, the final assistant message when
@@ -2019,10 +2230,10 @@ function App() {
   // still the newest one in the conversation at submit time.
   useEffect(() => {
     if (!quickAskActiveRef.current) return
-    let text = liveAssistantMessage
+    let text = hoverAssistantMessage
     if (!text) {
-      for (let i = liveConversation.length - 1; i >= 0; i--) {
-        const item = liveConversation[i]
+      for (let i = hoverConversation.length - 1; i >= 0; i--) {
+        const item = hoverConversation[i]
         if (isChatMessage(item) && item.role === 'assistant') {
           if (item.timestamp >= quickAskStartedAtRef.current) text = item.content
           break
@@ -2031,12 +2242,12 @@ function App() {
     }
     // Nothing new yet (run not started / no fresh answer): pushing would
     // only flicker the bar's local "Thinking…" state away.
-    if (!text && !activeIsProcessing) return
+    if (!text && !hoverIsProcessing) return
     void window.ipc
-      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText: liveActivityText })
+      .invoke('quickAsk:state', { processing: hoverIsProcessing, responseText: text || null, statusText: hoverActivityText })
       .catch(() => {})
-    if (!activeIsProcessing && text) quickAskActiveRef.current = false
-  }, [activeIsProcessing, liveActivityText, liveAssistantMessage, liveConversation])
+    if (!hoverIsProcessing && text) quickAskActiveRef.current = false
+  }, [hoverIsProcessing, hoverActivityText, hoverAssistantMessage, hoverConversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -3982,6 +4193,7 @@ function App() {
     )))
     void loadRun(rid)
   }, [cancelRecordingIfActive, loadRun, saveChatScrollForTab])
+  bindChatToRunRef.current = bindChatToRun
 
   // A code session was selected in the Code view: bind the chat to it — the
   // conversation IS the assistant chat, no separate chat surface.
@@ -4189,34 +4401,36 @@ function App() {
     handleNewChatTabInSidebar()
   }, [chatTabs, handleNewChatTabInSidebar])
 
-  // Quick-ask "+": the bar wants a fresh conversation for its next question.
+  // Quick-ask "+": the bar wants a fresh COMPANION conversation for its next
+  // question. The app window's chat is untouched.
   useEffect(() => {
     return window.ipc.on('quick-ask:new-chat', () => {
-      handleNewChatTabInSidebar()
+      setHoverRunId(null)
     })
-  }, [handleNewChatTabInSidebar])
+  }, [])
 
-  // Companion-bar chat context: which chat a bar submit lands in (shown as
-  // the bar's destination chip) plus recents for its switcher. Pushed on
-  // every tab/run change; main caches and replays it on bar load.
+  // Companion-bar chat context: which conversation the companion is bound to
+  // (shown as the bar's destination chip) plus recents for its switcher.
+  // This is the HOVER binding — the app window's chat plays no part in it.
   useEffect(() => {
-    const activeTab = chatTabs.find((t) => t.id === activeChatTabId)
     void window.ipc
       .invoke('quickAsk:chatContext', {
-        activeRunId: activeTab?.runId ?? null,
-        activeTitle: activeTab ? getChatTabTitle(activeTab) : null,
+        activeRunId: hoverRunId,
+        activeTitle: hoverRunId
+          ? (runs.find((r) => r.id === hoverRunId)?.title || '(Untitled chat)')
+          : null,
         recent: runs.slice(0, 10).map((r) => ({ id: r.id, title: r.title || '(Untitled chat)' })),
       })
       .catch(() => {})
-  }, [chatTabs, activeChatTabId, runs, getChatTabTitle])
+  }, [hoverRunId, runs])
 
-  // The bar's chip switcher picked a chat: bind the chat surface to it — the
-  // same pattern as the sidebar's recent-chats list.
+  // The bar's chip switcher picked a chat: rebind the COMPANION to it. The
+  // app window keeps showing whatever it was showing.
   useEffect(() => {
     return window.ipc.on('quick-ask:select-chat', ({ runId: rid }) => {
-      bindChatToRun(rid)
+      setHoverRunId(rid)
     })
-  }, [bindChatToRun])
+  }, [])
 
   // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
   // queues the message; the pending-submit effect (below) flushes it once state has settled
@@ -6165,7 +6379,7 @@ function App() {
                           onCancelRecording={handleCancelRecording}
                           voiceAvailable={voiceAvailable}
                           inCall={inCall}
-                          onStartCall={startCall}
+                          onStartCall={handleStartCall}
                           onEndCall={endCall}
                           callAvailable={voiceAvailable && ttsAvailable}
                         />
@@ -6654,7 +6868,7 @@ function App() {
                           onCancelRecording={handleCancelRecording}
                           voiceAvailable={voiceAvailable}
                           inCall={inCall}
-                          onStartCall={startCall}
+                          onStartCall={handleStartCall}
                           onEndCall={endCall}
                           ttsAvailable={ttsAvailable}
                         />
@@ -6686,7 +6900,6 @@ function App() {
                 onSelectRun={bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
-                onPopOut={() => void window.ipc.invoke('quickAsk:popOut', null).catch(() => {})}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
                 currentReasoning={activeChatTabState.currentReasoning}
@@ -6755,7 +6968,7 @@ function App() {
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
                 inCall={inCall}
-                onStartCall={startCall}
+                onStartCall={handleStartCall}
                 onEndCall={endCall}
                 callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
