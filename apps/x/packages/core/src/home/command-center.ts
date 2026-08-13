@@ -38,6 +38,7 @@ export async function ensureCommandCenterSession(sessions: ISessions): Promise<s
     if (existing) {
         try {
             await sessions.getSession(existing);
+            await detachCodeMeta(existing);
             return existing;
         } catch {
             // Deleted — recreate below.
@@ -50,4 +51,42 @@ export async function ensureCommandCenterSession(sessions: ISessions): Promise<s
         await fs.writeFile(FILE, JSON.stringify({ sessionId }, null, 2), 'utf-8');
     });
     return sessionId;
+}
+
+/**
+ * Self-heal: the operator channel must never carry code-session meta. Early
+ * builds let an in-channel code_agent_run adopt it (meta + worktree written
+ * before the never-adopt guard existed); the meta is durable, so it kept
+ * showing in the Code rail and pinning the dispatcher to one repo. Detach
+ * ONLY: the meta, the stored ACP conversation, and the workdir sidecar are
+ * removed — the worktree directory and its branch stay on disk, since they
+ * may hold work from those turns (recoverable via git; never deleted here).
+ */
+async function detachCodeMeta(sessionId: string): Promise<void> {
+    try {
+        const { lazyResolve } = await import('../di/lazy-resolve.js');
+        const repo = await lazyResolve<{
+            get(id: string): Promise<{ worktree?: { path: string; branch: string } } | null>;
+            remove(id: string): Promise<void>;
+        }>('codeSessionsRepo');
+        const meta = await repo.get(sessionId);
+        if (!meta) return;
+        await repo.remove(sessionId);
+        const { clearStoredSession } = await import('../code-mode/acp/session-store.js');
+        await clearStoredSession(sessionId);
+        await fs.rm(path.join(WorkDir, 'config', `workdir-${sessionId}.json`), { force: true }).catch(() => {});
+        console.warn(
+            `[command-center] detached code-session meta from the operator channel${
+                meta.worktree ? `; worktree left intact at ${meta.worktree.path} (branch ${meta.worktree.branch})` : ''
+            }`,
+        );
+    } catch {
+        // Best-effort — the createForSession guard still blocks new damage.
+    }
+}
+
+/** Boot-time half of the self-heal: repair without creating. */
+export async function repairCommandCenterSession(): Promise<void> {
+    const existing = await getCommandCenterSessionId();
+    if (existing) await detachCodeMeta(existing);
 }

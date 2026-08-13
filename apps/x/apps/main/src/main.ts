@@ -696,6 +696,13 @@ app.whenReady().then(async () => {
   // start the Home thread registry (the Deck's underway/needs-you feed)
   startHomeThreadsWatcher();
 
+  // Self-heal: strip any code-session meta that leaked onto the Command
+  // Center session before the never-adopt guard existed (its worktree, if
+  // any, is left on disk — see detachCodeMeta).
+  import('@x/core/dist/home/command-center.js')
+    .then((m) => m.repairCommandCenterSession())
+    .catch(() => {});
+
   // start services watcher
   startServicesWatcher();
 

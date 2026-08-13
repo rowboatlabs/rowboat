@@ -135,6 +135,15 @@ export class CodeSessionService {
     async createForSession(sessionId: string, args: CreateSessionArgs): Promise<CodeSession> {
         const existing = await this.codeSessionsRepo.get(sessionId);
         if (existing) return existing;
+        // The Command Center session is the dispatcher — it assigns coding
+        // work to OTHER threads and must never itself become a code session.
+        // Guarded here (not just in the adoption hook) so no path can ever
+        // pin the operator channel to a repo/worktree.
+        const { getCommandCenterSessionId } = await import('../../home/command-center.js');
+        const commandCenterId = await getCommandCenterSessionId().catch(() => null);
+        if (commandCenterId && commandCenterId === sessionId) {
+            throw new Error('The Command Center session is the dispatcher — it cannot become a code session.');
+        }
         const project = await this.codeProjectsRepo.get(args.projectId);
         if (!project) throw new Error(`Unknown project: ${args.projectId}`);
 
