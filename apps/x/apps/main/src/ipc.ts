@@ -477,7 +477,7 @@ const activeTtsStreams = new Map<string, AbortController>();
 // Match only real app windows — getAllWindows() can also contain the
 // companion window and hidden utility windows (e.g. PDF-export renderers),
 // which must not be shown, focused, or sent app events.
-function findMainAppWindow(): BrowserWindow | undefined {
+export function findMainAppWindow(): BrowserWindow | undefined {
   return BrowserWindow.getAllWindows().find((w) => {
     if (w.isDestroyed()) return false;
     const url = w.webContents.getURL();
