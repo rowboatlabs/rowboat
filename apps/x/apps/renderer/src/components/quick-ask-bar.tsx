@@ -219,6 +219,27 @@ export function QuickAskBar() {
     void window.ipc.invoke('quickAsk:setPinnedCollapsed', { collapsed: next }).catch(() => {})
   }, [])
 
+  // The visible card, for hit-testing stage clicks: the window is a tall
+  // transparent frame, so "clicked outside" often lands INSIDE its invisible
+  // stage. Tuck-on-stage-click only counts near the card — clicks in
+  // visually-empty space must not steal the panel.
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  const TUCK_BAND_PX = 80
+  const stageTuck = useCallback((e: React.MouseEvent) => {
+    const card = cardRef.current?.getBoundingClientRect()
+    if (!card) {
+      requestCollapsed(true)
+      return
+    }
+    const nearCard =
+      e.clientY >= card.top - TUCK_BAND_PX &&
+      e.clientX >= card.left - 24 &&
+      e.clientX <= card.right + 24
+    if (nearCard) requestCollapsed(true)
+    // Anywhere else on the invisible stage: inert — an invisible surface
+    // must not carry a surprising gesture.
+  }, [requestCollapsed])
+
   // Call state mirrored from the app window, which owns the call engine —
   // this window only renders it (same contract as the old popout).
   const [callState, setCallState] = useState<CallState>(IDLE_CALL_STATE)
@@ -777,13 +798,17 @@ export function QuickAskBar() {
   return (
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden">
       {/* The invisible stage: popovers open into this zone; clicking it
-          dismisses the bar — or, on the call card, tucks the text back into
-          the mascot (the call keeps going). Folded Skipper: the stage is a
-          drag area, part of "carry it around". */}
+          dismisses the summoned bar (true Spotlight click-away — blur
+          dismisses it anyway, so stage and outside clicks agree). On the
+          call card, only clicks NEAR the visible card tuck the panel
+          (stageTuck hit-test) — the rest of the invisible frame is inert,
+          so clicking what looks like empty desktop never steals the panel.
+          Folded Skipper: the stage is a drag area, part of "carry it
+          around". */}
       <div
         className="min-h-0 flex-1"
         style={skipper && collapsed ? dragRegion : undefined}
-        onMouseDown={callCard ? () => requestCollapsed(true) : skipper ? undefined : dismiss}
+        onMouseDown={callCard ? stageTuck : skipper ? undefined : dismiss}
       />
 
       {/* Bottom row: card + the mascot riding alongside on the transparent
@@ -798,7 +823,7 @@ export function QuickAskBar() {
       {/* Light skin (#810): near-white card, hairline dark border, dark
           text. The window's native shadow is off (it would outline the
           whole transparent frame) — the card draws its own. */}
-      <div className="qa-card w-full overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)]">
+      <div ref={cardRef} className="qa-card w-full overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)]">
         {/* Charcoal code blocks. Streamdown's own dark rule is
             background: var(--shiki-dark-bg) !important inside Tailwind's
             utilities layer — layered !important outranks any override we
