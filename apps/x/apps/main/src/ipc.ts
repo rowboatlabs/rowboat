@@ -375,6 +375,7 @@ function slackMessageUrl(message: Record<string, unknown>, workspaceUrl: string 
   return `${workspaceUrl.replace(/\/$/, '')}/archives/${channelId}/p${ts.replace('.', '')}`;
 }
 import { browserIpcHandlers } from './browser/ipc.js';
+import { spacesIpcHandlers } from './spaces/ipc.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -3178,5 +3179,6 @@ export function setupIpcHandlers() {
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,
+    ...spacesIpcHandlers,
   });
 }

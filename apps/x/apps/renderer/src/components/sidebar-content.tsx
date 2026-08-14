@@ -20,6 +20,7 @@ import {
   PanelLeftClose,
   Pencil,
   Pin,
+  Sailboat,
   SquarePen,
   Trash2,
   Plug,
@@ -194,6 +195,7 @@ type SidebarContentPanelProps = {
   onOpenApps?: () => void
   /** Open a specific app (pinned in the sidebar) inside the Apps view. */
   onOpenApp?: (folder: string) => void
+  onOpenSpaces?: () => void
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
@@ -210,7 +212,7 @@ type SidebarContentPanelProps = {
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'workspaces' | null
+  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -451,6 +453,7 @@ export function SidebarContentPanel({
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
+  onOpenSpaces,
   recentRuns = [],
   onOpenRun,
   onRenameRun,
@@ -1014,6 +1017,16 @@ export function SidebarContentPanel({
                   </ContextMenu>
                 </SidebarMenuItem>
               ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-spaces"
+                  isActive={activeNav === 'spaces'}
+                  onClick={onOpenSpaces}
+                >
+                  <Sailboat className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Spaces</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-agents"

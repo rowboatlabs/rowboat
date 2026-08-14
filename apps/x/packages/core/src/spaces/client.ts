@@ -1,0 +1,211 @@
+import {
+  routes,
+  type AcceptInviteResult,
+  type ChangeSet,
+  type CreateInviteResult,
+  type Member,
+  type Message,
+  type ProposeChange,
+  type ProposeChangeResult,
+  type ReadAssetResult,
+  type ResolveInviteResult,
+  type Routes,
+  type Space,
+  type Topic,
+} from '@rowboat/spaces-protocol';
+import type { z } from 'zod';
+
+// Typed client for one org's render face. Thin by design: every method is one
+// route from the protocol's api.ts, request/response validated with the
+// contract schemas — the same drift tripwire the stub server runs, from the
+// other side of the wire.
+
+export interface SpacesApiError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export class SpacesRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly retryable: boolean;
+
+  constructor(status: number, body: SpacesApiError) {
+    super(body.message);
+    this.name = 'SpacesRequestError';
+    this.status = status;
+    this.code = body.code;
+    this.retryable = body.retryable;
+  }
+}
+
+export interface SpacesClientOptions {
+  /** e.g. http://localhost:4272 — scheme + host[:port], no trailing slash. */
+  baseUrl: string;
+  /** Bearer token; dev-<memberId> against the stub, OAuth access token later. */
+  token: string;
+  fetchImpl?: typeof fetch;
+}
+
+type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
+type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
+
+export class SpacesClient {
+  private readonly baseUrl: string;
+  private readonly token: string;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(options: SpacesClientOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/$/, '');
+    this.token = options.token;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  private async request<S extends z.ZodType>(
+    method: 'GET' | 'POST',
+    path: string,
+    responseSchema: S,
+    body?: unknown,
+    auth = true,
+  ): Promise<z.infer<S>> {
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method,
+      headers: {
+        ...(auth ? { authorization: `Bearer ${this.token}` } : {}),
+        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    const json = (await res.json().catch(() => undefined)) as unknown;
+    if (!res.ok) {
+      const parsed = (json ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? `request failed with ${res.status}`,
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    const result = responseSchema.safeParse(json);
+    if (!result.success) {
+      throw new SpacesRequestError(res.status, {
+        code: 'internal',
+        message: `response failed contract validation: ${result.error.message}`,
+        retryable: false,
+      });
+    }
+    return result.data;
+  }
+
+  private space(spaceId: string, rest: string): string {
+    return `/v1/spaces/${encodeURIComponent(spaceId)}${rest}`;
+  }
+
+  // --- health ---------------------------------------------------------------
+
+  /** Also the connectivity probe for "org unreachable" states. */
+  async health(): Promise<{ ok: boolean; org: { name: string; address: string } }> {
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/health`);
+    if (!res.ok) throw new SpacesRequestError(res.status, { code: 'internal', message: 'health check failed', retryable: true });
+    return (await res.json()) as { ok: boolean; org: { name: string; address: string } };
+  }
+
+  // --- spaces & membership --------------------------------------------------
+
+  async listSpaces(): Promise<Space[]> {
+    return (await this.request('GET', routes.listSpaces.path, routes.listSpaces.response)).spaces;
+  }
+
+  async createSpace(name: string): Promise<Space> {
+    return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
+  }
+
+  async listMembers(spaceId: string): Promise<Member[]> {
+    return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
+  }
+
+  async leaveSpace(spaceId: string): Promise<void> {
+    await this.request('POST', this.space(spaceId, '/leave'), routes.leaveSpace.response, {});
+  }
+
+  // --- invites --------------------------------------------------------------
+
+  async createInvite(spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
+    return this.request('POST', routes.createInvite.path, routes.createInvite.response, {
+      spaceId,
+      ...(expiresInHours !== undefined ? { expiresInHours } : {}),
+    });
+  }
+
+  /** Pre-auth: works before the org has been added. */
+  async resolveInvite(token: string): Promise<ResolveInviteResult> {
+    return this.request('POST', routes.resolveInvite.path, routes.resolveInvite.response, { token }, false);
+  }
+
+  async acceptInvite(token: string): Promise<AcceptInviteResult> {
+    return this.request('POST', routes.acceptInvite.path, routes.acceptInvite.response, { token });
+  }
+
+  // --- assets ---------------------------------------------------------------
+
+  async listAssets(spaceId: string): Promise<Array<{ path: string; version: number; updatedAt: string }>> {
+    return (await this.request('GET', this.space(spaceId, '/assets'), routes.listAssets.response)).entries;
+  }
+
+  async readAsset(spaceId: string, path: string, version?: number): Promise<ReadAssetResult> {
+    const q = new URLSearchParams({ path, ...(version !== undefined ? { version: String(version) } : {}) });
+    return this.request('GET', this.space(spaceId, `/asset?${q}`), routes.readAsset.response);
+  }
+
+  /** All three outcomes come back as values — a conflict is a result, not an exception. */
+  async proposeChange(spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {
+    return this.request('POST', this.space(spaceId, '/changes'), routes.proposeChange.response, input);
+  }
+
+  async assetHistory(
+    spaceId: string,
+    opts: { path?: string; beforeOffset?: number; limit?: number } = {},
+  ): Promise<ChangeSet[]> {
+    const q = new URLSearchParams();
+    if (opts.path !== undefined) q.set('path', opts.path);
+    if (opts.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
+    if (opts.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.size > 0 ? `?${q}` : '';
+    return (await this.request('GET', this.space(spaceId, `/history${qs}`), routes.assetHistory.response)).changeSets;
+  }
+
+  async diff(spaceId: string, path: string, from: number, to: number): Promise<string> {
+    const q = new URLSearchParams({ path, from: String(from), to: String(to) });
+    return (await this.request('GET', this.space(spaceId, `/diff?${q}`), routes.diff.response)).unified;
+  }
+
+  // --- feed -----------------------------------------------------------------
+
+  async listTopics(spaceId: string, includeArchived = false): Promise<Topic[]> {
+    const qs = includeArchived ? '?includeArchived=true' : '';
+    return (await this.request('GET', this.space(spaceId, `/topics${qs}`), routes.listTopics.response)).topics;
+  }
+
+  async listMessages(spaceId: string, topicId: string): Promise<{ topic: Topic; messages: Message[] }> {
+    return this.request(
+      'GET',
+      this.space(spaceId, `/topics/${encodeURIComponent(topicId)}/messages`),
+      routes.listMessages.response,
+    );
+  }
+
+  async postMessage(spaceId: string, input: NewTopicMessage): Promise<{ topic: Topic; message: Message }> {
+    return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
+  }
+
+  async manageTopic(spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/topics/${encodeURIComponent(topicId)}`),
+        routes.manageTopic.response,
+        action,
+      )
+    ).topic;
+  }
+}

@@ -124,6 +124,7 @@ export type AppView =
   | 'code'
   | 'bg-tasks'
   | 'apps'
+  | 'spaces'
 
 // Views that count as "using a feature" — first visit sets a person property
 // so PostHog cohorts can answer "how many people have ever used meetings".
@@ -134,6 +135,7 @@ const FIRST_USE_VIEWS: Partial<Record<AppView, string>> = {
   'bg-tasks': 'has_used_bg_agents',
   apps: 'has_used_apps',
   code: 'has_used_code',
+  spaces: 'has_used_spaces',
 }
 
 export function viewOpened(view: AppView) {

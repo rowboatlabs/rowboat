@@ -1,0 +1,11 @@
+{
+  "name": "delete-vs-edit",
+  "description": "One writer deleted a line the other edited. Must conflict — silently dropping either intent violates principle 5.",
+  "base": "# Roadmap\n- [ ] Old initiative\n- [ ] Migration prep\n",
+  "current": "# Roadmap\n- [ ] Migration prep\n",
+  "proposed": "# Roadmap\n- [ ] Old initiative — revive for Q4\n- [ ] Migration prep\n",
+  "expected": {
+    "outcome": "conflict",
+    "regions": [{ "baseStart": 2, "baseEnd": 2 }]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "same-line-conflict",
+  "description": "Both writers changed the same base line to different things. Must conflict; nothing written; the later writer re-proposes.",
+  "base": "# Roadmap\n- [ ] SSO — scope SAML vs OIDC\n- [ ] Migration prep\n",
+  "current": "# Roadmap\n- [ ] SSO — scope SAML only (Acme confirmed)\n- [ ] Migration prep\n",
+  "proposed": "# Roadmap\n- [x] SSO — scope SAML vs OIDC\n- [ ] Migration prep\n",
+  "expected": {
+    "outcome": "conflict",
+    "regions": [{ "baseStart": 2, "baseEnd": 2 }]
+  }
+}

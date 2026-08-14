@@ -1,0 +1,22 @@
+{
+  "name": "@rowboat/spaces-protocol",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "fixtures"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "4.2.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

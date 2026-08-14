@@ -36,6 +36,7 @@ import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
+import { SpacesView } from '@/components/spaces-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
@@ -621,6 +622,7 @@ type ViewState =
   | { type: 'code' }
   | { type: 'bg-tasks' }
   | { type: 'apps' }
+  | { type: 'spaces' }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -701,6 +703,8 @@ function parseDeepLink(input: string): ViewState | null {
       return { type: 'bg-tasks' }
     case 'apps':
       return { type: 'apps' }
+    case 'spaces':
+      return { type: 'spaces' }
     default:
       return null
   }
@@ -817,6 +821,7 @@ function App() {
   const [isLiveNotesOpen, setIsLiveNotesOpen] = useState(false)
   const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
+  const [isSpacesOpen, setIsSpacesOpen] = useState(false)
   const [isEmailOpen, setIsEmailOpen] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
@@ -4557,10 +4562,11 @@ function App() {
     if (isCodeOpen) return { type: 'code' }
     if (isBgTasksOpen) return { type: 'bg-tasks' }
     if (isAppsOpen) return { type: 'apps' }
+    if (isSpacesOpen) return { type: 'spaces' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSpacesOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
   // applyViewState is declared further down (it needs the chat-binding
   // helpers); handlers above it reach it through this render-filled ref.
@@ -4579,6 +4585,7 @@ function App() {
       case 'live-notes': return 'Live notes'
       case 'bg-tasks': return 'Background tasks'
       case 'apps': return 'Apps'
+      case 'spaces': return 'Spaces'
       case 'workspace': return 'Workspace'
       case 'knowledge-view': return 'Brain'
       case 'graph': return 'Graph View'
@@ -4606,6 +4613,7 @@ function App() {
     setIsLiveNotesOpen(false)
     setIsBgTasksOpen(false)
     setIsAppsOpen(false)
+    setIsSpacesOpen(false)
     setIsEmailOpen(false)
     setIsWorkspaceOpen(false)
     setIsKnowledgeViewOpen(false)
@@ -5066,6 +5074,9 @@ function App() {
       case 'apps':
         setIsAppsOpen(true)
         return
+      case 'spaces':
+        setIsSpacesOpen(true)
+        return
       case 'chat':
         if (view.runId) {
           bindChatToRun(view.runId)
@@ -5132,6 +5143,10 @@ function App() {
     setAppIdVersion((v) => v + 1)
     openAppsView()
   }, [openAppsView])
+
+  const openSpacesView = useCallback(() => {
+    void navigateToView({ type: 'spaces' })
+  }, [navigateToView])
 
   const openMeetingsView = useCallback(() => {
     void navigateToView({ type: 'meetings' })
@@ -5422,6 +5437,7 @@ function App() {
         case 'workspace': void navigateToView({ type: 'workspace' }); break
         case 'code': void navigateToView({ type: 'code' }); break
         case 'apps': openAppsGrid(); break
+        case 'spaces': void navigateToView({ type: 'spaces' }); break
       }
     }
 
@@ -6571,6 +6587,7 @@ function App() {
                 : (isKnowledgeViewOpen || isGraphOpen || (selectedPath != null && selectedPath.startsWith('knowledge/'))) ? 'knowledge'
                 : isBgTasksOpen ? 'agents'
                 : isAppsOpen ? 'apps'
+                : isSpacesOpen ? 'spaces'
                 : isWorkspaceOpen ? 'workspaces'
                 : null
               }
@@ -6580,6 +6597,7 @@ function App() {
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenApps={openAppsGrid}
               onOpenApp={(folder) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() }}
+              onOpenSpaces={openSpacesView}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
               onRenameRun={(rid, title) => {
@@ -6921,6 +6939,10 @@ function App() {
                     initialVersion={appIdVersion}
                     onNewApp={() => prefillChat('Build me an app that ')}
                   />
+                </div>
+              ) : isSpacesOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <SpacesView onOpenSession={(sessionId) => void navigateToView({ type: 'chat', runId: sessionId })} />
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
