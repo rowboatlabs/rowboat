@@ -16,7 +16,12 @@
  */
 import { BrowserWindow, shell } from 'electron';
 
-type PttKeyEvent = { type: 'down' | 'up' | 'chord' };
+type PttKeyEvent = {
+  type: 'down' | 'up' | 'chord';
+  /** Ghostwriter chord: ⇧ was already held when Right ⌘ went down — the
+   * utterance's result should be pasted at the user's cursor. */
+  paste?: boolean;
+};
 
 // libuiohook VC_META_R — the Right ⌘ key.
 const META_RIGHT = 3676;
@@ -72,7 +77,12 @@ function attachListeners(mod: UiohookModule) {
       // OS key-repeat refires keydown while held — only the edge matters.
       if (!metaRightHeld) {
         metaRightHeld = true;
-        broadcast({ type: 'down' });
+        const paste = e.shiftKey === true;
+        if (paste) {
+          // Remember the frontmost app NOW — it's the paste target.
+          void import('./text-insert.js').then((m) => m.textInsertService.captureTarget()).catch(() => {});
+        }
+        broadcast({ type: 'down', paste });
       }
     } else if (metaRightHeld) {
       // Right ⌘ is acting as a modifier (⌘C etc.), not as the PTT key —

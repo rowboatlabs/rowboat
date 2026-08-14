@@ -30,6 +30,7 @@ import { HomeThreadsTracker } from "../home/threads.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
 import type { IScreenPointerService } from "../application/screen-pointer/service.js";
+import type { ITextInsertService } from "../application/text-insert/service.js";
 import { SystemClock, type IClock } from "../runtime/turns/clock.js";
 import { FSTurnRepo } from "../runtime/turns/fs-repo.js";
 import type { ITurnRepo } from "../runtime/turns/repo.js";
@@ -201,5 +202,11 @@ export function registerNotificationService(service: INotificationService): void
 export function registerScreenPointerService(service: IScreenPointerService): void {
     container.register({
         screenPointerService: asValue(service),
+    });
+}
+
+export function registerTextInsertService(service: ITextInsertService): void {
+    container.register({
+        textInsertService: asValue(service),
     });
 }

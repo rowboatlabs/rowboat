@@ -1012,6 +1012,10 @@ function App() {
   // because segment consumption freezes while the gate is open.
   const [pttStatus, setPttStatus] = useState<'idle' | 'held' | 'locked'>('idle')
   const pttStatusRef = useRef<'idle' | 'held' | 'locked'>('idle')
+  // Ghostwriter chord (⇧ + right ⌘): the NEXT utterance's result gets
+  // pasted at the user's cursor. Set on the down edge, consumed by the
+  // utterance callback, cleared on cancel.
+  const pttPasteIntentRef = useRef(false)
   const setPttState = useCallback((s: 'idle' | 'held' | 'locked') => {
     pttStatusRef.current = s
     setPttStatus(s)
@@ -1417,9 +1421,16 @@ function App() {
         playAckCue()
         callTurnMarksRef.current = { t0: performance.now() }
         pendingVoiceInputRef.current = true
+        // Ghostwriter chord: the directive rides the message itself, so it
+        // is durable in the transcript and needs no composition plumbing.
+        const paste = pttPasteIntentRef.current
+        pttPasteIntentRef.current = false
+        const message = paste
+          ? `${text}\n\n[Paste chord held: put your result into my focused app with the paste-at-cursor tool — the payload only. Keep any spoken reply to one short line.]`
+          : text
         // Calls talk to the companion's session — the app window can browse
         // any chat mid-call without retargeting the conversation.
-        handleHoverSubmitRef.current?.({ text, files: [] })
+        handleHoverSubmitRef.current?.({ text: message, files: [] })
       })
       .then((result) => {
         if (result === 'mic-denied') setPermissionDialog('microphone')
@@ -1657,12 +1668,15 @@ function App() {
     return !!last && last.type === type && now - last.at < PTT_EDGE_ECHO_MS
   }, [])
 
-  const handlePttDown = useCallback(() => {
+  const handlePttDown = useCallback((paste?: boolean) => {
     if (!inCallRef.current || micMutedRef.current) return
     if (pttEdgeIsEcho('down')) return
     pttChordedRef.current = false
     pttDownAtRef.current = performance.now()
     if (pttStatusRef.current === 'idle') {
+      // Ghostwriter chord: this capture's utterance wants its result pasted
+      // at the cursor — consumed by the utterance callback in startCall.
+      pttPasteIntentRef.current = !!paste
       // Captured BEFORE the cancel below wipes it — the release edge needs
       // to know whether this press interrupted speech.
       pttSpokeAtDownRef.current = ttsRef.current.state !== 'idle'
@@ -1721,6 +1735,7 @@ function App() {
 
   const handlePttCancel = useCallback(() => {
     if (pttStatusRef.current === 'idle') return
+    pttPasteIntentRef.current = false
     voiceRef.current.pttCancel()
     setPttState('idle')
   }, [setPttState])
@@ -1740,14 +1755,14 @@ function App() {
   // even when macOS Input Monitoring hasn't been granted.
   useEffect(() => {
     if (!inCall) return
-    const offKey = window.ipc.on('voice:ptt-key', ({ type }) => {
-      if (type === 'down') handlePttDown()
+    const offKey = window.ipc.on('voice:ptt-key', ({ type, paste }) => {
+      if (type === 'down') handlePttDown(paste)
       else if (type === 'up') handlePttUp()
       else handlePttChord()
     })
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'MetaRight') {
-        if (!e.repeat) handlePttDown()
+        if (!e.repeat) handlePttDown(e.shiftKey)
         return
       }
       if (e.key === 'Escape' && pttStatusRef.current !== 'idle') {

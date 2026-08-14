@@ -25,6 +25,7 @@ import { notificationTools } from "./domains/notifications.js";
 import { todoTools } from "./domains/todo.js";
 import { screenPointerTools } from "./domains/screen-pointer.js";
 import { homeTools } from "./domains/home.js";
+import { textInsertTools } from "./domains/text-insert.js";
 import { BuiltinToolsSchema } from "./types.js";
 export { coalesceCodeRunEvents } from "./domains/code.js";
 
@@ -100,6 +101,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...todoTools,
     ...screenPointerTools,
     ...homeTools,
+    ...textInsertTools,
 
     [SPAWN_AGENT_TOOL_NAME]: {
         permission: "none",

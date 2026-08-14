@@ -30,6 +30,9 @@ export const COPILOT_BASE_TOOLS: readonly string[] = [
     // essential on the Command Center channel, useful in any chat, and like
     // todo-add it has no skill signal to trigger on.
     "home-status",
+    // Ghostwriter: "write this into my email" from the companion must work
+    // without a skill hop — availability-gated to macOS + registered service.
+    "paste-at-cursor",
     "executeCommand",
     "spawn-agent",
     "code_agent_run",

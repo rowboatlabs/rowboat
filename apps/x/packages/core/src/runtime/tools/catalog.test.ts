@@ -207,6 +207,7 @@ const HISTORICAL_KEY_ORDER = [
     "todo-report",
     "screen-pointer",
     "home-status",
+    "paste-at-cursor",
     "spawn-agent",
 ];
 
@@ -244,6 +245,9 @@ describe("BuiltinTools permission audit", () => {
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
             "composio-execute-tool": "composio-execute",
+            // Ghostwriter: types into ANOTHER app at the user's cursor —
+            // always gated (the auto judge keeps voice flow smooth).
+            "paste-at-cursor": "prompt",
         });
     });
 });

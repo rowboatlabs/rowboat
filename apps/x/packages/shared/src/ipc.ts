@@ -1203,6 +1203,9 @@ const ipcSchemas = {
   'voice:ptt-key': {
     req: z.object({
       type: z.enum(['down', 'up', 'chord']),
+      // Ghostwriter chord (⇧ held when Right ⌘ went down): this capture's
+      // result should be pasted at the user's cursor.
+      paste: z.boolean().optional(),
     }),
     res: z.null(),
   },
