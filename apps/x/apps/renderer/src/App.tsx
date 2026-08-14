@@ -1423,12 +1423,16 @@ function App() {
         pendingVoiceInputRef.current = true
         // Ghostwriter chord: the marker rides the message itself — durable
         // in the transcript ("why did it paste?" answers itself), cache-safe
-        // (no per-turn composition churn). Terse on purpose: the behavioral
-        // doctrine lives in the paste-at-cursor tool description.
+        // (no per-turn composition churn). It carries the chord's TWO modes:
+        // dictation (the utterance IS the content — paste the user's words)
+        // vs. ghostwriting (the utterance instructs — compose). Ties break
+        // toward verbatim: pasting the user's own words when they meant
+        // "compose" is a cheap delete; composing when they were dictating
+        // puts words in their mouth.
         const paste = pttPasteIntentRef.current
         pttPasteIntentRef.current = false
         const message = paste
-          ? `${text}\n\n[⇧⌘ chord — paste the result at my cursor]`
+          ? `${text}\n\n[⇧⌘ chord — paste at my cursor. If I'm dictating content, paste MY words verbatim (fix punctuation, drop fillers, change nothing else). Compose only when I'm clearly instructing you to write something. Unsure → verbatim.]`
           : text
         // Calls talk to the companion's session — the app window can browse
         // any chat mid-call without retargeting the conversation.
