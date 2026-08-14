@@ -26,6 +26,10 @@ import { PptxEditor } from '@/components/pptx-editor';
 import { PersistentViewerCache } from '@/components/persistent-viewer-cache';
 import { UnsupportedFileViewer } from '@/components/unsupported-file-viewer';
 import { getViewerType, isCacheableViewerPath } from '@/lib/file-types';
+import {
+  readFileAfterExternalChangesSettle,
+  reloadCleanActiveMarkdownAfterExternalChange,
+} from '@/lib/active-markdown-external-change';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
@@ -864,7 +868,8 @@ function App() {
   const editorPathRef = useRef<string | null>(null)
   const fileLoadRequestIdRef = useRef(0)
   const initialContentByPathRef = useRef<Map<string, string>>(new Map())
-  const recentLocalMarkdownWritesRef = useRef<Map<string, number>>(new Map())
+  const documentRevisionByPathRef = useRef<Map<string, number>>(new Map())
+  const externalChangeRevisionByPathRef = useRef<Map<string, number>>(new Map())
   const untitledRenameReadyPathsRef = useRef<Set<string>>(new Set())
 
   // Pending app-navigation result to process once navigation functions are ready
@@ -2677,38 +2682,29 @@ function App() {
     })
   }, [])
 
+  const bumpDocumentRevisionForPath = useCallback((path: string) => {
+    const revisions = documentRevisionByPathRef.current
+    revisions.set(path, (revisions.get(path) ?? 0) + 1)
+  }, [])
+
+  const setInitialContentForPath = useCallback((path: string, content: string) => {
+    initialContentByPathRef.current.set(path, content)
+    bumpDocumentRevisionForPath(path)
+  }, [bumpDocumentRevisionForPath])
+
+  const deleteInitialContentForPath = useCallback((path: string) => {
+    initialContentByPathRef.current.delete(path)
+    bumpDocumentRevisionForPath(path)
+  }, [bumpDocumentRevisionForPath])
+
   const removeEditorCacheForPath = useCallback((path: string) => {
     editorContentByPathRef.current.delete(path)
-    untitledRenameReadyPathsRef.current.delete(path)
     setEditorContentByPath((prev) => {
       if (!(path in prev)) return prev
       const next = { ...prev }
       delete next[path]
       return next
     })
-  }, [])
-
-  const markRecentLocalMarkdownWrite = useCallback((path: string) => {
-    if (!path.endsWith('.md')) return
-    const now = Date.now()
-    recentLocalMarkdownWritesRef.current.set(path, now)
-    if (recentLocalMarkdownWritesRef.current.size > 200) {
-      for (const [knownPath, timestamp] of recentLocalMarkdownWritesRef.current.entries()) {
-        if (now - timestamp > 10_000) {
-          recentLocalMarkdownWritesRef.current.delete(knownPath)
-        }
-      }
-    }
-  }, [])
-
-  const consumeRecentLocalMarkdownWrite = useCallback((path: string, windowMs: number = 2_500) => {
-    const timestamp = recentLocalMarkdownWritesRef.current.get(path)
-    if (timestamp === undefined) return false
-    const isRecent = Date.now() - timestamp <= windowMs
-    if (!isRecent) {
-      recentLocalMarkdownWritesRef.current.delete(path)
-    }
-    return isRecent
   }, [])
 
   const reloadMarkdownFileIntoEditor = useCallback(async (path: string) => {
@@ -2720,11 +2716,11 @@ function App() {
     setEditorCacheForPath(path, body)
     editorContentRef.current = body
     editorPathRef.current = path
-    initialContentByPathRef.current.set(path, body)
+    setInitialContentForPath(path, body)
     initialContentRef.current = body
     setLastSaved(new Date())
     setEditorSessionByPath((prev) => ({ ...prev, [path]: (prev[path] ?? 0) + 1 }))
-  }, [setEditorCacheForPath])
+  }, [setEditorCacheForPath, setInitialContentForPath])
 
   const handleEditorChange = useCallback((path: string, markdown: string) => {
     setEditorCacheForPath(path, markdown)
@@ -2745,10 +2741,8 @@ function App() {
     if (!path || !path.startsWith('knowledge/') || !path.endsWith('.md')) return
 
     setGoogleDocSyncDirection('down')
-    markRecentLocalMarkdownWrite(path)
     try {
       await window.ipc.invoke('google-docs:refreshSnapshot', { path })
-      markRecentLocalMarkdownWrite(path)
       await reloadMarkdownFileIntoEditor(path)
       toast.success('Pulled latest Google Doc')
     } catch (err) {
@@ -2757,7 +2751,7 @@ function App() {
     } finally {
       setGoogleDocSyncDirection(null)
     }
-  }, [markRecentLocalMarkdownWrite, reloadMarkdownFileIntoEditor])
+  }, [reloadMarkdownFileIntoEditor])
 
   const syncGoogleDocUp = useCallback(async (targetPath?: string) => {
     const path = targetPath ?? selectedPathRef.current
@@ -2766,7 +2760,6 @@ function App() {
     const body = editorContentByPathRef.current.get(path) ?? editorContentRef.current
     const markdown = joinFrontmatter(frontmatterByPathRef.current.get(path) ?? null, body)
     setGoogleDocSyncDirection('up')
-    markRecentLocalMarkdownWrite(path)
     try {
       let result = await window.ipc.invoke('google-docs:sync', { path, markdown })
       if (result.conflict) {
@@ -2784,7 +2777,6 @@ function App() {
       if (!result.synced) {
         throw new Error(result.error || 'This note is not linked to a Google Doc.')
       }
-      markRecentLocalMarkdownWrite(path)
       await reloadMarkdownFileIntoEditor(path)
       toast.success('Pushed changes to Google Doc')
     } catch (err) {
@@ -2793,7 +2785,7 @@ function App() {
     } finally {
       setGoogleDocSyncDirection(null)
     }
-  }, [markRecentLocalMarkdownWrite, reloadMarkdownFileIntoEditor])
+  }, [reloadMarkdownFileIntoEditor])
   // Keep processingRunIdsRef in sync for use in async callbacks
   useEffect(() => {
     processingRunIdsRef.current = processingRunIds
@@ -2884,6 +2876,15 @@ function App() {
       })()
       const selectedPathAtEvent = selectedPathRef.current
 
+      // Initial hydration owns its read until editorPath/baseline are ready.
+      // Record every Markdown event so that loader can detect an in-flight
+      // stale snapshot and repeat the read instead of losing this notification.
+      for (const path of new Set(eventPaths)) {
+        if (!path.endsWith('.md')) continue
+        const revisions = externalChangeRevisionByPathRef.current
+        revisions.set(path, (revisions.get(path) ?? 0) + 1)
+      }
+
       // Reload background tasks if agent-schedule.json changed
       if (
         changedPath === 'config/agent-schedule.json'
@@ -2905,7 +2906,7 @@ function App() {
         if (!path.endsWith('.md')) continue
         if (selectedPathAtEvent && path === selectedPathAtEvent) continue
         removeEditorCacheForPath(path)
-        initialContentByPathRef.current.delete(path)
+        deleteInitialContentForPath(path)
       }
 
       // Keep selection stable if a file is moved externally.
@@ -2925,33 +2926,50 @@ function App() {
         changedPath === pathToReload || changedPaths.includes(pathToReload)
 
       if (isCurrentFileChanged) {
-        // Ignore immediate watcher echoes of our own autosaves to preserve undo history.
-        if (consumeRecentLocalMarkdownWrite(pathToReload)) {
-          return
-        }
-        // Only reload if no unsaved edits
-        const baseline = initialContentByPathRef.current.get(pathToReload) ?? initialContentRef.current
-        if (editorContentRef.current === baseline) {
-          const result = await window.ipc.invoke('workspace:readFile', { path: pathToReload })
-          if (selectedPathRef.current !== pathToReload) return
-          setFileContent(result.data)
-          const { raw: fm, body } = splitFrontmatter(result.data)
-          frontmatterByPathRef.current.set(pathToReload, fm)
-          setEditorContent(body)
-          setEditorCacheForPath(pathToReload, body)
-          editorContentRef.current = body
-          editorPathRef.current = pathToReload
-          initialContentByPathRef.current.set(pathToReload, body)
-          initialContentRef.current = body
-        }
+        await reloadCleanActiveMarkdownAfterExternalChange({
+          path: pathToReload,
+          getSelectedPath: () => selectedPathRef.current,
+          getEditorPath: () => editorPathRef.current,
+          getEditorContent: () => editorContentRef.current,
+          getBaseline: () => initialContentByPathRef.current.get(pathToReload),
+          getDocumentRevision: () => documentRevisionByPathRef.current.get(pathToReload) ?? 0,
+          invalidateCache: () => {
+            removeEditorCacheForPath(pathToReload)
+          },
+          beginRequest: () => (fileLoadRequestIdRef.current += 1),
+          isCurrentRequest: (requestId) => fileLoadRequestIdRef.current === requestId,
+          readFile: () => window.ipc.invoke('workspace:readFile', { path: pathToReload }),
+          getDiskEditorContent: (data) => splitFrontmatter(data).body,
+          applyReload: (data) => {
+            setFileContent(data)
+            const { raw: fm, body } = splitFrontmatter(data)
+            frontmatterByPathRef.current.set(pathToReload, fm)
+            setEditorContent(body)
+            setEditorCacheForPath(pathToReload, body)
+            editorContentRef.current = body
+            editorPathRef.current = pathToReload
+            setInitialContentForPath(pathToReload, body)
+            initialContentRef.current = body
+          },
+          applyUnchangedReload: (data) => {
+            setFileContent(data)
+            const { raw: fm, body } = splitFrontmatter(data)
+            frontmatterByPathRef.current.set(pathToReload, fm)
+            setEditorCacheForPath(pathToReload, body)
+            setInitialContentForPath(pathToReload, body)
+            initialContentRef.current = body
+          },
+          onReadError: (error) => console.error('Failed to reload externally changed file:', error),
+        })
       }
     })
     return cleanup
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadDirectory, removeEditorCacheForPath, setEditorCacheForPath])
+  }, [deleteInitialContentForPath, loadDirectory, removeEditorCacheForPath, setEditorCacheForPath, setInitialContentForPath])
 
   // Load file content when selected
   useEffect(() => {
+    const requestId = (fileLoadRequestIdRef.current += 1)
     if (!selectedPath) {
       setFileContent('')
       setEditorContent('')
@@ -2999,7 +3017,6 @@ function App() {
         return
       }
     }
-    const requestId = (fileLoadRequestIdRef.current += 1)
     const pathToLoad = selectedPath
     // Only the markdown editor still consumes fileContent. Every other viewer
     // (media + UnsupportedFileViewer) self-loads, so skip the generic UTF-8
@@ -3025,8 +3042,16 @@ function App() {
             return
           }
         }
-        const result = await window.ipc.invoke('workspace:readFile', { path: pathToLoad })
-        if (cancelled || fileLoadRequestIdRef.current !== requestId || selectedPathRef.current !== pathToLoad) return
+        const result = await readFileAfterExternalChangesSettle({
+          getExternalRevision: () => externalChangeRevisionByPathRef.current.get(pathToLoad) ?? 0,
+          isCurrent: () => (
+            !cancelled
+            && fileLoadRequestIdRef.current === requestId
+            && selectedPathRef.current === pathToLoad
+          ),
+          readFile: () => window.ipc.invoke('workspace:readFile', { path: pathToLoad }),
+        })
+        if (!result) return
         setFileContent(result.data)
         const { raw: fm, body } = splitFrontmatter(result.data)
         frontmatterByPathRef.current.set(pathToLoad, fm)
@@ -3045,7 +3070,7 @@ function App() {
           }
           editorContentRef.current = body
           editorPathRef.current = pathToLoad
-          initialContentByPathRef.current.set(pathToLoad, body)
+          setInitialContentForPath(pathToLoad, body)
           initialContentRef.current = body
           setLastSaved(null)
         } else {
@@ -3065,7 +3090,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [selectedPath, setEditorCacheForPath])
+  }, [selectedPath, setEditorCacheForPath, setInitialContentForPath])
 
   // Track recently opened markdown files for wiki links
   useEffect(() => {
@@ -3135,7 +3160,7 @@ function App() {
                 const fmEntry = frontmatterByPathRef.current.get(pathAtStart)
                 frontmatterByPathRef.current.delete(pathAtStart)
                 frontmatterByPathRef.current.set(targetPath, fmEntry ?? null)
-                initialContentByPathRef.current.delete(pathAtStart)
+                deleteInitialContentForPath(pathAtStart)
                 const cachedContent = editorContentByPathRef.current.get(pathAtStart)
                 if (cachedContent !== undefined) {
                   const rewrittenCachedContent = rewriteWikiLinksForRenamedFileInMarkdown(
@@ -3172,10 +3197,9 @@ function App() {
           data: contentToSave,
           opts: { encoding: 'utf8' }
         })
-        markRecentLocalMarkdownWrite(pathToSave)
         analytics.noteEdited(pathToSave)
         // Store body-only baseline (matches what debouncedContent compares against)
-        initialContentByPathRef.current.set(pathToSave, splitFrontmatter(contentToSave).body)
+        setInitialContentForPath(pathToSave, splitFrontmatter(contentToSave).body)
 
         // If we renamed the active file, update state/history AFTER the write completes so the editor
         // doesn't reload stale on-disk content mid-typing (which can drop the latest character).
@@ -3209,7 +3233,7 @@ function App() {
       }
     }
     saveFile()
-  }, [debouncedContent, markRecentLocalMarkdownWrite, setHistory])
+  }, [debouncedContent, deleteInitialContentForPath, setHistory, setInitialContentForPath])
 
   // Close version history panel when switching files
   useEffect(() => {
@@ -5751,8 +5775,8 @@ function App() {
         }
         const baseline = initialContentByPathRef.current.get(oldPath)
         if (baseline !== undefined) {
-          initialContentByPathRef.current.delete(oldPath)
-          initialContentByPathRef.current.set(newPath, rewriteForRename(baseline))
+          deleteInitialContentForPath(oldPath)
+          setInitialContentForPath(newPath, rewriteForRename(baseline))
         }
         const cachedContent = editorContentByPathRef.current.get(oldPath)
         if (cachedContent !== undefined) {
@@ -5784,7 +5808,7 @@ function App() {
         await window.ipc.invoke('workspace:remove', { path, opts: { trash: true } })
         if (path.endsWith('.md')) {
           removeEditorCacheForPath(path)
-          initialContentByPathRef.current.delete(path)
+          deleteInitialContentForPath(path)
           untitledRenameReadyPathsRef.current.delete(path)
           frontmatterByPathRef.current.delete(path)
         }
@@ -5814,7 +5838,7 @@ function App() {
         console.error('Failed to open in file manager:', err)
       })
     },
-  }), [tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, removeEditorCacheForPath])
+  }), [deleteInitialContentForPath, setInitialContentForPath, tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, removeEditorCacheForPath])
 
   // Drives the mascot product tour through the app's main sections
   const handleTourNavigate = useCallback((target: TourNavTarget) => {
@@ -6837,7 +6861,7 @@ function App() {
                                 // Write updated frontmatter to disk immediately
                                 const currentBody = editorContentRef.current
                                 const fullContent = joinFrontmatter(newRaw, currentBody)
-                                initialContentByPathRef.current.set(notePath, splitFrontmatter(fullContent).body)
+                                setInitialContentForPath(notePath, splitFrontmatter(fullContent).body)
                                 initialContentRef.current = splitFrontmatter(fullContent).body
                                 void window.ipc.invoke('workspace:writeFile', {
                                   path: notePath,
