@@ -31,6 +31,7 @@ import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
 import { CodeProject, CodeSession, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
+import { SELF_HOSTED_TRANSCRIPTION_PROTOCOL } from './self-hosted-transcription.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -122,6 +123,17 @@ const UpdaterStatusSchema = z.object({
   releaseNotes: z.string().optional(),
   error: z.string().optional(),
   lastCheckedAt: z.number().optional(),
+});
+
+const SelfHostedTranscriptUpdateSchema = z.object({
+  channelIndex: z.union([z.literal(0), z.literal(1)]),
+  full: z.string(),
+  committed: z.string(),
+  tentative: z.string(),
+  final: z.boolean(),
+  revision: z.number().nonnegative(),
+  inputMs: z.number().nonnegative(),
+  bufferedMs: z.number().nonnegative(),
 });
 
 const ipcSchemas = {
@@ -2598,6 +2610,42 @@ const ipcSchemas = {
     res: z.object({
       notes: z.string(),
     }),
+  },
+  // Optional self-hosted meeting transcription. Main owns the bearer token,
+  // validates the destination, and serializes each connection's audio. The
+  // renderer sees only a connection ID and bounded transcript snapshots.
+  'meeting:selfHostedTranscriptionStatus': {
+    req: z.null(),
+    res: z.object({
+      configured: z.boolean(),
+      valid: z.boolean(),
+      protocol: z.literal(SELF_HOSTED_TRANSCRIPTION_PROTOCOL).optional(),
+      endpoint: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'meeting:selfHostedTranscriptionBegin': {
+    req: z.null(),
+    res: z.object({ connectionId: z.string().uuid() }),
+  },
+  'meeting:selfHostedTranscriptionFeed': {
+    req: z.object({
+      connectionId: z.string().uuid(),
+      pcmBase64: z.string().max(350_000),
+    }),
+    res: z.object({
+      updates: z.array(SelfHostedTranscriptUpdateSchema).length(2),
+    }),
+  },
+  'meeting:selfHostedTranscriptionFinalize': {
+    req: z.object({ connectionId: z.string().uuid() }),
+    res: z.object({
+      updates: z.array(SelfHostedTranscriptUpdateSchema).length(2),
+    }),
+  },
+  'meeting:selfHostedTranscriptionReset': {
+    req: z.object({ connectionId: z.string().uuid() }),
+    res: z.object({ success: z.literal(true) }),
   },
   // Resolve a meeting's attendees against the knowledge base — returns each
   // attendee's existing person note (or null). Deterministic, no LLM; powers

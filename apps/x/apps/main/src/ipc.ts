@@ -97,12 +97,14 @@ import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
 import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
 import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
+import { selfHostedMeetingTranscription } from './self-hosted-meeting-transcription.js';
 
 // Ambient meeting detection must ignore Rowboat's own mic use: meeting
 // capture and assistant voice/video calls both hold the mic. Either being
 // active suppresses "Meeting detected" prompts.
 let meetingRecordingActive = false;
 let voiceCallActive = false;
+const selfHostedCleanupSenders = new WeakSet<object>();
 function updateSelfCaptureState() {
   setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
 }
@@ -2580,6 +2582,39 @@ export function setupIpcHandlers() {
         void maybeActivateCredit('first_meeting_note');
       }
       return { notes };
+    },
+    'meeting:selfHostedTranscriptionStatus': async () => {
+      return selfHostedMeetingTranscription.status();
+    },
+    'meeting:selfHostedTranscriptionBegin': async (event) => {
+      const sender = event.sender;
+      const ownerId = sender.id;
+      if (!selfHostedCleanupSenders.has(sender)) {
+        selfHostedCleanupSenders.add(sender);
+        sender.once('destroyed', () => {
+          void selfHostedMeetingTranscription.resetOwner(ownerId);
+        });
+      }
+      const result = await selfHostedMeetingTranscription.begin(ownerId);
+      if (sender.isDestroyed()) {
+        await selfHostedMeetingTranscription.resetOwner(ownerId);
+        throw new Error('Meeting transcription window closed while the worker was starting');
+      }
+      return result;
+    },
+    'meeting:selfHostedTranscriptionFeed': async (event, args) => {
+      return selfHostedMeetingTranscription.feed(
+        event.sender.id,
+        args.connectionId,
+        args.pcmBase64,
+      );
+    },
+    'meeting:selfHostedTranscriptionFinalize': async (event, args) => {
+      return selfHostedMeetingTranscription.finalize(event.sender.id, args.connectionId);
+    },
+    'meeting:selfHostedTranscriptionReset': async (event, args) => {
+      await selfHostedMeetingTranscription.reset(event.sender.id, args.connectionId);
+      return { success: true as const };
     },
     'meeting-prep:resolve': async (_event, args) => {
       const result = await resolveMeetingPrep(args.attendees);
