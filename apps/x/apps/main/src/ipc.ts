@@ -2808,7 +2808,7 @@ export function setupIpcHandlers() {
         // and it is a positive taste signal. Delegated text still waits for
         // the user's explicit go — accepting is not running.
         await addTodoItem(taken, { proposed: true });
-        void recordPlannerSignal('kept', taken).catch(() => {});
+        await recordPlannerSignal('kept', taken).catch(() => {});
         todoBus.publish({ type: 'list_changed' });
         return { success: true };
       } catch (err) {
@@ -2819,7 +2819,7 @@ export function setupIpcHandlers() {
       try {
         const taken = await takeTodoSuggestion(args.text);
         if (!taken) return { success: false, error: 'Suggestion no longer exists' };
-        void recordPlannerSignal('dismissed', taken).catch(() => {});
+        await recordPlannerSignal('dismissed', taken).catch(() => {});
         todoBus.publish({ type: 'list_changed' });
         return { success: true };
       } catch (err) {
@@ -2937,7 +2937,7 @@ export function setupIpcHandlers() {
         const found = await findTodoItem(args.key).catch(() => null);
         const ok = await dismissTodoItem(args.key);
         if (ok && found?.item.proposed) {
-          void recordPlannerSignal('dismissed', found.item.text).catch(() => {});
+          await recordPlannerSignal('dismissed', found.item.text).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return ok ? { success: true, wasProposed: !!found?.item.proposed } : { success: false, error: 'Item not found' };
@@ -2948,7 +2948,7 @@ export function setupIpcHandlers() {
     'todo:teach': async (_event, args) => {
       try {
         await addPlannerRule(`Don't suggest items like: "${args.text}"`);
-        void recordPlannerSignal('taught', args.text).catch(() => {});
+        await recordPlannerSignal('taught', args.text).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
