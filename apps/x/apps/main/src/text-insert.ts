@@ -38,15 +38,27 @@ interface Frontmost {
   bundleId: string;
 }
 
+function run(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout: 5000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(stderr?.trim() || err.message));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
+// lsappinfo needs NO TCC permission — unlike a System Events query, which
+// silently fails before the Automation grant and left target detection
+// blind on first use. Only the synthesized keystroke needs permissions.
 async function frontmostApp(): Promise<Frontmost | null> {
   try {
-    const out = await osascript(
-      'tell application "System Events" to get {name, bundle identifier} of first application process whose frontmost is true',
-    );
-    // AppleScript renders the pair as "Name, bundle.id".
-    const idx = out.lastIndexOf(', ');
-    if (idx < 0) return null;
-    return { name: out.slice(0, idx), bundleId: out.slice(idx + 2) };
+    const asn = (await run('lsappinfo', ['front'])).trim();
+    if (!asn) return null;
+    const info = await run('lsappinfo', ['info', '-only', 'name,bundleID', asn]);
+    const name = /"LSDisplayName"\s*=\s*"([^"]+)"/.exec(info)?.[1];
+    const bundleId = /"CFBundleIdentifier"\s*=\s*"([^"]+)"/.exec(info)?.[1];
+    if (!name || !bundleId) return null;
+    return { name, bundleId };
   } catch {
     return null;
   }
@@ -88,9 +100,12 @@ export class ElectronTextInsertService implements ITextInsertService {
     const stored = this.captured && Date.now() - this.captured.at < CAPTURE_TTL_MS ? this.captured : null;
     const target = live && !isOurs(live) ? live : stored;
     if (!target) {
+      // Graceful degradation: the words are never lost — they're on the
+      // clipboard, one ⌘V away, and the caller shows them as copyable text.
+      clipboard.writeText(text);
       return {
         ok: false,
-        error: 'No target app — ask the user to click into the field they want the text in, then try again.',
+        error: 'No target app was focused — the text is on the clipboard instead; the user can click where they want it and press ⌘V.',
       };
     }
 
@@ -100,15 +115,7 @@ export class ElectronTextInsertService implements ITextInsertService {
       await osascript(`tell application id "${target.bundleId.replace(/"/g, '\\"')}" to activate`);
       await sleep(ACTIVATE_SETTLE_MS);
       await osascript('tell application "System Events" to keystroke "v" using command down');
-      return { ok: true, app: target.name };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const friendly = /not allowed|1002|assistive/i.test(msg)
-        ? 'macOS blocked the keystroke — allow Rowboat under Privacy & Security → Accessibility (and Automation → System Events), then try again.'
-        : `Paste failed: ${msg}`;
-      return { ok: false, error: friendly };
-    } finally {
-      // Give the paste time to land before the clipboard goes back.
+      // Give the paste time to land, then put the user's clipboard back.
       void sleep(RESTORE_DELAY_MS).then(() => {
         try {
           clipboard.writeText(previousClipboard);
@@ -116,6 +123,16 @@ export class ElectronTextInsertService implements ITextInsertService {
           // The payload staying on the clipboard is the harmless failure.
         }
       });
+      return { ok: true, app: target.name };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const friendly = /not allowed|1002|assistive|osascript is not allowed/i.test(msg)
+        ? 'macOS blocked the keystroke — allow Rowboat (in dev: "Electron") under Privacy & Security → Accessibility, and → Automation → System Events.'
+        : `Paste failed: ${msg}`;
+      // Failure path: leave the payload ON the clipboard — losing the old
+      // clipboard is the lesser cost; the words being one ⌘V away is the
+      // promise this feature keeps even when the keystroke can't land.
+      return { ok: false, error: `${friendly} The text is on the clipboard — the user can press ⌘V where they want it.` };
     }
   }
 }
