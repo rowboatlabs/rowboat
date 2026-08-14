@@ -1421,12 +1421,14 @@ function App() {
         playAckCue()
         callTurnMarksRef.current = { t0: performance.now() }
         pendingVoiceInputRef.current = true
-        // Ghostwriter chord: the directive rides the message itself, so it
-        // is durable in the transcript and needs no composition plumbing.
+        // Ghostwriter chord: the marker rides the message itself — durable
+        // in the transcript ("why did it paste?" answers itself), cache-safe
+        // (no per-turn composition churn). Terse on purpose: the behavioral
+        // doctrine lives in the paste-at-cursor tool description.
         const paste = pttPasteIntentRef.current
         pttPasteIntentRef.current = false
         const message = paste
-          ? `${text}\n\n[Paste chord held: put your result into my focused app with the paste-at-cursor tool — the payload only. Keep any spoken reply to one short line.]`
+          ? `${text}\n\n[⇧⌘ chord — paste the result at my cursor]`
           : text
         // Calls talk to the companion's session — the app window can browse
         // any chat mid-call without retargeting the conversation.
