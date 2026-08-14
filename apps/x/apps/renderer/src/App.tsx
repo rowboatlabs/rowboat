@@ -1432,7 +1432,7 @@ function App() {
         const paste = pttPasteIntentRef.current
         pttPasteIntentRef.current = false
         const message = paste
-          ? `${text}\n\n[⇧⌘ chord — paste at my cursor. If I'm dictating content, paste MY words verbatim (fix punctuation, drop fillers, change nothing else). Compose only when I'm clearly instructing you to write something. Unsure → verbatim.]`
+          ? `${text}\n\n[⇧⌘ chord — paste at my cursor. If I'm dictating content, paste MY words verbatim (fix punctuation, drop fillers, change nothing else) and reply "Done." at most — I watch the text land; never narrate it. Compose only when I'm clearly instructing you to write something. Unsure → verbatim.]`
           : text
         // Calls talk to the companion's session — the app window can browse
         // any chat mid-call without retargeting the conversation.
