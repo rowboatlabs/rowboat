@@ -6,7 +6,7 @@ import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, compactPath, parentPath } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
@@ -4640,8 +4640,8 @@ function App() {
   // Code dispatch from Home (the Helm): an optional repo lane for the to-do
   // being composed. Picking a lane makes the item a real code session
   // (worktree by default) before its first turn — see todo:addItem `code`.
-  const [homeCodeProjects, setHomeCodeProjects] = useState<{ id: string; name: string }[]>([])
-  const [homeCodeProject, setHomeCodeProject] = useState<{ id: string; name: string } | null>(null)
+  const [homeCodeProjects, setHomeCodeProjects] = useState<{ id: string; name: string; path: string }[]>([])
+  const [homeCodeProject, setHomeCodeProject] = useState<{ id: string; name: string; path: string } | null>(null)
   const [homeCodeIsolation, setHomeCodeIsolation] = useState<'worktree' | 'in-repo'>('worktree')
   const homeCodeProjectRef = useRef(homeCodeProject)
   useEffect(() => { homeCodeProjectRef.current = homeCodeProject }, [homeCodeProject])
@@ -4656,7 +4656,7 @@ function App() {
       window.ipc.invoke('codeMode:getConfig', null).catch(() => null),
     ]).then(([list, config]) => {
       if (cancelled) return
-      const projects = list.projects.map((p) => ({ id: p.project.id, name: p.project.name }))
+      const projects = list.projects.map((p) => ({ id: p.project.id, name: p.project.name, path: p.project.path }))
       // The default repo (explicit, or the only one registered) leads the
       // lane row — one click, and it's the same repo voice dispatch uses.
       const defaultId = config?.defaultProjectId ?? (projects.length === 1 ? projects[0].id : null)
@@ -6577,6 +6577,7 @@ function App() {
                                 <button
                                   key={p.id}
                                   type="button"
+                                  title={p.path}
                                   onClick={() => setHomeCodeProject((cur) => (cur?.id === p.id ? null : p))}
                                   className={`rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
                                     homeCodeProject?.id === p.id
@@ -6585,6 +6586,10 @@ function App() {
                                   }`}
                                 >
                                   {p.name}
+                                  {/* Same-named repos elsewhere on disk — show where this one lives. */}
+                                  {homeCodeProjects.some((o) => o.id !== p.id && o.name === p.name) && (
+                                    <span className="ml-1 opacity-60">{compactPath(parentPath(p.path), 20)}</span>
+                                  )}
                                   {p.id === homeDefaultProjectId && <span className="ml-1 opacity-60">· default</span>}
                                 </button>
                               ))}

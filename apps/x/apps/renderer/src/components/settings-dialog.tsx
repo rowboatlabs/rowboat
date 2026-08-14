@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
+import { cn, compactPath, parentPath } from "@/lib/utils"
 import * as analytics from "@/lib/analytics"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
@@ -1231,7 +1231,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   // The repo coding work defaults into when none is named. undefined = Auto:
   // a single registered project is the implicit default.
   const [defaultProjectId, setDefaultProjectId] = useState<string | undefined>(undefined)
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
+  const [projects, setProjects] = useState<{ id: string; name: string; path: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
@@ -1266,7 +1266,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
       }
       try {
         const res = await window.ipc.invoke("codeProject:list", null)
-        if (!cancelled) setProjects(res.projects.map((p) => ({ id: p.project.id, name: p.project.name })))
+        if (!cancelled) setProjects(res.projects.map((p) => ({ id: p.project.id, name: p.project.name, path: p.project.path })))
       } catch {
         if (!cancelled) setProjects([])
       } finally {
@@ -1451,7 +1451,13 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
                 {projects.length === 1 ? `Auto — ${projects[0].name} (only repo)` : 'Auto — the only registered repo'}
               </SelectItem>
               {projects.map((p) => (
-                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                  {/* Same-named repos elsewhere — say where this one lives. */}
+                  {projects.some((o) => o.id !== p.id && o.name === p.name) && (
+                    <span className="ml-1.5 text-muted-foreground">{compactPath(parentPath(p.path), 24)}</span>
+                  )}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
