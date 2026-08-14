@@ -5028,6 +5028,12 @@ function App() {
   const navigateToViewRef = useRef(navigateToView)
   useEffect(() => { navigateToViewRef.current = navigateToView }, [navigateToView])
 
+  // Stable across navigations (EmailView's memoized rows compare prop
+  // identity) — the email view's people-note chips navigate through the ref.
+  const openNoteFromEmail = useCallback((path: string) => {
+    void navigateToViewRef.current({ type: 'file', path })
+  }, [])
+
   useEffect(() => {
     const handle = (url: string) => {
       const view = parseDeepLink(url)
@@ -6657,7 +6663,7 @@ function App() {
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} />
+                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} onOpenNote={openNoteFromEmail} />
                 </div>
               ) : isWorkspaceOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

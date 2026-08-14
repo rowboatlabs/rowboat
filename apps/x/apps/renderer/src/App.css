@@ -725,6 +725,35 @@
   line-height: 1.55;
 }
 
+/* People on the thread who have a knowledge note — one click to open it. */
+.gmail-thread-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.gmail-thread-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--gm-border);
+  border-radius: 999px;
+  background: var(--gm-bg-pill);
+  color: var(--gm-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.gmail-thread-person:hover {
+  background: var(--gm-bg-pill-hover);
+  color: var(--gm-text-strong);
+  border-color: var(--gm-border-strong);
+}
+
 .gmail-message-stack {
   display: flex;
   flex-direction: column;
