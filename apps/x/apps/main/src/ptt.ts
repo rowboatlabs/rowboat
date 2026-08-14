@@ -14,7 +14,7 @@
  * in-window DOM listener keeps PTT working while the app is focused either
  * way).
  */
-import { BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 
 type PttKeyEvent = {
   type: 'down' | 'up' | 'chord';
@@ -44,6 +44,13 @@ let findTargetWindows: () => BrowserWindow[] = () => [];
 /** Wire where PTT key events get delivered (the app window). */
 export function initPtt(findTargets: () => BrowserWindow[]) {
   findTargetWindows = findTargets;
+  // The shutdown half of the crash: the hook's native thread keeps pumping
+  // events while Node's environment tears down at quit — a delivery into
+  // the dying env is a napi fatal (the 23:11 crash report's
+  // CleanupHandles stack). The hook stays running for the app's LIFETIME
+  // (restarting it is what's unreliable) — but at final quit there is no
+  // restart to protect; stop it before teardown begins.
+  app.on('will-quit', () => stopHook());
 }
 
 function broadcast(event: PttKeyEvent) {
@@ -51,7 +58,18 @@ function broadcast(event: PttKeyEvent) {
   // setPttActive for why the hook keeps running between calls.
   if (reasons.size === 0) return;
   for (const win of findTargetWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('voice:ptt-key', event);
+    try {
+      // Both checks: a window mid-teardown can survive isDestroyed() while
+      // its webContents is already gone — send() then THROWS, and a throw
+      // anywhere in a uiohook callback is a PROCESS ABORT (see
+      // attachListeners). Seen in the wild as the companion window being
+      // recreated during a call.
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+        win.webContents.send('voice:ptt-key', event);
+      }
+    } catch {
+      // Never let a dying window take the app with it.
+    }
   }
 }
 
@@ -68,10 +86,25 @@ async function loadModule(): Promise<UiohookModule | null> {
   return hookModule;
 }
 
+// A JS exception inside a uiohook callback is NOT a normal error: the
+// module's threadsafe-function proxy escalates any callback failure to
+// napi_fatal_error → SIGABRT, taking the whole app down. Every handler body
+// is wrapped — all three crash reports on 0.8.7 carry exactly this
+// signature (tsfn_to_js_proxy → napi_fatal_error → abort).
+function guarded<T extends unknown[]>(fn: (...args: T) => void): (...args: T) => void {
+  return (...args) => {
+    try {
+      fn(...args);
+    } catch (err) {
+      console.error('[ptt] suppressed exception in uiohook callback:', err);
+    }
+  };
+}
+
 function attachListeners(mod: UiohookModule) {
   if (listenersAttached) return;
   listenersAttached = true;
-  mod.uIOhook.on('keydown', (e) => {
+  mod.uIOhook.on('keydown', guarded((e: { keycode: number; shiftKey?: boolean }) => {
     eventsSeen = true;
     if (e.keycode === META_RIGHT) {
       // OS key-repeat refires keydown while held — only the edge matters.
@@ -89,22 +122,22 @@ function attachListeners(mod: UiohookModule) {
       // the renderer cancels the capture.
       broadcast({ type: 'chord' });
     }
-  });
-  mod.uIOhook.on('keyup', (e) => {
+  }));
+  mod.uIOhook.on('keyup', guarded((e: { keycode: number }) => {
     eventsSeen = true;
     if (e.keycode === META_RIGHT && metaRightHeld) {
       metaRightHeld = false;
       broadcast({ type: 'up' });
     }
-  });
-  mod.uIOhook.on('mousedown', () => {
+  }));
+  mod.uIOhook.on('mousedown', guarded(() => {
     eventsSeen = true;
     // ⌘-click with the held key: a chord, same as a keyboard one.
     if (metaRightHeld) broadcast({ type: 'chord' });
-  });
-  mod.uIOhook.on('mousemove', () => {
+  }));
+  mod.uIOhook.on('mousemove', guarded(() => {
     eventsSeen = true;
-  });
+  }));
 }
 
 async function startHook() {
