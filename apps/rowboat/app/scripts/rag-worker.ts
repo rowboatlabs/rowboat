@@ -47,6 +47,37 @@ const splitter = new RecursiveCharacterTextSplitter({
 // Configure Google Gemini API
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || '');
 
+// Remove any existing points for this doc so that retries of a failed or
+// partially-completed run do not leave orphaned vectors behind (#603).
+// Point IDs are random UUIDs, so a re-run would otherwise upsert a full
+// duplicate set of chunks alongside the old ones.
+async function deleteDocEmbeddings(projectId: string, sourceId: string, docId: string): Promise<void> {
+    await qdrantClient.delete("embeddings", {
+        filter: {
+            must: [
+                {
+                    key: "projectId",
+                    match: {
+                        value: projectId,
+                    }
+                },
+                {
+                    key: "sourceId",
+                    match: {
+                        value: sourceId,
+                    }
+                },
+                {
+                    key: "docId",
+                    match: {
+                        value: docId,
+                    }
+                }
+            ],
+        },
+    });
+}
+
 async function retryable<T>(fn: () => Promise<T>, maxAttempts: number = 3): Promise<T> {
     let attempts = 0;
     while (true) {
@@ -150,6 +181,10 @@ async function runProcessFilePipeline(_logger: PrefixLogger, usageTracker: Usage
         context: "rag.files.embedding_usage",
     });
 
+    // clear any points left over from a previous failed attempt (#603)
+    logger.log("Clearing existing embeddings for doc in Qdrant");
+    await deleteDocEmbeddings(job.projectId, job.id, doc.id);
+
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
@@ -219,6 +254,10 @@ async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTrack
         context: "rag.urls.embedding_usage",
     });
 
+    // clear any points left over from a previous failed attempt (#603)
+    logger.log("Clearing existing embeddings for doc in Qdrant");
+    await deleteDocEmbeddings(job.projectId, job.id, doc.id);
+
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
@@ -271,6 +310,10 @@ async function runProcessTextPipeline(_logger: PrefixLogger, usageTracker: Usage
         context: "rag.text.embedding_usage",
     });
 
+    // clear any points left over from a previous failed attempt (#603)
+    logger.log("Clearing existing embeddings for doc in Qdrant");
+    await deleteDocEmbeddings(job.projectId, job.id, doc.id);
+
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
@@ -304,30 +347,7 @@ async function runDeletionPipeline(_logger: PrefixLogger, job: z.infer<typeof Da
 
     // Delete embeddings from qdrant
     logger.log("Deleting embeddings from Qdrant");
-    await qdrantClient.delete("embeddings", {
-        filter: {
-            must: [
-                {
-                    key: "projectId",
-                    match: {
-                        value: job.projectId,
-                    }
-                },
-                {
-                    key: "sourceId",
-                    match: {
-                        value: job.id,
-                    }
-                },
-                {
-                    key: "docId",
-                    match: {
-                        value: doc.id,
-                    }
-                }
-            ],
-        },
-    });
+    await deleteDocEmbeddings(job.projectId, job.id, doc.id);
 
     // Delete docs from db
     logger.log("Deleting doc from db");
