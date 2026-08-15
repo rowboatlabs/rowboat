@@ -893,7 +893,7 @@ async function backfillMissingRecentThreads(
     return synced;
 }
 
-async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number) {
+async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number, opts: { ignoreLastSync?: boolean } = {}) {
     const gmail = GoogleClientFactory.gmailClient(auth);
 
     // The onboarding / recovery fetch is bounded by a COUNT of the most recent
@@ -908,11 +908,17 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
     // With no resumable last_sync (first connect, or a gap longer than the
     // lookback window) we drop the date floor entirely and just take the newest
     // `maxEmails` threads.
+    //
+    // ignoreLastSync: the caller needs the whole window re-walked even though
+    // last_sync is recent — the cache-backfill case, where inbox_lists/ was
+    // wiped (disconnect) but sync_state.json survived. Resuming from last_sync
+    // there would only re-list mail newer than the wipe, so the old inbox
+    // would never come back.
     const maxEmails = getMaxEmails();
     const state = loadState(stateFile);
     const lookbackFloor = new Date();
     lookbackFloor.setDate(lookbackFloor.getDate() - lookbackDays);
-    const resumeFrom = state.last_sync && new Date(state.last_sync) > lookbackFloor
+    const resumeFrom = !opts.ignoreLastSync && state.last_sync && new Date(state.last_sync) > lookbackFloor
         ? new Date(state.last_sync)
         : null;
     if (resumeFrom) {
@@ -1354,8 +1360,13 @@ async function performSync() {
             console.log("No history ID found, starting full sync...");
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else if (cacheMissing) {
+            // ignoreLastSync: after a disconnect→reconnect, purgeEmailCaches()
+            // wiped inbox_lists/ but sync_state.json (inside gmail_sync/, kept
+            // as knowledge source material) survived with a recent last_sync.
+            // Resuming from it would only re-list brand-new mail, so the old
+            // inbox would never be backfilled.
             console.log("History ID present but inbox cache empty — running full sync to backfill snapshots...");
-            await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
+            await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS, { ignoreLastSync: true });
         } else if (gapTooLarge) {
             console.log(`Last sync older than ${LOOKBACK_DAYS} days — running count-bounded full sync instead of partial sync...`);
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
