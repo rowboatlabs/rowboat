@@ -1389,25 +1389,30 @@ export async function getAccountEmail(): Promise<string | null> {
     return getUserEmail(auth);
 }
 
-let cachedAccountName: string | null | undefined;
+/**
+ * Per-client display-name cache. Must not be process-global: reconnecting a
+ * different Google account (new OAuth2Client) must not inherit the prior name.
+ * `null` is a valid cached miss (no SENT mail); WeakMap.has distinguishes cold.
+ */
+const accountNameByClient = new WeakMap<object, string | null>();
 
 /**
  * The connected account's display name, parsed from the `From` header of a
- * recent SENT message (which is the user themselves). Cached for the process
- * lifetime. Uses only the existing gmail.modify scope — no profile/userinfo
- * scope, so it never triggers a re-consent. Used by the composer to sign off
- * AI-generated emails with the real name.
+ * recent SENT message (which is the user themselves). Cached per OAuth client.
+ * Uses only the existing gmail.modify scope — no profile/userinfo scope, so it
+ * never triggers a re-consent. Used by the composer to sign off AI-generated
+ * emails with the real name.
  */
 export async function getAccountName(): Promise<string | null> {
-    if (cachedAccountName !== undefined) return cachedAccountName;
     try {
         const auth = await GoogleClientFactory.getClient();
         if (!auth) return null;
+        if (accountNameByClient.has(auth)) return accountNameByClient.get(auth) ?? null;
         const gmailClient = google.gmail({ version: 'v1', auth });
         const list = await gmailClient.users.messages.list({ userId: 'me', labelIds: ['SENT'], maxResults: 1 });
         const id = list.data.messages?.[0]?.id;
         if (!id) {
-            cachedAccountName = null;
+            accountNameByClient.set(auth, null);
             return null;
         }
         const msg = await gmailClient.users.messages.get({
@@ -1419,7 +1424,7 @@ export async function getAccountName(): Promise<string | null> {
         const from = msg.data.payload?.headers?.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
         // Pull the display name out of `"Name" <email>` / `Name <email>`.
         const name = from.match(/^\s*"?([^"<]+?)"?\s*</)?.[1]?.trim() || null;
-        cachedAccountName = name;
+        accountNameByClient.set(auth, name);
         return name;
     } catch (err) {
         console.warn('[Gmail] getAccountName failed:', err);

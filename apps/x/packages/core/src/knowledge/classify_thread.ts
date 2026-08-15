@@ -18,6 +18,7 @@ import { formatImportanceFeedbackForPrompt, maybeDistillImportanceRules } from '
 import { formatCategoryFeedbackForPrompt } from './email_category_feedback.js';
 import { formatEmailInstructionsForPrompt } from './email_instructions.js';
 import { getEmailLabels, type EmailLabelDef } from './email_labels.js';
+import { getOwnerEmails, unionEmails } from '../config/user_config.js';
 
 const STYLE_GUIDE_PATH = path.join(WorkDir, 'knowledge', 'Agent Notes', 'style', 'email.md');
 const CALENDAR_DIR = path.join(WorkDir, 'calendar_sync');
@@ -87,21 +88,42 @@ function formatCalendar(events: CalendarSlice[]): string {
     }).join('\n');
 }
 
-let cachedUserEmail: string | null = null;
+/**
+ * Per-client cache — never process-global. A second OAuth client (or a reconnect
+ * that yields a new client instance) must not inherit the first account's email.
+ */
+const emailByClient = new WeakMap<OAuth2Client, string>();
 
 export async function getUserEmail(auth: OAuth2Client): Promise<string | null> {
-    if (cachedUserEmail) return cachedUserEmail;
+    const hit = emailByClient.get(auth);
+    if (hit) return hit;
     try {
         const gmailClient = google.gmail({ version: 'v1', auth });
         const res = await gmailClient.users.getProfile({ userId: 'me' });
         if (res.data.emailAddress) {
-            cachedUserEmail = res.data.emailAddress.toLowerCase();
-            return cachedUserEmail;
+            const email = res.data.emailAddress.toLowerCase();
+            emailByClient.set(auth, email);
+            return email;
         }
     } catch (err) {
         console.warn('[Email classifier] getProfile failed:', err);
     }
     return null;
+}
+
+/**
+ * Identity set for matching (self / "user wrote"): connected Gmail address
+ * unioned with config/user.json emails. Single-account users still get size 1.
+ */
+export function resolveOwnerIdentityEmails(connectedEmail: string | null | undefined): string[] {
+    return unionEmails(getOwnerEmails(), connectedEmail);
+}
+
+/** True if a From-style header contains any of the owner emails. */
+export function headerMatchesOwner(header: string, ownerEmails: readonly string[]): boolean {
+    if (!header || ownerEmails.length === 0) return false;
+    const hay = header.toLowerCase();
+    return ownerEmails.some((e) => e && hay.includes(e));
 }
 
 /**
@@ -208,25 +230,29 @@ Omit the draft when:
 
 Be decisive — pick exactly one importance label. Do not hedge.`;
 
-function userSentLatest(snapshot: GmailThreadSnapshot, userEmail: string | null): boolean {
-    if (!userEmail) return false;
+/** Exported for unit tests. Latest message is from any owner address. */
+export function userSentLatest(snapshot: GmailThreadSnapshot, ownerEmails: readonly string[]): boolean {
+    if (ownerEmails.length === 0) return false;
     const latest = snapshot.messages[snapshot.messages.length - 1];
     if (!latest) return false;
-    const needle = userEmail.toLowerCase();
-    return (latest.from || '').toLowerCase().includes(needle);
+    return headerMatchesOwner(latest.from || '', ownerEmails);
 }
 
 function buildPrompt(
     snapshot: GmailThreadSnapshot,
-    userEmail: string | null,
+    ownerEmails: readonly string[],
     styleGuide: string | null,
     calendar: CalendarSlice[],
 ): string {
     const lines: string[] = [];
 
-    if (userEmail) {
+    if (ownerEmails.length === 1) {
         lines.push(`# Your identity`);
-        lines.push(`The user's own email is ${userEmail}. You write as this person when drafting replies.`);
+        lines.push(`The user's own email is ${ownerEmails[0]}. You write as this person when drafting replies.`);
+        lines.push('');
+    } else if (ownerEmails.length > 1) {
+        lines.push(`# Your identity`);
+        lines.push(`The user's own emails are ${ownerEmails.join(', ')}. You write as this person when drafting replies.`);
         lines.push('');
     }
 
@@ -272,7 +298,11 @@ export async function classifyThread(
     userEmail: string | null,
     options: ClassifyOptions = {},
 ): Promise<Classification> {
-    if (userSentLatest(snapshot, userEmail)) {
+    // Match against the full owner set (connected + user.json emails), not a
+    // single string — secondary aliases must not be treated as external senders.
+    const ownerEmails = resolveOwnerIdentityEmails(userEmail);
+
+    if (userSentLatest(snapshot, ownerEmails)) {
         // Force-important only for real conversations the user replied in.
         // Threads where the user is the ONLY sender (outbound campaigns,
         // first-touch outreach, self-test sends) are not inbox-important —
@@ -282,9 +312,8 @@ export async function classifyThread(
         // Either way the user wrote the latest message themselves, so the
         // knowledge pipeline always extracts: their own words carry their
         // commitments, decisions, and relationships.
-        const needle = (userEmail ?? '').toLowerCase();
-        const othersParticipated = needle
-            ? snapshot.messages.some((m) => m.from && !m.from.toLowerCase().includes(needle))
+        const othersParticipated = ownerEmails.length > 0
+            ? snapshot.messages.some((m) => m.from && !headerMatchesOwner(m.from, ownerEmails))
             : false;
         if (othersParticipated) {
             return { importance: 'important', category: 'correspondence', knowledge: 'extract' };
@@ -334,7 +363,7 @@ export async function classifyThread(
         const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObjectSafe({
             model,
             system: systemPrompt,
-            prompt: buildPrompt(snapshot, userEmail, styleGuide, calendar),
+            prompt: buildPrompt(snapshot, ownerEmails, styleGuide, calendar),
             schema: buildClassificationSchema(labels.map((l) => l.id)),
             retry: true,
             generateOptions: reasoning,
@@ -357,8 +386,8 @@ export async function classifyThread(
         // wrote in this thread, the knowledge pipeline must see it — their own
         // messages carry commitments and decisions regardless of how the LLM
         // categorized the thread.
-        const needle = (userEmail ?? '').toLowerCase();
-        if (needle && snapshot.messages.some((m) => (m.from || '').toLowerCase().includes(needle))) {
+        if (ownerEmails.length > 0
+            && snapshot.messages.some((m) => headerMatchesOwner(m.from || '', ownerEmails))) {
             out.knowledge = 'extract';
         }
         if (result.object.importance === 'important') {
