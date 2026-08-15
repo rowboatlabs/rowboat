@@ -22,6 +22,7 @@ import {
     writeSearchSnapshot,
     mirrorThreadReadState,
     mirrorThreadDraft,
+    listCachedThreadIds,
     stampClassificationFrontmatter,
     notifyNewEmailThreads,
     publishEmailSyncEvent,
@@ -863,20 +864,63 @@ function shouldRunRecentBackfill(stateFile: string): boolean {
     return Date.now() - lastRunMs >= RECENT_BACKFILL_INTERVAL_MS;
 }
 
+/** Recent threads still carrying the INBOX label — the set the inbox cache
+ *  should contain for the lookback window. The date query matches messages,
+ *  so an old thread with a recent reply is included (unlike a bare
+ *  newest-N threads.list, which orders by thread creation). */
+async function listRecentInboxThreadIds(gmailClient: gmail.Gmail, lookbackDays: number): Promise<string[]> {
+    const dateQuery = recentDateQuery(lookbackDays);
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    let pageToken: string | undefined;
+
+    do {
+        const res = await gmailClient.users.threads.list({
+            userId: 'me',
+            labelIds: ['INBOX'],
+            q: `after:${dateQuery}`,
+            maxResults: 500,
+            pageToken,
+        });
+        for (const thread of res.data.threads || []) {
+            if (!thread.id || seen.has(thread.id)) continue;
+            seen.add(thread.id);
+            ids.push(thread.id);
+        }
+        pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+
+    return ids;
+}
+
 async function backfillMissingRecentThreads(
     auth: OAuth2Client,
     syncDir: string,
     attachmentsDir: string,
     stateFile: string,
     lookbackDays: number,
+    opts: { force?: boolean } = {},
 ): Promise<SyncedThread[]> {
-    if (!shouldRunRecentBackfill(stateFile)) return [];
+    if (!opts.force && !shouldRunRecentBackfill(stateFile)) return [];
 
     const gmailClient = GoogleClientFactory.gmailClient(auth);
     const recentThreads = await listRecentNonDeletedThreadIds(gmailClient, lookbackDays);
-    const missingThreadIds = recentThreads
-        .map((thread) => thread.threadId)
-        .filter((threadId) => !fs.existsSync(path.join(syncDir, `${threadId}.md`)));
+    const missingThreadIds = new Set(
+        recentThreads
+            .map((thread) => thread.threadId)
+            .filter((threadId) => !fs.existsSync(path.join(syncDir, `${threadId}.md`))),
+    );
+
+    // A markdown mirror alone doesn't mean the thread is synced: disconnect
+    // wipes the inbox cache but keeps gmail_sync/, and a cache-rebuilding full
+    // sync misses old threads with new replies entirely. So a recent thread
+    // still in INBOX with no cache entry counts as missing too. Scoped to
+    // INBOX so archived threads (deliberately uncached — caching would
+    // resurrect them in the inbox UI) aren't re-processed every pass.
+    const cached = new Set(listCachedThreadIds());
+    for (const threadId of await listRecentInboxThreadIds(gmailClient, lookbackDays)) {
+        if (!cached.has(threadId)) missingThreadIds.add(threadId);
+    }
 
     const synced: SyncedThread[] = [];
     for (const threadId of missingThreadIds) {
@@ -884,11 +928,22 @@ async function backfillMissingRecentThreads(
         if (result) synced.push(result);
     }
 
-    const profile = await gmailClient.users.getProfile({ userId: 'me' });
-    saveState(profile.data.historyId!, stateFile, { last_recent_backfill: new Date().toISOString() });
+    // Advance the history watermark only on the timer-driven pass. A forced
+    // pass runs right after a full sync, whose deliberately-early historyId
+    // (captured before listing) must survive so the next partial sync replays
+    // anything that arrived while the full sync was processing.
+    if (opts.force) {
+        const state = loadState(stateFile);
+        if (state.historyId) {
+            saveState(state.historyId, stateFile, { last_recent_backfill: new Date().toISOString() });
+        }
+    } else {
+        const profile = await gmailClient.users.getProfile({ userId: 'me' });
+        saveState(profile.data.historyId!, stateFile, { last_recent_backfill: new Date().toISOString() });
+    }
 
-    if (missingThreadIds.length > 0) {
-        console.log(`Recent Gmail backfill synced ${synced.length}/${missingThreadIds.length} missing thread(s).`);
+    if (missingThreadIds.size > 0) {
+        console.log(`Recent Gmail backfill synced ${synced.length}/${missingThreadIds.size} missing thread(s).`);
     }
     return synced;
 }
@@ -1356,6 +1411,7 @@ async function performSync() {
         // which is count-bounded (the newest maxEmails threads).
         const gapMs = state.last_sync ? Date.now() - new Date(state.last_sync).getTime() : 0;
         const gapTooLarge = gapMs > LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+        let ranFullSync = true;
         if (!state.historyId) {
             console.log("No history ID found, starting full sync...");
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
@@ -1373,6 +1429,19 @@ async function performSync() {
         } else {
             console.log("History ID found, starting partial sync...");
             await partialSync(auth, state.historyId, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
+            ranFullSync = false;
+        }
+
+        // A full sync lists the newest N threads, but threads.list orders by
+        // thread CREATION date — an old thread whose latest reply arrived an
+        // hour ago is invisible to it. Run the recent-window backfill
+        // immediately (its date query matches messages, so it catches those)
+        // instead of waiting out the 15-minute timer.
+        if (ranFullSync) {
+            const backfilled = await backfillMissingRecentThreads(
+                auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS, { force: true },
+            );
+            await publishGmailSyncEvent(backfilled);
         }
 
         // Keep inbox_lists/ in lock-step with Gmail's INBOX label —
