@@ -24,6 +24,7 @@ import { backgroundTaskTools } from "./domains/background-tasks.js";
 import { notificationTools } from "./domains/notifications.js";
 import { todoTools } from "./domains/todo.js";
 import { screenPointerTools } from "./domains/screen-pointer.js";
+import { voiceTools } from "./domains/voice.js";
 import { BuiltinToolsSchema } from "./types.js";
 export { coalesceCodeRunEvents } from "./domains/code.js";
 
@@ -98,6 +99,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...notificationTools,
     ...todoTools,
     ...screenPointerTools,
+    ...voiceTools,
 
     [SPAWN_AGENT_TOOL_NAME]: {
         permission: "none",

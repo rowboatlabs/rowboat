@@ -28,10 +28,15 @@ export const PROXY_TIMEOUT_MS = 30_000; // §7.5
 export const MAX_LLM_REQUEST_BYTES = 256 * 1024; // 256 KB (§7.6)
 export const LLM_MAX_OUTPUT_TOKENS = 4096; // §7.6 (requests clamp to it)
 export const LLM_MAX_CONCURRENT_PER_APP = 2; // §7.6
+export const LLM_TIMEOUT_MS = 120_000; // hard cap — a hung provider call must never pin a slot
 
 export const MAX_COPILOT_PROMPT_BYTES = 16 * 1024; // 16 KB (§7.7)
 export const COPILOT_RUN_TIMEOUT_MS = 600_000; // 10 min (§7.7)
 export const COPILOT_MAX_CONCURRENT_PER_APP = 1; // §7.7
+
+export const MAX_TTS_TEXT_CHARS = 5000; // voice/tts per-request text cap
+export const MAX_VOICE_UPLOAD_BYTES = 32 * 1024 * 1024; // voice/transcribe JSON body cap (base64)
+export const VOICE_MAX_CONCURRENT_PER_APP = 4; // shared across both voice endpoints
 
 export const FOLDER_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/; // §4.1
 

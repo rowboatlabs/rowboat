@@ -440,6 +440,37 @@ export async function writeText(inputPath: string, data: string, opts?: WriteTex
   };
 }
 
+/** Binary sibling of writeText (same atomicity/mkdirp semantics, no etag). */
+export async function writeBuffer(inputPath: string, data: Buffer, opts?: { atomic?: boolean; mkdirp?: boolean }) {
+  const resolved = resolveFilePath(inputPath);
+  const atomic = opts?.atomic !== false;
+  const mkdirp = opts?.mkdirp !== false;
+
+  if (mkdirp) {
+    await fs.mkdir(path.dirname(resolved.resolvedPath), { recursive: true });
+  }
+
+  const result = await withFileLock(resolved.resolvedPath, async () => {
+    if (atomic) {
+      const tempPath = `${resolved.resolvedPath}.tmp.${Date.now()}${Math.random().toString(36).slice(2)}`;
+      await fs.writeFile(tempPath, data);
+      await fs.rename(tempPath, resolved.resolvedPath);
+    } else {
+      await fs.writeFile(resolved.resolvedPath, data);
+    }
+    const stats = await fs.lstat(resolved.resolvedPath);
+    return { stat: statToSchema(stats), etag: computeEtag(stats.size, stats.mtimeMs) };
+  });
+
+  return {
+    path: resolved.originalPath,
+    resolvedPath: resolved.resolvedPath,
+    isInsideWorkspace: resolved.isInsideWorkspace,
+    stat: result.stat,
+    etag: result.etag,
+  };
+}
+
 export async function editText(inputPath: string, oldString: string, newString: string, replaceAll = false) {
   const resolved = resolveFilePath(inputPath);
   await assertTextFile(resolved.resolvedPath);

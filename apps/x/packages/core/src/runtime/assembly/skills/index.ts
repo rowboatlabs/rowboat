@@ -30,6 +30,7 @@ import notifyUserSkill from "./notify-user/skill.js";
 import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
 import chartsSkill from "./charts/skill.js";
+import voiceSkill from "./voice/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/runtime/assembly/skills";
@@ -205,6 +206,13 @@ const definitions: SkillDefinition[] = [
     summary: "Send native desktop notifications with optional clickable links — including rowboat:// deep links that open a specific note, chat, or view inside the app.",
     content: notifyUserSkill,
     tools: ["notify-user"],
+  },
+  {
+    id: "voice",
+    title: "Voice — Speak & Transcribe",
+    summary: "Turn text into spoken audio (text-to-speech saves an .mp3 in the workspace; two voices available for dialogue/podcast-style segments) and transcribe audio files to text (transcribe-audio). Uses the app's built-in voice stack — no API keys needed.",
+    content: voiceSkill,
+    tools: ["text-to-speech", "transcribe-audio"],
   },
 ];
 

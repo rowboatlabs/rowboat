@@ -119,6 +119,29 @@ const { text, turnId } = await (await fetch('/_rowboat/copilot/run', {
 })).json();
 \`\`\`
 
+**Voice** (capability \`voice\`) — text-to-speech and audio transcription via
+the user's own voice stack (no API keys in the app). TTS text ≤ 5000 chars
+per call (segment long content); at most 4 concurrent voice calls per app.
+\`\`\`js
+// TTS: optional ElevenLabs voiceId (e.g. two voices for a dialogue)
+const { audioBase64, mimeType } = await (await fetch('/_rowboat/voice/tts', {
+  method: 'POST', headers: { 'X-Rowboat-App': '1', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ text: 'Hello!', voiceId: '21m00Tcm4TlvDq8ikWAM' }),
+})).json();
+new Audio(\`data:\${mimeType};base64,\${audioBase64}\`).play();
+
+// ASR: base64-encode recorded audio (wav/mp3/ogg/webm)
+const { transcript } = await (await fetch('/_rowboat/voice/transcribe', {
+  method: 'POST', headers: { 'X-Rowboat-App': '1', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ audioBase64, mimeType: 'audio/webm' }),
+})).json();
+\`\`\`
+
+For document understanding (user-uploaded PDFs etc.), store the file under
+\`data/\` via the data API and delegate to \`copilot/run\` — the headless agent
+has \`parseFile\`/\`LLMParse\` and can read the file at
+\`apps/<folder>/data/<path>\` (workspace-relative). Don't parse in the page.
+
 ## 4. Data conventions
 
 - Durable state goes in \`data/\` via the data API — **never localStorage**

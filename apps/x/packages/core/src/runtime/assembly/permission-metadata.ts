@@ -51,7 +51,14 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'LLMParse':
         case 'file-exists':
         case 'file-stat':
+        case 'transcribe-audio':
             return pathArg ? { operation: 'read', paths: [pathArg] } : null;
+        case 'text-to-speech': {
+            // Only an explicit outputPath can escape the workspace; the
+            // default target is always inside it.
+            const out = typeof args.outputPath === 'string' ? args.outputPath : undefined;
+            return out ? { operation: 'write', paths: [out] } : null;
+        }
         case 'file-list':
             return pathArg ? { operation: 'list', paths: [pathArg || '.'] } : null;
         case 'file-glob':
