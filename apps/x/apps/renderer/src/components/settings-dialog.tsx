@@ -1188,67 +1188,60 @@ function AgentStatusRow({
   const signedIn = status?.signedIn ?? false
   const email = status?.account?.email
   const plan = formatPlan(agent, status?.account?.plan)
+  const active = installed && signedIn
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          {agent === 'claude' ? (
-            <AnthropicIcon className="size-4 shrink-0" />
-          ) : (
-            <OpenAIIcon className="size-4 shrink-0" />
+    <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
+      {agent === 'claude' ? (
+        <AnthropicIcon className="size-5 shrink-0" />
+      ) : (
+        <OpenAIIcon className="size-5 shrink-0" />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{name}</span>
+          {signedIn && plan && (
+            <span className="rounded-full border px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground shrink-0">
+              {plan}
+            </span>
           )}
-          {name}
         </div>
-        {provisioning ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
-            <Loader2 className="size-3 animate-spin" />
-            {prov?.pct != null ? `${prov.pct}%` : null}
-          </span>
-        ) : !installed ? (
-          <button
-            type="button"
-            onClick={enable}
-            className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            Enable
-          </button>
-        ) : null}
-      </div>
-      <div className="rounded-md border px-3 py-2.5 flex items-center gap-3 min-h-12">
-        {signedIn ? (
-          <>
-            <div className="size-7 shrink-0 rounded-full bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground uppercase">
-              {(email ?? name).charAt(0)}
-            </div>
-            <div className="flex-1 min-w-0 text-sm font-medium truncate">
-              {email ?? 'Signed in'}
-            </div>
-            {installed && (
-              <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600 shrink-0">
-                Active
-              </span>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+          <span
+            className={cn(
+              "size-2 rounded-full shrink-0",
+              active ? "bg-green-500" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
             )}
-            {plan && (
-              <span className="rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none text-muted-foreground shrink-0">
-                {plan}
-              </span>
-            )}
-          </>
-        ) : (
-          <div className="text-xs text-muted-foreground">
-            {installed ? (
+          />
+          <span className="truncate">
+            {provisioning ? (
+              'Downloading engine…'
+            ) : active ? (
+              <>Active{email ? ` · ${email}` : ''}</>
+            ) : installed ? (
               <>
-                Not signed in — run{' '}
+                Run{' '}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>{' '}
-                in your terminal, then Re-check.
+                in your terminal, then Re-check
               </>
+            ) : email ? (
+              `${email} · engine not enabled`
             ) : (
-              'Not enabled — click Enable to download the engine.'
+              'Not enabled'
             )}
-          </div>
-        )}
+          </span>
+        </div>
+        {error && <div className="text-xs text-destructive mt-1 break-words">{error}</div>}
       </div>
-      {error && <div className="text-xs text-red-600 break-words">{error}</div>}
+      {provisioning ? (
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 tabular-nums">
+          <Loader2 className="size-3 animate-spin" />
+          {prov?.pct != null ? `${prov.pct}%` : null}
+        </span>
+      ) : !installed ? (
+        <Button variant="outline" size="sm" onClick={enable} className="shrink-0">
+          Enable
+        </Button>
+      ) : null}
     </div>
   )
 }
