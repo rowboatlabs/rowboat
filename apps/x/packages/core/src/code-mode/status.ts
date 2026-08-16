@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import { CodeModeAgentStatus } from './types.js';
+import { AgentAccount, CodeModeAgentStatus } from './types.js';
 import { isEngineProvisioned, getProvisionedEnginePath } from './acp/engine-provisioner.js';
 import { decodeJwtPayload } from '../auth/jwt.js';
 
@@ -114,16 +114,25 @@ function execFailureDetails(err: unknown): { exitCode: number | null; killed: bo
     };
 }
 
+interface AgentAuthState {
+    signedIn: boolean;
+    account?: AgentAccount;
+}
+
 // Parse `claude auth status` output: a JSON object with a boolean `loggedIn`
-// (plus authMethod/email/subscriptionType we don't need here). Returns null if
-// the output doesn't contain that shape.
-function parseClaudeAuthStatus(stdout: string): boolean | null {
+// plus, when logged in, identity fields (email, subscriptionType, authMethod).
+// Returns null if the output doesn't contain that shape.
+function parseClaudeAuthStatus(stdout: string): AgentAuthState | null {
     const start = stdout.indexOf('{');
     const end = stdout.lastIndexOf('}');
     if (start < 0 || end <= start) return null;
     try {
         const parsed = JSON.parse(stdout.slice(start, end + 1)) as Record<string, unknown>;
-        return typeof parsed.loggedIn === 'boolean' ? parsed.loggedIn : null;
+        if (typeof parsed.loggedIn !== 'boolean') return null;
+        if (!parsed.loggedIn) return { signedIn: false };
+        const email = typeof parsed.email === 'string' ? parsed.email : undefined;
+        const plan = typeof parsed.subscriptionType === 'string' ? parsed.subscriptionType : undefined;
+        return { signedIn: true, account: email || plan ? { email, plan } : undefined };
     } catch {
         return null;
     }
@@ -136,7 +145,7 @@ function parseClaudeAuthStatus(stdout: string): boolean | null {
 // so we don't have to guess where they live. Returns null when the engine
 // isn't provisioned or the probe itself failed to run (spawn error, timeout);
 // the caller then falls back to the credential-file heuristic.
-async function checkClaudeSignedInViaEngine(): Promise<boolean | null> {
+async function checkClaudeSignedInViaEngine(): Promise<AgentAuthState | null> {
     if (!isEngineProvisioned('claude')) return null;
     const engine = getProvisionedEnginePath('claude');
     try {
@@ -148,25 +157,61 @@ async function checkClaudeSignedInViaEngine(): Promise<boolean | null> {
         const parsed = parseClaudeAuthStatus(stdout);
         if (parsed !== null) return parsed;
         // Ran to completion without status output — engine says it can't auth.
-        if (exitCode !== null) return false;
+        if (exitCode !== null) return { signedIn: false };
         return null;
+    }
+}
+
+// Best-effort account identity for the fallback path: Claude Code caches the
+// signed-in account (emailAddress etc.) in ~/.claude.json under `oauthAccount`.
+// The same approach OSS account switchers (claude-swap, CCSwitcher) use.
+async function readClaudeAccountFromConfig(): Promise<AgentAccount | undefined> {
+    try {
+        const raw = await fs.readFile(path.join(os.homedir(), '.claude.json'), 'utf-8');
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const acct = parsed.oauthAccount as Record<string, unknown> | undefined;
+        const email = typeof acct?.emailAddress === 'string' ? acct.emailAddress : undefined;
+        return email ? { email } : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+// Account identity for Codex: the id_token in ~/.codex/auth.json is a JWT whose
+// claims carry the email and the ChatGPT plan type ("plus", "go", "pro", …).
+// Decoded locally without verification — display only, never an auth decision.
+async function readCodexAccountFromAuthJson(): Promise<AgentAccount | undefined> {
+    try {
+        const raw = await fs.readFile(path.join(os.homedir(), '.codex', 'auth.json'), 'utf-8');
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const tokens = parsed.tokens as Record<string, unknown> | undefined;
+        const idToken = typeof tokens?.id_token === 'string' ? tokens.id_token : '';
+        const claims = idToken ? decodeJwtPayload(idToken) : null;
+        if (!claims) return undefined;
+        const email = typeof claims.email === 'string' ? claims.email : undefined;
+        const auth = claims['https://api.openai.com/auth'] as Record<string, unknown> | undefined;
+        const plan = typeof auth?.chatgpt_plan_type === 'string' ? auth.chatgpt_plan_type : undefined;
+        return email || plan ? { email, plan } : undefined;
+    } catch {
+        return undefined;
     }
 }
 
 // Ask the provisioned Codex engine whether it is signed in. `codex login status`
 // exits 0 when logged in and non-zero ("Not logged in") when not. Returns null
-// when the engine isn't provisioned or the probe didn't run.
-async function checkCodexSignedInViaEngine(): Promise<boolean | null> {
+// when the engine isn't provisioned or the probe didn't run. The status output
+// has no identity, so a signed-in result is enriched from auth.json separately.
+async function checkCodexSignedInViaEngine(): Promise<AgentAuthState | null> {
     if (!isEngineProvisioned('codex')) return null;
     const engine = getProvisionedEnginePath('codex');
     try {
         await execFileAsync(engine, ['login', 'status'], { timeout: ENGINE_PROBE_TIMEOUT_MS });
-        return true;
+        return { signedIn: true };
     } catch (err) {
         const { exitCode, killed } = execFailureDetails(err);
-        if (killed) return null;                 // timed out — engine state unknown
-        if (exitCode !== null) return false;     // ran and reported logged-out
-        return null;                             // spawn failure — fall back
+        if (killed) return null;                        // timed out — engine state unknown
+        if (exitCode !== null) return { signedIn: false }; // ran and reported logged-out
+        return null;                                    // spawn failure — fall back
     }
 }
 
@@ -224,19 +269,32 @@ async function checkCodexSignedInHeuristic(): Promise<boolean> {
     return false;
 }
 
-// Exported for diagnostics — silenced unused-var warning by re-export only.
-export { decodeJwtPayload };
+// Resolve one agent's auth state: the engine probe is authoritative when it
+// ran; otherwise fall back to the credential-file heuristic. A signed-in state
+// missing identity (heuristic path; codex always) is enriched best-effort from
+// the local account metadata.
+async function resolveAgentAuth(
+    viaEngine: Promise<AgentAuthState | null>,
+    heuristic: () => Promise<boolean>,
+    readAccount: () => Promise<AgentAccount | undefined>,
+): Promise<AgentAuthState> {
+    const state = (await viaEngine) ?? { signedIn: await heuristic() };
+    if (state.signedIn && !state.account) {
+        return { signedIn: true, account: await readAccount() };
+    }
+    return state;
+}
 
 export async function checkCodeModeAgentStatus(): Promise<CodeModeAgentStatus> {
-    const [claudeSignedIn, codexSignedIn] = await Promise.all([
-        checkClaudeSignedInViaEngine().then((viaEngine) => viaEngine ?? checkClaudeSignedInHeuristic()),
-        checkCodexSignedInViaEngine().then((viaEngine) => viaEngine ?? checkCodexSignedInHeuristic()),
+    const [claude, codex] = await Promise.all([
+        resolveAgentAuth(checkClaudeSignedInViaEngine(), checkClaudeSignedInHeuristic, readClaudeAccountFromConfig),
+        resolveAgentAuth(checkCodexSignedInViaEngine(), checkCodexSignedInHeuristic, readCodexAccountFromAuthJson),
     ]);
     // `installed` means the engine is provisioned (downloaded) locally — the user has
     // clicked Enable in Settings → Code Mode. We no longer look for a global claude/codex
     // CLI on PATH; code mode runs our own pinned engine from ~/.rowboat/engines.
     return {
-        claude: { installed: isEngineProvisioned('claude'), signedIn: claudeSignedIn },
-        codex: { installed: isEngineProvisioned('codex'), signedIn: codexSignedIn },
+        claude: { installed: isEngineProvisioned('claude'), signedIn: claude.signedIn, account: claude.account },
+        codex: { installed: isEngineProvisioned('codex'), signedIn: codex.signedIn, account: codex.account },
     };
 }
