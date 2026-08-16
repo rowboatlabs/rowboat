@@ -1341,22 +1341,18 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     <div className="space-y-5">
       <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
         <p>
-          <strong className="text-foreground">Code mode</strong> lets the assistant delegate coding tasks
-          to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> running
-          on your machine. Pick the agent inline from the composer; the assistant runs it on-device
-          and streams its work — tool calls, file diffs, and approvals — back into chat.
+          <strong className="text-foreground">Code mode</strong> lets the assistant hand coding tasks
+          to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> on
+          your machine. Pick the agent in the composer, and everything it does — commands, file
+          changes, approvals — shows up in the chat.
         </p>
         <p>
-          Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
-          a <strong className="text-foreground">ChatGPT/Codex</strong> subscription. You can have one or both.
-        </p>
-        <p>
-          For each agent you want to use, you must have it{' '}
-          <strong className="text-foreground">installed and logged in</strong> on this machine: click{' '}
-          <strong className="text-foreground">Enable</strong> below to download its engine, and sign in by
-          running <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
+          To set up an agent, click <strong className="text-foreground">Enable</strong> below to download
+          it, then sign in by running{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
           or <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">codex login</code>{' '}
-          in your terminal. Code mode uses that saved login.
+          in your terminal. You need a <strong className="text-foreground">Claude</strong> or{' '}
+          <strong className="text-foreground">ChatGPT</strong> subscription — either one works, or both.
         </p>
       </div>
 
