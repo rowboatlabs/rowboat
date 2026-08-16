@@ -28,18 +28,57 @@ const ASK_HUMAN_DESCRIPTOR: z.infer<typeof ToolDescriptor> = {
     toolId: `builtin:${ASK_HUMAN_TOOL}`,
     name: ASK_HUMAN_TOOL,
     description:
-        "Ask a human before proceeding. Optionally pass `options` (an array of short button labels) when a small set of choices would help the human answer quickly.",
+        "Ask the user a question and wait for their answer before proceeding. " +
+        "Three modes:\n\n" +
+        "1. Single choice — provide up to 4 `options`. The UI renders them as " +
+        "selectable rows and always appends its own 'Other (type your answer)' " +
+        "row, so never add an 'Other'/'Something else' option yourself.\n" +
+        "2. Multiple choice — additionally set `multiSelect: true` when several " +
+        "options can apply at once ('pick all that apply'). The answer lists " +
+        "every selected option.\n" +
+        "3. Open-ended — omit `options` entirely. The user types a free-form " +
+        "answer.\n\n" +
+        "CRITICAL: when offering choices, put each choice ONLY in the `options` " +
+        "array — NEVER enumerate the choices inside the `question` text. The UI " +
+        "renders `options` as pickable rows; choices written into the question " +
+        "string render as dead prose the user can't pick. " +
+        "Right: question='Which deployment target?', options=['staging', 'prod']. " +
+        "Wrong: question='Which target? 1) staging 2) prod', options=[].\n\n" +
+        "Use this tool when:\n" +
+        "- The task is ambiguous and the user must choose an approach\n" +
+        "- A decision has meaningful trade-offs the user should weigh in on\n" +
+        "- You need a fact only the user knows before you can proceed\n\n" +
+        "Do NOT use it for low-stakes decisions — make a reasonable choice " +
+        "yourself and proceed. The user can skip the question; if the answer " +
+        "says they skipped, use your best judgment and continue without asking " +
+        "again.",
     inputSchema: {
         type: "object",
         properties: {
             question: {
                 type: "string",
-                description: "The question to ask the human",
+                description:
+                    "The question itself, and ONLY the question (e.g. 'Which " +
+                    "deployment target?'). Do NOT embed the answer choices here " +
+                    "— pass them as separate elements in `options`.",
             },
             options: {
                 type: "array",
                 items: { type: "string" },
-                description: "Optional short button labels the human can pick from",
+                maxItems: 4,
+                description:
+                    "REQUIRED whenever you are presenting selectable choices: " +
+                    "each distinct choice is its own short label (up to 4). The " +
+                    "UI auto-appends an 'Other (type your answer)' row. Omit " +
+                    "entirely ONLY for a genuinely open-ended question.",
+            },
+            multiSelect: {
+                type: "boolean",
+                description:
+                    "When true, the user can select MULTIPLE options " +
+                    "(checkboxes); the answer lists all selected options. " +
+                    "When false (default), single selection. No effect when " +
+                    "`options` is omitted.",
             },
         },
         required: ["question"],
