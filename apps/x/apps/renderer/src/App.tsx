@@ -134,6 +134,11 @@ const graphPalette = [
 // submits). PTT_EDGE_ECHO_MS collapses the same key edge arriving from two
 // sources at once (global uiohook hook + in-window DOM listener).
 const PTT_TAP_MS = 350
+// The PTT key per platform (matches main/ptt.ts's global hook): right ⌘ on
+// macOS, right Ctrl elsewhere (the right Win key is OS-owned on Windows).
+const APP_IS_MAC = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
+const PTT_EVENT_CODE = APP_IS_MAC ? 'MetaRight' : 'ControlRight'
+const PTT_KEY_LABEL = quickAskShortcut.pttKeyLabel(APP_IS_MAC)
 // Mic-ownership token for the Home composer (chat composers use their chatId).
 const HOME_VOICE_HOLDER = 'home-composer'
 const PTT_EDGE_ECHO_MS = 80
@@ -1533,6 +1538,9 @@ function App() {
   // (unbound) chat defer-binds, so the first utterance creates ONE session
   // both surfaces share. ⌥⇧Space summons keep the companion's previous
   // conversation instead (no composer context to seed from).
+  const startHoverCallRef = useRef<() => Promise<void>>(startHoverCall)
+  startHoverCallRef.current = startHoverCall
+
   const handleStartCall = useCallback((preset: CallPreset) => {
     const activeTab = chatTabsRef.current.find((t) => t.id === activeChatTabIdRef.current)
     const seedRunId = activeTab?.runId ?? null
@@ -1702,7 +1710,7 @@ function App() {
       if (shown < 2) {
         localStorage.setItem('ptt-hold-tip-shown', String(shown + 1))
         toast('No need to keep holding', {
-          description: 'For longer turns, quick-tap right ⌘ instead — talk hands-free, then tap again to send.',
+          description: `For longer turns, quick-tap ${PTT_KEY_LABEL} instead — talk hands-free, then tap again to send.`,
           duration: 6000,
         })
       }
@@ -1739,7 +1747,7 @@ function App() {
       else handlePttChord()
     })
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight') {
+      if (e.code === PTT_EVENT_CODE) {
         if (!e.repeat) handlePttDown()
         return
       }
@@ -1752,7 +1760,7 @@ function App() {
       else if (pttStatusRef.current === 'locked' && e.metaKey) handlePttChord()
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight') handlePttUp()
+      if (e.code === PTT_EVENT_CODE) handlePttUp()
     }
     document.addEventListener('keydown', onKeyDown)
     document.addEventListener('keyup', onKeyUp)
@@ -1993,7 +2001,7 @@ function App() {
         .catch(() => quickAskShortcut.DEFAULT_QUICK_ASK_SHORTCUT)
       playPopCue()
       toast('Ask Rowboat from anywhere', {
-        description: `Press ${quickAskShortcut.formatShortcut(accelerator, isMac)} in any app for a quick question — the answer shows up right there and in your chat.`,
+        description: `Press ${quickAskShortcut.formatShortcut(accelerator, isMac)} in any app and your floating companion pops up on a live voice session — ask out loud, it answers right there.`,
         duration: 12000,
         closeButton: true,
         // Lift the card off the page, and move sonner's close button (which
@@ -2002,7 +2010,10 @@ function App() {
           'shadow-xl shadow-black/25 [&_[data-close-button]]:!left-auto [&_[data-close-button]]:!right-0 [&_[data-close-button]]:!translate-x-[15%] [&_[data-close-button]]:!-translate-y-[15%]',
         action: {
           label: 'Try it',
-          onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
+          // The SAME flow as the shortcut itself (hover companion, with the
+          // text-card fallback when voice isn't configured) — quickAsk:show
+          // here was a remnant that summoned the pre-hover legacy bar.
+          onClick: () => void startHoverCallRef.current?.().catch(() => {}),
         },
       })
     }, 3000)

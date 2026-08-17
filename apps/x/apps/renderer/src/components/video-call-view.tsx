@@ -6,6 +6,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { TTSState } from '@/hooks/useVoiceTTS'
 import { cn } from '@/lib/utils'
 
+const PTT_KEY_LABEL = navigator.platform.toLowerCase().includes('mac') ? 'right \u2318' : 'right Ctrl'
+
 export type VideoCallStatus = 'idle' | 'listening' | 'thinking' | 'speaking'
 
 export type PttStatus = 'idle' | 'held' | 'locked'
@@ -45,7 +47,7 @@ interface VideoCallViewProps {
 }
 
 const STATUS_DISPLAY: Record<VideoCallStatus, { label: string; dotClass: string }> = {
-  idle: { label: 'Hold right ⌘ to talk · press & release it to go hands-free', dotClass: 'bg-neutral-500' },
+  idle: { label: `Hold ${PTT_KEY_LABEL} to talk · press & release it to go hands-free`, dotClass: 'bg-neutral-500' },
   listening: { label: 'Listening — release to send', dotClass: 'bg-green-500 animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
@@ -209,7 +211,7 @@ export function VideoCallView({
           ) : pttStatus === 'locked' ? (
             <>
               <span className="block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-              Hands-free — press right ⌘ again to send
+              Hands-free — press {PTT_KEY_LABEL} again to send
             </>
           ) : (
             <>
@@ -245,7 +247,7 @@ export function VideoCallView({
               {pttStatus === 'idle' ? 'Hold to talk' : pttStatus === 'locked' ? 'Tap to send' : 'Release to send'}
             </button>
           </TooltipTrigger>
-          <TooltipContent className="z-[110]">Hold to talk (tap to go hands-free) — or hold the right ⌘ key</TooltipContent>
+          <TooltipContent className="z-[110]">Hold to talk (tap to go hands-free) — or hold the {PTT_KEY_LABEL} key</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
