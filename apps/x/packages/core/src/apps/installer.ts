@@ -71,9 +71,11 @@ async function downloadBundle(url: string, destDir: string): Promise<{ zipPath: 
     const reader = res.body?.getReader();
     if (!reader) throw new InstallError('download_failed', 'empty response body');
     let received = 0;
+    let firstBytes: Uint8Array | null = null;
     for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (!firstBytes) firstBytes = value.slice(0, 4);
         received += value.byteLength;
         if (received > MAX_BUNDLE_COMPRESSED) {
             out.destroy();
@@ -84,6 +86,21 @@ async function downloadBundle(url: string, destDir: string): Promise<{ zipPath: 
         await new Promise<void>((resolve, reject) => out.write(value, (e) => (e ? reject(e) : resolve())));
     }
     await new Promise<void>((resolve, reject) => out.end((e?: Error | null) => (e ? reject(e) : resolve())));
+
+    // Fail with a DIAGNOSIS, not yauzl's "End of central directory record
+    // signature not found": the usual mistake is a URL that returns a web
+    // page (GitHub repo/release PAGE, Drive/Dropbox share interstitial)
+    // instead of the zip asset itself.
+    if (!firstBytes || firstBytes.length < 4 || firstBytes[0] !== 0x50 || firstBytes[1] !== 0x4b) {
+        const contentType = res.headers.get('content-type') ?? 'unknown';
+        await fsp.rm(zipPath, { force: true });
+        const hint = /html/i.test(contentType)
+            ? ' The URL returned a web page — use a direct download link (for GitHub: …/releases/download/<tag>/<file>.zip, not the repo or release page).'
+            : /gzip|tar/i.test(contentType) || /\.t(ar\.)?gz$/i.test(new URL(url).pathname)
+                ? ' The URL points at a tar/gzip archive — Rowboat app bundles must be .zip.'
+                : '';
+        throw new InstallError('not_a_zip', `the URL did not return a zip bundle (content-type: ${contentType}).${hint}`);
+    }
     return { zipPath, sha256: hash.digest('hex') };
 }
 
@@ -288,8 +305,48 @@ function githubProvenance(url: string): string | undefined {
     return m ? m[1] : undefined;
 }
 
+/**
+ * Accept the URLs Rowboat itself shows after publishing — the repo page,
+ * `/releases`, `/releases/latest`, or a `/releases/tag/<tag>` page — by
+ * resolving them to the release's bundle asset via the GitHub API. Direct
+ * asset URLs and non-GitHub URLs pass through untouched. Without this, the
+ * natural publish → copy URL → install flow dies in the unzipper with
+ * "End of central directory record signature not found" (the page is HTML).
+ */
+async function resolveInstallUrl(url: string): Promise<string> {
+    let u: URL;
+    try { u = new URL(url); } catch { return url; }
+    if (u.hostname !== 'github.com') return url;
+    const parts = u.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+    if (parts.length < 2) return url;
+    if (parts[2] === 'releases' && parts[3] === 'download') return url; // already an asset URL
+    const owner = parts[0];
+    const repo = parts[1].replace(/\.git$/, '');
+    let api: string | null = null;
+    if (parts.length === 2 || (parts[2] === 'releases' && (parts.length === 3 || parts[3] === 'latest'))) {
+        api = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+    } else if (parts[2] === 'releases' && parts[3] === 'tag' && parts[4]) {
+        api = `https://api.github.com/repos/${owner}/${repo}/releases/tags/${parts[4]}`;
+    }
+    if (!api) return url;
+    const res = await fetch(api, { headers: { accept: 'application/vnd.github+json' } });
+    if (!res.ok) {
+        throw new InstallError('release_lookup_failed',
+            `could not look up the release for ${owner}/${repo} (HTTP ${res.status})${res.status === 404 ? ' — does the repo have a published release?' : ''}`);
+    }
+    const rel = await res.json() as { assets?: Array<{ name: string; browser_download_url: string }> };
+    const asset = rel.assets?.find((a) => a.name.endsWith('.rowboat-app'))
+        ?? rel.assets?.find((a) => a.name.endsWith('.zip'));
+    if (!asset) {
+        throw new InstallError('no_bundle_asset',
+            `the release for ${owner}/${repo} has no .rowboat-app or .zip asset — publish the app from Rowboat first`);
+    }
+    return asset.browser_download_url;
+}
+
 export async function previewUrlInstall(url: string): Promise<InstallPreview> {
     if (!url.startsWith('https:')) throw new InstallError('invalid_url', 'only https URLs are allowed');
+    url = await resolveInstallUrl(url);
 
     // Reuse fresh staging for the same URL.
     const existing = urlStagings.get(url);
@@ -324,6 +381,7 @@ export async function previewUrlInstall(url: string): Promise<InstallPreview> {
 }
 
 export async function confirmUrlInstall(url: string): Promise<InstallDone> {
+    url = await resolveInstallUrl(url); // stagings are keyed by the RESOLVED url
     let staged = urlStagings.get(url);
     if (!staged || Date.now() - staged.createdAt >= URL_STAGING_TTL_MS) {
         await previewUrlInstall(url); // re-download if evicted
