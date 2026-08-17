@@ -173,6 +173,7 @@ export class RealToolRegistry implements IToolRegistry {
                         asArgs(input),
                         {
                             runId: ctx.turnId,
+                            sessionId: ctx.sessionId,
                             toolCallId: ctx.toolCallId,
                             signal: ctx.signal,
                             abortRegistry,

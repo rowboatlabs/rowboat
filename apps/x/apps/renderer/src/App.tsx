@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
-import { workspace } from '@x/shared';
+import { workspace, quickAskShortcut } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
@@ -12,7 +12,7 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
-import { ChatSessionPane, ChatSessionComposer } from './components/chat-session';
+import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './components/chat-session';
 // Value import: the Home to-do surface mounts a standalone composer directly
 // (not tab-bound); chat tabs render theirs through ChatSessionComposer.
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
@@ -42,8 +42,6 @@ import { HomeView } from '@/components/home-view';
 import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
-import { CodeChat } from '@/components/code/code-chat';
-import { ResizableRightPane } from '@/components/code/resizable-right-pane';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   type PromptInputMessage,
@@ -77,7 +75,7 @@ import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
-import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
+import { type ChatTab } from '@/components/tab-bar'
 import { CaffeinateIndicator } from '@/components/caffeinate-indicator'
 import {
   type ChatMessage,
@@ -137,6 +135,8 @@ const graphPalette = [
 // submits). PTT_EDGE_ECHO_MS collapses the same key edge arriving from two
 // sources at once (global uiohook hook + in-window DOM listener).
 const PTT_TAP_MS = 350
+// Mic-ownership token for the Home composer (chat composers use their chatId).
+const HOME_VOICE_HOLDER = 'home-composer'
 const PTT_EDGE_ECHO_MS = 80
 
 // Speakable fallback for a call reply that skipped <voice> tags: strip the
@@ -166,20 +166,14 @@ const TITLEBAR_HEADER_GAP_PX = 8
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 1
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 0
-const GRAPH_TAB_PATH = '__rowboat_graph_view__'
-const SUGGESTED_TOPICS_TAB_PATH = '__rowboat_suggested_topics__'
-const MEETINGS_TAB_PATH = '__rowboat_meetings__'
-const LIVE_NOTES_TAB_PATH = '__rowboat_live_notes__'
-const BG_TASKS_TAB_PATH = '__rowboat_bg_tasks__'
-const APPS_TAB_PATH = '__rowboat_mini_apps__'
-const EMAIL_TAB_PATH = '__rowboat_email__'
-const WORKSPACE_TAB_PATH = '__rowboat_workspace__'
 const WORKSPACE_ROOT = 'knowledge/Workspace'
-const KNOWLEDGE_VIEW_TAB_PATH = '__rowboat_knowledge_view__'
-const CHAT_HISTORY_TAB_PATH = '__rowboat_chat_history__'
-const HOME_TAB_PATH = '__rowboat_home__'
+// Sentinel path for the default Bases view (a virtual "file" the bases table
+// renders under). The other __rowboat_* sentinel tab paths died with the tab
+// strip — sections are plain view state now.
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
-const CODE_TAB_PATH = '__rowboat_code__'
+
+// Stable empty conversation for unbound sessions (identity-stable for deps).
+const EMPTY_CONVERSATION: ConversationItem[] = []
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -343,19 +337,7 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
   return ancestors
 }
 
-const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
-const isSuggestedTopicsTabPath = (path: string) => path === SUGGESTED_TOPICS_TAB_PATH
-const isMeetingsTabPath = (path: string) => path === MEETINGS_TAB_PATH
-const isLiveNotesTabPath = (path: string) => path === LIVE_NOTES_TAB_PATH
-const isBgTasksTabPath = (path: string) => path === BG_TASKS_TAB_PATH
-const isAppsTabPath = (path: string) => path === APPS_TAB_PATH
-const isEmailTabPath = (path: string) => path === EMAIL_TAB_PATH
-const isWorkspaceTabPath = (path: string) => path === WORKSPACE_TAB_PATH
-const isKnowledgeViewTabPath = (path: string) => path === KNOWLEDGE_VIEW_TAB_PATH
-const isChatHistoryTabPath = (path: string) => path === CHAT_HISTORY_TAB_PATH
-const isHomeTabPath = (path: string) => path === HOME_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
-const isCodeTabPath = (path: string) => path === CODE_TAB_PATH
 
 const getSuggestedTopicTargetFolder = (category?: string) => {
   const normalized = category?.trim().toLowerCase()
@@ -850,15 +832,10 @@ function App() {
   // read-view email query), so threads outside the synced inbox get real rows.
   const [emailInitialSearchQuery, setEmailInitialSearchQuery] = useState<string | null>(null)
   const [emailSearchQueryVersion, setEmailSearchQueryVersion] = useState(0)
-  const [expandedFrom, setExpandedFrom] = useState<{
-    path: string | null
-    graph: boolean
-    suggestedTopics: boolean
-    meetings: boolean
-    liveNotes: boolean
-    bgTasks: boolean
-    email: boolean
-  } | null>(null)
+  // The view full-screen chat was expanded from, restored on close. A plain
+  // ViewState snapshot, so ANY section restores — the old per-flag record
+  // silently dropped Home/Code and left the close button doing nothing.
+  const [expandedFrom, setExpandedFrom] = useState<ViewState | null>(null)
   const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
@@ -880,7 +857,7 @@ function App() {
   // markdown editor so it shares the layout (no overlap with chat) and
   // auto-closes when the active note changes.
   const [liveNotePanelPath, setLiveNotePanelPath] = useState<string | null>(null)
-  const [activeShortcutPane, setActiveShortcutPane] = useState<ShortcutPane>('left')
+  const [, setActiveShortcutPane] = useState<ShortcutPane>('left')
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
   const collapsedLeftPaddingPx =
     (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) +
@@ -948,11 +925,46 @@ function App() {
   // runId IS the session id in the sessions runtime.
   const sessionChat = useSessionChat(runId)
 
+  // The companion's OWN conversation binding. The hover bar, the Skipper,
+  // and every call talk to THIS session — never to whatever chat the app
+  // happens to be showing. Seeded from the chat a call was started on;
+  // switched from the bar's chip; untouched by app navigation, so hovering
+  // and browsing the app are fully independent.
+  const [hoverRunId, setHoverRunId] = useState<string | null>(null)
+  const hoverRunIdRef = useRef<string | null>(null)
+  hoverRunIdRef.current = hoverRunId
+  const hoverChat = useSessionChat(hoverRunId)
+  const hoverChatRef = useRef(hoverChat)
+  hoverChatRef.current = hoverChat
+  // The bar's model/effort picks — scoped to the companion, never overlaid
+  // onto the app chat's selection.
+  const hoverSelectionRef = useRef<ModelSelection | null>(null)
+  const hoverIsProcessing = hoverChat.chatState?.isProcessing ?? false
+  const hoverIsReasoning = hoverChat.chatState?.isReasoning ?? false
+  const hoverConversation = hoverChat.chatState?.conversation ?? EMPTY_CONVERSATION
+  const hoverAssistantMessage = hoverChat.chatState?.currentAssistantMessage ?? ''
+
   // Watch the conversation that is actually rendered — the sessions-runtime
   // one when loaded, the legacy state otherwise — so billing failures
   // (out of credits, subscription lapsed) always pop the upgrade dialog.
+  // Only errors that APPEAR while a conversation is on screen count: when a
+  // context first renders (session loaded/switched, app relaunched), errors
+  // already in its transcript are history — replaying them would pop the
+  // dialog and flip the credit state on every open of that chat.
   const billingWatchedConversation = sessionChat.chatState?.conversation ?? conversation
+  const billingContextKeyRef = useRef<string | null>(null)
   useEffect(() => {
+    const contextKey = sessionChat.chatState ? `session:${sessionChat.sessionId}` : 'legacy'
+    const isNewContext = billingContextKeyRef.current !== contextKey
+    billingContextKeyRef.current = contextKey
+    if (isNewContext) {
+      for (const item of billingWatchedConversation) {
+        if (isErrorMessage(item) && matchBillingError(item.message)) {
+          handledBillingErrorIdsRef.current.add(item.id)
+        }
+      }
+      return
+    }
     for (let i = billingWatchedConversation.length - 1; i >= 0; i--) {
       const item = billingWatchedConversation[i]
       if (!isErrorMessage(item)) continue
@@ -966,7 +978,7 @@ function App() {
       }
       return
     }
-  }, [billingWatchedConversation])
+  }, [billingWatchedConversation, sessionChat.chatState, sessionChat.sessionId])
   const runIdRef = useRef<string | null>(null)
   const loadRunRequestIdRef = useRef(0)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -982,13 +994,8 @@ function App() {
   const activeIsReasoning = sessionChat.chatState?.isReasoning ?? false
   const activeIsWaitingOnHuman = sessionChat.chatState?.isWaitingOnHuman ?? false
   const activeIsWorking = activeIsProcessing && !activeIsWaitingOnHuman
-  // LIVE chat data: the new runtime streams through sessionChat.chatState —
-  // the standalone conversation/currentAssistantMessage states are only the
-  // legacy pre-load fallback (see activeChatTabState). Anything mirroring
-  // the in-flight reply (pill response panel, fallback speech) must read
-  // these, never the legacy states.
-  const liveConversation = sessionChat.chatState?.conversation ?? conversation
-  const liveAssistantMessage = sessionChat.chatState?.currentAssistantMessage ?? currentAssistantMessage
+  // (The in-flight-reply mirrors — pill response panel, fallback speech,
+  // quick-ask state — read the HOVER session's store, declared above.)
   // A failed session load must be visible, not a blank chat.
   const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
     sessionChat.error
@@ -1042,12 +1049,12 @@ function App() {
     setPttStatus(s)
   }, [])
 
-  // Speak newly completed <voice> blocks from the new runtime's live stream
-  // (parity with the legacy text-delta voice extraction below). The store
-  // accumulates completed blocks in chatState.voiceSegments; we speak only
-  // segments that appeared after the current session became active.
+  // Speak newly completed <voice> blocks from the new runtime's live stream.
+  // Speech is a COMPANION concern (calls + the bar's voice toggle), so the
+  // segments come from the hover session's store — the app's visible chat
+  // never starts talking, whatever it's bound to.
   const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
-  const voiceSegments = sessionChat.chatState?.voiceSegments
+  const voiceSegments = hoverChat.chatState?.voiceSegments
   const voiceSegmentsRef = useRef(voiceSegments)
   voiceSegmentsRef.current = voiceSegments
   // Whether any voice segment of the CURRENT call turn has been spoken —
@@ -1066,9 +1073,9 @@ function App() {
   })
   useEffect(() => {
     if (!voiceSegments) return
-    if (spokenVoiceRef.current.key !== runId) {
+    if (spokenVoiceRef.current.key !== hoverRunId) {
       // Session switch: skip anything already streamed before we arrived.
-      spokenVoiceRef.current = { key: runId, count: voiceSegments.length }
+      spokenVoiceRef.current = { key: hoverRunId, count: voiceSegments.length }
       return
     }
     // The overlay's segment list is PER-TURN: the store resets it to [] on
@@ -1099,14 +1106,14 @@ function App() {
         setAssistantCaption(segment)
       }
     }
-  }, [voiceSegments, runId, pttStatus])
+  }, [voiceSegments, hoverRunId, pttStatus])
 
   // Consistency net: 'full' voice output relies on the model wrapping its
   // reply in <voice> tags — when it doesn't, the turn used to end in total
   // silence. If a call turn finishes with no voice segment, read the reply
   // text itself aloud.
   useEffect(() => {
-    if (activeIsProcessing) return
+    if (hoverIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
     // Typed turn or speaker muted: no fallback read-aloud.
@@ -1128,8 +1135,8 @@ function App() {
       turn.pending = false
       return
     }
-    for (let i = liveConversation.length - 1; i >= 0; i--) {
-      const item = liveConversation[i]
+    for (let i = hoverConversation.length - 1; i >= 0; i--) {
+      const item = hoverConversation[i]
       if (!isChatMessage(item) || item.role !== 'assistant') continue
       // Only a reply from THIS turn counts — an errored turn would otherwise
       // re-speak the previous answer. An older newest-message means this
@@ -1145,7 +1152,7 @@ function App() {
       }
       break
     }
-  }, [activeIsProcessing, liveConversation, pttStatus])
+  }, [hoverIsProcessing, hoverConversation, pttStatus])
 
   // Emit the turn's voice-to-voice latency breakdown once audio is audible.
   useEffect(() => {
@@ -1325,11 +1332,29 @@ function App() {
   }, [voice, cancelPttForSteal])
 
   const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  // Companion sends (bar submits, call utterances) — filled once
+  // handleHoverSubmit exists; early callers (startCall's PTT callback) fire
+  // at event time, long after render.
+  const handleHoverSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  // Late-bound handle to bindChatToRun (declared with the chat plumbing far
+  // below) for early-declared effects like quick-ask open-chat.
+  const bindChatToRunRef = useRef<((rid: string) => void) | null>(null)
+  const loadRunRef = useRef<((id: string) => Promise<void>) | null>(null)
+  // A call was started from a FRESH (unbound) chat: when the hover session
+  // materializes on the first utterance, bind that chat to it too — the
+  // call button means "float THIS chat", so both surfaces must end up on
+  // the same conversation instead of hover minting an orphan chat. Chat
+  // identity is captured so a user who switched away is never hijacked.
+  const bindAppChatOnHoverCreateRef = useRef<{ tabId: string; chatId: string } | null>(null)
+  // The Home composer's submit (routes to a to-do target or a fresh chat);
+  // dictation started from the Home composer flows through it, so a spoken
+  // to-do lands on the list, not in some chat.
+  const handleHomeComposerSubmitRef = useRef<((message: PromptInputMessage) => void) | null>(null)
   const pendingVoiceInputRef = useRef(false)
 
-  // Palette: per-tab editor handles for capturing cursor context on Cmd+K, and pending payload
-  // queued across the new-chat-tab state flush before submit fires.
-  const editorRefsByTabId = useRef<Map<string, MarkdownEditorHandle>>(new Map())
+  // The (single) mounted markdown editor's imperative handle, and the pending
+  // palette payload queued across the new-chat state flush before submit fires.
+  const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null)
   const [pendingPaletteSubmit, setPendingPaletteSubmit] = useState<{ text: string; mention: CommandPaletteMention | null } | null>(null)
 
   const handleSubmitRecording = useCallback(async () => {
@@ -1341,7 +1366,13 @@ function App() {
     if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
     if (text) {
       pendingVoiceInputRef.current = true
-      handlePromptSubmitRef.current?.({ text, files: [] })
+      // Route by mic owner: the transcript belongs to the composer that
+      // started the recording, not blindly to the active chat.
+      if (holder === HOME_VOICE_HOLDER) {
+        handleHomeComposerSubmitRef.current?.({ text, files: [] })
+      } else {
+        handlePromptSubmitRef.current?.({ text, files: [] })
+      }
     }
   }, [voice])
 
@@ -1418,7 +1449,9 @@ function App() {
         playAckCue()
         callTurnMarksRef.current = { t0: performance.now() }
         pendingVoiceInputRef.current = true
-        handlePromptSubmitRef.current?.({ text, files: [] })
+        // Calls talk to the companion's session — the app window can browse
+        // any chat mid-call without retargeting the conversation.
+        handleHoverSubmitRef.current?.({ text, files: [] })
       })
       .then((result) => {
         if (result === 'mic-denied') setPermissionDialog('microphone')
@@ -1460,7 +1493,87 @@ function App() {
     setInCall(false)
     companionVoiceRef.current = false
     releaseVoice(CALL_VOICE_HOLDER)
+    // A call seeded from the app's own chat was just a mirror of it — release
+    // the companion binding so its second store unsubscribes instead of
+    // double-processing that conversation forever. ⌥⇧Space-born conversations
+    // (hover ≠ app chat) keep continuity for the next summon.
+    if (hoverRunIdRef.current && hoverRunIdRef.current === runIdRef.current) {
+      hoverRunIdRef.current = null
+      setHoverRunId(null)
+    }
   }, [video, setPttState])
+
+  // ONE hover mode: the ⌥⇧Space relay, the card's tuck handle, and the
+  // composer's call button all start THIS — a companion voice session on
+  // the Skipper surface. Sticky screen share replays the user's standing
+  // choice; without voice configured it falls back to the text card.
+  const startHoverCall = useCallback(async () => {
+    // Tell main the relay landed and a session is coming — cancels the
+    // "nothing answered" text-card fallback so slow device startup can't
+    // flash the old summoned bar before the Skipper pins.
+    void window.ipc.invoke('quickAsk:tuckAck', null).catch(() => {})
+    if (inCallRef.current) {
+      // Already on a call — just make sure the floating surface is up
+      // (re-assert even when callSurface didn't change, so a destroyed or
+      // desynced companion window self-heals).
+      setCallMinimized(true)
+      void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+      return
+    }
+    if (companionVoiceStartingRef.current) return
+    if (!(voiceAvailable && ttsAvailable)) {
+      // Voice-first has no voice — fall back to the text card.
+      void window.ipc.invoke('quickAsk:show', null).catch(() => {})
+      return
+    }
+    companionVoiceRef.current = true
+    companionVoiceStartingRef.current = true
+    try {
+      await startCall('voice')
+      // Sticky screen share: opted in once from the mascot's share pin →
+      // every summon starts already sharing, until toggled off.
+      if (localStorage.getItem('companion-share-sticky') === '1') {
+        const shared = await video.startScreenShare()
+        if (!shared) setPermissionDialog('screen-recording')
+      }
+    } finally {
+      companionVoiceStartingRef.current = false
+    }
+  }, [voiceAvailable, ttsAvailable, startCall, video])
+
+  // Composer call buttons: the call button on a chat always means "float
+  // THIS chat". No call yet → start the hover session bound to it; call
+  // already live on another chat → re-point the live call at it (same
+  // devices, same Skipper — only the conversation switches); a fresh
+  // (unbound) chat defer-binds, so the first utterance creates ONE session
+  // both surfaces share. ⌥⇧Space summons keep the companion's previous
+  // conversation instead (no composer context to seed from).
+  const handleStartCall = useCallback((preset: CallPreset) => {
+    const activeTab = chatTabsRef.current.find((t) => t.id === activeChatTabIdRef.current)
+    const seedRunId = activeTab?.runId ?? null
+    if (seedRunId) {
+      hoverRunIdRef.current = seedRunId
+      setHoverRunId(seedRunId)
+      bindAppChatOnHoverCreateRef.current = null
+    } else if (activeTab) {
+      hoverRunIdRef.current = null
+      setHoverRunId(null)
+      bindAppChatOnHoverCreateRef.current = { tabId: activeTab.id, chatId: activeTab.chatId }
+    }
+    if (inCallRef.current) {
+      // Live-call retarget: silence whatever of the OLD conversation's reply
+      // was still playing, and make sure the floating surface is up. The
+      // segment player re-keys itself off the new hover binding.
+      ttsRef.current.cancel()
+      void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+      return
+    }
+    if (preset === 'voice') {
+      void startHoverCall()
+    } else {
+      void startCall(preset)
+    }
+  }, [startHoverCall, startCall])
 
   // The user-mute half that lives in the video pipeline: stop sampling
   // camera/screen frames while muted (see useVideoMode.setCapturePaused).
@@ -1521,10 +1634,12 @@ function App() {
     }
     // An interrupted turn must not fallback-speak its (aborted) reply.
     callTurnVoiceRef.current.pending = false
-    if (activeIsProcessing) {
-      void stopRunRef.current?.()
+    // Speech comes from the COMPANION's session — stop THAT turn, not
+    // whatever chat the app window happens to be showing.
+    if (hoverChatRef.current.chatState?.isProcessing) {
+      void hoverChatRef.current.stop().catch(() => {})
     }
-  }, [voiceSegments, activeIsProcessing])
+  }, [voiceSegments])
 
   // --- Push-to-talk state machine ---
   // One edge-triggered machine fed by every source: the global key hook
@@ -1533,6 +1648,11 @@ function App() {
   // focused, so identical edges arriving within the echo window collapse
   // into one.
   const pttDownAtRef = useRef(0)
+  // The assistant was audibly speaking (or about to) when this press began:
+  // a quick TAP then means "stop talking" — full interrupt, mic stays shut —
+  // not "lock hands-free capture". A HOLD still barges in (silence + talk)
+  // in one gesture, and the next tap after a stop behaves normally.
+  const pttSpokeAtDownRef = useRef(false)
   const pttLastEdgeRef = useRef<{ type: 'down' | 'up'; at: number } | null>(null)
   // Right ⌘ was used as a modifier (⌘C etc.) during this press — the
   // matching release must not commit/lock.
@@ -1551,10 +1671,14 @@ function App() {
     pttChordedRef.current = false
     pttDownAtRef.current = performance.now()
     if (pttStatusRef.current === 'idle') {
+      // Captured BEFORE the cancel below wipes it — the release edge needs
+      // to know whether this press interrupted speech.
+      pttSpokeAtDownRef.current = ttsRef.current.state !== 'idle'
       // Silence the assistant's AUDIO the moment the user starts talking —
       // but do NOT abort the run or discard its reply: an accidental or
       // empty press must never cost the answer. The run is stopped only
-      // when a real utterance actually submits (handlePromptSubmit).
+      // when a real utterance actually submits (handlePromptSubmit), or by
+      // a deliberate stop-tap (see handlePttUp).
       ttsRef.current.cancel()
       setAssistantCaption('')
       voiceRef.current.pttBegin()
@@ -1572,7 +1696,18 @@ function App() {
     }
     const heldMs = performance.now() - pttDownAtRef.current
     if (pttStatusRef.current === 'held' && heldMs < PTT_TAP_MS) {
-      // Quick tap: lock hands-free capture until the next press.
+      if (pttSpokeAtDownRef.current) {
+        // Tap while the assistant was talking = "stop": full interrupt
+        // (silence + drop the queued reply + stop generation, so it can't
+        // resume a beat later) with the mic left CLOSED — never a hot mic
+        // the user didn't ask for. The next tap lists as usual.
+        pttSpokeAtDownRef.current = false
+        voiceRef.current.pttCancel()
+        setPttState('idle')
+        handleInterruptAssistant()
+        return
+      }
+      // Quick tap in silence: lock hands-free capture until the next press.
       setPttState('locked')
       return
     }
@@ -1590,7 +1725,7 @@ function App() {
     // Releasing a hold (or pressing again while locked) submits.
     setPttState('idle')
     void voiceRef.current.pttEnd()
-  }, [pttEdgeIsEcho, setPttState])
+  }, [pttEdgeIsEcho, setPttState, handleInterruptAssistant])
 
   const handlePttCancel = useCallback(() => {
     if (pttStatusRef.current === 'idle') return
@@ -1681,7 +1816,7 @@ function App() {
         ? 'listening'
         : tts.state === 'speaking'
           ? 'speaking'
-          : tts.state === 'synthesizing' || activeIsProcessing
+          : tts.state === 'synthesizing' || hoverIsProcessing
             ? 'thinking'
             : 'idle'
       : null
@@ -1727,10 +1862,12 @@ function App() {
   let callResponseText: string | null = null
   let callQuestionText: string | null = null
   if (inCall) {
-    // The question the reply answers — shown above it in the pill's panel.
+    // The question the reply answers — shown above it in the panel. All of
+    // this reads the HOVER session: the call's conversation, regardless of
+    // what the app window is showing.
     let questionAt = 0
-    for (let i = liveConversation.length - 1; i >= 0; i--) {
-      const item = liveConversation[i]
+    for (let i = hoverConversation.length - 1; i >= 0; i--) {
+      const item = hoverConversation[i]
       if (isChatMessage(item) && item.role === 'user') {
         if (item.timestamp >= callStartedEpochRef.current) {
           callQuestionText = item.content
@@ -1739,10 +1876,10 @@ function App() {
         break
       }
     }
-    callResponseText = liveAssistantMessage || null
+    callResponseText = hoverAssistantMessage || null
     if (!callResponseText) {
-      for (let i = liveConversation.length - 1; i >= 0; i--) {
-        const item = liveConversation[i]
+      for (let i = hoverConversation.length - 1; i >= 0; i--) {
+        const item = hoverConversation[i]
         if (isChatMessage(item) && item.role === 'assistant') {
           // Only a reply to the CURRENT question counts — right after a
           // submit the newest assistant message is still the previous
@@ -1759,12 +1896,13 @@ function App() {
   // What's happening right now, at tool-NAME level ("Searching the web…",
   // "Reasoning…" — never arguments): the most recent activity wins — a
   // running tool by display name, else reasoning, else plain thinking.
-  // Feeds the summoned bar's status line AND the Skipper's chip/panel.
-  const liveActivityText = useMemo(() => {
-    if (!activeIsProcessing) return null
-    let label = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
-    for (let i = liveConversation.length - 1; i >= 0; i--) {
-      const item = liveConversation[i]
+  // Feeds the summoned bar's status line AND the Skipper's chip/panel, so
+  // it reads the HOVER session's turn.
+  const hoverActivityText = useMemo(() => {
+    if (!hoverIsProcessing) return null
+    let label = hoverIsReasoning ? 'Reasoning…' : 'Thinking…'
+    for (let i = hoverConversation.length - 1; i >= 0; i--) {
+      const item = hoverConversation[i]
       if (isToolCall(item)) {
         if (item.status === 'pending' || item.status === 'running') {
           label = `${getToolDisplayName(item)}…`
@@ -1774,7 +1912,7 @@ function App() {
       if (isChatMessage(item)) break
     }
     return label
-  }, [activeIsProcessing, activeIsReasoning, liveConversation])
+  }, [hoverIsProcessing, hoverIsReasoning, hoverConversation])
 
   // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
   // The main process caches the latest state and replays it when the popout
@@ -1789,14 +1927,14 @@ function App() {
         micMuted,
         screenSharing: video.screenState === 'live',
         speakerMuted,
-        activityText: liveActivityText,
+        activityText: hoverActivityText,
         interimText: voice.interimText || null,
         pttLocked: pttStatus === 'locked',
         responseText: callResponseText,
         questionText: callQuestionText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, liveActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, hoverActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
   // Screen-pointer gate: tell main whether a share is live (call OR
   // quick-ask — this window owns the capture either way). While true the
@@ -1819,7 +1957,7 @@ function App() {
   // screen, which by the exclusivity rule stops any running share; the main
   // process already refocused the app window.
   useEffect(() => {
-    return window.ipc.on('video:popout-action', ({ action, text }) => {
+    return window.ipc.on('video:popout-action', ({ action }) => {
       if (action === 'toggle-mic') handleToggleMic()
       else if (action === 'toggle-camera') handleToggleCamera()
       else if (action === 'toggle-share') {
@@ -1849,11 +1987,6 @@ function App() {
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
       else if (action === 'ptt-up') handlePttUp()
-      else if (action === 'send-text') {
-        // Typed from the popout: exactly a composer message — frames ride
-        // along via handlePromptSubmit as with any typed mid-call message.
-        if (text?.trim()) handlePromptSubmitRef.current?.({ text: text.trim(), files: [] })
-      }
       else if (action === 'end-call') endCall()
       else if (action === 'expand') {
         if (video.screenState === 'live') video.stopScreenShare()
@@ -1863,14 +1996,19 @@ function App() {
   }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
 
   // Discoverability: nothing else in the UI reveals the global quick-ask
-  // shortcut. One toast, once per install, shortly after launch.
+  // shortcut. One toast, once per install, shortly after launch. The chord
+  // is fetched at fire time — it's customizable (Settings → Shortcuts).
   useEffect(() => {
     if (localStorage.getItem('quick-ask-tip-shown')) return
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       localStorage.setItem('quick-ask-tip-shown', '1')
+      const accelerator = await window.ipc
+        .invoke('quickAsk:getShortcut', null)
+        .then((s) => s.accelerator)
+        .catch(() => quickAskShortcut.DEFAULT_QUICK_ASK_SHORTCUT)
       playPopCue()
       toast('Ask Rowboat from anywhere', {
-        description: `Press ${isMac ? '⌥⇧Space' : 'Alt+Shift+Space'} in any app for a quick question — the answer shows up right there and in your chat.`,
+        description: `Press ${quickAskShortcut.formatShortcut(accelerator, isMac)} in any app for a quick question — the answer shows up right there and in your chat.`,
         duration: 12000,
         closeButton: true,
         // Lift the card off the page, and move sonner's close button (which
@@ -1886,12 +2024,18 @@ function App() {
     return () => clearTimeout(timer)
   }, [])
 
-  // Quick-ask "Open in Rowboat": land on the conversation full-view — chat
-  // pane open and maximized, no middle pane.
+  // Quick-ask "Open in Rowboat": the ONE deliberate bridge between the
+  // companion and the app — bind the app's chat to the companion's
+  // conversation and land on it full-view. (Everything else keeps the two
+  // bindings independent.)
   useEffect(() => {
     return window.ipc.on('quick-ask:open-chat', () => {
+      const hoverId = hoverRunIdRef.current
+      if (hoverId) bindChatToRunRef.current?.(hoverId)
+      // Side pane, not the maximized full view — the user keeps whatever
+      // they were working on in the middle.
       setIsChatSidebarOpen(true)
-      setIsRightPaneMaximized(true)
+      setIsRightPaneMaximized(false)
     })
   }, [])
 
@@ -1949,41 +2093,221 @@ function App() {
       .catch(() => {})
   }, [inCall, video.screenState])
 
-  // Quick-ask bar: a submit from the global ⌥⇧Space bar lands in the current
-  // chat exactly like a composer message. The bar hosts the REAL composer,
-  // so the payload carries everything an in-app submit does — mentions,
-  // attachments, per-turn config — plus the bar's model/effort picks, which
-  // are applied to the active tab the same way its own composer would.
+  // Quick-ask bar: a submit from the companion lands in the COMPANION's own
+  // session — never in whatever chat the app window is showing. The bar
+  // hosts the REAL composer, so the payload carries everything an in-app
+  // submit does; its model/effort picks are companion-scoped.
   const quickAskActiveRef = useRef(false)
   const quickAskStartedAtRef = useRef(0)
+
+  // Send into the COMPANION's session. The lean twin of handlePromptSubmit:
+  // same per-turn config (voice flags, frames, search/code, permissions,
+  // fast-thinking default) but no middle-pane context and none of the
+  // visible-chat bookkeeping — the app window's conversation is not
+  // involved, whatever it's currently bound to.
+  const handleHoverSubmit = useCallback(async (
+    message: PromptInputMessage,
+    mentions?: FileMention[],
+    stagedAttachments: StagedAttachment[] = [],
+    searchEnabled?: boolean,
+    codeMode?: 'claude' | 'codex',
+    permissionMode?: PermissionMode,
+  ) => {
+    const userMessage = message.text.trim()
+    const hasAttachments = stagedAttachments.length > 0
+    if (!userMessage && !hasAttachments) return
+
+    if (hoverChatRef.current.chatState?.isProcessing) {
+      // In-call and quick-ask input arrives at arbitrary moments — finish
+      // the previous turn's stop and proceed instead of dropping the message.
+      await hoverChatRef.current.stop().catch(() => {})
+    }
+
+    const marks = callTurnMarksRef.current
+    if (inCallRef.current && marks && marks.submit === undefined) {
+      marks.submit = performance.now()
+    }
+    // Quick-ask voice toggle: this turn speaks its reply even without a call.
+    speakTurnRef.current =
+      !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
+    // Modality decides speech on calls: a TYPED question renders its reply
+    // silently; a SPOKEN one (PTT utterance) is read aloud.
+    suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
+    if (inCallRef.current || speakTurnRef.current) {
+      // A new question supersedes whatever of the previous reply was still
+      // unspoken — silence it and drop the frozen backlog.
+      ttsRef.current.cancel()
+      if (voiceSegmentsRef.current) {
+        spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+      }
+      spokeSegmentThisTurnRef.current = false
+      callTurnVoiceRef.current = { pending: true, submitAt: Date.now() }
+    }
+
+    // Frames ride along whenever capture is live — calls, and quick-ask
+    // questions with the share toggle on.
+    const videoFrames =
+      inCallRef.current || video.screenState === 'live' ? video.collectFrames() : []
+
+    try {
+      let sessionId = hoverRunIdRef.current
+      if (!sessionId) {
+        const created = await window.ipc.invoke('sessions:create', {})
+        sessionId = created.sessionId
+        hoverRunIdRef.current = sessionId
+        setHoverRunId(sessionId)
+        analytics.chatSessionCreated(sessionId)
+        // The call was started from a fresh chat: bind that chat to the
+        // session we just created — both surfaces show ONE conversation.
+        // Only if the user hasn't switched or reset that chat since (its
+        // chat identity still matches) and it's still unbound.
+        const pending = bindAppChatOnHoverCreateRef.current
+        if (pending) {
+          bindAppChatOnHoverCreateRef.current = null
+          const activeTab = chatTabsRef.current.find((t) => t.id === pending.tabId)
+          if (activeTab && activeTab.chatId === pending.chatId && !activeTab.runId) {
+            const boundSessionId = sessionId
+            setChatTabs((prev) => prev.map((t) => (
+              // Keep the chatId: same conversation identity getting its
+              // session, exactly like a first composer send — no remount.
+              t.id === pending.tabId ? { ...t, runId: boundSessionId } : t
+            )))
+            void loadRunRef.current?.(boundSessionId)
+          }
+        }
+      }
+
+      const selected = hoverSelectionRef.current
+      // Hover turns default to FAST thinking when there's no explicit pick —
+      // voice-to-first-word is the experience, and a long reasoning phase is
+      // dead air.
+      const reasoningEffort =
+        selected?.effort ??
+        ((inCallRef.current && companionVoiceRef.current) || quickAskActiveRef.current
+          ? ('low' as const)
+          : undefined)
+      const chatMaxModelCalls = await window.ipc
+        .invoke('turnLimits:getSettings', null)
+        .then((settings) => settings.chatMaxModelCalls)
+        .catch(() => undefined)
+      const sendConfig = {
+        agent: {
+          agentId: 'copilot',
+          overrides: {
+            ...(selected ? { model: { provider: selected.provider, model: selected.model } } : {}),
+            composition: {
+              workDirId: sessionId,
+              ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
+              ...(ttsEnabledRef.current
+                ? { voiceOutput: ttsModeRef.current }
+                : speakTurnRef.current
+                  ? { voiceOutput: 'full' as const }
+                  : {}),
+              ...(searchEnabled ? { searchEnabled: true } : {}),
+              ...(codeMode ? { codeMode } : {}),
+              ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
+                ? { videoMode: true }
+                : {}),
+              ...(practiceModeRef.current ? { coachMode: true } : {}),
+            },
+          },
+        },
+        autoPermission: (permissionMode ?? 'auto') === 'auto',
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
+      }
+      const userMessageContext = {
+        currentDateTime: `${new Date().toLocaleString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
+        middlePane: { kind: 'empty' as const },
+      }
+
+      type HoverContentPart =
+        | { type: 'text'; text: string }
+        | { type: 'attachment'; path: string; filename: string; mimeType: string; size?: number; lineNumber?: number }
+        | { type: 'image'; data: string; mediaType: string; source: 'camera' | 'screen'; capturedAt: string }
+      const hasMentions = (mentions?.length ?? 0) > 0
+      const content: string | HoverContentPart[] = hasAttachments || hasMentions || videoFrames.length > 0
+        ? [
+            ...(mentions ?? []).map((mention): HoverContentPart => ({
+              type: 'attachment',
+              path: mention.path,
+              filename: mention.displayName || mention.path.split('/').pop() || mention.path,
+              mimeType: 'text/markdown',
+              ...(mention.lineNumber !== undefined ? { lineNumber: mention.lineNumber } : {}),
+            })),
+            ...stagedAttachments.map((attachment): HoverContentPart => ({
+              type: 'attachment',
+              path: attachment.path,
+              filename: attachment.filename,
+              mimeType: attachment.mimeType,
+              size: attachment.size,
+            })),
+            ...(userMessage ? [{ type: 'text', text: userMessage } satisfies HoverContentPart] : []),
+            ...videoFrames.map((frame): HoverContentPart => ({
+              type: 'image',
+              data: frame.data,
+              mediaType: frame.mediaType,
+              source: frame.source,
+              capturedAt: frame.capturedAt,
+            })),
+          ]
+        : userMessage
+
+      // One retry: an in-call submit can land while the previous turn's
+      // abort hasn't fully settled in the runtime.
+      const payload = {
+        sessionId,
+        input: { role: 'user' as const, content, userMessageContext },
+        config: sendConfig,
+      }
+      try {
+        await window.ipc.invoke('sessions:sendMessage', payload)
+      } catch (err) {
+        console.error('[hover] sendMessage failed, retrying once:', err)
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        await window.ipc.invoke('sessions:sendMessage', payload)
+      }
+      analytics.chatMessageSent({
+        voiceInput: pendingVoiceInputRef.current || undefined,
+        voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
+        searchEnabled: searchEnabled || undefined,
+      })
+    } catch (err) {
+      console.error('[hover] submit failed:', err)
+    } finally {
+      pendingVoiceInputRef.current = false
+    }
+  }, [video])
+  handleHoverSubmitRef.current = handleHoverSubmit
+
   useEffect(() => {
     return window.ipc.on('quick-ask:submit', (payload) => {
       const trimmed = payload.text.trim()
       if (!trimmed && !payload.attachments?.length) return
       quickAskActiveRef.current = true
       quickAskStartedAtRef.current = Date.now()
-      // Model/effort now ride ONE ModelSelection keyed by chatId. The bar's
-      // picks overlay the tab's existing selection; effort-only picks need
-      // a model to attach to (fresh-tab effort still applies via the
-      // hover fast-thinking fallback in handlePromptSubmit).
-      const tabId = activeChatTabIdRef.current
-      if (payload.model || payload.reasoningEffort) {
-        const key = chatIdForTab(tabId)
-        const prev = selectionByTabRef.current.get(key)
-        const model = payload.model ?? prev
-        if (model) {
-          selectionByTabRef.current.set(key, {
-            provider: model.provider,
-            model: model.model,
-            ...(payload.reasoningEffort
-              ? { effort: payload.reasoningEffort }
-              : prev?.effort
-                ? { effort: prev.effort }
-                : {}),
-          })
+      if (payload.model) {
+        hoverSelectionRef.current = {
+          provider: payload.model.provider,
+          model: payload.model.model,
+          ...(payload.reasoningEffort
+            ? { effort: payload.reasoningEffort }
+            : hoverSelectionRef.current?.effort
+              ? { effort: hoverSelectionRef.current.effort }
+              : {}),
         }
+      } else if (payload.reasoningEffort && hoverSelectionRef.current) {
+        hoverSelectionRef.current = { ...hoverSelectionRef.current, effort: payload.reasoningEffort }
       }
-      void handlePromptSubmitRef.current?.(
+      void handleHoverSubmitRef.current?.(
         { text: trimmed, files: [] },
         payload.mentions,
         payload.attachments ?? [],
@@ -1995,50 +2319,22 @@ function App() {
   }, [])
 
   // Stop relay: the bar composer's send button becomes Stop while a turn is
-  // processing, same as in the app.
+  // processing — the COMPANION's turn, not the app chat's.
   useEffect(() => {
     return window.ipc.on('quick-ask:stop', () => {
-      void stopRunRef.current?.()
+      void hoverChatRef.current.stop().catch(() => {})
     })
   }, [])
 
   // (The old surface-based text-mode hush is gone: speech now follows each
   // question's modality, plus the explicit speaker mute below.)
 
-  // Tuck relay: the bar pushed its text into the mascot — voice-to-voice.
-  // This is the voice call preset's long-promised "floating mascot pill"
-  // surface: start one (it opens minimized → callSurface 'popout' → the
-  // companion pins collapsed). If a call is already live, just minimize it
-  // to the floating surface instead of starting a second one.
+  // Tuck relay (⌥⇧Space, the card's tuck handle): the ONE hover flow.
   useEffect(() => {
     return window.ipc.on('quick-ask:tuck', () => {
-      if (inCallRef.current) {
-        setCallMinimized(true)
-        return
-      }
-      if (companionVoiceStartingRef.current) return
-      if (voiceAvailable && ttsAvailable) {
-        companionVoiceRef.current = true
-        companionVoiceStartingRef.current = true
-        void startCall('voice')
-          .then(() => {
-            // Sticky screen share: opted in once from the mascot's share
-            // pin → every summon starts already sharing, until toggled off.
-            if (localStorage.getItem('companion-share-sticky') === '1') {
-              void video.startScreenShare().then((shared) => {
-                if (!shared) setPermissionDialog('screen-recording')
-              })
-            }
-          })
-          .finally(() => {
-            companionVoiceStartingRef.current = false
-          })
-      } else {
-        // Voice-first has no voice — fall back to the text card.
-        void window.ipc.invoke('quickAsk:show', null).catch(() => {})
-      }
+      void startHoverCall()
     })
-  }, [voiceAvailable, ttsAvailable, startCall, video])
+  }, [startHoverCall])
 
   // Mirror the in-flight answer back to the bar while a quick-ask turn is
   // live: streaming text while generating, the final assistant message when
@@ -2050,10 +2346,10 @@ function App() {
   // still the newest one in the conversation at submit time.
   useEffect(() => {
     if (!quickAskActiveRef.current) return
-    let text = liveAssistantMessage
+    let text = hoverAssistantMessage
     if (!text) {
-      for (let i = liveConversation.length - 1; i >= 0; i--) {
-        const item = liveConversation[i]
+      for (let i = hoverConversation.length - 1; i >= 0; i--) {
+        const item = hoverConversation[i]
         if (isChatMessage(item) && item.role === 'assistant') {
           if (item.timestamp >= quickAskStartedAtRef.current) text = item.content
           break
@@ -2062,12 +2358,12 @@ function App() {
     }
     // Nothing new yet (run not started / no fresh answer): pushing would
     // only flicker the bar's local "Thinking…" state away.
-    if (!text && !activeIsProcessing) return
+    if (!text && !hoverIsProcessing) return
     void window.ipc
-      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText: liveActivityText })
+      .invoke('quickAsk:state', { processing: hoverIsProcessing, responseText: text || null, statusText: hoverActivityText })
       .catch(() => {})
-    if (!activeIsProcessing && text) quickAskActiveRef.current = false
-  }, [activeIsProcessing, liveActivityText, liveAssistantMessage, liveConversation])
+    if (!hoverIsProcessing && text) quickAskActiveRef.current = false
+  }, [hoverIsProcessing, hoverActivityText, hoverAssistantMessage, hoverConversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -2085,12 +2381,16 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [handleSubmitRecording, handleCancelRecording])
 
-  // Helper to cancel recording from any navigation handler
+  // Helper to cancel recording from any navigation handler. Releases the mic
+  // ownership token too — a cancelled dictation must not leave its composer
+  // marked as the owner (that pinned the recording UI to a dead chat id).
   const cancelRecordingIfActive = useCallback(() => {
     if (isRecordingRef.current) {
       voiceRef.current.cancel()
       setIsRecording(false)
       isRecordingRef.current = false
+      const holder = voiceOwnerId()
+      if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
     }
   }, [])
 
@@ -2108,7 +2408,7 @@ function App() {
   const chatIdForTab = useCallback((tabId: string) => (
     chatTabsRef.current.find((t) => t.id === tabId)?.chatId ?? tabId
   ), [])
-  const [activeChatTabId, setActiveChatTabId] = useState('default-chat-tab')
+  const [activeChatTabId] = useState('default-chat-tab')
   const [chatViewStateByTab, setChatViewStateByTab] = useState<Record<string, ChatTabViewState>>({
     'default-chat-tab': createEmptyChatTabViewState(),
   })
@@ -2221,54 +2521,28 @@ function App() {
     return runs.find(r => r.id === tab.runId)?.title || '(Untitled chat)'
   }, [runs])
 
-  const isChatTabProcessing = useCallback((tab: ChatTab) => {
-    return tab.runId ? processingRunIds.has(tab.runId) : false
-  }, [processingRunIds])
 
-  // File tab state
-  const [fileTabs, setFileTabs] = useState<FileTab[]>([{ id: 'home-tab', path: HOME_TAB_PATH }])
-  const [activeFileTabId, setActiveFileTabId] = useState<string | null>('home-tab')
-  const activeFileTabIdRef = useRef(activeFileTabId)
-  activeFileTabIdRef.current = activeFileTabId
-  // The Code section is tab-derived (no boolean to keep in sync with the other
-  // section flags): it is open exactly while its sentinel tab is active.
-  const isCodeOpen = React.useMemo(() => {
-    const activeTab = fileTabs.find((tab) => tab.id === activeFileTabId)
-    return activeTab ? isCodeTabPath(activeTab.path) : false
-  }, [fileTabs, activeFileTabId])
-  // The code session that owns the right-hand chat pane: rowboat-mode sessions
-  // bind the assistant chat to their run; direct-mode sessions swap the pane
-  // for the direct-drive chat.
+  // The Code section is a plain section boolean like every other section. (It
+  // used to be derived from a sentinel entry in an editor-style tab strip,
+  // which made it the ONE section bulk section-clears couldn't close — the
+  // root of a whole family of stuck/inert-UI navigation bugs.)
+  const [isCodeOpen, setIsCodeOpen] = useState(false)
+  // The code session that owns the right-hand chat pane: selecting a session
+  // binds the assistant chat to it (a code session IS a chat session).
   const [activeCodeSession, setActiveCodeSession] = useState<ActiveCodeSession | null>(null)
   // A file the code chat asked to review — consumed by the workspace pane.
   const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
-  const boundCodeSessionRef = useRef<string | null>(null)
   // Composer locks for runs that are code sessions: the session's cwd + agent
   // are frozen in the chat input (the backend pins them server-side anyway).
-  // Kept after the Code view unmounts — the chat tab stays bound to the run.
+  // Kept after the Code view unmounts — the chat stays bound to the session.
   const [codeSessionLocks, setCodeSessionLocks] = useState<Record<string, { cwd: string; agent: 'claude' | 'codex' }>>({})
-  const [editorSessionByTabId, setEditorSessionByTabId] = useState<Record<string, number>>({})
-  const fileHistoryHandlersRef = useRef<Map<string, MarkdownHistoryHandlers>>(new Map())
-  const fileTabIdCounterRef = useRef(0)
-  const newFileTabId = () => `file-tab-${++fileTabIdCounterRef.current}`
-
-  const getFileTabTitle = useCallback((tab: FileTab) => {
-    if (isGraphTabPath(tab.path)) return 'Graph View'
-    if (isSuggestedTopicsTabPath(tab.path)) return 'Suggested Topics'
-    if (isMeetingsTabPath(tab.path)) return 'Meetings'
-    if (isLiveNotesTabPath(tab.path)) return 'Live notes'
-    if (isBgTasksTabPath(tab.path)) return 'Background tasks'
-    if (isAppsTabPath(tab.path)) return 'Mini Apps'
-    if (isEmailTabPath(tab.path)) return 'Email'
-    if (isWorkspaceTabPath(tab.path)) return 'Workspace'
-    if (isKnowledgeViewTabPath(tab.path)) return 'Brain'
-    if (isChatHistoryTabPath(tab.path)) return 'Chat history'
-    if (isHomeTabPath(tab.path)) return 'Home'
-    if (isCodeTabPath(tab.path)) return 'Code'
-    if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
-    if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
-    return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
-  }, [])
+  const codeSessionLocksRef = useRef(codeSessionLocks)
+  codeSessionLocksRef.current = codeSessionLocks
+  // Undo/redo handlers of the (single) mounted markdown editor.
+  const fileHistoryHandlersRef = useRef<MarkdownHistoryHandlers | null>(null)
+  // Bumped when a file's content is reloaded from disk behind the editor's
+  // back — remounts the editor session (clears undo history) for that path.
+  const [editorSessionByPath, setEditorSessionByPath] = useState<Record<string, number>>({})
 
   // Pending requests state
   const [, setPendingPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
@@ -2464,17 +2738,8 @@ function App() {
     initialContentByPathRef.current.set(path, body)
     initialContentRef.current = body
     setLastSaved(new Date())
-    setEditorSessionByTabId((prev) => {
-      let changed = false
-      const next = { ...prev }
-      for (const tab of fileTabs) {
-        if (tab.path !== path) continue
-        next[tab.id] = (next[tab.id] ?? 0) + 1
-        changed = true
-      }
-      return changed ? next : prev
-    })
-  }, [fileTabs, setEditorCacheForPath])
+    setEditorSessionByPath((prev) => ({ ...prev, [path]: (prev[path] ?? 0) + 1 }))
+  }, [setEditorCacheForPath])
 
   const handleEditorChange = useCallback((path: string, markdown: string) => {
     setEditorCacheForPath(path, markdown)
@@ -2881,7 +3146,6 @@ function App() {
                 renamedTo = targetPath
                 editorPathRef.current = targetPath
                 untitledRenameReadyPathsRef.current.delete(pathAtStart)
-                setFileTabs(prev => prev.map(tab => (tab.path === pathAtStart ? { ...tab, path: targetPath } : tab)))
                 // Migrate frontmatter entry
                 const fmEntry = frontmatterByPathRef.current.get(pathAtStart)
                 frontmatterByPathRef.current.delete(pathAtStart)
@@ -3142,6 +3406,7 @@ function App() {
       console.error('Failed to load session work dir:', err)
     }
   }, [loadRunWorkDir])
+  loadRunRef.current = loadRun
 
   const getStreamingBuffer = useCallback((id: string) => {
     const existing = streamingBuffersRef.current.get(id)
@@ -3609,12 +3874,12 @@ function App() {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => {
-    if (activeIsProcessing) {
+    if (activeIsProcessing && (inCallRef.current || quickAskActiveRef.current)) {
       // In-call and quick-ask input arrives at arbitrary moments — a hard
       // drop here silently ate utterances submitted while the previous turn
       // was still stopping (the PTT interrupt is async). Finish the stop and
-      // proceed with this message instead.
-      if (!inCallRef.current && !quickAskActiveRef.current) return
+      // proceed with this message instead. Ordinary typed sends proceed while
+      // busy: sessions:sendOrQueueMessage queues them to steer the live turn.
       await stopRunRef.current?.()
     }
 
@@ -3761,7 +4026,16 @@ function App() {
                   ? { voiceOutput: 'full' as const }
                   : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
-              ...(codeMode ? { codeMode } : {}),
+              // Code-session pins: a bound chat always carries the session's
+              // agent + cwd, so voice/quick-ask submits (which don't thread
+              // the composer chip) still assemble the code-mode prompt. The
+              // backend pins these server-side regardless.
+              ...(currentRunId && codeSessionLocksRef.current[currentRunId]
+                ? {
+                    codeMode: codeMode ?? codeSessionLocksRef.current[currentRunId].agent,
+                    codeCwd: codeSessionLocksRef.current[currentRunId].cwd,
+                  }
+                : (codeMode ? { codeMode } : {})),
               ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
                 ? { videoMode: true }
                 : {}),
@@ -3799,19 +4073,13 @@ function App() {
         }
       }
 
-      // One retry: an in-call submit can land while the previous turn's
-      // abort hasn't fully settled in the runtime — losing the message (and
-      // its spoken answer) over that race is much worse than a short delay.
-      const sendSessionMessage = async (payload: Parameters<typeof window.ipc.invoke<'sessions:sendMessage'>>[1]) => {
-        try {
-          await window.ipc.invoke('sessions:sendMessage', payload)
-        } catch (err) {
-          console.error('[chat] sendMessage failed, retrying once:', err)
-          await new Promise((resolve) => setTimeout(resolve, 600))
-          await window.ipc.invoke('sessions:sendMessage', payload)
-        }
-      }
+      // Deliver-ASAP: a busy session queues the message (it steers the live
+      // turn at the next model-call boundary or starts the next turn), so a
+      // mid-turn send is never rejected or dropped.
+      const sendSessionMessage = (payload: Parameters<typeof window.ipc.invoke<'sessions:sendOrQueueMessage'>>[1]) =>
+        window.ipc.invoke('sessions:sendOrQueueMessage', payload)
 
+      let sendResult: Awaited<ReturnType<typeof sendSessionMessage>>
       if (hasAttachments || hasMentions || videoFrames.length > 0) {
         type ContentPart =
           | { type: 'text'; text: string }
@@ -3872,7 +4140,7 @@ function App() {
         }
 
         const middlePaneContext = await buildMiddlePaneContext()
-        await sendSessionMessage({
+        sendResult = await sendSessionMessage({
           sessionId: currentRunId,
           input: {
             role: 'user',
@@ -3888,7 +4156,7 @@ function App() {
         })
       } else {
         const middlePaneContext = await buildMiddlePaneContext()
-        await sendSessionMessage({
+        sendResult = await sendSessionMessage({
           sessionId: currentRunId,
           input: {
             role: 'user',
@@ -3902,6 +4170,14 @@ function App() {
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
         })
+      }
+
+      // Queued (the latest turn was still running): there is no turn for
+      // this message yet — the pending chip above the composer represents it,
+      // and the real bubble arrives via turn events when it is delivered.
+      // Retract the optimistic bubble so it can't double-render.
+      if (sendResult.queued) {
+        setConversation((prev) => prev.filter((item) => item.id !== userMessageId))
       }
 
       pendingVoiceInputRef.current = false
@@ -3950,12 +4226,44 @@ function App() {
     ttsRef.current.cancel()
     setAssistantCaption('')
     try {
-      await sessionChat.stop()
+      // Stop drains the pending queue (queued messages must not auto-start
+      // after an explicit stop) — restore their text into the composer so
+      // nothing the user typed is lost.
+      const dequeued = await sessionChat.stop()
+      const drainedText = dequeued
+        .map((entry) => queuedMessageText(entry.message))
+        .filter(Boolean)
+        .join('\n\n')
+      if (drainedText) {
+        const draft = chatDraftsRef.current
+          .get(chatIdForTab(activeChatTabIdRef.current))
+          ?.trim()
+        setPresetMessage(draft ? `${draft}\n\n${drainedText}` : drainedText)
+      }
     } catch (error) {
       console.error('Failed to stop turn:', error)
     }
-  }, [runId, sessionChat])
+  }, [runId, sessionChat, chatIdForTab])
   stopRunRef.current = handleStop
+
+  // Pending-queue chips (messages sent while the turn was running): ✕
+  // discards the message; clicking the chip body pulls it back out of the
+  // queue and into the composer for editing.
+  const handleRemoveQueued = useCallback((queueId: string) => {
+    sessionChat.removeQueued(queueId).catch((error) => {
+      console.error('Failed to remove queued message:', error)
+    })
+  }, [sessionChat])
+
+  const handlePullQueued = useCallback(async (queueId: string) => {
+    try {
+      const removed = await sessionChat.removeQueued(queueId)
+      const text = removed ? queuedMessageText(removed.message) : ''
+      if (text) setPresetMessage(text)
+    } catch (error) {
+      console.error('Failed to pull back queued message:', error)
+    }
+  }, [sessionChat])
 
   const handlePermissionResponse = useCallback(async (
     toolCallId: string,
@@ -4036,81 +4344,31 @@ function App() {
     selectionByTabRef.current.delete(chatIdForTab(activeChatTabIdRef.current))
   }, [setChatViewportAnchor])
 
-  // Chat tab operations
-  const applyChatTab = useCallback((tab: ChatTab) => {
-    if (tab.runId) {
-      loadRun(tab.runId)
-    } else {
-      loadRunRequestIdRef.current += 1
-      setConversation([])
-      setCurrentAssistantMessage('')
-      setRunId(null)
-      setMessage('')
-      setModelUsage(null)
-      setIsProcessing(false)
-      setPendingPermissionRequests(new Map())
-      setPendingAskHumanRequests(new Map())
-      setAllPermissionRequests(new Map())
-      setPermissionResponses(new Map())
-      setAutoPermissionDecisions(new Map())
-      setChatViewportAnchor(tab.id, null)
-    }
-  }, [loadRun, setChatViewportAnchor])
+  // Bind the single chat surface to a session. THE one way any part of the
+  // app points the chat at a conversation (recents, history, Home threads,
+  // code sessions, quick-ask). No-ops when already bound; otherwise rebinds
+  // with a fresh chat identity (remounts pane + composer, drops drafts).
+  const bindChatToRun = useCallback((rid: string) => {
+    const active = chatTabsRef.current.find((t) => t.id === activeChatTabIdRef.current)
+    if (active?.runId === rid) return
+    // Cancel any active dictation — its transcript belongs to the old chat.
+    cancelRecordingIfActive()
+    saveChatScrollForTab(activeChatTabIdRef.current)
+    setChatTabs((prev) => prev.map((t) => (
+      // Rebinding to a different session = a different chat identity — but a
+      // DETERMINISTIC one (the session id), so switching A→B→A restores A's
+      // draft/selection instead of silently dropping half-typed input.
+      t.id === activeChatTabIdRef.current ? { ...t, runId: rid, chatId: rid } : t
+    )))
+    void loadRun(rid)
+  }, [cancelRecordingIfActive, loadRun, saveChatScrollForTab])
+  bindChatToRunRef.current = bindChatToRun
 
-  const restoreChatTabState = useCallback((tabId: string, fallbackRunId: string | null): boolean => {
-    const cached = chatViewStateByTabRef.current[tabId]
-    if (!cached) return false
-    // Ignore stale cache snapshots that don't match the tab's current run binding.
-    if (cached.runId !== fallbackRunId) return false
-
-    const resolvedRunId = fallbackRunId
-    setRunId(resolvedRunId)
-    setConversation(cached.conversation)
-    setCurrentAssistantMessage(cached.currentAssistantMessage)
-
-    const pendingPermissions = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
-    for (const [toolCallId, request] of cached.allPermissionRequests.entries()) {
-      if (!cached.permissionResponses.has(toolCallId)) {
-        pendingPermissions.set(toolCallId, request)
-      }
-    }
-    setPendingPermissionRequests(pendingPermissions)
-    setPendingAskHumanRequests(new Map(cached.pendingAskHumanRequests))
-    setAllPermissionRequests(new Map(cached.allPermissionRequests))
-    setPermissionResponses(new Map(cached.permissionResponses))
-    setAutoPermissionDecisions(new Map(cached.autoPermissionDecisions))
-    setIsProcessing(Boolean(resolvedRunId && processingRunIdsRef.current.has(resolvedRunId)))
-    return true
-  }, [])
-
-  const switchChatTab = useCallback((tabId: string) => {
-    const tab = chatTabs.find(t => t.id === tabId)
-    if (!tab) return
-    if (tabId === activeChatTabId) return
-    // Cancel any active recording when switching tabs
-    if (isRecordingRef.current) {
-      voiceRef.current.cancel()
-      setIsRecording(false)
-      isRecordingRef.current = false
-    }
-    saveChatScrollForTab(activeChatTabId)
-    // Cancel stale in-flight loads from previously focused tabs.
-    loadRunRequestIdRef.current += 1
-    setActiveChatTabId(tabId)
-    const restored = restoreChatTabState(tabId, tab.runId)
-    if (tab.runId && processingRunIdsRef.current.has(tab.runId)) {
-      loadRun(tab.runId)
-      return
-    }
-    if (!restored) {
-      applyChatTab(tab)
-    }
-  }, [chatTabs, activeChatTabId, applyChatTab, loadRun, restoreChatTabState, saveChatScrollForTab])
-
-  // A code session was selected (or changed mode/status) in the Code view.
-  // Rowboat-mode sessions take over the assistant chat pane by binding their
-  // run to a chat tab — the conversation IS the assistant chat, no copy.
-  // Direct-mode sessions render their own pane instead (see right-pane JSX).
+  // A code session was selected in the Code view: bind the chat to it — the
+  // conversation IS the assistant chat, no separate chat surface. No local
+  // "already bound" guard here: bindChatToRun dedupes on the live binding,
+  // and a stale guard is exactly how re-selecting a session after opening
+  // another chat used to do nothing (the stuck-binding family).
   const handleCodeSessionSelected = useCallback((active: ActiveCodeSession | null) => {
     setActiveCodeSession(active)
     if (active) {
@@ -4121,70 +4379,12 @@ function App() {
           : { ...prev, [id]: { cwd, agent } }
       ))
     }
-    const rowboatSessionId = active && active.session.mode === 'rowboat' ? active.session.id : null
-    if (!rowboatSessionId) {
-      boundCodeSessionRef.current = null
-      return
-    }
-    if (boundCodeSessionRef.current === rowboatSessionId) return
-    boundCodeSessionRef.current = rowboatSessionId
-    const existingTab = chatTabsRef.current.find((t) => t.runId === rowboatSessionId)
-    if (existingTab) {
-      switchChatTab(existingTab.id)
-      return
-    }
-    setChatTabs((prev) => prev.map((t) => (
-      // Rebinding to a different session = a different chat identity.
-      t.id === activeChatTabIdRef.current ? { ...t, runId: rowboatSessionId, chatId: crypto.randomUUID() } : t
-    )))
-    loadRun(rowboatSessionId)
-  }, [switchChatTab, loadRun])
-
-  const closeChatTab = useCallback((tabId: string) => {
-    if (chatTabs.length <= 1) return
-    const idx = chatTabs.findIndex(t => t.id === tabId)
-    if (idx === -1) return
-    saveChatScrollForTab(tabId)
-    // Resolve before the tab list changes — chat-keyed maps below.
-    const closingChatId = chatIdForTab(tabId)
-    const nextTabs = chatTabs.filter(t => t.id !== tabId)
-    setChatTabs(nextTabs)
-    setChatViewStateByTab(prev => {
-      if (!(tabId in prev)) return prev
-      const next = { ...prev }
-      delete next[tabId]
-      return next
-    })
-    chatDraftsRef.current.delete(closingChatId)
-    selectionByTabRef.current.delete(closingChatId)
-    chatScrollTopByTabRef.current.delete(tabId)
-    setWorkDirByTab((prev) => {
-      if (!(tabId in prev)) return prev
-      const next = { ...prev }
-      delete next[tabId]
-      return next
-    })
-    setToolOpenByTab((prev) => {
-      if (!(tabId in prev)) return prev
-      const next = { ...prev }
-      delete next[tabId]
-      return next
-    })
-
-    if (tabId === activeChatTabId && nextTabs.length > 0) {
-      const newIdx = Math.min(idx, nextTabs.length - 1)
-      const newActiveTab = nextTabs[newIdx]
-      // Cancel stale in-flight loads from the closing tab.
-      loadRunRequestIdRef.current += 1
-      setActiveChatTabId(newActiveTab.id)
-      const restored = restoreChatTabState(newActiveTab.id, newActiveTab.runId)
-      if (newActiveTab.runId && processingRunIdsRef.current.has(newActiveTab.runId)) {
-        loadRun(newActiveTab.runId)
-      } else if (!restored) {
-        applyChatTab(newActiveTab)
-      }
-    }
-  }, [chatTabs, activeChatTabId, applyChatTab, loadRun, restoreChatTabState, saveChatScrollForTab])
+    const sessionId = active?.session.id ?? null
+    if (!sessionId) return
+    bindChatToRun(sessionId)
+    // The conversation lives in the dock — selecting a session must show it.
+    setIsChatSidebarOpen(true)
+  }, [bindChatToRun])
 
   useEffect(() => {
     let cleanupScrollListener: (() => void) | undefined
@@ -4260,350 +4460,78 @@ function App() {
     getChatScrollContainer,
   ])
 
-  // File tab operations
-  const openFileInNewTab = useCallback((path: string) => {
-    dismissBrowserOverlay()
-    const existingTab = fileTabs.find(t => t.path === path)
-    if (existingTab) {
-      setActiveFileTabId(existingTab.id)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-      setSelectedPath(path)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs(prev => [...prev, { id, path }])
-    setActiveFileTabId(id)
-    setIsGraphOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-    setSelectedPath(path)
-  }, [fileTabs, dismissBrowserOverlay])
+  const currentViewState = React.useMemo<ViewState>(() => {
+    if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
+    if (isEmailOpen) return { type: 'email' }
+    if (isMeetingsOpen) return { type: 'meetings' }
+    if (isLiveNotesOpen) return { type: 'live-notes' }
+    if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
+    if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
+    if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined, mode: knowledgeViewMode }
+    if (isChatHistoryOpen) return { type: 'chat-history' }
+    if (isHomeOpen) return { type: 'home' }
+    if (isCodeOpen) return { type: 'code' }
+    if (isBgTasksOpen) return { type: 'bg-tasks' }
+    if (isAppsOpen) return { type: 'apps' }
+    if (selectedPath) return { type: 'file', path: selectedPath }
+    if (isGraphOpen) return { type: 'graph' }
+    return { type: 'chat', runId }
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
-  const switchFileTab = useCallback((tabId: string) => {
-    const tab = fileTabs.find(t => t.id === tabId)
-    if (!tab) return
-    dismissBrowserOverlay()
-    setActiveFileTabId(tabId)
+  // applyViewState is declared further down (it needs the chat-binding
+  // helpers); handlers above it reach it through this render-filled ref.
+  const applyViewStateRef = useRef<((view: ViewState) => Promise<void>) | null>(null)
+
+  // Header title for the current view (the tab strip is gone — the header
+  // names where you are instead).
+  const currentViewTitle = React.useMemo(() => {
+    switch (currentViewState.type) {
+      case 'home': return 'Home'
+      case 'chat': return 'Chat'
+      case 'chat-history': return 'Chat history'
+      case 'code': return 'Code'
+      case 'email': return 'Email'
+      case 'meetings': return 'Meetings'
+      case 'live-notes': return 'Live notes'
+      case 'bg-tasks': return 'Background tasks'
+      case 'apps': return 'Mini Apps'
+      case 'workspace': return 'Workspace'
+      case 'knowledge-view': return 'Brain'
+      case 'graph': return 'Graph View'
+      case 'suggested-topics': return 'Suggested Topics'
+      case 'task': return currentViewState.name
+      case 'file': {
+        const path = currentViewState.path
+        if (path === BASES_DEFAULT_TAB_PATH) return 'Bases'
+        if (path.endsWith('.base')) return path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
+        return path.split('/').pop()?.replace(/\.md$/i, '') || path
+      }
+    }
+  }, [currentViewState])
+
+  // Close every section flag — THE single place a section switch resets the
+  // rest of the world. Every navigation path funnels through this (via
+  // applyViewState or directly), so no switch can leave two sections both
+  // claiming the screen, or a section flag stuck on with no way to clear it.
+  const closeAllSections = useCallback(() => {
+    setSelectedPath(null)
+    setIsGraphOpen(false)
+    setIsBrowserOpen(false)
+    setIsSuggestedTopicsOpen(false)
+    setIsMeetingsOpen(false)
+    setIsLiveNotesOpen(false)
+    setIsBgTasksOpen(false)
+    setIsAppsOpen(false)
+    setIsEmailOpen(false)
+    setIsWorkspaceOpen(false)
+    setIsKnowledgeViewOpen(false)
+    setIsChatHistoryOpen(false)
+    setIsHomeOpen(false)
+    setIsCodeOpen(false)
     setSelectedBackgroundTask(null)
     setExpandedFrom(null)
-    // If chat-only maximize is active, drop back to a visible knowledge layout.
-    if (isRightPaneMaximized) {
-      setIsRightPaneMaximized(false)
-    }
-    if (isGraphTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(true)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-      return
-    }
-    if (isSuggestedTopicsTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(true)
-      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-      return
-    }
-    if (isLiveNotesTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false)
-      setIsBgTasksOpen(false)
-      setIsEmailOpen(false)
-      setIsWorkspaceOpen(false)
-      setIsKnowledgeViewOpen(false)
-      setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-      setIsLiveNotesOpen(true)
-      return
-    }
-    if (isBgTasksTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false)
-      setIsLiveNotesOpen(false)
-      setIsEmailOpen(false)
-      setIsWorkspaceOpen(false)
-      setIsKnowledgeViewOpen(false)
-      setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-      setIsBgTasksOpen(true)
-      return
-    }
-    if (isAppsTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false)
-      setIsLiveNotesOpen(false)
-      setIsBgTasksOpen(false)
-      setIsEmailOpen(false)
-      setIsWorkspaceOpen(false)
-      setIsKnowledgeViewOpen(false)
-      setIsChatHistoryOpen(false)
-      setIsHomeOpen(false)
-      setIsAppsOpen(true)
-      return
-    }
-    if (isMeetingsTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(true)
-      setIsLiveNotesOpen(false)
-      setIsBgTasksOpen(false)
-      setIsEmailOpen(false)
-      setIsWorkspaceOpen(false)
-      setIsKnowledgeViewOpen(false)
-      setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-      return
-    }
-    if (isEmailTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false)
-      setIsLiveNotesOpen(false)
-      setIsBgTasksOpen(false)
-      setIsWorkspaceOpen(false)
-      setIsKnowledgeViewOpen(false)
-      setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-      setIsEmailOpen(true)
-      return
-    }
-    if (isWorkspaceTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false)
-      setIsLiveNotesOpen(false)
-      setIsBgTasksOpen(false)
-      setIsEmailOpen(false)
-      setIsKnowledgeViewOpen(false)
-      setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-      setIsWorkspaceOpen(true)
-      return
-    }
-    if (isKnowledgeViewTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false)
-      setIsLiveNotesOpen(false)
-      setIsBgTasksOpen(false)
-      setIsEmailOpen(false)
-      setIsWorkspaceOpen(false)
-      setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-      setIsKnowledgeViewOpen(true)
-      return
-    }
-    if (isChatHistoryTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false)
-      setIsLiveNotesOpen(false)
-      setIsBgTasksOpen(false)
-      setIsEmailOpen(false)
-      setIsWorkspaceOpen(false)
-      setIsKnowledgeViewOpen(false)
-      setIsChatHistoryOpen(true); setIsHomeOpen(false); setIsAppsOpen(false)
-      return
-    }
-    if (isHomeTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
-      setIsHomeOpen(true); setIsAppsOpen(false)
-      return
-    }
-    if (isCodeTabPath(tab.path)) {
-      // isCodeOpen itself is derived from the active tab — just clear the rest.
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-      return
-    }
-    setIsGraphOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-    setSelectedPath(tab.path)
-  }, [fileTabs, isRightPaneMaximized, dismissBrowserOverlay])
-
-  const closeFileTab = useCallback((tabId: string) => {
-    const closingTab = fileTabs.find(t => t.id === tabId)
-    if (closingTab && !isGraphTabPath(closingTab.path) && !isSuggestedTopicsTabPath(closingTab.path) && !isLiveNotesTabPath(closingTab.path) && !isBgTasksTabPath(closingTab.path) && !isAppsTabPath(closingTab.path) && !isEmailTabPath(closingTab.path) && !isWorkspaceTabPath(closingTab.path) && !isKnowledgeViewTabPath(closingTab.path) && !isChatHistoryTabPath(closingTab.path) && !isHomeTabPath(closingTab.path) && !isCodeTabPath(closingTab.path) && !isBaseFilePath(closingTab.path)) {
-      removeEditorCacheForPath(closingTab.path)
-      initialContentByPathRef.current.delete(closingTab.path)
-      untitledRenameReadyPathsRef.current.delete(closingTab.path)
-      frontmatterByPathRef.current.delete(closingTab.path)
-      if (editorPathRef.current === closingTab.path) {
-        editorPathRef.current = null
-      }
-    }
-    if (closingTab && isBaseFilePath(closingTab.path)) {
-      setBaseConfigByPath((prev) => {
-        const next = { ...prev }
-        delete next[closingTab.path]
-        return next
-      })
-    }
-    setFileTabs(prev => {
-      if (prev.length <= 1) {
-        // Last file tab - close it and go back to chat
-        setActiveFileTabId(null)
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-          return []
-      }
-      const idx = prev.findIndex(t => t.id === tabId)
-      if (idx === -1) return prev
-      const next = prev.filter(t => t.id !== tabId)
-      if (tabId === activeFileTabId && next.length > 0) {
-        const newIdx = Math.min(idx, next.length - 1)
-        const newActiveTab = next[newIdx]
-        setActiveFileTabId(newActiveTab.id)
-        if (isGraphTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(true)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-        } else if (isSuggestedTopicsTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(true)
-          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-        } else if (isMeetingsTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(true)
-          setIsLiveNotesOpen(false)
-          setIsBgTasksOpen(false)
-          setIsEmailOpen(false)
-          setIsWorkspaceOpen(false)
-          setIsKnowledgeViewOpen(false)
-          setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-        } else if (isLiveNotesTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false)
-          setIsBgTasksOpen(false)
-          setIsEmailOpen(false)
-          setIsWorkspaceOpen(false)
-          setIsKnowledgeViewOpen(false)
-          setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-          setIsLiveNotesOpen(true)
-        } else if (isBgTasksTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false)
-          setIsLiveNotesOpen(false)
-          setIsBgTasksOpen(true)
-          setIsEmailOpen(false)
-          setIsWorkspaceOpen(false)
-          setIsKnowledgeViewOpen(false)
-          setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-        } else if (isAppsTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false)
-          setIsLiveNotesOpen(false)
-          setIsBgTasksOpen(false)
-          setIsEmailOpen(false)
-          setIsWorkspaceOpen(false)
-          setIsKnowledgeViewOpen(false)
-          setIsChatHistoryOpen(false)
-          setIsHomeOpen(false)
-          setIsAppsOpen(true)
-        } else if (isEmailTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false)
-          setIsLiveNotesOpen(false)
-          setIsBgTasksOpen(false)
-          setIsWorkspaceOpen(false)
-          setIsKnowledgeViewOpen(false)
-          setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-          setIsEmailOpen(true)
-        } else if (isWorkspaceTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false)
-          setIsLiveNotesOpen(false)
-          setIsBgTasksOpen(false)
-          setIsEmailOpen(false)
-          setIsKnowledgeViewOpen(false)
-          setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-          setIsWorkspaceOpen(true)
-        } else if (isKnowledgeViewTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false)
-          setIsLiveNotesOpen(false)
-          setIsBgTasksOpen(false)
-          setIsEmailOpen(false)
-          setIsWorkspaceOpen(false)
-          setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-          setIsKnowledgeViewOpen(true)
-        } else if (isChatHistoryTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false)
-          setIsLiveNotesOpen(false)
-          setIsBgTasksOpen(false)
-          setIsEmailOpen(false)
-          setIsWorkspaceOpen(false)
-          setIsKnowledgeViewOpen(false)
-          setIsChatHistoryOpen(true); setIsHomeOpen(false); setIsAppsOpen(false)
-        } else if (isHomeTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
-          setIsHomeOpen(true); setIsAppsOpen(false)
-        } else {
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-              setSelectedPath(newActiveTab.path)
-        }
-      }
-      return next
-    })
-    setEditorSessionByTabId((prev) => {
-      if (!(tabId in prev)) return prev
-      const next = { ...prev }
-      delete next[tabId]
-      return next
-    })
-    fileHistoryHandlersRef.current.delete(tabId)
-  }, [activeFileTabId, fileTabs, removeEditorCacheForPath])
+    setIsRightPaneMaximized(false)
+  }, [])
 
   const handleNewChatTab = useCallback(() => {
     // Single-chat model: reset the one conversation in place instead of
@@ -4611,42 +4539,12 @@ function App() {
     setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId: crypto.randomUUID() }])
     dismissBrowserOverlay()
     handleNewChat()
-    // Left-pane "new chat" should always open full chat view.
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) {
-      setExpandedFrom({
-        path: selectedPath,
-        graph: isGraphOpen,
-        suggestedTopics: isSuggestedTopicsOpen,
-        meetings: isMeetingsOpen,
-        liveNotes: isLiveNotesOpen,
-        bgTasks: isBgTasksOpen,
-        email: isEmailOpen,
-      })
-    } else {
-      setExpandedFrom(null)
-    }
-    setIsRightPaneMaximized(false)
-    setSelectedPath(null)
-    setIsGraphOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-  }, [dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen])
-
-  // A chat was deleted (sessions:delete succeeded): drop it from the recents
-  // list and — because closeChatTab no-ops on the last tab in the single-chat
-  // model — reset the chat surface to a fresh conversation when the deleted
-  // chat is the one currently bound, so a dead transcript never stays on
-  // screen.
-  const handleRunDeleted = useCallback((rid: string) => {
-    setRuns((prev) => prev.filter((r) => r.id !== rid))
-    const openTab = chatTabs.find((t) => t.runId === rid)
-    if (!openTab) return
-    if (chatTabs.length > 1) {
-      closeChatTab(openTab.id)
-    } else {
-      handleNewChatTab()
-    }
-  }, [chatTabs, closeChatTab, handleNewChatTab])
+    // "New chat" opens the full-screen chat; remember where we came from so
+    // closing it can restore the section.
+    const from = currentViewState.type === 'chat' ? null : currentViewState
+    closeAllSections()
+    setExpandedFrom(from)
+  }, [dismissBrowserOverlay, handleNewChat, closeAllSections, currentViewState])
 
   // Sidebar variant: reset the chat in place without leaving file/graph context.
   // A caller with a selection already chosen for the fresh chat (the Home
@@ -4660,40 +4558,51 @@ function App() {
     handleNewChat()
   }, [handleNewChat])
 
-  // Quick-ask "+": the bar wants a fresh conversation for its next question.
+  // A chat was deleted (sessions:delete succeeded): drop it from the recents
+  // list, and if it was the one on screen, reset the chat surface in place to
+  // a fresh conversation so a dead transcript never stays visible.
+  const handleRunDeleted = useCallback((rid: string) => {
+    setRuns((prev) => prev.filter((r) => r.id !== rid))
+    // The companion must not keep pointing at a deleted conversation.
+    if (hoverRunIdRef.current === rid) {
+      hoverRunIdRef.current = null
+      setHoverRunId(null)
+    }
+    const openTab = chatTabs.find((t) => t.runId === rid)
+    if (!openTab) return
+    handleNewChatTabInSidebar()
+  }, [chatTabs, handleNewChatTabInSidebar])
+
+  // Quick-ask "+": the bar wants a fresh COMPANION conversation for its next
+  // question. The app window's chat is untouched.
   useEffect(() => {
     return window.ipc.on('quick-ask:new-chat', () => {
-      handleNewChatTabInSidebar()
+      setHoverRunId(null)
     })
-  }, [handleNewChatTabInSidebar])
+  }, [])
 
-  // Companion-bar chat context: which chat a bar submit lands in (shown as
-  // the bar's destination chip) plus recents for its switcher. Pushed on
-  // every tab/run change; main caches and replays it on bar load.
+  // Companion-bar chat context: which conversation the companion is bound to
+  // (shown as the bar's destination chip) plus recents for its switcher.
+  // This is the HOVER binding — the app window's chat plays no part in it.
   useEffect(() => {
-    const activeTab = chatTabs.find((t) => t.id === activeChatTabId)
     void window.ipc
       .invoke('quickAsk:chatContext', {
-        activeRunId: activeTab?.runId ?? null,
-        activeTitle: activeTab ? getChatTabTitle(activeTab) : null,
+        activeRunId: hoverRunId,
+        activeTitle: hoverRunId
+          ? (runs.find((r) => r.id === hoverRunId)?.title || '(Untitled chat)')
+          : null,
         recent: runs.slice(0, 10).map((r) => ({ id: r.id, title: r.title || '(Untitled chat)' })),
       })
       .catch(() => {})
-  }, [chatTabs, activeChatTabId, runs, getChatTabTitle])
+  }, [hoverRunId, runs])
 
-  // The bar's chip switcher picked a chat: bind the active tab to it — the
-  // same pattern as the sidebar's recent-chats list.
+  // The bar's chip switcher picked a chat: rebind the COMPANION to it. The
+  // app window keeps showing whatever it was showing.
   useEffect(() => {
     return window.ipc.on('quick-ask:select-chat', ({ runId: rid }) => {
-      const existingTab = chatTabs.find((t) => t.runId === rid)
-      if (existingTab) {
-        switchChatTab(existingTab.id)
-        return
-      }
-      setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid } : t)))
-      void loadRun(rid)
+      setHoverRunId(rid)
     })
-  }, [chatTabs, activeChatTabId, switchChatTab, loadRun])
+  }, [])
 
   // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
   // queues the message; the pending-submit effect (below) flushes it once state has settled
@@ -4800,6 +4709,7 @@ function App() {
     handleNewChatTabInSidebar(homeSelectionRef.current)
     setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode })
   }, [handleNewChatTabInSidebar])
+  handleHomeComposerSubmitRef.current = handleHomeComposerSubmit
   const homeComposeTargetRef = useRef(homeComposeTarget)
   useEffect(() => { homeComposeTargetRef.current = homeComposeTarget }, [homeComposeTarget])
 
@@ -4915,100 +4825,20 @@ function App() {
   }, [])
 
   const handleOpenFullScreenChat = useCallback(() => {
-    // Remember where we came from so the close button can return
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) {
-      setExpandedFrom({
-        path: selectedPath,
-        graph: isGraphOpen,
-        suggestedTopics: isSuggestedTopicsOpen,
-        meetings: isMeetingsOpen,
-        liveNotes: isLiveNotesOpen,
-        bgTasks: isBgTasksOpen,
-        email: isEmailOpen,
-      })
-    }
+    // Remember where we came from so the close button can return.
+    const from = currentViewState.type === 'chat' ? null : currentViewState
     dismissBrowserOverlay()
-    setIsRightPaneMaximized(false)
-    setSelectedPath(null)
-    setIsGraphOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, dismissBrowserOverlay])
+    closeAllSections()
+    setExpandedFrom(from)
+  }, [closeAllSections, currentViewState, dismissBrowserOverlay])
 
   const handleCloseFullScreenChat = useCallback((): boolean => {
-    let restored = false
-    if (expandedFrom) {
-      restored = true
-      if (expandedFrom.graph) {
-        setIsGraphOpen(true)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-      } else if (expandedFrom.suggestedTopics) {
-        setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(true)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-      } else if (expandedFrom.meetings) {
-        setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(true)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(false)
-      } else if (expandedFrom.liveNotes) {
-        setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(false)
-        setIsLiveNotesOpen(true)
-      } else if (expandedFrom.bgTasks) {
-        setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(true)
-        setIsEmailOpen(false)
-      } else if (expandedFrom.email) {
-        setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(true)
-      } else if (expandedFrom.path) {
-        setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-        setSelectedPath(expandedFrom.path)
-      } else {
-        // expandedFrom was captured from a view this restorer doesn't track
-        // (e.g. Home): there's nothing to re-open, so report it and let the
-        // caller fall back instead of leaving a blank full-screen chat.
-        restored = false
-      }
-      setExpandedFrom(null)
-      setIsRightPaneMaximized(false)
-    }
-    return restored
+    if (!expandedFrom) return false
+    const target = expandedFrom
+    setExpandedFrom(null)
+    void applyViewStateRef.current?.(target)
+    return true
   }, [expandedFrom])
-
-  const currentViewState = React.useMemo<ViewState>(() => {
-    if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
-    if (isEmailOpen) return { type: 'email' }
-    if (isMeetingsOpen) return { type: 'meetings' }
-    if (isLiveNotesOpen) return { type: 'live-notes' }
-    if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
-    if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
-    if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined, mode: knowledgeViewMode }
-    if (isChatHistoryOpen) return { type: 'chat-history' }
-    if (isHomeOpen) return { type: 'home' }
-    if (isCodeOpen) return { type: 'code' }
-    if (isBgTasksOpen) return { type: 'bg-tasks' }
-    if (isAppsOpen) return { type: 'apps' }
-    if (selectedPath) return { type: 'file', path: selectedPath }
-    if (isGraphOpen) return { type: 'graph' }
-    return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
   // Feature-importance funnel: one event per view the user lands on. Keyed on
   // the view *type* so switching files/threads inside a view doesn't re-fire.
@@ -5016,359 +4846,51 @@ function App() {
     analytics.viewOpened(currentViewState.type)
   }, [currentViewState.type])
 
+  // Safety net: Radix modal dialogs set `pointer-events: none` on <body> and
+  // restore it on close — but a navigation that unmounts the dialog's owner
+  // (deep link, assistant navigation, tour) skips the restore and leaves the
+  // whole window inert. Any view change clears the lock.
+  useEffect(() => {
+    if (document.body.style.pointerEvents === 'none') {
+      document.body.style.pointerEvents = ''
+    }
+    // Keyed on the whole view state (not just .type): file→file navigation
+    // must also clear the lock.
+  }, [currentViewState])
+
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
     if (last && viewStatesEqual(last, entry)) return stack
     return [...stack, entry]
   }, [])
 
-  const ensureFileTabForPath = useCallback((path: string) => {
-    const existingTab = fileTabs.find((tab) => tab.path === path)
-    if (existingTab) {
-      setActiveFileTabId(existingTab.id)
-      return
-    }
-
-    if (activeFileTabId) {
-      const activeTab = fileTabs.find((tab) => tab.id === activeFileTabId)
-      if (activeTab && !isGraphTabPath(activeTab.path) && !isBaseFilePath(activeTab.path)) {
-        setFileTabs((prev) => prev.map((tab) => (
-          tab.id === activeFileTabId ? { ...tab, path } : tab
-        )))
-        // Rebinds this tab to a different note path: reset editor session to clear undo history.
-        setEditorSessionByTabId((prev) => ({
-          ...prev,
-          [activeFileTabId]: (prev[activeFileTabId] ?? 0) + 1,
-        }))
-        return
-      }
-    }
-
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path }])
-    setActiveFileTabId(id)
-  }, [fileTabs, activeFileTabId])
-
-  const ensureGraphFileTab = useCallback(() => {
-    const existingGraphTab = fileTabs.find((tab) => isGraphTabPath(tab.path))
-    if (existingGraphTab) {
-      setActiveFileTabId(existingGraphTab.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: GRAPH_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureSuggestedTopicsFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isSuggestedTopicsTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: SUGGESTED_TOPICS_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureLiveNotesFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isLiveNotesTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: LIVE_NOTES_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureMeetingsFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isMeetingsTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: MEETINGS_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureBgTasksFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isBgTasksTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: BG_TASKS_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureAppsFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isAppsTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: APPS_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureEmailFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isEmailTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: EMAIL_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureWorkspaceFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isWorkspaceTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: WORKSPACE_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureKnowledgeViewFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isKnowledgeViewTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: KNOWLEDGE_VIEW_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureChatHistoryFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isChatHistoryTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: CHAT_HISTORY_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureHomeFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isHomeTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: HOME_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const ensureCodeFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isCodeTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: CODE_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
-  const openEmailView = useCallback((threadId?: string) => {
-    setSelectedPath(null)
-    setIsGraphOpen(false)
-    setIsBrowserOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false)
-    setIsLiveNotesOpen(false)
-    setIsBgTasksOpen(false)
-    setIsWorkspaceOpen(false)
-    setIsKnowledgeViewOpen(false)
-    setIsChatHistoryOpen(false)
-    setIsHomeOpen(false); setIsAppsOpen(false)
-    setSelectedBackgroundTask(null)
-    setExpandedFrom(null)
-    setIsRightPaneMaximized(false)
-    setIsEmailOpen(true)
-    if (threadId) {
-      setEmailInitialThreadId(threadId)
-      setEmailThreadIdVersion((v) => v + 1)
-    }
-    // Same reason as in navigateToView: a stale assistant-driven search must
-    // not repopulate the search box when the user re-enters the email view.
-    setEmailInitialSearchQuery(null)
-    ensureEmailFileTab()
-  }, [ensureEmailFileTab])
-
-  const openBgTasksView = useCallback(() => {
-    setSelectedPath(null)
-    setIsGraphOpen(false)
-    setIsBrowserOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-    setSelectedBackgroundTask(null)
-    setExpandedFrom(null)
-    setIsRightPaneMaximized(false)
-    setIsBgTasksOpen(true)
-    ensureBgTasksFileTab()
-  }, [ensureBgTasksFileTab])
-
-  const openAppsView = useCallback(() => {
-    setSelectedPath(null)
-    setIsGraphOpen(false)
-    setIsBrowserOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
-    setSelectedBackgroundTask(null)
-    setExpandedFrom(null)
-    setIsRightPaneMaximized(false)
-    setIsAppsOpen(true)
-    ensureAppsFileTab()
-  }, [ensureAppsFileTab])
-
-  const openMeetingsView = useCallback(() => {
-    setSelectedPath(null)
-    setIsGraphOpen(false)
-    setIsBrowserOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(true)
-    setIsLiveNotesOpen(false)
-    setIsBgTasksOpen(false)
-    setIsEmailOpen(false)
-    setIsWorkspaceOpen(false)
-    setIsKnowledgeViewOpen(false)
-    setIsChatHistoryOpen(false)
-    setIsHomeOpen(false); setIsAppsOpen(false)
-    setSelectedBackgroundTask(null)
-    setExpandedFrom(null)
-    setIsRightPaneMaximized(false)
-    ensureMeetingsFileTab()
-  }, [ensureMeetingsFileTab])
-
-  const openCodeView = useCallback(() => {
-    setSelectedPath(null)
-    setIsGraphOpen(false)
-    setIsBrowserOpen(false)
-    setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-    setSelectedBackgroundTask(null)
-    setExpandedFrom(null)
-    setIsRightPaneMaximized(false)
-    ensureCodeFileTab()
-  }, [ensureCodeFileTab])
-
+  // Make a ViewState the world: close every section, then open the one the
+  // view names. Because closeAllSections resets everything (including Code,
+  // which used to live outside this system as a sentinel tab), applying a
+  // view can never strand a stale section on screen.
   const applyViewState = useCallback(async (view: ViewState) => {
+    closeAllSections()
     switch (view.type) {
       case 'file':
-        setSelectedBackgroundTask(null)
-        setIsGraphOpen(false)
-        // Navigating to a file dismisses the browser overlay so the file is
-        // visible in the middle pane.
-        setIsBrowserOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-        setExpandedFrom(null)
-        // Preserve split vs knowledge-max mode when navigating knowledge files.
-        // Only exit chat-only maximize, because that would hide the selected file.
-        if (isRightPaneMaximized) {
-          setIsRightPaneMaximized(false)
-        }
         setSelectedPath(view.path)
-        ensureFileTabForPath(view.path)
         return
       case 'graph':
-        setSelectedBackgroundTask(null)
-        setSelectedPath(null)
-        setIsBrowserOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-        setExpandedFrom(null)
         setIsGraphOpen(true)
-        ensureGraphFileTab()
-        if (isRightPaneMaximized) {
-          setIsRightPaneMaximized(false)
-        }
         return
       case 'task':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
         return
       case 'suggested-topics':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(true)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-        ensureSuggestedTopicsFileTab()
         return
       case 'meetings':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
         setIsMeetingsOpen(true)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(false)
-        setIsWorkspaceOpen(false)
-        setIsKnowledgeViewOpen(false)
-        setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-        ensureMeetingsFileTab()
         return
       case 'live-notes':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(false)
-        setIsWorkspaceOpen(false)
-        setIsKnowledgeViewOpen(false)
-        setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
         setIsLiveNotesOpen(true)
-        ensureLiveNotesFileTab()
         return
       case 'email':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(false)
         setIsEmailOpen(true)
-        setIsWorkspaceOpen(false)
-        setIsKnowledgeViewOpen(false)
-        setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
         // Deep links (e.g. a new-email notification) carry the thread to open;
         // bump the version so EmailView re-selects it even if email is already open.
         if (view.threadId) {
@@ -5383,147 +4905,41 @@ function App() {
           // every re-entry, even after the user cleared the search box.
           setEmailInitialSearchQuery(null)
         }
-        ensureEmailFileTab()
         return
       case 'workspace':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(false)
         setIsWorkspaceOpen(true)
-        setIsKnowledgeViewOpen(false)
-        setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
         setWorkspaceInitialPath(view.path ?? null)
-        ensureWorkspaceFileTab()
         return
       case 'knowledge-view':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(false)
-        setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(true)
         setKnowledgeViewMode(view.mode ?? (view.folderPath ? 'files' : 'graph'))
         setKnowledgeViewFolderPath(view.folderPath ?? null)
-        setIsChatHistoryOpen(false)
-      setIsHomeOpen(false); setIsAppsOpen(false)
-        ensureKnowledgeViewFileTab()
         return
       case 'chat-history':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(false)
-        setIsWorkspaceOpen(false)
-        setIsKnowledgeViewOpen(false)
-        setIsChatHistoryOpen(true); setIsHomeOpen(false); setIsAppsOpen(false)
-        ensureChatHistoryFileTab()
+        setIsChatHistoryOpen(true)
         return
       case 'home':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false)
-        setIsLiveNotesOpen(false)
-        setIsBgTasksOpen(false)
-        setIsEmailOpen(false)
-        setIsWorkspaceOpen(false)
-        setIsKnowledgeViewOpen(false)
-        setIsChatHistoryOpen(false)
-        setIsHomeOpen(true); setIsAppsOpen(false)
-        ensureHomeFileTab()
+        setIsHomeOpen(true)
         return
       case 'code':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
-        ensureCodeFileTab()
+        setIsCodeOpen(true)
         return
       case 'bg-tasks':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
         setIsBgTasksOpen(true)
-        ensureBgTasksFileTab()
         return
       case 'apps':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         setIsAppsOpen(true)
-        ensureAppsFileTab()
         return
       case 'chat':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false); setIsAppsOpen(false)
         if (view.runId) {
-          const targetRunId = view.runId
-          // Bind the loaded run to a chat tab so its title (derived from
-          // tab.runId) updates. Reuse an existing tab for this run if one is
-          // open, otherwise rebind the active tab.
-          const existingTab = chatTabsRef.current.find((tab) => tab.runId === targetRunId)
-          if (existingTab) {
-            setActiveChatTabId(existingTab.id)
-          } else {
-            setChatTabs((prev) => prev.map((tab) => (
-              // Rebinding to a different session = a different chat identity.
-              tab.id === activeChatTabIdRef.current ? { ...tab, runId: targetRunId, chatId: crypto.randomUUID() } : tab
-            )))
-          }
-          await loadRun(targetRunId)
+          bindChatToRun(view.runId)
         } else {
           handleNewChat()
         }
         return
     }
-  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, ensureHomeFileTab, ensureCodeFileTab, ensureBgTasksFileTab, ensureAppsFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [closeAllSections, bindChatToRun, handleNewChat])
+  applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -5555,6 +4971,29 @@ function App() {
       void navigateToView({ type: 'home' })
     }
   }, [handleCloseFullScreenChat, navigateToView])
+
+  // Section entry points (sidebar items, deep links, the tour). Thin wrappers
+  // over navigateToView so every entry records history — the old direct
+  // state-twiddling versions didn't, which made Back skip whole sections.
+  const openEmailView = useCallback((threadId?: string) => {
+    void navigateToView({ type: 'email', ...(threadId ? { threadId } : {}) })
+  }, [navigateToView])
+
+  const openBgTasksView = useCallback(() => {
+    void navigateToView({ type: 'bg-tasks' })
+  }, [navigateToView])
+
+  const openAppsView = useCallback(() => {
+    void navigateToView({ type: 'apps' })
+  }, [navigateToView])
+
+  const openMeetingsView = useCallback(() => {
+    void navigateToView({ type: 'meetings' })
+  }, [navigateToView])
+
+  const openCodeView = useCallback(() => {
+    void navigateToView({ type: 'code' })
+  }, [navigateToView])
 
   const navigateBack = useCallback(async () => {
     const { back, forward } = historyRef.current
@@ -5645,6 +5084,7 @@ function App() {
           onClick: () => window.open(`https://github.com/rowboatlabs/rowboat/releases/tag/v${version}`, '_blank'),
         },
         duration: 10000,
+        closeButton: true,
       })
     })
   }, [])
@@ -5658,6 +5098,31 @@ function App() {
     void window.ipc.invoke('retention:consumeFirstRunNotice', null).then(({ show, chatDays }) => {
       if (show) setRetentionNotice({ chatDays })
     }).catch(() => { /* settings unavailable — try again next launch */ })
+  }, [])
+
+  // The quick-ask chord failed to register at boot — another app owns it.
+  // Say so (once per launch) with a path to fix it, instead of quick-ask
+  // being silently dead. Deliberately no automatic rebinding: a shortcut
+  // that moves on its own is worse than one that's honestly broken.
+  const [shortcutSettingsOpen, setShortcutSettingsOpen] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const s = await window.ipc.invoke('quickAsk:getShortcut', null)
+        if (s.registered) return
+        const isMacHere = navigator.platform.toLowerCase().includes('mac')
+        toast.warning('Quick Ask shortcut unavailable', {
+          description: `${quickAskShortcut.formatShortcut(s.accelerator, isMacHere)} is in use by another app, so Quick Ask can't be summoned right now. Pick a different shortcut in Settings.`,
+          duration: 15000,
+          closeButton: true,
+          action: {
+            label: 'Change shortcut',
+            onClick: () => setShortcutSettingsOpen(true),
+          },
+        })
+      } catch { /* stale preload — channel not there yet */ }
+    }, 2000)
+    return () => clearTimeout(timer)
   }, [])
 
   // Report the UI theme to the apps server (spec §7.1): apps read it from
@@ -6038,6 +5503,13 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
+  // The call button on a chat means "float THIS chat": it reads as End call
+  // only on the chat the live call is actually bound to; on any other chat
+  // it stays a call button that re-points the live call (see handleStartCall).
+  const callOnActiveChat = inCall
+    && hoverRunId != null
+    && chatTabs.find((t) => t.id === activeChatTabId)?.runId === hoverRunId
+
   const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -6078,7 +5550,7 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [handleNewChatTab])
 
-  // Route undo/redo to the active markdown tab only (prevents cross-tab browser undo behavior).
+  // Route undo/redo to the open markdown editor (prevents browser undo).
   useEffect(() => {
     const handleHistoryKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
@@ -6089,7 +5561,7 @@ function App() {
       const wantsRedo = (key === 'z' && e.shiftKey) || (!isMac && key === 'y')
       if (!wantsUndo && !wantsRedo) return
 
-      if (!selectedPath || !selectedPath.endsWith('.md') || !activeFileTabId) return
+      if (!selectedPath || !selectedPath.endsWith('.md')) return
 
       const target = e.target as EventTarget | null
       if (target instanceof HTMLElement) {
@@ -6102,7 +5574,7 @@ function App() {
         if (inOtherTextInput) return
       }
 
-      const handlers = fileHistoryHandlersRef.current.get(activeFileTabId)
+      const handlers = fileHistoryHandlersRef.current
       if (!handlers) return
 
       e.preventDefault()
@@ -6116,114 +5588,7 @@ function App() {
 
     document.addEventListener('keydown', handleHistoryKeyDown, true)
     return () => document.removeEventListener('keydown', handleHistoryKeyDown, true)
-  }, [activeFileTabId, isMac, selectedPath])
-
-  // Keyboard shortcuts for tab management
-  useEffect(() => {
-    const handleTabKeyDown = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey
-      if (!mod) return
-      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) && isChatSidebarOpen)
-      const targetPane: ShortcutPane = rightPaneAvailable
-        ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
-        : 'left'
-      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen)
-      const selectedKnowledgePath = isGraphOpen
-        ? GRAPH_TAB_PATH
-        : isSuggestedTopicsOpen
-          ? SUGGESTED_TOPICS_TAB_PATH
-          : isMeetingsOpen
-            ? MEETINGS_TAB_PATH
-          : isLiveNotesOpen
-            ? LIVE_NOTES_TAB_PATH
-          : isBgTasksOpen
-            ? BG_TASKS_TAB_PATH
-          : isAppsOpen
-            ? APPS_TAB_PATH
-          : isEmailOpen
-            ? EMAIL_TAB_PATH
-          : isWorkspaceOpen
-            ? WORKSPACE_TAB_PATH
-          : isKnowledgeViewOpen
-            ? KNOWLEDGE_VIEW_TAB_PATH
-          : isChatHistoryOpen
-            ? CHAT_HISTORY_TAB_PATH
-          : isHomeOpen
-            ? HOME_TAB_PATH
-          : selectedPath
-      const targetFileTabId = activeFileTabId ?? (
-        selectedKnowledgePath
-          ? (fileTabs.find((tab) => tab.path === selectedKnowledgePath)?.id ?? null)
-          : null
-      )
-
-      // Cmd+W — close active tab
-      if (e.key === 'w') {
-        e.preventDefault()
-        if (inFileView && targetFileTabId) {
-          closeFileTab(targetFileTabId)
-        } else {
-          closeChatTab(activeChatTabId)
-        }
-        return
-      }
-
-      // Cmd+1..9 — switch to tab N (Cmd+9 always goes to last tab)
-      if (/^[1-9]$/.test(e.key)) {
-        e.preventDefault()
-        const n = parseInt(e.key, 10)
-        if (inFileView) {
-          const idx = e.key === '9' ? fileTabs.length - 1 : n - 1
-          const tab = fileTabs[idx]
-          if (tab) switchFileTab(tab.id)
-        } else {
-          const idx = e.key === '9' ? chatTabs.length - 1 : n - 1
-          const tab = chatTabs[idx]
-          if (tab) switchChatTab(tab.id)
-        }
-        return
-      }
-
-      // Cmd+Shift+] — next tab, Cmd+Shift+[ — previous tab
-      if (e.shiftKey && (e.key === ']' || e.key === '[')) {
-        e.preventDefault()
-        const direction = e.key === ']' ? 1 : -1
-        if (inFileView) {
-          const currentIdx = fileTabs.findIndex(t => t.id === targetFileTabId)
-          if (currentIdx === -1) return
-          const nextIdx = (currentIdx + direction + fileTabs.length) % fileTabs.length
-          switchFileTab(fileTabs[nextIdx].id)
-        } else {
-          const currentIdx = chatTabs.findIndex(t => t.id === activeChatTabId)
-          if (currentIdx === -1) return
-          const nextIdx = (currentIdx + direction + chatTabs.length) % chatTabs.length
-          switchChatTab(chatTabs[nextIdx].id)
-        }
-        return
-      }
-
-      // Ctrl+Tab — next tab, Ctrl+Shift+Tab — previous tab (browser-style).
-      // Bound to Ctrl specifically (Cmd+Tab is the OS app switcher on macOS).
-      if (e.ctrlKey && e.key === 'Tab') {
-        e.preventDefault()
-        const direction = e.shiftKey ? -1 : 1
-        if (inFileView) {
-          const currentIdx = fileTabs.findIndex(t => t.id === targetFileTabId)
-          if (currentIdx === -1) return
-          const nextIdx = (currentIdx + direction + fileTabs.length) % fileTabs.length
-          switchFileTab(fileTabs[nextIdx].id)
-        } else {
-          const currentIdx = chatTabs.findIndex(t => t.id === activeChatTabId)
-          if (currentIdx === -1) return
-          const nextIdx = (currentIdx + direction + chatTabs.length) % chatTabs.length
-          switchChatTab(chatTabs[nextIdx].id)
-        }
-        return
-      }
-    }
-    document.addEventListener('keydown', handleTabKeyDown)
-    return () => document.removeEventListener('keydown', handleTabKeyDown)
-  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
+  }, [isMac, selectedPath])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -6248,7 +5613,7 @@ function App() {
           }),
         },
       }))
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedBackgroundTask) {
+      if (isFullScreenChat) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
@@ -6397,21 +5762,21 @@ function App() {
     },
     openGraph: () => {
       // From chat-only landing state, open graph directly in full knowledge view.
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedBackgroundTask) {
+      if (isFullScreenChat) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'graph' })
     },
     openBases: () => {
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedBackgroundTask) {
+      if (isFullScreenChat) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
     },
     openWorkspaceAt: (path?: string) => {
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedBackgroundTask) {
+      if (isFullScreenChat) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
@@ -6451,7 +5816,6 @@ function App() {
         untitledRenameReadyPathsRef.current.delete(oldPath)
         const rewriteForRename = (content: string) =>
           isDir ? content : rewriteWikiLinksForRenamedFileInMarkdown(content, oldPath, newPath)
-        setFileTabs(prev => prev.map(tab => (tab.path === oldPath ? { ...tab, path: newPath } : tab)))
         if (editorPathRef.current === oldPath) {
           editorPathRef.current = newPath
         }
@@ -6500,11 +5864,8 @@ function App() {
           untitledRenameReadyPathsRef.current.delete(path)
           frontmatterByPathRef.current.delete(path)
         }
-        // Close any file tab showing the deleted file
-        const tabForFile = fileTabs.find(t => t.path === path)
-        if (tabForFile) {
-          closeFileTab(tabForFile.id)
-        } else if (selectedPath === path) {
+        // If the deleted file is on screen, clear it (falls back to chat).
+        if (selectedPath === path) {
           setSelectedPath(null)
         }
       } catch (err) {
@@ -6529,10 +5890,7 @@ function App() {
         console.error('Failed to open in file manager:', err)
       })
     },
-    onOpenInNewTab: (path: string) => {
-      openFileInNewTab(path)
-    },
-  }), [tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
+  }), [tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, removeEditorCacheForPath])
 
   // Drives the mascot product tour through the app's main sections
   const handleTourNavigate = useCallback((target: TourNavTarget) => {
@@ -6582,38 +5940,20 @@ function App() {
       return newSet
     })
 
-    // If tab already exists for this path (e.g. second call after transcription),
-    // force a content reload instead of creating a duplicate tab.
-    const existingTab = fileTabs.find(tab => tab.path === notePath)
-    if (existingTab) {
-      setActiveFileTabId(existingTab.id)
-      // Read fresh content from disk and update the editor
+    // If the note is already on screen (e.g. second call after transcription),
+    // force a content reload instead of re-navigating.
+    if (selectedPathRef.current === notePath) {
       try {
-        const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
-        const { raw: fm, body } = splitFrontmatter(result.data)
-        frontmatterByPathRef.current.set(notePath, fm)
-        setFileContent(body)
-        setEditorContent(body)
-        editorContentRef.current = body
-        editorPathRef.current = notePath
-        initialContentRef.current = body
-        initialContentByPathRef.current.set(notePath, body)
-        setEditorContentByPath(prev => ({ ...prev, [notePath]: body }))
-        editorContentByPathRef.current.set(notePath, body)
-        // Bump editor session to force TipTap to pick up the new content
-        setEditorSessionByTabId(prev => ({
-          ...prev,
-          [existingTab.id]: (prev[existingTab.id] ?? 0) + 1,
-        }))
+        await reloadMarkdownFileIntoEditor(notePath)
       } catch {
         // File read failed — ignore
       }
       return
     }
 
-    // First call — open the file in a tab
+    // First call — open the file
     navigateToFile(notePath)
-  }, [loadDirectory, navigateToFile, fileTabs])
+  }, [loadDirectory, navigateToFile, reloadMarkdownFileIntoEditor])
 
   const meetingNotePathRef = useRef<string | null>(null)
   const meetingRecordingStartedAtMsRef = useRef<number | null>(null)
@@ -7035,20 +6375,10 @@ function App() {
     })
     return () => cancelAnimationFrame(id)
   }, [shouldCollapseLeftPane, insetCollapseFromPx])
-  const openMarkdownTabs = React.useMemo(() => {
-    const markdownTabs = fileTabs.filter(tab => tab.path.endsWith('.md'))
-    if (selectedPath?.endsWith('.md')) {
-      const hasSelectedTab = markdownTabs.some(tab => tab.path === selectedPath)
-      if (!hasSelectedTab) {
-        return [...markdownTabs, { id: '__active-markdown-tab__', path: selectedPath }]
-      }
-    }
-    return markdownTabs
-  }, [fileTabs, selectedPath])
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
-        if (section === 'knowledge' && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen) {
+        if (section === 'knowledge' && isFullScreenChat) {
           void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
         }
       }}>
@@ -7124,17 +6454,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen) && fileTabs.length >= 1 ? (
-                  <TabBar
-                    tabs={fileTabs}
-                    activeTabId={activeFileTabId ?? ''}
-                    getTabTitle={getFileTabTitle}
-                    getTabId={(t) => t.id}
-                    onSwitchTab={switchFileTab}
-                    onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
-                  />
-                ) : isFullScreenChat ? (
+                {isFullScreenChat ? (
                   <ChatHeader
                     activeTitle={(() => {
                       const activeTab = chatTabs.find((t) => t.id === activeChatTabId)
@@ -7148,15 +6468,13 @@ function App() {
                     onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                   />
                 ) : (
-                  <TabBar
-                    tabs={chatTabs}
-                    activeTabId={activeChatTabId}
-                    getTabTitle={getChatTabTitle}
-                    getTabId={(t) => t.id}
-                    isProcessing={isChatTabProcessing}
-                    onSwitchTab={switchChatTab}
-                    onCloseTab={closeChatTab}
-                  />
+                  // No tabs: the header names the section (or open file). It is
+                  // part of the titlebar drag region — static text drags fine.
+                  <div className="flex min-w-0 flex-1 items-center self-center">
+                    <span className="truncate text-sm font-medium text-foreground/80">
+                      {currentViewTitle}
+                    </span>
+                  </div>
                 )}
                 {selectedPath && selectedPath.endsWith('.md') && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
@@ -7198,7 +6516,7 @@ function App() {
                     <TooltipContent side="bottom">Version history</TooltipContent>
                   </Tooltip>
                 )}
-                {!isFullScreenChat && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isCodeOpen && !selectedTask && !isBrowserOpen && (
+                {isHomeOpen && !isBrowserOpen && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -7219,7 +6537,9 @@ function App() {
                     a freshly-mounted no-drag button inside the drag-region header
                     otherwise has its first click swallowed by the window drag. */}
                 {(() => {
-                  const viewOpen = selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen
+                  // Any section view (including Code — it was omitted here
+                  // once, which left the dock unreopenable from Code).
+                  const viewOpen = !isFullScreenChat
                   const action = isFullScreenChat
                     ? { onClick: pushChatToSidePane, icon: <ArrowRight className="size-5" />, label: 'Dock chat to side pane' }
                     : (viewOpen && !isChatSidebarOpen)
@@ -7298,24 +6618,34 @@ function App() {
                                   : homeComposeTarget.kind === 'chatReply'
                                     ? 'Reply…'
                                     : 'Add a to-do… @rowboat hands it off')
+                            : 'Ask anything — starts a new chat'}
+                          isRecording={isRecording && voiceOwner === HOME_VOICE_HOLDER}
+                          recordingText={voiceOwner === HOME_VOICE_HOLDER ? voice.interimText : undefined}
+                          recordingState={voiceOwner === HOME_VOICE_HOLDER
+                            ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening')
                             : undefined}
+                          audioLevelsRef={voice.audioLevelsRef}
+                          onStartRecording={() => handleStartRecording(HOME_VOICE_HOLDER)}
+                          onSubmitRecording={handleSubmitRecording}
+                          onCancelRecording={handleCancelRecording}
+                          voiceAvailable={voiceAvailable}
+                          inCall={inCall}
+                          callOnThisChat={callOnActiveChat}
+                          onStartCall={handleStartCall}
+                          onEndCall={endCall}
+                          callAvailable={voiceAvailable && ttsAvailable}
                         />
                       }
                       onComposeTodo={composeTodoOnHome}
                       composeTarget={homeComposeTarget}
                       onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
+                      onNewChat={handleNewChatTab}
+                      onFocusComposer={() => setHomeComposerFocusSignal((n) => n + 1)}
                       onOpenNote={(path) => navigateToFile(path)}
                       onOpenInChat={(sessionId) => {
                         // Bind the dock (not the full-screen chat) to the
-                        // item's session — same pattern as ChatSidebar's
-                        // onSelectRun.
-                        const existingTab = chatTabs.find((t) => t.runId === sessionId)
-                        if (existingTab) {
-                          switchChatTab(existingTab.id)
-                        } else {
-                          setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: sessionId } : t))
-                          void loadRun(sessionId)
-                        }
+                        // item's session.
+                        bindChatToRun(sessionId)
                         setIsChatSidebarOpen(true)
                       }}
                       onShowOverview={() => setHomeTab('overview')}
@@ -7418,7 +6748,6 @@ function App() {
                       createPresentation: knowledgeActions.createPresentation,
                       addGoogleDoc: knowledgeActions.addGoogleDoc,
                       createFolder: knowledgeActions.createFolder,
-                      onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
                     onNavigate={(path) => { void navigateToView({ type: 'workspace', path: path === WORKSPACE_ROOT ? undefined : path }) }}
                     onOpenNote={(path) => navigateToFile(path)}
@@ -7438,7 +6767,6 @@ function App() {
                       remove: knowledgeActions.remove,
                       copyPath: knowledgeActions.copyPath,
                       revealInFileManager: knowledgeActions.revealInFileManager,
-                      onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
                     mode={knowledgeViewMode}
                     onModeChange={setKnowledgeViewMode}
@@ -7550,80 +6878,69 @@ function App() {
                 selectedPath.endsWith('.md') ? (
                   <div className="flex-1 min-h-0 flex flex-row overflow-hidden">
                     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                      {openMarkdownTabs.map((tab) => {
-                        const isActive = activeFileTabId
-                          ? tab.id === activeFileTabId || tab.path === selectedPath
-                          : tab.path === selectedPath
-                        const isViewingHistory = viewingHistoricalVersion && isActive && versionHistoryPath === tab.path
-                        const tabFrontmatter = frontmatterByPathRef.current.get(tab.path) ?? null
-                        const linkedGoogleDoc = parseLinkedGoogleDocFrontmatter(tabFrontmatter)
-                        const tabContent = isViewingHistory
+                      {(() => {
+                        const notePath = selectedPath
+                        const isViewingHistory = viewingHistoricalVersion && versionHistoryPath === notePath
+                        const noteFrontmatter = frontmatterByPathRef.current.get(notePath) ?? null
+                        const linkedGoogleDoc = parseLinkedGoogleDocFrontmatter(noteFrontmatter)
+                        const noteContent = isViewingHistory
                           ? viewingHistoricalVersion.content
-                          : editorContentByPath[tab.path]
-                            ?? (isActive && editorPathRef.current === tab.path ? editorContent : '')
+                          : editorContentByPath[notePath]
+                            ?? (editorPathRef.current === notePath ? editorContent : '')
                         return (
                           <div
-                            key={tab.id}
-                            className={cn(
-                              'min-h-0 flex-1 flex-col overflow-hidden',
-                              isActive ? 'flex' : 'hidden'
-                            )}
-                            data-file-tab-panel={tab.id}
-                            aria-hidden={!isActive}
+                            // Keyed by path: switching files remounts the
+                            // editor with a fresh undo history.
+                            key={notePath}
+                            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                            data-file-tab-panel={notePath}
                           >
                             <MarkdownEditor
-                              ref={(el) => {
-                                if (el) editorRefsByTabId.current.set(tab.id, el)
-                                else editorRefsByTabId.current.delete(tab.id)
-                              }}
-                              content={tabContent}
-                              notePath={tab.path}
-                              onChange={(markdown) => { if (!isViewingHistory) handleEditorChange(tab.path, markdown) }}
+                              ref={(el) => { markdownEditorRef.current = el }}
+                              content={noteContent}
+                              notePath={notePath}
+                              onChange={(markdown) => { if (!isViewingHistory) handleEditorChange(notePath, markdown) }}
                               onPrimaryHeadingCommit={() => {
-                                untitledRenameReadyPathsRef.current.add(tab.path)
+                                untitledRenameReadyPathsRef.current.add(notePath)
                               }}
-                              preserveUntitledTitleHeading={isUntitledPlaceholderName(getBaseName(tab.path))}
+                              preserveUntitledTitleHeading={isUntitledPlaceholderName(getBaseName(notePath))}
                               placeholder="Start writing..."
                               wikiLinks={wikiLinkConfig}
                               onImageUpload={handleImageUpload}
-                              editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
-                              frontmatter={tabFrontmatter}
+                              editorSessionKey={editorSessionByPath[notePath] ?? 0}
+                              frontmatter={noteFrontmatter}
                               onFrontmatterChange={(newRaw) => {
-                                frontmatterByPathRef.current.set(tab.path, newRaw)
+                                frontmatterByPathRef.current.set(notePath, newRaw)
                                 // Write updated frontmatter to disk immediately
                                 const currentBody = editorContentRef.current
                                 const fullContent = joinFrontmatter(newRaw, currentBody)
-                                initialContentByPathRef.current.set(tab.path, splitFrontmatter(fullContent).body)
+                                initialContentByPathRef.current.set(notePath, splitFrontmatter(fullContent).body)
                                 initialContentRef.current = splitFrontmatter(fullContent).body
                                 void window.ipc.invoke('workspace:writeFile', {
-                                  path: tab.path,
+                                  path: notePath,
                                   data: fullContent,
                                   opts: { encoding: 'utf8' },
                                 })
                               }}
                               onHistoryHandlersChange={(handlers) => {
-                                if (handlers) {
-                                  fileHistoryHandlersRef.current.set(tab.id, handlers)
-                                } else {
-                                  fileHistoryHandlersRef.current.delete(tab.id)
-                                }
+                                fileHistoryHandlersRef.current = handlers ?? null
                               }}
                               editable={!isViewingHistory}
                               googleDoc={linkedGoogleDoc && !isViewingHistory ? {
                                 title: linkedGoogleDoc.title,
-                                isSyncing: isActive ? googleDocSyncDirection : null,
+                                isSyncing: googleDocSyncDirection,
                                 lastSyncedAt: linkedGoogleDoc.syncedAt,
                                 onOpen: () => {
                                   if (linkedGoogleDoc.url) {
                                     window.open(linkedGoogleDoc.url, '_blank')
                                   }
                                 },
-                                onSyncDown: () => { void syncGoogleDocDown(tab.path) },
-                                onSyncUp: () => { void syncGoogleDocUp(tab.path) },
+                                onSyncDown: () => { void syncGoogleDocDown(notePath) },
+                                onSyncUp: () => { void syncGoogleDocUp(notePath) },
                               } : undefined}
                               onExport={async (format) => {
-                                const markdown = tabContent
-                                const title = getBaseName(tab.path)
+                                const markdown = noteContent
+                                const title = getBaseName(notePath)
                                 try {
                                   await window.ipc.invoke('export:note', { markdown, format, title })
                                   analytics.noteExported(format)
@@ -7634,7 +6951,7 @@ function App() {
                             />
                           </div>
                         )
-                      })}
+                      })()}
                     </div>
                     <LiveNoteSidebar
                       filePath={liveNotePanelPath}
@@ -7773,6 +7090,15 @@ function App() {
                           onStop={handleStop}
                           activeIsProcessing={activeIsProcessing}
                           isStopping={isStopping}
+                          // The single session store follows the ACTIVE tab's
+                          // run — only that tab's composer shows its queue.
+                          queued={
+                            isActive && tab.runId && sessionChat.sessionId === tab.runId
+                              ? sessionChat.queued
+                              : undefined
+                          }
+                          onRemoveQueued={handleRemoveQueued}
+                          onPullQueued={handlePullQueued}
                           presetMessage={presetMessage}
                           onPresetMessageConsumed={() => setPresetMessage(undefined)}
                           codeSessionLocks={codeSessionLocks}
@@ -7808,7 +7134,8 @@ function App() {
                           onCancelRecording={handleCancelRecording}
                           voiceAvailable={voiceAvailable}
                           inCall={inCall}
-                          onStartCall={startCall}
+                          callOnThisChat={callOnActiveChat}
+                          onStartCall={handleStartCall}
                           onEndCall={endCall}
                           ttsAvailable={ttsAvailable}
                         />
@@ -7821,23 +7148,10 @@ function App() {
               )}
             </SidebarInset>
 
-            {/* Chat pane - shown when viewing files/graph. For a direct-mode
-                code session it swaps to the direct-drive chat; rowboat-mode
-                sessions use the regular assistant chat bound to their run. */}
-            {isRightPaneContext && isCodeOpen && activeCodeSession?.session.mode === 'direct' ? (
-              <ResizableRightPane
-                defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
-                onActivate={() => setActiveShortcutPane('right')}
-              >
-                <CodeChat
-                  key={activeCodeSession.session.id}
-                  session={activeCodeSession.session}
-                  status={activeCodeSession.status}
-                  onOpenDiff={setCodeDiffPath}
-                  voiceAvailable={voiceAvailable}
-                />
-              </ResizableRightPane>
-            ) : isRightPaneContext && (
+            {/* Chat pane - shown when viewing files/graph/code. Code sessions
+                bind this same assistant chat (a code session IS a chat
+                session) — there is no separate code chat surface. */}
+            {isRightPaneContext && (
               <ChatSidebar
                 placement={chatPanePlacement}
                 paneSize={chatPaneSize}
@@ -7850,18 +7164,9 @@ function App() {
                 getChatTabTitle={getChatTabTitle}
                 onNewChatTab={() => handleNewChatTabInSidebar()}
                 recentRuns={runs}
-                onSelectRun={(rid) => {
-                  const existingTab = chatTabs.find((t) => t.runId === rid)
-                  if (existingTab) {
-                    switchChatTab(existingTab.id)
-                    return
-                  }
-                  setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid, chatId: crypto.randomUUID() } : t)))
-                  loadRun(rid)
-                }}
+                onSelectRun={bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
-                onPopOut={() => void window.ipc.invoke('quickAsk:popOut', null).catch(() => {})}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
                 currentReasoning={activeChatTabState.currentReasoning}
@@ -7872,6 +7177,11 @@ function App() {
                 isStopping={isStopping}
                 onStop={handleStop}
                 onSubmit={handlePromptSubmit}
+                queuedForActive={
+                  runId && sessionChat.sessionId === runId ? sessionChat.queued : undefined
+                }
+                onRemoveQueued={handleRemoveQueued}
+                onPullQueued={handlePullQueued}
                 knowledgeFiles={knowledgeFiles}
                 recentFiles={recentWikiFiles}
                 visibleFiles={visibleKnowledgeFiles}
@@ -7898,7 +7208,7 @@ function App() {
                 codeSessionLocks={codeSessionLocks}
                 pinnedToCodeSession={
                   isCodeOpen
-                    && activeCodeSession?.session.mode === 'rowboat'
+                    && activeCodeSession
                     // Only while the pane is actually bound to the session — a
                     // palette-initiated fresh chat, for example, unbinds it.
                     && chatTabs.find((t) => t.id === activeChatTabId)?.runId === activeCodeSession.session.id
@@ -7920,8 +7230,10 @@ function App() {
                 onOpenFile={(path) => { navigateToFile(path) }}
                 onActivate={() => setActiveShortcutPane('right')}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
-                isRecording={isRecording}
-                recordingText={voice.interimText}
+                // Gated on mic ownership: when another composer (Home, a
+                // call) owns the mic, the dock must not mirror the recording.
+                isRecording={isRecording && voiceOwner === chatIdForTab(activeChatTabId)}
+                recordingText={voiceOwner === chatIdForTab(activeChatTabId) ? voice.interimText : undefined}
                 recordingState={voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'}
                 audioLevelsRef={voice.audioLevelsRef}
                 onStartRecording={() => handleStartRecording(chatIdForTab(activeChatTabIdRef.current))}
@@ -7929,7 +7241,8 @@ function App() {
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
                 inCall={inCall}
-                onStartCall={startCall}
+                callOnThisChat={callOnActiveChat}
+                onStartCall={handleStartCall}
                 onEndCall={endCall}
                 callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
@@ -8034,6 +7347,11 @@ function App() {
         open={retentionSettingsOpen}
         onOpenChange={setRetentionSettingsOpen}
         defaultTab="advanced"
+      />
+      <SettingsDialog
+        open={shortcutSettingsOpen}
+        onOpenChange={setShortcutSettingsOpen}
+        defaultTab="shortcuts"
       />
       <OnboardingModal
         open={showOnboarding}

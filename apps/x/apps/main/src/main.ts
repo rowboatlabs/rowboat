@@ -21,7 +21,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
+import { init as initOutlookSync } from "@x/core/dist/knowledge/sync_outlook.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
+import { init as initOutlookCalendarSync } from "@x/core/dist/knowledge/sync_outlook_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
@@ -57,6 +59,7 @@ import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
+import type { CodeSessionService } from "@x/core/dist/code-mode/sessions/service.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
@@ -653,6 +656,14 @@ app.whenReady().then(async () => {
     console.error('[runs-migration] pass failed:', error);
   }
 
+  // Code sessions created before code mode moved onto the turns runtime have
+  // meta files but no chat-session file — backfill them BEFORE the index scan
+  // so they open in the chat pane like any other session.
+  try {
+    await container.resolve<CodeSessionService>('codeSessionService').backfillChatSessions();
+  } catch (error) {
+    console.error('[code-sessions] backfill failed:', error);
+  }
   // New runtime: build the in-memory session index (startup scan), then
   // forward the session bus to windows. The renderer window is already up and
   // may have called sessions:list — that handler blocks on
@@ -721,8 +732,14 @@ app.whenReady().then(async () => {
   // start gmail sync
   initGmailSync();
 
+  // start outlook sync (idles unless Microsoft is connected)
+  initOutlookSync();
+
   // start calendar sync
   initCalendarSync();
+
+  // start outlook calendar sync (idles unless Microsoft is connected)
+  initOutlookCalendarSync();
 
   // start fireflies sync
   initFirefliesSync();

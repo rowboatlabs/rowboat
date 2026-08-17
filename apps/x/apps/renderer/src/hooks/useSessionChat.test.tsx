@@ -38,6 +38,18 @@ function makeDeps() {
       calls.push({ method: 'sendMessage', args })
       return { turnId: 'turn-2' }
     },
+    sendOrQueueMessage: async (...args) => {
+      calls.push({ method: 'sendOrQueueMessage', args })
+      return { queued: false as const, turnId: 'turn-2' }
+    },
+    listQueued: async () => ({ queue: [] }),
+    editQueued: async (...args) => {
+      calls.push({ method: 'editQueued', args })
+    },
+    removeQueued: async (...args) => {
+      calls.push({ method: 'removeQueued', args })
+      return { removed: null }
+    },
     respondToPermission: async (...args) => {
       calls.push({ method: 'respondToPermission', args })
     },
@@ -46,6 +58,7 @@ function makeDeps() {
     },
     stopTurn: async (...args) => {
       calls.push({ method: 'stopTurn', args })
+      return { dequeued: [] }
     },
     resumeTurn: async () => undefined,
     setTitle: async () => undefined,
@@ -60,6 +73,7 @@ function makeDeps() {
           unsubscribed += 1
         }
       },
+      subscribeSessionFeed: () => () => undefined,
       subscribeDeltas: (turnId: string) => {
         deltaSubs.push(turnId)
         return () => {

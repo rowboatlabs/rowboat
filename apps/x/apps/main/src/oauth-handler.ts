@@ -11,6 +11,13 @@ import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
+import { triggerSync as triggerOutlookSync } from '@x/core/dist/knowledge/sync_outlook.js';
+import { triggerSync as triggerOutlookCalendarSync } from '@x/core/dist/knowledge/sync_outlook_calendar.js';
+import { purgeEmailCaches } from '@x/core/dist/knowledge/email/store.js';
+import { isEmailProviderConnected } from '@x/core/dist/knowledge/email/active-provider.js';
+import { invalidateContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
+import { invalidateSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
+import { invalidateSentContacts as invalidateOutlookSentContacts } from '@x/core/dist/knowledge/outlook_sent_contacts.js';
 import { emitOAuthEvent } from './ipc.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { capture as analyticsCapture, identify as analyticsIdentify, reset as analyticsReset } from '@x/core/dist/analytics/posthog.js';
@@ -247,6 +254,20 @@ export async function connectProvider(provider: string, credentials?: { clientId
     const oauthRepo = getOAuthRepo();
     const providerConfig = await getProviderConfig(provider);
 
+    // Only one email provider (Google or Microsoft) may be connected at a
+    // time — the inbox cache, contact indexes, and copilot email routing all
+    // assume a single active mailbox.
+    if (provider === 'google' || provider === 'microsoft') {
+      const other = provider === 'google' ? 'microsoft' : 'google';
+      if (await isEmailProviderConnected(other)) {
+        const otherName = other === 'google' ? 'Google' : 'Microsoft';
+        return {
+          success: false,
+          error: `Disconnect ${otherName} first — only one email account can be connected at a time.`,
+        };
+      }
+    }
+
     if (provider === 'google') {
       if (!credentials?.clientId || !credentials?.clientSecret) {
         // No credentials → rowboat mode if the user is signed in to Rowboat
@@ -288,25 +309,18 @@ export async function connectProvider(provider: string, credentials?: { clientId
     const { server, port: boundPort } = await createAuthServer(
       startPort,
       async (callbackUrl) => {
-        // Guard against duplicate callbacks (browser may send multiple requests)
+        // Guard against duplicate callbacks (browser may send multiple
+        // requests). validateCallback below has already matched `state`, so
+        // only genuine duplicates of the live callback are dropped here — a
+        // stale or foreign request can no longer consume the one-shot guard.
         if (callbackHandled) return;
         callbackHandled = true;
-        const receivedState = callbackUrl.searchParams.get('state');
-        if (receivedState == null || receivedState === '') {
-          throw new Error(
-            'OAuth callback missing state parameter. Complete sign-in in the browser or check the redirect URI.'
-          );
-        }
-        if (receivedState !== state) {
-          throw new Error('Invalid state parameter - possible CSRF attack');
-        }
-
-        const flow = activeFlows.get(state);
-        if (!flow || flow.provider !== provider) {
-          throw new Error('Invalid OAuth flow state');
-        }
 
         try {
+          const flow = activeFlows.get(state);
+          if (!flow || flow.provider !== provider) {
+            throw new Error('Invalid OAuth flow state');
+          }
           // Use full callback URL (includes iss, scope, etc.) so openid-client validation succeeds
           console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
           const tokens = await oauthClient.exchangeCodeForTokens(
@@ -332,6 +346,9 @@ export async function connectProvider(provider: string, credentials?: { clientId
           if (provider === 'google') {
             triggerGmailSync();
             triggerCalendarSync();
+          } else if (provider === 'microsoft') {
+            triggerOutlookSync();
+            triggerOutlookCalendarSync();
           } else if (provider === 'fireflies-ai') {
             triggerFirefliesSync();
           }
@@ -398,7 +415,44 @@ export async function connectProvider(provider: string, credentials?: { clientId
       // Static providers (Google BYOK) keep fixed-port behaviour to match the
       // pre-registered redirect URI at the provider's console. DCR providers
       // can fall back since we register the actual bound port below.
-      { fallback: !isStaticClient },
+      {
+        fallback: !isStaticClient,
+        // Gatekeeper: requests whose `state` doesn't match the live flow (a
+        // leftover tab from an earlier sign-in, a prefetch, a scanner) get a
+        // polite close-this-tab page and never reach onError/onCallback — so
+        // they can neither settle nor poison the live flow. Runs before the
+        // provider-error branch too, keeping stale access_denied tabs inert.
+        validateCallback: (url) => {
+          const receivedState = url.searchParams.get('state');
+          if (receivedState == null || receivedState === '') {
+            return 'The sign-in response is missing its state parameter. Close this tab and retry from Rowboat.';
+          }
+          if (receivedState !== state) {
+            console.warn(`[OAuth] ${provider}: received state ${receivedState} does not match live flow state ${state || '<unset>'}`);
+            return 'This sign-in attempt is no longer active. Close this tab and retry from Rowboat.';
+          }
+          return null;
+        },
+        // Provider returned an error for the live flow (state already matched
+        // above) — e.g. the user declined consent. Settle immediately instead
+        // of leaving the renderer spinning until the 10-minute timeout.
+        onError: (error) => {
+          console.error(`[OAuth] Provider returned error for ${provider}: ${error}`);
+          emitOAuthEvent({
+            provider,
+            success: false,
+            error: error === 'access_denied'
+              ? 'Sign-in was cancelled in the browser.'
+              : `Sign-in failed: ${error}`,
+          });
+          activeFlows.delete(state);
+          if (activeFlow && activeFlow.state === state) {
+            clearTimeout(activeFlow.cleanupTimeout);
+            activeFlow.server.close();
+            activeFlow = null;
+          }
+        },
+      },
     );
 
     // Server is bound. Any throw between here and `activeFlow = ...` would
@@ -433,6 +487,9 @@ export async function connectProvider(provider: string, credentials?: { clientId
         // BYOK token expires after ~1h with no way to refresh (it goes stale and
         // every Google call — including the Picker — starts failing).
         ...(provider === 'google' ? { access_type: 'offline', prompt: 'consent' } : {}),
+        // Microsoft: let multi-mailbox users pick which account to connect
+        // instead of silently reusing the browser's active session.
+        ...(provider === 'microsoft' ? { prompt: 'select_account' } : {}),
       });
 
       // Set timeout to clean up abandoned flows. Generous (10 min) because a
@@ -454,6 +511,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
       };
 
       // Open in system browser (shares cookies/sessions with user's regular browser)
+      console.log(`[OAuth] ${provider}: opening browser with flow state=${state} (authUrl state=${authUrl.searchParams.get('state') ?? '<missing>'})`);
       shell.openExternal(authUrl.toString());
 
       return { success: true };
@@ -485,8 +543,18 @@ export async function connectProvider(provider: string, credentials?: { clientId
 export async function completeRowboatGoogleConnect(state: string): Promise<void> {
   try {
     console.log('[OAuth] Claiming rowboat-mode Google tokens...');
-    const tokens = await claimTokensViaBackend(state);
     const oauthRepo = getOAuthRepo();
+    // Same one-email-provider-at-a-time rule as connectProvider — this path
+    // bypasses it (deep link from the webapp), so re-check here.
+    if (await isEmailProviderConnected('microsoft')) {
+      emitOAuthEvent({
+        provider: 'google',
+        success: false,
+        error: 'Disconnect Microsoft first — only one email account can be connected at a time.',
+      });
+      return;
+    }
+    const tokens = await claimTokensViaBackend(state);
     await oauthRepo.upsert('google', {
       tokens,
       mode: 'rowboat',
@@ -543,6 +611,15 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
       // any provider). The composer prompts for a new pick.
       await clearRowboatSelections();
       captureProviderDisconnected('rowboat');
+    }
+    // Email caches hold provider-specific thread/message/draft ids — wipe them
+    // so a later connect (same or other provider) starts clean. The gmail_sync/
+    // markdown mirror stays: it's knowledge source material, not an API cache.
+    if (provider === 'google' || provider === 'microsoft') {
+      purgeEmailCaches();
+      invalidateContactIndex();
+      invalidateSentContacts();
+      invalidateOutlookSentContacts();
     }
     // Notify renderer so sidebar, voice, and billing re-check state
     emitOAuthEvent({ provider, success: false });

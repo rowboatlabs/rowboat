@@ -60,6 +60,7 @@ function makeCtx(overrides: Partial<ToolExecutionContext> = {}): ToolExecutionCo
     const progress: unknown[] = [];
     return {
         turnId: "turn-1",
+        sessionId: null,
         toolCallId: "tc-1",
         signal: new AbortController().signal,
         reportProgress: async (p) => {

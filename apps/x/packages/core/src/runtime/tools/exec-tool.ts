@@ -10,6 +10,11 @@ import { IAbortRegistry } from "../turns/abort-registry.js";
  */
 export interface ToolContext {
     runId: string;
+    // The chat session the triggering turn belongs to (turns runtime); null
+    // for standalone/headless turns and legacy runs. code_agent_run keys its
+    // persistent ACP session on this (context survives across turns) and uses
+    // it to resolve Code-section session pins (cwd/agent/policy/model).
+    sessionId?: string | null;
     toolCallId: string;
     signal: AbortSignal;
     abortRegistry: IAbortRegistry;
@@ -18,9 +23,9 @@ export interface ToolContext {
     // it is the authoritative coding agent — code_agent_run uses it rather than the
     // agent the model guessed, so switching the chip deterministically switches agents.
     codeMode?: 'claude' | 'codex' | null;
-    // Set for Code-section sessions in Rowboat mode: the session's working directory
-    // and approval policy. code_agent_run honors these over the model's cwd argument
-    // and the global approval policy.
+    // Set for Code-section sessions: the session's working directory and approval
+    // policy. code_agent_run honors these over the model's cwd argument and the
+    // global approval policy.
     codeCwd?: string | null;
     codePolicy?: 'ask' | 'auto-approve-reads' | 'yolo' | null;
 }

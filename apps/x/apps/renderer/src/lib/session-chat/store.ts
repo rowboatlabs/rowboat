@@ -1,6 +1,10 @@
 import type { z } from 'zod'
 import type { UserMessage } from '@x/shared/src/message.js'
-import type { SessionBusEvent, SessionIndexEntry } from '@x/shared/src/sessions.js'
+import type {
+  QueuedSessionMessage,
+  SessionBusEvent,
+  SessionIndexEntry,
+} from '@x/shared/src/sessions.js'
 import {
   isDurableTurnEvent,
   reduceTurn,
@@ -25,6 +29,10 @@ export interface SessionChatSnapshot {
   sessionId: string | null
   chatState: SessionChatState | null
   latestTurnId: string | null
+  // Messages accepted while the latest turn runs, waiting in the ephemeral
+  // main-process queue to steer it (or start the next turn). Mirrored from
+  // queue-changed bus events; editable/removable until delivered.
+  queued: QueuedSessionMessage[]
   loading: boolean
   error: string | null
 }
@@ -34,6 +42,8 @@ export interface SessionChatStoreDeps {
   // The turns:events spine (durable events with offsets, plus deltas for
   // turns this window subscribed to).
   subscribeTurnFeed: (listener: (event: TurnBusEvent) => void) => () => void
+  // sessions:events — queue-changed mirrors for the active session.
+  subscribeSessionFeed: (listener: (event: SessionBusEvent) => void) => () => void
   // Declares "this window is watching turn X" so main forwards its deltas;
   // returns the unsubscribe.
   subscribeDeltas: (turnId: string) => () => void
@@ -46,8 +56,10 @@ export interface SessionChatStoreDeps {
 export class SessionChatStore {
   private readonly client: SessionsClient
   private readonly subscribeTurnFeed: (listener: (event: TurnBusEvent) => void) => () => void
+  private readonly subscribeSessionFeed: (listener: (event: SessionBusEvent) => void) => () => void
   private readonly subscribeDeltas: (turnId: string) => () => void
   private feedDisconnect: (() => void) | null = null
+  private sessionFeedDisconnect: (() => void) | null = null
   private readonly listeners = new Set<() => void>()
 
   private sessionId: string | null = null
@@ -56,6 +68,7 @@ export class SessionChatStore {
   // The latest turn's raw event log; re-reduced on each durable event.
   private latestEvents: TEvent[] | null = null
   private overlay: LiveOverlay = emptyOverlay()
+  private queued: QueuedSessionMessage[] = []
   private loading = false
   private error: string | null = null
   // Guards stale async loads after a session switch.
@@ -68,6 +81,7 @@ export class SessionChatStore {
     sessionId: null,
     chatState: null,
     latestTurnId: null,
+    queued: [],
     loading: false,
     error: null,
   }
@@ -75,6 +89,7 @@ export class SessionChatStore {
   constructor(deps: SessionChatStoreDeps) {
     this.client = deps.client
     this.subscribeTurnFeed = deps.subscribeTurnFeed
+    this.subscribeSessionFeed = deps.subscribeSessionFeed
     this.subscribeDeltas = deps.subscribeDeltas
   }
 
@@ -84,11 +99,14 @@ export class SessionChatStore {
   connect(): () => void {
     if (!this.feedDisconnect) {
       this.feedDisconnect = this.subscribeTurnFeed(this.onTurnEvent)
+      this.sessionFeedDisconnect = this.subscribeSessionFeed(this.onSessionEvent)
       this.syncDeltas()
     }
     return () => {
       this.feedDisconnect?.()
       this.feedDisconnect = null
+      this.sessionFeedDisconnect?.()
+      this.sessionFeedDisconnect = null
       this.syncDeltas()
     }
   }
@@ -125,6 +143,7 @@ export class SessionChatStore {
     this.priorTurns = []
     this.latestEvents = null
     this.overlay = emptyOverlay()
+    this.queued = []
     this.error = null
     this.loading = sessionId !== null
     this.syncDeltas()
@@ -133,13 +152,16 @@ export class SessionChatStore {
 
     try {
       const state = await this.client.get(sessionId)
-      const turns = await Promise.all(
-        state.turns.map((ref) => this.client.getTurn(ref.turnId)),
-      )
+      const [turns, queued] = await Promise.all([
+        Promise.all(state.turns.map((ref) => this.client.getTurn(ref.turnId))),
+        // Seed the pending-queue mirror; queue-changed events keep it live.
+        this.client.listQueued(sessionId).then(({ queue }) => queue),
+      ])
       if (generation !== this.generation) return
       const reduced = turns.map((turn) => reduceTurn(turn.events))
       this.priorTurns = reduced.slice(0, -1)
       this.latestEvents = turns.length > 0 ? turns[turns.length - 1].events : null
+      this.queued = queued
       this.loading = false
       this.syncDeltas()
       this.emit()
@@ -150,6 +172,12 @@ export class SessionChatStore {
       this.error = error instanceof Error ? error.message : String(error)
       this.emit()
     }
+  }
+
+  private onSessionEvent = (event: SessionBusEvent): void => {
+    if (event.kind !== 'queue-changed' || event.sessionId !== this.sessionId) return
+    this.queued = event.queue
+    this.emit()
   }
 
   private onTurnEvent = (event: TurnBusEvent): void => {
@@ -226,6 +254,33 @@ export class SessionChatStore {
     return this.client.sendMessage(this.sessionId, input, config)
   }
 
+  // Deliver-ASAP send: never rejects for a busy session — the message queues
+  // and steers the live turn (or starts the next one) at the earliest safe
+  // point.
+  sendOrQueueMessage = async (
+    input: z.infer<typeof UserMessage>,
+    config: SendMessageConfig,
+  ): Promise<{ queued: false; turnId: string } | { queued: true; queueId: string }> => {
+    if (!this.sessionId) throw new Error('No active session')
+    return this.client.sendOrQueueMessage(this.sessionId, input, config)
+  }
+
+  editQueued = async (
+    queueId: string,
+    message: z.infer<typeof UserMessage>,
+  ): Promise<void> => {
+    if (!this.sessionId) return
+    await this.client.editQueued(this.sessionId, queueId, message)
+  }
+
+  removeQueued = async (
+    queueId: string,
+  ): Promise<QueuedSessionMessage | null> => {
+    if (!this.sessionId) return null
+    const { removed } = await this.client.removeQueued(this.sessionId, queueId)
+    return removed
+  }
+
   respondToPermission = async (
     toolCallId: string,
     decision: 'allow' | 'deny',
@@ -242,10 +297,14 @@ export class SessionChatStore {
     await this.client.respondToAskHuman(turnId, toolCallId, answer)
   }
 
-  stop = async (): Promise<void> => {
+  // Stops the latest turn. Pending queued messages are drained by the stop
+  // (never auto-started after it) and returned so the composer can restore
+  // their text.
+  stop = async (): Promise<QueuedSessionMessage[]> => {
     const turnId = this.snapshot.latestTurnId
-    if (!turnId) return
-    await this.client.stopTurn(turnId)
+    if (!turnId) return []
+    const { dequeued } = await this.client.stopTurn(turnId)
+    return dequeued
   }
 
   // ── Derivation ──────────────────────────────────────────────────────────
@@ -276,6 +335,7 @@ export class SessionChatStore {
           ? buildSessionChatState(turns, this.overlay)
           : null,
       latestTurnId: latest?.definition.turnId ?? null,
+      queued: this.queued,
       loading: this.loading,
       error,
     }

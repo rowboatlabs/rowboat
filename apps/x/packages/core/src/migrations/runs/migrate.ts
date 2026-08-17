@@ -16,8 +16,8 @@ import { convertRun } from "./convert.js";
 //     never re-processes them and no separate marker is needed.
 //   - Any run that fails to convert is LEFT in `runs/` (still served by the
 //     `runs:fetch` fallback the history views keep) and retried next launch.
-//   - code_session runs are skipped and left in place — Code mode still uses
-//     the old runtime, so those files must stay.
+//   - code_session runs migrate like any other chat (code sessions ARE
+//     chat sessions since the 2026-08 unification), so their history survives.
 // Every step is defensive; a bad run (or the whole pass) never blocks boot.
 
 const ID_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T[A-Za-z0-9-]+$/;
@@ -110,12 +110,6 @@ export function migrateRuns(deps: MigrateRunsDeps = {}): MigrationSummary {
             if (!start || start.type !== "start") {
                 throw new Error("run log does not begin with a start event");
             }
-            if (start.useCase === "code_session") {
-                // Code mode still uses the old runtime; leave the file in place.
-                summary.skipped++;
-                continue;
-            }
-
             const result = convertRun(logEvents, start.runId);
             for (const turn of result.turns) {
                 writeJsonl(turnsRootDir, turn.turnId, turn.events, TurnEvent);

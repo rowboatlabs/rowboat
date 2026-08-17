@@ -175,6 +175,27 @@ function cleanFilename(name: string): string {
     return name.replace(/[\\/*?:"<>|]/g, "").replace(/\s+/g, "_").substring(0, 100).trim();
 }
 
+// --- Write-path hooks (calendar_write.ts) ---
+// Persist an event returned by an insert/patch straight into the sync dir so
+// the renderer's file watcher picks it up immediately, without waiting for the
+// next poll. The poll then reconciles anything we got wrong.
+
+export async function persistSyncedEvent(event: cal.Schema$Event): Promise<void> {
+    if (!fs.existsSync(SYNC_DIR)) {
+        fs.mkdirSync(SYNC_DIR, { recursive: true });
+    }
+    await saveEvent(event, SYNC_DIR);
+}
+
+export function removeSyncedEvent(eventId: string): void {
+    const filePath = path.join(SYNC_DIR, `${eventId}.json`);
+    try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (e) {
+        console.error(`[Calendar] Error removing synced event ${eventId}:`, e);
+    }
+}
+
 // --- Sync Logic ---
 
 function cleanUpOldFiles(currentEventIds: Set<string>, syncDir: string): string[] {

@@ -211,6 +211,8 @@ const HISTORICAL_KEY_ORDER = [
     "deck-restyle",
     "deck-review",
     "screen-pointer",
+    "text-to-speech",
+    "transcribe-audio",
     "spawn-agent",
 ];
 
@@ -285,6 +287,8 @@ describe("BuiltinTools permission audit", () => {
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
             "composio-execute-tool": "composio-execute",
+            "text-to-speech": "file-boundary",
+            "transcribe-audio": "file-boundary",
         });
     });
 });

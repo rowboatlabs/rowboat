@@ -30,16 +30,19 @@ import {
   getCompanionMode,
   getExpandedSurface,
   getPopoutState,
+  getQuickAskShortcutState,
   getQuickAskWindow,
   hideQuickAsk,
   isPinnedCollapsed,
-  markTuckPending,
-  popOutCompanion,
+  markSummonPending,
+  ackSummon,
   pushChatContext,
   pushPopoutState,
   resizeCompanionPinned,
   setCompanionPinned,
   setPinnedCollapsed,
+  setQuickAskShortcut,
+  setShortcutCaptureActive,
   showQuickAsk,
 } from './quick-ask.js';
 import { screenPointerService } from './screen-pointer.js';
@@ -139,11 +142,11 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, archiveCategoryThreads, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance, setThreadCategory } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, setThreadImportance, setThreadCategory } from '@x/core/dist/knowledge/email/store.js';
+import { triggerEmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, archiveCategoryThreads, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getEmailConnectionStatus, searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/email/dispatcher.js';
 import { loadEmailInstructions, saveEmailInstructions } from '@x/core/dist/knowledge/email_instructions.js';
 import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/knowledge/email_labels.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
-import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
 import { startManagedGooglePick } from './google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
@@ -703,9 +706,10 @@ export function emitOAuthEvent(event: { provider: string; success: boolean; erro
   // prompt, so any OAuth state change must rebuild it.
   invalidateCopilotInstructionsCache();
   broadcastToWindows('oauth:didConnect', event);
-  // Google connect (both BYOK and rowboat-mode paths funnel through here) is
-  // the "connected Gmail" first-time reward.
-  if (event.provider === 'google' && event.success) {
+  // Email connect (Google BYOK, Google rowboat-mode, and Microsoft all funnel
+  // through here) is the "connected email" first-time reward. The stored
+  // credit key keeps its historical name — renaming would double-grant.
+  if ((event.provider === 'google' || event.provider === 'microsoft') && event.success) {
     void maybeActivateCredit('first_gmail_connected');
   }
 }
@@ -939,12 +943,12 @@ export function setupIpcHandlers() {
   // windows so the UI can update balances and celebrate.
   subscribeCreditActivations((event) => broadcastToWindows('credits:didActivate', event));
 
-  // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
+  // Pre-warm the email contact indices so the first compose-box keystroke is instant.
   // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
-  // - warmSentContacts(): kicks off a background Gmail API sync of the SENT label
-  //   for full historical coverage of people you've actually emailed.
+  // - warmSentContacts(): kicks off a background sync of the active provider's
+  //   sent mail for full historical coverage of people you've actually emailed.
   warmContactIndex();
-  warmSentContacts();
+  void warmSentContacts();
 
   registerIpcHandlers({
     'app:getVersions': async () => {
@@ -1132,6 +1136,16 @@ export function setupIpcHandlers() {
       }
     },
     // --- Quick-ask bar relays ---
+    'quickAsk:getShortcut': async () => {
+      return getQuickAskShortcutState();
+    },
+    'quickAsk:setShortcut': async (_event, args) => {
+      return setQuickAskShortcut(args.accelerator);
+    },
+    'quickAsk:setShortcutCaptureActive': async (_event, args) => {
+      setShortcutCaptureActive(args.active);
+      return {};
+    },
     'quickAsk:submit': async (_event, args) => {
       findMainAppWindow()?.webContents.send('quick-ask:submit', args);
       return {};
@@ -1148,11 +1162,15 @@ export function setupIpcHandlers() {
       };
     },
     'quickAsk:tuck': async () => {
-      // The next pin starts collapsed near the bar's mascot; the app window
-      // decides HOW to get there (start a voice call, or minimize a live
-      // call to the floating surface).
-      markTuckPending();
+      // The next pin gets focus (the user asked for their companion); the
+      // app window decides HOW to get there (start a voice call, or
+      // minimize a live call to the floating surface).
+      markSummonPending();
       findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
+      return {};
+    },
+    'quickAsk:tuckAck': async () => {
+      ackSummon();
       return {};
     },
     'quickAsk:setPinnedCollapsed': async (_event, args) => {
@@ -1161,15 +1179,6 @@ export function setupIpcHandlers() {
     },
     'quickAsk:chatContext': async (_event, args) => {
       pushChatContext(args);
-      return {};
-    },
-    'quickAsk:popOut': async () => {
-      // Already pinned → expanded/focused in place; otherwise arm the
-      // expanded-card landing and run the tuck flow (voice session, or the
-      // app falls back to the plain summoned card without voice).
-      if (!popOutCompanion()) {
-        findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
-      }
       return {};
     },
     'quickAsk:selectChat': async (_event, args) => {
@@ -1359,7 +1368,7 @@ export function setupIpcHandlers() {
       return listEverythingElseThreads({ cursor: args.cursor, limit: args.limit, category: args.category });
     },
     'gmail:triggerSync': async () => {
-      triggerGmailSync();
+      await triggerEmailSync();
       return {};
     },
     'gmail:sendReply': async (_event, args) => {
@@ -1382,7 +1391,7 @@ export function setupIpcHandlers() {
       return searchThreads(args.query, { limit: args.limit });
     },
     'gmail:getConnectionStatus': async () => {
-      return getGmailConnectionStatus();
+      return getEmailConnectionStatus();
     },
     'gmail:getAccountEmail': async () => {
       return { email: await getAccountEmail() };
@@ -1517,6 +1526,20 @@ export function setupIpcHandlers() {
     'sessions:sendMessage': async (_event, args) => {
       return container.resolve<ISessions>('sessions').sendMessage(args.sessionId, args.input, args.config);
     },
+    'sessions:sendOrQueueMessage': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').sendOrQueueMessage(args.sessionId, args.input, args.config);
+    },
+    'sessions:listQueued': async (_event, args) => {
+      return { queue: container.resolve<ISessions>('sessions').listQueued(args.sessionId) };
+    },
+    'sessions:editQueued': async (_event, args) => {
+      container.resolve<ISessions>('sessions').editQueued(args.sessionId, args.queueId, args.message);
+      return { success: true };
+    },
+    'sessions:removeQueued': async (_event, args) => {
+      const removed = container.resolve<ISessions>('sessions').removeQueued(args.sessionId, args.queueId);
+      return { removed: removed ?? null };
+    },
     'sessions:respondToPermission': async (_event, args) => {
       await container.resolve<ISessions>('sessions').respondToPermission(args.turnId, args.toolCallId, args.decision, args.metadata);
       return { success: true };
@@ -1526,8 +1549,8 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'sessions:stopTurn': async (_event, args) => {
-      await container.resolve<ISessions>('sessions').stopTurn(args.turnId, args.reason);
-      return { success: true };
+      const { dequeued } = await container.resolve<ISessions>('sessions').stopTurn(args.turnId, args.reason);
+      return { success: true, dequeued };
     },
     'sessions:resumeTurn': async (_event, args) => {
       await container.resolve<ISessions>('sessions').resumeTurn(args.sessionId);
@@ -1798,7 +1821,7 @@ export function setupIpcHandlers() {
     'codeSession:create': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       const session = await service.create(args);
-      capture('code_session_created', { mode: session.mode, agent: session.agent });
+      capture('code_session_created', { agent: session.agent });
       return { session };
     },
     'codeSession:list': async () => {
@@ -1822,20 +1845,6 @@ export function setupIpcHandlers() {
         deleteBranch: args.deleteBranch,
       });
       return { success: true };
-    },
-    'codeSession:sendMessage': async (_event, args) => {
-      const service = container.resolve<CodeSessionService>('codeSessionService');
-      // Intentionally not awaited: the turn can run for minutes and streams over
-      // runs:events. sendMessage validates synchronously enough that busy/unknown
-      // errors are reported via the run's error events instead.
-      const resultPromise = service.sendMessage(args.sessionId, args.text);
-      // Surface immediate rejections (busy session, unknown id) to the caller.
-      const result = await Promise.race([
-        resultPromise,
-        new Promise<{ accepted: true }>((resolve) => setTimeout(() => resolve({ accepted: true }), 300)),
-      ]);
-      resultPromise.catch((err) => console.error('codeSession:sendMessage failed', err));
-      return result;
     },
     'codeSession:stop': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
