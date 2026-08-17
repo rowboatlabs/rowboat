@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, FileIcon, FileText, Image, Music, Pause, Play, Video } from 'lucide-react'
+import { BookOpen, FileIcon, FileSpreadsheet, FileText, Image, Music, Pause, Play, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useFileCard } from '@/contexts/file-card-context'
 import { useSidebarSection } from '@/contexts/sidebar-context'
@@ -9,6 +9,7 @@ const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm'])
 const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.rtf', '.csv'])
+const SPREADSHEET_EXTENSIONS = new Set(['.csv', '.tsv', '.xls', '.xlsx'])
 
 function getExtension(filePath: string): string {
   const dot = filePath.lastIndexOf('.')
@@ -168,6 +169,58 @@ function AudioFileCard({ filePath }: { filePath: string }) {
   )
 }
 
+// --- Spreadsheet File Card ---
+
+// Workspace root fetched once per session; spreadsheet cards use it to map
+// absolute paths back to workspace-relative ones for the in-app viewer.
+let workspaceRootPromise: Promise<string> | null = null
+function getWorkspaceRoot(): Promise<string> {
+  workspaceRootPromise ??= window.ipc.invoke('workspace:getRoot', null).then((r) => r.root)
+  return workspaceRootPromise
+}
+
+function SpreadsheetFileCard({ filePath }: { filePath: string }) {
+  const { onOpenFile } = useFileCard()
+  const ext = getExtension(filePath)
+  const extLabel = getExtLabel(ext)
+
+  const handleOpen = async () => {
+    if (onOpenFile) {
+      const isAbsolute = filePath.startsWith('/') || filePath.startsWith('~') || /^[A-Za-z]:[\\/]/.test(filePath)
+      if (!isAbsolute) {
+        onOpenFile(filePath)
+        return
+      }
+      if (filePath.startsWith('/')) {
+        try {
+          const root = await getWorkspaceRoot()
+          const prefix = root.endsWith('/') ? root : `${root}/`
+          if (filePath.startsWith(prefix)) {
+            onOpenFile(filePath.slice(prefix.length))
+            return
+          }
+        } catch { /* fall through to the OS opener */ }
+      }
+    }
+    // Outside the workspace (or no in-app handler): let the OS handle it.
+    await window.ipc.invoke('shell:openPath', { path: filePath })
+  }
+
+  return (
+    <CardShell
+      icon={<FileSpreadsheet className="h-5 w-5 text-muted-foreground" />}
+      title={getFileNameWithoutExt(filePath)}
+      subtitle={`Spreadsheet · ${extLabel}`}
+      onClick={() => { void handleOpen() }}
+      action={
+        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
+          Open
+        </Button>
+      }
+    />
+  )
+}
+
 // --- System File Card ---
 
 function SystemFileCard({ filePath }: { filePath: string }) {
@@ -223,6 +276,10 @@ export function FilePathCard({ filePath }: { filePath: string }) {
   }
 
   const ext = getExtension(trimmed)
+  if (SPREADSHEET_EXTENSIONS.has(ext)) {
+    return <SpreadsheetFileCard filePath={trimmed} />
+  }
+
   if (AUDIO_EXTENSIONS.has(ext)) {
     return <AudioFileCard filePath={trimmed} />
   }

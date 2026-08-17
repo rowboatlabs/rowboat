@@ -113,6 +113,7 @@ interface ChatSidebarProps {
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
   onOpenKnowledgeFile?: (path: string) => void
+  onOpenFile?: (path: string) => void
   onActivate?: () => void
   collapsedLeftPaddingPx?: number
   // Voice / TTS props
@@ -187,6 +188,7 @@ export function ChatSidebar({
   isToolOpenForTab,
   onToolOpenChangeForTab,
   onOpenKnowledgeFile,
+  onOpenFile,
   onActivate,
   collapsedLeftPaddingPx = 196,
   isRecording,
@@ -426,7 +428,7 @@ export function ChatSidebar({
             )}
           </header>
 
-          <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})}>
+          <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})} onOpenFile={onOpenFile}>
             <div className="flex min-h-0 flex-1 flex-col">
               {/* Pane padding lives here, on the container — the shared chat pane renders identically on every surface. */}
               <div className="relative min-h-0 flex-1 px-3">

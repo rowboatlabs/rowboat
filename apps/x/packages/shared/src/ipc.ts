@@ -2246,6 +2246,48 @@ const ipcSchemas = {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
   },
+  // Spreadsheet viewer: windowed read of a local .xlsx/.xls/.csv/.tsv file
+  'spreadsheet:load': {
+    req: z.object({
+      path: z.string(),
+      sheet: z.string().optional(),
+      offset: z.number().int().min(0),
+      limit: z.number().int().min(1).max(1000),
+    }),
+    res: z.object({
+      format: z.enum(['xlsx', 'xls', 'csv', 'tsv']),
+      sheets: z.array(z.object({
+        name: z.string(),
+        rowCount: z.number(),
+        columnCount: z.number(),
+      })),
+      activeSheet: z.string(),
+      rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+      // Formatted text per cell (dates/currency/percent as Excel shows them)
+      display: z.array(z.array(z.string().nullable())),
+      // Row 1 of the sheet, for the viewer's pinned-header mode
+      firstRow: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])).nullable(),
+      firstRowDisplay: z.array(z.string().nullable()).nullable(),
+      offset: z.number(),
+      totalRows: z.number(),
+      totalColumns: z.number(),
+      etag: z.string(),
+    }),
+  },
+  // Spreadsheet viewer: locate cells matching a query in one sheet
+  'spreadsheet:find': {
+    req: z.object({
+      path: z.string(),
+      sheet: z.string().optional(),
+      query: z.string(),
+      maxMatches: z.number().int().min(1).max(5000).optional(),
+    }),
+    res: z.object({
+      activeSheet: z.string(),
+      matches: z.array(z.object({ row: z.number(), col: z.number() })),
+      total: z.number(),
+    }),
+  },
   // Native dialog channels
   'dialog:openDirectory': {
     req: z.object({

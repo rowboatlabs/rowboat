@@ -206,6 +206,8 @@ const HISTORICAL_KEY_ORDER = [
     "todo-propose",
     "todo-report",
     "screen-pointer",
+    "spreadsheet-create",
+    "spreadsheet-edit",
     "spawn-agent",
 ];
 
@@ -239,6 +241,8 @@ describe("BuiltinTools permission audit", () => {
             "file-mkdir": "file-boundary",
             parseFile: "file-boundary",
             LLMParse: "file-boundary",
+            "spreadsheet-create": "file-boundary",
+            "spreadsheet-edit": "file-boundary",
             executeCommand: "command-allowlist",
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",

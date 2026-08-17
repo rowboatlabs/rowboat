@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
 import { VoiceNoteButton } from '@/components/sidebar-content'
+import { getViewerType } from '@/lib/file-types'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -785,12 +786,20 @@ function RowContextMenu({
             <ContextMenuSeparator />
           </>
         )}
-        {!isDir && actions.onOpenInNewTab && (
+        {!isDir && (actions.onOpenInNewTab || getViewerType(node.path) === 'spreadsheet') && (
           <>
-            <ContextMenuItem onClick={() => actions.onOpenInNewTab!(node.path)}>
-              <ExternalLink className="mr-2 size-4" />
-              Open in new tab
-            </ContextMenuItem>
+            {actions.onOpenInNewTab && (
+              <ContextMenuItem onClick={() => actions.onOpenInNewTab!(node.path)}>
+                <ExternalLink className="mr-2 size-4" />
+                Open in new tab
+              </ContextMenuItem>
+            )}
+            {getViewerType(node.path) === 'spreadsheet' && (
+              <ContextMenuItem onClick={() => { void window.ipc.invoke('shell:openPath', { path: node.path }) }}>
+                <Table2 className="mr-2 size-4" />
+                Open in System App
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
           </>
         )}
