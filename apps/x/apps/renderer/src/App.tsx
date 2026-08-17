@@ -3803,12 +3803,19 @@ function App() {
         const contentParts: ContentPart[] = []
 
         if (mentions && mentions.length > 0) {
+          const mentionMimeTypes: Record<string, string> = {
+            xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            xls: 'application/vnd.ms-excel',
+            csv: 'text/csv',
+            tsv: 'text/tab-separated-values',
+          }
           for (const mention of mentions) {
+            const ext = mention.path.split('.').pop()?.toLowerCase() ?? ''
             contentParts.push({
               type: 'attachment',
               path: mention.path,
               filename: mention.displayName || mention.path.split('/').pop() || mention.path,
-              mimeType: 'text/markdown',
+              mimeType: mentionMimeTypes[ext] ?? 'text/markdown',
               ...(mention.lineNumber !== undefined ? { lineNumber: mention.lineNumber } : {}),
             })
           }
@@ -6232,6 +6239,15 @@ function App() {
     const files = collectFilePaths(tree).filter((path) => path.endsWith('.md'))
     return Array.from(new Set(files.map(stripKnowledgePrefix)))
   }, [tree])
+  // Chat @-mention candidates: notes plus spreadsheets (the assistant reads
+  // workbooks via its spreadsheet/parse tools). Wiki links and the graph stay
+  // markdown-only via knowledgeFiles above.
+  const mentionableFiles = React.useMemo(() => {
+    const files = collectFilePaths(tree).filter(
+      (path) => path.endsWith('.md') || getViewerType(path) === 'spreadsheet',
+    )
+    return Array.from(new Set(files.map(stripKnowledgePrefix)))
+  }, [tree])
   const knowledgeFilePaths = React.useMemo(() => (
     knowledgeFiles.reduce<string[]>((acc, filePath) => {
       const resolved = toKnowledgePath(filePath)
@@ -6255,14 +6271,14 @@ function App() {
       return true
     }
 
-    for (const file of knowledgeFiles) {
+    for (const file of mentionableFiles) {
       const fullPath = toKnowledgePath(file)
       if (fullPath && isPathVisible(fullPath)) {
         visible.push(file)
       }
     }
     return visible
-  }, [knowledgeFiles, expandedPaths])
+  }, [mentionableFiles, expandedPaths])
 
   // Load workspace root on mount
   useEffect(() => {
@@ -7223,7 +7239,7 @@ function App() {
                     <TodoView
                       composer={
                         <ChatInputWithMentions
-                          knowledgeFiles={knowledgeFiles}
+                          knowledgeFiles={mentionableFiles}
                           recentFiles={recentWikiFiles}
                           visibleFiles={visibleKnowledgeFiles}
                           onSubmit={handleHomeComposerSubmit}
@@ -7723,7 +7739,7 @@ function App() {
                           tab={tab}
                           isActive={isActive}
                           tabState={getChatTabStateForRender(tab.id)}
-                          knowledgeFiles={knowledgeFiles}
+                          knowledgeFiles={mentionableFiles}
                           recentFiles={recentWikiFiles}
                           visibleFiles={visibleKnowledgeFiles}
                           onSubmit={handlePromptSubmit}
@@ -7829,7 +7845,7 @@ function App() {
                 isStopping={isStopping}
                 onStop={handleStop}
                 onSubmit={handlePromptSubmit}
-                knowledgeFiles={knowledgeFiles}
+                knowledgeFiles={mentionableFiles}
                 recentFiles={recentWikiFiles}
                 visibleFiles={visibleKnowledgeFiles}
                 runId={runId}

@@ -2401,11 +2401,18 @@ export function setupIpcHandlers() {
         sheets: result.meta.sheets,
         activeSheet: result.activeSheet,
         rows: result.rows,
+        display: result.display,
+        firstRow: result.firstRow,
+        firstRowDisplay: result.firstRowDisplay,
         offset: result.offset,
         totalRows: result.totalRows,
         totalColumns: result.totalColumns,
         etag: result.meta.etag,
       };
+    },
+    'spreadsheet:find': async (_event, args) => {
+      const { findInSheet } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
+      return await findInSheet(args.path, args.sheet, args.query, args.maxMatches);
     },
     'dialog:openDirectory': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);

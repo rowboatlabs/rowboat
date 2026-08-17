@@ -249,4 +249,62 @@ describe("loadSheetWindow", () => {
 
         await expect(spreadsheet.loadSheetWindow("named.xlsx", "Nope", 0, 5)).rejects.toThrow("Available: Only");
     });
+
+    it("returns display text plus the first row on every window", async () => {
+        const spreadsheet = await loadModule();
+        const rows: Array<Array<string | number>> = [
+            ["Name", "Score"],
+            ...Array.from({ length: 10 }, (_, i) => [`p${i}`, i] as [string, number]),
+        ];
+        await spreadsheet.createWorkbook("disp.xlsx", [{ rows }]);
+
+        const win = await spreadsheet.loadSheetWindow("disp.xlsx", undefined, 5, 3);
+        expect(win.firstRow).toEqual(["Name", "Score"]);
+        expect(win.firstRowDisplay).toEqual(["Name", "Score"]);
+        // Sheet row 5 is p4 (row 0 is the header); numbers format to strings.
+        expect(win.rows[0]).toEqual(["p4", 4]);
+        expect(win.display[0]).toEqual(["p4", "4"]);
+        expect(win.display).toHaveLength(3);
+
+        const first = await spreadsheet.loadSheetWindow("disp.xlsx", undefined, 0, 3);
+        expect(first.firstRow).toEqual(["Name", "Score"]);
+        expect(first.rows[0]).toEqual(["Name", "Score"]);
+    });
+});
+
+describe("findInSheet", () => {
+    it("locates matching cells sorted by position and respects the cap", async () => {
+        const spreadsheet = await loadModule();
+        await spreadsheet.createWorkbook("find.xlsx", [
+            { name: "S", rows: [["apple", "banana"], ["grape", "apple pie"], [42, "APPLE"]] },
+        ]);
+
+        const res = await spreadsheet.findInSheet("find.xlsx", undefined, "apple");
+        expect(res.activeSheet).toBe("S");
+        expect(res.matches).toEqual([
+            { row: 0, col: 0 },
+            { row: 1, col: 1 },
+            { row: 2, col: 1 },
+        ]);
+        expect(res.total).toBe(3);
+
+        const capped = await spreadsheet.findInSheet("find.xlsx", undefined, "apple", 2);
+        expect(capped.matches).toHaveLength(2);
+        expect(capped.total).toBe(3);
+
+        const none = await spreadsheet.findInSheet("find.xlsx", undefined, "zzz");
+        expect(none.matches).toEqual([]);
+        expect(none.total).toBe(0);
+
+        const blank = await spreadsheet.findInSheet("find.xlsx", undefined, "   ");
+        expect(blank.total).toBe(0);
+    });
+
+    it("matches numbers by their raw text", async () => {
+        const spreadsheet = await loadModule();
+        await spreadsheet.createWorkbook("nums.csv", [{ rows: [["id"], ["12345"], ["99"]] }]);
+
+        const res = await spreadsheet.findInSheet("nums.csv", undefined, "234");
+        expect(res.matches).toEqual([{ row: 1, col: 0 }]);
+    });
 });

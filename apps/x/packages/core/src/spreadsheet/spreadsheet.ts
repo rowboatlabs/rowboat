@@ -366,6 +366,26 @@ export async function applyWorkbookOps(
     };
 }
 
+// Windowed read returning raw values (type info for alignment and copy) plus
+// formatted display text (dates, currency, percents render as in Excel).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function readWindow(XLSX: any, ws: any, offset: number, limit: number, rowCount: number, columnCount: number): {
+    rows: CellValue[][];
+    display: (string | null)[][];
+} {
+    if (rowCount === 0 || offset >= rowCount) return { rows: [], display: [] };
+    const range = {
+        s: { r: offset, c: 0 },
+        e: { r: Math.min(offset + limit, rowCount) - 1, c: Math.min(columnCount, MAX_WINDOW_COLUMNS) - 1 },
+    };
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: true, range }) as unknown[][];
+    const formatted = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: true, raw: false, range }) as unknown[][];
+    return {
+        rows: raw.map((row) => row.map(toCellValue)),
+        display: formatted.map((row) => row.map((v) => (v === null || v === undefined ? null : String(v)))),
+    };
+}
+
 export async function loadSheetWindow(
     inputPath: string,
     sheet: string | undefined,
@@ -375,6 +395,9 @@ export async function loadSheetWindow(
     meta: WorkbookMeta;
     activeSheet: string;
     rows: CellValue[][];
+    display: (string | null)[][];
+    firstRow: CellValue[] | null;
+    firstRowDisplay: (string | null)[] | null;
     offset: number;
     totalRows: number;
     totalColumns: number;
@@ -385,15 +408,12 @@ export async function loadSheetWindow(
     const ws = workbook.Sheets[activeSheet];
     const { rowCount, columnCount } = sheetDimensions(XLSX, ws);
 
-    let rows: CellValue[][] = [];
-    if (rowCount > 0 && offset < rowCount) {
-        const range = {
-            s: { r: offset, c: 0 },
-            e: { r: Math.min(offset + limit, rowCount) - 1, c: Math.min(columnCount, MAX_WINDOW_COLUMNS) - 1 },
-        };
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: true, range }) as unknown[][];
-        rows = raw.map((row) => row.map(toCellValue));
-    }
+    const win = readWindow(XLSX, ws, offset, limit, rowCount, columnCount);
+    // Row 1 rides along on every window so the viewer can pin it as a header
+    // while paging through the rest of the sheet.
+    const first = offset === 0 && win.rows.length > 0
+        ? { rows: win.rows.slice(0, 1), display: win.display.slice(0, 1) }
+        : readWindow(XLSX, ws, 0, 1, rowCount, columnCount);
 
     return {
         meta: {
@@ -405,9 +425,43 @@ export async function loadSheetWindow(
             etag,
         },
         activeSheet,
-        rows,
+        rows: win.rows,
+        display: win.display,
+        firstRow: first.rows[0] ?? null,
+        firstRowDisplay: first.display[0] ?? null,
         offset,
         totalRows: rowCount,
         totalColumns: columnCount,
     };
+}
+
+export async function findInSheet(
+    inputPath: string,
+    sheet: string | undefined,
+    query: string,
+    maxMatches = 1000,
+): Promise<{ activeSheet: string; matches: Array<{ row: number; col: number }>; total: number }> {
+    const { XLSX, workbook, format } = await readWorkbook(inputPath);
+    const activeSheet = resolveSheet(workbook, format, sheet);
+    const needle = query.trim().toLowerCase();
+    if (!needle) return { activeSheet, matches: [], total: 0 };
+
+    const ws = workbook.Sheets[activeSheet];
+    const matches: Array<{ row: number; col: number }> = [];
+    for (const [key, cell] of Object.entries(ws)) {
+        if (key.startsWith('!')) continue;
+        const c = cell as { v?: unknown; w?: string } | null;
+        if (!c || typeof c !== 'object' || c.v === undefined || c.v === null) continue;
+        const addr = XLSX.utils.decode_cell(key);
+        // Columns past the window cap never render, so a match there would be
+        // unreachable in the viewer.
+        if (addr.c >= MAX_WINDOW_COLUMNS) continue;
+        const display = typeof c.w === 'string' ? c.w.toLowerCase() : '';
+        const raw = typeof c.v === 'object' ? '' : String(c.v).toLowerCase();
+        if (display.includes(needle) || raw.includes(needle)) {
+            matches.push({ row: addr.r, col: addr.c });
+        }
+    }
+    matches.sort((a, b) => (a.row - b.row) || (a.col - b.col));
+    return { activeSheet, matches: matches.slice(0, maxMatches), total: matches.length };
 }
