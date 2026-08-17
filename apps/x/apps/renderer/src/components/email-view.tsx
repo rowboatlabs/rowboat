@@ -1938,7 +1938,7 @@ const ComposeBox = memo(function ComposeBox({
             size="sm"
             onClick={() => { void sendInGmail() }}
             disabled={sending}
-            title={isNew ? 'Send this email via Gmail' : 'Send this reply via Gmail'}
+            title={isNew ? 'Send this email' : 'Send this reply'}
           >
             {sending ? <LoaderIcon className="size-4 animate-spin" /> : <Send className="size-4" />}
             {sending ? 'Sending…' : 'Send'}
@@ -2330,7 +2330,7 @@ const ThreadRow = memo(function ThreadRow({
           <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
           <span className="gmail-row-content">
             <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
-            <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
+            <span>{thread.summary ? thread.subject : snippet(thread.preview || latest?.body || thread.latest_email)}</span>
             {categoryChip && <span className="gmail-row-chip">{categoryChip}</span>}
             {chip && <span className={cn('gmail-row-chip', chipWaiting ? 'gmail-row-chip-waiting' : 'gmail-row-chip-ready')}>{chip}</span>}
           </span>
@@ -3078,7 +3078,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       } else {
         analytics.emailCategoryArchived(category)
         toast(
-          `Archived ${result.archived} thread${result.archived === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}. They stay searchable in Gmail.`,
+          `Archived ${result.archived} thread${result.archived === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}. They stay searchable in your mailbox.`,
           result.failed ? 'error' : 'success',
         )
       }
@@ -3774,7 +3774,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
             <Mail size={28} className="opacity-50" />
             <p>
               {needsEmailReconnect
-                ? 'Reconnect your email to enable Gmail sync and actions.'
+                ? 'Reconnect your email to enable sync and actions.'
                 : 'Connect your email to see your inbox here.'}
             </p>
             <button
@@ -3788,7 +3788,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
           </div>
         ) : (
           <div className="gmail-empty-state">
-            {initialLoading ? 'Loading Gmail threads…' : 'No Gmail threads in your inbox cache yet.'}
+            {initialLoading ? 'Loading email threads…' : 'No email threads in your inbox cache yet.'}
           </div>
         )}
       </div>

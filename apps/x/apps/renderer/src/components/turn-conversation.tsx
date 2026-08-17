@@ -13,6 +13,7 @@ import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { AppActionCard } from '@/components/ai-elements/app-action-card'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
+import { AskHumanSettled } from '@/components/ai-elements/ask-human-request'
 import { CodingRunBlock } from '@/components/coding-run'
 import { SubAgentBlock } from '@/components/sub-agent-block'
 import { TerminalOutput } from '@/components/terminal-output'
@@ -27,6 +28,7 @@ import {
   type ChatTabViewState,
   type ConversationItem,
   getAppActionCardData,
+  getAskHumanCardData,
   getComposioConnectCardData,
   getToolErrorText,
   getToolRowSummary,
@@ -233,6 +235,23 @@ export function TurnConversation({
             item={item}
             open={isToolOpen(item.id)}
             onOpenChange={(open) => onToolOpenChange(item.id, open)}
+          />
+        )
+      }
+      const askHumanData = getAskHumanCardData(item)
+      if (askHumanData) {
+        // Pending: the interactive card (mounted by the pane below the
+        // conversation) is the question's representation — a transcript row
+        // here would duplicate it. Settled (answered/skipped/cancelled):
+        // compact question → answer block.
+        if (askHumanData.answer === null) return null
+        return (
+          <AskHumanSettled
+            key={item.id}
+            question={askHumanData.question}
+            answer={askHumanData.answer}
+            skipped={askHumanData.skipped}
+            isError={item.status === 'error'}
           />
         )
       }

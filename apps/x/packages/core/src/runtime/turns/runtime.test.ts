@@ -838,7 +838,10 @@ describe("automatic permission classification (26.4)", () => {
 
     it("handles allow, deny, and defer in one batch with a human available", async () => {
         const { runtime, repo, classifier } = makeRuntime({
-            models: [respond(completedResp(batch))],
+            models: [
+                respond(completedResp(batch)),
+                respond(completedResp(assistantText("done"))),
+            ],
             checker: new FakePermissionChecker(checkerRules),
             classifier: new FakePermissionClassifier(classifierImpl),
         });
@@ -847,10 +850,13 @@ describe("automatic permission classification (26.4)", () => {
         });
         const { outcome } = await advanceAndSettle(runtime, turnId);
 
-        // Deferred call asks the human.
+        // Denied and deferred calls both escalate to the human.
         expect(outcome).toMatchObject({
             status: "suspended",
-            pendingPermissions: [expect.objectContaining({ toolCallId: "CF" })],
+            pendingPermissions: [
+                expect.objectContaining({ toolCallId: "CD" }),
+                expect.objectContaining({ toolCallId: "CF" }),
+            ],
         });
         expect(classifier.batches).toHaveLength(1);
         expect(classifier.batches[0].map((r) => r.toolCallId)).toEqual([
@@ -864,28 +870,44 @@ describe("automatic permission classification (26.4)", () => {
             messageCount: 2,
         });
 
-        const log = await persisted(repo, turnId);
-        // Classifier provenance and effective decisions are distinct records.
+        let log = await persisted(repo, turnId);
+        // Classifier provenance and effective decisions are distinct records:
+        // the deny is on record but only the allow resolved.
         expect(
             log.filter((e) => e.type === "tool_permission_classified"),
         ).toHaveLength(3);
-        const resolved = log.filter((e) => e.type === "tool_permission_resolved");
-        expect(resolved).toEqual([
+        expect(log.filter((e) => e.type === "tool_permission_resolved")).toEqual([
             expect.objectContaining({ toolCallId: "CA", decision: "allow", source: "classifier" }),
-            expect.objectContaining({ toolCallId: "CD", decision: "deny", source: "classifier" }),
         ]);
-        // Allow executed; deny got an error result without invocation.
         expect(
             log.some((e) => e.type === "tool_result" && e.toolCallId === "CA" && e.source === "sync"),
         ).toBe(true);
+
+        // The human overrides the classifier's deny; their decisions resolve.
+        await advanceAndSettle(runtime, turnId, {
+            type: "permission_decision",
+            toolCallId: "CD",
+            decision: "allow",
+        });
+        const final = await advanceAndSettle(runtime, turnId, {
+            type: "permission_decision",
+            toolCallId: "CF",
+            decision: "deny",
+        });
+        expect(final.outcome?.status).toBe("completed");
+
+        log = await persisted(repo, turnId);
         expect(
-            log.some(
-                (e) => e.type === "tool_invocation_requested" && e.toolCallId === "CD",
+            log.find(
+                (e) => e.type === "tool_permission_resolved" && e.toolCallId === "CD",
             ),
-        ).toBe(false);
+        ).toMatchObject({ decision: "allow", source: "human" });
+        expect(
+            log.some((e) => e.type === "tool_result" && e.toolCallId === "CD" && e.source === "sync"),
+        ).toBe(true);
     });
 
-    it("denies deferred calls when no human is available", async () => {
+    it("denies deferred and denied calls when no human is available", async () => {
         const { runtime, repo } = makeRuntime({
             models: [
                 respond(completedResp(batch)),
@@ -905,6 +927,23 @@ describe("automatic permission classification (26.4)", () => {
                 (e) => e.type === "tool_permission_resolved" && e.toolCallId === "CF",
             ),
         ).toMatchObject({ decision: "deny", source: "human_unavailable" });
+        // The classifier's deny hard-denies with its reason on the result.
+        expect(
+            log.find(
+                (e) => e.type === "tool_permission_resolved" && e.toolCallId === "CD",
+            ),
+        ).toMatchObject({ decision: "deny", source: "classifier" });
+        expect(
+            log.find((e) => e.type === "tool_result" && e.toolCallId === "CD"),
+        ).toMatchObject({
+            source: "runtime",
+            result: { isError: true, output: "Permission denied: because deny" },
+        });
+        expect(
+            log.some(
+                (e) => e.type === "tool_invocation_requested" && e.toolCallId === "CD",
+            ),
+        ).toBe(false);
     });
 
     it("classifier failure records the failure and defers to the human", async () => {
@@ -3186,5 +3225,228 @@ describe("model-call limit resolution", () => {
                 maxModelCalls: 3,
             }),
         ).toBe(3);
+    });
+});
+
+describe("added inputs (steering)", () => {
+    // A takeInputs fake that only offers its message once armed — letting
+    // tests target a specific boundary despite the drain running at every
+    // one (including before call 0).
+    function armedSteer(text: string) {
+        const state = { armed: false, drained: 0 };
+        const takeInputs = () => {
+            state.drained += 1;
+            if (!state.armed) {
+                return [];
+            }
+            state.armed = false;
+            return [user(text)];
+        };
+        return { state, takeInputs };
+    }
+
+    it("injects a message offered at the tool-batch boundary before the next model call", async () => {
+        const { state, takeInputs } = armedSteer("also check the tests");
+        const tools: RuntimeTool[] = [
+            syncTool(echoDescriptor, async () => {
+                state.armed = true; // steer arrives while the tool runs
+                return { output: "ok", isError: false };
+            }),
+            ...defaultTools.filter(
+                (t) => t.descriptor.toolId !== echoDescriptor.toolId,
+            ),
+        ];
+        const { runtime, repo, models } = makeRuntime({
+            tools,
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("tc1", "echo")))),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId, undefined, {
+            takeInputs,
+        });
+        expect(outcome?.status).toBe("completed");
+
+        const log = await persisted(repo, turnId);
+        expect(typesOf(log)).toEqual([
+            "turn_created",
+            "model_call_requested",
+            "model_call_completed",
+            "tool_invocation_requested",
+            "tool_result",
+            "input_added",
+            "model_call_requested",
+            "model_call_completed",
+            "turn_completed",
+        ]);
+        expect(log[5]).toMatchObject({
+            inputIndex: 1,
+            message: user("also check the tests"),
+        });
+        expect(log[6]).toMatchObject({
+            request: {
+                messages: ["assistant:0", "toolResult:tc1", "input:1"],
+            },
+        });
+        // The wire request carries the injected message after the tool result.
+        const wire = models.requests[1].messages as Array<{ role: string }>;
+        expect(wire[wire.length - 1]).toEqual(user("also check the tests"));
+    });
+
+    it("injects a message already pending before the first model call on call 0", async () => {
+        const pending = [user("and one more thing")];
+        const { runtime, repo, models } = makeRuntime({
+            models: [respond(completedResp(assistantText("done")))],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId, undefined, {
+            takeInputs: () => pending.splice(0),
+        });
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, turnId);
+        expect(typesOf(log)).toEqual([
+            "turn_created",
+            "input_added",
+            "model_call_requested",
+            "model_call_completed",
+            "turn_completed",
+        ]);
+        expect(log[2]).toMatchObject({
+            request: { messages: ["input", "input:1"] },
+        });
+        expect(models.requests[0].messages).toEqual([
+            user("hello"),
+            user("and one more thing"),
+        ]);
+    });
+
+    it("an accepted input resets the model-call budget", async () => {
+        const { state, takeInputs } = armedSteer("keep going");
+        const tools: RuntimeTool[] = [
+            syncTool(echoDescriptor, async () => {
+                state.armed = true;
+                return { output: "ok", isError: false };
+            }),
+            ...defaultTools.filter(
+                (t) => t.descriptor.toolId !== echoDescriptor.toolId,
+            ),
+        ];
+        const { runtime } = makeRuntime({
+            tools,
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("tc1", "echo")))),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        // maxModelCalls 1: without the steer this fails with the limit code
+        // after call 0's batch (26.9); the accepted input buys call 1.
+        const turnId = await newTurn(runtime, {
+            config: { humanAvailable: true, maxModelCalls: 1 },
+        });
+        const { outcome } = await advanceAndSettle(runtime, turnId, undefined, {
+            takeInputs,
+        });
+        expect(outcome?.status).toBe("completed");
+    });
+
+    it("drains the steer source when an external input resumes a suspended turn", async () => {
+        const checker = new FakePermissionChecker({
+            echo: { request: { tool: "echo" } },
+        });
+        const { runtime, repo } = makeRuntime({
+            checker,
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("tc1", "echo")))),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const first = await advanceAndSettle(runtime, turnId);
+        expect(first.outcome?.status).toBe("suspended");
+
+        // The message typed while suspended rides the resuming advance.
+        const pending = [user("typed while waiting")];
+        const { outcome } = await advanceAndSettle(
+            runtime,
+            turnId,
+            { type: "permission_decision", toolCallId: "tc1", decision: "allow" },
+            { takeInputs: () => pending.splice(0) },
+        );
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, turnId);
+        const added = log.find((e) => e.type === "input_added");
+        expect(added).toMatchObject({ message: user("typed while waiting") });
+        const second = log.filter((e) => e.type === "model_call_requested")[1];
+        expect(second).toMatchObject({
+            request: {
+                messages: ["assistant:0", "toolResult:tc1", "input:1"],
+            },
+        });
+    });
+
+    it("recovery re-issues the request with an input left unreferenced by a crash", async () => {
+        const SEED_ID = "2026-07-02T10-00-00Z-0000001-000";
+        const repo = new InMemoryTurnRepo();
+        repo.seed([
+            {
+                type: "turn_created",
+                schemaVersion: 1,
+                turnId: SEED_ID,
+                ts: TS,
+                sessionId: null,
+                agent: {
+                    requested: { agentId: "copilot" },
+                    resolved: defaultAgent,
+                },
+                context: [],
+                input: user("hello"),
+                config: {
+                    autoPermission: false,
+                    humanAvailable: true,
+                    maxModelCalls: 20,
+                },
+            },
+            {
+                type: "input_added",
+                turnId: SEED_ID,
+                ts: TS,
+                inputIndex: 1,
+                message: user("accepted just before the crash"),
+            },
+        ]);
+        const { runtime, models } = makeRuntime({
+            repo,
+            models: [respond(completedResp(assistantText("done")))],
+        });
+        const { outcome } = await advanceAndSettle(runtime, SEED_ID);
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, SEED_ID);
+        expect(log[2]).toMatchObject({
+            request: { messages: ["input", "input:1"] },
+        });
+        expect(models.requests[0].messages).toEqual([
+            user("hello"),
+            user("accepted just before the crash"),
+        ]);
+    });
+
+    it("an empty drain appends nothing", async () => {
+        const { runtime, repo } = makeRuntime({
+            models: [respond(completedResp(assistantText("done")))],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId, undefined, {
+            takeInputs: () => [],
+        });
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, turnId);
+        expect(typesOf(log)).toEqual([
+            "turn_created",
+            "model_call_requested",
+            "model_call_completed",
+            "turn_completed",
+        ]);
     });
 });

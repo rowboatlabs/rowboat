@@ -132,7 +132,7 @@ describe("migrateRuns", () => {
         expect(turnState.terminal?.type).toBe("turn_completed");
     });
 
-    it("skips code_session runs and leaves them in place", () => {
+    it("migrates code_session runs like any other chat (history survives)", () => {
         // Rewrite a fixture's useCase to code_session.
         const raw = fs
             .readFileSync(path.join(fixturesDir, "knowledge-single-turn.jsonl"), "utf-8")
@@ -145,11 +145,12 @@ describe("migrateRuns", () => {
 
         const summary = migrateRuns(deps());
 
-        expect(summary.skipped).toBe(1);
-        expect(summary.migratedTurns).toBe(0);
-        // Left in place, not archived.
-        expect(fs.existsSync(path.join(runsDir, "code.jsonl"))).toBe(true);
-        expect(fs.existsSync(path.join(archiveDir, "code.jsonl"))).toBe(false);
+        expect(summary.skipped).toBe(0);
+        expect(summary.migratedSessions).toBe(1);
+        expect(summary.migratedTurns).toBeGreaterThan(0);
+        // Archived out of the scan directory so the pass converges.
+        expect(fs.existsSync(path.join(runsDir, "code.jsonl"))).toBe(false);
+        expect(fs.existsSync(path.join(archiveDir, "code.jsonl"))).toBe(true);
     });
 
     it("leaves a malformed run in place and records the failure", () => {

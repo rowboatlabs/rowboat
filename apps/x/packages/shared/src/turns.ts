@@ -203,14 +203,18 @@ export const TurnCreated = z.object({
 // provider payload is rebuilt deterministically by the request composer
 // (core), which is the same code path the loop sends through.
 // Compact string refs so raw JSONL reads naturally:
-//   "context" | "input" | "assistant:<modelCallIndex>" | "toolResult:<toolCallId>"
+//   "context" | "input" | "input:<inputIndex>" | "assistant:<modelCallIndex>"
+//   | "toolResult:<toolCallId>"
+// "input" is the turn-defining message (index 0); "input:<n>" (n >= 1) is the
+// nth input_added message. Index 0 has exactly one spelling so every
+// referenced byte keeps a single canonical ref.
 export const ModelRequestMessageRef = z
     .string()
-    .regex(/^(context|input|assistant:\d+|toolResult:.+)$/);
+    .regex(/^(context|input(:[1-9]\d*)?|assistant:\d+|toolResult:.+)$/);
 
 export type ParsedRequestRef =
     | { kind: "context" }
-    | { kind: "input" }
+    | { kind: "input"; inputIndex: number }
     | { kind: "assistant"; modelCallIndex: number }
     | { kind: "toolResult"; toolCallId: string };
 
@@ -218,10 +222,22 @@ export const assistantRef = (modelCallIndex: number): string =>
     `assistant:${modelCallIndex}`;
 export const toolResultRef = (toolCallId: string): string =>
     `toolResult:${toolCallId}`;
+export const inputRef = (inputIndex: number): string =>
+    inputIndex === 0 ? "input" : `input:${inputIndex}`;
 
 export function parseRequestRef(ref: string): ParsedRequestRef {
-    if (ref === "context" || ref === "input") {
-        return { kind: ref };
+    if (ref === "context") {
+        return { kind: "context" };
+    }
+    if (ref === "input") {
+        return { kind: "input", inputIndex: 0 };
+    }
+    if (ref.startsWith("input:")) {
+        const inputIndex = Number(ref.slice("input:".length));
+        if (!Number.isInteger(inputIndex) || inputIndex < 1) {
+            throw new Error(`malformed request ref: ${ref}`);
+        }
+        return { kind: "input", inputIndex };
     }
     if (ref.startsWith("assistant:")) {
         const modelCallIndex = Number(ref.slice("assistant:".length));
@@ -389,6 +405,22 @@ export const ToolsExtended = z.object({
     tools: z.array(ToolDescriptor).min(1),
 });
 
+// A user message accepted into the RUNNING turn at a model-call boundary
+// (steering). Like tools_extended, this is a sanctioned, durable, ordered
+// exception to turn-definition immutability: a turn has one or more inputs,
+// the first arriving in turn_created. Injection is purely additive — it never
+// cancels in-flight work — and lands only between a settled tool batch and
+// the next model call, so the very next model_call_requested references every
+// input added before it ("input:<n>" refs) and an accepted message can never
+// be silently dropped. inputIndex is 1-based; index 0 is turn_created.input.
+export const InputAdded = z.object({
+    type: z.literal("input_added"),
+    turnId: z.string(),
+    ts: z.string(),
+    inputIndex: z.number().int().positive(),
+    message: UserMessage,
+});
+
 export const TurnSuspended = z.object({
     type: z.literal("turn_suspended"),
     turnId: z.string(),
@@ -453,6 +485,7 @@ export const TurnEvent = z.discriminatedUnion("type", [
     ToolProgress,
     ToolResult,
     ToolsExtended,
+    InputAdded,
     TurnSuspended,
     TurnCompleted,
     TurnFailed,
@@ -552,11 +585,19 @@ export interface ToolExtensionState {
     firstAffectedModelCallIndex: number;
 }
 
+export interface AddedInputState {
+    event: z.infer<typeof InputAdded>;
+    // Inputs land between model calls; the call requested at this index is
+    // the first whose request references (and transmits) the message.
+    firstAffectedModelCallIndex: number;
+}
+
 export interface TurnState {
     definition: z.infer<typeof TurnCreated>;
     modelCalls: ModelCallState[];
     toolCalls: ToolCallState[];
     toolExtensions: ToolExtensionState[];
+    addedInputs: AddedInputState[];
     suspension?: z.infer<typeof TurnSuspended>;
     terminal?:
         | z.infer<typeof TurnCompleted>
@@ -599,6 +640,13 @@ function batchToolCalls(state: TurnState, modelCallIndex: number): ToolCallState
         .sort((a, b) => a.order - b.order);
 }
 
+// The model-call index the budget counts from: 0, or the boundary of the
+// most recent added input (each accepted input resets the allowance).
+export function modelCallBudgetBase(state: TurnState): number {
+    const last = state.addedInputs[state.addedInputs.length - 1];
+    return last ? last.firstAffectedModelCallIndex : 0;
+}
+
 function addUsage(
     total: z.infer<typeof TurnUsage>,
     usage: z.infer<typeof TurnUsage>,
@@ -628,9 +676,14 @@ function applyModelCallRequested(
             `model call index ${event.modelCallIndex} out of order; expected ${expectedIndex}`,
         );
     }
-    if (expectedIndex >= state.definition.config.maxModelCalls) {
+    // The budget counts calls since the last accepted input: a mid-turn
+    // input_added buys the same allowance a fresh turn would get.
+    if (
+        expectedIndex - modelCallBudgetBase(state) >=
+        state.definition.config.maxModelCalls
+    ) {
         fail(
-            `model call index ${event.modelCallIndex} exceeds maxModelCalls ${state.definition.config.maxModelCalls}`,
+            `model call index ${event.modelCallIndex} exceeds maxModelCalls ${state.definition.config.maxModelCalls} since the last input`,
         );
     }
     if (openModelCall(state)) {
@@ -674,6 +727,16 @@ function applyModelCallRequested(
                   ]
                 : []; // re-issue after an interrupted call adds nothing new
     }
+    // Every input accepted since the previous call must ride this request —
+    // the invariant that makes a durably accepted message impossible to drop.
+    expectedRefs.push(
+        ...state.addedInputs
+            .filter(
+                (added) =>
+                    added.firstAffectedModelCallIndex === event.modelCallIndex,
+            )
+            .map((added) => inputRef(added.event.inputIndex)),
+    );
     if (JSON.stringify(event.request.messages) !== JSON.stringify(expectedRefs)) {
         fail(
             `model request references do not match the transcript: expected ${JSON.stringify(
@@ -942,6 +1005,33 @@ function applyToolsExtended(
     });
 }
 
+function applyInputAdded(
+    state: TurnState,
+    event: z.infer<typeof InputAdded>,
+): void {
+    if (openModelCall(state)) {
+        fail("input added while a model call is unsettled");
+    }
+    const unresolved = state.toolCalls.filter((tc) => !tc.result);
+    if (unresolved.length > 0) {
+        fail(
+            `input added while tool calls are unresolved: ${unresolved
+                .map((tc) => tc.toolCallId)
+                .join(", ")}`,
+        );
+    }
+    const expected = state.addedInputs.length + 1;
+    if (event.inputIndex !== expected) {
+        fail(
+            `input index ${event.inputIndex} out of order; expected ${expected}`,
+        );
+    }
+    state.addedInputs.push({
+        event,
+        firstAffectedModelCallIndex: state.modelCalls.length,
+    });
+}
+
 function sortedIds(ids: string[]): string {
     return [...ids].sort().join(",");
 }
@@ -1031,6 +1121,7 @@ export function reduceTurn(
         modelCalls: [],
         toolCalls: [],
         toolExtensions: [],
+        addedInputs: [],
         usage: {},
     };
 
@@ -1083,6 +1174,9 @@ export function reduceTurn(
             case "tools_extended":
                 applyToolsExtended(state, event);
                 break;
+            case "input_added":
+                applyInputAdded(state, event);
+                break;
             case "turn_suspended":
                 applyTurnSuspended(state, event);
                 break;
@@ -1132,6 +1226,21 @@ export function effectiveTools(
 ): Array<z.infer<typeof ToolDescriptor>> {
     const extended = extendedToolsFor(state, modelCallIndex);
     return extended.length === 0 ? baseTools : [...baseTools, ...extended];
+}
+
+// The messages of inputs accepted at a given model-call boundary: those a
+// request at `modelCallIndex` is the first to transmit. Position consumers
+// (transcript, classifier context, timeline UIs) share this so an added
+// input renders exactly where the model saw it.
+export function addedInputMessagesAt(
+    state: TurnState,
+    modelCallIndex: number,
+): Array<z.infer<typeof UserMessage>> {
+    return state.addedInputs
+        .filter(
+            (added) => added.firstAffectedModelCallIndex === modelCallIndex,
+        )
+        .map((added) => added.event.message);
 }
 
 export function outstandingPermissions(state: TurnState): ToolCallState[] {
@@ -1221,8 +1330,18 @@ export function requestMessagesFor(
                 }
                 return context;
             }
-            case "input":
-                return [state.definition.input];
+            case "input": {
+                if (ref.inputIndex === 0) {
+                    return [state.definition.input];
+                }
+                const added = state.addedInputs[ref.inputIndex - 1];
+                if (!added) {
+                    throw new Error(
+                        `input ref to unknown added input ${ref.inputIndex}`,
+                    );
+                }
+                return [added.event.message];
+            }
             case "assistant": {
                 const response = state.modelCalls[ref.modelCallIndex]?.response;
                 if (response === undefined) {
@@ -1245,12 +1364,13 @@ export function requestMessagesFor(
     });
 }
 
-// The messages this turn contributed to the conversation: its input plus, per
-// completed model call, the assistant response and its tool results in source
-// order. Failed model calls contribute nothing. The turn's context prefix is
-// NOT included; materializing the full conversation is the context resolver's
-// job (core). Requires every tool call to have a terminal result, which holds
-// for all terminal turns.
+// The messages this turn contributed to the conversation: its inputs in the
+// positions the model saw them plus, per completed model call, the assistant
+// response and its tool results in source order. Failed model calls
+// contribute nothing (added inputs at their boundary still do). The turn's
+// context prefix is NOT included; materializing the full conversation is the
+// context resolver's job (core). Requires every tool call to have a terminal
+// result, which holds for all terminal turns.
 export function turnTranscript(
     state: TurnState,
 ): Array<z.infer<typeof ConversationMessage>> {
@@ -1258,6 +1378,7 @@ export function turnTranscript(
         state.definition.input,
     ];
     for (const call of state.modelCalls) {
+        messages.push(...addedInputMessagesAt(state, call.index));
         if (call.response === undefined) {
             continue;
         }
@@ -1271,6 +1392,10 @@ export function turnTranscript(
             messages.push(toolResultMessage(toolCall));
         }
     }
+    // Inputs accepted after the last requested call (the turn was cancelled
+    // or crashed before the next request) were still durably accepted; they
+    // close the transcript so the next turn's model sees them.
+    messages.push(...addedInputMessagesAt(state, state.modelCalls.length));
     return messages;
 }
 

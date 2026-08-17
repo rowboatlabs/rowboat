@@ -2,8 +2,10 @@ import z from "zod";
 import { CodingAgent, ApprovalPolicy } from "./code-mode.js";
 
 // Shared zod schemas for the Code section: registered projects and coding
-// sessions. A coding session is backed by a run (session id == run id); the
-// mutable metadata below lives in its own per-session file.
+// sessions. A coding session IS a chat session on the turns runtime (session
+// id == chat session id) — the copilot drives the coding agent via
+// code_agent_run, pinned to this session's cwd/agent/policy. The mutable
+// metadata below lives in its own per-session file.
 
 export const CodeProject = z.object({
     id: z.string(),
@@ -22,12 +24,7 @@ export const GitRepoInfo = z.object({
 });
 export type GitRepoInfo = z.infer<typeof GitRepoInfo>;
 
-// 'direct': the user's messages go straight to the ACP coding agent.
-// 'rowboat': Rowboat's copilot LLM orchestrates the agent via code_agent_run.
-export const CodeSessionMode = z.enum(["direct", "rowboat"]);
-export type CodeSessionMode = z.infer<typeof CodeSessionMode>;
-
-// Derived live in the main process from the run event stream; not persisted.
+// Derived live in the main process from the session event stream; not persisted.
 export const CodeSessionStatus = z.enum(["working", "needs-you", "idle"]);
 export type CodeSessionStatus = z.infer<typeof CodeSessionStatus>;
 
@@ -44,11 +41,10 @@ export const CodeWorktree = z.object({
 export type CodeWorktree = z.infer<typeof CodeWorktree>;
 
 export const CodeSession = z.object({
-    id: z.string(), // == runId
+    id: z.string(), // == chat session id (turns runtime)
     projectId: z.string(),
     title: z.string(),
     agent: CodingAgent,
-    mode: CodeSessionMode,
     policy: ApprovalPolicy,
     // Where the agent works: the project path, or the worktree path.
     cwd: z.string(),

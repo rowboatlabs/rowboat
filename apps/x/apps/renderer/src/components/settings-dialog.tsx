@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, Keyboard } from "lucide-react"
 
 import {
   Dialog,
@@ -34,10 +34,11 @@ import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { ModelSelectionSection } from "@/components/settings/model-selection-section"
 import { PermissionsSettings } from "@/components/settings/permissions-settings"
+import { ShortcutSettings } from "@/components/settings/shortcut-settings"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -100,6 +101,12 @@ const tabs: TabConfig[] = [
     description: "Customize the look and feel",
   },
   {
+    id: "shortcuts",
+    label: "Shortcuts",
+    icon: Keyboard,
+    description: "Customize keyboard shortcuts",
+  },
+  {
     id: "notifications",
     label: "Notifications",
     icon: Bell,
@@ -136,7 +143,7 @@ const tabs: TabConfig[] = [
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
-  { label: "App", ids: ["appearance", "notifications", "permissions", "help"] },
+  { label: "App", ids: ["appearance", "shortcuts", "notifications", "permissions", "help"] },
 ]
 
 interface SettingsDialogProps {
@@ -1150,6 +1157,14 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Code Mode Settings ---
 
+// Human label for the raw subscription tier the engine reports
+// (claude: "max" / "pro" / "enterprise"; codex: ChatGPT plan types like "go" / "plus").
+function formatPlan(agent: 'claude' | 'codex', plan: string | undefined): string | null {
+  if (!plan) return null
+  const cap = plan.charAt(0).toUpperCase() + plan.slice(1)
+  return agent === 'codex' ? `ChatGPT ${cap}` : cap
+}
+
 function AgentStatusRow({
   name,
   agent,
@@ -1170,50 +1185,63 @@ function AgentStatusRow({
 
   // Treat a just-enabled engine as installed even before the status refresh lands.
   const installed = (status?.installed ?? false) || enabledOptimistic.has(agent)
-  const ready = installed && status?.signedIn
+  const signedIn = status?.signedIn ?? false
+  const email = status?.account?.email
+  const plan = formatPlan(agent, status?.account?.plan)
+  const active = installed && signedIn
   return (
-    <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
+    <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
       {agent === 'claude' ? (
         <AnthropicIcon className="size-5 shrink-0" />
       ) : (
         <OpenAIIcon className="size-5 shrink-0" />
       )}
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium">{name}</div>
-        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
-          <span className={cn("inline-flex items-center gap-1", installed ? "text-green-600" : "text-muted-foreground")}>
-            {installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
-            {installed ? 'Engine ready' : 'Not enabled'}
-          </span>
-          <span className={cn("inline-flex items-center gap-1", status?.signedIn ? "text-green-600" : "text-muted-foreground")}>
-            {status?.signedIn ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
-            Signed in
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{name}</span>
+          {signedIn && plan && (
+            <span className="rounded-full border px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground shrink-0">
+              {plan}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+          <span
+            className={cn(
+              "size-2 rounded-full shrink-0",
+              active ? "bg-green-500" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
+            )}
+          />
+          <span className="truncate">
+            {provisioning ? (
+              'Downloading engine…'
+            ) : active ? (
+              <>Active{email ? ` · ${email}` : ''}</>
+            ) : installed ? (
+              <>
+                Run{' '}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>{' '}
+                in your terminal, then Re-check
+              </>
+            ) : email ? (
+              `${email} · engine not enabled`
+            ) : (
+              'Not enabled'
+            )}
           </span>
         </div>
-        {error && <div className="text-xs text-red-600 mt-1 break-words">{error}</div>}
+        {error && <div className="text-xs text-destructive mt-1 break-words">{error}</div>}
       </div>
       {provisioning ? (
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 tabular-nums">
           <Loader2 className="size-3 animate-spin" />
           {prov?.pct != null ? `${prov.pct}%` : null}
         </span>
-      ) : ready ? (
-        <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
-          Ready
-        </span>
       ) : !installed ? (
-        <button
-          type="button"
-          onClick={enable}
-          className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 shrink-0"
-        >
+        <Button variant="outline" size="sm" onClick={enable} className="shrink-0">
           Enable
-        </button>
-      ) : (
-        <span className="text-xs text-muted-foreground shrink-0">
-          Run <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>
-        </span>
-      )}
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -1306,22 +1334,18 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     <div className="space-y-5">
       <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
         <p>
-          <strong className="text-foreground">Code mode</strong> lets the assistant delegate coding tasks
-          to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> running
-          on your machine. Pick the agent inline from the composer; the assistant runs it on-device
-          and streams its work — tool calls, file diffs, and approvals — back into chat.
+          <strong className="text-foreground">Code mode</strong> lets the assistant hand coding tasks
+          to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> on
+          your machine. Pick the agent in the composer, and everything it does — commands, file
+          changes, approvals — shows up in the chat.
         </p>
         <p>
-          Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
-          a <strong className="text-foreground">ChatGPT/Codex</strong> subscription. You can have one or both.
-        </p>
-        <p>
-          For each agent you want to use, you must have it{' '}
-          <strong className="text-foreground">installed and logged in</strong> on this machine: click{' '}
-          <strong className="text-foreground">Enable</strong> below to download its engine, and sign in by
-          running <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
+          To set up an agent, click <strong className="text-foreground">Enable</strong> below to download
+          it, then sign in by running{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
           or <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">codex login</code>{' '}
-          in your terminal. Code mode uses that saved login.
+          in your terminal. You need a <strong className="text-foreground">Claude</strong> or{' '}
+          <strong className="text-foreground">ChatGPT</strong> subscription — either one works, or both.
         </p>
       </div>
 
@@ -1856,7 +1880,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications" || tab === "advanced") return
+    if (tab === "appearance" || tab === "shortcuts" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications" || tab === "advanced") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -1925,7 +1949,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
     <Dialog open={open} onOpenChange={setOpen}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent
-        className="max-w-[900px]! w-[900px] h-[600px] p-0 gap-0 overflow-hidden"
+        className="max-w-[900px]! w-[900px] h-[660px] max-h-[85vh] p-0 gap-0 overflow-hidden"
       >
         <div className="flex h-full overflow-hidden">
           {/* Sidebar */}
@@ -2019,6 +2043,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
+              ) : activeTab === "shortcuts" ? (
+                <ShortcutSettings />
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
               ) : activeTab === "permissions" ? (

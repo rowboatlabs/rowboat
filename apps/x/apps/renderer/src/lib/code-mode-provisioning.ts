@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
-export type AgentStatus = { installed: boolean; signedIn: boolean }
+export type AgentAccount = { email?: string; plan?: string }
+export type AgentStatus = { installed: boolean; signedIn: boolean; account?: AgentAccount }
 export type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
 
 // Engine provisioning runs in the main process and keeps going even if the UI that

@@ -21,13 +21,6 @@ export interface RunPromptArgs {
     onEvent: (event: CodeRunEvent) => void;
     /** Aborts the turn on stop; the manager cancels then force-kills the adapter. */
     signal?: AbortSignal;
-    /**
-     * Drop the conversation replay that session/load streams on a cold resume.
-     * Direct sessions persist their own history (run JSONL) and render from it,
-     * so replaying through onEvent would duplicate every prior turn. When set,
-     * events only flow to onEvent once the session is open, right before prompt.
-     */
-    suppressReplay?: boolean;
 }
 
 interface ActiveRun {
@@ -87,7 +80,7 @@ export class CodeModeManager {
     }
 
     async runPrompt(args: RunPromptArgs): Promise<RunPromptResult> {
-        const { runId, agent, cwd, prompt, policy, model, effort, ask, onEvent, signal, suppressReplay } = args;
+        const { runId, agent, cwd, prompt, policy, model, effort, ask, onEvent, signal } = args;
 
         const broker = new PermissionBroker({
             policy,
@@ -95,7 +88,7 @@ export class CodeModeManager {
             onResolved: (a, decision, auto) => onEvent({ type: 'permission', ask: a, decision, auto }),
         });
 
-        const run = await this.ensureRun(runId, agent, cwd, broker, onEvent, suppressReplay ?? false);
+        const run = await this.ensureRun(runId, agent, cwd, broker, onEvent);
         // Re-apply the session's model + effort each turn (idempotent): a warm
         // connection keeps the last selection, but a cold session/load resets it,
         // and the user may have changed it from the header since the last turn.
@@ -208,7 +201,6 @@ export class CodeModeManager {
         cwd: string,
         broker: PermissionBroker,
         onEvent: (event: CodeRunEvent) => void,
-        suppressReplay: boolean,
     ): Promise<ActiveRun> {
         const existing = this.runs.get(runId);
         if (existing && existing.agent === agent && existing.cwd === cwd) {
@@ -218,21 +210,22 @@ export class CodeModeManager {
         }
         if (existing) this.dispose(runId); // agent/cwd changed — start over
 
-        // With suppressReplay, the client starts with a muted event sink so a
-        // session/load replay of the prior conversation goes nowhere; the real
-        // sink is installed once the session is open (below).
+        // The client starts with a muted event sink so a session/load replay of
+        // the prior conversation goes nowhere — the chat's durable record is the
+        // only source of history. The real sink is installed once the session is
+        // open (below), right before the prompt.
         const client = new AcpClient({
             agent,
             cwd,
             broker,
-            onEvent: suppressReplay ? () => {} : onEvent,
+            onEvent: () => {},
         });
         // Dispose the client if startup fails (e.g. the startup-timeout fires) so the
         // spawned adapter process doesn't leak.
         try {
             await client.start();
             const sessionId = await this.openSession(runId, agent, cwd, client);
-            if (suppressReplay) client.setHandlers(broker, onEvent);
+            client.setHandlers(broker, onEvent);
             const run: ActiveRun = { client, sessionId, agent, cwd, inflight: 0 };
             this.runs.set(runId, run);
             return run;

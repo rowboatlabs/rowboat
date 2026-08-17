@@ -17,7 +17,7 @@ import {
 } from './background-task.js';
 import { UserMessage, UserMessageContent } from './message.js';
 import { RequestedAgent, type TurnBusEvent, type TurnEvent } from './turns.js';
-import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
+import type { QueuedSessionMessage, SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
@@ -29,7 +29,7 @@ import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent 
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
-import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
+import { CodeProject, CodeSession, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
 // ============================================================================
@@ -638,6 +638,43 @@ const ipcSchemas = {
     }),
     res: z.object({ turnId: z.string() }),
   },
+  // Deliver-ASAP send: starts a turn when the session is settled, otherwise
+  // queues (ephemeral, main-process memory) — queued messages steer the live
+  // turn at its next model-call boundary or promote to a new turn at settle.
+  'sessions:sendOrQueueMessage': {
+    req: z.object({
+      sessionId: z.string(),
+      input: UserMessage,
+      config: z.object({
+        agent: RequestedAgent,
+        useCase: UseCase.optional(),
+        subUseCase: z.string().optional(),
+        autoPermission: z.boolean().optional(),
+        maxModelCalls: z.number().int().positive().optional(),
+        reasoningEffort: ReasoningEffort.optional(),
+      }),
+    }),
+    res: z.union([
+      z.object({ queued: z.literal(false), turnId: z.string() }),
+      z.object({ queued: z.literal(true), queueId: z.string() }),
+    ]),
+  },
+  'sessions:listQueued': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ queue: z.array(z.custom<QueuedSessionMessage>()) }),
+  },
+  'sessions:editQueued': {
+    req: z.object({
+      sessionId: z.string(),
+      queueId: z.string(),
+      message: UserMessage,
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:removeQueued': {
+    req: z.object({ sessionId: z.string(), queueId: z.string() }),
+    res: z.object({ removed: z.custom<QueuedSessionMessage>().nullable() }),
+  },
   'sessions:respondToPermission': {
     req: z.object({
       turnId: z.string(),
@@ -660,7 +697,13 @@ const ipcSchemas = {
       turnId: z.string(),
       reason: z.string().optional(),
     }),
-    res: z.object({ success: z.literal(true) }),
+    // dequeued: pending messages drained by the stop (a stop must not be
+    // followed by a queued message auto-starting) — the UI restores their
+    // text to the composer.
+    res: z.object({
+      success: z.literal(true),
+      dequeued: z.array(z.custom<QueuedSessionMessage>()),
+    }),
   },
   'sessions:resumeTurn': {
     req: z.object({ sessionId: z.string() }),
@@ -1255,17 +1298,16 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
-  // App window → main: pop the ACTIVE chat out into the floating companion,
-  // landing on the expanded text card (the mirror of the card's ↗). Starts
-  // a companion session so the popped chat survives blur (tucking to the
-  // mascot instead of dying like a plain summon would).
-  'quickAsk:popOut': {
-    req: z.null(),
-    res: z.object({}),
-  },
   'quick-ask:tuck': {
     req: z.null(),
     res: z.null(),
+  },
+  // App → main: the tuck relay was received and a session is starting —
+  // cancel the "nothing answered" text-card fallback (device acquisition can
+  // take seconds; the fallback must not flash meanwhile).
+  'quickAsk:tuckAck': {
+    req: z.null(),
+    res: z.object({}),
   },
   // Pill ⇄ tucked-mascot presentation of the pinned role (main resizes the
   // window in place and re-pushes quick-ask:mode).
@@ -1383,6 +1425,46 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // Any window → main: the current global quick-ask chord and whether the
+  // OS actually granted it (false = another app owns it — quick-ask is
+  // unreachable until the user picks a different chord).
+  'quickAsk:getShortcut': {
+    req: z.null(),
+    res: z.object({
+      accelerator: z.string(),
+      registered: z.boolean(),
+      isDefault: z.boolean(),
+    }),
+  },
+  // Settings → main: rebind the global chord (null = reset to default).
+  // Main registers the NEW chord before releasing the old one — a rejected
+  // rebind (invalid, system-reserved, or taken by another app) leaves the
+  // old binding untouched and comes back ok:false with a human-readable
+  // reason for the recorder to show inline.
+  'quickAsk:setShortcut': {
+    req: z.object({ accelerator: z.string().nullable() }),
+    res: z.object({
+      ok: z.boolean(),
+      accelerator: z.string(),
+      registered: z.boolean(),
+      error: z.string().nullable(),
+    }),
+  },
+  // Settings → main: the shortcut-recorder modal is capturing keys. While
+  // active, main releases the current global chord so pressing it lands in
+  // the modal (as keys to display) instead of summoning the quick-ask bar
+  // over the recorder. Re-registered when capture ends.
+  'quickAsk:setShortcutCaptureActive': {
+    req: z.object({ active: z.boolean() }),
+    res: z.object({}),
+  },
+  // Push: main → every window after a successful rebind (or a boot-time
+  // registration failure), so the tray tooltip, toast copy, and the bar's
+  // hold-to-talk chord detection all follow the one source of truth.
+  'quick-ask:shortcut-changed': {
+    req: z.object({ accelerator: z.string(), registered: z.boolean() }),
+    res: z.null(),
+  },
   // --- Ambient meeting detection popup (own always-on-top window) ---
   // Main → popup: the detection to display.
   'meetingDetect:payload': {
@@ -1450,8 +1532,18 @@ const ipcSchemas = {
   'codeMode:checkAgentStatus': {
     req: z.null(),
     res: z.object({
-      claude: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
-      codex: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
+      claude: z.object({
+        installed: z.boolean(),
+        signedIn: z.boolean(),
+        // Who is signed in, when detectable: email plus the subscription tier
+        // ("max", "pro", "enterprise" for Claude; "plus", "go", … for Codex).
+        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      }),
+      codex: z.object({
+        installed: z.boolean(),
+        signedIn: z.boolean(),
+        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      }),
     }),
   },
   // Download + install an agent's native engine (the Settings "Enable" action).
@@ -1504,15 +1596,11 @@ const ipcSchemas = {
       projectId: z.string(),
       title: z.string().optional(),
       agent: CodingAgent,
-      mode: CodeSessionMode,
       policy: ApprovalPolicy,
       isolation: z.enum(['in-repo', 'worktree']),
-      // LLM for Rowboat-mode turns. Unset = the configured default. Like any
-      // chat, the model is fixed once the session's run exists.
-      model: z.string().optional(),
-      provider: z.string().optional(),
-      // The coding agent's own model + reasoning effort (ACP engine). Unlike the
-      // Rowboat model these are re-applied each turn, so they stay editable.
+      // The coding agent's own model + reasoning effort (ACP engine),
+      // re-applied each turn so they stay editable. The copilot LLM is
+      // whatever the chat composer picks — same as any other chat.
       agentModel: z.string().optional(),
       agentEffort: z.string().optional(),
     }),
@@ -1530,7 +1618,7 @@ const ipcSchemas = {
   'codeSession:update': {
     req: z.object({
       sessionId: z.string(),
-      patch: CodeSession.pick({ title: true, mode: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
+      patch: CodeSession.pick({ title: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
     }),
     res: z.object({
       session: CodeSession,
@@ -1550,18 +1638,6 @@ const ipcSchemas = {
     }),
     res: z.object({
       success: z.literal(true),
-    }),
-  },
-  // Direct-drive: send the user's message straight to the session's ACP agent
-  // (no copilot LLM in between). Streams back over `runs:events`.
-  'codeSession:sendMessage': {
-    req: z.object({
-      sessionId: z.string(),
-      text: z.string().min(1),
-    }),
-    res: z.object({
-      accepted: z.boolean(),
-      error: z.string().optional(),
     }),
   },
   'codeSession:stop': {
@@ -2483,12 +2559,10 @@ const ipcSchemas = {
   // Popout control bar → main process → relayed to the app window, which
   // executes the action on the live call. 'expand' additionally focuses the
   // main app window (handled in the main process). 'ptt-down'/'ptt-up' are
-  // the on-screen talk button's press/release edges; 'send-text' carries a
-  // typed message from the popout's input.
+  // the on-screen talk button's press/release edges.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
-      text: z.string().optional(),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'end-call', 'expand']),
     }),
     res: z.object({}),
   },
@@ -2515,8 +2589,7 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
-      text: z.string().optional(),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'end-call', 'expand']),
     }),
     res: z.null(),
   },

@@ -144,7 +144,6 @@ export function SessionRail({
                         <div className="truncate text-xs">{session.title}</div>
                         <div className="truncate text-[10px] text-muted-foreground">
                           {AGENT_SHORT[session.agent]}
-                          {session.mode === 'rowboat' ? ' · Rowboat drives' : ''}
                           {session.worktree && !session.worktree.removedAt ? ' · worktree' : ''}
                         </div>
                       </div>
