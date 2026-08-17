@@ -619,6 +619,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'listMcpTools': 'Listing MCP tools',
   'executeMcpTool': 'Running MCP tool',
   'web-search': 'Searching the web',
+  'generate-image': 'Generating image',
   'save-to-memory': 'Saving to memory',
   'app-navigation': 'Navigating app',
   'browser-control': 'Controlling browser',
@@ -835,6 +836,14 @@ export const getToolRowSummary = (tool: ToolCall): ToolRowSummary => {
         verb: 'Web search',
         detail: asString(input?.query) ? `"${input!.query}"` : undefined,
         stat: done && results !== undefined ? plural(results, 'result') : undefined,
+      }
+    }
+    case 'generate-image': {
+      const failed = done && asRecord(tool.result)?.success === false
+      return {
+        verb: 'Generate image',
+        detail: asString(input?.prompt)?.slice(0, 64),
+        stat: failed ? 'failed' : undefined,
       }
     }
     case 'save-to-memory':

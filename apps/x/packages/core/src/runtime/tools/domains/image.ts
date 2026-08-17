@@ -7,7 +7,8 @@
 import { z } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
-import { generateImage, NoImageGeneratedError, type ImageModel } from "ai";
+import { randomBytes } from "crypto";
+import { generateImage, NoImageGeneratedError, type GeneratedFile, type ImageModel, type Warning } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -19,9 +20,10 @@ import { getGatewayProvider } from "../../../models/gateway.js";
 import container from "../../../di/container.js";
 import type { IModelConfigRepo } from "../../../models/repo.js";
 import { BuiltinToolsSchema } from "../types.js";
+import type { ToolContext } from "../exec-tool.js";
 
-// Placeholder until the founders fix the gateway's official default image
-// model. Kept separate from the BYOK defaults so they can diverge.
+// The gateway's image model until it publishes an official default. Kept
+// separate from the BYOK defaults so they can diverge.
 const GATEWAY_IMAGE_MODEL = "google/gemini-2.5-flash-image";
 
 // Per-flavor BYOK defaults, each in its provider's own naming (only
@@ -31,8 +33,9 @@ const OPENROUTER_IMAGE_MODEL = "google/gemini-2.5-flash-image";
 const GOOGLE_IMAGE_MODEL = "gemini-2.5-flash-image";
 // Newest id the installed @ai-sdk/openai documents (beyond gpt-image-1).
 const OPENAI_IMAGE_MODEL = "gpt-image-2";
-// Ollama's launch image model; must be pulled locally (`ollama pull`).
-const OLLAMA_IMAGE_MODEL = "z-image-turbo";
+// Ollama's launch image model, published under the `x/` namespace; must be
+// pulled locally (`ollama pull x/z-image-turbo`).
+const OLLAMA_IMAGE_MODEL = "x/z-image-turbo";
 
 type ImageFlavor = "openrouter" | "google" | "openai" | "ollama" | "openai-compatible";
 
@@ -146,7 +149,8 @@ function slugify(input: string): string {
 const MODEL_ID_SHAPE = /^[\w.:/-]{1,128}$/;
 
 // Loose on purpose — each provider enforces its own exact ratio enum; this
-// only stops malformed strings before they reach the API.
+// only stops malformed strings before they reach the API. "auto" is accepted
+// here and dropped at the call site (provider default = no field).
 const ASPECT_RATIO_SHAPE = /^(auto|\d+(\.\d+)?:\d+(\.\d+)?)$/;
 
 // Tokens shared by half the image catalog — matching on them would suggest
@@ -232,8 +236,8 @@ function describeImageError(error: unknown, modelId: string, flavor: ImageFlavor
 
 // Gateway failures get their own framing: a 404 / "No endpoints" /
 // unknown-model shape most likely means the gateway doesn't route image
-// models yet. The raw error text is kept verbatim — it is the evidence for
-// the founders.
+// models yet. The raw error text is kept verbatim so the failure can be
+// diagnosed from the tool result alone.
 function describeGatewayError(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
     const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
@@ -249,31 +253,78 @@ function describeGatewayError(error: unknown): string {
     return `Image generation via the Rowboat gateway failed: ${message}`;
 }
 
+// OpenAI's image API takes a fixed `size` rather than an aspect ratio (the
+// SDK warns and drops `aspectRatio`). Map the requested shape onto the sizes
+// the gpt-image family documents; dall-e models have their own size table
+// and are left to the provider warning instead.
+function openaiSizeForAspect(modelId: string, aspectRatio: string): `${number}x${number}` | undefined {
+    if (modelId.startsWith("dall-e")) return undefined;
+    const [w, h] = aspectRatio.split(":").map(Number);
+    if (!w || !h) return undefined;
+    if (w > h) return "1536x1024";
+    if (w < h) return "1024x1536";
+    return "1024x1024";
+}
+
+// Provider warnings as plain text so the tool result carries them (e.g. a
+// model that ignores aspectRatio) instead of silently dropping them.
+function formatWarnings(warnings: Warning[]): string[] {
+    return warnings.map((w) => {
+        switch (w.type) {
+            case "unsupported":
+                return `Unsupported: ${w.feature}${w.details ? ` — ${w.details}` : ""}`;
+            case "compatibility":
+                return `Compatibility: ${w.feature}${w.details ? ` — ${w.details}` : ""}`;
+            case "deprecated":
+                return `Deprecated: ${w.setting} — ${w.message}`;
+            default:
+                return w.message;
+        }
+    });
+}
+
 // One generation path for every flavor: the AI SDK image interface. (The
 // installed @ai-sdk/google accepts Gemini image ids on it directly, so no
-// generateText + responseModalities branch is needed.)
+// generateText + responseModalities branch is needed.) The turn's abort
+// signal rides along so a stopped turn cancels the (billed) request.
 async function runImageGeneration(
-    backend: Pick<ImageBackend, "makeImageModel">,
+    backend: Pick<ImageBackend, "flavor" | "makeImageModel">,
     modelId: string,
     prompt: string,
-    aspect: { aspectRatio?: `${number}:${number}` },
-): Promise<{ base64: string }> {
+    aspectRatio: `${number}:${number}` | undefined,
+    signal: AbortSignal | undefined,
+): Promise<{ image: GeneratedFile; warnings: string[] }> {
+    const size = backend.flavor === "openai" && aspectRatio
+        ? openaiSizeForAspect(modelId, aspectRatio)
+        : undefined;
     const result = await generateImage({
         model: backend.makeImageModel(modelId),
         prompt,
-        ...aspect,
+        // OpenAI takes size, everyone else takes the ratio; sending both
+        // would only add a second warning.
+        ...(size ? { size } : aspectRatio ? { aspectRatio } : {}),
+        abortSignal: signal,
     });
     const image = result.images[0];
     if (!image) {
         throw new Error("Model returned no image — it may not support image output.");
     }
-    return { base64: image.base64 };
+    return { image, warnings: formatWarnings(result.warnings) };
 }
 
+// Extension from the provider-reported media type; PNG when unrecognised.
+const EXTENSION_BY_MEDIA_TYPE: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+};
+
 // Write a generated image to <WorkDir>/generated_images and return its
-// absolute path.
+// absolute path. The timestamp keeps the folder sortable; the random suffix
+// keeps parallel calls with the same name from colliding.
 async function saveGeneratedImage(
-    image: { base64: string },
+    image: Pick<GeneratedFile, "uint8Array" | "mediaType">,
     filename: string | undefined,
     prompt: string,
 ): Promise<string> {
@@ -282,26 +333,33 @@ async function saveGeneratedImage(
     const safeName = slugify(filename ?? "")
         || slugify(prompt.split(/\s+/).slice(0, 6).join(" "))
         || "image";
-    const filePath = path.join(dir, `${safeName}-${Date.now()}.png`);
-    await fs.writeFile(filePath, Buffer.from(image.base64, "base64"));
+    const mediaType = (image.mediaType.split(";")[0] ?? "").trim().toLowerCase();
+    const ext = EXTENSION_BY_MEDIA_TYPE[mediaType] ?? "png";
+    const suffix = randomBytes(3).toString("hex");
+    const filePath = path.join(dir, `${safeName}-${Date.now()}-${suffix}.${ext}`);
+    await fs.writeFile(filePath, image.uint8Array);
     return filePath;
 }
 
 export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
     'generate-image': {
         permission: "none",
-        description: "Generate an image from a text prompt. Use this tool whenever the user asks to generate, create, or draw an image or picture. It renders the prompt with the default image model — unless the user explicitly names one — and saves the result as a PNG file, returning the saved file's absolute path. After a successful call, present that path to the user wrapped in a ```filepath code block. The prompt should be a vivid, self-contained description of the desired image.",
+        description: "Generate an image from a text prompt. Use this tool whenever the user asks to generate, create, or draw an image or picture. It renders the prompt with the default image model — unless the user explicitly names one — and saves the result as an image file, returning the saved file's absolute path. After a successful call, present that path to the user wrapped in a ```filepath code block. The prompt should be a vivid, self-contained description of the desired image.",
         inputSchema: z.object({
             prompt: z.string().describe('A vivid, self-contained description of the image to generate. Include the subject, style, setting, and any important details.'),
             filename: z.string().optional().describe('Short kebab-case basename for the saved file, without extension (e.g. "sunset-over-lake"). Derived from the prompt when omitted.'),
             aspectRatio: z.string().optional().describe('Aspect ratio of the image as width:height — common values are "1:1", "16:9", "9:16", "4:3" — or "auto". Only pass this when the user asks for a specific shape.'),
-            model: z.string().optional().describe('Image model id in the ACTIVE provider\'s naming: OpenRouter "vendor/model" (e.g. "x-ai/grok-imagine-image-quality", "bytedance-seed/seedream-4.5", "google/gemini-2.5-flash-image"), Google "gemini-…" (e.g. "gemini-2.5-flash-image"), OpenAI "gpt-image-…", Ollama a locally pulled model name. Pass ONLY when the user explicitly names an image model or provider (e.g. "use gpt-image-1", "grok se banao"); omit otherwise to use the default model.'),
+            model: z.string().optional().describe('Image model id in the ACTIVE provider\'s naming: OpenRouter "vendor/model" (e.g. "x-ai/grok-imagine-image-quality", "bytedance-seed/seedream-4.5", "google/gemini-2.5-flash-image"), Google "gemini-…" (e.g. "gemini-2.5-flash-image"), OpenAI "gpt-image-…", Ollama a locally pulled model name. Pass ONLY when the user explicitly names an image model or provider (e.g. "use gpt-image-1", "make it with Grok"); omit otherwise to use the default model.'),
         }),
         isAvailable: async () => {
             if (await isSignedIn()) return true;
             return (await resolveImageBackend()) !== null;
         },
-        execute: async ({ prompt, filename, aspectRatio, model }: { prompt: string; filename?: string; aspectRatio?: string; model?: string }) => {
+        execute: async (
+            { prompt, filename, aspectRatio, model }: { prompt: string; filename?: string; aspectRatio?: string; model?: string },
+            ctx?: ToolContext,
+        ) => {
+            const signal = ctx?.signal;
             const aspectInput = aspectRatio?.trim() || undefined;
             if (aspectInput && !ASPECT_RATIO_SHAPE.test(aspectInput)) {
                 return {
@@ -309,7 +367,11 @@ export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
                     error: `Invalid aspectRatio '${aspectInput}'. Expected width:height (e.g. "16:9") or "auto".`,
                 };
             }
-            const aspect = aspectInput ? { aspectRatio: aspectInput as `${number}:${number}` } : {};
+            // "auto" is the provider default, which every provider expresses
+            // by omitting the field (Google rejects a literal "auto").
+            const aspect = aspectInput && aspectInput !== "auto"
+                ? aspectInput as `${number}:${number}`
+                : undefined;
 
             const modelOverride = model?.trim() || undefined;
             if (modelOverride && !MODEL_ID_SHAPE.test(modelOverride)) {
@@ -319,16 +381,20 @@ export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
                 };
             }
 
+            // One config read serves the whole call: the same backend gates
+            // model overrides, is the gateway fallback, and runs BYOK.
+            const backend = await resolveImageBackend();
+
             // Signed-in: the gateway is the primary path; the user's own
             // provider (when configured) is the fallback, with the gateway
             // failure noted on the result. The gateway always renders
-            // GATEWAY_IMAGE_MODEL — gateway billing is Rowboat's; per-call
-            // overrides there are a founder decision — so an explicit model
+            // GATEWAY_IMAGE_MODEL — gateway billing is Rowboat's, so per-call
+            // model overrides are not offered there — and an explicit model
             // choice skips it and runs on the user's own provider.
             let gatewayNote: string | undefined;
             if (await isSignedIn()) {
                 if (modelOverride) {
-                    if (!(await resolveImageBackend())) {
+                    if (!backend) {
                         return {
                             success: false,
                             error: `Choosing a specific image model requires your own provider (OpenRouter, Google, OpenAI, Ollama, or an OpenAI-compatible server). Add one in model settings, or omit the model to use the default (${GATEWAY_IMAGE_MODEL}).`,
@@ -336,11 +402,14 @@ export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
                     }
                 } else {
                     try {
-                        const image = await runImageGeneration(
-                            { makeImageModel: (id) => getGatewayProvider().imageModel(id) },
+                        // The gateway fronts OpenRouter, so it takes the ratio
+                        // the same way the openrouter flavor does.
+                        const { image, warnings } = await runImageGeneration(
+                            { flavor: "openrouter", makeImageModel: (id) => getGatewayProvider().imageModel(id) },
                             GATEWAY_IMAGE_MODEL,
                             prompt,
                             aspect,
+                            signal,
                         );
                         const filePath = await saveGeneratedImage(image, filename, prompt);
                         return {
@@ -348,25 +417,28 @@ export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
                             path: filePath,
                             provider: "rowboat",
                             model: GATEWAY_IMAGE_MODEL,
+                            ...(warnings.length > 0 ? { warnings } : {}),
                         };
                     } catch (error) {
+                        // A stopped turn is not a gateway fault: let it
+                        // propagate so the runtime records the cancellation
+                        // instead of retrying on the user's own provider.
+                        if (signal?.aborted) throw error;
                         // Only a backend that can run without an explicit
                         // model is a usable fallback here (openai-compatible
                         // has no default).
-                        const fallback = await resolveImageBackend();
-                        if (!fallback?.defaultModel) {
+                        if (!backend?.defaultModel) {
                             return {
                                 success: false,
                                 error: describeGatewayError(error),
                             };
                         }
                         const message = error instanceof Error ? error.message : String(error);
-                        gatewayNote = `Rowboat gateway image call failed (${message.slice(0, 120)}); used your ${fallback.flavor} provider instead.`;
+                        gatewayNote = `Rowboat gateway image call failed (${message.slice(0, 120)}); used your ${backend.flavor} provider instead.`;
                     }
                 }
             }
 
-            const backend = await resolveImageBackend();
             if (!backend) {
                 return {
                     success: false,
@@ -383,16 +455,18 @@ export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
             }
 
             try {
-                const image = await runImageGeneration(backend, byokModel, prompt, aspect);
+                const { image, warnings } = await runImageGeneration(backend, byokModel, prompt, aspect, signal);
                 const filePath = await saveGeneratedImage(image, filename, prompt);
                 return {
                     success: true,
                     path: filePath,
                     provider: backend.flavor,
                     model: byokModel,
+                    ...(warnings.length > 0 ? { warnings } : {}),
                     ...(gatewayNote ? { note: gatewayNote } : {}),
                 };
             } catch (error) {
+                if (signal?.aborted) throw error;
                 let errorText = describeImageError(error, byokModel, backend.flavor);
                 // An unknown OpenRouter id is usually a near-miss on a real
                 // one; the catalog lookup is decorative and never changes the
