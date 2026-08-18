@@ -1580,8 +1580,18 @@ const ipcSchemas = {
   'codeMode:checkAgentStatus': {
     req: z.null(),
     res: z.object({
-      claude: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
-      codex: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
+      claude: z.object({
+        installed: z.boolean(),
+        signedIn: z.boolean(),
+        // Who is signed in, when detectable: email plus the subscription tier
+        // ("max", "pro", "enterprise" for Claude; "plus", "go", … for Codex).
+        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      }),
+      codex: z.object({
+        installed: z.boolean(),
+        signedIn: z.boolean(),
+        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      }),
     }),
   },
   // Download + install an agent's native engine (the Settings "Enable" action).

@@ -931,8 +931,24 @@ function App() {
   // Watch the conversation that is actually rendered — the sessions-runtime
   // one when loaded, the legacy state otherwise — so billing failures
   // (out of credits, subscription lapsed) always pop the upgrade dialog.
+  // Only errors that APPEAR while a conversation is on screen count: when a
+  // context first renders (session loaded/switched, app relaunched), errors
+  // already in its transcript are history — replaying them would pop the
+  // dialog and flip the credit state on every open of that chat.
   const billingWatchedConversation = sessionChat.chatState?.conversation ?? conversation
+  const billingContextKeyRef = useRef<string | null>(null)
   useEffect(() => {
+    const contextKey = sessionChat.chatState ? `session:${sessionChat.sessionId}` : 'legacy'
+    const isNewContext = billingContextKeyRef.current !== contextKey
+    billingContextKeyRef.current = contextKey
+    if (isNewContext) {
+      for (const item of billingWatchedConversation) {
+        if (isErrorMessage(item) && matchBillingError(item.message)) {
+          handledBillingErrorIdsRef.current.add(item.id)
+        }
+      }
+      return
+    }
     for (let i = billingWatchedConversation.length - 1; i >= 0; i--) {
       const item = billingWatchedConversation[i]
       if (!isErrorMessage(item)) continue
@@ -946,7 +962,7 @@ function App() {
       }
       return
     }
-  }, [billingWatchedConversation])
+  }, [billingWatchedConversation, sessionChat.chatState, sessionChat.sessionId])
   const runIdRef = useRef<string | null>(null)
   const loadRunRequestIdRef = useRef(0)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -5111,6 +5127,12 @@ function App() {
   const navigateToViewRef = useRef(navigateToView)
   useEffect(() => { navigateToViewRef.current = navigateToView }, [navigateToView])
 
+  // Stable across navigations (EmailView's memoized rows compare prop
+  // identity) — the email view's people-note chips navigate through the ref.
+  const openNoteFromEmail = useCallback((path: string) => {
+    void navigateToViewRef.current({ type: 'file', path })
+  }, [])
+
   useEffect(() => {
     const handle = (url: string) => {
       const view = parseDeepLink(url)
@@ -6762,7 +6784,7 @@ function App() {
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} />
+                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} onOpenNote={openNoteFromEmail} />
                 </div>
               ) : isWorkspaceOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

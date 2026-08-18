@@ -206,6 +206,8 @@ const HISTORICAL_KEY_ORDER = [
     "todo-propose",
     "todo-report",
     "screen-pointer",
+    "text-to-speech",
+    "transcribe-audio",
     "home-status",
     "paste-at-cursor",
     "spawn-agent",
@@ -245,6 +247,8 @@ describe("BuiltinTools permission audit", () => {
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
             "composio-execute-tool": "composio-execute",
+            "text-to-speech": "file-boundary",
+            "transcribe-audio": "file-boundary",
             // Ghostwriter: types into ANOTHER app at the user's cursor —
             // always gated (the auto judge keeps voice flow smooth).
             "paste-at-cursor": "prompt",

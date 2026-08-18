@@ -524,9 +524,19 @@ export function listCategoryThreadIds(category: string): string[] {
  * cache. Outlook's delta state goes too so a reconnect starts with a full sync.
  */
 export function purgeEmailCaches(): void {
+    // Empty the cache directories IN PLACE rather than rm -rf'ing them:
+    // inbox_lists/ is a workspace-watcher root, and chokidar cannot re-attach
+    // to a watched root that is deleted and recreated — the email view would
+    // stop receiving live updates until app restart (stuck on the empty state
+    // while the reconnect sync refills the cache behind it). Per-entry deletes
+    // also emit change events, so the inbox clears — and later refills —
+    // without a manual refresh.
     for (const dir of [CACHE_DIR, SEARCH_CACHE_DIR, path.join(WorkDir, 'outlook_sync')]) {
         try {
-            fs.rmSync(dir, { recursive: true, force: true });
+            if (!fs.existsSync(dir)) continue;
+            for (const name of fs.readdirSync(dir)) {
+                fs.rmSync(path.join(dir, name), { recursive: true, force: true });
+            }
         } catch (err) {
             console.warn(`[Email store] cache purge failed for ${dir}:`, err);
         }

@@ -9,6 +9,11 @@
 // revisit once code-mode migrates to the turns runtime.
 export const COPILOT_BASE_TOOLS: readonly string[] = [
     "loadSkill",
+    // Blocking user question (async, requiresHuman) — resolved as a special
+    // descriptor in real-agent-resolver, not a BuiltinTools catalog entry.
+    // Headless/background turns run humanAvailable:false, where the runtime
+    // answers it immediately with "Human input is unavailable for this turn."
+    "ask-human",
     "file-getRoot",
     "file-exists",
     "file-list",

@@ -24,6 +24,7 @@ import { backgroundTaskTools } from "./domains/background-tasks.js";
 import { notificationTools } from "./domains/notifications.js";
 import { todoTools } from "./domains/todo.js";
 import { screenPointerTools } from "./domains/screen-pointer.js";
+import { voiceTools } from "./domains/voice.js";
 import { homeTools } from "./domains/home.js";
 import { textInsertTools } from "./domains/text-insert.js";
 import { BuiltinToolsSchema } from "./types.js";
@@ -100,6 +101,10 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...notificationTools,
     ...todoTools,
     ...screenPointerTools,
+    // Merge order note: voiceTools shipped on main first — their catalog
+    // position is already in main users' provider payloads; the Helm's
+    // additions append after.
+    ...voiceTools,
     ...homeTools,
     ...textInsertTools,
 

@@ -13,9 +13,19 @@ export const CodeModeConfig = z.object({
 });
 export type CodeModeConfig = z.infer<typeof CodeModeConfig>;
 
+// Who is signed in, when detectable. `plan` is the raw subscription tier as
+// reported by the agent ("max", "pro", "enterprise" for Claude; ChatGPT plan
+// types like "plus" / "go" for Codex) — the UI formats it for display.
+export const AgentAccount = z.object({
+    email: z.string().optional(),
+    plan: z.string().optional(),
+});
+export type AgentAccount = z.infer<typeof AgentAccount>;
+
 export const AgentStatus = z.object({
     installed: z.boolean(),
     signedIn: z.boolean(),
+    account: AgentAccount.optional(),
 });
 export type AgentStatus = z.infer<typeof AgentStatus>;
 
