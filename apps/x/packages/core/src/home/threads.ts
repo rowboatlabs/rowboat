@@ -47,6 +47,10 @@ interface HomeState {
      * trips the wire early). Stale entries are harmless — they stop matching
      * and get overwritten by the next snooze. */
     snoozed: Record<string, { until: string; since: string }>;
+    /** Dismissals: "release this claim on my attention" — no expiry, only
+     * the activity tripwire (the thread moving again returns it). The
+     * ledger's receipts are untouched: this silences the bay, not the fact. */
+    dismissed: Record<string, { since: string }>;
 }
 
 // The live status machine lives on neutral ground — runtime/turns — so the
@@ -59,13 +63,22 @@ async function readState(): Promise<HomeState> {
         const raw = await fs.readFile(STATE_PATH, 'utf-8');
         const parsed: unknown = JSON.parse(raw);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            const obj = parsed as { seen?: unknown; pins?: unknown; snoozed?: unknown };
+            const obj = parsed as { seen?: unknown; pins?: unknown; snoozed?: unknown; dismissed?: unknown };
             const snoozed: HomeState['snoozed'] = {};
             if (obj.snoozed && typeof obj.snoozed === 'object' && !Array.isArray(obj.snoozed)) {
                 for (const [key, value] of Object.entries(obj.snoozed as Record<string, unknown>)) {
                     const v = value as { until?: unknown; since?: unknown } | null;
                     if (typeof v?.until === 'string' && typeof v?.since === 'string') {
                         snoozed[key] = { until: v.until, since: v.since };
+                    }
+                }
+            }
+            const dismissed: HomeState['dismissed'] = {};
+            if (obj.dismissed && typeof obj.dismissed === 'object' && !Array.isArray(obj.dismissed)) {
+                for (const [key, value] of Object.entries(obj.dismissed as Record<string, unknown>)) {
+                    const v = value as { since?: unknown } | null;
+                    if (typeof v?.since === 'string') {
+                        dismissed[key] = { since: v.since };
                     }
                 }
             }
@@ -80,13 +93,14 @@ async function readState(): Promise<HomeState> {
                         : {},
                 pins: Array.isArray(obj.pins) ? obj.pins.filter((p): p is string => typeof p === 'string') : [],
                 snoozed,
+                dismissed,
             };
         }
     } catch {
-        // missing or corrupt — start fresh; seen/pins/snoozes are losable
-        // attention state, never work state.
+        // missing or corrupt — start fresh; seen/pins/snoozes/dismissals
+        // are losable attention state, never work state.
     }
-    return { seen: {}, pins: [], snoozed: {} };
+    return { seen: {}, pins: [], snoozed: {}, dismissed: {} };
 }
 
 async function writeState(mutate: (state: HomeState) => void): Promise<void> {
@@ -250,6 +264,17 @@ export class HomeThreadsTracker {
         this.ping();
     }
 
+    /** Dismiss a thread's claim on the user's attention: out of the bay,
+     * the counts, and the sitrep — with no timer. Only the activity
+     * tripwire returns it (the thread moving again earns its way back).
+     * The ledger's receipts are untouched. */
+    async dismiss(sessionId: string): Promise<void> {
+        await writeState((state) => {
+            state.dismissed[sessionId] = { since: new Date().toISOString() };
+        });
+        this.ping();
+    }
+
     /** Snooze a thread out of the needs-you bay: back at `hours` from now,
      * or the moment the session sees new activity — whichever comes first. */
     async snooze(sessionId: string, hours = 4): Promise<void> {
@@ -335,6 +360,10 @@ export class HomeThreadsTracker {
             const snoozed = !!snoozeEntry && now < snoozeEntry.until && entry.updatedAt <= snoozeEntry.since;
             // Boot-persisted snoozes need their wake re-armed.
             if (snoozed) this.scheduleSnoozeWake(snoozeEntry.until);
+            // Dismissal: same tripwire, no timer — only new activity on the
+            // thread returns its claim.
+            const dismissEntry = state.dismissed[entry.sessionId];
+            const dismissed = !!dismissEntry && entry.updatedAt <= dismissEntry.since;
 
             const seenAt = state.seen[entry.sessionId];
             const pinIndex = pinIndexById.get(entry.sessionId);
@@ -348,6 +377,7 @@ export class HomeThreadsTracker {
                 todoKey,
                 ...(pinIndex !== undefined ? { pinIndex } : {}),
                 ...(snoozed ? { snoozed } : {}),
+                ...(dismissed ? { dismissed } : {}),
                 code: code
                     ? {
                           projectId: code.projectId,

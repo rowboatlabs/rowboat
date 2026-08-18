@@ -795,6 +795,13 @@ const ipcSchemas = {
     req: z.object({ sessionId: z.string(), hours: z.number().positive().max(168).optional() }),
     res: z.object({ success: z.boolean() }),
   },
+  // Dismiss a needs-you thread's claim entirely: no timer, only the
+  // activity tripwire returns it. Attention-state only — receipts and the
+  // thread itself are untouched.
+  'home:dismiss': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.boolean() }),
+  },
   // Push ping: the registry changed — refetch home:threads. Debounced in
   // the tracker; carries no payload by design (the snapshot is the truth).
   'home:threadsChanged': {

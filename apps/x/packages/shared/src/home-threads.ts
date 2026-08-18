@@ -66,6 +66,10 @@ export const HomeThreadSchema = z.object({
     /** Snoozed out of the needs-you bay — returns at the chosen time or on
      * new activity, whichever comes first (the Linear tripwire). */
     snoozed: z.boolean().optional(),
+    /** Dismissed — the user released this claim on their attention. No
+     * timer; only new activity on the thread returns it. Receipts on the
+     * ledger stay visible: the bay is silenced, not the fact. */
+    dismissed: z.boolean().optional(),
     /** Updated since the user last looked at this thread. */
     unseen: z.boolean(),
 });

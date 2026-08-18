@@ -1267,7 +1267,7 @@ function stripTitle(thread: HomeThread): string {
 
 const STRIP_HOVER_BTN = 'shrink-0 rounded-[4px] p-0.5 text-muted-foreground/70 opacity-0 transition-opacity duration-100 hover:bg-foreground/[0.08] hover:text-foreground focus-visible:opacity-100 group-hover/strip:opacity-100'
 
-function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze }: {
+function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze, onDismiss }: {
   thread: HomeThread
   /** Click: spotlight the source in place (falls back to the dock). */
   onJump: () => void
@@ -1277,6 +1277,9 @@ function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze }: {
   onTogglePin: () => void
   /** Needs-you bay only: park it for 4h or until the thread moves. */
   onSnooze?: () => void
+  /** Needs-you bay only: release the claim entirely — no timer, only new
+   * activity brings it back. The ledger's receipts stay visible. */
+  onDismiss?: () => void
 }) {
   const needs = thread.status === 'needs-you' || thread.status === 'ready'
   const live = thread.status === 'underway'
@@ -1314,6 +1317,13 @@ function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze }: {
         <IconTip label="Snooze 4h — returns early if the thread moves">
           <button type="button" onClick={(e) => { e.stopPropagation(); onSnooze() }} className={STRIP_HOVER_BTN}>
             <Clock className="size-3.5" />
+          </button>
+        </IconTip>
+      )}
+      {onDismiss && (
+        <IconTip label="Dismiss — returns only if the thread moves again; receipts stay on the list">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onDismiss() }} className={STRIP_HOVER_BTN}>
+            <X className="size-3.5" />
           </button>
         </IconTip>
       )}
@@ -1698,6 +1708,14 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
           snoozeThreadRef.current(target)
           lastJumpedRef.current = null
         }
+      } else if (e.key === 'x') {
+        // Dismiss the J-cursor's last stop — release the claim entirely.
+        const target = lastJumpedRef.current
+        if (target && (target.status === 'needs-you' || target.status === 'ready')) {
+          e.preventDefault()
+          dismissThreadRef.current(target)
+          lastJumpedRef.current = null
+        }
       }
     }
     document.addEventListener('keydown', onKey)
@@ -1816,6 +1834,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   }, [])
   const snoozeThreadRef = useRef(snoozeThread)
   useEffect(() => { snoozeThreadRef.current = snoozeThread }, [snoozeThread])
+  const dismissThread = useCallback((thread: HomeThread) => {
+    void window.ipc.invoke('home:dismiss', { sessionId: thread.sessionId })
+    toast('Dismissed — returns only if the thread moves again')
+  }, [])
+  const dismissThreadRef = useRef(dismissThread)
+  useEffect(() => { dismissThreadRef.current = dismissThread }, [dismissThread])
   const pinnedIds = new Set(deckThreads.filter((t) => t.pinned).map((t) => t.sessionId))
 
   const startChat = useCallback(async (text: string) => {
@@ -1929,10 +1953,10 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   // conversation) is excluded everywhere — the Deck is for unattended work.
   const deckVisible = deckThreads.filter((t) => t.sessionId !== attendedSessionId)
   const deckNeedsYou = deckVisible
-    .filter((t) => (t.status === 'needs-you' || t.status === 'ready') && !t.snoozed)
+    .filter((t) => (t.status === 'needs-you' || t.status === 'ready') && !t.snoozed && !t.dismissed)
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
   const deckUnderway = deckVisible
-    .filter((t) => t.status === 'underway' || (t.pinned && (t.snoozed || t.status === 'idle')))
+    .filter((t) => t.status === 'underway' || (t.pinned && (t.snoozed || t.dismissed || t.status === 'idle')))
     .sort((a, b) => (a.startedAt ?? a.updatedAt).localeCompare(b.startedAt ?? b.updatedAt))
   const deckNeedsYouRef = useRef(deckNeedsYou)
   deckNeedsYouRef.current = deckNeedsYou
@@ -1940,11 +1964,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   const lastJumpedRef = useRef<HomeThread | null>(null)
 
   // Skipper's watch: the fleet state as one glance (and one sentence).
-  // Snoozed threads are deliberately parked, and the attended thread is the
-  // user's own conversation — neither counts.
+  // Snoozed and dismissed threads are deliberately parked, and the attended
+  // thread is the user's own conversation — none of them count.
   const skipperUnderway = deckVisible.filter((t) => t.status === 'underway').length
-  const skipperNeeds = deckVisible.filter((t) => t.status === 'needs-you' && !t.snoozed).length
-  const skipperReady = deckVisible.filter((t) => t.status === 'ready' && !t.snoozed).length
+  const skipperNeeds = deckVisible.filter((t) => t.status === 'needs-you' && !t.snoozed && !t.dismissed).length
+  const skipperReady = deckVisible.filter((t) => t.status === 'ready' && !t.snoozed && !t.dismissed).length
   const sitrep = [
     skipperUnderway > 0 && `${skipperUnderway} underway`,
     skipperNeeds > 0 && `${skipperNeeds} need${skipperNeeds === 1 ? 's' : ''} you`,
@@ -2139,6 +2163,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
                       onOpen={() => openStrip(t)}
                       onTogglePin={() => togglePin(t)}
                       onSnooze={() => snoozeThread(t)}
+                      onDismiss={() => dismissThread(t)}
                     />
                   ))}
                 </div>

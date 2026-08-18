@@ -2927,6 +2927,15 @@ export function setupIpcHandlers() {
         return { success: false };
       }
     },
+    'home:dismiss': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.dismiss(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
     'home:commandCenter': async () => {
       const { ensureCommandCenterSession } = await import('@x/core/dist/home/command-center.js');
       const sessionId = await ensureCommandCenterSession(container.resolve<ISessions>('sessions'));
