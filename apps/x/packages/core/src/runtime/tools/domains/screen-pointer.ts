@@ -11,7 +11,7 @@ import { BuiltinToolsSchema } from "../types.js";
 export const screenPointerTools: z.infer<typeof BuiltinToolsSchema> = {
     'screen-pointer': {
         permission: "none",
-        description: "Point at a spot on the user's SHARED screen during a call: an animated pointer with an optional label appears at that position on their real display. Coordinates are fractions (0-1) of the LATEST screen-share frame — x left→right, y top→bottom. Only works while the user is sharing their screen. Use it to show what you mean while explaining ('this line here'); action 'hide' dismisses the pointer.",
+        description: "Point at a spot on the user's SHARED screen during a call: an animated pointer with an optional label appears at that position on their real display. Coordinates are fractions (0-1) of the LATEST screen-share frame — x left→right, y top→bottom. Only works while the user is sharing their screen. Use it ONLY when indicating a location genuinely helps — the user asked where/which, or a spatial reference disambiguates ('this line here'). Most answers need no pointer: never point as emphasis, by habit, or on questions unrelated to what's on screen, and never when unsure of the target's position in the latest frame. action 'hide' dismisses the pointer.",
         inputSchema: z.object({
             action: z.enum(["point", "hide"]).describe("point: show the pointer at x/y. hide: dismiss it."),
             x: z.number().min(0).max(1).optional().describe("Horizontal position as a fraction of the latest screen-share frame: 0 = left edge, 1 = right edge. Required for point."),
