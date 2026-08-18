@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, SlidersHorizontal, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
+import { Archive, Bold, BookUser, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, SlidersHorizontal, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -252,6 +252,44 @@ function dedupeRecipients(tokens: string[], exclude: Set<string>): string[] {
     if (!addr || seen.has(addr)) continue
     seen.add(addr)
     out.push(token)
+  }
+  return out
+}
+
+// A person on the thread who has a knowledge note. Mirrors the
+// `meeting-prep:resolve` IPC response (people only — orgs are ignored here).
+type ThreadPersonNote = {
+  label: string
+  path: string
+  role?: string
+  organization?: string
+}
+
+// Everyone on the thread (from/to/cc across all messages) as resolve-ready
+// attendees, deduped by address. `self` marks the connected account so the
+// resolver skips the user's own note.
+function collectThreadParticipants(thread: GmailThread, selfEmail: string): { email?: string; displayName?: string; self?: boolean }[] {
+  const seen = new Set<string>()
+  const out: { email?: string; displayName?: string; self?: boolean }[] = []
+  const self = selfEmail.trim().toLowerCase()
+  for (const message of thread.messages) {
+    const tokens = [
+      ...(message.from ? [message.from] : []),
+      ...splitAddresses(message.to),
+      ...splitAddresses(message.cc),
+    ]
+    for (const token of tokens) {
+      const address = extractAddress(token).trim()
+      const email = address.includes('@') ? address.toLowerCase() : ''
+      if (!email || seen.has(email)) continue
+      seen.add(email)
+      const named = token.match(/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/)
+      out.push({
+        email,
+        displayName: named?.[1]?.trim() || undefined,
+        self: self !== '' && email === self,
+      })
+    }
   }
   return out
 }
@@ -2054,6 +2092,7 @@ function ThreadDetail({
   onComposingChange,
   onSetCategory,
   labels = BUILTIN_LABELS,
+  onOpenNote,
 }: {
   thread: GmailThread
   onClose: () => void
@@ -2066,9 +2105,15 @@ function ThreadDetail({
   onSetCategory?: (threadId: string, category: EmailCategory) => Promise<void>
   /** The label registry (built-ins + user-defined) for the chip and correction dropdown. */
   labels?: EmailLabelInfo[]
+  /** Opens a knowledge note (workspace-relative path); enables the people strip. */
+  onOpenNote?: (path: string) => void
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
   const [selfEmail, setSelfEmail] = useState<string>('')
+  // null until gmail:getAccountEmail settles — the people lookup waits so the
+  // user's own note never flashes in as a chip.
+  const [selfEmailLoaded, setSelfEmailLoaded] = useState(false)
+  const [peopleNotes, setPeopleNotes] = useState<ThreadPersonNote[]>([])
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(
     () => new Set(thread.messages.length > 0 ? [thread.messages.length - 1] : [])
   )
@@ -2079,8 +2124,44 @@ function ThreadDetail({
     window.ipc.invoke('gmail:getAccountEmail', {})
       .then((res) => { if (!cancelled && res?.email) setSelfEmail(res.email) })
       .catch(() => {})
+      .finally(() => { if (!cancelled) setSelfEmailLoaded(true) })
     return () => { cancelled = true }
   }, [])
+
+  // Match everyone on the thread against the knowledge base (same deterministic
+  // email-then-name resolver the meeting prep card uses) so people with a note
+  // are one click away from it. Keyed on the participant signature, not the
+  // thread object — sync ticks swap thread identity without changing who's on it.
+  const participants = useMemo(() => collectThreadParticipants(thread, selfEmail), [thread, selfEmail])
+  const participantsKey = useMemo(
+    () => participants.map((p) => (p.self ? '!' : '') + p.email).join(','),
+    [participants],
+  )
+  const participantsRef = useRef(participants)
+  participantsRef.current = participants
+  useEffect(() => {
+    if (!onOpenNote || !selfEmailLoaded) return
+    const attendees = participantsRef.current
+    if (attendees.length === 0) {
+      setPeopleNotes([])
+      return
+    }
+    let cancelled = false
+    window.ipc.invoke('meeting-prep:resolve', { attendees })
+      .then((res) => {
+        if (cancelled) return
+        setPeopleNotes(res.attendees
+          .filter((a) => a.note != null)
+          .map((a) => ({
+            label: a.note!.name || a.label,
+            path: a.note!.path,
+            role: a.note!.role,
+            organization: a.note!.organization,
+          })))
+      })
+      .catch(() => { if (!cancelled) setPeopleNotes([]) })
+    return () => { cancelled = true }
+  }, [participantsKey, selfEmailLoaded, onOpenNote])
 
   const replyAllRecipients = useMemo(
     () => buildRecipients('replyAll', thread, selfEmail),
@@ -2183,6 +2264,22 @@ function ThreadDetail({
             <span className="gmail-thread-summary-text">{thread.summary}</span>
           </div>
         )}
+        {peopleNotes.length > 0 && onOpenNote && (
+          <div className="gmail-thread-people">
+            {peopleNotes.map((person) => (
+              <button
+                key={person.path}
+                type="button"
+                className="gmail-thread-person"
+                title={[person.role, person.organization].filter(Boolean).join(' · ') || 'Open note'}
+                onClick={() => onOpenNote(person.path)}
+              >
+                <BookUser size={13} />
+                {person.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="gmail-message-stack">
           {thread.messages.map((message, index) => {
             const isExpanded = expandedIndices.has(index)
@@ -2275,6 +2372,7 @@ const ThreadRow = memo(function ThreadRow({
   onHoverOut,
   onCloseThread,
   onComposingChange,
+  onOpenNote,
 }: {
   thread: GmailThread
   isSelected: boolean
@@ -2299,6 +2397,8 @@ const ThreadRow = memo(function ThreadRow({
   onHoverOut: () => void
   onCloseThread: () => void
   onComposingChange: (composing: boolean) => void
+  /** Opens a knowledge note — forwarded to ThreadDetail's people strip. */
+  onOpenNote?: (path: string) => void
 }) {
   const latest = latestMessage(thread)
   const isUnread = thread.unread === true
@@ -2388,6 +2488,7 @@ const ThreadRow = memo(function ThreadRow({
           onComposingChange={onComposingChange}
           onSetCategory={onSetCategory}
           labels={labels}
+          onOpenNote={onOpenNote}
         />
       )}
     </div>
@@ -2596,9 +2697,12 @@ export type EmailViewProps = {
   initialSearchQuery?: string | null
   /** Bump to re-apply the same search query. */
   searchQueryVersion?: number
+  /** Opens a knowledge note (workspace-relative path) — enables the "people on
+   *  this email with a note" strip in the thread view. */
+  onOpenNote?: (path: string) => void
 }
 
-export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery, searchQueryVersion }: EmailViewProps = {}) {
+export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery, searchQueryVersion, onOpenNote }: EmailViewProps = {}) {
   const [important, setImportant] = useState<SectionState>(() => clearLoadingFlag(persistedImportant))
   const [other, setOther] = useState<SectionState>(() => clearLoadingFlag(persistedOther))
   const hadPersistedDataOnMount = useRef(persistedImportant !== null)
@@ -3556,6 +3660,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
         onHoverOut={cancelHoverPrefetch}
         onCloseThread={closeThread}
         onComposingChange={setActiveThreadComposing}
+        onOpenNote={onOpenNote}
       />
     )
   }
