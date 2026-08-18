@@ -2977,12 +2977,12 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   // reload to be discarded whenever Other was reloaded in the same tick.)
   const epochsRef = useRef<Record<InboxSection, number>>({ important: 0, other: 0 })
 
-  const fetchSectionPage = useCallback(async (section: InboxSection, cursor?: string) => {
+  const fetchSectionPage = useCallback(async (section: InboxSection, cursor?: string, limit: number = PAGE_SIZE) => {
     const result = section === 'important'
-      ? await window.ipc.invoke('gmail:getImportant', { cursor, limit: PAGE_SIZE })
+      ? await window.ipc.invoke('gmail:getImportant', { cursor, limit })
       : await window.ipc.invoke('gmail:getEverythingElse', {
           cursor,
-          limit: PAGE_SIZE,
+          limit,
           category: otherCategoryRef.current ?? undefined,
         })
     // Counts describe the whole 'other' section regardless of filter/page —
@@ -3015,20 +3015,47 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     }
   }, [important, other, setSection, fetchSectionPage])
 
+  // Section states mirrored into refs so reloadFirstPage can read the current
+  // pagination depth without depending on them (its identity must stay stable
+  // for the watcher effect).
+  const importantRef = useRef(important)
+  importantRef.current = important
+  const otherRef = useRef(other)
+  otherRef.current = other
+
   const reloadFirstPage = useCallback(async (section: InboxSection, options: { silent?: boolean } = {}) => {
     const epoch = ++epochsRef.current[section]
+    // A silent live reload must refresh the list AT ITS CURRENT DEPTH, not
+    // reset it to page 1: replacing a deep-scrolled list with one page
+    // shrinks the scroller, which clamps scrollTop — the list visibly lurches
+    // upward mid-scroll. (The watcher fires on any inbox_lists/ write —
+    // mark-read mirrors, body-height saves — not just new mail.) So walk
+    // pages until the previously-loaded depth is re-covered, then swap the
+    // array once.
+    const prevDepth = options.silent
+      ? (section === 'important' ? importantRef.current : otherRef.current).threads.length
+      : 0
     if (options.silent) {
       setSection(section, (prev) => ({ ...prev, loadingPage: true }))
     } else {
       setSection(section, () => ({ ...initialSectionState, loadingPage: true }))
     }
     try {
-      const result = await fetchSectionPage(section)
-      if (epoch !== epochsRef.current[section]) return
+      const threads: GmailThread[] = []
+      let nextCursor: string | null = null
+      let cursor: string | undefined
+      do {
+        const limit = Math.min(100, Math.max(PAGE_SIZE, prevDepth - threads.length))
+        const result = await fetchSectionPage(section, cursor, limit)
+        if (epoch !== epochsRef.current[section]) return
+        threads.push(...result.threads)
+        nextCursor = result.nextCursor
+        cursor = result.nextCursor ?? undefined
+      } while (cursor && threads.length < prevDepth)
       setSection(section, () => ({
-        threads: result.threads,
-        nextCursor: result.nextCursor,
-        hasReachedEnd: result.nextCursor === null,
+        threads,
+        nextCursor,
+        hasReachedEnd: nextCursor === null,
         loadingPage: false,
       }))
     } catch (err) {
