@@ -285,6 +285,27 @@ describe("deck-create input schema (intake enforcement)", () => {
         expect(tools["deck-create"].inputSchema.safeParse(VALID).success).toBe(true);
     });
 
+    // The description is the only place the model is told HOW to collect those
+    // three arguments. It has to point at the ask-human card (and its option
+    // cap), or the model falls back to typing a lettered list into chat.
+    it("the description routes the intake through the ask-human card", async () => {
+        const tools = await loadTools();
+        const description = tools["deck-create"].description;
+
+        expect(description).toContain("ask-human");
+        expect(description).toMatch(/choices in its options array \(max 4\)/);
+        expect(description).toMatch(/never in the question text/);
+        expect(description).toMatch(/the card appends its own\s+"Other" row, so never add one/);
+        // The three field shapes: two pick-ones and one open-ended call.
+        expect(description).toMatch(/Purpose is a pick-one of four options/);
+        expect(description).toMatch(/quick 5-6 \/ standard 8-10 \/ detailed 12\+/);
+        expect(description).toMatch(/ONE\s+open-ended call with options omitted/);
+        // One message of cards, and Skip does not become a re-ask.
+        expect(description).toMatch(/issued in ONE message/);
+        expect(description).toMatch(/when the user skipped a card/);
+        expect(description).not.toMatch(/lettered options/);
+    });
+
     it("rejects a call missing purpose, audience or lengthChoice", async () => {
         const tools = await loadTools();
         const schema = tools["deck-create"].inputSchema;

@@ -303,6 +303,70 @@ describe("presentation intent routes to the deck tools", () => {
     expect(body).toMatch(/square-bracket placeholder/);
   });
 
+  // The intake is a question CARD now, not a typed-out lettered list: the
+  // first move on a new-deck request is an ask-human call, choices live in
+  // `options` (capped at 4) and never in the question text, and the card
+  // supplies its own "Other" row. A regression here puts the questions back
+  // into prose, which is unclickable and re-opens the interrogation loop.
+  it("the intake is driven by the ask-human question card", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    expect(body).toMatch(/\*\*Ask with the question card, never with prose\.\*\*/);
+    expect(body).toMatch(/The FIRST thing you do for a new-deck request is call \\`ask-human\\`/);
+    // Choices go in `options`, never in the question string, and the card
+    // owns the "Other" row — all three are the tool's own hard rules.
+    expect(body).toMatch(/hard cap 4/);
+    expect(body).toMatch(/NOTHING in the question text/);
+    expect(body).toMatch(/Never add an "Other" or "Something else" option/);
+    expect(body).toMatch(/appends its own "Other \(type your answer\)" row/);
+    expect(body).toMatch(/Leave \\`multiSelect\\` off/);
+    // The tool says never to ask about low-stakes decisions; the skill has to
+    // claim the intake as the high-stakes exception, and hand tone back.
+    expect(body).toMatch(/low-stakes decision/);
+    expect(body).toMatch(/this intake is precisely the high-stakes case the tool exists for/);
+    expect(body).toContain("**Tone never earns a card.**");
+  });
+
+  it("the intake pins the exact option sets each card offers", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    // Purpose: single-select, exactly four rows, no hand-rolled "Other".
+    expect(body).toContain(
+      'options: ["Pitch investors", "Sell to a customer", "Update the team", "Teach or present"],',
+    );
+    // Length: single-select, the three named depths that map onto lengthChoice.
+    expect(body).toContain(
+      'options: ["Quick — 5-6 slides", "Standard — 8-10 slides", "Detailed — 12+ slides"],',
+    );
+    // Audience + facts: free text, which means `options` omitted entirely.
+    expect(body).toMatch(/ONE call with \\`options\\` omitted entirely/);
+    expect(body).toMatch(/who's in the room\?.*whenever the audience is still unknown/);
+    // The old prose enumerations survive only as the source of the option
+    // arrays — they must be labelled as what NOT to type into `question`.
+    expect(body).toMatch(/they belong in \\`options\\`, never in the question text/);
+    expect(body).toMatch(/is exactly what must NOT go into \\`question\\`/);
+  });
+
+  it("the intake caps the cards and takes Skip as a final answer", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    // One message of cards, two rounds at the very most, never more cards
+    // than the fields the user actually left open.
+    expect(body).toContain(
+      "**At most two cards in a message, and at most two rounds — never a third.**",
+    );
+    expect(body).toMatch(/parallel \\`ask-human\\` calls in a SINGLE message/);
+    expect(body).toMatch(/Never more cards than the fields the user actually left open/);
+    // Skip resolves the call with a sentinel; the model proceeds on its own
+    // judgment with placeholders instead of re-asking.
+    expect(body).toContain("**Skip is an answer, not a retry.**");
+    expect(body).toMatch(/never re-send that question, never rephrase it/);
+    expect(body).toMatch(/skipped facts become square-bracket placeholders with \\`needsInput\\`/);
+  });
+
   it("the skill tells the model the intake is enforced by required tool arguments", async () => {
     const skills = await import("./index.js");
     const body = skills.resolveSkill("create-presentations")!.content;

@@ -154,12 +154,17 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             'the visual patterns — bullets, two-column for compare/contrast, big-number for one key ' +
             'metric the user supplied, quote, section for topic shifts, closing at the end — instead ' +
             'of a wall of bullet lists. Speaker notes are not written to the file. ' +
-            'ASK ONCE, THEN BUILD: for a brand-new deck send ONE compact message of lettered options ' +
-            '— purpose/audience (pitch investors / sell to a customer / update the team / teach at an ' +
-            'event), length (quick 5-6 / standard 8-10 / detailed 12+), and the specific facts that ' +
-            'purpose needs — never open-ended prompts and never a multi-turn interrogation; then ' +
-            'follow the arc for that purpose. The purpose, audience and lengthChoice arguments are ' +
-            'REQUIRED and exist to enforce that intake — fill them from the answers. ' + HONESTY_RULES,
+            'ASK ONCE, THEN BUILD: for a brand-new deck the intake goes through the ask-human ' +
+            'question card, not prose — one call per question, choices in its options array (max 4) ' +
+            'and never in the question text, all of them issued in ONE message so the user answers ' +
+            'them as a single card sequence. Purpose is a pick-one of four options (pitch investors / ' +
+            'sell to a customer / update the team / teach or present; the card appends its own ' +
+            '"Other" row, so never add one), length is a pick-one of quick 5-6 / standard 8-10 / ' +
+            'detailed 12+, and the audience plus the specific facts that purpose needs are ONE ' +
+            'open-ended call with options omitted. Never a typed-out lettered list and never a ' +
+            'multi-turn interrogation; then follow the arc for that purpose. The purpose, audience ' +
+            'and lengthChoice arguments are REQUIRED and exist to enforce that intake — fill them ' +
+            'from the answers, and from your own best judgment when the user skipped a card. ' + HONESTY_RULES,
         inputSchema: z.object({
             path: NewDeckPathField,
             title: z.string().min(1).describe('Deck title (also used for the title slide)'),

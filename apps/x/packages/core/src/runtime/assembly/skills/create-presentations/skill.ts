@@ -31,35 +31,51 @@ Presentations in Rowboat are real PowerPoint files built with the \`deck-*\` too
 
 A deck is a document the user will put in front of other people. Inventing a number for it is a serious failure, not a rounding error — and a vague question ("what would you like on the slides?") gets a vague answer, which produces filler.
 
-Ask like a designer taking a brief: closed questions with named options the user can answer in one word. **Send ONE message covering all four points below, then build.**
+**Ask with the question card, never with prose.** The FIRST thing you do for a new-deck request is call \`ask-human\` — no preamble sentence, no "before I build this, four quick things", no lettered list typed into chat. \`ask-human\` renders each question as a card with pickable rows, and several calls issued in the SAME message queue into one card sequence ("1 of 2") the user clicks through. That sequence IS the "one intake message".
 
-1. **Purpose & audience** — a pick-one, because it decides the entire arc of the deck:
-   "Is this to (a) pitch investors, (b) sell to a customer, (c) update the team, or (d) teach/present at an event — and who's in the room?"
-2. **Length & depth** — named options, not "how many slides?":
-   "Quick (5-6 slides), standard (8-10), or detailed (12+)?"
-3. **The facts the deck depends on** — ask concretely for the purpose you believe it is, and ONLY for what the request has not already given you:
-   - **Pitch** — traction numbers (revenue, growth, users), the team, and the ask (how much, for what).
-   - **Sales** — the customer's problem in their own words, pricing, and proof points (logos, case studies, quantified results).
-   - **Update** — the period it covers, the wins, the misses, and next steps.
-   - **Teaching** — the one idea they must leave with, the audience's starting level, and a real example or exercise you can use.
-4. **Tone** — ONLY when the request leaves it genuinely open: "Formal, conversational, or punchy?" Skip it when the purpose already implies the register.
+\`ask-human\`'s own description tells you not to spend a question on a low-stakes decision, and it is right — but this intake is precisely the high-stakes case the tool exists for. Purpose decides the entire arc of the deck, length decides how much you write, and the facts are the difference between a real deck and a fabricated one; \`deck-create\` will not even run without them. Tone and palette are the low-stakes half — never spend a card on those, choose them yourself.
 
-The whole intake, in one message:
+### The questions, and their exact option sets
 
-> Before I build this, four quick things:
-> 1. Purpose — (a) pitch investors, (b) sell to a customer, (c) update the team, or (d) teach at an event? And who's in the room?
-> 2. Length — quick (5-6 slides), standard (8-10), or detailed (12+)?
-> 3. Numbers — what traction can I use (revenue, growth, users), and what's the ask?
-> 4. Tone — formal, conversational, or punchy?
->
-> Answer as short as you like — "b, standard, punchy" plus the numbers is plenty.
+One question per \`ask-human\` call. Put every choice in \`options\` (hard cap 4) and NOTHING in the question text — the card renders \`options\` as pickable rows, while choices typed into the question string are dead prose the user cannot click. Leave \`multiSelect\` off (purpose and length are pick-one). Never add an "Other" or "Something else" option: the card always appends its own "Other (type your answer)" row, and that free-text row is where an unusual purpose or a specific audience arrives.
+
+**1. Purpose** — single-select, exactly these four:
+
+\`\`\`
+ask-human({
+  question: "What's this deck for?",
+  options: ["Pitch investors", "Sell to a customer", "Update the team", "Teach or present"],
+})
+\`\`\`
+
+Those four rows are the deck types — (a) pitch investors, (b) sell to a customer, (c) update the team, or (d) teach/present at an event — and they belong in \`options\`, never in the question text and never with a fifth "other" row bolted on.
+
+**2. Length** — single-select, named depths rather than "how many slides?":
+
+\`\`\`
+ask-human({
+  question: "How long should it be?",
+  options: ["Quick — 5-6 slides", "Standard — 8-10 slides", "Detailed — 12+ slides"],
+})
+\`\`\`
+
+The prose form — "Quick (5-6 slides), standard (8-10), or detailed (12+)?" — is exactly what must NOT go into \`question\`; it is the option set, and it maps straight onto \`lengthChoice\`.
+
+**3. Audience and the facts the deck depends on** — ONE call with \`options\` omitted entirely, so the user types a free-form answer. Send it once the purpose is known (from their answer, or from the request when it already said), ask concretely for that deck type, and ask ONLY for what the request has not already given you. Fold "and who's in the room?" into the same question whenever the audience is still unknown — that one sentence is how \`audience\` gets filled:
+
+- **Pitch** — traction numbers (revenue, growth, users), the team, and the ask (how much, for what).
+- **Sales** — the customer's problem in their own words, pricing, and proof points (logos, case studies, quantified results).
+- **Update** — the period it covers, the wins, the misses, and next steps.
+- **Teaching** — the one idea they must leave with, the audience's starting level, and a real example or exercise you can use.
 
 ### How to ask
 
-- **One message, then build.** Never a second round of questions, never an interrogation loop. A partial answer is enough to start.
-- **Lettered or named options**, each answerable in a single word. At most four numbered points, no sub-questions nested inside a point, no open-ended prompts.
-- **Never ask what the request already answered.** "Deck for our Series A" has told you the purpose and audience — ask for the traction numbers and the ask, not who it is for.
+- **One message, then build.** Every question the request left open goes out as parallel \`ask-human\` calls in a SINGLE message, which the user answers as one card sequence — then you build. Never a second round once you have what you need, never an interrogation loop. A partial answer is enough to start.
+- **At most two cards in a message, and at most two rounds — never a third.** When the request already tells you the purpose, ask length and the facts together and there is no second round at all. When it does not, ask purpose and length in the first message, then send the single facts question for the purpose they picked. Never more cards than the fields the user actually left open.
+- **Never ask what the request already answered.** "Deck for our Series A" has told you the purpose and the audience — do not send those cards; ask for the traction numbers and the ask.
 - **Ask at most once for any given fact.** A fact the user skipped or declined becomes a bracketed placeholder; that is the honest outcome, not a reason to ask again.
+- **Skip is an answer, not a retry.** When the card comes back saying the user skipped, use your best judgment and proceed — never re-send that question, never rephrase it into a new one. A skipped purpose or length becomes the closest sensible default, stated out loud as an assumption; skipped facts become square-bracket placeholders with \`needsInput\`.
+- **Tone never earns a card.** "Formal, conversational, or punchy?" is exactly the low-stakes decision \`ask-human\` tells you not to ask about — read the register off the purpose and audience, and say which one you chose. Same for the palette.
 - **Skip the intake entirely** when the request already covers purpose, length and the facts it needs, or when the user says "just draft something" / "you decide" — then build immediately and say what you assumed.
 
 The intake is enforced, not optional: \`deck-create\` REQUIRES \`purpose\` (pitch | sales | update | teach | other), \`audience\` (who is in the room, in the user's words) and \`lengthChoice\` (quick = 5-6 slides, standard = 8-10, detailed = 12+) as arguments — you cannot build without them. Fill them from the user's answers, or from the request when it already says; when the user skips a question, "you decide" is an answer ("just draft something" → pick the closest purpose, say what you assumed) but a silent guess is not.
@@ -136,7 +152,7 @@ Default to the workspace: \`presentations/<Descriptive Name>.pptx\`. Use the use
 ## Workflow
 
 **New deck**
-1. Send the ONE intake message (skip only when the request already answers it).
+1. Send the intake as \`ask-human\` cards in ONE message — purpose and length as options, the per-purpose facts as an open question (skip any the request already answers, and the whole intake when it answers everything).
 2. Author the outline on the arc for that purpose: title slide, the arc's beats with varied patterns, closing slide.
 3. ONE \`deck-create\` call.
 4. Tell the user it is open in the editor, name the palette, and list any \`needsInput\` gaps.
