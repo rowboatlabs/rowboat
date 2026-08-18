@@ -196,6 +196,14 @@ export type SessionBusEvent =
           kind: "queue-changed";
           sessionId: string;
           queue: QueuedSessionMessage[];
+      }
+    // A plain chat BECAME a code session (adoption wrote its meta). Every
+    // cache of "what kind of session is this" — the code status tracker,
+    // the Home registry, future ones — corrects itself from this one event
+    // instead of relying on per-cache hand-pokes.
+    | {
+          kind: "code-adopted";
+          sessionId: string;
       };
 
 export function sessionIndexEntry(

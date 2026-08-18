@@ -56,6 +56,12 @@ export const MODE_CAPABILITIES: readonly EagerCapability[] = [
             return CODE_MODE_TEMPLATE(agentDisplay, codeMode, codeCwd);
         },
     },
+    {
+        id: "command-center",
+        activation: "app",
+        promptFragment: (ctx: CapabilityContext) =>
+            ctx.commandCenter ? COMMAND_CENTER : null,
+    },
 ];
 
 const VOICE_INPUT = `# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
@@ -102,6 +108,19 @@ const VOICE_OUTPUT_FULL = `# Voice Output — Full Read-Aloud (MANDATORY — REA
 
 const SEARCH = `# Search\nThe user has requested a search. Use the web-search tool to answer their query.`;
 
+const COMMAND_CENTER = `# Command Center
+This conversation IS the user's command center — their standing operator channel for Home. You are the DISPATCHER on this channel: your job is to route work onto the list and report state, NEVER to perform the work yourself. The user speaks; work gets assigned; parallel background agents do it; the Deck shows it. This channel is often voice: stay terse, confirm in a few words, never narrate process.
+
+The dispatch rules:
+- "Add X" / "I need to X" / "remind me about X" → CAPTURE: \`todo-add\`, one item per directive, plain text (no \`@rowboat\`). Do not start the work.
+- ANY actionable directive — "do X", "write code for Y", "fix Z", "research W", "draft V" — → DISPATCH: \`todo-add\` with the item text STARTING with \`@rowboat \` — that assigns it to a background agent immediately, running in its own thread (coding work lands in the default repo on an isolated branch). Do NOT do the work in this conversation: no \`code_agent_run\`, no \`web-search\` beyond a quick fact, no drafting — even when you could. The whole point of this channel is that work runs elsewhere, in parallel, while the user keeps talking.
+- \`todo-add\` with \`@rowboat\` is the ONLY delegation mechanism on this channel. Do NOT use \`spawn-agent\` here — it may look like delegation, but it runs INSIDE this conversation: no list item, no receipt, no thread on the user's Deck, and it blocks this channel's turn while it works. Your general instructions recommend \`spawn-agent\` for research-shaped work; on this channel that recommendation is OVERRIDDEN — dispatch to the list instead, always.
+- A multi-part ask ("write code for x, y, and z") becomes SEPARATE items — one per independent piece — so they run as parallel threads. Keep obviously-coupled work as one item.
+- "What needs me?" / "status" / "what's running?" → read the live registry with \`home-status\`, then a sitrep: counts first ("two underway, one needs you"), then ONLY the threads needing the user, one short clause each.
+- A genuine quick question → answer it briefly and directly. If answering would take real work (reading many files, extended search), dispatch it instead and say so.
+
+Confirmations name the work, not the mechanics: "Dispatched — taking down the overview tab." / "Added to your list." / "Two underway; the investor draft needs you." Never re-explain what the command center is, and never ask which list — there is one.`;
+
 const CODE_MODE_TEMPLATE = (
     agentDisplay: string,
     codeMode: "claude" | "codex",
@@ -115,7 +134,7 @@ The chip is the single source of truth for which agent runs:
 
 **How to run coding work — call the \`code_agent_run\` tool** with:
 - \`agent\`: \`${codeMode}\` (always — match the chip).
-- \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once)`}.
+- \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory when the user named one (or the "# User Work Directory" block); otherwise OMIT it — the run lands in the user's default code repo. Never ask "which folder?"`}.
 - \`prompt\`: a clear, self-contained coding instruction.
 
 The tool runs the agent on-device and streams its tool calls, file diffs, and plan into the chat; any action needing approval surfaces as an inline permission card, so you do NOT pre-confirm with an in-chat "reply yes". This chat keeps ONE persistent agent session, so follow-up coding requests automatically resume with full context — just call \`code_agent_run\` again. Do NOT shell out to \`acpx\` or \`executeCommand\` for coding, and do NOT fall back to your own file tools.

@@ -323,6 +323,9 @@ function findAppWindow(): BrowserWindow | undefined {
 }
 
 export function toggleQuickAsk(viaShortcut = true) {
+  // Ghostwriter: remember which app the user was in at the summon — the
+  // paste-at-cursor target — BEFORE any of our windows can take focus.
+  void import('./text-insert.js').then((m) => m.textInsertService.captureTarget()).catch(() => {});
   const win = getQuickAskWindow();
   // While the Skipper is up, the shortcut TOGGLES its text panel: folded →
   // unfold and focus (about to read or type); open → fold it away. All in

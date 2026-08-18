@@ -9,6 +9,7 @@ import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
 import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
+import { HomeThreadSchema } from './home-threads.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -768,6 +769,52 @@ const ipcSchemas = {
     req: TodoEvent,
     res: z.null(),
   },
+  // ── Home thread registry (the Deck) ──────────────────────────────────────
+  // One main-process snapshot of every thread through the attention lens:
+  // kind (task/code/chat), status (underway/needs-you/ready/idle), live
+  // activity, seen marks and pins. Derived in core/home/threads.ts; the
+  // Deck, triage pills, and Skipper's sitrep all read this one feed.
+  'home:threads': {
+    req: z.object({}),
+    res: z.object({ threads: z.array(HomeThreadSchema) }),
+  },
+  'home:markSeen': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // The operator's watch flag — a pinned thread keeps its Deck strip even
+  // while idle, and takes a 1–9 recall slot.
+  'home:setPinned': {
+    req: z.object({ sessionId: z.string(), pinned: z.boolean() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Snooze a needs-you thread out of the bay. It returns at the chosen time
+  // or on new session activity, whichever comes first — a tripwire, never a
+  // mute. Default 4 hours.
+  'home:snooze': {
+    req: z.object({ sessionId: z.string(), hours: z.number().positive().max(168).optional() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Dismiss a needs-you thread's claim entirely: no timer, only the
+  // activity tripwire returns it. Attention-state only — receipts and the
+  // thread itself are untouched.
+  'home:dismiss': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Push ping: the registry changed — refetch home:threads. Debounced in
+  // the tracker; carries no payload by design (the snapshot is the truth).
+  'home:threadsChanged': {
+    req: z.object({}),
+    res: z.null(),
+  },
+  // The Command Center session — get-or-create the ONE persistent operator
+  // conversation. Any turn on it is command-center-framed server-side
+  // (sessionCompositionPins), whatever surface sends it.
+  'home:commandCenter': {
+    req: z.object({}),
+    res: z.object({ sessionId: z.string() }),
+  },
   // The unified model catalog (core/models/catalog.ts): every connected
   // provider — Rowboat gateway, ChatGPT subscription (codex), BYOK keys,
   // local/custom endpoints — listed the same way, with per-provider status.
@@ -1163,6 +1210,9 @@ const ipcSchemas = {
   'voice:ptt-key': {
     req: z.object({
       type: z.enum(['down', 'up', 'chord']),
+      // Ghostwriter chord (⇧ held when Right ⌘ went down): this capture's
+      // result should be pasted at the user's cursor.
+      paste: z.boolean().optional(),
     }),
     res: z.null(),
   },
@@ -1508,12 +1558,17 @@ const ipcSchemas = {
     res: z.object({
       enabled: z.boolean(),
       approvalPolicy: ApprovalPolicy.optional(),
+      // The repo coding work defaults into when none is named — set once in
+      // Settings → Code. With exactly one registered project, that project
+      // is the implicit default and this stays unset.
+      defaultProjectId: z.string().optional(),
     }),
   },
   'codeMode:setConfig': {
     req: z.object({
       enabled: z.boolean(),
       approvalPolicy: ApprovalPolicy.optional(),
+      defaultProjectId: z.string().optional(),
     }),
     res: z.object({
       success: z.literal(true),
@@ -2811,15 +2866,25 @@ const ipcSchemas = {
         path: z.string(),
         name: z.string(),
       })).optional(),
-      // Composer model selection — overrides the todo agent's model when
-      // the item runs now.
+      // Composer model selection (with its paired reasoning effort) —
+      // overrides the todo agent's model when the item runs now.
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
       permissionMode: z.enum(['auto', 'manual']).optional(),
+      // Code dispatch (the Helm): materialize a real code session on the
+      // item's thread before it runs — worktree lane by default, a row in
+      // the Code section, status tracking. The agent's code_agent_run then
+      // resolves the pin server-side.
+      code: z.object({
+        projectId: z.string(),
+        agent: z.enum(['claude', 'codex']).optional(),
+        isolation: z.enum(['in-repo', 'worktree']).optional(),
+      }).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2828,10 +2893,19 @@ const ipcSchemas = {
   },
   // Fire a run for one item, identified by its normalized line text.
   // Fire-and-forget: progress and completion arrive on todo:events.
+  // Carries the same model/permission overrides as todo:addItem so the run
+  // and retry chips honor the composer's picker instead of silently falling
+  // back to the default model.
   'todo:runItem': {
     req: z.object({
       key: z.string(),
       context: z.string().optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
+      }).optional(),
+      permissionMode: z.enum(['auto', 'manual']).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2874,6 +2948,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2906,6 +2981,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2941,6 +3017,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.

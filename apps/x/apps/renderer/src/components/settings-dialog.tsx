@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
+import { cn, compactPath, parentPath } from "@/lib/utils"
 import * as analytics from "@/lib/analytics"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
@@ -1249,6 +1249,10 @@ function AgentStatusRow({
 function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [enabled, setEnabled] = useState(false)
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>('ask')
+  // The repo coding work defaults into when none is named. undefined = Auto:
+  // a single registered project is the implicit default.
+  const [defaultProjectId, setDefaultProjectId] = useState<string | undefined>(undefined)
+  const [projects, setProjects] = useState<{ id: string; name: string; path: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
@@ -1276,9 +1280,16 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         if (!cancelled) {
           setEnabled(result.enabled)
           setApprovalPolicy(result.approvalPolicy ?? 'ask')
+          setDefaultProjectId(result.defaultProjectId)
         }
       } catch {
         if (!cancelled) setEnabled(false)
+      }
+      try {
+        const res = await window.ipc.invoke("codeProject:list", null)
+        if (!cancelled) setProjects(res.projects.map((p) => ({ id: p.project.id, name: p.project.name, path: p.project.path })))
+      } catch {
+        if (!cancelled) setProjects([])
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -1292,7 +1303,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     setEnabled(next)
     try {
-      await window.ipc.invoke("codeMode:setConfig", { enabled: next, approvalPolicy })
+      await window.ipc.invoke("codeMode:setConfig", { enabled: next, approvalPolicy, defaultProjectId })
       window.dispatchEvent(new Event("code-mode-config-changed"))
       toast.success(next ? "Code mode enabled" : "Code mode disabled")
     } catch {
@@ -1301,14 +1312,14 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [approvalPolicy])
+  }, [approvalPolicy, defaultProjectId])
 
   const handlePolicyChange = useCallback(async (next: ApprovalPolicy) => {
     const prev = approvalPolicy
     setSaving(true)
     setApprovalPolicy(next)
     try {
-      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy: next })
+      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy: next, defaultProjectId })
       window.dispatchEvent(new Event("code-mode-config-changed"))
     } catch {
       setApprovalPolicy(prev)
@@ -1316,7 +1327,22 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [enabled, approvalPolicy])
+  }, [enabled, approvalPolicy, defaultProjectId])
+
+  const handleDefaultRepoChange = useCallback(async (next: string | undefined) => {
+    const prev = defaultProjectId
+    setSaving(true)
+    setDefaultProjectId(next)
+    try {
+      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy, defaultProjectId: next })
+      window.dispatchEvent(new Event("code-mode-config-changed"))
+    } catch {
+      setDefaultProjectId(prev)
+      toast.error("Failed to update the default repo")
+    } finally {
+      setSaving(false)
+    }
+  }, [enabled, approvalPolicy, defaultProjectId])
 
   const anyReady = status?.claude.installed && status?.claude.signedIn
     || status?.codex.installed && status?.codex.signedIn
@@ -1422,6 +1448,49 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         </div>
       )}
 
+      {enabled && (
+        <div className="rounded-md border px-3 py-3 space-y-2">
+          <div className="text-sm font-medium">Default repo</div>
+          <div className="text-xs text-muted-foreground">
+            Where coding work lands when you don&apos;t name a folder — say &quot;fix the login bug&quot; anywhere
+            (Home, chat, voice) and it runs here on its own isolated branch. Repos are registered in the Code section.
+          </div>
+          <Select
+            value={defaultProjectId ?? 'auto'}
+            onValueChange={(v) => handleDefaultRepoChange(v === 'auto' ? undefined : v)}
+            disabled={saving || projects.length === 0}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">
+                {projects.length === 1 ? `Auto — ${projects[0].name} (only repo)` : 'Auto — the only registered repo'}
+              </SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                  {/* Same-named repos elsewhere — say where this one lives. */}
+                  {projects.some((o) => o.id !== p.id && o.name === p.name) && (
+                    <span className="ml-1.5 text-muted-foreground">{compactPath(parentPath(p.path), 24)}</span>
+                  )}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {projects.length === 0 && (
+            <div className="text-xs text-muted-foreground">
+              No repos registered yet — add one in the Code section first.
+            </div>
+          )}
+          {projects.length > 1 && !defaultProjectId && (
+            <div className="text-xs text-muted-foreground">
+              Several repos are registered — pick one, or unnamed coding requests will ask.
+            </div>
+          )}
+        </div>
+      )}
+
       {enabled && status && !anyReady && (
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
           <AlertTriangle className="size-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
@@ -1437,7 +1506,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Notification Settings ---
 
-type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "meeting_detection" | "meeting_notes_ready"
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready"
 
 const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
@@ -1459,6 +1528,11 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     key: "background_task",
     label: "Background agents",
     description: "When a background agent you've set up has something to surface. Click to open it on the background tasks page.",
+  },
+  {
+    key: "todo",
+    label: "To-do list",
+    description: "When a to-do you delegated finishes or has something ready for review. Click to open Home.",
   },
   {
     key: "meeting_detection",

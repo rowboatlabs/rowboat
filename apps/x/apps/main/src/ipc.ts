@@ -72,6 +72,7 @@ import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js'
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
 import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import { HomeThreadsTracker } from '@x/core/dist/home/threads.js';
 import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
@@ -476,7 +477,7 @@ const activeTtsStreams = new Map<string, AbortController>();
 // Match only real app windows — getAllWindows() can also contain the
 // companion window and hidden utility windows (e.g. PDF-export renderers),
 // which must not be shown, focused, or sent app events.
-function findMainAppWindow(): BrowserWindow | undefined {
+export function findMainAppWindow(): BrowserWindow | undefined {
   return BrowserWindow.getAllWindows().find((w) => {
     if (w.isDestroyed()) return false;
     const url = w.webContents.getURL();
@@ -734,6 +735,20 @@ export async function startCodeSessionStatusWatcher(): Promise<void> {
   });
 }
 
+// Home thread registry (the Deck): live status from the turn spine → a
+// debounced ping; the renderer refetches home:threads on it.
+let homeThreadsWatcher: (() => void) | null = null;
+export function startHomeThreadsWatcher(): void {
+  if (homeThreadsWatcher) {
+    return;
+  }
+  const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+  tracker.start();
+  homeThreadsWatcher = tracker.onChange(() => {
+    broadcastToWindows('home:threadsChanged', {});
+  });
+}
+
 let runsWatcher: (() => void) | null = null;
 export async function startRunsWatcher(): Promise<void> {
   if (runsWatcher) {
@@ -861,6 +876,12 @@ export function startRetentionSweep(): void {
         turnsRootDir: container.resolve<string>('turnsRootDir'),
         settings,
       });
+      // After the session sweep: clear code-mode residue whose chat is now
+      // gone (meta / ACP handle / workdir sidecar — worktrees stay on disk).
+      const orphaned = await container.resolve<CodeSessionService>('codeSessionService').sweepOrphanedMeta().catch(() => 0);
+      if (orphaned > 0) {
+        console.log(`[Retention] cleared code-mode meta for ${orphaned} deleted session(s)`);
+      }
       if (result.deletedSessions > 0 || result.deletedTurnFiles > 0) {
         console.log(
           `[Retention] sweep: deleted ${result.deletedSessions} session(s), ${result.deletedTurnFiles} turn file(s)`,
@@ -1533,7 +1554,20 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'sessions:delete': async (_event, args) => {
-      await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      // An ADOPTED chat is a code session under a plain-chat door: deleting
+      // it through the runtime alone would orphan its code meta, stored ACP
+      // conversation, workdir sidecar — and leave a ghost row in the Code
+      // rail. Route through CodeSessionService.delete, which cleans all of
+      // that up (the runtime layer stays ignorant of code-mode). The
+      // worktree checkout is deliberately KEPT on disk — an unmerged
+      // worktree may hold the only copy of the work; explicit removal
+      // stays a Code-rail decision.
+      const codeMeta = await container.resolve<ICodeSessionsRepo>('codeSessionsRepo').get(args.sessionId).catch(() => null);
+      if (codeMeta) {
+        await container.resolve<CodeSessionService>('codeSessionService').delete(args.sessionId, { removeWorktree: false });
+      } else {
+        await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      }
       return { success: true };
     },
     'turns:subscribe': async (event, args) => {
@@ -1738,11 +1772,11 @@ export function setupIpcHandlers() {
     'codeMode:getConfig': async () => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
       const config = await repo.getConfig();
-      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy };
+      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy, defaultProjectId: config.defaultProjectId };
     },
     'codeMode:setConfig': async (_event, args) => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
-      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy });
+      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy, defaultProjectId: args.defaultProjectId });
       invalidateCopilotInstructionsCache();
       return { success: true };
     },
@@ -2846,7 +2880,7 @@ export function setupIpcHandlers() {
         const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
         const item = await addTodoItem(text);
         if (args.run || item.delegated) {
-          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual', code: args.code }).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return { success: true };
@@ -2856,11 +2890,56 @@ export function setupIpcHandlers() {
     },
     'todo:runItem': async (_event, args) => {
       try {
-        void runTodoItem(args.key, args.context).catch(() => {});
+        void runTodoItem(args.key, args.context, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    'home:threads': async () => {
+      const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+      return { threads: await tracker.snapshot() };
+    },
+    'home:markSeen': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.markSeen(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:setPinned': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.setPinned(args.sessionId, args.pinned);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:snooze': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.snooze(args.sessionId, args.hours);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:dismiss': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.dismiss(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:commandCenter': async () => {
+      const { ensureCommandCenterSession } = await import('@x/core/dist/home/command-center.js');
+      const sessionId = await ensureCommandCenterSession(container.resolve<ISessions>('sessions'));
+      return { sessionId };
     },
     'todo:stopRun': async (_event, args) => {
       try {

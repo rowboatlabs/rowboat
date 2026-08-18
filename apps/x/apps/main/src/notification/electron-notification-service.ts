@@ -2,6 +2,7 @@ import { BrowserWindow, Notification, shell } from "electron";
 import type { INotificationService, NotifyInput } from "@x/core/dist/application/notification/service.js";
 import { shouldSuppressDuringStartupGrace } from "@x/core/dist/application/notification/service.js";
 import { dispatchUrl } from "../deeplink.js";
+import { findMainAppWindow } from "../ipc.js";
 
 const HTTP_URL = /^https?:\/\//i;
 const ROWBOAT_URL = /^rowboat:\/\//i;
@@ -100,7 +101,10 @@ export class ElectronNotificationService implements INotificationService {
     }
 
     private focusMainWindow(): void {
-        const [win] = BrowserWindow.getAllWindows();
+        // NEVER getAllWindows()[0]: that can be the hidden companion window,
+        // and force-showing it at stale bounds paints the squeezed-card
+        // wedge (the malformed sliver-Skipper) instead of the app.
+        const win = findMainAppWindow();
         if (!win) return;
         if (win.isMinimized()) win.restore();
         win.show();
