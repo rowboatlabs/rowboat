@@ -286,9 +286,11 @@ export function CodeView({
                       variant="ghost"
                       size="sm"
                       className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-                      title={POLICY_LABEL[selectedSession.policy]}
+                      title={selectedSession.policy
+                        ? POLICY_LABEL[selectedSession.policy]
+                        : 'Approvals: Auto — follows the composer chip / global setting until you pick one here'}
                     >
-                      <span className="whitespace-nowrap">{POLICY_HEADER_LABEL[selectedSession.policy]}</span>
+                      <span className="whitespace-nowrap">{selectedSession.policy ? POLICY_HEADER_LABEL[selectedSession.policy] : 'Auto'}</span>
                       <ChevronDown className="size-3" />
                     </Button>
                   </DropdownMenuTrigger>

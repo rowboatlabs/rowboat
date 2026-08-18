@@ -34,33 +34,39 @@ export const HomeThreadStatusSchema = z.enum([
 ]);
 export type HomeThreadStatus = z.infer<typeof HomeThreadStatusSchema>;
 
-export interface HomeThread {
-    sessionId: string;
-    kind: HomeThreadKind;
-    status: HomeThreadStatus;
-    title: string;
+export const HomeThreadSchema = z.object({
+    sessionId: z.string(),
+    kind: HomeThreadKindSchema,
+    status: HomeThreadStatusSchema,
+    title: z.string(),
     /** Why it needs you (question text / "waiting for approval"), when
      * status is needs-you. */
-    attention?: string;
+    attention: z.string().optional(),
     /** One-line live activity while underway — the current tool's name, or
      * "thinking" between calls. Ephemeral; never persisted. */
-    activity?: string;
+    activity: z.string().optional(),
     /** The todo item key when kind is 'task' — the Deck strip's jump target
      * on the list. */
-    todoKey?: string;
+    todoKey: z.string().optional(),
     /** Code-session context when kind is 'code'. */
-    code?: { projectId: string; projectName: string; agent: string; branch?: string };
-    updatedAt: string;
+    code: z.object({
+        projectId: z.string(),
+        projectName: z.string(),
+        agent: z.string(),
+        branch: z.string().optional(),
+    }).optional(),
+    updatedAt: z.string(),
     /** When the live turn started, while underway (elapsed display). */
-    startedAt?: string;
+    startedAt: z.string().optional(),
     /** Kept on the Deck even while idle (the operator's watch flag). */
-    pinned: boolean;
+    pinned: z.boolean(),
     /** Stable recall slot when pinned (0-based; keys 1–9 jump by slot).
      * Order is the pin order, so slots never reshuffle. */
-    pinIndex?: number;
+    pinIndex: z.number().int().nonnegative().optional(),
     /** Snoozed out of the needs-you bay — returns at the chosen time or on
      * new activity, whichever comes first (the Linear tripwire). */
-    snoozed?: boolean;
+    snoozed: z.boolean().optional(),
     /** Updated since the user last looked at this thread. */
-    unseen: boolean;
-}
+    unseen: z.boolean(),
+});
+export type HomeThread = z.infer<typeof HomeThreadSchema>;

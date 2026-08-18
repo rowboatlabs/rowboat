@@ -20,7 +20,13 @@ const FILE = path.join(WorkDir, 'home', 'command-center.json');
 
 export const COMMAND_CENTER_TITLE = 'Command Center';
 
-export async function getCommandCenterSessionId(): Promise<string | null> {
+// Module-memory cache: sessionCompositionPins consults the pointer on EVERY
+// turn of every session to decide the commandCenter flag — a stable id must
+// not cost fs reads on that hot path. undefined = not read yet; refreshed
+// on every write below.
+let cachedId: string | null | undefined;
+
+async function readPointerFile(): Promise<string | null> {
     try {
         const raw = await fs.readFile(FILE, 'utf-8');
         const parsed: unknown = JSON.parse(raw);
@@ -31,26 +37,37 @@ export async function getCommandCenterSessionId(): Promise<string | null> {
     }
 }
 
+export async function getCommandCenterSessionId(): Promise<string | null> {
+    if (cachedId === undefined) cachedId = await readPointerFile();
+    return cachedId;
+}
+
 /** The command-center session, verified to still exist — or a fresh one.
- * Created with its title up front, so auto-titling never renames it. */
+ * Created with its title up front, so auto-titling never renames it. The
+ * WHOLE get-verify-create runs under the lock: two concurrent binds
+ * (Skipper click + the companion switcher at startup) must never each mint
+ * a session — the loser would be an orphaned "Command Center" chat that is
+ * not actually operator-framed. */
 export async function ensureCommandCenterSession(sessions: ISessions): Promise<string> {
-    const existing = await getCommandCenterSessionId();
-    if (existing) {
-        try {
-            await sessions.getSession(existing);
-            await detachCodeMeta(existing);
-            return existing;
-        } catch {
-            // Deleted — recreate below.
+    return withFileLock(FILE, async () => {
+        const existing = await readPointerFile();
+        if (existing) {
+            try {
+                await sessions.getSession(existing);
+                cachedId = existing;
+                await detachCodeMeta(existing);
+                return existing;
+            } catch {
+                // Deleted — recreate below.
+            }
         }
-    }
-    const sessionId = await sessions.createSession({ title: COMMAND_CENTER_TITLE });
-    await withFileLock(FILE, async () => {
+        const sessionId = await sessions.createSession({ title: COMMAND_CENTER_TITLE });
         const dir = path.dirname(FILE);
         if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });
         await fs.writeFile(FILE, JSON.stringify({ sessionId }, null, 2), 'utf-8');
+        cachedId = sessionId;
+        return sessionId;
     });
-    return sessionId;
 }
 
 /**

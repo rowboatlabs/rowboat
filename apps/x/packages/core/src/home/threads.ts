@@ -49,73 +49,10 @@ interface HomeState {
     snoozed: Record<string, { until: string; since: string }>;
 }
 
-export interface LiveTurnState {
-    status: Exclude<HomeThreadStatus, 'ready'>;
-    activity?: string;
-    attention?: string;
-    startedAt?: string;
-}
-
-/**
- * What a spine event means for a thread's live status — pure, so the
- * semantics are testable. Same transitions as the code-session tracker
- * (status-tracker.ts), plus the activity line the Deck's strips show.
- * Returns the next state, 'clear' on terminal events, or null when the
- * event doesn't move the needle.
- */
-export function transitionLive(
-    prev: LiveTurnState | undefined,
-    e: TurnBusEvent['event'],
-): LiveTurnState | 'clear' | null {
-    switch (e.type) {
-        case 'turn_created':
-            return { status: 'underway', activity: 'starting', startedAt: e.ts };
-        case 'model_call_requested':
-            return { ...(prev ?? { status: 'underway' }), status: prev?.status === 'needs-you' ? prev.status : 'underway', activity: 'thinking' };
-        case 'tool_invocation_requested':
-            return { ...(prev ?? { status: 'underway' }), status: prev?.status === 'needs-you' ? prev.status : 'underway', activity: e.toolName };
-        case 'tool_permission_required':
-            return { ...(prev ?? { status: 'needs-you' }), status: 'needs-you', attention: `waiting for your approval: ${e.toolName}` };
-        case 'turn_suspended': {
-            const ask = e.pendingAsyncTools.find((t) => t.toolName === 'ask-human');
-            const question = ask
-                ? (typeof (ask.input as { question?: unknown } | null)?.question === 'string'
-                    ? String((ask.input as { question: string }).question)
-                    : 'The agent needs your input.')
-                : undefined;
-            return {
-                ...(prev ?? { status: 'needs-you' }),
-                status: 'needs-you',
-                attention: question ?? (e.pendingPermissions.length > 0 ? 'waiting for your approval' : 'waiting on you'),
-            };
-        }
-        case 'tool_permission_resolved':
-        case 'tool_result':
-            if (prev?.status === 'needs-you') {
-                return { ...prev, status: 'underway', attention: undefined };
-            }
-            return null;
-        case 'tool_progress': {
-            const progress = e.progress;
-            if (progress && typeof progress === 'object' && !Array.isArray(progress)) {
-                const kind = (progress as { kind?: unknown }).kind;
-                if (kind === 'code-run-permission-request') {
-                    return { ...(prev ?? { status: 'needs-you' }), status: 'needs-you', attention: 'the coding agent needs your approval' };
-                }
-                if (kind === 'code-run-permission-resolved' && prev?.status === 'needs-you') {
-                    return { ...prev, status: 'underway', attention: undefined };
-                }
-            }
-            return null;
-        }
-        case 'turn_completed':
-        case 'turn_failed':
-        case 'turn_cancelled':
-            return 'clear';
-        default:
-            return null;
-    }
-}
+// The live status machine lives on neutral ground — runtime/turns — so the
+// Deck registry and the code-session status tracker consume ONE transition
+// table instead of drifting copies.
+import { transitionLive, type LiveTurnState } from '../runtime/turns/live-status.js';
 
 async function readState(): Promise<HomeState> {
     try {

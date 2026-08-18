@@ -27,6 +27,7 @@ import { FSCodeSessionsRepo, ICodeSessionsRepo } from "../code-mode/sessions/rep
 import { CodeSessionService } from "../code-mode/sessions/service.js";
 import { CodeSessionStatusTracker } from "../code-mode/sessions/status-tracker.js";
 import { HomeThreadsTracker } from "../home/threads.js";
+import { getCommandCenterSessionId } from "../home/command-center.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
 import type { IScreenPointerService } from "../application/screen-pointer/service.js";
@@ -171,7 +172,9 @@ container.register({
                     pins.codeMode = meta.agent;
                     pins.codeCwd = meta.cwd;
                 }
-                const { getCommandCenterSessionId } = await import("../home/command-center.js");
+                // Hot path (every turn) — the pointer is memory-cached in
+                // the module, and the import is static so the edge shows in
+                // the module graph.
                 const commandCenterId = await getCommandCenterSessionId().catch(() => null);
                 if (commandCenterId && commandCenterId === sessionId) {
                     pins.commandCenter = true;

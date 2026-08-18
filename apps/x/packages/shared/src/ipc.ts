@@ -9,7 +9,7 @@ import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
 import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
-import type { HomeThread } from './home-threads.js';
+import { HomeThreadSchema } from './home-threads.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -776,7 +776,7 @@ const ipcSchemas = {
   // Deck, triage pills, and Skipper's sitrep all read this one feed.
   'home:threads': {
     req: z.object({}),
-    res: z.object({ threads: z.array(z.custom<HomeThread>()) }),
+    res: z.object({ threads: z.array(HomeThreadSchema) }),
   },
   'home:markSeen': {
     req: z.object({ sessionId: z.string() }),

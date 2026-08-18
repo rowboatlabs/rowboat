@@ -110,6 +110,7 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
             // engine keeps its established cwd — switching mid-conversation
             // would silently drop the coding agent's ACP context. Scratch
             // runs outside registered projects stay plain chats.
+            let adoptedThisCall = false;
             const adoptionService = !pinned && ctx.sessionId && candidate ? resolveService() : null;
             // The Command Center session is the DISPATCHER — it assigns
             // coding work to other threads and must never itself become a
@@ -135,12 +136,16 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                         pinned = await adoptionService.createForSession(ctx.sessionId, {
                             projectId: project.id,
                             agent: ctx.codeMode ?? agent,
-                            policy: fallbackPolicy,
+                            // NO policy: adoption must not freeze this turn's
+                            // transient posture into permanent meta — every
+                            // run keeps resolving chip → settings → ask
+                            // until the user explicitly chooses in the rail.
                             isolation,
                             // Worktree runs work at the worktree root; in-repo
                             // runs keep the targeted path (may be a subdir).
                             ...(isolation === 'in-repo' ? { cwd: candidate } : {}),
                         });
+                        adoptedThisCall = true;
                     } catch (err) {
                         if (isolation === 'worktree') {
                             // A failed worktree must NOT silently degrade into
@@ -243,6 +248,18 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                     agent: effectiveAgent,
                     summary: finalText.trim(),
                     changedFiles: [...changedFiles],
+                    // Adoption happened DURING this call — the turn's composed
+                    // prompt predates the pin, so tell the model where work
+                    // actually lives now (else it narrates stale paths).
+                    ...(adoptedThisCall && pinned
+                        ? {
+                              adopted: {
+                                  cwd: pinned.cwd,
+                                  ...(pinned.worktree ? { branch: pinned.worktree.branch } : {}),
+                                  note: 'This chat is now a tracked code session pinned to the cwd above (an isolated worktree when branch is set). Follow-up coding resumes there — cite these paths, not earlier ones.',
+                              },
+                          }
+                        : {}),
                 };
             } catch (error) {
                 // A stop mid-run isn't a failure — report it as a clean cancellation.

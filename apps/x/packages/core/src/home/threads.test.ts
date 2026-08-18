@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { transitionLive, type LiveTurnState } from './threads.js';
+import { transitionLive, type LiveTurnState } from '../runtime/turns/live-status.js';
 import type { TurnBusEvent } from '@x/shared/dist/turns.js';
 
 type SpineEvent = TurnBusEvent['event'];

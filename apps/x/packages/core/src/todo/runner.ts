@@ -462,7 +462,11 @@ export async function runTodoItem(
                 const meta = await service.createForSession(sessionId, {
                     projectId: opts.code.projectId,
                     agent: opts.code.agent ?? 'claude',
-                    policy: (opts.autoPermission ?? true) ? 'auto-approve-reads' : 'ask',
+                    // NO policy: the composer's permission toggle is a
+                    // per-dispatch posture, not a chosen session setting —
+                    // freezing it would silently outlive the toggle. Runs
+                    // resolve chip → global settings → ask until the user
+                    // picks a policy in the Code rail.
                     isolation: opts.code.isolation ?? 'worktree',
                     title,
                 });

@@ -876,6 +876,12 @@ export function startRetentionSweep(): void {
         turnsRootDir: container.resolve<string>('turnsRootDir'),
         settings,
       });
+      // After the session sweep: clear code-mode residue whose chat is now
+      // gone (meta / ACP handle / workdir sidecar — worktrees stay on disk).
+      const orphaned = await container.resolve<CodeSessionService>('codeSessionService').sweepOrphanedMeta().catch(() => 0);
+      if (orphaned > 0) {
+        console.log(`[Retention] cleared code-mode meta for ${orphaned} deleted session(s)`);
+      }
       if (result.deletedSessions > 0 || result.deletedTurnFiles > 0) {
         console.log(
           `[Retention] sweep: deleted ${result.deletedSessions} session(s), ${result.deletedTurnFiles} turn file(s)`,
@@ -1548,7 +1554,20 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'sessions:delete': async (_event, args) => {
-      await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      // An ADOPTED chat is a code session under a plain-chat door: deleting
+      // it through the runtime alone would orphan its code meta, stored ACP
+      // conversation, workdir sidecar — and leave a ghost row in the Code
+      // rail. Route through CodeSessionService.delete, which cleans all of
+      // that up (the runtime layer stays ignorant of code-mode). The
+      // worktree checkout is deliberately KEPT on disk — an unmerged
+      // worktree may hold the only copy of the work; explicit removal
+      // stays a Code-rail decision.
+      const codeMeta = await container.resolve<ICodeSessionsRepo>('codeSessionsRepo').get(args.sessionId).catch(() => null);
+      if (codeMeta) {
+        await container.resolve<CodeSessionService>('codeSessionService').delete(args.sessionId, { removeWorktree: false });
+      } else {
+        await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      }
       return { success: true };
     },
     'turns:subscribe': async (event, args) => {
