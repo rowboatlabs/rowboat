@@ -617,6 +617,16 @@ async function handleStatic(
         return html503(res, 'App entry not found', `dist/${entryRel} does not exist.`);
     }
 
+    // The entry itself is missing. `dist/index.html` has an extension, so the
+    // SPA-fallback branch above never catches it and this fell through to the
+    // JSON asset error — opening the app showed a raw {"error":...} blob
+    // instead of a page. This is the common copilot failure shape: manifest
+    // and dist/ get written, the entry does not.
+    const entryOnDisk = confinePath(distRoot, `/${entryRel}`);
+    if (entryOnDisk && resolved === entryOnDisk) {
+        return html503(res, 'App entry not found', `dist/${entryRel} does not exist.`);
+    }
+
     sendError(res, 404, 'not_found', 'asset not found');
 }
 
@@ -651,6 +661,13 @@ function createApp(): express.Express {
             }
             const slug = match[1];
             if (!FOLDER_SLUG_RE.test(slug) || !fs.existsSync(appDirFor(slug))) {
+                // A browser navigating here — the app frame reloading after its folder
+                // was deleted or renamed — should get a page, not a JSON blob. Asset and
+                // XHR requests keep the machine-readable error.
+                if (req.method === 'GET' && (req.headers.accept ?? '').includes('text/html')) {
+                    html503(res, 'App not found', `There is no app folder named “${slug}”. It may have been deleted or renamed.`);
+                    return;
+                }
                 sendError(res, 404, 'app_not_found', `no app folder named "${slug}"`);
                 return;
             }
