@@ -762,7 +762,17 @@ async function startWatcher(): Promise<void> {
         if (!['add', 'addDir', 'change', 'unlink', 'unlinkDir'].includes(eventName)) return;
         const hit = slugFromAbsolutePath(absolutePath);
         if (!hit || hit.rel.endsWith('.tmp') || /\.tmp-[0-9a-f]+$/.test(hit.rel)) return;
-        const area: 'dist' | 'data' = hit.rel === 'data' || hit.rel.startsWith('data/') ? 'data' : 'dist';
+        // Only dist/, data/ and the manifest change what the app serves.
+        // Everything else in the folder fell into the "dist" bucket and forced
+        // a full page reload — README.md, .rowboat-install.json,
+        // .rowboat-publish.json (rewritten at every publish step), agents/,
+        // defaults/, .previous/ — discarding whatever the user had typed in the
+        // open app for a file the app never reads.
+        const top = hit.rel.split('/')[0];
+        let area: 'dist' | 'data';
+        if (top === 'data') area = 'data';
+        else if (top === 'dist' || hit.rel === 'rowboat-app.json') area = 'dist';
+        else return;
         scheduleChangeBroadcast(hit.slug, area, hit.rel);
         if (hit.rel === 'data/config.json' && (eventName === 'add' || eventName === 'change')) {
             scheduleAgentKick(hit.slug);
