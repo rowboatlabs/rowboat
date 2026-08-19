@@ -118,6 +118,11 @@ export function createSavePipeline(opts: SavePipelineOptions): SavePipeline {
       opts.onStatus('saving')
       clearTimer()
       timer = setTimeout(() => {
+        // The debounce has fired: it is no longer "armed". Leaving the dead
+        // handle here made isIdle() false for the rest of the session after
+        // the FIRST autosave — every external change then took the banner
+        // path instead of reloading a clean editor in place.
+        timer = null
         void persist()
       }, opts.debounceMs)
     },

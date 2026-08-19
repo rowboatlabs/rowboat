@@ -130,6 +130,28 @@ describe('planSlideEdit', () => {
     expect(plan.kind).toBe('text')
   })
 
+  // A one-text-box slide detected as 'bullets' (heading only, or an arbitrary
+  // imported slide) has no shape to hold bullets. Building a heading-only slot
+  // set made an unchanged heading + new bullets plan as NOOP — "success,
+  // changed: false" with the bullets silently dropped. No slot → replace.
+  it('replaces when bullets are wanted but the slide has no body shape', async () => {
+    const deck = await mixedDeck()
+    const bulletsSlide = deck.slides[1]
+    const [headingShape] = bulletsSlide.shapes.filter((s): s is TextShape => s.type === 'text')
+    const oneBox = { ...bulletsSlide, shapes: [headingShape] }
+    expect(detectPattern(oneBox)).toBe('bullets')
+
+    const { outline } = extractOutlineSlide(oneBox)
+    expect(outline.bullets).toBeUndefined()
+    // Heading unchanged, bullets added: must NOT be a noop.
+    const plan = planSlideEdit(oneBox, 'bullets', { ...outline, bullets: ['New one', 'New two'] })
+    expect(plan.kind).toBe('replace')
+    // Heading-only edits on the same slide still take the cheap text path.
+    expect(planSlideEdit(oneBox, 'bullets', { ...outline, heading: 'Renamed' }).kind).toBe('text')
+    // And a genuinely unchanged outline is still a noop.
+    expect(planSlideEdit(oneBox, 'bullets', outline).kind).toBe('noop')
+  })
+
   it('replaces when the column count changes', async () => {
     const deck = await mixedDeck()
     const { pattern, outline } = extractOutlineSlide(deck.slides[2])

@@ -72,6 +72,7 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'deck-create':
         case 'deck-add-slide':
         case 'deck-edit-slide':
+        case 'deck-restructure':
         case 'deck-restyle':
             return pathArg ? { operation: 'write', paths: [pathArg] } : null;
         case 'file-copy':

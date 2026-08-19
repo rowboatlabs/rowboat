@@ -44,7 +44,19 @@ const ONLY_PATH_RULE =
     'hand-write a .pptx via executeCommand / python-pptx / any script or library, and never ' +
     'fabricate one with file-writeText.';
 
-function errorEnvelope(error: unknown): { success: false; error: string } {
+// A guarded write refused because the deck changed on disk between this
+// tool's read and its write (the editor's autosave, another tool, the user
+// saving in PowerPoint). Nothing was written; the agent's picture of the
+// deck is stale, so it must look again before retrying.
+const DECK_CONFLICT_MESSAGE =
+    'The deck changed on disk while this tool was working (for example the slide editor saved an ' +
+    'edit), so nothing was written to avoid overwriting those changes. Re-run deck-review to see ' +
+    'the current slides, then retry the edit against what it returns.';
+
+function errorEnvelope(error: unknown): { success: false; error: string; conflict?: true } {
+    if (files.isEtagMismatchError(error)) {
+        return { success: false, error: DECK_CONFLICT_MESSAGE, conflict: true };
+    }
     return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -71,10 +83,76 @@ function workspaceRelPathOf(inputPath: string): string | null {
     return files.resolveFilePath(inputPath).workspaceRelPath;
 }
 
-async function readDeck(inputPath: string): Promise<SlideDeck> {
+/**
+ * Reads and parses a deck, returning the etag of the bytes that were parsed.
+ * Every tool that modifies a deck is a read → modify → write: the write MUST
+ * carry this etag as `expectedEtag` so the main-process guard refuses it if
+ * anything else (the editor's autosave above all) wrote the file in between.
+ * An unguarded write here would silently clobber the user's concurrent edits.
+ */
+async function readDeck(inputPath: string): Promise<{ parsed: SlideDeck; etag: string }> {
     assertPptxPath(inputPath);
-    const { buffer } = await files.readBuffer(inputPath);
-    return parsePptx(buffer, { mediaUrls: false });
+    const { buffer, etag } = await files.readBuffer(inputPath);
+    return { parsed: await parsePptx(buffer, { mediaUrls: false }), etag };
+}
+
+/** The transactional write every deck-modifying tool ends with. */
+async function writeDeckGuarded(inputPath: string, bytes: Uint8Array, etag: string): Promise<void> {
+    await files.writeBuffer(inputPath, Buffer.from(bytes), { expectedEtag: etag });
+}
+
+/**
+ * Validates the deck-restructure request against the deck as read: 1-based
+ * numbers in range, no duplicate deletions, at least one survivor, and an
+ * `order` that is an exact permutation of the surviving slides' CURRENT
+ * numbers. Returns the slide part paths writeDeck needs. Pure; throws with a
+ * message the agent can act on.
+ */
+export function planDeckRestructure(
+    slidePaths: readonly string[],
+    deleteSlides: readonly number[] | undefined,
+    order: readonly number[] | undefined,
+): { deleteSlides: string[]; slideOrder?: string[]; deleted: number[]; order?: number[] } {
+    const count = slidePaths.length;
+    if ((!deleteSlides || deleteSlides.length === 0) && (!order || order.length === 0)) {
+        throw new Error('Nothing to do: pass deleteSlides (1-based numbers to remove) and/or order (the full new order of the remaining slides, as their current 1-based numbers)');
+    }
+    const inRange = (n: number, field: string) => {
+        if (!Number.isInteger(n) || n < 1 || n > count) {
+            throw new Error(`${field}: slide ${n} does not exist (deck has ${count} slides)`);
+        }
+    };
+    const deleted = [...new Set(deleteSlides ?? [])].sort((a, b) => a - b);
+    for (const n of deleted) inRange(n, 'deleteSlides');
+    if (deleted.length >= count) {
+        throw new Error('Cannot delete every slide in the deck');
+    }
+    const deletedSet = new Set(deleted);
+    const survivors = slidePaths.map((_, i) => i + 1).filter((n) => !deletedSet.has(n));
+
+    let slideOrder: string[] | undefined;
+    if (order && order.length > 0) {
+        for (const n of order) inRange(n, 'order');
+        const seen = new Set<number>();
+        for (const n of order) {
+            if (deletedSet.has(n)) throw new Error(`order lists slide ${n}, which deleteSlides removes`);
+            if (seen.has(n)) throw new Error(`order lists slide ${n} more than once`);
+            seen.add(n);
+        }
+        if (order.length !== survivors.length || survivors.some((n) => !seen.has(n))) {
+            throw new Error(
+                `order must list every remaining slide exactly once (expected a permutation of ` +
+                `[${survivors.join(', ')}], got [${order.join(', ')}])`,
+            );
+        }
+        slideOrder = order.map((n) => slidePaths[n - 1]);
+    }
+    return {
+        deleteSlides: deleted.map((n) => slidePaths[n - 1]),
+        ...(slideOrder ? { slideOrder } : {}),
+        deleted,
+        ...(order && order.length > 0 ? { order: [...order] } : {}),
+    };
 }
 
 function requireSlide(parsed: SlideDeck, slideNumber: number) {
@@ -92,7 +170,7 @@ const sameNodePath = (a: NodePath, b: NodePath): boolean =>
 // deck's path — that would write over what the user is looking at.
 const NewDeckPathField = z.string().min(1).describe('Destination file path ending in .pptx. Can be absolute, ~/..., or relative to the default root.');
 
-// The four tools that act on an EXISTING deck default to whatever the user has
+// The tools that act on an EXISTING deck default to whatever the user has
 // open (the "# User Context" block's `State: deck`), so "restyle this deck"
 // needs no path from the user.
 const PathField = z.string().min(1).describe("Deck file path ending in .pptx. Can be absolute, ~/..., or relative to the default root. Defaults to the deck currently open in the editor when the user refers to 'this deck' or a slide number without naming a file — take it from the '# User Context' block's Path.");
@@ -148,7 +226,8 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             'NOT FOR EDITS: when a deck is already open in the editor (the "# User Context" block ' +
             'says State: deck) and the request is edit-like — change, reword, fix, tighten, add a ' +
             'slide, delete a slide, reorder, restyle, retheme, "make slide 2 …" — it is about THAT ' +
-            'deck; use deck-edit-slide / deck-add-slide / deck-restyle instead. Create only when the ' +
+            'deck; use deck-edit-slide / deck-add-slide / deck-restructure / deck-restyle instead. ' +
+            'Create only when the ' +
             'user asks for a NEW deck, or when nothing is open. ' +
             'Slide 1 is always the title slide (its heading is the deck title on the slide). Vary ' +
             'the visual patterns — bullets, two-column for compare/contrast, big-number for one key ' +
@@ -231,7 +310,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             position?: number;
         }) => {
             try {
-                const parsed = await readDeck(inputPath);
+                const { parsed, etag } = await readDeck(inputPath);
                 try {
                     const pos = position ?? parsed.slides.length;
                     if (pos > parsed.slides.length) {
@@ -240,7 +319,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                     const anchorPath = pos === 0 ? '' : parsed.slides[pos - 1].xmlPath;
                     const part = await synthesizeSlidePart(parsed, slide, anchorPath, []);
                     const bytes = await writeDeck(parsed, new Map(), { addSlides: [part] });
-                    await files.writeBuffer(inputPath, Buffer.from(bytes));
+                    await writeDeckGuarded(inputPath, bytes, etag);
                     return {
                         success: true,
                         path: inputPath,
@@ -282,7 +361,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             slide: deck.DeckOutlineSlide;
         }) => {
             try {
-                const parsed = await readDeck(inputPath);
+                const { parsed, etag } = await readDeck(inputPath);
                 try {
                     const target = requireSlide(parsed, slideNumber);
                     const currentPattern = detectPattern(target);
@@ -317,7 +396,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                             slideOrder: order,
                         });
                     }
-                    await files.writeBuffer(inputPath, Buffer.from(bytes));
+                    await writeDeckGuarded(inputPath, bytes, etag);
                     return {
                         success: true,
                         path: inputPath,
@@ -325,6 +404,56 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
                         slideNumber,
                         changed: true,
                         mode: plan.kind === 'text' ? 'text-edit' : 'rebuild',
+                    };
+                } finally {
+                    disposeDeck(parsed);
+                }
+            } catch (error) {
+                return errorEnvelope(error);
+            }
+        },
+    },
+
+    'deck-restructure': {
+        permission: "file-boundary",
+        description:
+            'Delete and/or reorder slides in an existing presentation. USE THIS WHENEVER THE USER ' +
+            'ASKS TO REMOVE, CUT, DROP OR DELETE A SLIDE, OR TO MOVE, SWAP OR REORDER SLIDES — ' +
+            '"delete slide 4", "cut the market slide", "move the team slide before the ask", "swap ' +
+            'slides 2 and 3", "put the closing last". Slide numbers are 1-based and refer to the deck ' +
+            'AS IT IS NOW (use deck-review first to see them). deleteSlides removes those slides; ' +
+            'order is the FULL new sequence of the remaining slides as their current numbers — every ' +
+            'remaining slide listed exactly once (a permutation), so to move slide 5 before slide 2 ' +
+            'in a 6-slide deck pass order [1, 5, 2, 3, 4, 6]. Both can be given at once (order then ' +
+            'lists only the survivors). Slide content, theme and hand-applied formatting are ' +
+            'untouched; at least one slide must remain. Never rebuild the deck to drop or move a ' +
+            'slide, and never edit the .pptx by any other means.',
+        inputSchema: z.object({
+            path: PathField,
+            deleteSlides: z.array(z.number().int().min(1)).optional().describe('1-based numbers of the slides to remove, as numbered in the deck right now'),
+            order: z.array(z.number().int().min(1)).optional().describe('The full new order of the remaining slides, as their current 1-based numbers — a permutation, every remaining slide exactly once'),
+        }),
+        execute: async ({ path: inputPath, deleteSlides, order }: {
+            path: string;
+            deleteSlides?: number[];
+            order?: number[];
+        }) => {
+            try {
+                const { parsed, etag } = await readDeck(inputPath);
+                try {
+                    const plan = planDeckRestructure(parsed.slides.map((s) => s.xmlPath), deleteSlides, order);
+                    const bytes = await writeDeck(parsed, new Map(), {
+                        deleteSlides: plan.deleteSlides,
+                        ...(plan.slideOrder ? { slideOrder: plan.slideOrder } : {}),
+                    });
+                    await writeDeckGuarded(inputPath, bytes, etag);
+                    return {
+                        success: true,
+                        path: inputPath,
+                        workspaceRelPath: workspaceRelPathOf(inputPath),
+                        deleted: plan.deleted,
+                        ...(plan.order ? { order: plan.order } : {}),
+                        slideCount: parsed.slides.length - plan.deleted.length,
                     };
                 } finally {
                     disposeDeck(parsed);
@@ -352,11 +481,11 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
             palette: deck.DeckOutlinePalette;
         }) => {
             try {
-                const parsed = await readDeck(inputPath);
+                const { parsed, etag } = await readDeck(inputPath);
                 try {
                     const xml = buildThemeXml(paletteById(palette));
                     const bytes = await writeDeck(parsed, new Map(), { replaceTheme: { xml } });
-                    await files.writeBuffer(inputPath, Buffer.from(bytes));
+                    await writeDeckGuarded(inputPath, bytes, etag);
                     return { success: true, path: inputPath, workspaceRelPath: workspaceRelPathOf(inputPath), palette, slideCount: parsed.slides.length };
                 } finally {
                     disposeDeck(parsed);
@@ -372,8 +501,8 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
         description:
             'Read back / review a presentation. USE THIS WHENEVER THE USER ASKS WHAT IS IN A DECK or ' +
             'for feedback on one — "what\'s in my deck?", "review my pitch deck", "is this deck any ' +
-            'good?" — and ALWAYS before deck-add-slide or deck-edit-slide on a deck you did not just ' +
-            'create. Returns every slide\'s content (heading, text lines, detected visual pattern) ' +
+            'good?" — and ALWAYS before deck-add-slide, deck-edit-slide or deck-restructure on a deck ' +
+            'you did not just create. Returns every slide\'s content (heading, text lines, detected visual pattern) ' +
             'plus structured feedback: overall assessment, strengths, per-slide comments, and ' +
             'factsToFill — the [bracketed] placeholders still to fill and any unsourced numbers or ' +
             'quotes to verify with the user. Editing needs no new-deck intake: ground any question in ' +
@@ -386,7 +515,7 @@ export const deckTools: z.infer<typeof BuiltinToolsSchema> = {
         }),
         execute: async ({ path: inputPath, focus }: { path: string; focus?: string }) => {
             try {
-                const parsed = await readDeck(inputPath);
+                const { parsed } = await readDeck(inputPath);
                 try {
                     const title = path.basename(inputPath).replace(/\.pptx$/i, '');
                     const context = buildDeckContext(parsed, title);

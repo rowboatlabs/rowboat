@@ -126,6 +126,50 @@ describe('deck file sync', () => {
     expect(disk.content).toBe('editor version')
   })
 
+  // The reload path reads WITHOUT adopting and adopts only once it knows it
+  // will go through. Adopting first (what load() does) handed the armed
+  // autosave the NEW etag: the back-out then left an edit pending whose save
+  // passed the guard and overwrote the assistant's bytes with stale-base edits.
+  it('read() leaves the snapshot alone until adopt(); a guarded write in between is still keyed on the old etag', async () => {
+    const disk = makeDisk('original')
+    const sync = createDeckFileSync(disk.options)
+    await sync.load()
+    const before = sync.snapshot()
+
+    disk.externalWrite('assistant version')
+    const pending = await sync.read()
+    expect(pending.data).toBe('assistant version')
+    // Not adopted: the snapshot is still the pre-read one...
+    expect(sync.snapshot()).toEqual(before)
+    // ...so the guard refuses a write keyed on it (the back-out path).
+    await expect(sync.guardedWrite('editor edit')).rejects.toBeInstanceOf(ExternalChangeError)
+    expect(disk.content).toBe('assistant version')
+    expect(disk.conflicts).toHaveLength(1)
+
+    // Adopting installs what was read; writes now go through.
+    expect(pending.adopt()).toBe(true)
+    expect(sync.snapshot()).not.toEqual(before)
+    await expect(sync.checkExternal()).resolves.toBe('self')
+    await sync.guardedWrite('editor edit')
+    expect(disk.content).toBe('editor edit')
+  })
+
+  it('adopt() refuses when one of our own writes landed during the read', async () => {
+    const disk = makeDisk('original')
+    const sync = createDeckFileSync(disk.options)
+    await sync.load()
+
+    const pending = await sync.read()
+    await sync.guardedWrite('written after the read began')
+    const afterWrite = sync.snapshot()
+
+    // What was read is stale now: adopting it would key later writes on a
+    // dead etag and re-install pre-write bytes as the base.
+    expect(pending.adopt()).toBe(false)
+    expect(sync.snapshot()).toEqual(afterWrite)
+    await expect(sync.checkExternal()).resolves.toBe('self')
+  })
+
   it('checkExternal tells own writes from foreign ones without reading the file', async () => {
     const disk = makeDisk('original')
     const sync = createDeckFileSync(disk.options)

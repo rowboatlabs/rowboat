@@ -63,6 +63,7 @@ const definitions: SkillDefinition[] = [
       "deck-review",
       "deck-add-slide",
       "deck-edit-slide",
+      "deck-restructure",
       "deck-restyle",
       "file-mkdir",
     ],

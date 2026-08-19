@@ -16,6 +16,12 @@ const CANNED_REVIEW: deck.DeckReview = {
 
 const reviewDeckMock = vi.fn<(input: unknown) => Promise<deck.DeckReview>>(async () => CANNED_REVIEW);
 
+// Interposes between a tool's read of the deck and its write: the real
+// filesystem module, with readBuffer calling `afterRead` once it has the bytes.
+// Tests use it to write the file "concurrently" (as the editor's autosave
+// would) and check the tool's guarded write refuses rather than clobbers.
+const afterRead: { fn: ((resolvedPath: string) => Promise<void>) | null } = { fn: null };
+
 beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "rowboat-deck-test-"));
     workspaceDir = path.join(tmpDir, "workspace");
@@ -23,6 +29,20 @@ beforeEach(async () => {
     process.env.ROWBOAT_WORKDIR = workspaceDir;
     vi.resetModules();
     reviewDeckMock.mockClear();
+    afterRead.fn = null;
+    vi.doMock("../../../filesystem/files.js", async () => {
+        const actual = await vi.importActual<typeof import("../../../filesystem/files.js")>(
+            "../../../filesystem/files.js",
+        );
+        return {
+            ...actual,
+            readBuffer: async (inputPath: string) => {
+                const result = await actual.readBuffer(inputPath);
+                if (afterRead.fn) await afterRead.fn(result.resolvedPath);
+                return result;
+            },
+        };
+    });
     vi.doMock("../../../knowledge/version_history.js", () => ({
         commitAll: vi.fn(async () => undefined),
         initRepo: vi.fn(async () => undefined),
@@ -38,6 +58,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
     delete process.env.ROWBOAT_WORKDIR;
+    afterRead.fn = null;
+    vi.doUnmock("../../../filesystem/files.js");
     vi.doUnmock("../../../knowledge/version_history.js");
     vi.doUnmock("../../../knowledge/deprecate_today_note.js");
     vi.doUnmock("../../../knowledge/deck_outline.js");
@@ -195,6 +217,59 @@ describe("deck-edit-slide", () => {
         expect(context.slides[1].heading).toBe("Customers live");
     });
 
+    // Item-4 regression: a slide with ONE text shape (heading only — the body
+    // placeholder removed in the editor, or an imported one-box slide) is
+    // detected as 'bullets'. Editing its bullets used to return
+    // { success: true, changed: false } and write nothing.
+    it("adds bullets to a single-text-shape slide by rebuilding it (no silent noop)", async () => {
+        const tools = await loadTools();
+        const relPath = await createDeck(tools);
+        const { parsePptx, disposeDeck } = await import("@x/shared/dist/pptx/parse.js");
+        const { writeDeck } = await import("@x/shared/dist/pptx/serialize.js");
+        const { detectPattern } = await import("@x/shared/dist/pptx/edit-slide.js");
+
+        // Strip slide 2 down to its heading box, as the editor's "delete shape" would.
+        const abs = path.join(workspaceDir, relPath);
+        const parsed = await parsePptx(await fs.readFile(abs), { mediaUrls: false });
+        try {
+            const slide = parsed.slides[1];
+            const body = slide.shapes[1];
+            const deleteEdit = {
+                kind: "deleteShape" as const,
+                nodePath: body.nodePath,
+                shapeType: body.type,
+                shapeId: body.id,
+                ...(body.type === "text" ? { original: body.paragraphs } : {}),
+            };
+            await fs.writeFile(abs, await writeDeck(parsed, new Map([[slide.xmlPath, [deleteEdit]]])));
+        } finally {
+            disposeDeck(parsed);
+        }
+        const stripped = await parsePptx(await fs.readFile(abs), { mediaUrls: false });
+        try {
+            expect(stripped.slides[1].shapes.filter((s) => s.type === "text")).toHaveLength(1);
+            expect(detectPattern(stripped.slides[1])).toBe("bullets");
+        } finally {
+            disposeDeck(stripped);
+        }
+        const before = await fs.readFile(abs);
+
+        const result = await tools["deck-edit-slide"].execute({
+            path: relPath,
+            slideNumber: 2,
+            slide: { layout: "title-body", pattern: "bullets", heading: "Where we are", bullets: ["New one", "New two"] },
+        });
+        expect(result).toMatchObject({ success: true, changed: true, mode: "rebuild" });
+
+        // The written bytes actually carry the bullets.
+        const after = await fs.readFile(abs);
+        expect(after.equals(before)).toBe(false);
+        const { context } = await readBack(relPath);
+        expect(context.slides).toHaveLength(3);
+        expect(context.slides[1].heading).toBe("Where we are");
+        expect(context.slides[1].bullets).toEqual(["New one", "New two"]);
+    });
+
     it("reports an unchanged slide as a no-op", async () => {
         const tools = await loadTools();
         const relPath = await createDeck(tools);
@@ -262,6 +337,168 @@ describe("deck-review", () => {
         const result = await tools["deck-review"].execute({ path: "missing.pptx" });
         expect(result).toMatchObject({ success: false });
         expect(reviewDeckMock).not.toHaveBeenCalled();
+    });
+});
+
+describe("deck-restructure", () => {
+    it("deletes slides by 1-based number and round-trips", async () => {
+        const tools = await loadTools();
+        const relPath = await createDeck(tools);
+
+        const result = await tools["deck-restructure"].execute({ path: relPath, deleteSlides: [2] });
+        expect(result).toMatchObject({ success: true, deleted: [2], slideCount: 2 });
+
+        const { context } = await readBack(relPath);
+        expect(context.slides.map((s) => s.heading)).toEqual(["Launch Plan", "What comes next"]);
+    });
+
+    it("reorders slides with a full permutation of current numbers and round-trips", async () => {
+        const tools = await loadTools();
+        const relPath = await createDeck(tools);
+
+        const result = await tools["deck-restructure"].execute({ path: relPath, order: [3, 1, 2] });
+        expect(result).toMatchObject({ success: true, deleted: [], order: [3, 1, 2], slideCount: 3 });
+
+        const { context } = await readBack(relPath);
+        expect(context.slides.map((s) => s.heading)).toEqual(["What comes next", "Launch Plan", "Where we are"]);
+    });
+
+    it("deletes and reorders in one call; order lists only the survivors", async () => {
+        const tools = await loadTools();
+        const relPath = await createDeck(tools);
+        // Add a fourth so the survivors are a non-trivial permutation.
+        await tools["deck-add-slide"].execute({
+            path: relPath,
+            slide: { layout: "title-body", pattern: "closing", heading: "Thank you" },
+        });
+
+        const result = await tools["deck-restructure"].execute({
+            path: relPath,
+            deleteSlides: [2],
+            order: [4, 1, 3],
+        });
+        expect(result).toMatchObject({ success: true, deleted: [2], order: [4, 1, 3], slideCount: 3 });
+
+        const { context } = await readBack(relPath);
+        expect(context.slides.map((s) => s.heading)).toEqual(["Thank you", "Launch Plan", "What comes next"]);
+    });
+
+    it("fails closed on an invalid permutation — the file is untouched", async () => {
+        const tools = await loadTools();
+        const relPath = await createDeck(tools);
+        const before = await fs.readFile(path.join(workspaceDir, relPath));
+
+        const cases: Array<{ deleteSlides?: number[]; order?: number[]; error: RegExp }> = [
+            { order: [1, 2], error: /every remaining slide exactly once/ },            // missing one
+            { order: [1, 2, 2], error: /more than once/ },                              // duplicate
+            { order: [1, 2, 3, 4], error: /does not exist/ },                            // out of range
+            { deleteSlides: [2], order: [1, 2, 3], error: /which deleteSlides removes/ }, // lists a deleted slide
+            { deleteSlides: [2], order: [1], error: /every remaining slide exactly once/ }, // not all survivors
+            { deleteSlides: [1, 2, 3], error: /every slide/ },                           // nothing left
+            { deleteSlides: [9], error: /does not exist/ },
+            { error: /Nothing to do/ },
+        ];
+        for (const c of cases) {
+            const result = await tools["deck-restructure"].execute({ path: relPath, ...c });
+            expect(result, JSON.stringify(c)).toMatchObject({ success: false });
+            expect((result as { error: string }).error, JSON.stringify(c)).toMatch(c.error);
+        }
+        await expect(fs.readFile(path.join(workspaceDir, relPath))).resolves.toEqual(before);
+    });
+
+    it("is registered with the write-side conventions of its siblings", async () => {
+        const tools = await loadTools();
+        expect(tools["deck-restructure"].permission).toBe("file-boundary");
+        expect(tools["deck-restructure"].description).toMatch(/reorder/i);
+        expect(tools["deck-restructure"].description).toMatch(/delete/i);
+        expect(tools["deck-restructure"].inputSchema.safeParse({ path: "a.pptx", order: [2, 1] }).success).toBe(true);
+        expect(tools["deck-restructure"].inputSchema.safeParse({ path: "a.pptx", deleteSlides: [0] }).success).toBe(false);
+    });
+});
+
+// The deck-modifying tools are read → modify → write, and the editor's
+// autosave can land between the two. Each write carries the etag of the bytes
+// the tool read, so the main-process guard refuses it and the concurrent save
+// survives. Without the guard the tool silently rewrote the whole file from
+// its stale parse — the user's edit was gone with no error anywhere.
+describe("deck tools refuse to clobber a concurrent write", () => {
+    const USER_BYTES = Buffer.from("the user's concurrent save");
+
+    const mutations: Array<{
+        name: "deck-add-slide" | "deck-edit-slide" | "deck-restyle" | "deck-restructure";
+        args: Record<string, unknown>;
+    }> = [
+        { name: "deck-add-slide", args: { slide: { layout: "title-body", pattern: "closing", heading: "Bye" } } },
+        {
+            name: "deck-edit-slide",
+            args: { slideNumber: 2, slide: { ...OUTLINE_SLIDES[1], heading: "Where we are today" } },
+        },
+        { name: "deck-restyle", args: { palette: "sunset" } },
+        { name: "deck-restructure", args: { order: [3, 1, 2] } },
+    ];
+
+    for (const { name, args } of mutations) {
+        it(`${name}: a write between its read and its write → conflict envelope, user's bytes survive`, async () => {
+            const tools = await loadTools();
+            const relPath = await createDeck(tools);
+
+            // "The editor saved" between the tool's read and its write.
+            afterRead.fn = async (resolvedPath) => {
+                afterRead.fn = null;
+                await fs.writeFile(resolvedPath, USER_BYTES);
+            };
+            const result = await tools[name].execute({ path: relPath, ...args });
+
+            expect(result).toMatchObject({ success: false, conflict: true });
+            const error = (result as { error: string }).error;
+            expect(error).toMatch(/changed on disk/);
+            expect(error).toMatch(/deck-review/);
+            // Nothing was written over the concurrent save.
+            await expect(fs.readFile(path.join(workspaceDir, relPath))).resolves.toEqual(USER_BYTES);
+        });
+    }
+
+    it("with no concurrent write the same calls succeed (the guard is transactional, not sticky)", async () => {
+        const tools = await loadTools();
+        for (const { name, args } of mutations) {
+            const relPath = await createDeck(tools, `decks/${name}.pptx`);
+            const result = await tools[name].execute({ path: relPath, ...args });
+            expect(result, name).toMatchObject({ success: true });
+        }
+    });
+});
+
+describe("planDeckRestructure", () => {
+    const PATHS = ["ppt/slides/slide1.xml", "ppt/slides/slide2.xml", "ppt/slides/slide3.xml"];
+
+    it("maps 1-based numbers to part paths and dedupes deletions", async () => {
+        const { planDeckRestructure } = await import("./deck.js");
+        expect(planDeckRestructure(PATHS, [3, 3], undefined)).toEqual({
+            deleteSlides: ["ppt/slides/slide3.xml"],
+            deleted: [3],
+        });
+        expect(planDeckRestructure(PATHS, undefined, [2, 3, 1])).toEqual({
+            deleteSlides: [],
+            slideOrder: ["ppt/slides/slide2.xml", "ppt/slides/slide3.xml", "ppt/slides/slide1.xml"],
+            deleted: [],
+            order: [2, 3, 1],
+        });
+        expect(planDeckRestructure(PATHS, [1], [3, 2])).toEqual({
+            deleteSlides: ["ppt/slides/slide1.xml"],
+            slideOrder: ["ppt/slides/slide3.xml", "ppt/slides/slide2.xml"],
+            deleted: [1],
+            order: [3, 2],
+        });
+    });
+
+    it("rejects anything that is not a full permutation of the survivors", async () => {
+        const { planDeckRestructure } = await import("./deck.js");
+        expect(() => planDeckRestructure(PATHS, undefined, [1, 2])).toThrow(/exactly once/);
+        expect(() => planDeckRestructure(PATHS, undefined, [1, 1, 2])).toThrow(/more than once/);
+        expect(() => planDeckRestructure(PATHS, undefined, [0, 1, 2])).toThrow(/does not exist/);
+        expect(() => planDeckRestructure(PATHS, [2], [1, 2, 3])).toThrow(/deleteSlides removes/);
+        expect(() => planDeckRestructure(PATHS, [1, 2, 3], undefined)).toThrow(/every slide/);
+        expect(() => planDeckRestructure(PATHS, [], [])).toThrow(/Nothing to do/);
     });
 });
 

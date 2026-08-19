@@ -47,15 +47,31 @@ export class ExternalChangeError extends Error {
   }
 }
 
-/** The main process refuses a stale expectedEtag with this marker. */
+/**
+ * The main process refuses a stale expectedEtag with this marker. A file
+ * that went MISSING under an expectedEtag carries the same marker (it is the
+ * same conflict: the file is not the one we read), so it lands here too —
+ * never as a raw ENOENT the editor could not recover from.
+ */
 function isEtagMismatch(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err)
   return message.includes('ETag mismatch')
 }
 
 export interface DeckFileSync {
-  /** Reads the file and adopts its state as the snapshot. */
+  /** Reads the file and adopts its state as the snapshot (initial open). */
   load(): Promise<string>
+  /**
+   * Reads the file WITHOUT adopting its state. `adopt()` installs what was
+   * read as the snapshot and returns true; until then every guarded write is
+   * still keyed on the PREVIOUS snapshot. A reload that has to back out (an
+   * edit started while the read was in flight) simply never adopts — so the
+   * armed autosave, which would clobber the newly read bytes with stale-base
+   * edits, is refused by the guard instead of sailing through on an etag it
+   * never earned. `adopt()` returns false (and installs nothing) when one of
+   * our own writes landed after the read: what was read is already stale.
+   */
+  read(): Promise<{ data: string; adopt: () => boolean }>
   /**
    * Writes with the snapshot's etag as the transactional guard. On an
    * external change: signals `onConflict` and throws ExternalChangeError,
@@ -81,20 +97,39 @@ export interface DeckFileSync {
 export function createDeckFileSync(opts: DeckFileSyncOptions): DeckFileSync {
   let snapshot: FileSnapshot | null = null
   let overrideNext = false
+  /** Bumped by every successful write, so a pending read knows it went stale. */
+  let writeSeq = 0
+
+  const read = async (): Promise<{ data: string; adopt: () => boolean }> => {
+    const seqAtRead = writeSeq
+    const res = await opts.read()
+    const next: FileSnapshot = { etag: res.etag, mtimeMs: res.stat.mtimeMs, size: res.stat.size }
+    return {
+      data: res.data,
+      adopt: () => {
+        if (writeSeq !== seqAtRead) return false
+        snapshot = next
+        overrideNext = false
+        return true
+      },
+    }
+  }
 
   return {
     async load() {
-      const res = await opts.read()
-      snapshot = { etag: res.etag, mtimeMs: res.stat.mtimeMs, size: res.stat.size }
-      overrideNext = false
+      const res = await read()
+      res.adopt()
       return res.data
     },
+
+    read,
 
     async guardedWrite(data: string) {
       const expected = overrideNext ? null : (snapshot?.etag ?? null)
       try {
         const res = await opts.write(data, expected)
         overrideNext = false
+        writeSeq += 1
         snapshot = { etag: res.etag, mtimeMs: res.stat.mtimeMs, size: res.stat.size }
       } catch (err) {
         if (isEtagMismatch(err)) {

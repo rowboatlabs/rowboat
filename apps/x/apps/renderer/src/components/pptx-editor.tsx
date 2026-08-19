@@ -217,8 +217,11 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
   const [editingKey, setEditingKey] = useState<ShapeKey | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('clean')
   // The file changed underneath us (assistant tool / external write) while
-  // local unsaved edits exist. Nothing is written until the user picks a side.
-  const [externalConflict, setExternalConflict] = useState(false)
+  // local unsaved edits exist — or it is GONE (deleted / moved away), which a
+  // guarded save surfaces as the same conflict. Nothing is written until the
+  // user picks a side. 'missing' is only entered by a Reload that found no
+  // file to read: the banner then says so and offers to recreate it.
+  const [externalConflict, setExternalConflict] = useState<null | 'changed' | 'missing'>(null)
   const [zoomMode, setZoomMode] = useState<'fit' | number>('fit')
   const [zoomPercent, setZoomPercent] = useState(100)
   const [selectionTick, setSelectionTick] = useState(0)
@@ -285,7 +288,9 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
           return null
         }
       },
-      onConflict: () => setExternalConflict(true),
+      // A refused write after the file went missing keeps the 'missing'
+      // banner (it is still the truth); otherwise the generic conflict.
+      onConflict: () => setExternalConflict((current) => current ?? 'changed'),
     })
   }
   const fileSync = fileSyncRef.current
@@ -438,13 +443,19 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
    */
   const reloadFromDisk = useCallback(async () => {
     try {
-      const data = await fileSync.load()
+      // Read WITHOUT adopting: the snapshot (and so the etag every guarded
+      // write is keyed on) moves only once we know the reload goes through.
+      const { data, adopt } = await fileSync.read()
       const parsed = await parsePptx(base64ToUint8Array(data))
       // An edit racing the re-read must not be clobbered silently: back out
-      // and let the banner ask.
-      if (!savePipeline.isIdle()) {
+      // and let the banner ask. The snapshot stays the PRE-reload one, so
+      // the autosave that edit armed is refused by the guard (its etag is
+      // stale against the bytes we just read) rather than overwriting them
+      // with stale-base edits on an etag it never earned. `adopt()` itself
+      // refuses if a write landed during the read, for the same reason.
+      if (!savePipeline.isIdle() || !adopt()) {
         disposeDeck(parsed)
-        setExternalConflict(true)
+        setExternalConflict('changed')
         return
       }
       const old = baseDeckRef.current
@@ -457,7 +468,7 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
       editSetRef.current = EMPTY_DECK_EDITS
       setSelectedKey(null)
       setEditingKey(null)
-      setExternalConflict(false)
+      setExternalConflict(null)
       try {
         const themePath = await resolveThemePath(parsed.source.zip)
         const themeXml = (await parsed.source.zip.file(themePath)?.async('string')) ?? null
@@ -469,6 +480,14 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
       }
       setSaveStatus('clean')
     } catch (err) {
+      // Nothing to reload because the file is GONE (deleted, moved, a git
+      // checkout): report that instead of a generic failure, and let the
+      // banner offer to recreate it from the local edits. Not a toast — the
+      // user needs the choice, not a notification that expires.
+      if ((await fileSync.checkExternal()) === 'missing') {
+        setExternalConflict('missing')
+        return
+      }
       console.error('Failed to reload pptx after external change:', err)
       toast.error('Could not reload the presentation.', {
         description: err instanceof Error ? err.message : String(err),
@@ -485,20 +504,31 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
    * the no-write half even when the autosave debounce fires regardless).
    */
   const externalSignalBusyRef = useRef(false)
+  // A signal that arrives while one is being handled is COALESCED, not
+  // dropped: the handler runs one more round when it finishes. Dropping it
+  // left the editor stale when two assistant writes landed back to back (the
+  // second's signal arrived during the first's reload tail).
+  const externalSignalPendingRef = useRef(false)
   const handleExternalSignal = useCallback(async () => {
     // Signals during the initial load race the first parse; the load is
     // reading the newest bytes anyway.
     if (!baseDeckRef.current) return
-    if (externalSignalBusyRef.current) return
+    if (externalSignalBusyRef.current) {
+      externalSignalPendingRef.current = true
+      return
+    }
     externalSignalBusyRef.current = true
     try {
-      const verdict = await fileSync.checkExternal()
-      if (verdict !== 'external') return
-      if (savePipeline.isIdle()) {
-        await reloadFromDisk()
-      } else {
-        setExternalConflict(true)
-      }
+      do {
+        externalSignalPendingRef.current = false
+        const verdict = await fileSync.checkExternal()
+        if (verdict !== 'external') continue
+        if (savePipeline.isIdle()) {
+          await reloadFromDisk()
+        } else {
+          setExternalConflict('changed')
+        }
+      } while (externalSignalPendingRef.current)
     } finally {
       externalSignalBusyRef.current = false
     }
@@ -528,7 +558,10 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
         case 'bulkChanged':
           if (!event.paths || event.paths.includes(path)) void handleExternalSignal()
           break
-        // 'deleted': nothing to reload; the next save simply recreates the file.
+        // 'deleted': nothing to reload. The next guarded save is REFUSED — a
+        // missing file under an expectedEtag is an ETag mismatch by design —
+        // which raises the conflict banner; Reload then finds no file,
+        // reports it is gone and offers to recreate it from the local edits.
       }
     })
     return cleanup
@@ -545,10 +578,18 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
     await reloadFromDisk()
   }, [savePipeline, reloadFromDisk])
 
-  /** Banner: keep local edits; the next save knowingly overwrites the file. */
+  /**
+   * Banner: keep local edits; the next save knowingly overwrites the file —
+   * or recreates it, when it is gone.
+   */
   const resolveConflictKeepMine = useCallback(() => {
     fileSync.keepMine()
-    setExternalConflict(false)
+    setExternalConflict(null)
+    // A Reload that failed (file gone) has already discarded the pipeline's
+    // bookkeeping while the edits are still on screen; mark a generation so
+    // persist() actually serializes the current state instead of finding
+    // nothing to do. (A no-op when edits are pending anyway.)
+    savePipeline.markEdited()
     void savePipeline.persist()
   }, [fileSync, savePipeline])
 
@@ -606,25 +647,41 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
     setCurrentThemeXml(themeXml)
   }, [])
 
-  /** Writes the full deck (current edits + current base theme) to disk now. */
-  const persistFullDeck = useCallback(async () => {
-    const base = baseDeckRef.current
-    if (!base) return
-    const edits = editSetRef.current
-    const bytes = await writeDeck(
-      base,
-      mergeSlideEdits(toSlideEdits(edits.shapes), insertsToSlideEdits(edits.insertedShapes)),
-      { deleteSlides: edits.deletedSlides, addSlides: edits.addedSlides, slideOrder: edits.slideOrder },
-    )
-    await fileSync.guardedWrite(uint8ArrayToBase64(bytes))
-  }, [fileSync])
+  /**
+   * Writes the full deck — the given edit set on the CURRENT base, with the
+   * theme part replaced by `themeXml` — to disk now, as one guarded write.
+   * This is the disk half of a theme change; the in-memory half
+   * (swapBaseTheme) runs only after this resolves, so a refused write leaves
+   * the screen showing exactly what the file still holds.
+   */
+  const persistDeckWithTheme = useCallback(
+    async (themeXml: string, edits: DeckEdits) => {
+      const base = baseDeckRef.current
+      if (!base) return
+      const bytes = await writeDeck(
+        base,
+        mergeSlideEdits(toSlideEdits(edits.shapes), insertsToSlideEdits(edits.insertedShapes)),
+        {
+          deleteSlides: edits.deletedSlides,
+          addSlides: edits.addedSlides,
+          slideOrder: edits.slideOrder,
+          replaceTheme: { xml: themeXml },
+        },
+      )
+      await fileSync.guardedWrite(uint8ArrayToBase64(bytes))
+    },
+    [fileSync],
+  )
 
   const activePaletteId = useMemo(() => paletteIdOfTheme(currentThemeXml), [currentThemeXml])
 
   /**
    * Swap the whole deck to a built-in palette. Flushes pending edits first,
-   * swaps the theme in memory, writes the restyled deck, and records a special
-   * history entry so the change is undoable through the same mechanism.
+   * then PERSISTS the restyled deck; only on success does it swap the theme
+   * in memory and record a special history entry so the change is undoable
+   * through the same mechanism. A refused write (the file changed underneath
+   * us) raises the conflict banner via the guard and leaves the on-screen
+   * theme exactly as it was — screen and file never disagree.
    */
   const changeTheme = useCallback(
     async (paletteId: string) => {
@@ -646,8 +703,8 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
           originalTheme = (await base.source.zip.file(themePath)?.async('string')) ?? null
         }
         if (originalTheme === null) throw new Error('could not resolve the deck theme to replace')
+        await persistDeckWithTheme(after, editSetRef.current)
         await swapBaseTheme(after)
-        await persistFullDeck()
         setHistory((h) => {
           const trimmed = [
             ...h.slice(0, histIndexRef.current + 1),
@@ -670,7 +727,7 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
         setThemeBusy(false)
       }
     },
-    [savePipeline, swapBaseTheme, persistFullDeck, themeBusy],
+    [savePipeline, swapBaseTheme, persistDeckWithTheme, themeBusy],
   )
 
   // ------------------------------------------------------------ undo / redo
@@ -678,53 +735,74 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
   const canUndo = histIndex > 0
   const canRedo = histIndex < history.length - 1
 
+  /**
+   * Moves the history index across a THEME step: persists the deck with the
+   * target theme first, and only on success moves the index and swaps the
+   * on-screen theme. Same contract as changeTheme — a refused write raises
+   * the banner through the guard and leaves history, screen and file exactly
+   * where they were, so there is nothing to desync and nothing to re-sync.
+   */
+  const stepThemeHistory = useCallback(
+    (next: number, themeXml: string) => {
+      setThemeBusy(true)
+      void (async () => {
+        try {
+          // Flush pending edits first (as changeTheme does), so the debounced
+          // save cannot race this guarded write with the same etag.
+          await savePipeline.flush()
+          const edits = (history[next] ?? { edits: EMPTY_DECK_EDITS }).edits
+          await persistDeckWithTheme(themeXml, edits)
+          histIndexRef.current = next
+          editSetRef.current = edits
+          setHistIndex(next)
+          setEditingKey(null)
+          await swapBaseTheme(themeXml)
+        } catch (err) {
+          console.error('Failed to undo/redo the theme change:', err)
+          if (!(err instanceof ExternalChangeError)) {
+            toast.error('Could not change the theme.', {
+              description: err instanceof Error ? err.message : String(err),
+            })
+          }
+        } finally {
+          setThemeBusy(false)
+        }
+      })()
+    },
+    [history, savePipeline, swapBaseTheme, persistDeckWithTheme],
+  )
+
   const undo = useCallback(() => {
     if (histIndexRef.current <= 0 || themeBusy) return
     const from = histIndexRef.current
     const next = from - 1
     const leaving = history[from]
+    if (leaving?.theme) {
+      // Undo a theme change: persist the previous theme part, then restore it.
+      stepThemeHistory(next, leaving.theme.before)
+      return
+    }
     histIndexRef.current = next
     editSetRef.current = (history[next] ?? { edits: EMPTY_DECK_EDITS }).edits
     setHistIndex(next)
     setEditingKey(null)
-    if (leaving?.theme) {
-      // Undo a theme change: restore the previous theme part and persist.
-      setThemeBusy(true)
-      void (async () => {
-        try {
-          await swapBaseTheme(leaving.theme!.before)
-          await persistFullDeck()
-        } finally {
-          setThemeBusy(false)
-        }
-      })()
-    } else {
-      savePipeline.scheduleSave()
-    }
-  }, [history, savePipeline, swapBaseTheme, persistFullDeck, themeBusy])
+    savePipeline.scheduleSave()
+  }, [history, savePipeline, stepThemeHistory, themeBusy])
 
   const redo = useCallback(() => {
     if (histIndexRef.current >= history.length - 1 || themeBusy) return
     const next = histIndexRef.current + 1
     const entering = history[next]
+    if (entering?.theme) {
+      stepThemeHistory(next, entering.theme.after)
+      return
+    }
     histIndexRef.current = next
     editSetRef.current = (entering ?? { edits: EMPTY_DECK_EDITS }).edits
     setHistIndex(next)
     setEditingKey(null)
-    if (entering?.theme) {
-      setThemeBusy(true)
-      void (async () => {
-        try {
-          await swapBaseTheme(entering.theme!.after)
-          await persistFullDeck()
-        } finally {
-          setThemeBusy(false)
-        }
-      })()
-    } else {
-      savePipeline.scheduleSave()
-    }
-  }, [history, savePipeline, swapBaseTheme, persistFullDeck, themeBusy])
+    savePipeline.scheduleSave()
+  }, [history, savePipeline, stepThemeHistory, themeBusy])
 
   // ----------------------------------------------------------- edit commits
 
@@ -1464,7 +1542,7 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
           slideCount={deck.slides.length}
         />
 
-        {externalConflict && (
+        {externalConflict === 'changed' && (
           <div
             role="alert"
             className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs"
@@ -1487,6 +1565,26 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
                 className="rounded-md border border-border bg-background px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-accent"
               >
                 Keep mine (your next save overwrites)
+              </button>
+            </div>
+          </div>
+        )}
+        {externalConflict === 'missing' && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs"
+          >
+            <TriangleAlertIcon className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="font-medium text-foreground">
+              This file no longer exists on disk — it was deleted or moved.
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={resolveConflictKeepMine}
+                className="rounded-md border border-border bg-background px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                Recreate it from your edits
               </button>
             </div>
           </div>

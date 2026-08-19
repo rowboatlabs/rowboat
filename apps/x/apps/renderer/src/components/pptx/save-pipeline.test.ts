@@ -168,6 +168,29 @@ describe('idle / discard / settled (external-change support)', () => {
     expect(h.pipeline.isIdle()).toBe(true)
   })
 
+  // The editor's clean-reload decision. A debounced save that completes ON
+  // ITS OWN (no flush) must leave the pipeline idle — the fired timer handle
+  // was never cleared, so isIdle() stayed false for the rest of the session
+  // after the first autosave and every assistant write raised the conflict
+  // banner on an editor with nothing unsaved.
+  it('isIdle is true again once the debounced save completes by itself (no flush)', async () => {
+    const h = harness()
+    h.edit('A')
+    expect(h.pipeline.isIdle()).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE)
+    expect(h.writes).toEqual(['A'])
+    expect(h.statuses[h.statuses.length - 1]).toBe('saved')
+    expect(h.pipeline.isIdle()).toBe(true)
+
+    // And again after a second round — it is not a one-off.
+    h.edit('B')
+    expect(h.pipeline.isIdle()).toBe(false)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE)
+    expect(h.writes).toEqual(['A', 'B'])
+    expect(h.pipeline.isIdle()).toBe(true)
+  })
+
   it('discard abandons pending edits without ever writing', async () => {
     const h = harness()
     h.edit('A')

@@ -23,6 +23,7 @@ Presentations in Rowboat are real PowerPoint files built with the \`deck-*\` too
 | \`deck-review\` | Read an existing deck back — every slide's heading, text and visual pattern — plus model feedback (story, density, variety, facts still to fill). **Call this before editing a deck you did not just create.** |
 | \`deck-add-slide\` | Insert ONE slide at a position. Inherits the deck's theme. |
 | \`deck-edit-slide\` | Replace the content of ONE slide (1-based \`slideNumber\`). |
+| \`deck-restructure\` | Delete slides (\`deleteSlides\`, 1-based) and/or reorder them (\`order\`: the full new sequence of the remaining slides as their current numbers). Content untouched. |
 | \`deck-restyle\` | Swap the whole deck to a different colour palette. |
 
 ## Ask first — one intake message
@@ -91,12 +92,12 @@ An edit is not a new deck. The user already has slides they care about, so the j
 1. **Look before you ask.** Call \`deck-review\` first. It returns every slide's heading, text and pattern plus feedback on story, density, variety and the facts still missing. Base any question on what is actually in the deck — "slides 4-6 are all bullet lists and the closing slide has no ask — want me to fix those two things?" — never on a generic checklist.
 2. **At most ONE question, and only when the request is ambiguous.** "Improve my deck", "polish this", "make it better", "clean it up" leave the KIND of change open. Ask once, with options:
    "Want me to (a) tighten the text, (b) restructure the flow, (c) restyle the look, or (d) all of it?"
-3. **A specific request gets NO questions.** "Shorten slide 3", "fix the closing slide's heading", "make it navy", "add a pricing slide after 4", "cut the market slide" — just do it. Asking here is the failure, not the caution.
-4. **Never regenerate the deck.** Use \`deck-edit-slide\` / \`deck-add-slide\` / \`deck-restyle\` so every slide you were not asked to touch keeps its exact bytes — the user's own edits, images and shape positions survive. Rebuilding with \`deck-create\` destroys all of that and is never the right way to change a deck that already exists.
+3. **A specific request gets NO questions.** "Shorten slide 3", "fix the closing slide's heading", "make it navy", "add a pricing slide after 4", "cut the market slide", "move the team slide before the ask" — just do it. Asking here is the failure, not the caution.
+4. **Never regenerate the deck.** Use \`deck-edit-slide\` / \`deck-add-slide\` / \`deck-restructure\` / \`deck-restyle\` so every slide you were not asked to touch keeps its exact bytes — the user's own edits, images and shape positions survive. Rebuilding with \`deck-create\` destroys all of that and is never the right way to change a deck that already exists.
 
 What each answer maps to:
 - **(a) tighten the text** — one \`deck-edit-slide\` per slide that needs it: a heading that makes a claim, 3-5 short lines, detail moved to \`speakerNotes\`. Return every field you were not asked to change verbatim.
-- **(b) restructure the flow** — reorder, add or retire slides so the deck follows the arc for its purpose (see "Deck-type arcs" below). One \`deck-add-slide\` / \`deck-edit-slide\` per change.
+- **(b) restructure the flow** — reorder, add or retire slides so the deck follows the arc for its purpose (see "Deck-type arcs" below). \`deck-restructure\` deletes and reorders in ONE call (\`deleteSlides\` + \`order\`, both keyed on the current 1-based numbers from \`deck-review\`); one \`deck-add-slide\` / \`deck-edit-slide\` per content change.
 - **(c) restyle the look** — ONE \`deck-restyle\` call with a palette that fits. Do not touch content.
 - **(d) all of it** — content first, restyle last, so the user watches the words settle before the look changes.
 
@@ -139,7 +140,7 @@ Pick one that fits the topic and audience rather than asking — mention which y
 
 Each user message may carry a hidden "# User Context" block. When it says \`State: deck\`, the user has that .pptx open in the slide editor and \`Slide: N of M\` is the slide they have selected.
 
-Treat that path as the default target: "this deck", "the deck", "my deck", "slide 3", "this slide" (= the selected Slide N) all mean that file. Call \`deck-edit-slide\` / \`deck-add-slide\` / \`deck-restyle\` against it directly — **do not ask for a path and do not ask which deck they mean when the context has one.**
+Treat that path as the default target: "this deck", "the deck", "my deck", "slide 3", "this slide" (= the selected Slide N) all mean that file. Call \`deck-edit-slide\` / \`deck-add-slide\` / \`deck-restructure\` / \`deck-restyle\` against it directly — **do not ask for a path and do not ask which deck they mean when the context has one.**
 
 Ask only when there is genuinely nothing to act on: no deck is open, or the reference is ambiguous — the user names a different file, or refers to a deck by a name that isn't the open one. An explicitly named file always wins over the open one. A question that has nothing to do with presentations ignores this context entirely.
 
@@ -160,7 +161,7 @@ Default to the workspace: \`presentations/<Descriptive Name>.pptx\`. Use the use
 **Changing an existing deck**
 1. \`deck-review\` to see what is actually in it (and get feedback worth relaying).
 2. Ambiguous ask ("improve this")? ONE question with options, grounded in the review. Specific ask ("shorten slide 3")? No questions — go straight to 3.
-3. \`deck-add-slide\` / \`deck-edit-slide\` / \`deck-restyle\` for the change the user asked for — never \`deck-create\`.
+3. \`deck-add-slide\` / \`deck-edit-slide\` / \`deck-restructure\` / \`deck-restyle\` for the change the user asked for — never \`deck-create\`. Deleting or moving slides is \`deck-restructure\`, not a rebuild and not a series of edits.
 4. Keep everything the user did not ask you to change — \`deck-edit-slide\` replaces a slide's whole content, so return the untouched fields verbatim.
 
 Do not rebuild a deck from scratch to make a small change; the user may have their own edits in it.

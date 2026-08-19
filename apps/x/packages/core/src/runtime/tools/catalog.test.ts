@@ -208,6 +208,7 @@ const HISTORICAL_KEY_ORDER = [
     "deck-create",
     "deck-add-slide",
     "deck-edit-slide",
+    "deck-restructure",
     "deck-restyle",
     "deck-review",
     "screen-pointer",
@@ -242,6 +243,7 @@ describe("bundled skills declare real builtin tools", () => {
                 "deck-review",
                 "deck-add-slide",
                 "deck-edit-slide",
+                "deck-restructure",
                 "deck-restyle",
             ]),
         );
@@ -281,6 +283,7 @@ describe("BuiltinTools permission audit", () => {
             "deck-create": "file-boundary",
             "deck-add-slide": "file-boundary",
             "deck-edit-slide": "file-boundary",
+            "deck-restructure": "file-boundary",
             "deck-restyle": "file-boundary",
             "deck-review": "file-boundary",
             executeCommand: "command-allowlist",

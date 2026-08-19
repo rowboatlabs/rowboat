@@ -158,7 +158,14 @@ function slotsFor(
     case 'bullets': {
       if (texts.length < 1) return null
       const slots: Slot[] = [{ shape: texts[0], lines: [heading], uniformStyle: false }]
-      if (texts[1]) slots.push({ shape: texts[1], lines: bodyLinesOf(edited, 6), uniformStyle: true })
+      const body = bodyLinesOf(edited, 6)
+      if (texts[1]) slots.push({ shape: texts[1], lines: body, uniformStyle: true })
+      // Body lines wanted but no shape to hold them (a heading-only slide, or
+      // an arbitrary one-box slide that degraded to 'bullets'): there is no
+      // slot to build, so this must REPLACE. Returning a heading-only slot set
+      // here made planSlideEdit report 'noop' — "success, changed: false" —
+      // while the requested bullets were silently dropped.
+      else if (body.length > 0) return null
       return slots
     }
     case 'title': {

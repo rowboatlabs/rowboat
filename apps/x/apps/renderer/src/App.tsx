@@ -5426,6 +5426,7 @@ function App() {
         (item.name === 'deck-create' ||
           item.name === 'deck-add-slide' ||
           item.name === 'deck-edit-slide' ||
+          item.name === 'deck-restructure' ||
           item.name === 'deck-restyle') &&
         item.status === 'completed'
     )

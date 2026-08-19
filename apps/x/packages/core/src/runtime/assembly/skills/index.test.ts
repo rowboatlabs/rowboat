@@ -257,6 +257,7 @@ describe("presentation intent routes to the deck tools", () => {
       "deck-review",
       "deck-add-slide",
       "deck-edit-slide",
+      "deck-restructure",
       "deck-restyle",
     ]) {
       expect(section).toContain(tool);
