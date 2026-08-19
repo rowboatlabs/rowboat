@@ -43,6 +43,7 @@ import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tas
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
 import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/runtime/assembly/skills/watcher.js";
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
+import { cleanInstallTmp } from "@x/core/dist/apps/installer.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
 import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
@@ -567,6 +568,13 @@ app.whenReady().then(async () => {
     isAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+  });
+  // Startup hygiene: drop leftover install/update stagings. A cancelled URL
+  // preview retains its staging by design and a failed download leaves a
+  // partial bundle.zip; nothing else ever removes them, so they accumulate
+  // across launches. Fire-and-forget — never block or fail startup on it.
+  cleanInstallTmp().catch((error) => {
+    console.error('[Apps] Failed to clear install stagings:', error);
   });
   initAppsServer().catch((error) => {
     console.error('[Apps] Failed to start:', error);
