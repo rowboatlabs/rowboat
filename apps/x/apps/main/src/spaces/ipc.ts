@@ -34,6 +34,7 @@ type SpacesHandlers = {
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
   'spaces:unsubscribeSpace': InvokeHandler<'spaces:unsubscribeSpace'>;
+  'spaces:presence': InvokeHandler<'spaces:presence'>;
 };
 
 function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
@@ -176,6 +177,11 @@ export const spacesIpcHandlers: SpacesHandlers = {
     const key = `${args.orgId}/${args.spaceId}`;
     liveSubscriptions.get(key)?.();
     liveSubscriptions.delete(key);
+    return { success: true };
+  },
+
+  'spaces:presence': async (_event, args) => {
+    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.topicId);
     return { success: true };
   },
 };

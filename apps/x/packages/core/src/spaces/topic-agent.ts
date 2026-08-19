@@ -88,6 +88,7 @@ export function buildInvocationMessage(input: InvokeTopicAgentInput, mcpServerNa
     'Load the "spaces" skill if not loaded and follow its "When invoked from a space topic" procedure. ' +
       `If the task concerns the discussion itself (summarising it, answering questions about it, catching up), ` +
       `call read_topic on this topicId FIRST. ` +
+      `Any propose_change you make must end its reason with " · topic:${input.topicId}" (provenance — it lists the change under this topic's artifacts). ` +
       `Do the work, then end with exactly ONE post_to_topic receipt to topicId ${input.topicId}.`,
     '',
     '--- message from your person ---',

@@ -204,6 +204,24 @@ export function emailSyncTriggered() {
 
 // --- Meetings ---
 
+// --- Spaces (chat-first, push-1 spike) --------------------------------------
+
+export function spacesMessagePosted(props: { kind: 'general' | 'topic'; mentionsRowboat: boolean }) {
+  posthog.capture('spaces_message_posted', { kind: props.kind, mentions_rowboat: props.mentionsRowboat })
+}
+
+export function spacesTopicStarted() {
+  posthog.capture('spaces_topic_started')
+}
+
+export function spacesFoldRequested() {
+  posthog.capture('spaces_fold_requested')
+}
+
+export function spacesTabViewed(tab: 'general' | 'topics' | 'files') {
+  posthog.capture('spaces_tab_viewed', { tab })
+}
+
 export function meetingRecordingStarted(hasCalendarEvent: boolean) {
   posthog.capture('meeting_recording_started', { has_calendar_event: hasCalendarEvent })
   posthog.people.set_once({ has_used_meetings: true })

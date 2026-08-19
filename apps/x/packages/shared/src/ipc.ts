@@ -3544,6 +3544,17 @@ const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
+  // Ephemeral presence from the human surface (viewing / typing / idle), scoped
+  // to a topic when set. agent_working is only ever sent by the topic agent.
+  'spaces:presence': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      state: z.enum(['viewing', 'typing', 'idle']),
+      topicId: z.string().optional(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'spaces:events': {
     req: z.custom<SpacesBusEvent>(),
     res: z.null(),

@@ -36,7 +36,9 @@ import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
-import { SpacesView } from '@/components/spaces-view';
+import { SpacesView, type SpaceSelection } from '@/components/spaces-view';
+import { railKey, type RailSelection } from '@/lib/spaces-selection';
+import { useSpacesOrgs } from '@/hooks/use-spaces';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
@@ -622,7 +624,7 @@ type ViewState =
   | { type: 'code' }
   | { type: 'bg-tasks' }
   | { type: 'apps' }
-  | { type: 'spaces' }
+  | { type: 'spaces'; orgId?: string; spaceId?: string; rail?: RailSelection }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -632,6 +634,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
   if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '') && (a.mode ?? '') === (b.mode ?? '')
   if (a.type === 'email' && b.type === 'email') return (a.threadId ?? '') === (b.threadId ?? '') && (a.searchQuery ?? '') === (b.searchQuery ?? '')
+  if (a.type === 'spaces' && b.type === 'spaces') return (a.orgId ?? '') === (b.orgId ?? '') && (a.spaceId ?? '') === (b.spaceId ?? '') && railKey(a.rail) === railKey(b.rail)
   return true // both graph
 }
 
@@ -703,8 +706,11 @@ function parseDeepLink(input: string): ViewState | null {
       return { type: 'bg-tasks' }
     case 'apps':
       return { type: 'apps' }
-    case 'spaces':
-      return { type: 'spaces' }
+    case 'spaces': {
+      const orgId = params.get('orgId')
+      const spaceId = params.get('spaceId')
+      return orgId && spaceId ? { type: 'spaces', orgId, spaceId } : { type: 'spaces' }
+    }
     default:
       return null
   }
@@ -822,6 +828,10 @@ function App() {
   const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
   const [isSpacesOpen, setIsSpacesOpen] = useState(false)
+  // The space open in the Spaces view (org + space); the sidebar highlights it.
+  const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(null)
+  // What's selected inside the open space (general / topic / file) — part of the history.
+  const [railSelection, setRailSelection] = useState<RailSelection>({ kind: 'general' })
   const [isEmailOpen, setIsEmailOpen] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
@@ -4562,11 +4572,11 @@ function App() {
     if (isCodeOpen) return { type: 'code' }
     if (isBgTasksOpen) return { type: 'bg-tasks' }
     if (isAppsOpen) return { type: 'apps' }
-    if (isSpacesOpen) return { type: 'spaces' }
+    if (isSpacesOpen) return spaceSelection ? { type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail: railSelection } : { type: 'spaces' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSpacesOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSpacesOpen, spaceSelection, railSelection, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
   // applyViewState is declared further down (it needs the chat-binding
   // helpers); handlers above it reach it through this render-filled ref.
@@ -4574,6 +4584,7 @@ function App() {
 
   // Header title for the current view (the tab strip is gone — the header
   // names where you are instead).
+  const { orgs: spacesOrgs } = useSpacesOrgs()
   const currentViewTitle = React.useMemo(() => {
     switch (currentViewState.type) {
       case 'home': return 'Home'
@@ -4585,7 +4596,11 @@ function App() {
       case 'live-notes': return 'Live notes'
       case 'bg-tasks': return 'Background tasks'
       case 'apps': return 'Apps'
-      case 'spaces': return 'Spaces'
+      case 'apps': return 'Mini Apps'
+      case 'spaces': {
+        const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
+        return org?.spaces.find((sp) => sp.id === currentViewState.spaceId)?.name ?? 'Spaces'
+      }
       case 'workspace': return 'Workspace'
       case 'knowledge-view': return 'Brain'
       case 'graph': return 'Graph View'
@@ -4598,7 +4613,7 @@ function App() {
         return path.split('/').pop()?.replace(/\.md$/i, '') || path
       }
     }
-  }, [currentViewState])
+  }, [currentViewState, spacesOrgs])
 
   // Close every section flag — THE single place a section switch resets the
   // rest of the world. Every navigation path funnels through this (via
@@ -5075,6 +5090,8 @@ function App() {
         setIsAppsOpen(true)
         return
       case 'spaces':
+        if (view.orgId && view.spaceId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId })
+        setRailSelection(view.rail ?? { kind: 'general' })
         setIsSpacesOpen(true)
         return
       case 'chat':
@@ -5144,8 +5161,8 @@ function App() {
     openAppsView()
   }, [openAppsView])
 
-  const openSpacesView = useCallback(() => {
-    void navigateToView({ type: 'spaces' })
+  const openSpace = useCallback((orgId: string, spaceId: string) => {
+    void navigateToView({ type: 'spaces', orgId, spaceId })
   }, [navigateToView])
 
   const openMeetingsView = useCallback(() => {
@@ -5695,7 +5712,7 @@ function App() {
     && hoverRunId != null
     && chatTabs.find((t) => t.id === activeChatTabId)?.runId === hoverRunId
 
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isSpacesOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -6525,7 +6542,7 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || isBrowserOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isSpacesOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
@@ -6597,7 +6614,8 @@ function App() {
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenApps={openAppsGrid}
               onOpenApp={(folder) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() }}
-              onOpenSpaces={openSpacesView}
+              onOpenSpace={openSpace}
+              activeSpace={isSpacesOpen ? spaceSelection : null}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
               onRenameRun={(rid, title) => {
@@ -6942,7 +6960,18 @@ function App() {
                 </div>
               ) : isSpacesOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <SpacesView onOpenSession={(sessionId) => void navigateToView({ type: 'chat', runId: sessionId })} />
+                  <SpacesView
+                    selection={spaceSelection}
+                    onSelect={setSpaceSelection}
+                    railSelection={railSelection}
+                    onRailSelect={(rail) => {
+                      // In-space navigation is real navigation: each selection is a history entry,
+                      // so the top ‹ › retrace general → topic → file.
+                      if (spaceSelection) void navigateToView({ type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail })
+                      else setRailSelection(rail)
+                    }}
+                    onOpenSession={(sessionId) => void navigateToView({ type: 'chat', runId: sessionId })}
+                  />
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

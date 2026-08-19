@@ -31,6 +31,11 @@ describe('buildInvocationMessage', () => {
     it('omits the server line when no org record resolves', () => {
         expect(buildInvocationMessage(input, null)).not.toContain('Org MCP server:');
     });
+
+    it('requires the topic provenance suffix on any change the agent proposes', () => {
+        const msg = buildInvocationMessage(input, null);
+        expect(msg).toContain('end its reason with " · topic:01M07TOPICAAAAAAAAAAAAAAA1"');
+    });
 });
 
 describe('isTopicReceiptCall', () => {

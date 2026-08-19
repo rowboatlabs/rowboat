@@ -20,7 +20,6 @@ import {
   PanelLeftClose,
   Pencil,
   Pin,
-  Sailboat,
   SquarePen,
   Trash2,
   Plug,
@@ -85,6 +84,8 @@ import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
+import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
+import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
@@ -195,7 +196,10 @@ type SidebarContentPanelProps = {
   onOpenApps?: () => void
   /** Open a specific app (pinned in the sidebar) inside the Apps view. */
   onOpenApp?: (folder: string) => void
-  onOpenSpaces?: () => void
+  /** Open one space (org + space) in the Spaces view. */
+  onOpenSpace?: (orgId: string, spaceId: string) => void
+  /** The space currently open, for highlighting its sidebar row. */
+  activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
@@ -453,7 +457,8 @@ export function SidebarContentPanel({
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
-  onOpenSpaces,
+  onOpenSpace,
+  activeSpace = null,
   recentRuns = [],
   onOpenRun,
   onRenameRun,
@@ -1019,16 +1024,6 @@ export function SidebarContentPanel({
               ))}
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  data-tour-id="nav-spaces"
-                  isActive={activeNav === 'spaces'}
-                  onClick={onOpenSpaces}
-                >
-                  <Sailboat className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Spaces</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
                   data-tour-id="nav-agents"
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
@@ -1067,6 +1062,11 @@ export function SidebarContentPanel({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <div className="mx-3 border-t border-sidebar-border" />
+
+        {/* Spaces — orgs and their spaces, with unread counts */}
+        <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
 
         <div className="mx-3 border-t border-sidebar-border" />
 
