@@ -1,7 +1,7 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { google, gmail_v1 as gmail } from 'googleapis';
+import { gmail_v1 as gmail } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
@@ -192,7 +192,7 @@ async function processInBatches<T>(items: T[], size: number, fn: (item: T) => Pr
 }
 
 async function fullSync(auth: OAuth2Client, selfEmail: string): Promise<{ map: Map<string, IndexEntry>; historyId: string | null }> {
-    const client = google.gmail({ version: 'v1', auth });
+    const client = GoogleClientFactory.gmailClient(auth);
 
     // Lock in the current historyId BEFORE we start listing, so any messages
     // sent during the sync get caught by the next incremental run.
@@ -231,7 +231,7 @@ async function incrementalSync(
     startHistoryId: string,
     map: Map<string, IndexEntry>,
 ): Promise<{ historyId: string | null; added: number } | null> {
-    const client = google.gmail({ version: 'v1', auth });
+    const client = GoogleClientFactory.gmailClient(auth);
     const added: string[] = [];
     let pageToken: string | undefined;
     let latestHistoryId: string | null = null;

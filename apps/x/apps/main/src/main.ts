@@ -7,6 +7,7 @@ import {
   startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
+  startHomeThreadsWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
@@ -57,7 +58,7 @@ import started from "electron-squirrel-startup";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService } from "@x/core/dist/di/container.js";
+import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { CodeSessionService } from "@x/core/dist/code-mode/sessions/service.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
@@ -66,6 +67,7 @@ import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { setupBrowserExtensions } from "./browser/extensions.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { screenPointerService } from "./screen-pointer.js";
+import { textInsertService } from "./text-insert.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
   DEEP_LINK_SCHEME,
@@ -528,6 +530,7 @@ app.whenReady().then(async () => {
   registerBrowserControlService(new ElectronBrowserControlService());
   registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
   registerScreenPointerService(screenPointerService);
+  registerTextInsertService(textInsertService);
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
@@ -691,6 +694,16 @@ app.whenReady().then(async () => {
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
+
+  // start the Home thread registry (the Deck's underway/needs-you feed)
+  startHomeThreadsWatcher();
+
+  // Self-heal: strip any code-session meta that leaked onto the Command
+  // Center session before the never-adopt guard existed (its worktree, if
+  // any, is left on disk — see detachCodeMeta).
+  import('@x/core/dist/home/command-center.js')
+    .then((m) => m.repairCommandCenterSession())
+    .catch(() => {});
 
   // start services watcher
   startServicesWatcher();

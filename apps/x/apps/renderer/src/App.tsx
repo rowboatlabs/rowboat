@@ -6,7 +6,7 @@ import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, compactPath, parentPath } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
@@ -38,7 +38,6 @@ import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-vi
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { NewPresentationDialog } from '@/components/new-presentation-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
-import { HomeView } from '@/components/home-view';
 import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
@@ -92,6 +91,7 @@ import {
   normalizeToolInput,
 } from '@/lib/chat-conversation'
 import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
+import { COMMAND_CENTER_CHAT_SENTINEL } from '@x/shared/src/home-threads.js'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
@@ -825,7 +825,6 @@ function App() {
   const [isHomeOpen, setIsHomeOpen] = useState(true)
   // Home surface: the to-do list is the primary tab; the legacy dashboard
   // stays reachable via its Overview toggle.
-  const [homeTab, setHomeTab] = useState<'todos' | 'overview'>('todos')
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
   // Search query pushed into the email view's search box (e.g. the assistant's
@@ -1044,6 +1043,10 @@ function App() {
   // because segment consumption freezes while the gate is open.
   const [pttStatus, setPttStatus] = useState<'idle' | 'held' | 'locked'>('idle')
   const pttStatusRef = useRef<'idle' | 'held' | 'locked'>('idle')
+  // Ghostwriter chord (⇧ + right ⌘): the NEXT utterance's result gets
+  // pasted at the user's cursor. Set on the down edge, consumed by the
+  // utterance callback, cleared on cancel.
+  const pttPasteIntentRef = useRef(false)
   const setPttState = useCallback((s: 'idle' | 'held' | 'locked') => {
     pttStatusRef.current = s
     setPttStatus(s)
@@ -1449,9 +1452,22 @@ function App() {
         playAckCue()
         callTurnMarksRef.current = { t0: performance.now() }
         pendingVoiceInputRef.current = true
+        // Ghostwriter chord: the marker rides the message itself — durable
+        // in the transcript ("why did it paste?" answers itself), cache-safe
+        // (no per-turn composition churn). It carries the chord's TWO modes:
+        // dictation (the utterance IS the content — paste the user's words)
+        // vs. ghostwriting (the utterance instructs — compose). Ties break
+        // toward verbatim: pasting the user's own words when they meant
+        // "compose" is a cheap delete; composing when they were dictating
+        // puts words in their mouth.
+        const paste = pttPasteIntentRef.current
+        pttPasteIntentRef.current = false
+        const message = paste
+          ? `${text}\n\n[⇧⌘ chord — paste at my cursor. If I'm dictating content, paste MY words verbatim (fix punctuation, drop fillers, change nothing else) and reply "Done." at most — I watch the text land; never narrate it. Compose only when I'm clearly instructing you to write something. Unsure → verbatim.]`
+          : text
         // Calls talk to the companion's session — the app window can browse
         // any chat mid-call without retargeting the conversation.
-        handleHoverSubmitRef.current?.({ text, files: [] })
+        handleHoverSubmitRef.current?.({ text: message, files: [] })
       })
       .then((result) => {
         if (result === 'mic-denied') setPermissionDialog('microphone')
@@ -1575,6 +1591,30 @@ function App() {
     }
   }, [startHoverCall, startCall])
 
+  // Skipper's click on Home starts the call on THE Command Center session —
+  // the standing operator channel — not whatever chat happens to be active.
+  // The operator frame rides server-side composition pins, so the first
+  // utterance is already "operate my command center", no preamble needed.
+  const startCommandCenterCall = useCallback(() => {
+    void (async () => {
+      try {
+        const { sessionId } = await window.ipc.invoke('home:commandCenter', {})
+        hoverRunIdRef.current = sessionId
+        setHoverRunId(sessionId)
+        bindAppChatOnHoverCreateRef.current = null
+      } catch {
+        // Couldn't resolve the operator session — a plain hover call still
+        // beats a dead click.
+      }
+      if (inCallRef.current) {
+        ttsRef.current.cancel()
+        void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+        return
+      }
+      void startHoverCall()
+    })()
+  }, [startHoverCall])
+
   // The user-mute half that lives in the video pipeline: stop sampling
   // camera/screen frames while muted (see useVideoMode.setCapturePaused).
   const setCapturePaused = video.setCapturePaused
@@ -1665,12 +1705,15 @@ function App() {
     return !!last && last.type === type && now - last.at < PTT_EDGE_ECHO_MS
   }, [])
 
-  const handlePttDown = useCallback(() => {
+  const handlePttDown = useCallback((paste?: boolean) => {
     if (!inCallRef.current || micMutedRef.current) return
     if (pttEdgeIsEcho('down')) return
     pttChordedRef.current = false
     pttDownAtRef.current = performance.now()
     if (pttStatusRef.current === 'idle') {
+      // Ghostwriter chord: this capture's utterance wants its result pasted
+      // at the cursor — consumed by the utterance callback in startCall.
+      pttPasteIntentRef.current = !!paste
       // Captured BEFORE the cancel below wipes it — the release edge needs
       // to know whether this press interrupted speech.
       pttSpokeAtDownRef.current = ttsRef.current.state !== 'idle'
@@ -1729,6 +1772,7 @@ function App() {
 
   const handlePttCancel = useCallback(() => {
     if (pttStatusRef.current === 'idle') return
+    pttPasteIntentRef.current = false
     voiceRef.current.pttCancel()
     setPttState('idle')
   }, [setPttState])
@@ -1748,14 +1792,14 @@ function App() {
   // even when macOS Input Monitoring hasn't been granted.
   useEffect(() => {
     if (!inCall) return
-    const offKey = window.ipc.on('voice:ptt-key', ({ type }) => {
-      if (type === 'down') handlePttDown()
+    const offKey = window.ipc.on('voice:ptt-key', ({ type, paste }) => {
+      if (type === 'down') handlePttDown(paste)
       else if (type === 'up') handlePttUp()
       else handlePttChord()
     })
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'MetaRight') {
-        if (!e.repeat) handlePttDown()
+        if (!e.repeat) handlePttDown(e.shiftKey)
         return
       }
       if (e.key === 'Escape' && pttStatusRef.current !== 'idle') {
@@ -2530,6 +2574,9 @@ function App() {
   // The code session that owns the right-hand chat pane: selecting a session
   // binds the assistant chat to it (a code session IS a chat session).
   const [activeCodeSession, setActiveCodeSession] = useState<ActiveCodeSession | null>(null)
+  // Deep-link into the Code section (a Home Deck strip's door): select this
+  // session when the view opens, then clear.
+  const [codeFocusSessionId, setCodeFocusSessionId] = useState<string | null>(null)
   // A file the code chat asked to review — consumed by the workspace pane.
   const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
   // Composer locks for runs that are code sessions: the session's cwd + agent
@@ -3272,8 +3319,8 @@ function App() {
           modifiedAt: event.entry.updatedAt,
           agentId: event.entry.lastAgentId ?? 'copilot',
         }
-        // Re-sort: chat-header and home-view slice the top of this list
-        // without sorting, so it must stay newest-first like sessions:list.
+        // Re-sort: chat-header slices the top of this list without sorting,
+        // so it must stay newest-first like sessions:list.
         const recency = (run: RunListItem) => {
           const ms = new Date(run.modifiedAt).getTime()
           return Number.isNaN(ms) ? 0 : ms
@@ -4597,9 +4644,18 @@ function App() {
   }, [hoverRunId, runs])
 
   // The bar's chip switcher picked a chat: rebind the COMPANION to it. The
-  // app window keeps showing whatever it was showing.
+  // app window keeps showing whatever it was showing. The Command Center
+  // sentinel resolves to THE standing operator session (created on first
+  // use) — its frame rides server-side composition pins, so nothing else
+  // here changes.
   useEffect(() => {
     return window.ipc.on('quick-ask:select-chat', ({ runId: rid }) => {
+      if (rid === COMMAND_CENTER_CHAT_SENTINEL) {
+        void window.ipc.invoke('home:commandCenter', {})
+          .then(({ sessionId }) => setHoverRunId(sessionId))
+          .catch(() => {})
+        return
+      }
       setHoverRunId(rid)
     })
   }, [])
@@ -4650,6 +4706,43 @@ function App() {
   const [homeComposeTarget, setHomeComposeTarget] = useState<HomeComposeTarget | null>(null)
   const [homeComposerFocusSignal, setHomeComposerFocusSignal] = useState(0)
   const [homeComposerPreset, setHomeComposerPreset] = useState<string | undefined>(undefined)
+  // Code dispatch from Home (the Helm): an optional repo lane for the to-do
+  // being composed. Picking a lane makes the item a real code session
+  // (worktree by default) before its first turn — see todo:addItem `code`.
+  const [homeCodeProjects, setHomeCodeProjects] = useState<{ id: string; name: string; path: string }[]>([])
+  const [homeCodeProject, setHomeCodeProject] = useState<{ id: string; name: string; path: string } | null>(null)
+  const [homeCodeIsolation, setHomeCodeIsolation] = useState<'worktree' | 'in-repo'>('worktree')
+  const homeCodeProjectRef = useRef(homeCodeProject)
+  useEffect(() => { homeCodeProjectRef.current = homeCodeProject }, [homeCodeProject])
+  const homeCodeIsolationRef = useRef(homeCodeIsolation)
+  useEffect(() => { homeCodeIsolationRef.current = homeCodeIsolation }, [homeCodeIsolation])
+  const [homeDefaultProjectId, setHomeDefaultProjectId] = useState<string | null>(null)
+  useEffect(() => {
+    if (homeComposeTarget?.kind !== 'todo') return
+    let cancelled = false
+    void Promise.all([
+      window.ipc.invoke('codeProject:list', null),
+      window.ipc.invoke('codeMode:getConfig', null).catch(() => null),
+    ]).then(([list, config]) => {
+      if (cancelled) return
+      const projects = list.projects.map((p) => ({ id: p.project.id, name: p.project.name, path: p.project.path }))
+      // The default repo (explicit, or the only one registered) leads the
+      // lane row — one click, and it's the same repo voice dispatch uses.
+      const defaultId = config?.defaultProjectId ?? (projects.length === 1 ? projects[0].id : null)
+      setHomeDefaultProjectId(defaultId)
+      setHomeCodeProjects(defaultId
+        ? [...projects.filter((p) => p.id === defaultId), ...projects.filter((p) => p.id !== defaultId)]
+        : projects)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [homeComposeTarget?.kind])
+  useEffect(() => {
+    // The lane lives and dies with the destination chip.
+    if (!homeComposeTarget) {
+      setHomeCodeProject(null)
+      setHomeCodeIsolation('worktree')
+    }
+  }, [homeComposeTarget])
   const composeTodoOnHome = useCallback((target: HomeComposeTarget) => {
     setHomeComposeTarget(target)
     if ((target.kind === 'todo' || target.kind === 'sub') && target.prefill) {
@@ -4686,10 +4779,10 @@ function App() {
       const attachments = stagedAttachments.length > 0
         ? stagedAttachments.map((a) => ({ path: a.path, name: a.filename }))
         : undefined
-      // todo:* schemas carry a bare {provider, model} ref today; effort
-      // threading through the todo runner is a follow-up.
+      // The full selection — model plus its paired reasoning effort —
+      // rides todo:* into the runner, matching chat.
       const model = homeSelectionRef.current
-        ? { provider: homeSelectionRef.current.provider, model: homeSelectionRef.current.model }
+        ? { provider: homeSelectionRef.current.provider, model: homeSelectionRef.current.model, effort: homeSelectionRef.current.effort }
         : undefined
       if (target.kind === 'comment') {
         void window.ipc.invoke('todo:comment', { key: target.key, message: text, attachments, model, permissionMode })
@@ -4698,7 +4791,13 @@ function App() {
       } else if (target.kind === 'sub') {
         void window.ipc.invoke('todo:addSubItem', { parentKey: target.parentKey, text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
       } else {
-        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text), attachments, model, permissionMode })
+        // A picked code lane is delegation intent as explicit as @rowboat —
+        // the item runs immediately in its repo.
+        const codeProject = homeCodeProjectRef.current
+        const code = codeProject
+          ? { projectId: codeProject.id, agent: codeMode, isolation: homeCodeIsolationRef.current }
+          : undefined
+        void window.ipc.invoke('todo:addItem', { text, run: /(^|\s)@rowboat\b/i.test(text) || !!code, attachments, model, permissionMode, code })
       }
       setHomeComposeTarget(null)
       return
@@ -5059,6 +5158,12 @@ function App() {
   // changes.
   const navigateToViewRef = useRef(navigateToView)
   useEffect(() => { navigateToViewRef.current = navigateToView }, [navigateToView])
+
+  // Stable across navigations (EmailView's memoized rows compare prop
+  // identity) — the email view's people-note chips navigate through the ref.
+  const openNoteFromEmail = useCallback((path: string) => {
+    void navigateToViewRef.current({ type: 'file', path })
+  }, [])
 
   useEffect(() => {
     const handle = (url: string) => {
@@ -6582,10 +6687,45 @@ function App() {
                 />
               ) : isHomeOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  {homeTab === 'todos' ? (
                     <TodoView
                       composer={
-                        <ChatInputWithMentions
+                        <div className="flex flex-col gap-1.5">
+                          {homeComposeTarget?.kind === 'todo' && homeCodeProjects.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 px-1">
+                              <span className="text-[11px] font-medium text-muted-foreground">Code lane:</span>
+                              {homeCodeProjects.slice(0, 6).map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  title={p.path}
+                                  onClick={() => setHomeCodeProject((cur) => (cur?.id === p.id ? null : p))}
+                                  className={`rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+                                    homeCodeProject?.id === p.id
+                                      ? 'border-primary bg-primary text-primary-foreground'
+                                      : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
+                                  }`}
+                                >
+                                  {p.name}
+                                  {/* Same-named repos elsewhere on disk — show where this one lives. */}
+                                  {homeCodeProjects.some((o) => o.id !== p.id && o.name === p.name) && (
+                                    <span className="ml-1 opacity-60">{compactPath(parentPath(p.path), 20)}</span>
+                                  )}
+                                  {p.id === homeDefaultProjectId && <span className="ml-1 opacity-60">· default</span>}
+                                </button>
+                              ))}
+                              {homeCodeProject && (
+                                <button
+                                  type="button"
+                                  onClick={() => setHomeCodeIsolation((v) => (v === 'worktree' ? 'in-repo' : 'worktree'))}
+                                  title="Where the agent works: an isolated worktree branch (parallel-safe, reviewed before merge), or directly in the repo"
+                                  className="rounded-md border border-dashed border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                  {homeCodeIsolation}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <ChatInputWithMentions
                           knowledgeFiles={knowledgeFiles}
                           recentFiles={recentWikiFiles}
                           visibleFiles={visibleKnowledgeFiles}
@@ -6635,10 +6775,12 @@ function App() {
                           onStartCall={handleStartCall}
                           onEndCall={endCall}
                           callAvailable={voiceAvailable && ttsAvailable}
-                        />
+                          />
+                        </div>
                       }
                       onComposeTodo={composeTodoOnHome}
                       composeTarget={homeComposeTarget}
+                      getRunModel={() => homeSelectionRef.current ?? undefined}
                       onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                       onNewChat={handleNewChatTab}
                       onFocusComposer={() => setHomeComposerFocusSignal((n) => n + 1)}
@@ -6649,32 +6791,15 @@ function App() {
                         bindChatToRun(sessionId)
                         setIsChatSidebarOpen(true)
                       }}
-                      onShowOverview={() => setHomeTab('overview')}
+                      onOpenCodeSession={(sessionId) => {
+                        // A code strip's door: the Code section (diffs,
+                        // terminal, worktree), focused on this session.
+                        setCodeFocusSessionId(sessionId)
+                        void navigateToView({ type: 'code' })
+                      }}
+                      onSkipperCall={voiceAvailable && ttsAvailable ? startCommandCenterCall : undefined}
+                      attendedSessionId={inCall ? hoverRunId : null}
                     />
-                  ) : (
-                    <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setHomeTab('todos')}
-                        className="absolute right-6 top-4 z-10 rounded-md border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
-                      >
-                        ← To-dos
-                      </button>
-                      <HomeView
-                        tree={tree}
-                        runs={runs}
-                        bgTaskSummaries={bgTaskSummaries}
-                        onOpenEmail={() => openEmailView()}
-                        onOpenMeetings={openMeetingsView}
-                        onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                        onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                        onOpenNote={(path) => navigateToFile(path)}
-                        onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                        onTakeMeetingNotes={() => { void handleToggleMeeting() }}
-                        onOpenChat={handleNewChatTab}
-                      />
-                    </div>
-                  )}
                 </div>
               ) : isSuggestedTopicsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -6700,6 +6825,8 @@ function App() {
                     onSessionSelected={handleCodeSessionSelected}
                     openDiffPath={codeDiffPath}
                     onDiffOpened={() => setCodeDiffPath(null)}
+                    focusSessionId={codeFocusSessionId}
+                    onFocusConsumed={() => setCodeFocusSessionId(null)}
                   />
                 </div>
               ) : isLiveNotesOpen ? (
@@ -6734,7 +6861,7 @@ function App() {
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} />
+                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} onOpenNote={openNoteFromEmail} />
                 </div>
               ) : isWorkspaceOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

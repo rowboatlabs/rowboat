@@ -26,9 +26,12 @@ import { FSCodeProjectsRepo, ICodeProjectsRepo } from "../code-mode/projects/rep
 import { FSCodeSessionsRepo, ICodeSessionsRepo } from "../code-mode/sessions/repo.js";
 import { CodeSessionService } from "../code-mode/sessions/service.js";
 import { CodeSessionStatusTracker } from "../code-mode/sessions/status-tracker.js";
+import { HomeThreadsTracker } from "../home/threads.js";
+import { getCommandCenterSessionId } from "../home/command-center.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
 import type { IScreenPointerService } from "../application/screen-pointer/service.js";
+import type { ITextInsertService } from "../application/text-insert/service.js";
 import { SystemClock, type IClock } from "../runtime/turns/clock.js";
 import { FSTurnRepo } from "../runtime/turns/fs-repo.js";
 import type { ITurnRepo } from "../runtime/turns/repo.js";
@@ -117,6 +120,10 @@ container.register({
     codeSessionService: asClass(CodeSessionService).singleton(),
     codeSessionStatusTracker: asClass(CodeSessionStatusTracker).singleton(),
 
+    // Home's thread registry (the Deck): live per-session status from the
+    // turn event spine + composition over sessions/todo/code-session state.
+    homeThreadsTracker: asClass(HomeThreadsTracker).singleton(),
+
     // New turn/session runtime (turn-runtime-design.md / session-design.md).
     // Bridges are constructed via asFunction so their optional test seams
     // don't collide with strict PROXY cradle resolution.
@@ -149,15 +156,30 @@ container.register({
     sessionRepo: asClass<ISessionRepo>(FSSessionRepo).singleton(),
     sessionBus: asClass<ISessionBus>(EmitterSessionBus).singleton(),
     sessions: asClass<ISessions>(SessionsImpl).singleton(),
-    // Code-section sessions pin their coding agent + working directory into
-    // every turn's composition, server-side — "is this a code session" is
-    // never a client-side decision (voice/quick-ask/composer all get the
-    // same prompt). Null for ordinary chats.
+    // Session-identity composition pins, applied server-side so no surface
+    // (voice/quick-ask/composer) has to know what a session IS:
+    // - Code sessions pin their coding agent + working directory.
+    // - The Command Center session pins the operator frame — directives on
+    //   that one conversation are operations on Home (to-dos, dispatch,
+    //   status), never "just chat".
+    // Null for ordinary chats.
     sessionCompositionPins: asFunction(
         ({ codeSessionsRepo }: { codeSessionsRepo: ICodeSessionsRepo }) =>
             async (sessionId: string): Promise<Record<string, JsonValue> | null> => {
+                const pins: Record<string, JsonValue> = {};
                 const meta = await codeSessionsRepo.get(sessionId).catch(() => null);
-                return meta ? { codeMode: meta.agent, codeCwd: meta.cwd } : null;
+                if (meta) {
+                    pins.codeMode = meta.agent;
+                    pins.codeCwd = meta.cwd;
+                }
+                // Hot path (every turn) — the pointer is memory-cached in
+                // the module, and the import is static so the edge shows in
+                // the module graph.
+                const commandCenterId = await getCommandCenterSessionId().catch(() => null);
+                if (commandCenterId && commandCenterId === sessionId) {
+                    pins.commandCenter = true;
+                }
+                return Object.keys(pins).length > 0 ? pins : null;
             },
     ).singleton(),
     defaultModelResolver:
@@ -183,5 +205,11 @@ export function registerNotificationService(service: INotificationService): void
 export function registerScreenPointerService(service: IScreenPointerService): void {
     container.register({
         screenPointerService: asValue(service),
+    });
+}
+
+export function registerTextInsertService(service: ITextInsertService): void {
+    container.register({
+        textInsertService: asValue(service),
     });
 }
