@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Bold, BookUser, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, SlidersHorizontal, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
+import { Archive, Bold, BookUser, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, MailOpen, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, SlidersHorizontal, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -21,6 +21,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
@@ -2415,68 +2422,97 @@ const ThreadRow = memo(function ThreadRow({
   }
   return (
     <div className={cn('gmail-row-group', !isMounted && 'gmail-row-group-cv', isLeaving && 'gmail-row-group-leaving')}>
-      <div
-        className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
-        data-thread-id={thread.threadId}
-        onMouseEnter={() => onHoverIn(thread)}
-        onMouseLeave={onHoverOut}
-      >
-        <button
-          type="button"
-          className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread', isFocused && 'gmail-row-focused')}
-          onClick={() => onToggle(thread)}
-        >
-          <span className="gmail-row-dot" aria-hidden />
-          <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
-          <span className="gmail-row-content">
-            <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
-            <span>{thread.summary ? thread.subject : snippet(thread.preview || latest?.body || thread.latest_email)}</span>
-            {categoryChip && <span className="gmail-row-chip">{categoryChip}</span>}
-            {chip && <span className={cn('gmail-row-chip', chipWaiting ? 'gmail-row-chip-waiting' : 'gmail-row-chip-ready')}>{chip}</span>}
-          </span>
-          <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
-        </button>
-        <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
-          {section && (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
+            data-thread-id={thread.threadId}
+            onMouseEnter={() => onHoverIn(thread)}
+            onMouseLeave={onHoverOut}
+          >
             <button
               type="button"
-              className="gmail-row-action"
-              title={section === 'important' ? 'Not important — teach the classifier' : 'Important — teach the classifier'}
-              aria-label={section === 'important' ? 'Mark as not important' : 'Mark as important'}
-              onClick={(e) => { stop(e); void onSetImportance(thread.threadId, section === 'important' ? 'other' : 'important') }}
+              className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread', isFocused && 'gmail-row-focused')}
+              onClick={() => onToggle(thread)}
             >
-              {section === 'important' ? <StarOff size={15} /> : <Star size={15} />}
+              <span className="gmail-row-dot" aria-hidden />
+              <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
+              <span className="gmail-row-content">
+                <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
+                <span>{thread.summary ? thread.subject : snippet(thread.preview || latest?.body || thread.latest_email)}</span>
+                {categoryChip && <span className="gmail-row-chip">{categoryChip}</span>}
+                {chip && <span className={cn('gmail-row-chip', chipWaiting ? 'gmail-row-chip-waiting' : 'gmail-row-chip-ready')}>{chip}</span>}
+              </span>
+              <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
             </button>
+            <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
+              {section && (
+                <button
+                  type="button"
+                  className="gmail-row-action"
+                  title={section === 'important' ? 'Not important — teach the classifier' : 'Important — teach the classifier'}
+                  aria-label={section === 'important' ? 'Mark as not important' : 'Mark as important'}
+                  onClick={(e) => { stop(e); void onSetImportance(thread.threadId, section === 'important' ? 'other' : 'important') }}
+                >
+                  {section === 'important' ? <StarOff size={15} /> : <Star size={15} />}
+                </button>
+              )}
+              <button
+                type="button"
+                className="gmail-row-action"
+                title={isUnread ? 'Mark as read' : 'Mark as unread'}
+                aria-label={isUnread ? 'Mark as read' : 'Mark as unread'}
+                onClick={(e) => { stop(e); void onMarkRead(thread.threadId, isUnread) }}
+              >
+                {isUnread ? <CheckCheck size={15} /> : <Mail size={15} />}
+              </button>
+              <button
+                type="button"
+                className="gmail-row-action"
+                title="Archive"
+                aria-label="Archive"
+                onClick={(e) => { stop(e); void onArchive(thread.threadId) }}
+              >
+                <Archive size={15} />
+              </button>
+              <button
+                type="button"
+                className="gmail-row-action gmail-row-action-danger"
+                title="Delete"
+                aria-label="Delete"
+                onClick={(e) => { stop(e); void onTrash(thread.threadId) }}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-56">
+          <ContextMenuItem onClick={() => onToggle(thread)}>
+            {isSelected ? <X className="mr-2 size-4" /> : <MailOpen className="mr-2 size-4" />}
+            {isSelected ? 'Close thread' : 'Open thread'}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => void onMarkRead(thread.threadId, isUnread)}>
+            {isUnread ? <CheckCheck className="mr-2 size-4" /> : <Mail className="mr-2 size-4" />}
+            {isUnread ? 'Mark as read' : 'Mark as unread'}
+          </ContextMenuItem>
+          {section && (
+            <ContextMenuItem onClick={() => void onSetImportance(thread.threadId, section === 'important' ? 'other' : 'important')}>
+              {section === 'important' ? <StarOff className="mr-2 size-4" /> : <Star className="mr-2 size-4" />}
+              {section === 'important' ? 'Mark as not important' : 'Mark as important'}
+            </ContextMenuItem>
           )}
-          <button
-            type="button"
-            className="gmail-row-action"
-            title={isUnread ? 'Mark as read' : 'Mark as unread'}
-            aria-label={isUnread ? 'Mark as read' : 'Mark as unread'}
-            onClick={(e) => { stop(e); void onMarkRead(thread.threadId, isUnread) }}
-          >
-            {isUnread ? <CheckCheck size={15} /> : <Mail size={15} />}
-          </button>
-          <button
-            type="button"
-            className="gmail-row-action"
-            title="Archive"
-            aria-label="Archive"
-            onClick={(e) => { stop(e); void onArchive(thread.threadId) }}
-          >
-            <Archive size={15} />
-          </button>
-          <button
-            type="button"
-            className="gmail-row-action gmail-row-action-danger"
-            title="Delete"
-            aria-label="Delete"
-            onClick={(e) => { stop(e); void onTrash(thread.threadId) }}
-          >
-            <Trash2 size={15} />
-          </button>
-        </div>
-      </div>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => void onArchive(thread.threadId)}>
+            <Archive className="mr-2 size-4" />
+            Archive
+          </ContextMenuItem>
+          <ContextMenuItem variant="destructive" onClick={() => void onTrash(thread.threadId)}>
+            <Trash2 className="mr-2 size-4" />
+            Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {/* Drop the detail as soon as the row starts leaving — the collapse
           keyframe assumes row height, and the thread is being removed anyway. */}
       {isMounted && !isLeaving && (

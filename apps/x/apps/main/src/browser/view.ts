@@ -9,6 +9,7 @@ import type {
   DisplayMediaRequest,
   HttpAuthRequest,
 } from '@x/shared/dist/browser-control.js';
+import { attachTextEditContextMenu } from '../context-menu.js';
 import { normalizeNavigationTarget } from './navigation.js';
 import {
   buildClickScript,
@@ -468,6 +469,9 @@ export class BrowserViewManager extends EventEmitter {
       invalidateAndEmit();
     });
     wc.on('page-title-updated', this.emitState.bind(this));
+
+    // Web pages in tabs get the standard edit/selection/link right-click menu.
+    attachTextEditContextMenu(wc);
 
     this.wireWindowPolicy(wc);
   }

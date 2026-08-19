@@ -30,6 +30,7 @@
  * opens/folds), like the old popout window.
  */
 import { DEV_SERVER_URL } from './dev-server.js';
+import { attachTextEditContextMenu } from './context-menu.js';
 import { app, BrowserWindow, globalShortcut, screen } from 'electron';
 import { loadAppSettings, saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { quickAskShortcut } from '@x/shared';
@@ -241,6 +242,8 @@ function createWindow(): BrowserWindow {
   win.on('closed', () => {
     if (quickAskWin === win) quickAskWin = null;
   });
+  // Native cut/copy/paste menu for the composer input.
+  attachTextEditContextMenu(win.webContents);
   // Zoom factor resets on navigation — apply it once the page is in, and
   // replay the state the renderer needs to pick up where things stand.
   win.webContents.on('did-finish-load', () => {
