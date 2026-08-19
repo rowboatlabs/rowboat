@@ -6740,6 +6740,7 @@ function App() {
                     onTakeMeetingNotes={() => { void handleToggleMeeting() }}
                     meetingState={meetingTranscription.state}
                     meetingSummarizing={meetingSummarizing}
+                    actions={knowledgeActions}
                   />
                 </div>
               ) : isCodeOpen ? (

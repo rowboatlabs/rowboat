@@ -86,8 +86,14 @@ const getActiveTab = (state: BrowserState) =>
   state.tabs.find((tab) => tab.id === state.activeTabId) ?? null
 
 const isVisibleOverlayElement = (el: HTMLElement) => {
+  // Opacity is deliberately NOT checked: Radix overlays animate in from
+  // opacity 0, and this check runs on the mount frame (all the portal's
+  // mutations coalesce into one rAF, and the CSS animation itself fires no
+  // further mutations) — an opacity test would classify an opening menu as
+  // absent and leave the native view painting over it. Closing overlays are
+  // already excluded by the [data-state="open"] query.
   const style = window.getComputedStyle(el)
-  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+  if (style.display === 'none' || style.visibility === 'hidden') {
     return false
   }
   const rect = el.getBoundingClientRect()

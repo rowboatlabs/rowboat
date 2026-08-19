@@ -1100,13 +1100,44 @@ export function SidebarContentPanel({
                         </div>
                       ) : (
                         <>
-                          <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
-                            <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
-                            {pinnedChatIds.includes(chat.id) && (
-                              <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
-                            )}
-                          </SidebarMenuButton>
+                          <ContextMenu>
+                            <ContextMenuTrigger asChild>
+                              <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
+                                <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                                <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
+                                {pinnedChatIds.includes(chat.id) && (
+                                  <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
+                                )}
+                              </SidebarMenuButton>
+                            </ContextMenuTrigger>
+                            {/* Mirrors the "…" dropdown below — right-click and the kebab offer the same actions. */}
+                            <ContextMenuContent>
+                              <ContextMenuItem onClick={() => toggleChatPin(chat.id)}>
+                                <Pin className="mr-2 size-3.5" />
+                                {pinnedChatIds.includes(chat.id) ? 'Unpin' : 'Pin'}
+                              </ContextMenuItem>
+                              {onRenameRun && (
+                                <ContextMenuItem
+                                  onClick={() => {
+                                    setRenameDraft(chat.title || '')
+                                    setRenamingChatId(chat.id)
+                                  }}
+                                >
+                                  <Pencil className="mr-2 size-3.5" />
+                                  Rename
+                                </ContextMenuItem>
+                              )}
+                              {onDeleteRun && (
+                                <ContextMenuItem
+                                  variant="destructive"
+                                  onClick={() => setDeleteChatTarget({ id: chat.id, title: chat.title || '(Untitled chat)' })}
+                                >
+                                  <Trash2 className="mr-2 size-3.5" />
+                                  Delete
+                                </ContextMenuItem>
+                              )}
+                            </ContextMenuContent>
+                          </ContextMenu>
                           {onRenameRun && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>

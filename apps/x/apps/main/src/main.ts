@@ -18,6 +18,7 @@ import {
   stopWorkspaceWatcher
 } from "./ipc.js";
 import { disposeAllTerminals } from "./terminal.js";
+import { attachTextEditContextMenu } from "./context-menu.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
@@ -470,6 +471,10 @@ function createWindow(options: { startHidden?: boolean } = {}) {
 
   // Cmd/Ctrl + (+ / − / 0) zoom shortcuts for the renderer UI.
   setupZoomShortcuts(win);
+
+  // Native cut/copy/paste + spellcheck menu for inputs, the note editor, and
+  // text selections (the in-DOM Radix menus suppress this event where they apply).
+  attachTextEditContextMenu(win.webContents);
 
   if (app.isPackaged) {
     win.loadURL("app://-/index.html");

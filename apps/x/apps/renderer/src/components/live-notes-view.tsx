@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Radio, Loader2, Square, AlertCircle } from 'lucide-react'
+import { Radio, Loader2, Square, AlertCircle, FileText, Pause, Play } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { stripKnowledgePrefix, wikiLabel } from '@/lib/wiki-links'
 import { toast } from '@/lib/toast'
 import { formatRelativeTime } from '@/lib/relative-time'
@@ -254,87 +261,115 @@ export function LiveNotesView({ onOpenNote, onAddNewLiveNote }: LiveNotesViewPro
                   const objectivePreview = note.objective.split('\n')[0].trim()
                   const hasError = !isRunning && !!note.lastRunError
                   return (
-                    <tr
-                      key={note.path}
-                      className={`border-b border-border/50 last:border-b-0 transition-colors ${isRunning ? 'bg-primary/5' : 'hover:bg-muted/20'}`}
-                    >
-                      <td className="px-4 py-3 align-top">
-                        <div className="flex min-w-0 flex-col gap-1">
-                          <div className="flex items-center gap-1.5">
-                            {hasError && (
-                              <AlertCircle
-                                className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
-                                aria-label="Last run failed"
-                              >
-                                <title>Last run failed: {note.lastRunError}</title>
-                              </AlertCircle>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => onOpenNote(note.path)}
-                              className="truncate text-left text-sm font-medium text-foreground hover:text-primary"
-                              title={note.path}
-                            >
-                              {wikiLabel(note.path)}
-                            </button>
-                          </div>
-                          <div className="truncate text-xs text-muted-foreground">
-                            {stripKnowledgePrefix(note.path)}
-                          </div>
-                          {objectivePreview && (
-                            <div className="truncate text-xs text-muted-foreground/80" title={note.objective}>
-                              {objectivePreview}
+                    <ContextMenu key={note.path}>
+                      <ContextMenuTrigger asChild>
+                        <tr
+                          className={`border-b border-border/50 last:border-b-0 transition-colors ${isRunning ? 'bg-primary/5' : 'hover:bg-muted/20'}`}
+                        >
+                          <td className="px-4 py-3 align-top">
+                            <div className="flex min-w-0 flex-col gap-1">
+                              <div className="flex items-center gap-1.5">
+                                {hasError && (
+                                  <AlertCircle
+                                    className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+                                    aria-label="Last run failed"
+                                  >
+                                    <title>Last run failed: {note.lastRunError}</title>
+                                  </AlertCircle>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenNote(note.path)}
+                                  className="truncate text-left text-sm font-medium text-foreground hover:text-primary"
+                                  title={note.path}
+                                >
+                                  {wikiLabel(note.path)}
+                                </button>
+                              </div>
+                              <div className="truncate text-xs text-muted-foreground">
+                                {stripKnowledgePrefix(note.path)}
+                              </div>
+                              {objectivePreview && (
+                                <div className="truncate text-xs text-muted-foreground/80" title={note.objective}>
+                                  {objectivePreview}
+                                </div>
+                              )}
+                              {hasError && note.lastRunError && (
+                                <div className="truncate text-xs text-amber-600 dark:text-amber-400" title={note.lastRunError}>
+                                  {note.lastRunError}
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {hasError && note.lastRunError && (
-                            <div className="truncate text-xs text-amber-600 dark:text-amber-400" title={note.lastRunError}>
-                              {note.lastRunError}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-foreground/80">
-                        {formatDateLabel(note.createdAt)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-foreground/80">
-                        {formatLastRanLabel(note.lastRunAt)}
-                      </td>
-                      <td className="px-4 py-3">
-                        {isRunning ? (
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
-                              <Loader2 className="size-3 animate-spin" />
-                              Updating…
-                            </span>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleStop(note)}
-                              disabled={isStopping}
-                            >
-                              {isStopping ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
-                              Stop
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-3">
-                            {isUpdating ? (
-                              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-foreground/80">
+                            {formatDateLabel(note.createdAt)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-foreground/80">
+                            {formatLastRanLabel(note.lastRunAt)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {isRunning ? (
+                              <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
+                                  <Loader2 className="size-3 animate-spin" />
+                                  Updating…
+                                </span>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => handleStop(note)}
+                                  disabled={isStopping}
+                                >
+                                  {isStopping ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+                                  Stop
+                                </Button>
+                              </div>
                             ) : (
-                              <span className="size-4 shrink-0" aria-hidden="true" />
+                              <div className="flex items-center gap-3">
+                                {isUpdating ? (
+                                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                                ) : (
+                                  <span className="size-4 shrink-0" aria-hidden="true" />
+                                )}
+                                <Switch
+                                  checked={note.isActive}
+                                  onCheckedChange={(checked) => { void handleToggleState(note, checked) }}
+                                  disabled={isUpdating}
+                                />
+                                <span className="min-w-16 text-xs font-medium text-foreground/80">
+                                  {note.isActive ? 'Active' : 'Inactive'}
+                                </span>
+                              </div>
                             )}
-                            <Switch
-                              checked={note.isActive}
-                              onCheckedChange={(checked) => { void handleToggleState(note, checked) }}
-                              disabled={isUpdating}
-                            />
-                            <span className="min-w-16 text-xs font-medium text-foreground/80">
-                              {note.isActive ? 'Active' : 'Inactive'}
-                            </span>
-                          </div>
+                          </td>
+                        </tr>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-52">
+                        <ContextMenuItem onClick={() => onOpenNote(note.path)}>
+                          <FileText className="mr-2 size-4" />
+                          Open note
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        {isRunning ? (
+                          <ContextMenuItem
+                            variant="destructive"
+                            disabled={isStopping}
+                            onClick={() => { void handleStop(note) }}
+                          >
+                            <Square className="mr-2 size-4" />
+                            Stop run
+                          </ContextMenuItem>
+                        ) : (
+                          <ContextMenuItem
+                            disabled={isUpdating}
+                            onClick={() => { void handleToggleState(note, !note.isActive) }}
+                          >
+                            {note.isActive ? <Pause className="mr-2 size-4" /> : <Play className="mr-2 size-4" />}
+                            {note.isActive ? 'Deactivate' : 'Activate'}
+                          </ContextMenuItem>
                         )}
-                      </td>
-                    </tr>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   )
                 })}
               </tbody>

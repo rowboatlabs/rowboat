@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar, ChevronDown, ChevronRight, Clock, ExternalLink, FileText, Loader2, MapPin, Mic, Sparkles, Square, UserPlus, UserRound, UsersRound, Video, X } from 'lucide-react'
+import { Calendar, ChevronDown, ChevronRight, Clock, Copy, ExternalLink, FileText, FolderOpen, Loader2, MapPin, Mic, Pencil, Sparkles, Square, Trash2, UserPlus, UserRound, UsersRound, Video, X } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { formatRelativeTime } from '@/lib/relative-time'
 import * as analytics from '@/lib/analytics'
@@ -56,11 +63,29 @@ type MeetingNoteRow = {
   mtimeMs: number
 }
 
+// Subset of App's knowledgeActions the notes-table context menu needs —
+// meeting notes are ordinary workspace files, so the same handlers apply.
+type MeetingsViewActions = {
+  rename: (path: string, newName: string, isDir: boolean) => Promise<void>
+  remove: (path: string) => Promise<void>
+  copyPath: (path: string) => void
+  revealInFileManager: (path: string, isDir: boolean) => void
+}
+
 type MeetingsViewProps = {
   onOpenNote: (path: string) => void
   onTakeMeetingNotes: () => void
   meetingState: MeetingTranscriptionState
   meetingSummarizing?: boolean
+  actions?: MeetingsViewActions
+}
+
+function getFileManagerName(): string {
+  if (typeof navigator === 'undefined') return 'File Manager'
+  const platform = navigator.platform.toLowerCase()
+  if (platform.includes('mac')) return 'Finder'
+  if (platform.includes('win')) return 'Explorer'
+  return 'File Manager'
 }
 
 function isMeetingPath(path: string | undefined): boolean {
@@ -1144,7 +1169,112 @@ function getMeetingButtonLabel(state: MeetingTranscriptionState): string {
   }
 }
 
-export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, meetingSummarizing = false }: MeetingsViewProps) {
+function MeetingNoteTableRow({ note, actions, onOpenNote }: {
+  note: MeetingNoteRow
+  actions?: MeetingsViewActions
+  onOpenNote: (path: string) => void
+}) {
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [newName, setNewName] = useState('')
+  const isSubmittingRef = useRef(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isRenaming) inputRef.current?.focus()
+  }, [isRenaming])
+
+  // note.name is display-formatted; rename works on the raw filename.
+  const baseName = note.path.split('/').pop()?.replace(/\.md$/, '') ?? note.name
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (isSubmittingRef.current) return
+    const trimmed = newName.trim()
+    if (!trimmed || trimmed === baseName) {
+      setIsRenaming(false)
+      return
+    }
+    isSubmittingRef.current = true
+    try {
+      await actions?.rename(note.path, trimmed, false)
+    } catch {
+      // ignore
+    }
+    setIsRenaming(false)
+    isSubmittingRef.current = false
+  }, [newName, baseName, actions, note.path])
+
+  const handleOpen = () => {
+    analytics.meetingNoteOpened()
+    onOpenNote(note.path)
+  }
+
+  const row = (
+    <tr className="border-b border-border/50 last:border-b-0 hover:bg-muted/20">
+      <td className="px-4 py-3 align-top">
+        {isRenaming ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onBlur={() => void handleRenameSubmit()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleRenameSubmit()
+              if (e.key === 'Escape') setIsRenaming(false)
+            }}
+            className="w-full bg-transparent text-sm font-medium outline-none ring-1 ring-ring rounded px-1"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={handleOpen}
+            className="block w-full min-w-0 text-left text-sm font-medium text-foreground hover:underline"
+          >
+            <span className="block truncate">{note.name}</span>
+          </button>
+        )}
+      </td>
+      <td className="px-4 py-3 align-top text-sm text-muted-foreground">{note.dateLabel}</td>
+      <td className="px-4 py-3 align-top text-sm text-muted-foreground">
+        {note.mtimeMs > 0 ? (formatRelativeTime(new Date(note.mtimeMs).toISOString()) || '—') : '—'}
+      </td>
+    </tr>
+  )
+
+  if (!actions) return row
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onClick={handleOpen}>
+          <FileText className="mr-2 size-4" />
+          Open
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => actions.copyPath(note.path)}>
+          <Copy className="mr-2 size-4" />
+          Copy Path
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => actions.revealInFileManager(note.path, false)}>
+          <FolderOpen className="mr-2 size-4" />
+          Open in {getFileManagerName()}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => { setNewName(baseName); isSubmittingRef.current = false; setIsRenaming(true) }}>
+          <Pencil className="mr-2 size-4" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem variant="destructive" onClick={() => void actions.remove(note.path)}>
+          <Trash2 className="mr-2 size-4" />
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, meetingSummarizing = false, actions }: MeetingsViewProps) {
   const [notes, setNotes] = useState<MeetingNoteRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -1307,21 +1437,7 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
               </thead>
               <tbody>
                 {notes.map((note) => (
-                  <tr key={note.path} className="border-b border-border/50 last:border-b-0 hover:bg-muted/20">
-                    <td className="px-4 py-3 align-top">
-                      <button
-                        type="button"
-                        onClick={() => { analytics.meetingNoteOpened(); onOpenNote(note.path) }}
-                        className="block w-full min-w-0 text-left text-sm font-medium text-foreground hover:underline"
-                      >
-                        <span className="block truncate">{note.name}</span>
-                      </button>
-                    </td>
-                    <td className="px-4 py-3 align-top text-sm text-muted-foreground">{note.dateLabel}</td>
-                    <td className="px-4 py-3 align-top text-sm text-muted-foreground">
-                      {note.mtimeMs > 0 ? (formatRelativeTime(new Date(note.mtimeMs).toISOString()) || '—') : '—'}
-                    </td>
-                  </tr>
+                  <MeetingNoteTableRow key={note.path} note={note} actions={actions} onOpenNote={onOpenNote} />
                 ))}
               </tbody>
             </table>
