@@ -1149,6 +1149,43 @@ const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
+  // Main → renderer: native application-menu commands (apps/main/src/menu.ts).
+  // One channel for all of them; each routes into the same handler the
+  // corresponding in-app control uses. Go-menu navigation is NOT here — it
+  // rides the existing deep-link pipeline (app:openUrl / pending-link drain).
+  'menu:command': {
+    req: z.discriminatedUnion('command', [
+      z.object({ command: z.literal('new-chat') }),
+      z.object({ command: z.literal('new-note') }),
+      z.object({ command: z.literal('undo') }),
+      z.object({ command: z.literal('redo') }),
+      z.object({ command: z.literal('open-search') }),
+      z.object({ command: z.literal('toggle-full-screen-chat') }),
+      z.object({ command: z.literal('go-back') }),
+      z.object({ command: z.literal('go-forward') }),
+      z.object({
+        command: z.literal('open-settings'),
+        // Mirrors the renderer's settings-dialog ConfigTab union.
+        tab: z.enum([
+          'account', 'connections', 'mobile', 'models', 'mcp', 'security',
+          'code-mode', 'appearance', 'shortcuts', 'notifications',
+          'permissions', 'note-tagging', 'advanced', 'help',
+        ]).optional(),
+      }),
+      z.object({
+        command: z.literal('export-note'),
+        format: z.enum(['md', 'pdf', 'docx']),
+      }),
+    ]),
+    res: z.null(),
+  },
+  // Main → renderer: View > Toggle Sidebar. Its own channel because the
+  // handler must live inside the SidebarProvider, below where menu:command's
+  // dispatcher sits.
+  'menu:toggleSidebar': {
+    req: z.null(),
+    res: z.null(),
+  },
   // Launch-at-login (resident app). The OS login-item registry is the source
   // of truth; these read/write it directly rather than a config file.
   'app:getLoginItemSettings': {

@@ -97,6 +97,7 @@ import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
 import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
+import { setMenuRecordingState } from './menu.js';
 import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
 
 // Ambient meeting detection must ignore Rowboat's own mic use: meeting
@@ -1020,6 +1021,7 @@ export function setupIpcHandlers() {
     },
     'meeting:setRecordingState': async (_event, args) => {
       setTrayRecordingState(args.recording);
+      setMenuRecordingState(args.recording);
       meetingRecordingActive = args.recording;
       updateSelfCaptureState();
       // Recording started through another path — a lingering "Take Notes?"

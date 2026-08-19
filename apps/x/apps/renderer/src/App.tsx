@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
-import { workspace, quickAskShortcut } from '@x/shared';
+import { workspace, quickAskShortcut, type ipc } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
@@ -54,7 +54,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import { SettingsDialog } from "@/components/settings-dialog"
+import { SettingsDialog, type ConfigTab } from "@/components/settings-dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
@@ -718,6 +718,17 @@ function FixedSidebarToggle({
       </button>
     </div>
   )
+}
+
+/** Application-menu "View > Toggle Sidebar" (menu:toggleSidebar). A bridge
+ * component because useSidebar() must be called under the SidebarProvider,
+ * below where the menu:command dispatcher sits. Renders nothing. */
+function MenuSidebarToggleBridge() {
+  const { toggleSidebar } = useSidebar()
+  const toggleRef = useRef(toggleSidebar)
+  useEffect(() => { toggleRef.current = toggleSidebar }, [toggleSidebar])
+  useEffect(() => window.ipc.on('menu:toggleSidebar', () => toggleRef.current()), [])
+  return null
 }
 
 /** Main content header that adjusts padding based on sidebar state */
@@ -5921,6 +5932,84 @@ function App() {
     },
   }), [tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, removeEditorCacheForPath])
 
+  // Settings opened from the application menu (Settings… / Keyboard
+  // Shortcuts…) — its own dialog instance so the menu can deep-link any tab.
+  const [menuSettings, setMenuSettings] = useState<{ open: boolean; tab: ConfigTab }>({ open: false, tab: 'account' })
+
+  // Native application-menu commands (apps/main/src/menu.ts). The dispatcher
+  // lives in a ref refreshed every render so the one-time IPC subscription
+  // below always routes into the current handlers — same pattern as
+  // navigateToViewRef above. Each command reuses the exact code path of the
+  // in-app control it mirrors.
+  const menuCommandRef = useRef<(cmd: ipc.IPCChannels['menu:command']['req']) => void>(() => {})
+  useEffect(() => {
+    menuCommandRef.current = (cmd) => {
+      switch (cmd.command) {
+        case 'new-chat':
+          handleNewChatTab()
+          break
+        case 'new-note':
+          void knowledgeActions.createNote()
+          break
+        case 'undo':
+        case 'redo': {
+          // Mirrors the ⌘Z keydown routing above: the open markdown editor's
+          // history when it applies, the focused input's native undo otherwise.
+          const active = document.activeElement
+          const inTipTap = active instanceof HTMLElement && Boolean(active.closest('.tiptap-editor'))
+          const inOtherTextInput = (
+            active instanceof HTMLInputElement
+            || active instanceof HTMLTextAreaElement
+            || (active instanceof HTMLElement && active.isContentEditable)
+          ) && !inTipTap
+          const handlers = fileHistoryHandlersRef.current
+          if (!inOtherTextInput && selectedPath?.endsWith('.md') && handlers) {
+            if (cmd.command === 'undo') handlers.undo()
+            else handlers.redo()
+          } else {
+            document.execCommand(cmd.command)
+          }
+          break
+        }
+        case 'open-search':
+          setIsSearchOpen(true)
+          break
+        case 'toggle-full-screen-chat':
+          if (isFullScreenChat && expandedFrom) {
+            handleCloseFullScreenChat()
+          } else {
+            navigateToFullScreenChat()
+          }
+          break
+        case 'go-back':
+          void navigateBack()
+          break
+        case 'go-forward':
+          void navigateForward()
+          break
+        case 'open-settings':
+          setMenuSettings({ open: true, tab: cmd.tab ?? 'account' })
+          break
+        case 'export-note': {
+          const path = selectedPath
+          if (!path || !path.endsWith('.md')) {
+            toast('Open a note to export it')
+            break
+          }
+          const markdown = editorContentByPath[path]
+            ?? (editorPathRef.current === path ? editorContent : '')
+          void window.ipc.invoke('export:note', { markdown, format: cmd.format, title: getBaseName(path) })
+            .then(() => analytics.noteExported(cmd.format))
+            .catch((err) => { console.error('Export failed:', err) })
+          break
+        }
+      }
+    }
+  })
+  useEffect(() => {
+    return window.ipc.on('menu:command', (cmd) => menuCommandRef.current(cmd))
+  }, [])
+
   // Drives the mascot product tour through the app's main sections
   const handleTourNavigate = useCallback((target: TourNavTarget) => {
     switch (target) {
@@ -7344,6 +7433,7 @@ function App() {
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
+            <MenuSidebarToggleBridge />
           </SidebarProvider>
         </div>
         <CommandPalette
@@ -7397,6 +7487,12 @@ function App() {
         open={shortcutSettingsOpen}
         onOpenChange={setShortcutSettingsOpen}
         defaultTab="shortcuts"
+      />
+      {/* Application menu: Settings… / Help > Keyboard Shortcuts… */}
+      <SettingsDialog
+        open={menuSettings.open}
+        onOpenChange={(open) => setMenuSettings((s) => ({ ...s, open }))}
+        defaultTab={menuSettings.tab}
       />
       <OnboardingModal
         open={showOnboarding}
