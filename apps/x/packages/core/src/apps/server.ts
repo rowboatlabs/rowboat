@@ -222,8 +222,17 @@ const BOOTSTRAP = String.raw`<script>
 </script>`;
 
 function injectBootstrap(htmlContent: string): string {
-    if (/<\/body>/i.test(htmlContent)) return htmlContent.replace(/<\/body>/i, `${BOOTSTRAP}\n</body>`);
-    return `${htmlContent}\n${BOOTSTRAP}`;
+    // Inject before the LAST </body>, not the first. An app whose markup
+    // contains a literal "</body>" earlier — a template inside a <textarea>,
+    // an HTML string inside a <script> — got the bootstrap spliced into that
+    // text instead: visible junk at best, a broken <script> at worst, and no
+    // live reload either way. (Regex loop rather than toLowerCase+lastIndexOf:
+    // case mapping can change string length and misalign the index.)
+    const re = /<\/body>/gi;
+    let idx = -1;
+    for (let m = re.exec(htmlContent); m; m = re.exec(htmlContent)) idx = m.index;
+    if (idx === -1) return `${htmlContent}\n${BOOTSTRAP}`;
+    return `${htmlContent.slice(0, idx)}${BOOTSTRAP}\n${htmlContent.slice(idx)}`;
 }
 
 // ---------------------------------------------------------------------------
