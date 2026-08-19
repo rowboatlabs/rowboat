@@ -1,6 +1,7 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, shell } from 'electron';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
+import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 
@@ -14,6 +15,9 @@ type InvokeHandler<K extends keyof IPCChannels> = (
 type SpacesHandlers = {
   'spaces:listOrgs': InvokeHandler<'spaces:listOrgs'>;
   'spaces:addOrg': InvokeHandler<'spaces:addOrg'>;
+  'spaces:resolveInviteLink': InvokeHandler<'spaces:resolveInviteLink'>;
+  'spaces:joinInvite': InvokeHandler<'spaces:joinInvite'>;
+  'spaces:signInOrg': InvokeHandler<'spaces:signInOrg'>;
   'spaces:removeOrg': InvokeHandler<'spaces:removeOrg'>;
   'spaces:listSpaces': InvokeHandler<'spaces:listSpaces'>;
   'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
@@ -44,8 +48,12 @@ function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
     address: record.address,
     baseUrl: record.baseUrl,
     memberId: record.auth.memberId,
+    authKind: record.auth.kind,
+    ...(record.auth.kind === 'oauth' && record.auth.error ? { authError: record.auth.error } : {}),
   };
 }
+
+const openBrowser = (url: string) => shell.openExternal(url);
 
 function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -73,6 +81,23 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:addOrg': async (_event, args) => ({
     org: orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId })),
   }),
+
+  'spaces:resolveInviteLink': async (_event, args) => {
+    const { baseUrl, resolved } = await spacesOAuth.resolveInviteLink(args.url);
+    return { baseUrl, resolved };
+  },
+
+  'spaces:joinInvite': async (_event, args) => {
+    const { org, result } = await spacesOAuth.joinViaInviteLink({ url: args.url, openBrowser });
+    return { org: orgSummary(org), space: result.space };
+  },
+
+  'spaces:signInOrg': async (_event, args) => {
+    const record = orgs.getOrg(args.orgId);
+    if (!record) throw new Error(`unknown org ${args.orgId}`);
+    const updated = await spacesOAuth.signInOrg({ baseUrl: record.baseUrl, openBrowser, orgId: record.id });
+    return { org: orgSummary(updated) };
+  },
 
   'spaces:removeOrg': async (_event, args) => {
     for (const [key, unsubscribe] of liveSubscriptions) {

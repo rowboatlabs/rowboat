@@ -21,6 +21,7 @@
     "@rowboat/spaces-protocol": "workspace:*",
     "diff": "^8.0.2",
     "hono": "^4.7.0",
+    "jose": "^6.2.9",
     "pg": "^8.23.0",
     "ulid": "^3.0.1",
     "ws": "^8.18.0",

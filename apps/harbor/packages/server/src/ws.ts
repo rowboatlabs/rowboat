@@ -1,7 +1,7 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientFrame, type ServerFrame } from '@rowboat/spaces-protocol';
-import { ensureMember, parseDevToken } from './auth.js';
+import type { AuthDriver } from './auth.js';
 import { HarborError } from './errors.js';
 import type { SpaceHub } from './hub.js';
 import type { HarborService } from './service.js';
@@ -15,6 +15,7 @@ interface Deps {
   service: HarborService;
   hub: SpaceHub;
   store: Store;
+  auth: AuthDriver;
 }
 
 export function attachLive(server: Server, deps: Deps): () => void {
@@ -26,17 +27,27 @@ export function attachLive(server: Server, deps: Deps): () => void {
       socket.destroy();
       return;
     }
-    let memberId: string;
-    try {
-      memberId = parseDevToken(req.headers.authorization, url.searchParams.get('token'));
-    } catch {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      void handleConnection(ws, memberId, deps);
-    });
+    // Auth completes BEFORE handleUpgrade: the client hasn't seen 101 yet, so
+    // no frames can arrive while we're on the auth/store round trips — the
+    // old race (subscribe sent before listeners attach) is now structurally
+    // impossible. Nobody reads the socket during the await; bytes just buffer.
+    socket.on('error', () => {});
+    void (async () => {
+      let memberId: string;
+      try {
+        const identity = await deps.auth.authenticate(req.headers.authorization, url.searchParams.get('token'));
+        memberId = (await deps.auth.resolveMember(deps.store, identity)).id;
+      } catch (err) {
+        const status = err instanceof HarborError && err.status === 403 ? '403 Forbidden' : '401 Unauthorized';
+        socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+        socket.destroy();
+        return;
+      }
+      if (socket.destroyed) return;
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleConnection(ws, memberId, deps);
+      });
+    })();
   });
 
   return () => {
@@ -45,13 +56,7 @@ export function attachLive(server: Server, deps: Deps): () => void {
   };
 }
 
-async function handleConnection(ws: WebSocket, memberId: string, deps: Deps): Promise<void> {
-  // Listeners MUST attach before any await: a client's subscribe sent right
-  // after open arrives while ensureMember is still on its Postgres round trip,
-  // and an unattached listener means the frame is silently dropped. Handlers
-  // await `ready` instead (in-memory stores resolve it instantly; the race
-  // only bites on real I/O).
-  const ready = ensureMember(deps.store, memberId);
+function handleConnection(ws: WebSocket, memberId: string, deps: Deps): void {
   const subscriptions = new Map<string, () => void>();
 
   const send = (frame: ServerFrame): void => {
@@ -63,7 +68,6 @@ async function handleConnection(ws: WebSocket, memberId: string, deps: Deps): Pr
 
   ws.on('message', (data) => {
     void (async () => {
-      await ready;
       let raw: unknown;
       try {
         raw = JSON.parse(String(data));

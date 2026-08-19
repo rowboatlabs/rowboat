@@ -40,11 +40,17 @@ export class SpacesRequestError extends Error {
   }
 }
 
+/**
+ * A live token source. `forceRefresh` is the 401 path: the token we just used
+ * was rejected, get a genuinely new one (orgs.ts refreshes + persists).
+ */
+export type SpacesTokenProvider = (opts?: { forceRefresh?: boolean }) => Promise<string>;
+
 export interface SpacesClientOptions {
   /** e.g. http://localhost:4272 — scheme + host[:port], no trailing slash. */
   baseUrl: string;
-  /** Bearer token; dev-<memberId> against the stub, OAuth access token later. */
-  token: string;
+  /** Static bearer (dev tokens, tests) or a provider (OAuth orgs — always fresh). */
+  token: string | SpacesTokenProvider;
   fetchImpl?: typeof fetch;
 }
 
@@ -53,13 +59,17 @@ type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 
 export class SpacesClient {
   private readonly baseUrl: string;
-  private readonly token: string;
+  private readonly token: string | SpacesTokenProvider;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: SpacesClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.token = options.token;
     this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  private async currentToken(opts?: { forceRefresh?: boolean }): Promise<string> {
+    return typeof this.token === 'string' ? this.token : this.token(opts);
   }
 
   private async request<S extends z.ZodType>(
@@ -69,14 +79,21 @@ export class SpacesClient {
     body?: unknown,
     auth = true,
   ): Promise<z.infer<S>> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        ...(auth ? { authorization: `Bearer ${this.token}` } : {}),
-        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
+    const send = async (token: string | undefined) =>
+      this.fetchImpl(`${this.baseUrl}${path}`, {
+        method,
+        headers: {
+          ...(token !== undefined ? { authorization: `Bearer ${token}` } : {}),
+          ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+    let res = await send(auth ? await this.currentToken() : undefined);
+    // One forced-refresh retry on 401 when the token source is live (an
+    // access token can be revoked before its expiry says so).
+    if (res.status === 401 && auth && typeof this.token !== 'string') {
+      res = await send(await this.currentToken({ forceRefresh: true }));
+    }
     const json = (await res.json().catch(() => undefined)) as unknown;
     if (!res.ok) {
       const parsed = (json ?? {}) as Partial<SpacesApiError>;
@@ -108,6 +125,13 @@ export class SpacesClient {
     const res = await this.fetchImpl(`${this.baseUrl}/v1/health`);
     if (!res.ok) throw new SpacesRequestError(res.status, { code: 'internal', message: 'health check failed', retryable: true });
     return (await res.json()) as { ok: boolean; org: { name: string; address: string } };
+  }
+
+  // --- identity -------------------------------------------------------------
+
+  /** Who this token is on the org — the only client-side source of our memberId under OAuth. */
+  async me(): Promise<{ member: Member }> {
+    return this.request('GET', routes.me.path, routes.me.response);
   }
 
   // --- spaces & membership --------------------------------------------------

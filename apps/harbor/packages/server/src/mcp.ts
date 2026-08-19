@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { mcpTools, type ActingMode } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
-import { ensureMember, parseDevToken } from './auth.js';
+import type { AuthDriver } from './auth.js';
 import { HarborError } from './errors.js';
 import type { HarborService } from './service.js';
 import type { Store } from './store.js';
@@ -22,6 +22,7 @@ import type { Store } from './store.js';
 interface Deps {
   service: HarborService;
   store: Store;
+  auth: AuthDriver;
 }
 
 interface McpActor {
@@ -33,17 +34,24 @@ interface McpActor {
 export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, deps: Deps): Promise<void> {
   let actor: McpActor;
   try {
-    const memberId = parseDevToken(req.headers.authorization);
-    await ensureMember(deps.store, memberId);
+    const identity = await deps.auth.authenticate(req.headers.authorization);
+    const member = await deps.auth.resolveMember(deps.store, identity);
     actor = {
-      memberId,
+      memberId: member.id,
       actingMode: req.headers['x-acting-mode'] === 'scheduled' ? 'scheduled' : 'agent',
       ...(typeof req.headers['x-agent-name'] === 'string' ? { agentName: req.headers['x-agent-name'] } : {}),
     };
   } catch (err) {
-    const message = err instanceof HarborError ? err.message : 'unauthorized';
-    res.writeHead(401, { 'content-type': 'application/json' }).end(
-      JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message }, id: null }),
+    const e = err instanceof HarborError ? err : new HarborError('unauthorized', 'unauthorized');
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    // RFC 9728: MCP clients discover the OAuth dance from this header.
+    if (e.code === 'unauthorized' && deps.auth.metadata?.()) {
+      const proto = typeof req.headers['x-forwarded-proto'] === 'string' ? req.headers['x-forwarded-proto'] : 'http';
+      headers['WWW-Authenticate'] =
+        `Bearer resource_metadata="${proto}://${req.headers.host}/.well-known/oauth-protected-resource"`;
+    }
+    res.writeHead(e.status, headers).end(
+      JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: e.message }, id: null }),
     );
     return;
   }

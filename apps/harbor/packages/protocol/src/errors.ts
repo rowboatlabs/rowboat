@@ -9,6 +9,20 @@ export const ErrorCode = z.enum([
   'unauthorized',
   /** Authenticated but not allowed (e.g. not a member of the space). */
   'forbidden',
+  /**
+   * Valid token, but the identity maps to no member of this org — the join
+   * flow's entry point (spec §4: acceptance binds (issuer, subject) → member).
+   * Distinct from `unauthorized` (re-auth won't help) and `forbidden`
+   * (which presumes membership).
+   */
+  'not_a_member',
+  /**
+   * Org policy refused the bind (spec §4, amended 2026-08-19: all bind-time
+   * gating is org policy — v1 is the email-domain rule). The message is the
+   * human-readable reason ("this org admits only @acme.com accounts") —
+   * never a cryptic 401.
+   */
+  'policy_refused',
   'not_found',
   /** Path failed AssetPath rules or org policy (e.g. non-text in v1). */
   'invalid_path',

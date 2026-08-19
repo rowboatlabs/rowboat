@@ -33,6 +33,22 @@ export interface ActorCtx {
   memberId: string;
 }
 
+/** What bindInvite needs from an authenticated identity (auth.ts AuthIdentity satisfies this). */
+export interface BindIdentity {
+  iss: string;
+  sub: string;
+  email?: string;
+  name?: string;
+}
+
+function seedDisplayName(identity: BindIdentity): string {
+  const name = identity.name?.trim();
+  if (name) return name.slice(0, 128);
+  const local = identity.email?.split('@')[0];
+  if (local) return local.slice(0, 128);
+  return identity.sub.slice(0, 24);
+}
+
 type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 
@@ -40,6 +56,12 @@ export interface OrgInfo {
   name: string;
   /** host[:port] — the org address links are minted on. Set once the listener knows its port. */
   address: string;
+  /**
+   * Org policy, v1 (spec §4, amended 2026-08-19): restrict membership to
+   * these IdP-verified email domains, checked ONLY at invite bind. Empty or
+   * absent = no restriction. Org-side by design — never on the wire.
+   */
+  allowedEmailDomains?: string[];
 }
 
 const RECENT_HISTORY = 10;
@@ -158,6 +180,44 @@ export class HarborService {
       space: { id: space.id, name: space.name },
       invitedBy: inviter?.displayName,
     };
+  }
+
+  /**
+   * The invite-binding ceremony (spec §4, amended 2026-08-19): an
+   * authenticated identity + an open bearer invite → member (created on
+   * first bind, displayName seeded from IdP profile claims) + membership.
+   * Every bind-time condition is org policy, checked HERE and nowhere else —
+   * v1 is the email-domain rule. The (iss, sub) → member row written here is
+   * what the oidc auth driver resolves on every later request.
+   */
+  async bindInvite(identity: BindIdentity, token: string): Promise<AcceptInviteResult> {
+    const resolved = await this.resolveInvite(token);
+    if (resolved.state !== 'ok') {
+      throw new HarborError('forbidden', `invite is ${resolved.state}`);
+    }
+    this.guardWrite();
+    this.checkBindPolicy(identity);
+    let member = await this.store.getMemberByIdentity(identity.iss, identity.sub);
+    if (!member) {
+      // Minted id, NOT the raw sub: issuer subjects live only in the mapping
+      // table, so an org can change AS someday without rewriting history.
+      member = { id: this.ulid(), displayName: seedDisplayName(identity), role: 'member' };
+      await this.store.putMember(member);
+      await this.store.putIdentity(identity.iss, identity.sub, member.id);
+    }
+    return this.acceptInvite({ memberId: member.id }, token);
+  }
+
+  private checkBindPolicy(identity: BindIdentity): void {
+    const domains = this.org.allowedEmailDomains;
+    if (!domains || domains.length === 0) return;
+    const domain = identity.email?.toLowerCase().split('@')[1];
+    if (!domain || !domains.some((d) => d.toLowerCase() === domain)) {
+      throw new HarborError(
+        'policy_refused',
+        `this org admits only ${domains.map((d) => `@${d}`).join(', ')} accounts`,
+      );
+    }
   }
 
   async acceptInvite(ctx: ActorCtx, token: string): Promise<AcceptInviteResult> {

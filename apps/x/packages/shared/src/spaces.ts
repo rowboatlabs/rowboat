@@ -44,6 +44,9 @@ export const SpacesOrgSummary = z.object({
   baseUrl: z.string(),
   /** Who we are on this org (org-scoped identity, spec §4). */
   memberId: z.string(),
+  authKind: z.enum(['dev', 'oauth']),
+  /** Present = the org needs a re-login (refresh dead). Visible and gentle, never silent. */
+  authError: z.string().optional(),
 });
 export type SpacesOrgSummary = z.infer<typeof SpacesOrgSummary>;
 

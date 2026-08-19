@@ -28,6 +28,13 @@ const NewTopicMessage = z.object({
 });
 
 export const routes = {
+  // --- identity ------------------------------------------------------------
+  /** Who am I on this org — the client's only source of its own memberId under OAuth. */
+  me: {
+    method: 'GET',
+    path: '/v1/me',
+    response: z.object({ member: Member }),
+  },
   // --- spaces & membership -------------------------------------------------
   listSpaces: {
     method: 'GET',

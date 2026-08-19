@@ -21,15 +21,18 @@ const BACKOFF_CAP_MS = 30_000;
 export interface SpacesLiveOptions {
   /** http(s)://host[:port] — same base as the REST client. */
   baseUrl: string;
-  token: string;
+  /** Static bearer (dev tokens, tests) or a provider — resolved fresh per connection attempt. */
+  token: string | (() => Promise<string>);
   /** Injection point for tests; defaults to the global WebSocket. */
   webSocketImpl?: typeof WebSocket;
 }
 
 export class SpacesLive {
-  private readonly wsUrl: string;
+  private readonly wsBase: string;
+  private readonly token: string | (() => Promise<string>);
   private readonly WebSocketImpl: typeof WebSocket;
   private ws: WebSocket | undefined;
+  private connecting = false;
   private subs = new Map<string, Subscription>();
   private statusHandlers = new Set<(status: SpacesLiveStatus) => void>();
   private attempts = 0;
@@ -37,8 +40,8 @@ export class SpacesLive {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: SpacesLiveOptions) {
-    const base = options.baseUrl.replace(/\/$/, '').replace(/^http/, 'ws');
-    this.wsUrl = `${base}/v1/live?token=${encodeURIComponent(options.token)}`;
+    this.wsBase = options.baseUrl.replace(/\/$/, '').replace(/^http/, 'ws');
+    this.token = options.token;
     this.WebSocketImpl = options.webSocketImpl ?? WebSocket;
   }
 
@@ -115,9 +118,28 @@ export class SpacesLive {
   }
 
   private ensureConnected(): void {
-    if (this.closed || this.ws) return;
+    if (this.closed || this.ws || this.connecting) return;
+    this.connecting = true;
     this.setStatus('connecting');
-    const ws = new this.WebSocketImpl(this.wsUrl);
+    void (async () => {
+      let token: string;
+      try {
+        token = typeof this.token === 'string' ? this.token : await this.token();
+      } catch {
+        // Token source failed (refresh dead → org needs re-login). Back off
+        // like a connection failure so a later re-auth resumes the stream.
+        this.connecting = false;
+        this.scheduleReconnect();
+        return;
+      }
+      this.connecting = false;
+      if (this.closed || this.ws) return;
+      this.openSocket(`${this.wsBase}/v1/live?token=${encodeURIComponent(token)}`);
+    })();
+  }
+
+  private openSocket(wsUrl: string): void {
+    const ws = new this.WebSocketImpl(wsUrl);
     this.ws = ws;
 
     ws.addEventListener('open', () => {

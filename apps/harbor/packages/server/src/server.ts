@@ -1,7 +1,7 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { getRequestListener } from '@hono/node-server';
-import { ensureMember } from './auth.js';
+import { DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
 import { buildHttpApp } from './http.js';
 import { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
@@ -34,8 +34,17 @@ export interface HarborOptions {
   orgName?: string;
   /** Org address links are minted on; defaults to localhost:<actual port>. */
   address?: string;
+  /** Org policy v1: restrict invite binds to these email domains (spec §4). */
+  allowedEmailDomains?: string[];
   /** Storage; defaults to in-memory. Pass a PgStore (init() run) for durable deployments. */
   store?: Store;
+  /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
+  auth?: AuthDriver;
+  /**
+   * Mounts /oauth/consent (the login/consent page). The issuer comes from the
+   * auth driver's metadata, so this only takes effect alongside an oidc driver.
+   */
+  consent?: { publishableKey: string };
   seedMembers?: SeedMember[];
   seedSpaces?: SeedSpace[];
 }
@@ -54,17 +63,22 @@ export interface RunningHarbor {
 
 export async function startHarbor(options: HarborOptions = {}): Promise<RunningHarbor> {
   const store = options.store ?? new MemoryStore();
+  const auth: AuthDriver = options.auth ?? new DevAuthDriver();
   const hub = new SpaceHub();
   const service = new HarborService(store, hub, {
     name: options.orgName ?? 'Harbor (dev)',
     address: options.address ?? 'localhost',
+    ...(options.allowedEmailDomains ? { allowedEmailDomains: options.allowedEmailDomains } : {}),
   });
 
   for (const m of options.seedMembers ?? []) {
-    await store.putMember({ id: m.id, displayName: m.displayName });
+    const existing = await store.getMember(m.id);
+    await store.putMember({ id: m.id, displayName: m.displayName, role: existing?.role ?? 'member' });
   }
   for (const seed of options.seedSpaces ?? []) {
-    await ensureMember(store, seed.creator);
+    // The seed creator is the provisioned first admin (spec §4, roles).
+    const creator = await ensureMember(store, seed.creator);
+    if (creator.role !== 'admin') await store.putMember({ ...creator, role: 'admin' });
     // Idempotent across restarts on durable stores: the seed space is only
     // created if the creator doesn't already have one by this name.
     const existing = await service.listSpaces({ memberId: seed.creator });
@@ -86,16 +100,22 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
     }
   }
 
-  const app = buildHttpApp({ service, store });
+  const issuer = auth.metadata?.()?.authorizationServers[0];
+  const app = buildHttpApp({
+    service,
+    store,
+    auth,
+    ...(options.consent && issuer ? { consent: { issuer, publishableKey: options.consent.publishableKey } } : {}),
+  });
   const honoListener = getRequestListener(app.fetch);
   const server = createServer((req, res) => {
     if (req.url === '/mcp' || req.url?.startsWith('/mcp?')) {
-      void handleMcpRequest(req, res, { service, store });
+      void handleMcpRequest(req, res, { service, store, auth });
       return;
     }
     honoListener(req, res);
   });
-  const closeLive = attachLive(server, { service, hub, store });
+  const closeLive = attachLive(server, { service, hub, store, auth });
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
   const port = (server.address() as AddressInfo).port;

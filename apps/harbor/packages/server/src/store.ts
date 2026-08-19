@@ -43,6 +43,12 @@ export interface Store {
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
 
+  // identity mapping — (issuer, subject) → member (spec §4: the token proves
+  // WHO; this table says which member that is). Written only by the invite
+  // ceremony (and seeding); the oidc auth driver reads, never creates.
+  getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined>;
+  putIdentity(iss: string, sub: string, memberId: string): Promise<void>;
+
   // spaces
   putSpace(space: Space): Promise<void>;
   getSpace(id: string): Promise<Space | undefined>;

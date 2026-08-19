@@ -24,9 +24,45 @@ team and a Roadboard space (`src/main.ts`).
 - **Merge engine** (`merge.ts`): line-level three-way, passes the six golden
   fixtures (`test/merge.test.ts` is the conformance harness — it loads the
   fixture files directly). This exact engine ships in the real Harbor.
-- **Fake auth** (`auth.ts`): bearer `dev-<memberId>`; first sight creates the
-  member. The real OAuth journey (discovery/DCR/PKCE/refresh) replaces this file
-  and nothing else.
+- **Auth is a driver boundary** (`auth.ts`): `authenticate(token) → identity
+  (iss, sub)` then `resolveMember(identity) → member`. Two drivers: `dev`
+  (bearer `dev-<memberId>`; first sight creates the member — local dev and
+  tests only) and `oidc` (`auth-oidc.ts`: pinned issuer, RFC 8414 discovery,
+  JWKS-verified JWTs via jose, and an (iss, sub) → member lookup that NEVER
+  auto-creates — a valid token with no mapping is `not_a_member`, the state
+  the invite ceremony converts). With oidc configured, the org serves RFC 9728
+  protected-resource metadata at `/.well-known/oauth-protected-resource` and
+  401s carry `WWW-Authenticate: Bearer resource_metadata=…`, so MCP clients
+  find the OAuth dance mechanically. Live-verified against a real Supabase
+  Auth stack (ES256 access tokens, all three faces). `AUTH_ISSUER` flips
+  `pnpm dev` to oidc.
+- **The invite-binding ceremony** (`service.bindInvite`): accept-invite is
+  the ONE route whose caller may be authenticated-but-not-yet-a-member — it
+  binds (iss, sub) → member (minted ULID id; subjects live only in the
+  mapping table), seeds `displayName` from IdP profile claims, and adds the
+  membership. Every bind-time condition is org policy checked there and
+  nowhere else — v1 is the email-domain rule (`HARBOR_ALLOWED_DOMAINS`),
+  refusals are `policy_refused` with a human message. `Member` carries the
+  org-level admin bit (`role`; seed/provisioned creator = admin) — data now,
+  enforcement routes arrive with org management. Live-verified: a real
+  dance-issued token went not_a_member → bind → full access, and an
+  outsider's real token was policy-refused.
+- **Schema is versioned migrations** (`migrations.ts`): an in-code,
+  append-only ladder (`schema_migrations` ledger, advisory-locked, each
+  entry transactional). 001 is the bootstrap-era schema verbatim — fully
+  idempotent, so pre-migration databases adopt the ladder by no-opping
+  through it. Every future schema change appends an entry; arbitrary SQL
+  (backfills included) is legal from 002 on.
+- **Login/consent page** (`consent.ts`, `GET /oauth/consent`): the human
+  moment of the dance, mounted only with oidc + `AUTH_PUBLISHABLE_KEY`.
+  Social sign-in ONLY (Google + Microsoft) — every credentialed call goes
+  browser → AS directly; Harbor serves static HTML and never sees or proxies
+  a credential. Drives GoTrue's consent state machine (claim GET is
+  mandatory before the approve/deny POST; the response's `redirect_url`
+  carries the code back). Deployment wiring: the AS's `site_url` must point
+  at the org address (consent redirect target = site_url +
+  authorization_url_path). Live-verified: a real DCR + PKCE authorize 302s
+  onto this route, and the page's exact fetch sequence completes the dance.
 - **Storage**: `store.ts` is the data-access boundary, `memory-store.ts` the
   stub driver. The real Harbor lands a **Postgres-only** driver — no S3 in v1:
   contents are ≤1MB text riding in the change-set log rows; current state,
@@ -84,6 +120,8 @@ team and a Roadboard space (`src/main.ts`).
 
 **4. Auth is standard OAuth 2.x, stated as TIERED requirements, not schemas** (`invite.ts` header; spec §4, amended 2026-08-18). MUST = discovery (RFC 9728 protected-resource metadata on the org + RFC 8414 AS metadata), OAuth 2.1 authorization-code + PKCE (S256), standard bearer validation — the org itself is only ever a **resource server**; the authorization server behind it is pluggable (Supabase Auth flagship). SHOULD/org-policy = DCR (on / gated / off — off degrades "any agent" to approved-clients-only; clients must handle its absence) and refresh tokens (restricting them trades unattended automations for visible re-login). This tiering matches the MCP remote-server authorization contract (discovery MUST, DCR SHOULD), on purpose. The one auth artifact with a wire shape is the **invite link** (`/join/<token>`), resolvable pre-auth so the app can show what's being joined. Spec §4.
 
+Amended 2026-08-19 (spec §4: invites/profile/roles): an invite is one shape — an **open bearer secret**; acceptance binds to the authenticated (issuer, subject), and **every bind-time condition is org policy checked in one place at acceptance** (v1: the email-domain rule; a per-person email-bound invite variant was considered and dropped — policy checks never live in the token). Wire impact when built: the accept path gains a policy-refused state; `Member` gains the org-level **admin bit** (membership/policy powers only — the content plane stays role-flat) and later a `handle` (org-unique, deferred until human mentions ship; attribution keys on member id, never name/handle).
+
 **5. The agent face is six MCP tools** (`mcp.ts`): `list_spaces`, `read_asset`, `propose_change`, `post_to_topic`, `search_feed`, `manage_topic` — direct projections of the core operations. Semantics live in the tool design: `list_spaces` makes discovery mechanical (space ids + full file listings in one call — agents never guess ids or paths, and never depend on the README-link convention), reads bundle recent history, conflicts return current content + history, so any well-behaved agent gets read-before-write and retry for free. `reason` is **required** on the MCP face (optional on REST) — the spec's "agents always attach a why" convention, enforced where only agents call. Rowboat's own agent uses these exact tools; no privileged path. Spec §9. (Escape hatch: if dogfood grows spaces with very large file counts, the inline listings in `list_spaces` split or paginate — a v0-legal change.)
 
 **6. Conflicts are outcomes; errors are failures** (`changeset.ts`, `errors.ts`). A stale base is a normal result of merge-then-correct, not an error — it returns 200 with everything needed to retry in one round trip (`currentContent`, `currentVersion`, colliding `regions`, `recentHistory`). The error enum is for actual failures, with `read_only_limit` encoding the over-limit-means-read-only rule (spec §4: never lockout).
@@ -103,4 +141,4 @@ team and a Roadboard space (`src/main.ts`).
 1. ~~`packages/server`: the **in-memory stub Harbor**~~ — done: every route in `api.ts`, the WS frames in `events.ts`, the MCP tools, a merge engine passing the fixtures, fake single-org auth, and spec §11 running as an automated acceptance test.
 2. ~~`apps/x`: the client chain against the stub~~ — done: `packages/core/src/spaces/` (SpacesClient + SpacesLive + org registry, tested against the real stub), `spaces:*` IPC, functional renderer surfaces (design pass pending), and org-add auto-registering the MCP face in `mcp.json` so the user's own agent gets the spaces tools. Note: consumption ended up as `link:` (not `file:`) — pnpm copies `file:` deps at install time, which goes stale during active co-development. **zod must stay version-identical across apps/x and apps/harbor** (pinned 4.2.1) or type identity breaks across the link.
 3. ~~Postgres storage~~ — done: `pg-store.ts` implements the Store boundary over a minimal SQL adapter (`sql.ts`; node-postgres for deployments, in-process PGlite for hermetic tests). `withSpaceLock` = one transaction holding a per-space advisory lock, with every store call inside riding that transaction (AsyncLocalStorage). **The §11 day-in-the-life suite runs twice — memory and Postgres — with identical assertions**; that dual run is the storage-swap gate, permanently. `DATABASE_URL` flips `pnpm dev` to durable storage (seeding is restart-idempotent). Postgres-only on purpose: no S3 in v1 — ≤1MB text contents ride in the log rows; state/history/feed/stream are projections.
-4. Real OAuth (the invite.ts header contract: discovery, DCR, PKCE, refresh) replacing dev tokens — the last piece between the stub and a deployable Harbor. Then multi-org routing, then the design pass over the functional surfaces (SPACES_DESIGN_BRIEF, private repo).
+4. ~~Real OAuth~~ — **DONE end to end, live-verified against Supabase Auth**: the `oidc` auth driver, the login/consent page (buttons derived from the AS's /settings), the invite-binding ceremony, and the app side — `core/spaces/oauth.ts` (discovery → DCR → PKCE via system browser + one-shot loopback) with rotating-refresh token lifecycle in the org registry (`freshTokenFor`: single-flight, persist-rotated-refresh-before-use, needs-relogin marking) and the paste-invite-link join UI. The one unautomatable step: a real Google/Microsoft click-through, pending provider creds on a Supabase project. Next: multi-org routing, then the design pass over the functional surfaces (SPACES_DESIGN_BRIEF, private repo).

@@ -16,10 +16,19 @@ export const Attribution = z.object({
 });
 export type Attribution = z.infer<typeof Attribution>;
 
+/**
+ * The org-level admin bit (spec §4, amended 2026-08-19): admin powers are
+ * membership and policy, never content — the content plane is role-flat.
+ */
+export const MemberRole = z.enum(['admin', 'member']);
+export type MemberRole = z.infer<typeof MemberRole>;
+
 export const Member = z.object({
   id: MemberId,
+  /** Display-only, org-scoped, not unique. Attribution keys on `id`, never on names. */
   displayName: z.string().min(1).max(128),
   avatarUrl: z.string().url().optional(),
+  role: MemberRole.default('member'),
 });
 export type Member = z.infer<typeof Member>;
 

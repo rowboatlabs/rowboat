@@ -23,6 +23,7 @@ interface SpaceState {
 
 export class MemoryStore implements Store {
   private members = new Map<string, Member>();
+  private identities = new Map<string, string>(); // `${iss}\n${sub}` → memberId
   private spaces = new Map<string, SpaceState>();
   private invites = new Map<string, StoredInvite>();
 
@@ -42,6 +43,15 @@ export class MemoryStore implements Store {
 
   async putMember(member: Member): Promise<void> {
     this.members.set(member.id, member);
+  }
+
+  async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
+    const memberId = this.identities.get(`${iss}\n${sub}`);
+    return memberId === undefined ? undefined : this.members.get(memberId);
+  }
+
+  async putIdentity(iss: string, sub: string, memberId: string): Promise<void> {
+    this.identities.set(`${iss}\n${sub}`, memberId);
   }
 
   async putSpace(space: Space): Promise<void> {

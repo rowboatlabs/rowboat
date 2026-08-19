@@ -3,6 +3,8 @@ import type { ApiError, ErrorCode } from '@rowboat/spaces-protocol';
 const STATUS: Record<ErrorCode, number> = {
   unauthorized: 401,
   forbidden: 403,
+  not_a_member: 403,
+  policy_refused: 403,
   not_found: 404,
   invalid_path: 400,
   payload_too_large: 413,

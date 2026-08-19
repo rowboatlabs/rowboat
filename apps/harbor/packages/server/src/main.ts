@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import type { AuthDriver } from './auth.js';
+import { OidcAuthDriver } from './auth-oidc.js';
 import { PgStore } from './pg-store.js';
 import { startHarbor } from './server.js';
 import { postgresDb } from './sql.js';
@@ -7,7 +9,10 @@ import type { Store } from './store.js';
 // Dev entry: a seeded single-org Harbor for dogfooding. The seed is the
 // Roadboard slice from spec §11 — the team, the space, the roadmap.
 // In-memory by default (restart = clean slate); set DATABASE_URL for durable
-// Postgres storage (seeding is idempotent across restarts).
+// Postgres storage (seeding is idempotent across restarts). Set AUTH_ISSUER
+// to a pinned AS issuer URL for real OAuth (dev tokens otherwise — never
+// expose those publicly). Until the invite ceremony lands, oidc members are
+// seeded by inserting (iss, sub) rows into member_identities directly.
 
 const TEAM = [
   { id: 'ramnique', displayName: 'Ramnique' },
@@ -49,10 +54,25 @@ if (process.env.DATABASE_URL) {
   store = pgStore;
 }
 
+let auth: AuthDriver | undefined;
+if (process.env.AUTH_ISSUER) {
+  auth = new OidcAuthDriver({
+    issuer: process.env.AUTH_ISSUER,
+    ...(process.env.AUTH_AUDIENCE ? { audience: process.env.AUTH_AUDIENCE } : {}),
+  });
+}
+
 const harbor = await startHarbor({
   port,
   ...(store ? { store } : {}),
+  ...(auth ? { auth } : {}),
+  ...(auth && process.env.AUTH_PUBLISHABLE_KEY
+    ? { consent: { publishableKey: process.env.AUTH_PUBLISHABLE_KEY } }
+    : {}),
   orgName: process.env.HARBOR_ORG ?? 'Rowboat Labs (dev)',
+  ...(process.env.HARBOR_ALLOWED_DOMAINS
+    ? { allowedEmailDomains: process.env.HARBOR_ALLOWED_DOMAINS.split(',').map((d) => d.trim()).filter(Boolean) }
+    : {}),
   seedMembers: TEAM,
   seedSpaces: [
     {
@@ -75,7 +95,15 @@ console.log(`  render     ${harbor.url}/v1/*`);
 console.log(`  live       ws://localhost:${harbor.port}/v1/live`);
 console.log(`  agent      ${harbor.mcpUrl}  (MCP streamable HTTP)`);
 console.log(``);
-console.log(`  auth       Bearer dev-<memberId>   e.g. "Authorization: Bearer dev-ramnique"`);
+if (auth) {
+  console.log(`  auth       OIDC — issuer ${process.env.AUTH_ISSUER} (JWKS-verified bearers)`);
+  if (process.env.AUTH_PUBLISHABLE_KEY) {
+    console.log(`  consent    ${harbor.url}/oauth/consent  (point the AS's authorization_url here)`);
+  }
+} else {
+  console.log(`  auth       Bearer dev-<memberId>   e.g. "Authorization: Bearer dev-ramnique"`);
+  console.log(`             *** DEV AUTH — anyone can be anyone. NEVER expose this publicly. ***`);
+}
 console.log(`  members    ${TEAM.map((m) => m.id).join(', ')}`);
 for (const s of spaces) {
   console.log(`  space      ${s.name}  ${s.id}`);

@@ -3408,10 +3408,26 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({ orgs: z.array(SpacesOrgSummary) }),
   },
-  // v0 dev auth (stub Harbor): base URL + member id. The OAuth journey
-  // replaces the req shape here when the real Harbor lands.
+  // Dev auth (stub Harbor / Tailscale dogfood): base URL + member id.
   'spaces:addOrg': {
     req: z.object({ baseUrl: z.string(), memberId: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // The OAuth journey (spec §4). Paste an invite link → resolve pre-auth →
+  // join (system-browser dance if this install has no auth on the org, then
+  // the server-side bind ceremony). signInOrg reruns the dance for a
+  // needs-relogin org. policy_refused / not_a_member surface as error
+  // messages verbatim — they are the honest states.
+  'spaces:resolveInviteLink': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ baseUrl: z.string(), resolved: z.custom<SpacesTypes.ResolveInviteResult>() }),
+  },
+  'spaces:joinInvite': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:signInOrg': {
+    req: z.object({ orgId: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
   },
   'spaces:removeOrg': {

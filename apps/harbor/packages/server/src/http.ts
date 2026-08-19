@@ -1,7 +1,8 @@
 import { Hono, type Context } from 'hono';
 import { routes } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
-import { ensureMember, parseDevToken } from './auth.js';
+import type { AuthDriver, AuthIdentity } from './auth.js';
+import { consentPageHtml } from './consent.js';
 import { HarborError } from './errors.js';
 import type { HarborService } from './service.js';
 import type { Store } from './store.js';
@@ -11,7 +12,7 @@ import type { Store } from './store.js';
 // too before they leave, so contract drift fails loudly in the stub instead of
 // silently in a client.
 
-type Env = { Variables: { memberId: string } };
+type Env = { Variables: { memberId: string; identity?: AuthIdentity } };
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 function parseWith<S extends z.ZodType>(schema: S, value: unknown): z.infer<S> {
@@ -45,27 +46,79 @@ function actor(c: Context<Env>): { memberId: string } {
   return { memberId: c.get('memberId') };
 }
 
-export function buildHttpApp(deps: { service: HarborService; store: Store }): Hono<Env> {
-  const { service, store } = deps;
+export function buildHttpApp(deps: {
+  service: HarborService;
+  store: Store;
+  auth: AuthDriver;
+  /** Mounts the login/consent page (Supabase-flagship glue; consent.ts). */
+  consent?: { issuer: string; publishableKey: string };
+}): Hono<Env> {
+  const { service, store, auth, consent } = deps;
   const app = new Hono<Env>();
 
   app.onError((err, c) => {
     const e = err instanceof HarborError ? err : new HarborError('internal', 'unexpected error');
     if (!(err instanceof HarborError)) console.error('[harbor] internal error:', err);
+    // RFC 9728: 401s point clients at the resource metadata so any MCP-style
+    // client can find the OAuth dance mechanically.
+    if (e.code === 'unauthorized' && auth.metadata?.()) {
+      const origin = new URL(c.req.url).origin;
+      c.header('WWW-Authenticate', `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`);
+    }
     return c.json(e.toBody(), e.status as 400);
   });
 
+  // RFC 9728 protected-resource metadata: the org names its authorization
+  // server here (the org is only ever a resource server — spec §4). 404 under
+  // the dev driver, which has no AS.
+  app.get('/.well-known/oauth-protected-resource', (c) => {
+    const meta = auth.metadata?.();
+    if (!meta) throw new HarborError('not_found', 'no authorization server configured (dev auth)');
+    const origin = new URL(c.req.url).origin;
+    return c.json({
+      resource: origin,
+      authorization_servers: meta.authorizationServers,
+      bearer_methods_supported: ['header'],
+    });
+  });
+
+  // The human moment of the OAuth dance (pre-auth by nature — the person is
+  // here to GET a session). The AS's authorize endpoint redirects browsers
+  // here with an authorization_id.
+  if (consent) {
+    app.get('/oauth/consent', (c) =>
+      c.html(consentPageHtml({ ...consent, orgName: service.org.name })),
+    );
+  }
+
   // Auth on everything under /v1 except pre-auth invite resolution (spec §4)
-  // and the health probe.
+  // and the health probe. Accept-invite is the one route whose caller is
+  // legitimately authenticated-but-not-yet-a-member: it gets the identity and
+  // the handler runs the bind ceremony instead.
   app.use('/v1/*', async (c, next) => {
     if (c.req.path === routes.resolveInvite.path || c.req.path === '/v1/health') return next();
-    const memberId = parseDevToken(c.req.header('authorization'), new URL(c.req.url).searchParams.get('token'));
-    await ensureMember(store, memberId);
-    c.set('memberId', memberId);
+    const identity = await auth.authenticate(c.req.header('authorization'), new URL(c.req.url).searchParams.get('token'));
+    if (c.req.path === routes.acceptInvite.path) {
+      c.set('identity', identity);
+      try {
+        c.set('memberId', (await auth.resolveMember(store, identity)).id);
+      } catch (err) {
+        if (!(err instanceof HarborError) || err.code !== 'not_a_member') throw err;
+      }
+      return next();
+    }
+    const member = await auth.resolveMember(store, identity);
+    c.set('memberId', member.id);
     return next();
   });
 
   app.get('/v1/health', (c) => c.json({ ok: true, org: { name: service.org.name, address: service.org.address } }));
+
+  app.get(routes.me.path, async (c) => {
+    const member = await store.getMember(c.get('memberId'));
+    if (!member) throw new HarborError('not_found', 'member not found');
+    return reply(c, routes.me.response, { member });
+  });
 
   // --- spaces & membership ---------------------------------------------------
 
@@ -103,7 +156,13 @@ export function buildHttpApp(deps: { service: HarborService; store: Store }): Ho
 
   app.post(routes.acceptInvite.path, async (c) => {
     const input = await body(c, routes.acceptInvite.request);
-    return reply(c, routes.acceptInvite.response, await service.acceptInvite(actor(c), input.token));
+    // Existing member (dev driver, or a mapped identity joining another
+    // space) → plain accept. Unmapped identity → the bind ceremony.
+    const memberId = c.get('memberId');
+    const result = memberId
+      ? await service.acceptInvite({ memberId }, input.token)
+      : await service.bindInvite(c.get('identity')!, input.token);
+    return reply(c, routes.acceptInvite.response, result);
   });
 
   // Human-shareable invite link target. The app intercepts these URLs; anyone

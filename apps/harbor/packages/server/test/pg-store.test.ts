@@ -123,4 +123,15 @@ describe('PgStore through the service', () => {
     const reread = await store.getChangeSet(spaceId, r.changeSet.id);
     expect(reread?.attribution).toEqual({ memberId: 'gagan', actingMode: 'agent', agentName: 'Claude Code' });
   });
+
+  it('identity mapping: (iss, sub) → member, upsert repoints, unmapped is undefined', async () => {
+    const iss = 'https://as.example/auth/v1';
+    expect(await store.getMemberByIdentity(iss, 'sub-1')).toBeUndefined();
+    await store.putIdentity(iss, 'sub-1', 'ramnique');
+    expect((await store.getMemberByIdentity(iss, 'sub-1'))?.id).toBe('ramnique');
+    // Same sub under another issuer is a different identity (spec §4 namespacing).
+    expect(await store.getMemberByIdentity('https://other.example', 'sub-1')).toBeUndefined();
+    await store.putIdentity(iss, 'sub-1', 'gagan');
+    expect((await store.getMemberByIdentity(iss, 'sub-1'))?.id).toBe('gagan');
+  });
 });

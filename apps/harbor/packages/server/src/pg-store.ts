@@ -7,6 +7,7 @@ import type {
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
+import { migrate } from './migrations.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
 import type { AssetHead, Store, StoredEvent, StoredInvite } from './store.js';
 
@@ -19,88 +20,24 @@ import type { AssetHead, Store, StoredEvent, StoredInvite } from './store.js';
 // AsyncLocalStorage. Timestamps stay ISO-8601 text end to end — what the
 // contract carries is exactly what's stored. "offset" is reserved in SQL, so
 // columns are stream_offset.
+//
+// Schema lives in migrations.ts (versioned, append-only); init() applies it.
 
-const SCHEMA = `
-create table if not exists members (
-  id text primary key,
-  display_name text not null,
-  avatar_url text
-);
-create table if not exists spaces (
-  id text primary key,
-  name text not null,
-  created_at text not null
-);
-create table if not exists memberships (
-  space_id text not null,
-  member_id text not null,
-  joined_at text not null,
-  primary key (space_id, member_id)
-);
-create table if not exists assets (
-  space_id text not null,
-  path text not null,
-  version int not null,
-  updated_at text not null,
-  primary key (space_id, path)
-);
-create table if not exists asset_versions (
-  space_id text not null,
-  path text not null,
-  version int not null,
-  content text not null,
-  primary key (space_id, path, version)
-);
-create table if not exists change_sets (
-  id text primary key,
-  space_id text not null,
-  asset_path text not null,
-  base_version int not null,
-  result_version int not null,
-  attribution jsonb not null,
-  reason text,
-  committed_at text not null,
-  stream_offset int not null
-);
-create index if not exists change_sets_space_offset on change_sets (space_id, stream_offset desc);
-create table if not exists topics (
-  id text primary key,
-  space_id text not null,
-  title text not null,
-  created_by jsonb not null,
-  created_at text not null,
-  archived boolean not null,
-  anchor_change_set_id text,
-  last_activity_at text not null,
-  message_count int not null
-);
-create index if not exists topics_space on topics (space_id, last_activity_at desc);
-create table if not exists messages (
-  id text primary key,
-  space_id text not null,
-  topic_id text not null,
-  author jsonb not null,
-  body text not null,
-  posted_at text not null,
-  stream_offset int not null
-);
-create index if not exists messages_topic on messages (space_id, topic_id, stream_offset);
-create table if not exists invites (
-  token text primary key,
-  space_id text not null,
-  created_by text not null,
-  created_at text not null,
-  expires_at text,
-  revoked boolean not null default false
-);
-create table if not exists events (
-  space_id text not null,
-  stream_offset int not null,
-  at text not null,
-  event jsonb not null,
-  primary key (space_id, stream_offset)
-);
-`;
+interface MemberRow {
+  id: string;
+  display_name: string;
+  avatar_url: string | null;
+  role: Member['role'];
+}
+
+function rowToMember(r: MemberRow): Member {
+  return {
+    id: r.id,
+    displayName: r.display_name,
+    ...(r.avatar_url !== null ? { avatarUrl: r.avatar_url } : {}),
+    role: r.role,
+  };
+}
 
 interface ChangeSetRow {
   id: string;
@@ -182,7 +119,7 @@ export class PgStore implements Store {
   constructor(private readonly db: SqlDb) {}
 
   async init(): Promise<void> {
-    await this.db.exec(SCHEMA);
+    await migrate(this.db);
   }
 
   /** The active executor: the lock's transaction inside withSpaceLock, the pool outside. */
@@ -200,20 +137,36 @@ export class PgStore implements Store {
   // --- members ---------------------------------------------------------------
 
   async getMember(id: string): Promise<Member | undefined> {
-    const rows = await this.sql.query<{ id: string; display_name: string; avatar_url: string | null }>(
-      'select id, display_name, avatar_url from members where id = $1',
+    const rows = await this.sql.query<MemberRow>(
+      'select id, display_name, avatar_url, role from members where id = $1',
       [id],
     );
-    const r = rows[0];
-    if (!r) return undefined;
-    return { id: r.id, displayName: r.display_name, ...(r.avatar_url !== null ? { avatarUrl: r.avatar_url } : {}) };
+    return rows[0] ? rowToMember(rows[0]) : undefined;
   }
 
   async putMember(member: Member): Promise<void> {
     await this.sql.query(
-      `insert into members (id, display_name, avatar_url) values ($1, $2, $3)
-       on conflict (id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url`,
-      [member.id, member.displayName, member.avatarUrl ?? null],
+      `insert into members (id, display_name, avatar_url, role) values ($1, $2, $3, $4)
+       on conflict (id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url, role = excluded.role`,
+      [member.id, member.displayName, member.avatarUrl ?? null, member.role],
+    );
+  }
+
+  async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
+    const rows = await this.sql.query<MemberRow>(
+      `select m.id, m.display_name, m.avatar_url, m.role from member_identities mi
+       join members m on m.id = mi.member_id
+       where mi.iss = $1 and mi.sub = $2`,
+      [iss, sub],
+    );
+    return rows[0] ? rowToMember(rows[0]) : undefined;
+  }
+
+  async putIdentity(iss: string, sub: string, memberId: string): Promise<void> {
+    await this.sql.query(
+      `insert into member_identities (iss, sub, member_id) values ($1, $2, $3)
+       on conflict (iss, sub) do update set member_id = excluded.member_id`,
+      [iss, sub, memberId],
     );
   }
 

@@ -28,6 +28,18 @@ import { SpaceId } from './ids.js';
 //   https://<org>/join/<token>
 // Resolution is allowed pre-auth so the app can show what's being joined;
 // acceptance requires auth and is subject to org membership policy.
+//
+// Amended 2026-08-19 (spec §4: invites/profile/roles): an invite is ONE
+// shape — an open bearer secret. Acceptance binds to the authenticated
+// (issuer, subject); every bind-time condition is ORG POLICY checked in one
+// place at acceptance (v1: email-domain rule — a standing invite under a
+// domain rule is a safe de-facto public join link). No per-token claim
+// checks, by decision. "Invite by email" is delivery UX, not a security
+// artifact. On the wire (built 2026-08-19): the accept path refuses with
+// ErrorCode 'policy_refused' (human-readable message, never a cryptic 401);
+// Member carries the org-level admin bit (role — membership/policy powers
+// only; content plane stays role-flat). Deferred until human mentions ship:
+// an org-unique handle. Attribution keys on member id, never name/handle.
 
 export const InviteToken = z.string().min(16).max(256);
 export type InviteToken = z.infer<typeof InviteToken>;

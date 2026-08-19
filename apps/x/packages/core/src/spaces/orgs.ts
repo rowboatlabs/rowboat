@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import * as oauthClient from '../auth/oauth-client.js';
 import { WorkDir } from '../config/config.js';
 import { SpacesClient } from './client.js';
 import { SpacesLive } from './live.js';
@@ -9,14 +10,32 @@ import { SpacesLive } from './live.js';
 // and content always come live from the org (spec: one canonical copy, the app
 // is a browser).
 //
-// v0 auth is the stub's dev tokens. The OAuth journey (discovery/DCR/PKCE/
-// refresh, per the protocol's invite.ts header) replaces OrgAuth and
-// tokenFor() — nothing else in this file changes shape.
+// Two auth kinds: the stub's dev tokens, and real OAuth (the dance lives in
+// oauth.ts; this file owns the tokens' lifecycle). OAuth refresh tokens
+// ROTATE on every use (spike-verified), so refresh is single-flight per org
+// and the new refresh token is persisted BEFORE the new access token is
+// handed out. A dead refresh marks the org needs-relogin (`auth.error`) —
+// visible and gentle, never a silently failing org (spec §4).
 
-export interface OrgAuth {
-  kind: 'dev';
-  memberId: string;
+export interface OrgOAuthTokens {
+  access: string;
+  refresh: string;
+  /** Epoch seconds. */
+  expiresAt: number;
 }
+
+export type OrgAuth =
+  | { kind: 'dev'; memberId: string }
+  | {
+      kind: 'oauth';
+      issuer: string;
+      clientId: string;
+      /** Learned from /v1/me (or the invite bind) after the dance. */
+      memberId: string;
+      tokens: OrgOAuthTokens;
+      /** Set when refresh fails: the org needs a re-login. Cleared by a fresh dance. */
+      error?: string;
+    };
 
 export interface OrgRecord {
   /** Local identifier (not the org address — addresses can change via aliases). */
@@ -52,8 +71,62 @@ function writeConfig(config: SpacesOrgsConfig): void {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
-function tokenFor(auth: OrgAuth): string {
-  return `dev-${auth.memberId}`;
+/** The bearer as of right now, no refresh — for synchronous derivation (MCP entries). */
+function currentBearer(auth: OrgAuth): string {
+  return auth.kind === 'dev' ? `dev-${auth.memberId}` : auth.tokens.access;
+}
+
+function mutateOrgAuth(orgId: string, fn: (auth: Extract<OrgAuth, { kind: 'oauth' }>) => void): void {
+  const config = readConfig();
+  const org = config.orgs.find((o) => o.id === orgId);
+  if (!org || org.auth.kind !== 'oauth') return;
+  fn(org.auth);
+  writeConfig(config);
+}
+
+const refreshFlights = new Map<string, Promise<string>>();
+
+/**
+ * A token guaranteed usable right now: dev tokens verbatim; OAuth access
+ * tokens refreshed when expired (or on `forceRefresh` — the 401 path).
+ * Single-flight per org: rotation means two parallel refreshes would
+ * invalidate each other's result.
+ */
+export async function freshTokenFor(orgId: string, opts?: { forceRefresh?: boolean }): Promise<string> {
+  const org = getOrg(orgId);
+  if (!org) throw new Error(`unknown org ${orgId}`);
+  if (org.auth.kind === 'dev') return `dev-${org.auth.memberId}`;
+  const now = Math.floor(Date.now() / 1000);
+  if (!opts?.forceRefresh && org.auth.tokens.expiresAt > now + 60) return org.auth.tokens.access;
+  const inFlight = refreshFlights.get(orgId);
+  if (inFlight) return inFlight;
+  const flight = refreshOrgTokens(org.id, org.auth).finally(() => refreshFlights.delete(orgId));
+  refreshFlights.set(orgId, flight);
+  return flight;
+}
+
+async function refreshOrgTokens(orgId: string, auth: Extract<OrgAuth, { kind: 'oauth' }>): Promise<string> {
+  try {
+    const config = await oauthClient.discoverConfiguration(auth.issuer, auth.clientId);
+    const refreshed = await oauthClient.refreshTokens(config, auth.tokens.refresh);
+    // Rotation discipline: the OLD refresh token just died — persist the new
+    // pair before anything uses the new access token.
+    mutateOrgAuth(orgId, (a) => {
+      a.tokens = {
+        access: refreshed.access_token,
+        refresh: refreshed.refresh_token ?? auth.tokens.refresh,
+        expiresAt: refreshed.expires_at,
+      };
+      delete a.error;
+    });
+    return refreshed.access_token;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    mutateOrgAuth(orgId, (a) => {
+      a.error = message;
+    });
+    throw new Error(`org needs re-login: ${message}`);
+  }
 }
 
 // Each org's MCP agent face is exposed to the user's own agent as a DERIVED
@@ -81,10 +154,13 @@ function deriveWithNames(orgRecords: OrgRecord[]): {
     let name = `spaces-${slug}`;
     if (entries[name]) name = `spaces-${slug}-${org.auth.memberId}`;
     if (entries[name]) name = `spaces-${org.id}`;
+    // OAuth orgs: the CURRENT access token (entries derive per-read; a
+    // rotation mid-session means one failed MCP call, then recovery on the
+    // next derive).
     entries[name] = {
       url: `${org.baseUrl}/mcp`,
       headers: {
-        authorization: `Bearer ${tokenFor(org.auth)}`,
+        authorization: `Bearer ${currentBearer(org.auth)}`,
         'x-agent-name': 'Rowboat',
       },
     };
@@ -133,7 +209,7 @@ export function getOrg(orgId: string): OrgRecord | undefined {
  */
 export async function addDevOrg(input: { baseUrl: string; memberId: string }): Promise<OrgRecord> {
   const baseUrl = input.baseUrl.replace(/\/$/, '');
-  const probe = new SpacesClient({ baseUrl, token: tokenFor({ kind: 'dev', memberId: input.memberId }) });
+  const probe = new SpacesClient({ baseUrl, token: `dev-${input.memberId}` });
   const health = await probe.health();
 
   const config = readConfig();
@@ -173,13 +249,61 @@ export function orgRuntime(orgId: string): OrgRuntime {
   if (cached) return cached;
   const org = getOrg(orgId);
   if (!org) throw new Error(`unknown org ${orgId}`);
-  const token = tokenFor(org.auth);
+  const token = (opts?: { forceRefresh?: boolean }) => freshTokenFor(orgId, opts);
   const runtime: OrgRuntime = {
     client: new SpacesClient({ baseUrl: org.baseUrl, token }),
     live: new SpacesLive({ baseUrl: org.baseUrl, token }),
   };
   runtimes.set(orgId, runtime);
   return runtime;
+}
+
+/**
+ * Save (or re-auth) an OAuth org after a completed dance. Matches an existing
+ * record by explicit id (re-login) or by (baseUrl, memberId); otherwise
+ * creates one. Clears any needs-relogin error and resets the cached runtime
+ * so the next client uses the new tokens immediately.
+ */
+export function upsertOAuthOrg(input: {
+  orgId?: string;
+  baseUrl: string;
+  name: string;
+  address: string;
+  issuer: string;
+  clientId: string;
+  memberId: string;
+  tokens: OrgOAuthTokens;
+}): OrgRecord {
+  const baseUrl = input.baseUrl.replace(/\/$/, '');
+  const auth: OrgAuth = {
+    kind: 'oauth',
+    issuer: input.issuer,
+    clientId: input.clientId,
+    memberId: input.memberId,
+    tokens: input.tokens,
+  };
+  const config = readConfig();
+  const existing = config.orgs.find((o) =>
+    input.orgId ? o.id === input.orgId : o.baseUrl === baseUrl && o.auth.kind === 'oauth' && o.auth.memberId === input.memberId,
+  );
+  const record: OrgRecord = existing ?? {
+    id: `org-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    name: input.name,
+    address: input.address,
+    baseUrl,
+    auth,
+  };
+  record.name = input.name;
+  record.address = input.address;
+  record.auth = auth;
+  if (!existing) config.orgs.push(record);
+  writeConfig(config);
+  const runtime = runtimes.get(record.id);
+  if (runtime) {
+    runtime.live.close();
+    runtimes.delete(record.id);
+  }
+  return record;
 }
 
 export function getClient(orgId: string): SpacesClient {
