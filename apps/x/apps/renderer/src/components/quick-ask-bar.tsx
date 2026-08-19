@@ -170,31 +170,47 @@ export function QuickAskBar() {
   // Which role the window is playing: summoned Spotlight bar or pinned call
   // pill (the old #video-popout, folded into this window). Pushed by main on
   // every transition; fetched once to cover the load race. 'hidden' renders
-  // as summoned — the window is invisible then anyway.
-  const [mode, setMode] = useState<CompanionMode>('summoned')
+  // as summoned — the window is invisible then anyway. UNKNOWN until the
+  // first push/fetch lands: nothing is painted before then, so a freshly
+  // created window can't flash the wrong role (the summoned bar used to
+  // show for the whole first page load before the Skipper replaced it).
+  const [role, setRole] = useState<{ seq: number; mode: CompanionMode; collapsed: boolean; surface: 'card' | 'pill' } | null>(null)
+  useEffect(() => {
+    const apply = (m: { seq: number; mode: CompanionMode; collapsed: boolean; surface: 'card' | 'pill' }) => {
+      // Pushes and the fetch can interleave — the highest seq is the truth.
+      setRole((prev) => (prev && prev.seq > m.seq ? prev : { ...m, mode: m.mode === 'hidden' ? 'summoned' : m.mode }))
+    }
+    const cleanup = window.ipc.on('quick-ask:mode', apply)
+    void window.ipc.invoke('quickAsk:getMode', null).then(apply).catch(() => {})
+    return cleanup
+  }, [])
+  // Paint ack: once the pushed role is on screen, tell main — it reveals
+  // (or resizes) the window only then, never over the previous role's
+  // layout. Two frames in: the first rAF runs before this commit is
+  // painted, the second after it has been.
+  const roleSeq = role?.seq ?? 0
+  useEffect(() => {
+    if (!roleSeq) return
+    let cancelled = false
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return
+        void window.ipc.invoke('quickAsk:modeApplied', { seq: roleSeq }).catch(() => {})
+      })
+    })
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf1)
+    }
+  }, [roleSeq])
+  const mode: CompanionMode = role?.mode ?? 'summoned'
   // Pinned presentation: expanded vs tucked down to just the mascot, and
   // WHICH surface expanded means — untuck returns you to the surface you
   // tucked from ('card' for bar-originated voice calls, 'pill' for calls
   // with live pixels). Main owns both (it resizes the window); pushes keep
   // us in sync.
-  const [collapsed, setCollapsed] = useState(false)
-  const [surface, setSurface] = useState<'card' | 'pill'>('pill')
-  useEffect(() => {
-    const cleanup = window.ipc.on('quick-ask:mode', (m) => {
-      setMode(m.mode === 'hidden' ? 'summoned' : m.mode)
-      setCollapsed(m.collapsed)
-      setSurface(m.surface)
-    })
-    void window.ipc
-      .invoke('quickAsk:getMode', null)
-      .then((m) => {
-        setMode(m.mode === 'hidden' ? 'summoned' : m.mode)
-        setCollapsed(m.collapsed)
-        setSurface(m.surface)
-      })
-      .catch(() => {})
-    return cleanup
-  }, [])
+  const collapsed = role?.collapsed ?? false
+  const surface = role?.surface ?? 'card'
   const pinned = mode === 'pinned'
   // The bar-style card hosting a LIVE voice call ("bring the text back"
   // from a bar-originated tuck): same layout, call-aware contents.
@@ -244,6 +260,15 @@ export function QuickAskBar() {
   // this window only renders it (same contract as the old popout).
   const [callState, setCallState] = useState<CallState>(IDLE_CALL_STATE)
   speakerMutedRef.current = callState.speakerMuted
+  // Leaving the pinned role ends this window's view of the call: drop the
+  // mirror so a later summon never paints the previous call's status or
+  // reply for a frame (main replays the live state on every pin). Render-
+  // time previous-state adjustment (React's no-effect pattern).
+  const [prevPinned, setPrevPinned] = useState(pinned)
+  if (prevPinned !== pinned) {
+    setPrevPinned(pinned)
+    if (!pinned) setCallState(IDLE_CALL_STATE)
+  }
   // Flicker-held activity label shared by every surface this window renders
   // (Skipper chip + panel, tucked chip, pill chip).
   const heldActivity = useHeldLabel(callState.activityText)
@@ -706,6 +731,60 @@ export function QuickAskBar() {
     }
   }, [asked, pinned, surface, collapsed, requestCollapsed, sendAction, startRecording, submitRecording, cancelRecording, reset, dismiss])
 
+  // --- Derived values for the card layout. Computed BEFORE the early
+  // returns below: the useMemo is a hook, and a hook after a conditional
+  // return changes the hook count between renders (React throws "rendered
+  // more/fewer hooks" and unmounts the whole window — the old pill ⇄ card
+  // crash on camera toggles).
+
+  // The bar-style card — summoned (no call), or the SKIPPER (a live voice
+  // call on the card surface, text panel open or folded). One layout (the
+  // last return below): the mascot column is the SAME mounted node in both
+  // Skipper states — fold/unfold only adds/removes the card beside it, so
+  // the mascot never moves, resizes, or replays its entry animation. The
+  // exchange comes from the call's mirror on the call card, from the
+  // quick-ask mirror summoned.
+  const skipper = pinned && surface === 'card'
+  const panelAsked = callCard ? callState.questionText : asked
+  const panelText = callCard ? (callState.responseText ?? '') : (answer?.text ?? '')
+  const panelProcessing = callCard ? callState.status === 'thinking' : processing
+  const panelStatusText = callCard
+    ? (heldActivity ?? 'Thinking…')
+    : (answer?.statusText || 'Thinking…')
+  // One-line caption under the Skipper's mascot: the in-flight utterance
+  // wins; otherwise the tail of the reply while it speaks.
+  const skipperReplyTail =
+    skipper && (callState.ttsState !== 'idle' || callState.status === 'thinking')
+      ? (callState.responseText ?? '')
+          .replace(/[#*_`>[\]]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(-90)
+      : ''
+  const skipperCaption = skipper ? (callState.interimText || skipperReplyTail) : ''
+
+  // History includes the chat's LATEST messages — but the current exchange
+  // is already rendered below the "earlier" divider, so trim it off the
+  // tail. Matched on the question text (the reliable key: a streaming reply
+  // can differ from its stored copy): drop the newest user message and
+  // everything after it iff it IS the question on display.
+  const earlierItems = useMemo(() => {
+    if (!historyData) return historyData
+    const current = (panelAsked ?? '').trim()
+    if (!current) return historyData
+    for (let i = historyData.length - 1; i >= 0; i--) {
+      if (historyData[i].role !== 'user') continue
+      if (historyData[i].content.trim() === current) return historyData.slice(0, i)
+      break
+    }
+    return historyData
+  }, [historyData, panelAsked])
+
+  // Role not known yet (first load): paint NOTHING. Main only reveals the
+  // window after the role's paint ack anyway — this keeps the fallback path
+  // (a late ack) from ever showing the wrong layout.
+  if (!role) return null
+
   // Pinned PILL role, tucked: just the mascot (voice-to-voice). The card
   // surface does NOT branch here — its folded state renders inside the one
   // Skipper layout below, so the mascot never remounts (and never moves) on
@@ -752,48 +831,6 @@ export function QuickAskBar() {
       </>
     )
   }
-
-  // The bar-style card — summoned (no call), or the SKIPPER (a live voice
-  // call on the card surface, text panel open or folded). One layout: the
-  // mascot column below is the SAME mounted node in both Skipper states —
-  // fold/unfold only adds/removes the card beside it, so the mascot never
-  // moves, resizes, or replays its entry animation. The exchange comes from
-  // the call's mirror on the call card, from the quick-ask mirror summoned.
-  const skipper = pinned && surface === 'card'
-  const panelAsked = callCard ? callState.questionText : asked
-  const panelText = callCard ? (callState.responseText ?? '') : (answer?.text ?? '')
-  const panelProcessing = callCard ? callState.status === 'thinking' : processing
-  const panelStatusText = callCard
-    ? (heldActivity ?? 'Thinking…')
-    : (answer?.statusText || 'Thinking…')
-  // One-line caption under the Skipper's mascot: the in-flight utterance
-  // wins; otherwise the tail of the reply while it speaks.
-  const skipperReplyTail =
-    skipper && (callState.ttsState !== 'idle' || callState.status === 'thinking')
-      ? (callState.responseText ?? '')
-          .replace(/[#*_`>[\]]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(-90)
-      : ''
-  const skipperCaption = skipper ? (callState.interimText || skipperReplyTail) : ''
-
-  // History includes the chat's LATEST messages — but the current exchange
-  // is already rendered below the "earlier" divider, so trim it off the
-  // tail. Matched on the question text (the reliable key: a streaming reply
-  // can differ from its stored copy): drop the newest user message and
-  // everything after it iff it IS the question on display.
-  const earlierItems = useMemo(() => {
-    if (!historyData) return historyData
-    const current = (panelAsked ?? '').trim()
-    if (!current) return historyData
-    for (let i = historyData.length - 1; i >= 0; i--) {
-      if (historyData[i].role !== 'user') continue
-      if (historyData[i].content.trim() === current) return historyData.slice(0, i)
-      break
-    }
-    return historyData
-  }, [historyData, panelAsked])
 
   return (
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden">

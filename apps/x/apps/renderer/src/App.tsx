@@ -1504,11 +1504,14 @@ function App() {
     }
   }, [video, setPttState])
 
-  // ONE hover mode: the ⌥⇧Space relay, the card's tuck handle, and the
-  // composer's call button all start THIS — a companion voice session on
-  // the Skipper surface. Sticky screen share replays the user's standing
-  // choice; without voice configured it falls back to the text card.
-  const startHoverCall = useCallback(async () => {
+  // ONE hover mode: the ⌥⇧Space relay (chord, tray item, the card's tuck
+  // handle), the composer's call button, the Home Skipper, and the
+  // discoverability toast all start THIS — a companion voice session on the
+  // Skipper surface. Sticky screen share replays the user's standing choice
+  // (`share` forces it on for this summon); without voice configured it
+  // falls back to the text card — and so does a session that fails to
+  // start, so a summon is never a silent no-op.
+  const startHoverCall = useCallback(async (opts: { share?: boolean } = {}) => {
     // Tell main the relay landed and a session is coming — cancels the
     // "nothing answered" text-card fallback so slow device startup can't
     // flash the old summoned bar before the Skipper pins.
@@ -1521,6 +1524,7 @@ function App() {
       void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
       return
     }
+    // A start is already in flight — its pin is coming.
     if (companionVoiceStartingRef.current) return
     if (!(voiceAvailable && ttsAvailable)) {
       // Voice-first has no voice — fall back to the text card.
@@ -1531,16 +1535,34 @@ function App() {
     companionVoiceStartingRef.current = true
     try {
       await startCall('voice')
-      // Sticky screen share: opted in once from the mascot's share pin →
-      // every summon starts already sharing, until toggled off.
-      if (localStorage.getItem('companion-share-sticky') === '1') {
-        const shared = await video.startScreenShare()
-        if (!shared) setPermissionDialog('screen-recording')
-      }
     } finally {
+      // Released the moment the call engine settles — NOT held across the
+      // screen share below: a share that stalls on the Screen Recording
+      // permission (getDisplayMedia can hang for seconds) used to leave
+      // this latched, and every later summon died silently against it.
       companionVoiceStartingRef.current = false
     }
+    if (!inCallRef.current) {
+      // The session didn't start (device denied/unavailable — startCall
+      // already explained why). The gesture still deserves a surface.
+      companionVoiceRef.current = false
+      void window.ipc.invoke('quickAsk:show', null).catch(() => {})
+      return
+    }
+    // Sticky screen share: opted in once from the mascot's share pin →
+    // every summon starts already sharing, until toggled off. Fire-and-
+    // forget: the Skipper is already up, the share badge lights when the
+    // capture is really live.
+    if (opts.share || localStorage.getItem('companion-share-sticky') === '1') {
+      void video.startScreenShare().then((shared) => {
+        if (!shared) setPermissionDialog('screen-recording')
+      })
+    }
   }, [voiceAvailable, ttsAvailable, startCall, video])
+  // Stable handle for the tuck-relay listener below — registered once,
+  // always calling the latest closure.
+  const startHoverCallRef = useRef(startHoverCall)
+  startHoverCallRef.current = startHoverCall
 
   // Composer call buttons: the call button on a chat always means "float
   // THIS chat". No call yet → start the hover session bound to it; call
@@ -1569,8 +1591,10 @@ function App() {
       void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
       return
     }
-    if (preset === 'voice') {
-      void startHoverCall()
+    if (preset === 'voice' || preset === 'share') {
+      // Both are the hover companion — 'share' is the same summon with the
+      // screen shared from the start (the menu's "Share screen").
+      void startHoverCall({ share: preset === 'share' })
     } else {
       void startCall(preset)
     }
@@ -1947,7 +1971,29 @@ function App() {
   // The main process caches the latest state and replays it when the popout
   // loads.
   useEffect(() => {
-    if (!inCall) return
+    if (!inCall) {
+      // Call over (or not started): push an explicit idle state so main's
+      // cache can't carry a stale cameraOn/status into the next summon —
+      // main keeps the cache across fullscreen ⇄ popout flaps of a LIVE
+      // call (camera on must come back as the pill), so only this end
+      // marker clears it.
+      void window.ipc
+        .invoke('video:popoutState', {
+          ttsState: 'idle',
+          status: null,
+          cameraOn: false,
+          micMuted: false,
+          screenSharing: false,
+          speakerMuted: false,
+          activityText: null,
+          interimText: null,
+          pttLocked: false,
+          responseText: null,
+          questionText: null,
+        })
+        .catch(() => {})
+      return
+    }
     void window.ipc
       .invoke('video:popoutState', {
         ttsState: tts.state,
@@ -2037,7 +2083,7 @@ function App() {
         .catch(() => quickAskShortcut.DEFAULT_QUICK_ASK_SHORTCUT)
       playPopCue()
       toast('Ask Rowboat from anywhere', {
-        description: `Press ${quickAskShortcut.formatShortcut(accelerator, isMac)} in any app for a quick question — the answer shows up right there and in your chat.`,
+        description: `Press ${quickAskShortcut.formatShortcut(accelerator, isMac)} in any app to summon your Skipper — talk or type, the answer shows up right there.`,
         duration: 12000,
         closeButton: true,
         // Lift the card off the page, and move sonner's close button (which
@@ -2046,7 +2092,10 @@ function App() {
           'shadow-xl shadow-black/25 [&_[data-close-button]]:!left-auto [&_[data-close-button]]:!right-0 [&_[data-close-button]]:!translate-x-[15%] [&_[data-close-button]]:!-translate-y-[15%]',
         action: {
           label: 'Try it',
-          onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
+          // The SAME summon the chord performs — through main's relay, so
+          // the Skipper lands focused exactly as it does for the shortcut
+          // (text card only as its own voice-unavailable fallback).
+          onClick: () => void window.ipc.invoke('quickAsk:tuck', null).catch(() => {}),
         },
       })
     }, 3000)
@@ -2358,12 +2407,18 @@ function App() {
   // (The old surface-based text-mode hush is gone: speech now follows each
   // question's modality, plus the explicit speaker mute below.)
 
-  // Tuck relay (⌥⇧Space, the card's tuck handle): the ONE hover flow.
+  // Tuck relay (⌥⇧Space, the tray item, the card's tuck handle): the ONE
+  // hover flow. Registered once (via the ref), then main is told this
+  // window can take relays — a summon that arrived while this window was
+  // still loading (or didn't exist yet: the user had closed it and the
+  // shortcut recreated it hidden) is delivered on that handshake.
   useEffect(() => {
-    return window.ipc.on('quick-ask:tuck', () => {
-      void startHoverCall()
+    const off = window.ipc.on('quick-ask:tuck', () => {
+      void startHoverCallRef.current()
     })
-  }, [startHoverCall])
+    void window.ipc.invoke('quickAsk:appReady', null).catch(() => {})
+    return off
+  }, [])
 
   // Mirror the in-flight answer back to the bar while a quick-ask turn is
   // live: streaming text while generating, the final assistant message when

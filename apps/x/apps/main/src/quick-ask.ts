@@ -28,6 +28,13 @@
  * Pinned geometry: a compact pill sized to its content (the renderer asks
  * for height changes over video:popoutResize when its response panel
  * opens/folds), like the old popout window.
+ *
+ * Reveal protocol: every `quick-ask:mode` push carries a sequence number and
+ * the renderer acks it (`quickAsk:modeApplied`) once that role is PAINTED.
+ * The window is revealed (opacity 0 → 1, focus) only after the ack for the
+ * current role, so the user never sees the previous role's layout — the
+ * summoned bar flashing for a frame (or, on first creation, for the whole
+ * page load) before the Skipper replaces it.
  */
 import { DEV_SERVER_URL } from './dev-server.js';
 import { app, BrowserWindow, globalShortcut, screen } from 'electron';
@@ -67,21 +74,42 @@ const scaled = (v: number) => Math.round(v * SCALE);
 
 let quickAskWin: BrowserWindow | null = null;
 let mode: CompanionMode = 'hidden';
+// Role transitions are the breadcrumbs every "the companion vanished /
+// flashed / never came" report needs — one line each, nothing per-frame.
+function setMode(next: CompanionMode, why: string) {
+  if (next === mode) return;
+  console.log(`[companion] ${mode} → ${next} (${why})`);
+  mode = next;
+}
 // Pinned presentation: full surface vs tucked down to just the mascot.
 let pinnedCollapsed = false;
 // The expanded surface currently applied to the window geometry (so a
 // device flip mid-call can morph card ⇄ pill in place).
 let appliedExpandedSurface: 'card' | 'pill' = 'pill';
-// A hover summon (⌥⇧Space or the composer's call button relay) is in
-// flight: the NEXT pin gets focus (the user just asked for their
-// companion), and if no pin arrives shortly the text card falls back so
-// the shortcut is never a silent no-op. Time-boxed so a stale summon can't
-// leak into an unrelated call.
+// A hover summon (⌥⇧Space, the tray item, or the composer's call button
+// relay) is in flight: the NEXT pin gets focus (the user just asked for
+// their companion), and if no pin arrives shortly the text card falls back
+// so the shortcut is never a silent no-op. Time-boxed so a stale summon
+// can't leak into an unrelated call.
 let summonPendingAt = 0;
 // The ⌥⇧Space no-op fallback: shows the text card if nothing answers the
 // tuck relay. Cancelled the moment the app ACKS the relay (it may then take
 // seconds to acquire devices — that must not flash the text card).
 let summonFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+// When the last tuck relay went out and has not been acked yet (0 = none).
+// A relay can be lost when the app window is still loading (login-hidden
+// start, or the window being recreated because the user had closed it) —
+// the app's `quickAsk:appReady` handshake re-sends a recent unacked one.
+let summonRelayAt = 0;
+const SUMMON_RELAY_RETRY_WINDOW_MS = 15_000;
+// How long a relay may go unanswered before the text card falls back: short
+// when an app window is up (the ack is synchronous on its side), longer
+// while the app window itself is booting.
+const SUMMON_FALLBACK_MS = 1500;
+const SUMMON_FALLBACK_APP_BOOT_MS = 8000;
+// Provided by main.ts: (re)create the app window hidden when a summon finds
+// none — the user closed it, but "Quick Ask from anywhere" must still work.
+let ensureAppWindow: (() => void) | null = null;
 
 function clearSummonFallback() {
   if (summonFallbackTimer) {
@@ -90,9 +118,40 @@ function clearSummonFallback() {
   }
 }
 
+function armSummonFallback(ms: number) {
+  clearSummonFallback();
+  summonFallbackTimer = setTimeout(() => {
+    summonFallbackTimer = null;
+    if (mode === 'hidden') showSummonedCard(false);
+  }, ms);
+}
+
 /** The app window acknowledged a tuck relay and is starting the session. */
 export function ackSummon() {
   clearSummonFallback();
+  summonRelayAt = 0;
+}
+
+/**
+ * The app window's renderer registered its hover relay listener. A summon
+ * that went out while it was loading (or before it existed) is delivered
+ * now — the shortcut must never be a silent no-op just because the app
+ * window was closed or still booting.
+ */
+export function onAppReady() {
+  if (summonRelayAt && Date.now() - summonRelayAt < SUMMON_RELAY_RETRY_WINDOW_MS) {
+    relaySummon();
+  }
+}
+
+/**
+ * The app window is gone. A live call dies with it (the app owns the call
+ * engine), so a pinned companion must not linger as a dead surface — and
+ * its cached call state must not leak into the next session.
+ */
+export function onAppWindowClosed() {
+  lastPopoutState = null;
+  if (mode === 'pinned') setCompanionPinned(false);
 }
 
 // The Skipper's anchor: the bottom-right corner of the window, i.e. where
@@ -125,7 +184,8 @@ function cornerBounds(corner: { x: number; y: number }, w: number, h: number): E
 }
 
 // Last call state pushed by the app window — replayed when the window
-// (re)loads, so the pill never renders from a blank guess.
+// (re)loads and on every pin, so the surface never renders from a blank (or
+// stale) guess.
 type PopoutState = {
   ttsState: 'idle' | 'synthesizing' | 'speaking';
   status: 'idle' | 'listening' | 'thinking' | 'speaking' | null;
@@ -153,7 +213,7 @@ export function isPinnedCollapsed(): boolean {
   return pinnedCollapsed;
 }
 
-export function markSummonPending() {
+function markSummonPending() {
   summonPendingAt = Date.now();
 }
 
@@ -169,11 +229,77 @@ export function getExpandedSurface(): 'card' | 'pill' {
   return lastPopoutState?.cameraOn ? 'pill' : 'card';
 }
 
-function pushMode(win: BrowserWindow) {
+// --- Reveal protocol (see the file header) ---
+let modeSeq = 0;
+export function getModeSeq(): number {
+  return modeSeq;
+}
+// The one action waiting for the renderer to paint a pushed role. A newer
+// push supersedes it (the latest role wins); a timeout keeps a wedged or
+// still-loading renderer from holding the window hostage.
+let pendingPaint: { seq: number; fire: () => void; timer: ReturnType<typeof setTimeout> } | null = null;
+const PAINT_ACK_TIMEOUT_MS = 600;
+const PAINT_ACK_LOADING_TIMEOUT_MS = 6000;
+
+function pushMode(win: BrowserWindow): number {
+  modeSeq += 1;
   win.webContents.send('quick-ask:mode', {
+    seq: modeSeq,
     mode,
     collapsed: pinnedCollapsed,
     surface: getExpandedSurface(),
+  });
+  return modeSeq;
+}
+
+/**
+ * Run `action` once the renderer has painted the role pushed as `seq` (or
+ * any later one) — used to reveal the window, and to shrink it on fold so
+ * the old layout is never squeezed into the new bounds for a frame.
+ */
+function afterModePainted(win: BrowserWindow, seq: number, action: () => void) {
+  if (pendingPaint) clearTimeout(pendingPaint.timer);
+  const entry = {
+    seq,
+    fire: () => {
+      if (pendingPaint !== entry) return;
+      clearTimeout(entry.timer);
+      pendingPaint = null;
+      if (!win.isDestroyed()) action();
+    },
+    timer: setTimeout(() => entry.fire(), win.webContents.isLoading() ? PAINT_ACK_LOADING_TIMEOUT_MS : PAINT_ACK_TIMEOUT_MS),
+  };
+  pendingPaint = entry;
+}
+
+/** The renderer painted the role pushed as `seq`. */
+export function onModeApplied(seq: number) {
+  if (pendingPaint && seq >= pendingPaint.seq) pendingPaint.fire();
+}
+
+// A hide supersedes whatever reveal/resize was waiting on a paint — a late
+// ack must not focus (or resize) a window that's gone away meanwhile.
+function cancelPendingPaint() {
+  if (!pendingPaint) return;
+  clearTimeout(pendingPaint.timer);
+  pendingPaint = null;
+}
+
+/**
+ * Show the window for the role just pushed: ordered in immediately but
+ * fully transparent (so the renderer, which is paused while hidden, can
+ * paint), then made opaque — and focused when asked — once the paint ack
+ * lands. Revealing only after the ack is what keeps the previous role's
+ * layout from ever flashing.
+ */
+function revealAfterMode(win: BrowserWindow, seq: number, opts: { focus: boolean }) {
+  if (!win.isVisible()) {
+    win.setOpacity(0);
+    win.showInactive();
+  }
+  afterModePainted(win, seq, () => {
+    win.setOpacity(1);
+    if (opts.focus && win.isVisible()) win.focus();
   });
 }
 
@@ -227,7 +353,8 @@ function createWindow(): BrowserWindow {
   win.on('blur', () => {
     if (win.isDestroyed() || !win.isVisible()) return;
     if (mode === 'summoned') {
-      mode = 'hidden';
+      setMode('hidden', 'blur');
+      cancelPendingPaint();
       win.hide();
     }
   });
@@ -242,7 +369,9 @@ function createWindow(): BrowserWindow {
     if (quickAskWin === win) quickAskWin = null;
   });
   // Zoom factor resets on navigation — apply it once the page is in, and
-  // replay the state the renderer needs to pick up where things stand.
+  // replay the state the renderer needs to pick up where things stand. (The
+  // renderer also PULLS all of it on mount — these pushes can land before
+  // React has subscribed.)
   win.webContents.on('did-finish-load', () => {
     win.webContents.setZoomFactor(SCALE);
     pushMode(win);
@@ -307,7 +436,8 @@ export function hideQuickAsk() {
   const win = getQuickAskWindow();
   // Never let a stray hide take down a live call surface.
   if (mode === 'pinned') return;
-  mode = 'hidden';
+  setMode('hidden', 'dismiss');
+  cancelPendingPaint();
   if (win?.isVisible()) win.hide();
 }
 
@@ -322,7 +452,34 @@ function findAppWindow(): BrowserWindow | undefined {
   });
 }
 
-export function toggleQuickAsk(viaShortcut = true) {
+/**
+ * The ONE hover relay: ask the app window (it owns the chat AND the call
+ * engine) to start the voice session that this window then pins as the
+ * Skipper. No app window → it is recreated hidden (main.ts) and the relay
+ * re-fires on its `quickAsk:appReady`; a window still loading is handled
+ * the same way. Whatever happens, the text card falls back if nothing
+ * answers, so the gesture is never a silent no-op.
+ */
+export function relaySummon() {
+  const appWin = findAppWindow();
+  markSummonPending();
+  summonRelayAt = Date.now();
+  const appUp = !!appWin && !appWin.webContents.isLoading();
+  if (appUp) {
+    appWin.webContents.send('quick-ask:tuck', null);
+  } else {
+    ensureAppWindow?.();
+  }
+  armSummonFallback(appUp ? SUMMON_FALLBACK_MS : SUMMON_FALLBACK_APP_BOOT_MS);
+}
+
+export type QuickAskTrigger = 'shortcut' | 'tray' | 'programmatic';
+
+/**
+ * The global chord (and the tray item): summon the hover companion, or
+ * operate it when it's already up.
+ */
+export function toggleQuickAsk(trigger: QuickAskTrigger = 'shortcut') {
   // Ghostwriter: remember which app the user was in at the summon — the
   // paste-at-cursor target — BEFORE any of our windows can take focus.
   void import('./text-insert.js').then((m) => m.textInsertService.captureTarget()).catch(() => {});
@@ -338,60 +495,53 @@ export function toggleQuickAsk(viaShortcut = true) {
     return;
   }
   if (win?.isVisible()) {
-    mode = 'hidden';
+    setMode('hidden', 'toggle');
+    cancelPendingPaint();
     win.hide();
     return;
   }
   // VOICE-FIRST: the shortcut summons the mascot on a live voice session —
   // the same relay as the card's tuck handle (the app starts the
   // voice-preset call, and this window pins near the cursor). The text
-  // card is the FALLBACK: programmatic shows (the toast), no app window to
-  // relay to, the app declining because voice isn't configured (it calls
-  // quickAsk:show), or — via the timer below — the app simply never
-  // answering the relay, so the shortcut is never a silent no-op.
-  if (viaShortcut) {
-    const appWin = findAppWindow();
-    if (appWin) {
-      markSummonPending();
-      appWin.webContents.send('quick-ask:tuck', null);
-      clearSummonFallback();
-      summonFallbackTimer = setTimeout(() => {
-        summonFallbackTimer = null;
-        if (mode === 'hidden') showSummonedCard(false);
-      }, 1500);
-      return;
-    }
+  // card is the FALLBACK: programmatic shows, the app declining because
+  // voice isn't configured (it calls quickAsk:show), or — via the timer in
+  // relaySummon — the app simply never answering.
+  if (trigger !== 'programmatic' && (findAppWindow() || ensureAppWindow)) {
+    relaySummon();
+    return;
   }
-  showSummonedCard(viaShortcut);
+  showSummonedCard(trigger === 'shortcut');
 }
 
-function showSummonedCard(viaShortcut: boolean) {
+/**
+ * The text card. `holdToTalk`: the chord summoned it, so capturing starts
+ * immediately (the renderer detects the chord's release). Never for the
+ * tray item, programmatic shows, or a window still loading on first
+ * creation — by the time that page is up, the chord is long released.
+ */
+function showSummonedCard(holdToTalk: boolean) {
   // A voice summon that fell back here must not leave its hint armed — the
   // next unrelated call would grab focus.
   summonPendingAt = 0;
   clearSummonFallback();
   let win = getQuickAskWindow();
   if (!win) win = createWindow();
-  mode = 'summoned';
+  const fresh = win.webContents.isLoading();
+  setMode('summoned', fresh ? 'text card (fresh window)' : 'text card');
   positionSummoned(win);
-  pushMode(win);
+  const seq = pushMode(win);
   // Unlike the pinned pill, taking focus is the point — the user is about
   // to type. The renderer focuses its input on window focus.
-  win.show();
-  win.focus();
-  // Hold-to-talk: a chord summon starts capturing immediately (the renderer
-  // detects the release once it has focus). Skip on first-ever creation —
-  // the page is still loading, and by the time it's up the chord is long
-  // released.
-  if (!win.webContents.isLoading()) {
-    win.webContents.send('quick-ask:summoned', { viaShortcut });
+  revealAfterMode(win, seq, { focus: true });
+  if (holdToTalk && !fresh) {
+    win.webContents.send('quick-ask:summoned', { viaShortcut: true });
   }
 }
 
-/** Show (never hide) — the discoverability toast's "Try it" action. */
+/** Show the text card (never hide) — the app's voice-unavailable fallback. */
 export function showQuickAsk() {
   if (mode === 'pinned') return;
-  if (!getQuickAskWindow()?.isVisible()) toggleQuickAsk(false);
+  if (!getQuickAskWindow()?.isVisible()) toggleQuickAsk('programmatic');
 }
 
 /**
@@ -412,15 +562,16 @@ export function setCompanionPinned(pinned: boolean) {
       const win0 = getQuickAskWindow() ?? createWindow();
       if (pinnedCollapsed) positionTucked(win0);
       else applyExpandedSurface(win0, getExpandedSurface());
-      pushMode(win0);
-      if (!win0.isVisible()) win0.showInactive();
+      const seq0 = pushMode(win0);
+      if (lastPopoutState) win0.webContents.send('video:popout-state', lastPopoutState);
+      revealAfterMode(win0, seq0, { focus: false });
       return;
     }
     let win = getQuickAskWindow();
     if (!win) win = createWindow();
     const fromSummon = Date.now() - summonPendingAt < 5000;
     summonPendingAt = 0;
-    mode = 'pinned';
+    setMode('pinned', fromSummon ? 'call surface (summoned)' : 'call surface');
     // ONE landing for every entry point: the Skipper lands as one unit —
     // mascot with the text panel already open (text is the default;
     // tucking is the user's gesture, never the arrival state) — anchored
@@ -439,29 +590,28 @@ export function setCompanionPinned(pinned: boolean) {
       positionPinned(win);
       appliedExpandedSurface = 'pill';
     }
-    pushMode(win);
-    if (fromSummon) {
-      // The user just summoned their companion — focus so speaking, typing,
-      // and Esc all work immediately.
-      if (!win.isVisible()) win.show();
-      win.focus();
-    } else if (!win.isVisible()) {
-      // showInactive: appearing must not steal focus from the app the user
-      // switched to — that would be a focus grab mid-work.
-      win.showInactive();
-    }
+    const seq = pushMode(win);
+    // The renderer resets its call-state mirror whenever it leaves the
+    // pinned role — replay the live state so the Skipper never paints from
+    // a blank guess before the app's next push.
+    if (lastPopoutState) win.webContents.send('video:popout-state', lastPopoutState);
+    // The user just summoned their companion → focus so speaking, typing,
+    // and Esc all work immediately. Otherwise appearing must not steal
+    // focus from the app the user switched to — that would be a focus grab
+    // mid-work.
+    revealAfterMode(win, seq, { focus: fromSummon });
   } else {
     if (mode !== 'pinned') return;
-    mode = 'hidden';
+    setMode('hidden', 'unpinned');
     pinnedCollapsed = false;
     summonPendingAt = 0;
-    // The call is over — its device state must not leak into the next
-    // summon (a stale cameraOn here made the next companion flash the
-    // camera pill before morphing to the card).
-    lastPopoutState = null;
+    // (The cached call state is kept: a fullscreen ⇄ popout flap mid-call
+    // must return to the same surface — camera on → pill. The app pushes
+    // an idle state when the call ENDS, so nothing stale survives it.)
     const win = getQuickAskWindow();
     if (win) {
       pushMode(win);
+      cancelPendingPaint();
       if (win.isVisible()) win.hide();
     }
   }
@@ -484,23 +634,32 @@ export function setPinnedCollapsed(collapsed: boolean) {
   // and idempotent.
   pinnedCollapsed = collapsed;
   if (collapsed) {
-    if (appliedExpandedSurface === 'card') {
-      positionTucked(win);
-    } else {
-      const b = win.getBounds();
-      const wa = screen.getDisplayMatching(b).workArea;
-      const w = scaled(TUCKED_WIDTH);
-      const h = scaled(TUCKED_HEIGHT);
-      const inTopHalf = b.y + b.height / 2 < wa.y + wa.height / 2;
-      let x = b.x + b.width - w;
-      let y = inTopHalf ? b.y : b.y + b.height - h;
-      x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
-      y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
-      setBoundsGuarded(win, { x, y, width: w, height: h });
-    }
-    pushMode(win);
+    // Fold: push the layout FIRST and shrink the window once it's painted —
+    // shrinking first squeezes the still-open card into the mascot-sized
+    // bounds for a frame (every control looks dead). The mascot sits at
+    // the anchor corner in both layouts, so the shrink itself is invisible.
+    const seq = pushMode(win);
+    afterModePainted(win, seq, () => {
+      if (mode !== 'pinned' || !pinnedCollapsed) return;
+      if (appliedExpandedSurface === 'card') {
+        positionTucked(win);
+      } else {
+        const b = win.getBounds();
+        const wa = screen.getDisplayMatching(b).workArea;
+        const w = scaled(TUCKED_WIDTH);
+        const h = scaled(TUCKED_HEIGHT);
+        const inTopHalf = b.y + b.height / 2 < wa.y + wa.height / 2;
+        let x = b.x + b.width - w;
+        let y = inTopHalf ? b.y : b.y + b.height - h;
+        x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
+        y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
+        setBoundsGuarded(win, { x, y, width: w, height: h });
+      }
+    });
     return;
   }
+  // Unfold: grow the window first (the extra area is transparent stage —
+  // the mascot doesn't move), then the card paints into it.
   applyExpandedSurface(win, getExpandedSurface());
   pushMode(win);
   if (appliedExpandedSurface === 'card') win.focus();
@@ -642,7 +801,7 @@ export function setShortcutCaptureActive(active: boolean) {
   // the settings row shows the "not active" notice).
   let ok = false;
   try {
-    ok = globalShortcut.register(currentShortcut, toggleQuickAsk);
+    ok = globalShortcut.register(currentShortcut, () => toggleQuickAsk('shortcut'));
   } catch {
     ok = false;
   }
@@ -689,7 +848,7 @@ export function setQuickAskShortcut(accelerator: string | null): {
   const previousRegistered = shortcutRegistered;
   let ok = false;
   try {
-    ok = globalShortcut.register(requested, toggleQuickAsk);
+    ok = globalShortcut.register(requested, () => toggleQuickAsk('shortcut'));
   } catch {
     return fail('That key combination can’t be used as a shortcut.');
   }
@@ -714,7 +873,8 @@ export function setQuickAskShortcut(accelerator: string | null): {
   return { ok: true, accelerator: currentShortcut, registered: true, error: null };
 }
 
-export function initQuickAsk() {
+export function initQuickAsk(opts: { ensureAppWindow?: () => void } = {}) {
+  ensureAppWindow = opts.ensureAppWindow ?? null;
   // Default ⌥⇧Space: plain ⌥Space is the most contested launcher chord on
   // macOS (Raycast, ChatGPT desktop, …) — registering it would silently
   // lose or, worse, double-fire alongside whatever owns it.
@@ -722,7 +882,7 @@ export function initQuickAsk() {
   currentShortcut =
     (saved ? normalizeShortcut(saved) : null) ?? DEFAULT_QUICK_ASK_SHORTCUT;
   try {
-    shortcutRegistered = globalShortcut.register(currentShortcut, toggleQuickAsk);
+    shortcutRegistered = globalShortcut.register(currentShortcut, () => toggleQuickAsk('shortcut'));
   } catch {
     shortcutRegistered = false;
   }

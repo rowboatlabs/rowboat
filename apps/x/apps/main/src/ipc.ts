@@ -28,13 +28,16 @@ let caffeinateBlockerId: number | null = null;
 import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
 import {
   getCompanionMode,
+  getModeSeq,
   getExpandedSurface,
   getPopoutState,
   getQuickAskShortcutState,
   getQuickAskWindow,
   hideQuickAsk,
+  onAppReady,
+  onModeApplied,
   isPinnedCollapsed,
-  markSummonPending,
+  relaySummon,
   ackSummon,
   pushChatContext,
   pushPopoutState,
@@ -1176,17 +1179,26 @@ export function setupIpcHandlers() {
     },
     'quickAsk:getMode': async () => {
       return {
+        seq: getModeSeq(),
         mode: getCompanionMode(),
         collapsed: isPinnedCollapsed(),
         surface: getExpandedSurface(),
       };
     },
+    'quickAsk:modeApplied': async (_event, args) => {
+      onModeApplied(args.seq);
+      return {};
+    },
+    'quickAsk:appReady': async () => {
+      onAppReady();
+      return {};
+    },
     'quickAsk:tuck': async () => {
-      // The next pin gets focus (the user asked for their companion); the
-      // app window decides HOW to get there (start a voice call, or
-      // minimize a live call to the floating surface).
-      markSummonPending();
-      findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
+      // The card's tuck handle: the SAME relay as the chord (the next pin
+      // gets focus; the app window decides HOW to get there — start a voice
+      // call, or minimize a live call to the floating surface; a missing or
+      // loading app window is waited for; nothing answering falls back).
+      relaySummon();
       return {};
     },
     'quickAsk:tuckAck': async () => {

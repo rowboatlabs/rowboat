@@ -81,7 +81,7 @@ import { ensureLoginItemRegistration } from "./login_item.js";
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
 import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
-import { initQuickAsk } from "./quick-ask.js";
+import { initQuickAsk, onAppWindowClosed } from "./quick-ask.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -416,6 +416,8 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
     setMainWindowForDeepLinks(null);
+    // The call engine lived in this window — take its floating surface down.
+    onAppWindowClosed();
   });
 
   // Show window when content is ready to prevent blank screen.
@@ -536,9 +538,15 @@ app.whenReady().then(async () => {
   setupBrowserEventForwarding();
   setupBrowserExtensions();
 
-  // Quick-ask bar: global ⌥⇧Space summons a Spotlight-style ask-anything
-  // window over whatever app the user is in.
-  initQuickAsk();
+  // Quick-ask / hover companion: global ⌥⇧Space summons the Skipper over
+  // whatever app the user is in. The app window owns the call engine it
+  // relays to — if the user closed that window, the summon recreates it
+  // hidden so the shortcut keeps working from anywhere.
+  initQuickAsk({
+    ensureAppWindow: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow({ startHidden: true });
+    },
+  });
 
   // Start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) BEFORE
   // the window and the long service-init chain below. The Apps view is

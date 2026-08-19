@@ -10,18 +10,28 @@ pipeline, and the LLM prompt surface with exact pointers.
 ## Product flow
 
 The composer has a **call split-button** (`chat-input-with-mentions.tsx`).
-The main click is the "work together" default — preset `share`: screen
-sharing ON, camera OFF, floating pill, so the user keeps working while the
-assistant watches along (the button tooltip discloses the screen share). The
-chevron menu holds the deviations. While a call is live the button turns red
-and ends it.
+The main click is the **hover companion** — preset `voice`: the SAME
+Skipper surface ⌥⇧Space summons (`startHoverCall()` in `App.tsx`), bound to
+this chat. The chevron menu holds the deviations. While a call is live the
+button turns red and ends it.
 
 | Preset | Starting devices | First surface |
 |--------|------------------|---------------|
-| `share` — main click | screen on, camera off | floating pill |
-| `voice` — no menu entry (programmatic only; the quick-ask bar's voice toggle covers this case) | camera off, screen off | floating mascot pill |
+| `voice` — main click, ⌥⇧Space, tray "Quick Ask", the card's tuck handle, the Home Skipper, the discoverability toast | camera off, screen off (sticky share replays if opted in) | the Skipper card (hover mode) |
+| `share` — "Share screen" | screen on, camera off | the Skipper card — the same hover summon with the screen shared from the start |
 | `video` — "Video call" | camera on | floating pill (camera in the pill; expand for full screen) |
 | `practice` — "Practice session" | camera on, + coaching persona | full-screen call |
+
+**ONE hover flow.** Every hover entry point ends in `startHoverCall()`:
+the chord / tray item / tuck handle / toast go main → `relaySummon()` →
+`quick-ask:tuck` → app; the call button and the Home Skipper call it
+directly. It acks the relay (`quickAsk:tuckAck`), starts the `voice`
+preset, and only THEN kicks off the (sticky or `share`-forced) screen
+share, fire-and-forget — the in-flight guard is released the moment the
+call engine settles, never held across device acquisition. A session that
+fails to start falls back to the text card (`quickAsk:show`), so a summon
+is never a silent no-op. Without voice configured the text card is the
+answer from the start.
 
 **One surface rule** (`callSurface` in `App.tsx`): full screen and screen
 sharing are mutually exclusive in both directions — a full-screen call covers
@@ -209,14 +219,37 @@ over `quick-ask:mode` (`'summoned' | 'pinned'`).
   the whole screen).
 - Pinned iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
   Renderer asks `video:setPopout {show}`; main repositions the companion
-  window to the old popout geometry (top-right of the primary display,
-  content-sized; `video:popoutResize` grows it for the response panel) and
-  shows it with `showInactive()` so it never steals focus. Blur does NOT
-  hide it in this mode (Spotlight blur-dismiss applies to the summoned role
-  only), Esc never dismisses it, and ⌥⇧Space focuses it instead of
-  toggling.
+  window (Skipper card at its anchor corner, or the old popout geometry
+  top-right for camera calls; `video:popoutResize` grows the pill for the
+  response panel) and reveals it — focused when a summon is pending,
+  `showInactive()` otherwise so it never steals focus. Blur does NOT hide
+  it in this mode (Spotlight blur-dismiss applies to the summoned role
+  only), Esc never dismisses it, and ⌥⇧Space folds/unfolds its text panel
+  instead of toggling.
+- **Reveal protocol** (the fix for "the old bar flashes before the
+  Skipper"): every `quick-ask:mode` push carries a `seq`; the renderer acks
+  it over `quickAsk:modeApplied` two frames after committing that role
+  (i.e. once it is painted). Main orders the window in at opacity 0 so the
+  renderer can paint, then sets opacity 1 (+ focus) only on the ack —
+  never with the previous role's layout on screen. A fold also pushes
+  first and shrinks the window on the ack, so the open card is never
+  squeezed into mascot-sized bounds for a frame. Timeouts (600 ms; 6 s
+  while the page is still loading) keep a wedged renderer from blocking.
+  On the renderer side the role is UNKNOWN until the first push/fetch —
+  nothing paints before then — and `index.html` gives `#quick-ask` /
+  `#screen-pointer` a transparent background from the very first paint.
 - Call state streams over the `video:popout-state` push channel; main
-  caches the last payload (in quick-ask.ts) and replays it on window load.
+  caches the last payload (in quick-ask.ts) and replays it on window load
+  and on every pin. The renderer drops its mirror whenever it leaves the
+  pinned role; the app pushes an explicit idle state when a call ENDS (the
+  cache survives fullscreen ⇄ popout flaps of a live call, so a camera
+  call comes back as the pill, not a card that morphs).
+- No app window (the user closed it) or one still loading: the summon
+  recreates it hidden (`initQuickAsk({ ensureAppWindow })` in `main.ts`)
+  and re-fires the relay on the app's `quickAsk:appReady` handshake; the
+  text card falls back if nothing answers (1.5 s with an app window up,
+  8 s while it boots). Closing the app window mid-call unpins the
+  companion (`onAppWindowClosed`).
 - The pill captures its **own** camera preview (MediaStreams can't cross
   windows) and synthesizes the mascot mouth level (no audio in that
   window).
@@ -254,7 +287,11 @@ over `quick-ask:mode` (`'summoned' | 'pinned'`).
 - Screen: `getDisplayMedia` is auto-approved with the primary screen by
   `setDisplayMediaRequestHandler` in `main.ts` (no picker);
   `meeting:checkScreenPermission` registers the app in macOS Screen
-  Recording settings on first use.
+  Recording settings on first use. With the permission denied (or its
+  prompt unanswered) `getDisplayMedia` can hang forever, so
+  `useVideoMode.startScreenShare` time-boxes the whole acquisition
+  (10 s) and fails cleanly — a hung share used to wedge `screenState` at
+  'starting' for the rest of the session.
 - Input Monitoring (global PTT key hook): starting the uiohook event tap
   triggers the macOS consent prompt on first use, but a missing grant
   doesn't error — events just never arrive (`eventsSeen` stays false). A
@@ -391,6 +428,10 @@ the composer's Stop. The window is hidden, not destroyed, on dismiss
 bottom card paints; composer popovers open upward into the transparent
 zone, a click there dismisses, and no window resizing happens in this
 mode.
+
+Today this card is the FALLBACK surface: the chord's first job is the
+hover companion above; the card appears when voice isn't configured, when
+a session fails to start, or when nothing answers the relay.
 
 **Optional toggles** (`quickAsk:setOptions` → `quick-ask:set-options`;
 actual state echoes back over `quickAsk:optionsState` →

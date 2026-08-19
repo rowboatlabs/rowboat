@@ -1323,6 +1323,10 @@ const ipcSchemas = {
   'quickAsk:getMode': {
     req: z.null(),
     res: z.object({
+      // Monotonic per push — the renderer echoes it back over
+      // quickAsk:modeApplied once that role has PAINTED, and main reveals
+      // the window only then (never with the previous role still on screen).
+      seq: z.number(),
       mode: z.enum(['hidden', 'summoned', 'pinned']),
       collapsed: z.boolean(),
       // Which surface the pinned role expands to: untuck returns you to the
@@ -1335,11 +1339,28 @@ const ipcSchemas = {
   },
   'quick-ask:mode': {
     req: z.object({
+      seq: z.number(),
       mode: z.enum(['hidden', 'summoned', 'pinned']),
       collapsed: z.boolean(),
       surface: z.enum(['card', 'pill']),
     }),
     res: z.null(),
+  },
+  // Companion window → main: the role carried by `seq` is on screen (painted)
+  // — main may now show/focus/resize the window for it. Without this ack the
+  // window could be revealed mid-transition: the summoned bar's layout for a
+  // frame (or, on first creation, for the whole page load) before the
+  // Skipper replaced it.
+  'quickAsk:modeApplied': {
+    req: z.object({ seq: z.number() }),
+    res: z.object({}),
+  },
+  // App window → main: the hover relay listener is registered — a summon
+  // that arrived while the app window was (re)loading (or didn't exist: the
+  // user closed it, the shortcut recreated it hidden) is delivered now.
+  'quickAsk:appReady': {
+    req: z.null(),
+    res: z.object({}),
   },
   // Bar → main → app window: tuck the text into the mascot. The app starts
   // the voice-preset call (mascot-only floating surface) — or, if a call is
