@@ -1281,8 +1281,8 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
-  // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
-  // Bar → main: relay a composer submit into the app window's chat.
+  // --- Hover companion (global ⌥⇧Space, own always-on-top window) ---
+  // Companion → main: relay a composer submit into the companion's chat.
   'quickAsk:submit': {
     req: QuickAskSubmitPayload,
     res: z.object({}),
@@ -1292,34 +1292,11 @@ const ipcSchemas = {
     req: QuickAskSubmitPayload,
     res: z.null(),
   },
-  // Bar → main → app window: stop the in-flight turn (the bar composer's
-  // send button becomes Stop while processing, same as in the app).
-  'quickAsk:stop': {
-    req: z.null(),
-    res: z.object({}),
-  },
-  'quick-ask:stop': {
-    req: z.null(),
-    res: z.null(),
-  },
-  // Bar → main: dismiss the bar (Esc).
-  'quickAsk:hide': {
-    req: z.null(),
-    res: z.object({}),
-  },
-  // Main → bar: the window was just summoned. viaShortcut distinguishes the
-  // global chord (⌥⇧Space — hold-to-talk starts capturing immediately) from
-  // programmatic shows (the discoverability toast), which must not touch
-  // the mic.
-  'quick-ask:summoned': {
-    req: z.object({ viaShortcut: z.boolean() }),
-    res: z.null(),
-  },
-  // The companion window's current role: summoned Spotlight bar, pinned
-  // call pill, or hidden. `collapsed` is the pinned pill tucked down to just
-  // the mascot (voice-to-voice). Pushed on every transition; the invoke
-  // covers the load race (the window may finish loading after a transition
-  // fired).
+  // The companion window's current role: `pinned` (the Skipper — the ONE
+  // hover surface) or `hidden`. `collapsed` is the Skipper tucked down to
+  // just the mascot (voice-to-voice). Pushed on every transition; the
+  // invoke covers the load race (the window may finish loading after a
+  // transition fired).
   'quickAsk:getMode': {
     req: z.null(),
     res: z.object({
@@ -1327,7 +1304,7 @@ const ipcSchemas = {
       // quickAsk:modeApplied once that role has PAINTED, and main reveals
       // the window only then (never with the previous role still on screen).
       seq: z.number(),
-      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      mode: z.enum(['hidden', 'pinned']),
       collapsed: z.boolean(),
       // Which surface the pinned role expands to: untuck returns you to the
       // surface you tucked FROM — 'card' (the bar-style text card, for
@@ -1340,7 +1317,7 @@ const ipcSchemas = {
   'quick-ask:mode': {
     req: z.object({
       seq: z.number(),
-      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      mode: z.enum(['hidden', 'pinned']),
       collapsed: z.boolean(),
       surface: z.enum(['card', 'pill']),
     }),
@@ -1390,11 +1367,6 @@ const ipcSchemas = {
   // whether a reply is SPOKEN now follows the question's modality — spoken
   // questions get spoken replies, typed ones stay silent — plus the
   // explicit speaker mute on the Skipper.)
-  // App window → main: open the bar (the discoverability toast's "Try it").
-  'quickAsk:show': {
-    req: z.null(),
-    res: z.object({}),
-  },
   // Bar → main: jump to the conversation in the app — focuses the app
   // window and tells it to show the chat full-view (no middle pane).
   'quickAsk:openChat': {
@@ -1404,42 +1376,6 @@ const ipcSchemas = {
   // Push channel: main → app window for the jump above.
   'quick-ask:open-chat': {
     req: z.null(),
-    res: z.null(),
-  },
-  // Bar → main → app window: the bar's optional toggles. voiceOutput speaks
-  // the answers aloud; screenShare turns on the existing screen capture so
-  // frames ride along with bar submits (the bar owns the share indicator —
-  // no floating pill outside calls).
-  'quickAsk:setOptions': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenShare: z.boolean(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → app window with the toggles above.
-  'quick-ask:set-options': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenShare: z.boolean(),
-    }),
-    res: z.null(),
-  },
-  // App window → main → bar: the ACTUAL state (share can fail on the macOS
-  // permission; the bar must never show a "sharing" badge that lies).
-  'quickAsk:optionsState': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenSharing: z.boolean(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → bar for the state above.
-  'quick-ask:options-state': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenSharing: z.boolean(),
-    }),
     res: z.null(),
   },
   // App window → main → bar: the destination-chat context (see
@@ -1471,29 +1407,6 @@ const ipcSchemas = {
   // Push channel: main → app window for the reset above.
   'quick-ask:new-chat': {
     req: z.null(),
-    res: z.null(),
-  },
-  // App window → main: mirror of the in-flight answer for the bar
-  // (streaming text while processing, final text when done).
-  'quickAsk:state': {
-    req: z.object({
-      processing: z.boolean(),
-      responseText: z.string().nullable(),
-      // What the agent is doing right now ("Reasoning…", "Web search…") —
-      // shown blinking in the bar until the answer starts streaming.
-      statusText: z.string().nullable(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → bar with the latest answer state.
-  'quick-ask:state': {
-    req: z.object({
-      processing: z.boolean(),
-      responseText: z.string().nullable(),
-      // What the agent is doing right now ("Reasoning…", "Web search…") —
-      // shown blinking in the bar until the answer starts streaming.
-      statusText: z.string().nullable(),
-    }),
     res: z.null(),
   },
   // Any window → main: the current global quick-ask chord and whether the

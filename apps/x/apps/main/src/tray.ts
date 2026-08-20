@@ -167,9 +167,8 @@ function rebuildMenu(): void {
         ? { accelerator: getQuickAskShortcutState().accelerator }
         : {}),
       registerAccelerator: false,
-      // Same hover summon as the chord — minus hold-to-talk, which only
-      // makes sense for a held key.
-      click: () => toggleQuickAsk('tray'),
+      // The same summon the chord performs.
+      click: () => toggleQuickAsk(),
     },
     recording
       ? {

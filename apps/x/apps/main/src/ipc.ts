@@ -32,8 +32,6 @@ import {
   getExpandedSurface,
   getPopoutState,
   getQuickAskShortcutState,
-  getQuickAskWindow,
-  hideQuickAsk,
   onAppReady,
   onModeApplied,
   isPinnedCollapsed,
@@ -46,7 +44,6 @@ import {
   setPinnedCollapsed,
   setQuickAskShortcut,
   setShortcutCaptureActive,
-  showQuickAsk,
 } from './quick-ask.js';
 import { screenPointerService } from './screen-pointer.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
@@ -1158,7 +1155,7 @@ export function setupIpcHandlers() {
         }
       }
     },
-    // --- Quick-ask bar relays ---
+    // --- Hover companion relays ---
     'quickAsk:getShortcut': async () => {
       return getQuickAskShortcutState();
     },
@@ -1171,10 +1168,6 @@ export function setupIpcHandlers() {
     },
     'quickAsk:submit': async (_event, args) => {
       findMainAppWindow()?.webContents.send('quick-ask:submit', args);
-      return {};
-    },
-    'quickAsk:stop': async () => {
-      findMainAppWindow()?.webContents.send('quick-ask:stop', null);
       return {};
     },
     'quickAsk:getMode': async () => {
@@ -1217,24 +1210,8 @@ export function setupIpcHandlers() {
       findMainAppWindow()?.webContents.send('quick-ask:select-chat', args);
       return {};
     },
-    'quickAsk:hide': async () => {
-      hideQuickAsk();
-      return {};
-    },
-    'quickAsk:show': async () => {
-      showQuickAsk();
-      return {};
-    },
     'quickAsk:newChat': async () => {
       findMainAppWindow()?.webContents.send('quick-ask:new-chat', null);
-      return {};
-    },
-    'quickAsk:setOptions': async (_event, args) => {
-      findMainAppWindow()?.webContents.send('quick-ask:set-options', args);
-      return {};
-    },
-    'quickAsk:optionsState': async (_event, args) => {
-      getQuickAskWindow()?.webContents.send('quick-ask:options-state', args);
       return {};
     },
     'quickAsk:openChat': async () => {
@@ -1246,10 +1223,6 @@ export function setupIpcHandlers() {
         app.focus({ steal: true });
         main.webContents.send('quick-ask:open-chat', null);
       }
-      return {};
-    },
-    'quickAsk:state': async (_event, args) => {
-      getQuickAskWindow()?.webContents.send('quick-ask:state', args);
       return {};
     },
     'meeting:notifyNotesReady': async (_event, args) => {
