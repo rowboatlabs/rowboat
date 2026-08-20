@@ -4578,7 +4578,7 @@ function App() {
       case 'meetings': return 'Meetings'
       case 'live-notes': return 'Live notes'
       case 'bg-tasks': return 'Background tasks'
-      case 'apps': return 'Mini Apps'
+      case 'apps': return 'Apps'
       case 'workspace': return 'Workspace'
       case 'knowledge-view': return 'Brain'
       case 'graph': return 'Graph View'
@@ -5123,6 +5123,16 @@ function App() {
     void navigateToView({ type: 'apps' })
   }, [navigateToView])
 
+  // navigateToView early-returns when the apps view is already showing, so
+  // `openAppsView` alone is a no-op while an app is open — the sidebar "Apps"
+  // item did nothing. Bumping the version with a null folder tells AppsView to
+  // drop its selection (mirrors onOpenBgTasks).
+  const openAppsGrid = useCallback(() => {
+    setAppInitialId(null)
+    setAppIdVersion((v) => v + 1)
+    openAppsView()
+  }, [openAppsView])
+
   const openMeetingsView = useCallback(() => {
     void navigateToView({ type: 'meetings' })
   }, [navigateToView])
@@ -5411,7 +5421,7 @@ function App() {
         case 'knowledge': void navigateToView({ type: 'knowledge-view' }); break
         case 'workspace': void navigateToView({ type: 'workspace' }); break
         case 'code': void navigateToView({ type: 'code' }); break
-        case 'apps': openAppsView(); break
+        case 'apps': openAppsGrid(); break
       }
     }
 
@@ -5535,7 +5545,7 @@ function App() {
         break
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigateToFile, navigateToView, selectedPath])
+  }, [navigateToFile, navigateToView, openAppsGrid, selectedPath])
 
   // Legacy runs:events path: handleRunEvent stashes the result in a ref;
   // polled every render (the triggering event always causes one).
@@ -6073,13 +6083,13 @@ function App() {
         openBgTasksView()
         break
       case 'apps':
-        openAppsView()
+        openAppsGrid()
         break
       case 'workspaces':
         knowledgeActions.openWorkspaceAt()
         break
     }
-  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsView])
+  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsGrid])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
@@ -6568,7 +6578,7 @@ function App() {
               onOpenCode={openCodeView}
               onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-              onOpenApps={openAppsView}
+              onOpenApps={openAppsGrid}
               onOpenApp={(folder) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() }}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
