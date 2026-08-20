@@ -1,63 +1,13 @@
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { exportJWK, generateKeyPair, SignJWT, type CryptoKey, type JWK } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OidcAuthDriver } from '../src/auth-oidc.js';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
-import { agentClient, callStructured, liveClient, restClient } from './helpers.js';
+import { agentClient, callStructured, liveClient, restClient, startFakeAs, type FakeAs } from './helpers.js';
 
-// The oidc driver against a local fake AS: RFC 8414 discovery + JWKS + JWTs we
-// mint ourselves, so CI never needs a real IdP. (jose's refetch-on-unknown-kid
-// key rotation is library behavior, deliberately not re-tested here.) The live
-// E2E against a real Supabase stack is a manual step, per the OAuth plan.
-
-const KID = 'test-key-1';
-
-interface FakeAs {
-  issuer: string;
-  server: Server;
-  privateKey: CryptoKey;
-  mint(claims: { sub?: string; iss?: string; exp?: string | number; email?: string; name?: string }): Promise<string>;
-}
-
-async function startFakeAs(): Promise<FakeAs> {
-  const { publicKey, privateKey } = await generateKeyPair('ES256', { extractable: true });
-  const jwk: JWK = { ...(await exportJWK(publicKey)), kid: KID, alg: 'ES256' };
-
-  let issuer = '';
-  const server = createServer((req, res) => {
-    if (req.url === '/.well-known/oauth-authorization-server') {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ issuer, jwks_uri: `${issuer}/jwks` }));
-    } else if (req.url === '/jwks') {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ keys: [jwk] }));
-    } else {
-      res.writeHead(404).end();
-    }
-  });
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  issuer = `http://localhost:${(server.address() as AddressInfo).port}`;
-
-  return {
-    issuer,
-    server,
-    privateKey,
-    async mint(claims) {
-      return new SignJWT({
-        ...(claims.email ? { email: claims.email } : {}),
-        // GoTrue's placement for social profile names.
-        ...(claims.name ? { user_metadata: { full_name: claims.name } } : {}),
-      })
-        .setProtectedHeader({ alg: 'ES256', kid: KID })
-        .setIssuer(claims.iss ?? issuer)
-        .setSubject(claims.sub ?? 'sub-ramnique')
-        .setIssuedAt()
-        .setExpirationTime(claims.exp ?? '5m')
-        .sign(privateKey);
-    },
-  };
-}
+// The oidc driver against a local fake AS (helpers.ts): RFC 8414 discovery +
+// JWKS + JWTs we mint ourselves, so CI never needs a real IdP. (jose's
+// refetch-on-unknown-kid key rotation is library behavior, deliberately not
+// re-tested here.) The live E2E against a real Supabase stack is a manual
+// step, per the OAuth plan.
 
 describe('oidc auth driver', () => {
   let as: FakeAs;

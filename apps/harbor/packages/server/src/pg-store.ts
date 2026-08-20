@@ -113,10 +113,22 @@ function rowToMessage(r: MessageRow): Message {
   };
 }
 
+/** The implicit org of every pre-multi-org deployment (migration 003 default). */
+export const DEFAULT_ORG_ID = 'org-default';
+
 export class PgStore implements Store {
   private readonly als = new AsyncLocalStorage<SqlExecutor>();
 
-  constructor(private readonly db: SqlDb) {}
+  /**
+   * One instance per org over a shared SqlDb: the Store interface stays the
+   * per-org view HarborService has always seen; org scoping lives in the
+   * queries here. Space-scoped tables key off globally-unique ULIDs and are
+   * deliberately unscoped.
+   */
+  constructor(
+    private readonly db: SqlDb,
+    private readonly orgId: string = DEFAULT_ORG_ID,
+  ) {}
 
   async init(): Promise<void> {
     await migrate(this.db);
@@ -138,35 +150,35 @@ export class PgStore implements Store {
 
   async getMember(id: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
-      'select id, display_name, avatar_url, role from members where id = $1',
-      [id],
+      'select id, display_name, avatar_url, role from members where org_id = $1 and id = $2',
+      [this.orgId, id],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
   }
 
   async putMember(member: Member): Promise<void> {
     await this.sql.query(
-      `insert into members (id, display_name, avatar_url, role) values ($1, $2, $3, $4)
-       on conflict (id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url, role = excluded.role`,
-      [member.id, member.displayName, member.avatarUrl ?? null, member.role],
+      `insert into members (org_id, id, display_name, avatar_url, role) values ($1, $2, $3, $4, $5)
+       on conflict (org_id, id) do update set display_name = excluded.display_name, avatar_url = excluded.avatar_url, role = excluded.role`,
+      [this.orgId, member.id, member.displayName, member.avatarUrl ?? null, member.role],
     );
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
     const rows = await this.sql.query<MemberRow>(
       `select m.id, m.display_name, m.avatar_url, m.role from member_identities mi
-       join members m on m.id = mi.member_id
-       where mi.iss = $1 and mi.sub = $2`,
-      [iss, sub],
+       join members m on m.org_id = mi.org_id and m.id = mi.member_id
+       where mi.org_id = $1 and mi.iss = $2 and mi.sub = $3`,
+      [this.orgId, iss, sub],
     );
     return rows[0] ? rowToMember(rows[0]) : undefined;
   }
 
   async putIdentity(iss: string, sub: string, memberId: string): Promise<void> {
     await this.sql.query(
-      `insert into member_identities (iss, sub, member_id) values ($1, $2, $3)
-       on conflict (iss, sub) do update set member_id = excluded.member_id`,
-      [iss, sub, memberId],
+      `insert into member_identities (org_id, iss, sub, member_id) values ($1, $2, $3, $4)
+       on conflict (org_id, iss, sub) do update set member_id = excluded.member_id`,
+      [this.orgId, iss, sub, memberId],
     );
   }
 
@@ -174,16 +186,18 @@ export class PgStore implements Store {
 
   async putSpace(space: Space): Promise<void> {
     await this.sql.query(
-      `insert into spaces (id, name, created_at) values ($1, $2, $3)
+      `insert into spaces (org_id, id, name, created_at) values ($1, $2, $3, $4)
        on conflict (id) do update set name = excluded.name`,
-      [space.id, space.name, space.createdAt],
+      [this.orgId, space.id, space.name, space.createdAt],
     );
   }
 
   async getSpace(id: string): Promise<Space | undefined> {
+    // Org-scoped on purpose: this is what makes a foreign org's space ids
+    // (and invite tokens, which resolve through here) not_found.
     const rows = await this.sql.query<{ id: string; name: string; created_at: string }>(
-      'select id, name, created_at from spaces where id = $1',
-      [id],
+      'select id, name, created_at from spaces where org_id = $1 and id = $2',
+      [this.orgId, id],
     );
     const r = rows[0];
     return r ? { id: r.id, name: r.name, createdAt: r.created_at } : undefined;
@@ -193,8 +207,8 @@ export class PgStore implements Store {
     const rows = await this.sql.query<{ id: string; name: string; created_at: string }>(
       `select s.id, s.name, s.created_at from spaces s
        join memberships m on m.space_id = s.id
-       where m.member_id = $1 order by s.created_at, s.id`,
-      [memberId],
+       where s.org_id = $1 and m.member_id = $2 order by s.created_at, s.id`,
+      [this.orgId, memberId],
     );
     return rows.map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at }));
   }

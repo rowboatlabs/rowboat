@@ -53,6 +53,18 @@ team and a Roadboard space (`src/main.ts`).
   idempotent, so pre-migration databases adopt the ladder by no-opping
   through it. Every future schema change appends an entry; arbitrary SQL
   (backfills included) is legal from 002 on.
+- **Multi-org deployment** (`deployment.ts` + `directory.ts`, spec §4
+  tenancy): `startHarborDeployment` serves 1..N orgs from one process over
+  one Postgres — Host (X-Forwarded-Host wins) → org → a cached per-org
+  runtime (service + faces + per-org issuer/policy). `HarborService` stayed
+  single-org by design; migration 003 org-scopes members/spaces/identities
+  (`member_identities` keys `(org_id, iss, sub)` — the same identity is a
+  different member per org); space-scoped tables are untouched (globally
+  unique ULIDs; one shared hub is therefore safe). Existing single-org data
+  adopts `org-default`. `startHarbor` remains the single-org self-host/dev
+  path, unchanged. Issuer-less orgs are refused unless the deployment opts
+  into dev orgs. Isolation is test-pinned (`test/multi-org.test.ts`): spaces,
+  members, invites, policy, live and agent faces all org-bounded.
 - **Login/consent page** (`consent.ts`, `GET /oauth/consent`): the human
   moment of the dance, mounted only with oidc + `AUTH_PUBLISHABLE_KEY`.
   Social sign-in ONLY (Google + Microsoft) — every credentialed call goes
@@ -141,4 +153,5 @@ Amended 2026-08-19 (spec §4: invites/profile/roles): an invite is one shape —
 1. ~~`packages/server`: the **in-memory stub Harbor**~~ — done: every route in `api.ts`, the WS frames in `events.ts`, the MCP tools, a merge engine passing the fixtures, fake single-org auth, and spec §11 running as an automated acceptance test.
 2. ~~`apps/x`: the client chain against the stub~~ — done: `packages/core/src/spaces/` (SpacesClient + SpacesLive + org registry, tested against the real stub), `spaces:*` IPC, functional renderer surfaces (design pass pending), and org-add auto-registering the MCP face in `mcp.json` so the user's own agent gets the spaces tools. Note: consumption ended up as `link:` (not `file:`) — pnpm copies `file:` deps at install time, which goes stale during active co-development. **zod must stay version-identical across apps/x and apps/harbor** (pinned 4.2.1) or type identity breaks across the link.
 3. ~~Postgres storage~~ — done: `pg-store.ts` implements the Store boundary over a minimal SQL adapter (`sql.ts`; node-postgres for deployments, in-process PGlite for hermetic tests). `withSpaceLock` = one transaction holding a per-space advisory lock, with every store call inside riding that transaction (AsyncLocalStorage). **The §11 day-in-the-life suite runs twice — memory and Postgres — with identical assertions**; that dual run is the storage-swap gate, permanently. `DATABASE_URL` flips `pnpm dev` to durable storage (seeding is restart-idempotent). Postgres-only on purpose: no S3 in v1 — ≤1MB text contents ride in the log rows; state/history/feed/stream are projections.
-4. ~~Real OAuth~~ — **DONE end to end, live-verified against Supabase Auth**: the `oidc` auth driver, the login/consent page (buttons derived from the AS's /settings), the invite-binding ceremony, and the app side — `core/spaces/oauth.ts` (discovery → DCR → PKCE via system browser + one-shot loopback) with rotating-refresh token lifecycle in the org registry (`freshTokenFor`: single-flight, persist-rotated-refresh-before-use, needs-relogin marking) and the paste-invite-link join UI. The one unautomatable step: a real Google/Microsoft click-through, pending provider creds on a Supabase project. Next: multi-org routing, then the design pass over the functional surfaces (SPACES_DESIGN_BRIEF, private repo).
+4. ~~Real OAuth~~ — **DONE end to end, live-verified against Supabase Auth**: the `oidc` auth driver, the login/consent page (buttons derived from the AS's /settings), the invite-binding ceremony, and the app side — `core/spaces/oauth.ts` (discovery → DCR → PKCE via system browser + one-shot loopback) with rotating-refresh token lifecycle in the org registry (`freshTokenFor`: single-flight, persist-rotated-refresh-before-use, needs-relogin marking) and the paste-invite-link join UI. The one unautomatable step: a real Google/Microsoft click-through, pending provider creds on a Supabase project.
+5. ~~Multi-org routing~~ — done (`deployment.ts`, see the stub notes above). Next: the `/internal` provisioning surface (control-plane face over `directory.ts`), then the real deployment, then the design pass over the functional surfaces (SPACES_DESIGN_BRIEF, private repo).

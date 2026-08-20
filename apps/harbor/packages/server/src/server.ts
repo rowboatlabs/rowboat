@@ -115,7 +115,7 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
     }
     honoListener(req, res);
   });
-  const closeLive = attachLive(server, { service, hub, store, auth });
+  const closeLive = attachLive(server, () => ({ service, hub, store, auth }));
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
   const port = (server.address() as AddressInfo).port;

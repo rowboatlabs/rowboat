@@ -18,7 +18,14 @@ interface Deps {
   auth: AuthDriver;
 }
 
-export function attachLive(server: Server, deps: Deps): () => void {
+/**
+ * Resolves the org runtime for a connection — multi-org deployments route by
+ * Host (spec §4 tenancy); the single-org server ignores the host. Undefined =
+ * no org on that domain.
+ */
+export type LiveDepsResolver = (host: string | undefined) => Deps | undefined | Promise<Deps | undefined>;
+
+export function attachLive(server: Server, resolve: LiveDepsResolver): () => void {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
@@ -33,8 +40,16 @@ export function attachLive(server: Server, deps: Deps): () => void {
     // impossible. Nobody reads the socket during the await; bytes just buffer.
     socket.on('error', () => {});
     void (async () => {
+      let deps: Deps | undefined;
       let memberId: string;
       try {
+        const forwarded = req.headers['x-forwarded-host'];
+        deps = await resolve(typeof forwarded === 'string' ? forwarded : req.headers.host);
+        if (!deps) {
+          socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+          socket.destroy();
+          return;
+        }
         const identity = await deps.auth.authenticate(req.headers.authorization, url.searchParams.get('token'));
         memberId = (await deps.auth.resolveMember(deps.store, identity)).id;
       } catch (err) {

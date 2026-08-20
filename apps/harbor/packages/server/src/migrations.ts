@@ -116,6 +116,38 @@ export const MIGRATIONS: Migration[] = [
       `alter table members add column if not exists role text not null default 'member'`,
     ],
   },
+  {
+    id: '003-multi-org',
+    statements: [
+      // Spec §4 "Deployment and tenancy": one deployment serves 1..N orgs,
+      // resolved from the Host header. Org-scoped tables gain org_id;
+      // space-scoped tables (assets, topics, messages, events, change_sets)
+      // key off globally-unique ULIDs and need nothing. Existing single-org
+      // data adopts the default org id.
+      `create table if not exists orgs (
+        id text primary key,
+        name text not null,
+        created_at text not null,
+        issuer text,
+        allowed_email_domains jsonb
+      )`,
+      `create table if not exists org_domains (
+        domain text primary key,
+        org_id text not null
+      )`,
+      `alter table members add column if not exists org_id text not null default 'org-default'`,
+      `alter table members drop constraint members_pkey`,
+      `alter table members add primary key (org_id, id)`,
+      `alter table spaces add column if not exists org_id text not null default 'org-default'`,
+      `create index if not exists spaces_org on spaces (org_id)`,
+      // The same (iss, sub) is legitimately a DIFFERENT member in each org.
+      `alter table member_identities add column if not exists org_id text not null default 'org-default'`,
+      `alter table member_identities drop constraint member_identities_pkey`,
+      `alter table member_identities add primary key (org_id, iss, sub)`,
+      // Invites need no org_id: resolution goes token → space, and the space
+      // lookup is org-scoped, so a foreign org's token is already not_found.
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

@@ -1,8 +1,62 @@
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { exportJWK, generateKeyPair, SignJWT, type CryptoKey, type JWK } from 'jose';
 import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { ServerFrame } from '@rowboat/spaces-protocol';
 import type { RunningHarbor } from '../src/server.js';
+
+// --- fake authorization server ----------------------------------------------
+// RFC 8414 discovery + JWKS + JWTs minted in-test — CI never needs a real IdP.
+
+const KID = 'test-key-1';
+
+export interface FakeAs {
+  issuer: string;
+  server: Server;
+  privateKey: CryptoKey;
+  mint(claims: { sub?: string; iss?: string; exp?: string | number; email?: string; name?: string }): Promise<string>;
+}
+
+export async function startFakeAs(): Promise<FakeAs> {
+  const { publicKey, privateKey } = await generateKeyPair('ES256', { extractable: true });
+  const jwk: JWK = { ...(await exportJWK(publicKey)), kid: KID, alg: 'ES256' };
+
+  let issuer = '';
+  const server = createServer((req, res) => {
+    if (req.url === '/.well-known/oauth-authorization-server') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ issuer, jwks_uri: `${issuer}/jwks` }));
+    } else if (req.url === '/jwks') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ keys: [jwk] }));
+    } else {
+      res.writeHead(404).end();
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  issuer = `http://localhost:${(server.address() as AddressInfo).port}`;
+
+  return {
+    issuer,
+    server,
+    privateKey,
+    async mint(claims) {
+      return new SignJWT({
+        ...(claims.email ? { email: claims.email } : {}),
+        // GoTrue's placement for social profile names.
+        ...(claims.name ? { user_metadata: { full_name: claims.name } } : {}),
+      })
+        .setProtectedHeader({ alg: 'ES256', kid: KID })
+        .setIssuer(claims.iss ?? issuer)
+        .setSubject(claims.sub ?? 'sub-ramnique')
+        .setIssuedAt()
+        .setExpirationTime(claims.exp ?? '5m')
+        .sign(privateKey);
+    },
+  };
+}
 
 export function restClient(harbor: RunningHarbor, token: string) {
   return {
