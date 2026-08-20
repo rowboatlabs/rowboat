@@ -187,6 +187,51 @@ export async function signInOrg(input: { baseUrl: string; openBrowser: OpenBrows
   });
 }
 
+/** The managed deployment's apex (create-org, my-orgs). Overridable for local stacks. */
+export const MANAGED_APEX_URL = 'https://spaces.rowboatlabs.com';
+
+export function apexUrl(): string {
+  return (process.env.ROWBOAT_SPACES_APEX ?? MANAGED_APEX_URL).replace(/\/$/, '');
+}
+
+/**
+ * Self-serve org creation on the managed deployment: dance against the apex
+ * (same discovery, same flow), POST the org, and — because shared-realm
+ * tokens are realm-generic — the dance's tokens work at the new org's
+ * subdomain immediately. The caller is the org's provisioned first admin.
+ */
+export async function createOrgOnDeployment(input: {
+  name: string;
+  slug: string;
+  openBrowser: OpenBrowser;
+  apexUrl?: string;
+}): Promise<OrgRecord> {
+  const apex = (input.apexUrl ?? apexUrl()).replace(/\/$/, '');
+  const dance = await danceForTokens({ baseUrl: apex, openBrowser: input.openBrowser });
+  const res = await fetch(`${apex}/v1/orgs`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${dance.tokens.access}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: input.name, slug: input.slug }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    message?: string;
+    org?: { id: string; name: string; address: string };
+    member?: { id: string };
+  };
+  if (!res.ok || !body.org || !body.member) {
+    throw new Error(body.message ?? `org creation failed (${res.status})`);
+  }
+  return upsertOAuthOrg({
+    baseUrl: `${new URL(apex).protocol}//${body.org.address}`,
+    name: body.org.name,
+    address: body.org.address,
+    issuer: dance.issuer,
+    clientId: dance.clientId,
+    memberId: body.member.id,
+    tokens: dance.tokens,
+  });
+}
+
 /** Pre-auth resolution of a pasted invite link — what the join card shows. */
 export async function resolveInviteLink(url: string): Promise<{ baseUrl: string; token: string; resolved: ResolveInviteResult }> {
   const parsed = parseInviteLink(url);

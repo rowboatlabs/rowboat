@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { getRequestListener } from '@hono/node-server';
+import { buildApexApp } from './apex.js';
 import { DevAuthDriver, type AuthDriver } from './auth.js';
 import { OidcAuthDriver } from './auth-oidc.js';
 import { OrgDirectory, normalizeDomain, type CreateOrgInput, type OrgConfig } from './directory.js';
@@ -35,6 +36,14 @@ export interface DeploymentOptions {
    * deployment an issuer-less org is a misconfiguration, not a fallback.
    */
   allowDevOrgs?: boolean;
+  /**
+   * Mounts the deployment face (apex.ts: self-serve org creation, "my orgs")
+   * on this domain; created orgs live at `<slug>.<apexDomain>` and pin
+   * `issuer`. Both required together.
+   */
+  apexDomain?: string;
+  /** The deployment's AS — apex auth + the issuer every created org pins. */
+  issuer?: string;
 }
 
 export interface RunningDeployment {
@@ -58,6 +67,21 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   const directory = new OrgDirectory(options.db);
   const hub = new SpaceHub();
   const runtimes = new Map<string, OrgRuntime>();
+
+  const apexDomain = options.apexDomain ? normalizeDomain(options.apexDomain) : undefined;
+  const apex =
+    apexDomain && options.issuer
+      ? getRequestListener(
+          buildApexApp({
+            db: options.db,
+            directory,
+            auth: new OidcAuthDriver({ issuer: options.issuer }),
+            apexDomain,
+            issuer: options.issuer,
+            ...(options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),
+          }).fetch,
+        )
+      : undefined;
 
   function buildRuntime(org: OrgConfig): OrgRuntime | undefined {
     if (!org.issuer && !options.allowDevOrgs) return undefined;
@@ -98,7 +122,18 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
 
   const server = createServer((req, res) => {
     void (async () => {
-      const runtime = await runtimeFor(hostOf(req));
+      // Host-independent liveness for platform health checks (they probe the
+      // service's own hostname, which routes to no org).
+      if (req.url === '/healthz') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+        return;
+      }
+      const host = hostOf(req);
+      if (apex && host && normalizeDomain(host) === apexDomain) {
+        apex(req, res);
+        return;
+      }
+      const runtime = await runtimeFor(host);
       if (!runtime) {
         res.writeHead(404, { 'content-type': 'application/json' }).end(
           JSON.stringify({ code: 'not_found', message: 'no org on this domain', retryable: false }),

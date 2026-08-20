@@ -38,7 +38,7 @@ const http = (host: string, token?: string) => ({
 beforeAll(async () => {
   db = await pgliteDb();
   as = await startFakeAs();
-  dep = await startHarborDeployment({ db });
+  dep = await startHarborDeployment({ db, apexDomain: 'spaces.test', issuer: as.issuer });
   await dep.createOrg({
     name: 'Acme',
     domains: ['acme.test'],
@@ -170,5 +170,48 @@ describe('multi-org deployment', () => {
 
   it('domains are unique across the deployment', async () => {
     await expect(dep.createOrg({ name: 'Squatter', domains: ['acme.test'] })).rejects.toThrow(/already routes/);
+  });
+});
+
+describe('apex face (self-serve org creation)', () => {
+  it('serves discovery so the standard OAuth dance works against the apex', async () => {
+    const res = await http('spaces.test').get('/.well-known/oauth-protected-resource');
+    expect(res.body.authorization_servers).toEqual([as.issuer]);
+  });
+
+  it('creates an org: caller becomes first admin; the SAME token works on the new org immediately', async () => {
+    const token = await as.mint({ sub: 'sub-founder', email: 'founder@rowboatlabs.com', name: 'The Founder' });
+    const created = await http('spaces.test', token).post('/v1/orgs', { name: 'Roadboard', slug: 'roadboard' });
+    expect(created.status).toBe(200);
+    expect(created.body.org.address).toBe('roadboard.spaces.test');
+    expect(created.body.member.displayName).toBe('The Founder');
+
+    // Realm-generic tokens (spike finding): no second dance needed.
+    const me = await http('roadboard.spaces.test', token).get('/v1/me');
+    expect(me.status).toBe(200);
+    expect(me.body.member.role).toBe('admin');
+    expect(me.body.member.id).toBe(created.body.member.id);
+    // Fully functional org: create a space on it.
+    expect((await http('roadboard.spaces.test', token).post('/v1/spaces', { name: 'General' })).status).toBe(200);
+  });
+
+  it('lists MY orgs — memberships across the deployment, nobody else’s', async () => {
+    const token = await as.mint({ sub: 'sub-founder' });
+    const mine = (await http('spaces.test', token).get('/v1/orgs')).body.orgs;
+    expect(mine.map((o: any) => o.name)).toEqual(['Roadboard']);
+    const ram = await as.mint({ sub: 'sub-ram' });
+    const rams = (await http('spaces.test', ram).get('/v1/orgs')).body.orgs;
+    expect(rams.map((o: any) => o.name).sort()).toEqual(['Acme', 'Beta']);
+  });
+
+  it('rejects bad slugs, reserved slugs, taken slugs, and unauthenticated creation', async () => {
+    const token = await as.mint({ sub: 'sub-founder' });
+    const apex = http('spaces.test', token);
+    expect((await apex.post('/v1/orgs', { name: 'X', slug: 'Bad_Slug!' })).status).toBe(400);
+    expect((await apex.post('/v1/orgs', { name: 'X', slug: 'www' })).body.message).toContain('reserved');
+    expect((await apex.post('/v1/orgs', { name: 'X', slug: 'roadboard' })).body.message).toContain('taken');
+    const anon = await http('spaces.test').post('/v1/orgs', { name: 'X', slug: 'nope' });
+    expect(anon.status).toBe(401);
+    expect((await http('spaces.test').get('/v1/health')).body.apex).toBe('spaces.test');
   });
 });

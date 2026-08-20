@@ -100,11 +100,79 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
     onOpenChange: (open: boolean) => void
     onAdded: () => void
 }) {
+    // Three ways in: create your own org on the managed deployment (free for
+    // now), paste an invite link (resolve pre-auth, then join with a
+    // system-browser sign-in), or a dev org against the stub.
+    const [mode, setMode] = useState<'invite' | 'create' | 'dev'>('invite')
+    const [inviteUrl, setInviteUrl] = useState('')
+    const [preview, setPreview] = useState<{ org: string; space: string; invitedBy?: string } | null>(null)
+    const [orgName, setOrgName] = useState('')
+    const [slug, setSlug] = useState('')
+    const [slugEdited, setSlugEdited] = useState(false)
     const [baseUrl, setBaseUrl] = useState('http://localhost:4272')
     const [memberId, setMemberId] = useState('')
     const [busy, setBusy] = useState(false)
 
-    const add = async () => {
+    const suggestSlug = (name: string) =>
+        name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+
+    const createOrg = async () => {
+        if (!orgName.trim() || !slug.trim()) return
+        setBusy(true)
+        setWaitingBrowser(true)
+        try {
+            const { org } = await window.ipc.invoke('spaces:createOrg', { name: orgName.trim(), slug: slug.trim() })
+            toast(`Created ${org.name} — you're the admin`, 'success')
+            onOpenChange(false)
+            setOrgName('')
+            setSlug('')
+            setSlugEdited(false)
+            onAdded()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not create the org', 'error')
+        } finally {
+            setBusy(false)
+            setWaitingBrowser(false)
+        }
+    }
+
+    // Pre-auth resolve as soon as the pasted text parses — show what's being joined.
+    const resolvePreview = async (url: string) => {
+        setInviteUrl(url)
+        setPreview(null)
+        if (!/\/join\//.test(url)) return
+        try {
+            const { resolved } = await window.ipc.invoke('spaces:resolveInviteLink', { url: url.trim() })
+            if (resolved.state === 'ok') {
+                setPreview({ org: resolved.org.name, space: resolved.space.name, ...(resolved.invitedBy ? { invitedBy: resolved.invitedBy } : {}) })
+            } else {
+                toast(`This invite is ${resolved.state}`, 'error')
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not resolve the invite', 'error')
+        }
+    }
+
+    const join = async () => {
+        if (!inviteUrl.trim()) return
+        setBusy(true)
+        setWaitingBrowser(true)
+        try {
+            const { org, space } = await window.ipc.invoke('spaces:joinInvite', { url: inviteUrl.trim() })
+            toast(`Joined ${space.name} on ${org.name}`, 'success')
+            onOpenChange(false)
+            setInviteUrl('')
+            setPreview(null)
+            onAdded()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not join', 'error')
+        } finally {
+            setBusy(false)
+            setWaitingBrowser(false)
+        }
+    }
+
+    const addDev = async () => {
         if (!baseUrl.trim() || !memberId.trim()) return
         setBusy(true)
         try {
@@ -123,25 +191,100 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
-                    <DialogTitle>Add an org</DialogTitle>
+                    <DialogTitle>
+                        {mode === 'invite' ? 'Join a space' : mode === 'create' ? 'Create an org' : 'Add a dev org'}
+                    </DialogTitle>
                     <DialogDescription>
-                        Dev sign-in against a stub Harbor (run <code>pnpm dev</code> in <code>apps/harbor/packages/server</code>).
-                        The real org sign-in is an OAuth journey and replaces this form.
+                        {mode === 'invite'
+                            ? 'Paste an invite link. Signing in opens your browser.'
+                            : mode === 'create'
+                              ? 'Your team’s own corner — you’ll be its admin. Signing in opens your browser.'
+                              : 'Dev sign-in against a stub Harbor (run pnpm dev in apps/harbor/packages/server).'}
                     </DialogDescription>
                 </DialogHeader>
-                <div className="space-y-3">
-                    <div>
-                        <label className="text-xs font-medium text-muted-foreground">Org address</label>
-                        <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:4272" />
+                {mode === 'create' ? (
+                    <div className="space-y-3">
+                        <div>
+                            <label className="text-xs font-medium text-muted-foreground">Org name</label>
+                            <Input
+                                autoFocus
+                                value={orgName}
+                                onChange={(e) => {
+                                    setOrgName(e.target.value)
+                                    if (!slugEdited) setSlug(suggestSlug(e.target.value))
+                                }}
+                                placeholder="Acme Inc"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs font-medium text-muted-foreground">Address</label>
+                            <div className="flex items-center gap-1">
+                                <Input
+                                    value={slug}
+                                    onChange={(e) => {
+                                        setSlugEdited(true)
+                                        setSlug(suggestSlug(e.target.value))
+                                    }}
+                                    placeholder="acme"
+                                    className="flex-1"
+                                    onKeyDown={(e) => e.key === 'Enter' && void createOrg()}
+                                />
+                                <span className="text-xs text-muted-foreground shrink-0">.spaces.rowboatlabs.com</span>
+                            </div>
+                        </div>
+                        {waitingBrowser && (
+                            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                <Loader2 className="size-3 animate-spin" /> Waiting for the browser sign-in…
+                            </div>
+                        )}
+                        <div className="flex items-center justify-between">
+                            <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setMode('invite')}>
+                                have an invite link?
+                            </button>
+                            <div className="flex gap-2">
+                                <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+                                <Button onClick={() => void createOrg()} disabled={busy || !orgName.trim() || !slug.trim()}>
+                                    {busy && <Loader2 className="size-3.5 mr-1 animate-spin" />} Create
+                                </Button>
+                            </div>
+                        </div>
                     </div>
-                    <div>
-                        <label className="text-xs font-medium text-muted-foreground">Member id</label>
+                ) : mode === 'invite' ? (
+                    <div className="space-y-3">
                         <Input
                             value={memberId}
                             onChange={(e) => setMemberId(e.target.value)}
                             placeholder="e.g. ramnique"
                             onKeyDown={(e) => e.key === 'Enter' && void add()}
                         />
+                        {preview && (
+                            <div className="rounded-md border px-3 py-2 text-sm">
+                                Join <span className="font-medium">{preview.space}</span> on{' '}
+                                <span className="font-medium">{preview.org}</span>
+                                {preview.invitedBy ? <span className="text-muted-foreground"> — invited by {preview.invitedBy}</span> : null}
+                            </div>
+                        )}
+                        {waitingBrowser && (
+                            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                <Loader2 className="size-3 animate-spin" /> Waiting for the browser sign-in…
+                            </div>
+                        )}
+                        <div className="flex items-center justify-between">
+                            <div className="flex gap-3">
+                                <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setMode('create')}>
+                                    create an org
+                                </button>
+                                <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setMode('dev')}>
+                                    dev org
+                                </button>
+                            </div>
+                            <div className="flex gap-2">
+                                <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+                                <Button onClick={() => void join()} disabled={busy || !inviteUrl.trim()}>
+                                    {busy && <Loader2 className="size-3.5 mr-1 animate-spin" />} Join
+                                </Button>
+                            </div>
+                        </div>
                     </div>
                     <div className="flex justify-end gap-2">
                         <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -154,4 +297,3 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
         </Dialog>
     )
 }
-

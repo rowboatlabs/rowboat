@@ -47,6 +47,38 @@ const ROADBOARD_ROADMAP = `# Roadmap
 
 const port = Number(process.env.PORT ?? 4272);
 
+// Deployment mode (the managed fleet / any multi-org host): HARBOR_MODE=deployment
+// + DATABASE_URL + APEX_DOMAIN + AUTH_ISSUER. No seeding, no dev tokens —
+// orgs are created self-serve on the apex face; members arrive via OAuth +
+// invite binds. Render sets PORT.
+if (process.env.HARBOR_MODE === 'deployment') {
+  const { startHarborDeployment } = await import('./deployment.js');
+  const required = ['DATABASE_URL', 'APEX_DOMAIN', 'AUTH_ISSUER'] as const;
+  for (const name of required) {
+    if (!process.env[name]) {
+      console.error(`HARBOR_MODE=deployment requires ${name}`);
+      process.exit(1);
+    }
+  }
+  const deployment = await startHarborDeployment({
+    db: postgresDb(process.env.DATABASE_URL!),
+    port,
+    apexDomain: process.env.APEX_DOMAIN!,
+    issuer: process.env.AUTH_ISSUER!,
+    ...(process.env.AUTH_PUBLISHABLE_KEY ? { consentPublishableKey: process.env.AUTH_PUBLISHABLE_KEY } : {}),
+  });
+  console.log(`Harbor deployment (multi-org, Postgres)`);
+  console.log(``);
+  console.log(`  apex       https://${process.env.APEX_DOMAIN}  (create org, my orgs)`);
+  console.log(`  orgs       https://<slug>.${process.env.APEX_DOMAIN}  (render /v1/*, live /v1/live, agent /mcp)`);
+  console.log(`  issuer     ${process.env.AUTH_ISSUER}`);
+  console.log(`  listening  :${deployment.port}`);
+  process.on('SIGTERM', () => void deployment.close().then(() => process.exit(0)));
+} else {
+  await startDevHarbor();
+}
+
+async function startDevHarbor(): Promise<void> {
 let store: Store | undefined;
 if (process.env.DATABASE_URL) {
   const pgStore = new PgStore(postgresDb(process.env.DATABASE_URL));
@@ -110,3 +142,4 @@ for (const s of spaces) {
 }
 console.log(``);
 console.log(`  try        curl -H 'Authorization: Bearer dev-ramnique' ${harbor.url}/v1/spaces`);
+}

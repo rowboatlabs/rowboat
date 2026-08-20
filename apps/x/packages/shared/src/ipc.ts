@@ -3430,6 +3430,13 @@ const ipcSchemas = {
     req: z.object({ orgId: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
   },
+  // Self-serve org creation on the managed deployment's apex (free for now —
+  // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
+  // caller is the org's first admin at <slug>.spaces.rowboatlabs.com.
+  'spaces:createOrg': {
+    req: z.object({ name: z.string(), slug: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
   'spaces:removeOrg': {
     req: z.object({ orgId: z.string() }),
     res: z.object({ success: z.literal(true) }),

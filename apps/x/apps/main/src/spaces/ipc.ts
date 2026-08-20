@@ -19,6 +19,7 @@ type SpacesHandlers = {
   'spaces:resolveInviteLink': InvokeHandler<'spaces:resolveInviteLink'>;
   'spaces:joinInvite': InvokeHandler<'spaces:joinInvite'>;
   'spaces:signInOrg': InvokeHandler<'spaces:signInOrg'>;
+  'spaces:createOrg': InvokeHandler<'spaces:createOrg'>;
   'spaces:removeOrg': InvokeHandler<'spaces:removeOrg'>;
   'spaces:listSpaces': InvokeHandler<'spaces:listSpaces'>;
   'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
@@ -102,6 +103,10 @@ export const spacesIpcHandlers: SpacesHandlers = {
     const updated = await spacesOAuth.signInOrg({ baseUrl: record.baseUrl, openBrowser, orgId: record.id });
     return { org: orgSummary(updated) };
   },
+
+  'spaces:createOrg': async (_event, args) => ({
+    org: orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, slug: args.slug, openBrowser })),
+  }),
 
   'spaces:removeOrg': async (_event, args) => {
     void syncSpaceMentionWatch();
