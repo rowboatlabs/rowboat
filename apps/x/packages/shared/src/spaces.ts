@@ -89,3 +89,34 @@ export interface SpacesBusEvent {
   orgId: string;
   frame: ServerFrame;
 }
+
+// ---------------------------------------------------------------------------
+// Mention scanning — one implementation for the renderer (composer highlight,
+// @rowboat trigger) and main (mention notifications).
+//
+// Address vs. cite rules (ported from buzz's mention scanner): text inside
+// code fences, inline code, and quoted lines is writing ABOUT someone, not
+// addressing them — stripped before scanning. The mention must sit at a word
+// boundary ("email@rowboat.com" never triggers).
+// ---------------------------------------------------------------------------
+
+export function stripNonAddressRegions(text: string): string {
+  return text
+    .replace(/```[\s\S]*?(```|$)/g, ' ') // fenced code blocks (incl. unterminated)
+    .replace(/`[^`\n]*`/g, ' ') // inline code
+    .replace(/^[ \t]*>.*$/gm, ' '); // markdown-quoted lines (citing someone else's message)
+}
+
+/** Does the body genuinely ADDRESS @<handle>? Case-insensitive; handles are org-scoped member ids. */
+export function containsMemberAddress(body: string, handle: string): boolean {
+  const escaped = handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Negative lookahead: not a longer handle ("@arjun.k", "@rowboat.com") — but
+  // trailing punctuation ("ping @arjun.") still counts as addressing.
+  const re = new RegExp(`(^|[\\s([{])@${escaped}(?!\\w|[.-]\\w)`, 'i');
+  return re.test(stripNonAddressRegions(body));
+}
+
+/** The @rowboat address — always the speaker's own agent (spec §8). */
+export function containsRowboatAddress(body: string): boolean {
+  return containsMemberAddress(body, 'rowboat');
+}

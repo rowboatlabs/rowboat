@@ -1506,7 +1506,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Notification Settings ---
 
-type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready"
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready" | "space_mention"
 
 const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
@@ -1543,6 +1543,11 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     key: "meeting_notes_ready",
     label: "Meeting notes ready",
     description: "When your meeting notes finish generating after a call. Click to open the note. Only shown while the app is in the background.",
+  },
+  {
+    key: "space_mention",
+    label: "Space mentions",
+    description: "When a teammate @mentions you in a space. Click to open the conversation. Only shown while the app is in the background.",
   },
 ]
 

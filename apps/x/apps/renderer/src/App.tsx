@@ -709,7 +709,9 @@ function parseDeepLink(input: string): ViewState | null {
     case 'spaces': {
       const orgId = params.get('orgId')
       const spaceId = params.get('spaceId')
-      return orgId && spaceId ? { type: 'spaces', orgId, spaceId } : { type: 'spaces' }
+      if (!orgId || !spaceId) return { type: 'spaces' }
+      const topicId = params.get('topicId')
+      return { type: 'spaces', orgId, spaceId, ...(topicId ? { rail: { kind: 'topic' as const, topicId } } : {}) }
     }
     default:
       return null
