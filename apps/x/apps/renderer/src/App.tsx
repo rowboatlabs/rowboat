@@ -917,7 +917,7 @@ function App() {
   // The companion's OWN conversation binding. The hover bar, the Skipper,
   // and every call talk to THIS session — never to whatever chat the app
   // happens to be showing. Seeded from the chat a call was started on;
-  // switched from the bar's chip; untouched by app navigation, so hovering
+  // switched from the companion's chip; untouched by app navigation, so hovering
   // and browsing the app are fully independent.
   const [hoverRunId, setHoverRunId] = useState<string | null>(null)
   const hoverRunIdRef = useRef<string | null>(null)
@@ -1061,7 +1061,7 @@ function App() {
   }, [])
 
   // Speak newly completed <voice> blocks from the new runtime's live stream.
-  // Speech is a COMPANION concern (calls + the bar's voice toggle), so the
+  // Speech is a COMPANION concern (the hover session's replies), so the
   // segments come from the hover session's store — the app's visible chat
   // never starts talking, whatever it's bound to.
   const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
@@ -1553,9 +1553,9 @@ function App() {
   // falls back to the text card — and so does a session that fails to
   // start, so a summon is never a silent no-op.
   const startHoverCall = useCallback(async (opts: { share?: boolean } = {}) => {
-    // Tell main the relay landed and a session is coming — cancels the
-    // "nothing answered" text-card fallback so slow device startup can't
-    // flash the old summoned bar before the Skipper pins.
+    // Tell main the relay landed and a session is coming — stops its
+    // watchdog from re-sending the relay while devices are still starting
+    // up (acquisition can take seconds).
     void window.ipc.invoke('quickAsk:tuckAck', null).catch(() => {})
     if (inCallRef.current) {
       // Already on a call — just make sure the floating surface is up
@@ -2004,7 +2004,7 @@ function App() {
   // What's happening right now, at tool-NAME level ("Searching the web…",
   // "Reasoning…" — never arguments): the most recent activity wins — a
   // running tool by display name, else reasoning, else plain thinking.
-  // Feeds the summoned bar's status line AND the Skipper's chip/panel, so
+  // Feeds the Skipper's status chip and text panel, so
   // it reads the HOVER session's turn.
   const hoverActivityText = useMemo(() => {
     if (!hoverIsProcessing) return null
@@ -4601,7 +4601,7 @@ function App() {
     handleNewChatTabInSidebar()
   }, [chatTabs, handleNewChatTabInSidebar])
 
-  // Quick-ask "+": the bar wants a fresh COMPANION conversation for its next
+  // The companion's "+": a fresh COMPANION conversation for its next
   // question. The app window's chat is untouched.
   useEffect(() => {
     return window.ipc.on('quick-ask:new-chat', () => {
@@ -4610,7 +4610,7 @@ function App() {
   }, [])
 
   // Companion-bar chat context: which conversation the companion is bound to
-  // (shown as the bar's destination chip) plus recents for its switcher.
+  // (shown as the companion's destination chip) plus recents for its switcher.
   // This is the HOVER binding — the app window's chat plays no part in it.
   useEffect(() => {
     void window.ipc
@@ -5213,8 +5213,8 @@ function App() {
         const s = await window.ipc.invoke('quickAsk:getShortcut', null)
         if (s.registered) return
         const isMacHere = navigator.platform.toLowerCase().includes('mac')
-        toast.warning('Quick Ask shortcut unavailable', {
-          description: `${quickAskShortcut.formatShortcut(s.accelerator, isMacHere)} is in use by another app, so Quick Ask can't be summoned right now. Pick a different shortcut in Settings.`,
+        toast.warning('Hover shortcut unavailable', {
+          description: `${quickAskShortcut.formatShortcut(s.accelerator, isMacHere)} is in use by another app, so your Skipper can't be summoned right now. Pick a different shortcut in Settings.`,
           duration: 15000,
           closeButton: true,
           action: {

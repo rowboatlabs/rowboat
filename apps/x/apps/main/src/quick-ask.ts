@@ -60,9 +60,9 @@ const PINNED_MAX_HEIGHT = 560;
 // caption, everything else on hover.
 const TUCKED_WIDTH = 250;
 const TUCKED_HEIGHT = 250;
-// The Skipper card: the pinned text panel + mascot, one unit. Narrower than
-// the summoned frame (it hugs a corner instead of center-stage) but the same
-// tall transparent stage above the card for popovers and panel growth.
+// The Skipper card: the text panel + mascot, one unit. It hugs a corner,
+// with a tall transparent stage above the card for popovers and panel
+// growth.
 const SKIPPER_FRAME_WIDTH = 560;
 const SKIPPER_FRAME_HEIGHT = 560;
 // Uniform downscale: the window shrinks and the page zooms by the SAME
@@ -336,7 +336,7 @@ function createWindow(): BrowserWindow {
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
-    // The summoned frame is mostly transparent — a native shadow would
+    // The frame is mostly transparent — a native shadow would
     // outline the whole invisible rectangle. Cards draw their own CSS
     // shadows in both modes.
     hasShadow: false,
@@ -706,7 +706,7 @@ function broadcastShortcutState() {
 
 // The shortcut-recorder modal is capturing keys: the current chord is
 // released so pressing it lands in the modal as keystrokes to display,
-// instead of summoning the bar over the recorder.
+// instead of summoning the companion over the recorder.
 let captureSuspended = false;
 
 export function setShortcutCaptureActive(active: boolean) {

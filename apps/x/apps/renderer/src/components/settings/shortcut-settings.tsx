@@ -132,7 +132,7 @@ export function ShortcutSettings() {
   }, [pending, apply, closeModal])
 
   // While the modal is up, main releases the current global chord —
-  // otherwise pressing it would summon the quick-ask bar over the recorder
+  // otherwise pressing it would summon the companion over the recorder
   // instead of showing up as keycaps here.
   useEffect(() => {
     if (!open) return

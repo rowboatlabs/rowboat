@@ -1161,8 +1161,8 @@ function SkipperStatusChip({ state, activity }: { state: CallState; activity?: s
  * `video:popoutAction` to the app window, which owns the devices. Captures
  * its own webcam preview — MediaStreams can't cross windows.
  *
- * Wrapped in `.dark`: the pill keeps its dark skin even though the summoned
- * bar claims light tokens, so the composer inside renders dark too.
+ * Wrapped in `.dark`: the pill keeps its dark skin even though the Skipper
+ * card claims light tokens, so the composer inside renders dark too.
  */
 function PinnedPill({
   state,
