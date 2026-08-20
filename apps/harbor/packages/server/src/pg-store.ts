@@ -47,6 +47,7 @@ interface ChangeSetRow {
   result_version: number;
   attribution: ChangeSet['attribution'];
   reason: string | null;
+  topic_id: string | null;
   committed_at: string;
   stream_offset: number;
 }
@@ -60,6 +61,7 @@ function rowToChangeSet(r: ChangeSetRow): ChangeSet {
     resultVersion: r.result_version,
     attribution: r.attribution,
     ...(r.reason !== null ? { reason: r.reason } : {}),
+    ...(r.topic_id !== null ? { topicId: r.topic_id } : {}),
     committedAt: r.committed_at,
     offset: r.stream_offset,
   };
@@ -69,10 +71,12 @@ interface TopicRow {
   id: string;
   space_id: string;
   title: string;
+  kind: Topic['kind'];
   created_by: Topic['createdBy'];
   created_at: string;
   archived: boolean;
   anchor_change_set_id: string | null;
+  anchor_message_id: string | null;
   last_activity_at: string;
   message_count: number;
 }
@@ -82,10 +86,12 @@ function rowToTopic(r: TopicRow): Topic {
     id: r.id,
     spaceId: r.space_id,
     title: r.title,
+    kind: r.kind,
     createdBy: r.created_by,
     createdAt: r.created_at,
     archived: r.archived,
     ...(r.anchor_change_set_id !== null ? { anchorChangeSetId: r.anchor_change_set_id } : {}),
+    ...(r.anchor_message_id !== null ? { anchorMessageId: r.anchor_message_id } : {}),
     lastActivityAt: r.last_activity_at,
     messageCount: r.message_count,
   };
@@ -288,8 +294,8 @@ export class PgStore implements Store {
 
   async appendChangeSet(changeSet: ChangeSet): Promise<void> {
     await this.sql.query(
-      `insert into change_sets (id, space_id, asset_path, base_version, result_version, attribution, reason, committed_at, stream_offset)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)`,
+      `insert into change_sets (id, space_id, asset_path, base_version, result_version, attribution, reason, topic_id, committed_at, stream_offset)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)`,
       [
         changeSet.id,
         changeSet.spaceId,
@@ -298,6 +304,7 @@ export class PgStore implements Store {
         changeSet.resultVersion,
         JSON.stringify(changeSet.attribution),
         changeSet.reason ?? null,
+        changeSet.topicId ?? null,
         changeSet.committedAt,
         changeSet.offset,
       ],
@@ -343,24 +350,35 @@ export class PgStore implements Store {
 
   async putTopic(topic: Topic): Promise<void> {
     await this.sql.query(
-      `insert into topics (id, space_id, title, created_by, created_at, archived, anchor_change_set_id, last_activity_at, message_count)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)
+      `insert into topics (id, space_id, title, kind, created_by, created_at, archived, anchor_change_set_id, anchor_message_id, last_activity_at, message_count)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
        on conflict (id) do update set
          title = excluded.title, archived = excluded.archived,
          anchor_change_set_id = excluded.anchor_change_set_id,
+         anchor_message_id = excluded.anchor_message_id,
          last_activity_at = excluded.last_activity_at, message_count = excluded.message_count`,
       [
         topic.id,
         topic.spaceId,
         topic.title,
+        topic.kind,
         JSON.stringify(topic.createdBy),
         topic.createdAt,
         topic.archived,
         topic.anchorChangeSetId ?? null,
+        topic.anchorMessageId ?? null,
         topic.lastActivityAt,
         topic.messageCount,
       ],
     );
+  }
+
+  async getTopicByAnchor(spaceId: string, anchorMessageId: string): Promise<Topic | undefined> {
+    const rows = await this.sql.query<TopicRow>(
+      'select * from topics where space_id = $1 and anchor_message_id = $2',
+      [spaceId, anchorMessageId],
+    );
+    return rows[0] ? rowToTopic(rows[0]) : undefined;
   }
 
   async listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]> {
@@ -370,6 +388,14 @@ export class PgStore implements Store {
       [spaceId],
     );
     return rows.map(rowToTopic);
+  }
+
+  async getMessage(spaceId: string, messageId: string): Promise<Message | undefined> {
+    const rows = await this.sql.query<MessageRow>(
+      'select * from messages where space_id = $1 and id = $2',
+      [spaceId, messageId],
+    );
+    return rows[0] ? rowToMessage(rows[0]) : undefined;
   }
 
   async listMessages(spaceId: string, topicId: string): Promise<Message[]> {

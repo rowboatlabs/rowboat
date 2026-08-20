@@ -155,6 +155,12 @@ export interface ThreadInfo {
     topicId: string
     firstMessage: spaces.Message | null
     marker: ThreadMarker | null
+    /** The message this topic grew from — the contract field, else the legacy marker. */
+    parentMessageId: string | null
+}
+
+function threadParentOf(topic: spaces.Topic, marker: ThreadMarker | null): string | null {
+    return topic.anchorMessageId ?? marker?.parentMessageId ?? null
 }
 
 let threadState: ReadonlyMap<string, ReadonlyMap<string, ThreadInfo>> = new Map()
@@ -180,7 +186,8 @@ async function indexThreads(orgId: string, spaceId: string): Promise<void> {
             try {
                 const res = await window.ipc.invoke('spaces:listMessages', { orgId, spaceId, topicId: topic.id })
                 const first = res.messages[0] ?? null
-                const info: ThreadInfo = { topicId: topic.id, firstMessage: first, marker: first ? parseThreadMarker(first.body) : null }
+                const marker = first ? parseThreadMarker(first.body) : null
+                const info: ThreadInfo = { topicId: topic.id, firstMessage: first, marker, parentMessageId: threadParentOf(topic, marker) }
                 const spaceMap = new Map(threadState.get(k) ?? [])
                 spaceMap.set(topic.id, info)
                 const next = new Map(threadState)
@@ -200,7 +207,8 @@ async function indexThreads(orgId: string, spaceId: string): Promise<void> {
 export function rememberThread(orgId: string, spaceId: string, topic: spaces.Topic, firstMessage: spaces.Message): void {
     const k = key(orgId, spaceId)
     const spaceMap = new Map(threadState.get(k) ?? [])
-    spaceMap.set(topic.id, { topicId: topic.id, firstMessage, marker: parseThreadMarker(firstMessage.body) })
+    const marker = parseThreadMarker(firstMessage.body)
+    spaceMap.set(topic.id, { topicId: topic.id, firstMessage, marker, parentMessageId: threadParentOf(topic, marker) })
     const next = new Map(threadState)
     next.set(k, spaceMap)
     threadState = next
@@ -242,10 +250,11 @@ export function useThreadIndex(orgId: string, spaceId: string): ThreadIndex {
         const byTopic = state.get(key(orgId, spaceId))
         if (!byTopic) return EMPTY_INDEX
         const byParent = new Map<string, string>()
-        // Oldest thread wins if two claim the same parent (same race rule as general).
+        // Oldest thread wins if two claim the same parent (only reachable via
+        // pre-contract data — the server now enforces one topic per message).
         const ordered = [...byTopic.values()].sort((a, b) => (a.firstMessage?.postedAt ?? '').localeCompare(b.firstMessage?.postedAt ?? ''))
         for (const info of ordered) {
-            if (info.marker && !byParent.has(info.marker.parentMessageId)) byParent.set(info.marker.parentMessageId, info.topicId)
+            if (info.parentMessageId && !byParent.has(info.parentMessageId)) byParent.set(info.parentMessageId, info.topicId)
         }
         return { byTopic, byParent }
     }, [state, orgId, spaceId])
@@ -295,8 +304,11 @@ export function useSpacePresence(orgId: string, spaceId: string, selfMemberId: s
     useSpaceLive(orgId, spaceId, (frame) => {
         if (frame.kind !== 'presence') return
         const leases = leasesRef.current
-        const k = `${frame.memberId}|${frame.topicId ?? ''}|${frame.state === 'agent_working' ? 'agent' : 'human'}`
-        if (frame.state === 'idle') leases.delete(k)
+        // Human and agent leases are independent per (member, topic) — the frame's
+        // state says which one this is (agent_working/agent_idle vs the rest).
+        const agent = frame.state === 'agent_working' || frame.state === 'agent_idle'
+        const k = `${frame.memberId}|${frame.topicId ?? ''}|${agent ? 'agent' : 'human'}`
+        if (frame.state === 'idle' || frame.state === 'agent_idle') leases.delete(k)
         else leases.set(k, { state: frame.state, topicId: frame.topicId ?? '', at: Date.now() })
         setPresence(foldLeases(leases, selfMemberId))
     })

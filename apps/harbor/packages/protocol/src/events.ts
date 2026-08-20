@@ -22,7 +22,14 @@ export const SpaceEvent = z.discriminatedUnion('type', [
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 
-export const PresenceState = z.enum(['viewing', 'typing', 'agent_working', 'idle']);
+/**
+ * A member holds two independent leases per topic: a human one (viewing /
+ * typing, ended by `idle`) and an agent one (`agent_working`, ended by
+ * `agent_idle`). Both frames carry the same memberId — the agent acts as the
+ * member — so the end states must be distinct for receivers to know which
+ * lease an `idle` closes.
+ */
+export const PresenceState = z.enum(['viewing', 'typing', 'agent_working', 'agent_idle', 'idle']);
 export type PresenceState = z.infer<typeof PresenceState>;
 
 /** Server → client frames. */

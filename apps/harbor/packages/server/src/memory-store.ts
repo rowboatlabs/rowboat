@@ -167,6 +167,14 @@ export class MemoryStore implements Store {
       .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
   }
 
+  async getTopicByAnchor(spaceId: string, anchorMessageId: string): Promise<Topic | undefined> {
+    return [...this.must(spaceId).topics.values()].find((t) => t.anchorMessageId === anchorMessageId);
+  }
+
+  async getMessage(spaceId: string, messageId: string): Promise<Message | undefined> {
+    return [...this.must(spaceId).messages.values()].flat().find((m) => m.id === messageId);
+  }
+
   async listMessages(spaceId: string, topicId: string): Promise<Message[]> {
     return [...(this.must(spaceId).messages.get(topicId) ?? [])];
   }

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ChangeSet, ProposeChange, ProposeChangeResult, ReadAssetResult } from './changeset.js';
 import { ActingMode, Member, Message, Space, Topic } from './core.js';
-import { AssetPath, AssetVersion, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetPath, AssetVersion, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
   AcceptInviteResult,
@@ -22,6 +22,12 @@ const NewTopicMessage = z.object({
   topicId: TopicId.optional(),
   /** Reply-to-activity-row: anchors the new topic to a change-set (only valid when creating). */
   anchorChangeSetId: z.string().optional(),
+  /**
+   * Reply-becomes-a-thread: anchors the new topic to an existing message
+   * (only valid when creating; at most one topic per message). The org
+   * validates the message exists in the space.
+   */
+  anchorMessageId: MessageId.optional(),
   body: z.string().min(1).max(65_536),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),

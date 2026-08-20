@@ -7,6 +7,7 @@ import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
+import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
@@ -4598,7 +4599,6 @@ function App() {
       case 'live-notes': return 'Live notes'
       case 'bg-tasks': return 'Background tasks'
       case 'apps': return 'Apps'
-      case 'apps': return 'Mini Apps'
       case 'spaces': {
         const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
         return org?.spaces.find((sp) => sp.id === currentViewState.spaceId)?.name ?? 'Spaces'
@@ -5092,6 +5092,11 @@ function App() {
         setIsAppsOpen(true)
         return
       case 'spaces':
+        // Feature-flag gate: every route into Spaces (sidebar, palette, deep
+        // links, notification clicks, history, relaunch restore) funnels
+        // through here. With the flag off, closeAllSections has already run,
+        // so the app lands on the default full-screen chat.
+        if (!SPACES_ENABLED) return
         if (view.orgId && view.spaceId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId })
         setRailSelection(view.rail ?? { kind: 'general' })
         setIsSpacesOpen(true)

@@ -7,6 +7,7 @@ import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
+import { encodeMentions } from '@/lib/spaces-presentation'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
 // line — with two things layered on: `@` autocompletes members and @rowboat,
@@ -24,11 +25,8 @@ export interface AgentOptions {
 
 interface MentionCandidate {
     id: string
-    /** Shown in the picker. */
     label: string
-    /** What gets typed into the message — a NAME, never the opaque member id. */
-    insert: string
-    hint: string
+    hint?: string
     isAgent?: boolean
 }
 
@@ -98,10 +96,10 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
         if (!mentionMatch) return []
         const q = mentionMatch.query
         const list: MentionCandidate[] = []
-        if ('rowboat'.startsWith(q)) list.push({ id: 'rowboat', label: 'rowboat', insert: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
+        if ('rowboat'.startsWith(q)) list.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
         for (const m of members) {
             const hay = `${m.id} ${m.displayName}`.toLowerCase()
-            if (!q || hay.includes(q)) list.push({ id: m.id, label: m.displayName, insert: m.displayName, hint: m.id === selfMemberId ? 'you' : '' })
+            if (!q || hay.includes(q)) list.push({ id: m.id, label: m.displayName, ...(m.id === selfMemberId ? { hint: 'you' } : {}) })
         }
         return list.slice(0, 8)
     }, [mentionMatch, members, selfMemberId])
@@ -127,9 +125,11 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
             setCaret(pos)
         })
     }
+    // The draft shows the person's name; send() encodes it back to the wire
+    // address @<memberId> (what notifications and agent invocation scan for).
     const pickCandidate = (c: MentionCandidate) => {
         if (!mentionMatch) return
-        insertAt(mentionMatch.start, caret, `@${c.insert} `)
+        insertAt(mentionMatch.start, caret, `@${c.label} `)
     }
 
     const insertRowboatChip = () => {
@@ -149,7 +149,7 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     // --- send ----------------------------------------------------------------
     const mentioned = containsRowboatAddress(draft)
     const send = async () => {
-        const body = draft.trim()
+        const body = encodeMentions(draft.trim(), members)
         if (!body || busy) return
         const agent: AgentOptions | undefined = mentioned
             ? {

@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Bot, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
+import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
 import { rememberThread, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { buildThreadSeed, dayKey, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
+import { resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { toast } from '@/lib/toast'
@@ -20,7 +22,7 @@ import { containsRowboatAddress } from '@/lib/spaces-mentions'
 const scrollMemory = new Map<string, number>()
 
 export function GeneralStream({
-    org, space, general, threads, topics, presence, members, memberNames, onOpenThread,
+    org, space, general, threads, topics, presence, members, memberNames, onOpenThread, onOpenSession,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -31,6 +33,7 @@ export function GeneralStream({
     members: spaces.Member[]
     memberNames: Map<string, string>
     onOpenThread: (topicId: string) => void
+    onOpenSession?: (sessionId: string) => void
 }) {
     const [posting, setPosting] = useState(false)
     const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null)
@@ -38,6 +41,20 @@ export function GeneralStream({
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const generalId = general.topic?.id ?? null
     const { onType } = usePresenceSender(org.id, space.id, generalId ?? undefined)
+
+    // Agents invoked straight from the stream hold their working lease on the
+    // stream's own topic — surface it here, typing-indicator position.
+    const workingHere = presence.working.get(generalId ?? '') ?? []
+    const openStreamSession = async () => {
+        if (!generalId) return
+        try {
+            const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, topicId: generalId })
+            if (sessionId && onOpenSession) onOpenSession(sessionId)
+            else if (!sessionId) toast('No agent session here yet', 'info')
+        } catch {
+            toast('Could not open the agent session', 'error')
+        }
+    }
 
     // "New" divider: snapshot the read mark when general opens; mark read from then on.
     const [newSince] = useState<string | null>(() => (generalId ? getTopicLastReadAt(org.id, space.id, generalId) : null))
@@ -63,7 +80,7 @@ export function GeneralStream({
         }
         const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
         if (nearBottom) bottomRef.current?.scrollIntoView({ block: 'end' })
-    }, [general.ready, general.messages.length, presence.typing, memoryKey])
+    }, [general.ready, general.messages.length, presence.typing, workingHere.length, memoryKey])
     useEffect(() => {
         return () => {
             if (lastScrollTopRef.current !== null) scrollMemory.set(memoryKey, lastScrollTopRef.current)
@@ -107,7 +124,9 @@ export function GeneralStream({
 
     const replyInThread = async (parent: spaces.Message) => {
         try {
-            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body: buildThreadSeed(parent) })
+            // anchorMessageId is the contract linkage; the seed's marker stays for
+            // teammates on pre-contract builds to parse.
+            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body: buildThreadSeed(parent), anchorMessageId: parent.id })
             rememberThread(org.id, space.id, result.topic, result.message)
             markTopicRead(org.id, space.id, result.topic.id)
             analytics.spacesTopicStarted()
@@ -119,7 +138,8 @@ export function GeneralStream({
 
     const askRowboat = (message: spaces.Message) => {
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
-        const quote = message.body.split('\n').map((l) => `> ${l}`).join('\n')
+        // Quote with names, not wire ids — the composer re-encodes on send.
+        const quote = resolveMentions(message.body, memberNames).split('\n').map((l) => `> ${l}`).join('\n')
         setSeed({ text: `@rowboat \n\n${quote}\n— ${name}`, nonce: Date.now() })
     }
 
@@ -194,6 +214,21 @@ export function GeneralStream({
                     <div className="px-2 py-6 text-sm text-muted-foreground">Nothing here yet — say hello, or @rowboat to ask your agent.</div>
                 )}
                 {rows}
+                {workingHere.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 pl-10 pt-1">
+                        {workingHere.map((memberId) => {
+                            const own = memberId === org.memberId
+                            const label = own ? 'Your Rowboat is working…' : <><MemberName id={memberId} />’s Rowboat is working…</>
+                            return own ? (
+                                <button key={memberId} className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent session" onClick={() => void openStreamSession()}>
+                                    <Loader2 className="size-3 animate-spin" />{label}
+                                </button>
+                            ) : (
+                                <span key={memberId} className="flex items-center gap-1.5 rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground"><Bot className="size-3" />{label}</span>
+                            )
+                        })}
+                    </div>
+                )}
                 <TypingIndicator names={typingNames} />
                 <div ref={bottomRef} />
             </div>

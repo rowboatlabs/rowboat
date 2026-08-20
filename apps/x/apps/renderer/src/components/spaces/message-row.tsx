@@ -6,7 +6,7 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { formatFeedTime } from '@/lib/spaces-presentation'
+import { decorateMentions, formatFeedTime } from '@/lib/spaces-presentation'
 
 // One message in a stream (general or a thread). Consecutive messages by the
 // same author compact to a time gutter; hover reveals the action bar.
@@ -66,7 +66,7 @@ export function MessageRow({
                     </div>
                 )}
                 <div className={MESSAGE_PROSE}>
-                    <Streamdown>{message.body}</Streamdown>
+                    <Streamdown>{decorateMentions(message.body, memberNames)}</Streamdown>
                 </div>
                 {thread && thread.replyCount > 0 && onOpenThread && (
                     <button

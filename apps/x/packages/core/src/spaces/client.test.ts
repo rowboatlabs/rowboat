@@ -144,11 +144,11 @@ describe('SpacesLive', () => {
       0,
     );
 
-    await waitFor(() => seen.filter((f) => f.kind === 'event').length >= 2, 'replay');
-    // Replay: membership joined + the a.md change.
+    await waitFor(() => seen.filter((f) => f.kind === 'event').length >= 3, 'replay');
+    // Replay: membership joined, the seeded stream topic, the a.md change.
     expect(seen[0]!.kind).toBe('subscribed');
     const replayOffsets = seen.filter((f) => f.kind === 'event').map((f) => f.offset);
-    expect(replayOffsets).toEqual([1, 2]);
+    expect(replayOffsets).toEqual([1, 2, 3]);
 
     // Live event arrives on the same subscription.
     await ramnique.proposeChange(space.id, {
@@ -157,8 +157,8 @@ describe('SpacesLive', () => {
       newContent: 'a\nb\n',
       actingMode: 'direct',
     });
-    await waitFor(() => seen.filter((f) => f.kind === 'event').length >= 3, 'live event');
-    expect(seen.filter((f) => f.kind === 'event').map((f) => f.offset)).toEqual([1, 2, 3]);
+    await waitFor(() => seen.filter((f) => f.kind === 'event').length >= 4, 'live event');
+    expect(seen.filter((f) => f.kind === 'event').map((f) => f.offset)).toEqual([1, 2, 3, 4]);
 
     live.close();
   });

@@ -122,6 +122,7 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
     const [baseUrl, setBaseUrl] = useState('http://localhost:4272')
     const [memberId, setMemberId] = useState('')
     const [busy, setBusy] = useState(false)
+    const [waitingBrowser, setWaitingBrowser] = useState(false)
 
     const suggestSlug = (name: string) =>
         name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
@@ -269,10 +270,11 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
                 ) : mode === 'invite' ? (
                     <div className="space-y-3">
                         <Input
-                            value={memberId}
-                            onChange={(e) => setMemberId(e.target.value)}
-                            placeholder="e.g. ramnique"
-                            onKeyDown={(e) => e.key === 'Enter' && void add()}
+                            autoFocus
+                            value={inviteUrl}
+                            onChange={(e) => void resolvePreview(e.target.value)}
+                            placeholder="https://org.example/join/…"
+                            onKeyDown={(e) => e.key === 'Enter' && void join()}
                         />
                         {preview && (
                             <div className="rounded-md border px-3 py-2 text-sm">
@@ -303,13 +305,34 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
                             </div>
                         </div>
                     </div>
-                    <div className="flex justify-end gap-2">
-                        <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-                        <Button onClick={() => void add()} disabled={busy || !baseUrl.trim() || !memberId.trim()}>
-                            {busy && <Loader2 className="size-3.5 mr-1 animate-spin" />} Sign in
-                        </Button>
+                ) : (
+                    <div className="space-y-3">
+                        <div>
+                            <label className="text-xs font-medium text-muted-foreground">Org address</label>
+                            <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:4272" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-medium text-muted-foreground">Member id</label>
+                            <Input
+                                value={memberId}
+                                onChange={(e) => setMemberId(e.target.value)}
+                                placeholder="e.g. ramnique"
+                                onKeyDown={(e) => e.key === 'Enter' && void addDev()}
+                            />
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setMode('invite')}>
+                                invite link instead
+                            </button>
+                            <div className="flex gap-2">
+                                <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+                                <Button onClick={() => void addDev()} disabled={busy || !baseUrl.trim() || !memberId.trim()}>
+                                    {busy && <Loader2 className="size-3.5 mr-1 animate-spin" />} Sign in
+                                </Button>
+                            </div>
+                        </div>
                     </div>
-                </div>
+                )}
             </DialogContent>
         </Dialog>
     )

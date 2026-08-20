@@ -9,12 +9,13 @@ import {
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
+import { MemberName, MemberText, useMemberNames } from '@/components/spaces/member-text'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
 import type { SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
 import { usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { artifactsForThread, isContinuation, stripThreadMarker } from '@/lib/spaces-conventions'
-import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
+import { attributionLabel, decorateMentions, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { toast } from '@/lib/toast'
@@ -87,8 +88,9 @@ export function ThreadPane({
     const groups = useMemo(() => artifactsForThread(changeSets, topicId), [changeSets, topicId])
 
     const parent = threadInfo?.firstMessage ?? messages[0] ?? null
+    const isThread = !!threadInfo?.parentMessageId
+    // Display metadata (who said the parent, when) still rides in the marker.
     const marker = threadInfo?.marker ?? null
-    const isThread = !!marker
     const replies = messages.slice(1)
 
     const post = async (body: string, agent?: AgentOptions) => {
@@ -172,7 +174,7 @@ export function ThreadPane({
                 )}
                 <span className="pl-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topic</span>
                 <span className="truncate text-xs text-muted-foreground">
-                    {isThread ? 'from a message' : topic?.title ?? ''}{groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? 'file' : 'files'} changed` : ''}
+                    {isThread ? 'from a message' : <MemberText text={topic?.title ?? ''} />}{groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? 'file' : 'files'} changed` : ''}
                 </span>
                 <span className="flex-1" />
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
@@ -270,7 +272,7 @@ export function ThreadPane({
                     <div className="flex flex-wrap items-center gap-2 pl-10 pt-1">
                         {workingAgents.map((memberId) => {
                             const own = memberId === org.memberId
-                            const label = own ? 'Your Rowboat is working…' : `${memberNames.get(memberId) ?? memberId}’s Rowboat is working…`
+                            const label = own ? 'Your Rowboat is working…' : <><MemberName id={memberId} />’s Rowboat is working…</>
                             return own ? (
                                 <button key={memberId} className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent session for this topic" onClick={() => void openTopicSession()}>
                                     <Loader2 className="size-3 animate-spin" />{label}
@@ -292,5 +294,6 @@ export function ThreadPane({
 }
 
 function ParentBody({ body }: { body: string }) {
-    return <Streamdown>{body}</Streamdown>
+    const names = useMemberNames()
+    return <Streamdown>{decorateMentions(body, names)}</Streamdown>
 }

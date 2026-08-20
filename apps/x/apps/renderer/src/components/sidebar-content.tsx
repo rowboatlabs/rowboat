@@ -85,6 +85,7 @@ import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
+import { SPACES_ENABLED } from "@/lib/feature-flags"
 import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
@@ -1066,9 +1067,12 @@ export function SidebarContentPanel({
         <div className="mx-3 border-t border-sidebar-border" />
 
         {/* Spaces — orgs and their spaces, with unread counts */}
-        <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
-
-        <div className="mx-3 border-t border-sidebar-border" />
+        {SPACES_ENABLED && (
+          <>
+            <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
+            <div className="mx-3 border-t border-sidebar-border" />
+          </>
+        )}
 
         {/* Chats */}
         <SidebarGroup className="flex flex-col">

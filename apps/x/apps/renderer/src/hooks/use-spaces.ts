@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
+import { SPACES_ENABLED } from '@/lib/feature-flags'
 import { getLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
 
 export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
@@ -58,7 +59,9 @@ export function refreshSpacesOrgs(): Promise<void> {
 
 export function subscribeOrgs(listener: () => void): () => void {
     orgsListeners.add(listener)
-    if (!orgsFetchedOnce && !orgsInflight) void refreshSpacesOrgs()
+    // With Spaces dark, passive subscribers (e.g. the App title crumb) must
+    // not trigger the lazy fetch — the store just stays empty.
+    if (SPACES_ENABLED && !orgsFetchedOnce && !orgsInflight) void refreshSpacesOrgs()
     return () => {
         orgsListeners.delete(listener)
     }

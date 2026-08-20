@@ -1,15 +1,10 @@
 import type { spaces } from '@x/shared'
 
-// Push-1 spike conventions (see the Spaces daily-chat plan). Everything the
-// chat-first model needs is already IN the space log; these helpers NAME it
-// client-side until the contract PR adds real fields:
-//
-//   messages  → Topic.kind = 'general'           (today: oldest open topic titled "messages")
-//   topic-from-message → Topic.anchorMessageId   (today: a marker in the topic's first message)
-//   artifacts → ChangeSet.topicId                (today: "· topic:<id>" suffix on the reason)
-//
-// Keep every convention in this one file so the migration is a grep. The
-// later backfill reads exactly these shapes.
+// Chat-first conventions. The contract now carries the real fields —
+// Topic.kind, Topic.anchorMessageId, ChangeSet.topicId (Harbor migration 004
+// backfilled pre-contract data from exactly the legacy shapes parsed here).
+// The legacy parsers below remain as fallbacks for topics minted by pre-004
+// servers (a teammate's stale local Harbor); delete them once none are left.
 
 // ---------------------------------------------------------------------------
 // Messages — the space's open stream (internally still "general")
@@ -21,8 +16,14 @@ const LEGACY_GENERAL_TITLES = new Set(['messages', 'general'])
 /** Body of the seed message that creates the stream topic (its first line becomes the title). Hidden in the UI. */
 export const GENERAL_SEED_BODY = 'messages'
 
-/** The oldest open topic titled "messages" (or the legacy "general") — ties (a seed race) resolve to the older topic. */
+/**
+ * The space's stream: the topic the server marked kind 'general' (seeded at
+ * space creation, unique per space). Fallback for pre-004 servers: the oldest
+ * open topic titled "messages"/"general" — ties (a seed race) resolve older.
+ */
 export function findGeneralTopic(topics: spaces.Topic[]): spaces.Topic | null {
+    const marked = topics.find((t) => t.kind === 'general' && !t.archived)
+    if (marked) return marked
     const candidates = topics.filter((t) => !t.archived && LEGACY_GENERAL_TITLES.has(t.title.trim().toLowerCase()))
     if (candidates.length === 0) return null
     candidates.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
@@ -103,7 +104,7 @@ export interface ArtifactGroup {
 
 /** Change-sets made from this topic, grouped by file, newest group first. */
 export function artifactsForThread(changeSets: spaces.ChangeSet[], topicId: string): ArtifactGroup[] {
-    const mine = changeSets.filter((c) => threadRefOf(c.reason) === topicId)
+    const mine = changeSets.filter((c) => (c.topicId ?? threadRefOf(c.reason)) === topicId)
     const byPath = new Map<string, spaces.ChangeSet[]>()
     for (const cs of mine) {
         const list = byPath.get(cs.assetPath) ?? []

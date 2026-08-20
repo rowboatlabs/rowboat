@@ -316,7 +316,8 @@ describe('feed: topics and messages', () => {
 
   it('retitle, archive (hidden by default), unarchive-by-reply', async () => {
     const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
-    const topicId = topics.body.topics[0].id;
+    // The seeded stream topic is not archivable chatter — operate on the discussion.
+    const topicId = topics.body.topics.find((t: { kind: string }) => t.kind === 'discussion').id;
 
     const retitled = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, {
       action: 'retitle',
@@ -325,9 +326,10 @@ describe('feed: topics and messages', () => {
     expect(retitled.body.topic.title).toBe('Pricing section: cut or keep');
 
     await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'archive' });
-    expect((await ramnique.get(`/v1/spaces/${spaceId}/topics`)).body.topics).toHaveLength(0);
+    const remaining = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    expect(remaining.body.topics.map((t: { kind: string }) => t.kind)).toEqual(['general']);
     const withArchived = await ramnique.get(`/v1/spaces/${spaceId}/topics?includeArchived=true`);
-    expect(withArchived.body.topics).toHaveLength(1);
+    expect(withArchived.body.topics).toHaveLength(2);
 
     const reply = await gagan.post(`/v1/spaces/${spaceId}/messages`, {
       topicId,
@@ -354,6 +356,83 @@ describe('feed: topics and messages', () => {
     const bad = await gagan.post(`/v1/spaces/${spaceId}/messages`, {
       body: 'Anchored to nothing',
       anchorChangeSetId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      actingMode: 'direct',
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('every space is born with its stream topic — exactly one, kind general, empty', async () => {
+    const r = await ramnique.post('/v1/spaces', { name: 'Born with a stream' });
+    const topics = await ramnique.get(`/v1/spaces/${r.body.space.id}/topics`);
+    const generals = topics.body.topics.filter((t: any) => t.kind === 'general');
+    expect(generals).toHaveLength(1);
+    expect(generals[0]).toMatchObject({ title: 'messages', messageCount: 0, archived: false });
+    expect(topics.body.topics).toHaveLength(1);
+  });
+
+  it('a topic can grow from a message — once, and the anchor must exist', async () => {
+    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    const general = topics.body.topics.find((t: any) => t.kind === 'general');
+    const parent = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      topicId: general.id,
+      body: 'The launch date question keeps coming back.',
+      actingMode: 'direct',
+    });
+
+    const thread = await gagan.post(`/v1/spaces/${spaceId}/messages`, {
+      body: 'The launch date question keeps coming back.',
+      anchorMessageId: parent.body.message.id,
+      actingMode: 'direct',
+    });
+    expect(thread.status).toBe(200);
+    expect(thread.body.topic.kind).toBe('discussion');
+    expect(thread.body.topic.anchorMessageId).toBe(parent.body.message.id);
+
+    // One topic per message: a second claim is refused and names the winner.
+    const again = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      body: 'Me too',
+      anchorMessageId: parent.body.message.id,
+      actingMode: 'direct',
+    });
+    expect(again.status).toBe(400);
+    expect(again.body.message).toContain(thread.body.topic.id);
+
+    const dangling = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      body: 'Anchored to nothing',
+      anchorMessageId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      actingMode: 'direct',
+    });
+    expect(dangling.status).toBe(400);
+  });
+
+  it('change-sets carry topic provenance — explicit topicId validated, reason suffix derived', async () => {
+    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    const topicId = topics.body.topics[0].id;
+
+    const explicit = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
+      assetPath: 'provenance.md',
+      baseVersion: 0,
+      newContent: '# From a topic\n',
+      topicId,
+      actingMode: 'direct',
+    });
+    expect(explicit.body.changeSet.topicId).toBe(topicId);
+
+    const derived = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
+      assetPath: 'provenance.md',
+      baseVersion: 1,
+      newContent: '# From a topic, via the reason suffix\n',
+      reason: `folded the discussion · topic:${topicId}`,
+      actingMode: 'agent',
+      agentName: 'Rowboat',
+    });
+    expect(derived.body.changeSet.topicId).toBe(topicId);
+
+    const bad = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
+      assetPath: 'provenance.md',
+      baseVersion: 2,
+      newContent: '# Bad provenance\n',
+      topicId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
       actingMode: 'direct',
     });
     expect(bad.status).toBe(400);

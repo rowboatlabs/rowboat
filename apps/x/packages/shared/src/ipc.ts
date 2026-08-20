@@ -3528,6 +3528,7 @@ const ipcSchemas = {
       spaceId: z.string(),
       topicId: z.string().optional(),
       anchorChangeSetId: z.string().optional(),
+      anchorMessageId: z.string().optional(),
       body: z.string(),
     }),
     res: z.custom<SpacesPostResult>(),

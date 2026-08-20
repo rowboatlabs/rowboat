@@ -18,6 +18,7 @@ function topic(over: Partial<spaces.Topic> & { id: string }): spaces.Topic {
     return {
         spaceId: 's1',
         title: 'general',
+        kind: 'discussion',
         createdBy: { memberId: 'arjun', actingMode: 'direct' },
         createdAt: '2026-08-19T09:00:00Z',
         archived: false,
@@ -62,6 +63,13 @@ describe('general', () => {
         ]
         expect(findGeneralTopic(topics)?.id).toBe('a')
         expect(findGeneralTopic([topic({ id: 'x', title: 'not general' })])).toBeNull()
+    })
+    it('prefers the server-marked stream (kind general) over any legacy title match', () => {
+        const topics = [
+            topic({ id: 'legacy-titled', createdAt: '2026-08-19T09:00:00Z', title: 'messages' }),
+            topic({ id: 'marked', createdAt: '2026-08-19T09:05:00Z', title: 'messages', kind: 'general' }),
+        ]
+        expect(findGeneralTopic(topics)?.id).toBe('marked')
     })
     it('recognises the seed message only as the first message of general', () => {
         const general = topic({ id: 't-general' })

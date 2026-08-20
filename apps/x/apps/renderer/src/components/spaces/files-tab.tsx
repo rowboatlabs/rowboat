@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { MemberText } from '@/components/spaces/member-text'
 import { attributionLabel, buildFileTree, formatFeedTime, type FileTreeNode } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { MemberAvatar } from '@/components/spaces/atoms'
@@ -451,7 +452,7 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
                             <MemberAvatar id={cs.attribution.memberId} name={memberNames.get(cs.attribution.memberId) ?? cs.attribution.memberId} size="sm" />
                             <div className="text-xs font-medium truncate">{attributionLabel(cs.attribution, memberNames)}</div>
                         </div>
-                        {cs.reason && <div className="text-xs text-muted-foreground mt-1 pl-7">&ldquo;{cs.reason}&rdquo;</div>}
+                        {cs.reason && <div className="text-xs text-muted-foreground mt-1 pl-7">&ldquo;<MemberText text={cs.reason} />&rdquo;</div>}
                         <div className="text-[10.5px] text-muted-foreground mt-1 pl-7 flex items-center gap-1">
                             <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
                         </div>

@@ -130,3 +130,65 @@ export function isUnreadChange(cs: spaces.ChangeSet, lastReadAt: string | null, 
 export function shortId(id: string): string {
     return id.slice(-6).toLowerCase()
 }
+
+/**
+ * The one walker that turns wire member addresses ("@<memberId>") into
+ * people. Code regions stay literal (same address-vs-cite line the trigger
+ * logic draws); unknown ids pass through untouched; @rowboat keeps its
+ * handle. Every mention-rendering path goes through here — fix it once.
+ */
+function mapMentions(body: string, memberNames: ReadonlyMap<string, string>, wrap: (handle: string) => string): string {
+    const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    return parts
+        .map((part, i) => {
+            if (i % 2 === 1) return part // a code region — cite, not address
+            return part.replace(/(^|[\s([{])@([A-Za-z0-9][\w.-]*)/g, (match, pre: string, id: string) => {
+                if (id.toLowerCase() === 'rowboat') return `${pre}${wrap('@rowboat')}`
+                const name = memberNames.get(id)
+                return name ? `${pre}${wrap(`@${name}`)}` : match
+            })
+        })
+        .join('')
+}
+
+/**
+ * For markdown surfaces (message bodies): "@<memberId>" becomes
+ * "**@Display Name**" so the pipeline sets it off in bold.
+ */
+export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
+    return mapMentions(body, memberNames, (h) => `**${h}**`)
+}
+
+/**
+ * For plain-text surfaces (topic titles, crumbs, reasons): same resolution,
+ * no markup — safe for search haystacks and tooltips too.
+ */
+export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
+    return mapMentions(body, memberNames, (h) => h)
+}
+
+/**
+ * The inverse, for the composer: people type/pick "@Display Name" but the wire
+ * address is "@<memberId>" (that's what mention notifications and agent
+ * invocation scan for). Longest name first so "Ramnique Singh" wins over a
+ * teammate named "Ramnique"; case-insensitive; code regions stay literal.
+ * A member named "rowboat" never captures the agent's address.
+ */
+export function encodeMentions(body: string, members: readonly { id: string; displayName: string }[]): string {
+    const ordered = members
+        .filter((m) => m.displayName && m.displayName !== m.id && m.displayName.toLowerCase() !== 'rowboat')
+        .sort((a, b) => b.displayName.length - a.displayName.length)
+    if (ordered.length === 0) return body
+    const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    return parts
+        .map((part, i) => {
+            if (i % 2 === 1) return part // a code region — cite, not address
+            let out = part
+            for (const m of ordered) {
+                const escaped = m.displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                out = out.replace(new RegExp(`(^|[\\s([{])@${escaped}(?![\\w.-])`, 'gi'), `$1@${m.id}`)
+            }
+            return out
+        })
+        .join('')
+}

@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import type { AuthDriver, AuthIdentity } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import { HarborError } from './errors.js';
+import { publicOrigin } from './origin.js';
 import type { HarborService } from './service.js';
 import type { Store } from './store.js';
 
@@ -62,7 +63,7 @@ export function buildHttpApp(deps: {
     // RFC 9728: 401s point clients at the resource metadata so any MCP-style
     // client can find the OAuth dance mechanically.
     if (e.code === 'unauthorized' && auth.metadata?.()) {
-      const origin = new URL(c.req.url).origin;
+      const origin = publicOrigin(c);
       c.header('WWW-Authenticate', `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`);
     }
     return c.json(e.toBody(), e.status as 400);
@@ -74,7 +75,7 @@ export function buildHttpApp(deps: {
   app.get('/.well-known/oauth-protected-resource', (c) => {
     const meta = auth.metadata?.();
     if (!meta) throw new HarborError('not_found', 'no authorization server configured (dev auth)');
-    const origin = new URL(c.req.url).origin;
+    const origin = publicOrigin(c);
     return c.json({
       resource: origin,
       authorization_servers: meta.authorizationServers,

@@ -218,7 +218,9 @@ function stopPresence(watch: TopicWatch): void {
   clearInterval(watch.presenceTimer);
   watch.presenceTimer = null;
   try {
-    getLive(watch.orgId).presence(watch.spaceId, 'idle', watch.topicId);
+    // agent_idle, not idle: both frames carry the member's id, and idle would
+    // read as the human lease ending (the agent chip then lingers to its TTL).
+    getLive(watch.orgId).presence(watch.spaceId, 'agent_idle', watch.topicId);
   } catch {
     // best effort
   }

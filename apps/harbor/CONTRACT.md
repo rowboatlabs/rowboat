@@ -114,6 +114,17 @@ team and a Roadboard space (`src/main.ts`).
 - **Replying to an archived topic unarchives it** (and emits a topic event).
 - **Topic events** fire on create/retitle/archive/unarchive/merge — not on
   every reply; clients derive `lastActivityAt`/counts from message events.
+- **Every space is born with its stream**: a `kind: 'general'` topic (titled
+  "messages", empty — no seed message) seeded at space creation, exactly one
+  per space (partial unique index). All other topics are `kind: 'discussion'`.
+- **A topic can grow from a message**: `anchorMessageId` on topic creation
+  (validated, at most one topic per message). Provenance, not hierarchy — the
+  anchored message may live in any topic; clients render a flat topic list.
+- **Change-sets carry topic provenance**: `ChangeSet.topicId`, from an explicit
+  (validated) `topicId` on the proposal or derived from the `· topic:<id>`
+  reason suffix that prompt-driven agents write (`topicIdFromReason`, best
+  effort). Harbor migration 004 backfilled all three fields from the legacy
+  client conventions (title match, first-message marker, reason suffix).
 - **`merge_into`** repoints the source's messages, archives the source, returns
   the *target*. Durable message events keep their original `topicId` — clients
   refetch a thread when a topic event announces a merge.

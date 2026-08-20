@@ -3,6 +3,7 @@ import type { AuthDriver } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import type { OrgDirectory } from './directory.js';
 import { HarborError } from './errors.js';
+import { publicOrigin } from './origin.js';
 import type { SpaceHub } from './hub.js';
 import { PgStore } from './pg-store.js';
 import { HarborService } from './service.js';
@@ -52,7 +53,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
     const e = err instanceof HarborError ? err : new HarborError('internal', 'unexpected error');
     if (!(err instanceof HarborError)) console.error('[harbor] apex error:', err);
     if (e.code === 'unauthorized') {
-      const origin = new URL(c.req.url).origin;
+      const origin = publicOrigin(c);
       c.header('WWW-Authenticate', `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`);
     }
     return c.json(e.toBody(), e.status as 400);
@@ -70,7 +71,7 @@ export function buildApexApp(deps: ApexDeps): Hono {
   // Same discovery shape as an org, so the app's existing OAuth dance works
   // against the apex unchanged.
   app.get('/.well-known/oauth-protected-resource', (c) => {
-    const origin = new URL(c.req.url).origin;
+    const origin = publicOrigin(c);
     return c.json({ resource: origin, authorization_servers: [deps.issuer], bearer_methods_supported: ['header'] });
   });
 

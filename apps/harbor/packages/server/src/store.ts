@@ -77,8 +77,11 @@ export interface Store {
 
   // topics & messages
   getTopic(spaceId: string, topicId: string): Promise<Topic | undefined>;
+  /** The topic grown from this message, if one exists (anchorMessageId is unique). */
+  getTopicByAnchor(spaceId: string, anchorMessageId: string): Promise<Topic | undefined>;
   putTopic(topic: Topic): Promise<void>;
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;
+  getMessage(spaceId: string, messageId: string): Promise<Message | undefined>;
   /** Oldest first. */
   listMessages(spaceId: string, topicId: string): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;

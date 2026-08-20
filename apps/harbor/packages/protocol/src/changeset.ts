@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Attribution, ActingMode } from './core.js';
-import { AssetPath, AssetVersion, ChangeSetId, SpaceId, StreamOffset } from './ids.js';
+import { AssetPath, AssetVersion, ChangeSetId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Decision 1 (CONTRACT.md): a proposal is full new content against a declared
 // base version; the org performs a line-level three-way merge. No operation
@@ -18,6 +18,8 @@ export const ChangeSet = z.object({
   attribution: Attribution,
   /** Commit-message-style reasoning. Optional for humans; the MCP face requires it (mcp.ts). */
   reason: z.string().max(1_000).optional(),
+  /** The topic the change was made from, when it was made from one (provenance). */
+  topicId: TopicId.optional(),
   committedAt: z.iso.datetime(),
   offset: StreamOffset,
 });
@@ -30,10 +32,26 @@ export const ProposeChange = z.object({
   /** Full desired content. V1 assets are small text files; simplicity beats op-encoding. */
   newContent: z.string().max(1_048_576),
   reason: z.string().max(1_000).optional(),
+  /** Provenance: the topic this change was made from. Omitted by prompt-driven agents, which append "· topic:<id>" to the reason instead — the org derives topicId from that suffix (topicIdFromReason). */
+  topicId: TopicId.optional(),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),
 });
 export type ProposeChange = z.infer<typeof ProposeChange>;
+
+/**
+ * The reason-suffix convention, owned here so both faces parse it identically:
+ * a change made from a topic may carry "· topic:<id>" at the end of its reason
+ * (legacy spelling "thread:"). Servers newer than migration 004 stamp the
+ * parsed value into ChangeSet.topicId at commit time.
+ */
+export function topicIdFromReason(reason: string | undefined): string | null {
+  if (!reason) return null;
+  const suffixed = /\s*·\s*(?:topic|thread):([0-9A-Za-z_-]+)\s*$/.exec(reason);
+  if (suffixed) return suffixed[1]!;
+  const bare = /^(?:topic|thread):([0-9A-Za-z_-]+)$/.exec(reason.trim());
+  return bare ? bare[1]! : null;
+}
 
 /** A base-file line range where both sides changed. Line numbers are 1-based on the base version. */
 export const ConflictRegion = z.object({

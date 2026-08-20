@@ -148,6 +148,49 @@ export const MIGRATIONS: Migration[] = [
       // lookup is org-scoped, so a foreign org's token is already not_found.
     ],
   },
+  {
+    id: '004-topic-contract',
+    statements: [
+      // Promote the chat-first client conventions (apps/x spaces-conventions.ts)
+      // into the contract: Topic.kind, Topic.anchorMessageId, ChangeSet.topicId.
+      // The backfills below parse the exact legacy shapes those conventions
+      // wrote, so pre-004 data reads identically through the new fields.
+      `alter table topics add column if not exists kind text not null default 'discussion'`,
+      `alter table topics add column if not exists anchor_message_id text`,
+      `alter table change_sets add column if not exists topic_id text`,
+      // The stream: the oldest open topic titled "messages" (legacy "general")
+      // per space — same tie-break as the client's findGeneralTopic.
+      `update topics set kind = 'general' where id in (
+        select distinct on (space_id) id from topics
+        where lower(btrim(title)) in ('messages', 'general') and archived = false
+        order by space_id, created_at asc, id asc
+      )`,
+      // Thread parentage: the "<!-- rowboat:topic parent=msg:<id> … -->" marker
+      // in each topic's first message. Oldest claimant wins a contested parent
+      // (same rule the client's thread index applies).
+      `update topics set anchor_message_id = claims.parent from (
+        select distinct on (parent) topic_id, parent from (
+          select distinct on (topic_id) topic_id, posted_at,
+            substring(body from '<!--\\s*rowboat:(?:topic|thread)\\s+parent=msg:([0-9A-Za-z_-]+)') as parent
+          from messages
+          order by topic_id, stream_offset asc
+        ) firsts
+        where parent is not null
+        order by parent, posted_at asc, topic_id asc
+      ) claims
+      where topics.id = claims.topic_id and topics.anchor_message_id is null`,
+      // Artifact provenance: the "· topic:<id>" reason suffix (legacy "thread:",
+      // or a bare "topic:<id>" reason).
+      `update change_sets set topic_id = coalesce(
+        substring(reason from '·\\s*(?:topic|thread):([0-9A-Za-z_-]+)\\s*$'),
+        substring(reason from '^(?:topic|thread):([0-9A-Za-z_-]+)$')
+      ) where reason is not null and topic_id is null`,
+      // What the conventions could never have: invariants. Exactly one stream
+      // per space; at most one topic grown from any message.
+      `create unique index if not exists topics_one_general_per_space on topics (space_id) where kind = 'general'`,
+      `create unique index if not exists topics_anchor_message on topics (anchor_message_id) where anchor_message_id is not null`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

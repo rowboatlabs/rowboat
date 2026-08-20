@@ -70,7 +70,6 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
                                     unread={unread}
                                     onOpenSpace={onOpenSpace}
                                     onChanged={() => void refresh()}
-                                    onSignIn={() => setAddOrgOpen(true)}
                                 />
                             ))}
                         </SidebarMenu>
@@ -82,17 +81,31 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
     )
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onSignIn }: {
+function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
     unread: Map<string, number>
     onOpenSpace: (orgId: string, spaceId: string) => void
     onChanged: () => void
-    onSignIn: () => void
 }) {
     const [creating, setCreating] = useState(false)
     const [newName, setNewName] = useState('')
-    const needsSignIn = !!org.error && /401|403|unauthor|forbidden|sign/i.test(org.error)
+    // A dead OAuth session shows as a gentle "Sign in again" (org.authError, from core);
+    // an unreachable org shows Retry.
+    const needsSignIn = !!org.authError
+    const [signingIn, setSigningIn] = useState(false)
+    const signInAgain = async () => {
+        setSigningIn(true)
+        try {
+            await window.ipc.invoke('spaces:signInOrg', { orgId: org.id })
+            toast(`Signed back into ${org.name}`, 'success')
+            onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Sign-in failed', 'error')
+        } finally {
+            setSigningIn(false)
+        }
+    }
 
     const createSpace = async () => {
         const name = newName.trim()
@@ -117,13 +130,23 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onSignIn }:
                     {needsSignIn ? (
                         <button
                             type="button"
-                            onClick={needsSignIn ? onSignIn : onChanged}
+                            onClick={() => void signInAgain()}
+                            disabled={signingIn}
+                            className="rounded-sm border border-border bg-background px-1.5 py-px text-[10.5px] text-foreground/80 hover:bg-accent disabled:opacity-50"
+                            title={`Session expired — ${org.authError}`}
+                        >
+                            {signingIn ? 'Signing in…' : 'Sign in again'}
+                        </button>
+                    ) : org.error ? (
+                        <button
+                            type="button"
+                            onClick={onChanged}
                             className="rounded-sm border border-border bg-background px-1.5 py-px text-[10.5px] text-foreground/80 hover:bg-accent"
                             title={org.error}
                         >
-                            {needsSignIn ? 'Sign in' : 'Retry'}
+                            Retry
                         </button>
-                    )}
+                    ) : null}
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <button

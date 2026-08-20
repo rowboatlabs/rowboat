@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { cn, compactPath, parentPath } from "@/lib/utils"
+import { SPACES_ENABLED } from "@/lib/feature-flags"
 import * as analytics from "@/lib/analytics"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
@@ -1508,7 +1509,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready" | "space_mention"
 
-const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
+const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
     key: "chat_completion",
     label: "Chat responses",
@@ -1550,6 +1551,10 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     description: "When a teammate @mentions you in a space. Click to open the conversation. Only shown while the app is in the background.",
   },
 ]
+
+// With Spaces dark, its notification category stays out of the settings UI
+// (the mention watcher that emits it is gated on the same flag in main).
+const NOTIFICATION_CATEGORIES = ALL_NOTIFICATION_CATEGORIES.filter((cat) => SPACES_ENABLED || cat.key !== "space_mention")
 
 function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [categories, setCategories] = useState<Record<NotificationCategoryKey, boolean> | null>(null)

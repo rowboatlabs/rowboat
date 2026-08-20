@@ -78,13 +78,14 @@ describe('live face', () => {
   it('subscribe with afterOffset 0 replays the full space log, in order, after the subscribed frame', async () => {
     const client = await connect('dev-ramnique');
     client.send({ kind: 'subscribe', spaceId, afterOffset: 0 });
-    await client.until((fs) => eventFrames(fs).length >= 3, 'replay of seeded events');
+    await client.until((fs) => eventFrames(fs).length >= 4, 'replay of seeded events');
 
     expect(client.frames[0]).toMatchObject({ kind: 'subscribed', spaceId, fromOffset: 0 });
     const events = eventFrames(client.frames);
-    // Seed produced: ramnique joined, gagan joined, then the README change.
-    expect(events.map((e) => e.event.type)).toEqual(['membership', 'membership', 'change']);
-    expect(events.map((e) => e.offset)).toEqual([1, 2, 3]);
+    // Seed produced: ramnique joined, the space's stream topic was born with
+    // it, gagan joined, then the README change.
+    expect(events.map((e) => e.event.type)).toEqual(['membership', 'topic', 'membership', 'change']);
+    expect(events.map((e) => e.offset)).toEqual([1, 2, 3, 4]);
     client.close();
   });
 

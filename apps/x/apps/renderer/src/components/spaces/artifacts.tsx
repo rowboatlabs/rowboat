@@ -8,6 +8,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { stripThreadRef, type ArtifactGroup } from '@/lib/spaces-conventions'
+import { MemberText } from '@/components/spaces/member-text'
 import { attributionLabel, formatFeedTime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
@@ -111,7 +112,7 @@ export function ArtifactsRail({ org, space, groups, memberNames, working, entrie
                                 <div className="text-[12.5px]"><code className="text-xs">{g.assetPath}</code> <span className="text-muted-foreground">{versionLabel(g)}</span></div>
                                 <div className="truncate text-[11px] text-muted-foreground">
                                     {attributionLabel(g.latest.attribution, memberNames)} · {formatFeedTime(g.latest.committedAt)}
-                                    {g.latest.reason && stripThreadRef(g.latest.reason) ? ` · “${stripThreadRef(g.latest.reason)}”` : ''}
+                                    {g.latest.reason && stripThreadRef(g.latest.reason) ? <> · “<MemberText text={stripThreadRef(g.latest.reason)} />”</> : ''}
                                 </div>
                             </div>
                         </button>

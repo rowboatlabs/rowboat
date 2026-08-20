@@ -199,6 +199,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
     orgs.getClient(args.orgId).postMessage(args.spaceId, {
       ...(args.topicId ? { topicId: args.topicId } : {}),
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
+      ...(args.anchorMessageId ? { anchorMessageId: args.anchorMessageId } : {}),
       body: args.body,
       actingMode: 'direct',
     }),

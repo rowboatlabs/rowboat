@@ -3,6 +3,7 @@ import { createTwoFilesPatch } from 'diff';
 import { monotonicFactory } from 'ulid';
 import {
   inviteUrl,
+  topicIdFromReason,
   type ActingMode,
   type AcceptInviteResult,
   type Attribution,
@@ -11,6 +12,7 @@ import {
   type Member,
   type Membership,
   type Message,
+  type PresenceState,
   type ProposeChange,
   type ProposeChangeResult,
   type ReadAssetResult,
@@ -66,6 +68,8 @@ export interface OrgInfo {
 
 const RECENT_HISTORY = 10;
 const DEFAULT_INVITE_HOURS = 24 * 7;
+/** The seeded stream topic's title — what legacy clients (pre-kind) look for. */
+const GENERAL_TOPIC_TITLE = 'messages';
 
 export class HarborService {
   readonly org: OrgInfo;
@@ -128,6 +132,22 @@ export class HarborService {
       await this.store.putMembership(membership);
       const offset = (await this.store.head(space.id)) + 1;
       await this.append(space.id, offset, now, { type: 'membership', membership, action: 'joined' });
+      // Every space is born with its stream (kind 'general', exactly one —
+      // migration 004's partial unique index). No seed message needed: the
+      // title is set directly, so the topic starts empty.
+      const general: Topic = {
+        id: this.ulid(),
+        spaceId: space.id,
+        title: GENERAL_TOPIC_TITLE,
+        kind: 'general',
+        createdBy: { memberId: ctx.memberId, actingMode: 'direct' },
+        createdAt: now,
+        archived: false,
+        lastActivityAt: now,
+        messageCount: 0,
+      };
+      await this.store.putTopic(general);
+      await this.append(space.id, offset + 1, now, { type: 'topic', topic: general });
       return space;
     });
   }
@@ -265,6 +285,9 @@ export class HarborService {
   async proposeChange(ctx: ActorCtx, spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
+    if (input.topicId && !(await this.store.getTopic(spaceId, input.topicId))) {
+      throw new HarborError('invalid_request', 'topicId does not exist in this space');
+    }
     const attribution: Attribution = {
       memberId: ctx.memberId,
       actingMode: input.actingMode,
@@ -330,6 +353,10 @@ export class HarborService {
   ): Promise<ChangeSet> {
     const at = this.now();
     const offset = (await this.store.head(spaceId)) + 1;
+    // Provenance: an explicit topicId wins; otherwise the "· topic:<id>"
+    // reason suffix that prompt-driven agents write (best effort — the suffix
+    // is a claim, not validated).
+    const topicId = input.topicId ?? topicIdFromReason(input.reason);
     const changeSet: ChangeSet = {
       id: this.ulid(),
       spaceId,
@@ -338,6 +365,7 @@ export class HarborService {
       resultVersion: version,
       attribution,
       ...(input.reason ? { reason: input.reason } : {}),
+      ...(topicId ? { topicId } : {}),
       committedAt: at,
       offset,
     };
@@ -439,15 +467,26 @@ export class HarborService {
         const anchor = await this.store.getChangeSet(spaceId, input.anchorChangeSetId);
         if (!anchor) throw new HarborError('invalid_request', 'anchorChangeSetId does not exist in this space');
       }
+      if (input.anchorMessageId) {
+        const anchor = await this.store.getMessage(spaceId, input.anchorMessageId);
+        if (!anchor) throw new HarborError('invalid_request', 'anchorMessageId does not exist in this space');
+        // One topic per message — the space lock makes this check race-free.
+        const claimed = await this.store.getTopicByAnchor(spaceId, input.anchorMessageId);
+        if (claimed) {
+          throw new HarborError('invalid_request', `a topic already grew from this message (${claimed.id})`);
+        }
+      }
       const topicOffset = (await this.store.head(spaceId)) + 1;
       const topic: Topic = {
         id: this.ulid(),
         spaceId,
         title: deriveTitle(input.body),
+        kind: 'discussion',
         createdBy: author,
         createdAt: at,
         archived: false,
         ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
+        ...(input.anchorMessageId ? { anchorMessageId: input.anchorMessageId } : {}),
         lastActivityAt: at,
         messageCount: 1,
       };
@@ -562,7 +601,7 @@ export class HarborService {
   async publishPresence(
     ctx: ActorCtx,
     spaceId: string,
-    state: 'viewing' | 'typing' | 'agent_working' | 'idle',
+    state: PresenceState,
     topicId?: string,
   ): Promise<void> {
     await this.requireMember(ctx, spaceId);

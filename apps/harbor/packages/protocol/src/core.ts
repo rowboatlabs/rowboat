@@ -51,11 +51,25 @@ export const Topic = z.object({
   spaceId: SpaceId,
   /** First message becomes the title (spec §7); agents may retitle later. */
   title: z.string().min(1).max(256),
+  /**
+   * 'general' = the space's open message stream, exactly one per space, seeded
+   * at space creation. Everything else is 'discussion'. The default exists only
+   * so new clients can parse pre-004 servers (which omit the field); servers
+   * always set it explicitly.
+   */
+  kind: z.enum(['general', 'discussion']).default('discussion'),
   createdBy: Attribution,
   createdAt: z.iso.datetime(),
   archived: z.boolean(),
   /** Set when the topic was born by replying to an activity row (spec §7). */
   anchorChangeSetId: ChangeSetId.optional(),
+  /**
+   * Set when the topic grew out of a message ("reply becomes a thread").
+   * Provenance, not hierarchy: at most one topic per message, the anchored
+   * message may live in any topic, and clients render a flat topic list with
+   * a breadcrumb — never a tree.
+   */
+  anchorMessageId: MessageId.optional(),
   lastActivityAt: z.iso.datetime(),
   messageCount: z.number().int().nonnegative(),
 });
