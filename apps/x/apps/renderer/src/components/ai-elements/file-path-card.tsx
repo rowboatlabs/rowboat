@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, FileIcon, FileText, Image, Music, Pause, Play, Video } from 'lucide-react'
+import { BookOpen, Download, FileIcon, FileText, Image, Maximize2, Music, Pause, Play, Video } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { ImageLightbox, ImageOverlayButton } from '@/components/image-lightbox'
 import { useFileCard } from '@/contexts/file-card-context'
 import { useSidebarSection } from '@/contexts/sidebar-context'
+import { isImageFilePath } from '@/lib/file-utils'
 import { canOpenInApp } from '@/lib/file-types'
 import { wikiLabel } from '@/lib/wiki-links'
 
@@ -262,6 +265,108 @@ function SystemFileCard({ filePath }: { filePath: string }) {
   )
 }
 
+// --- Inline Image ---
+
+function isAbsolutePath(filePath: string): boolean {
+  return /^([A-Za-z]:[\\/]|\/|\\\\)/.test(filePath)
+}
+
+// ChatGPT-style bare image for image filepaths: no card chrome, just the
+// picture. Clicking expands it into the lightbox; hovering reveals download
+// and expand controls. Any load failure falls back to the plain
+// SystemFileCard — never a broken-image glyph.
+function InlineImageFile({ filePath }: { filePath: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const name = filePath.split('/').pop() || filePath
+
+  useEffect(() => {
+    let cancelled = false
+    window.ipc.invoke('shell:readFileBase64', { path: filePath })
+      .then((result) => {
+        if (!cancelled) {
+          setDataUrl(`data:${result.mimeType};base64,${result.data}`)
+        }
+      })
+      .catch((err) => {
+        console.debug('InlineImageFile: falling back to file card', filePath, err)
+        if (!cancelled) setFailed(true)
+      })
+    return () => { cancelled = true }
+  }, [filePath])
+
+  if (failed) {
+    return <SystemFileCard filePath={filePath} />
+  }
+
+  if (!dataUrl) {
+    return null
+  }
+
+  const handleOpenInSystem = () => {
+    void window.ipc.invoke('shell:openPath', { path: filePath })
+  }
+
+  // Save a copy through the existing workspace export handler (native save
+  // dialog, copies the file itself). It resolves workspace-relative paths
+  // only, so anything absolute saves the bytes already held in memory —
+  // Electron's default download flow prompts for a location either way.
+  const handleDownload = async () => {
+    if (!isAbsolutePath(filePath)) {
+      try {
+        const result = await window.ipc.invoke('workspace:exportCopy', { path: filePath })
+        // Cancelling the dialog is not a failure — say nothing.
+        if (result.error) toast.error(`Could not save the image: ${result.error}`)
+        return
+      } catch (err) {
+        console.debug('workspace:exportCopy unavailable; saving from memory', filePath, err)
+      }
+    }
+    const link = document.createElement('a')
+    link.href = dataUrl
+    link.download = name
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  return (
+    <>
+      <div className="group relative my-2 w-fit max-w-full">
+        <img
+          src={dataUrl}
+          alt={name}
+          aria-label={name}
+          role="button"
+          tabIndex={0}
+          onClick={() => setExpanded(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(true) } }}
+          onError={() => setFailed(true)}
+          className="block max-h-[420px] max-w-[min(100%,480px)] w-auto rounded-2xl object-contain cursor-pointer"
+        />
+        <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <ImageOverlayButton label={`Download ${name}`} onClick={() => { void handleDownload() }}>
+            <Download className="h-3.5 w-3.5" />
+          </ImageOverlayButton>
+          <ImageOverlayButton label={`Expand ${name}`} onClick={() => setExpanded(true)}>
+            <Maximize2 className="h-3.5 w-3.5" />
+          </ImageOverlayButton>
+        </div>
+      </div>
+      <ImageLightbox
+        open={expanded}
+        onOpenChange={setExpanded}
+        src={dataUrl}
+        name={name}
+        onDownload={() => { void handleDownload() }}
+        onOpenInSystem={handleOpenInSystem}
+        onError={() => { setExpanded(false); setFailed(true) }}
+      />
+    </>
+  )
+}
+
 // --- Main FilePathCard ---
 
 export function FilePathCard({ filePath }: { filePath: string }) {
@@ -274,6 +379,10 @@ export function FilePathCard({ filePath }: { filePath: string }) {
   const ext = getExtension(trimmed)
   if (AUDIO_EXTENSIONS.has(ext)) {
     return <AudioFileCard filePath={trimmed} />
+  }
+
+  if (isImageFilePath(trimmed)) {
+    return <InlineImageFile filePath={trimmed} />
   }
 
   return <SystemFileCard filePath={trimmed} />

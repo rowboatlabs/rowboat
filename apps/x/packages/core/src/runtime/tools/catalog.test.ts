@@ -216,6 +216,7 @@ const HISTORICAL_KEY_ORDER = [
     "transcribe-audio",
     "home-status",
     "paste-at-cursor",
+    "generate-image",
     "spawn-agent",
 ];
 
