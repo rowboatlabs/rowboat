@@ -3437,6 +3437,12 @@ const ipcSchemas = {
     req: z.object({ name: z.string(), slug: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
   },
+  // Where the Create button makes orgs (from /v1/config via core). null =
+  // no spaces fleet for this environment; the dialog says so honestly.
+  'spaces:apexInfo': {
+    req: z.null(),
+    res: z.object({ apexDomain: z.string().nullable() }),
+  },
   'spaces:removeOrg': {
     req: z.object({ orgId: z.string() }),
     res: z.object({ success: z.literal(true) }),

@@ -3,7 +3,9 @@ import type { AuthDriver } from './auth.js';
 import { consentPageHtml } from './consent.js';
 import type { OrgDirectory } from './directory.js';
 import { HarborError } from './errors.js';
+import type { SpaceHub } from './hub.js';
 import { PgStore } from './pg-store.js';
+import { HarborService } from './service.js';
 import type { SqlDb } from './sql.js';
 
 // The deployment face, served on the APEX domain (spaces.rowboatlabs.com) —
@@ -28,6 +30,8 @@ export interface ApexDeps {
   db: SqlDb;
   directory: OrgDirectory;
   auth: AuthDriver;
+  /** Shared event hub — the seeded space's events flow like any other. */
+  hub: SpaceHub;
   /** e.g. spaces.rowboatlabs.com — org domains are `<slug>.<apexDomain>`. */
   apexDomain: string;
   /** The deployment's AS — every created org pins this issuer. */
@@ -97,7 +101,22 @@ export function buildApexApp(deps: ApexDeps): Hono {
       }
       throw err;
     }
-    const member = await new PgStore(deps.db, org.id).getMemberByIdentity(identity.iss, identity.sub);
+    const store = new PgStore(deps.db, org.id);
+    const member = await store.getMemberByIdentity(identity.iss, identity.sub);
+    // Landing area: a first space with a welcome README, so a fresh org is a
+    // place rather than an empty list. Attributed to the founder — every act
+    // belongs to a member, and this is theirs.
+    if (member) {
+      const service = new HarborService(store, deps.hub, { name: org.name, address: domain });
+      const space = await service.createSpace({ memberId: member.id }, 'Main');
+      await service.proposeChange({ memberId: member.id }, space.id, {
+        assetPath: 'README.md',
+        baseVersion: 0,
+        newContent: welcomeReadme(org.name),
+        reason: 'seed the landing page',
+        actingMode: 'direct',
+      });
+    }
     return c.json({
       org: { id: org.id, name: org.name, address: domain },
       member: { id: member?.id ?? '', displayName: member?.displayName ?? '', role: 'admin' },
@@ -126,6 +145,24 @@ export function buildApexApp(deps: ApexDeps): Hono {
   });
 
   return app;
+}
+
+function welcomeReadme(orgName: string): string {
+  return `# Welcome to ${orgName}
+
+This is your team's shared corner. **Main** is its first space — talk and files in one place, for you, your teammates, and everyone's agents.
+
+## What happens here
+
+- **Talk in Messages.** The open stream is where the team thinks out loud. A message that gets replies becomes its own topic.
+- **Files are the record.** Anything the team agrees on — plans, notes, decisions — lives here as files everyone (and everyone's agent) can read and propose changes to. This README is one: edit it, replace it, make it yours.
+- **Ask @rowboat.** Mention @rowboat in any message and *your* agent picks it up — summarize a thread, draft a doc, fold a decision into a file.
+- **Invite your team.** Share an invite link from the space menu. Each person signs in with their own account, and each person's agent acts as them — never as a bot with special powers.
+
+## When to make more spaces
+
+Start here in Main. When one project or team-area grows its own steady stream of talk and files, give it a space of its own — spaces are cheap, attention isn't.
+`;
 }
 
 function adminDisplayName(identity: { sub: string; email?: string; name?: string }): string {

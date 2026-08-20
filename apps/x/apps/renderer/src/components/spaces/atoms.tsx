@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -109,6 +109,16 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
     const [orgName, setOrgName] = useState('')
     const [slug, setSlug] = useState('')
     const [slugEdited, setSlugEdited] = useState(false)
+    // The org-address suffix comes from the configured apex (/v1/config via
+    // core). null = no spaces fleet for this environment; undefined = loading.
+    const [apexDomain, setApexDomain] = useState<string | null | undefined>(undefined)
+
+    useEffect(() => {
+        if (mode !== 'create' || apexDomain !== undefined) return
+        void window.ipc.invoke('spaces:apexInfo', null)
+            .then(({ apexDomain: domain }) => setApexDomain(domain))
+            .catch(() => setApexDomain(null))
+    }, [mode, apexDomain])
     const [baseUrl, setBaseUrl] = useState('http://localhost:4272')
     const [memberId, setMemberId] = useState('')
     const [busy, setBusy] = useState(false)
@@ -229,9 +239,16 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
                                     className="flex-1"
                                     onKeyDown={(e) => e.key === 'Enter' && void createOrg()}
                                 />
-                                <span className="text-xs text-muted-foreground shrink-0">.spaces.rowboatlabs.com</span>
+                                <span className="text-xs text-muted-foreground shrink-0">
+                                    {apexDomain ? `.${apexDomain}` : '.…'}
+                                </span>
                             </div>
                         </div>
+                        {apexDomain === null && (
+                            <p className="text-xs text-muted-foreground">
+                                Spaces isn’t available for this environment yet.
+                            </p>
+                        )}
                         {waitingBrowser && (
                             <div className="text-xs text-muted-foreground flex items-center gap-1.5">
                                 <Loader2 className="size-3 animate-spin" /> Waiting for the browser sign-in…
@@ -243,7 +260,7 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
                             </button>
                             <div className="flex gap-2">
                                 <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-                                <Button onClick={() => void createOrg()} disabled={busy || !orgName.trim() || !slug.trim()}>
+                                <Button onClick={() => void createOrg()} disabled={busy || !orgName.trim() || !slug.trim() || !apexDomain}>
                                     {busy && <Loader2 className="size-3.5 mr-1 animate-spin" />} Create
                                 </Button>
                             </div>

@@ -20,6 +20,7 @@ type SpacesHandlers = {
   'spaces:joinInvite': InvokeHandler<'spaces:joinInvite'>;
   'spaces:signInOrg': InvokeHandler<'spaces:signInOrg'>;
   'spaces:createOrg': InvokeHandler<'spaces:createOrg'>;
+  'spaces:apexInfo': InvokeHandler<'spaces:apexInfo'>;
   'spaces:removeOrg': InvokeHandler<'spaces:removeOrg'>;
   'spaces:listSpaces': InvokeHandler<'spaces:listSpaces'>;
   'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
@@ -108,6 +109,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
     const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, slug: args.slug, openBrowser }));
     void syncSpaceMentionWatch();
     return { org };
+  },
+
+  'spaces:apexInfo': async () => {
+    try {
+      return { apexDomain: new URL(await spacesOAuth.apexUrl()).host };
+    } catch {
+      return { apexDomain: null };
+    }
   },
 
   'spaces:removeOrg': async (_event, args) => {

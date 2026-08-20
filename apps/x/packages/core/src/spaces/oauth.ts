@@ -187,11 +187,22 @@ export async function signInOrg(input: { baseUrl: string; openBrowser: OpenBrows
   });
 }
 
-/** The managed deployment's apex (create-org, my-orgs). Overridable for local stacks. */
-export const MANAGED_APEX_URL = 'https://spaces.rowboatlabs.com';
-
-export function apexUrl(): string {
-  return (process.env.ROWBOAT_SPACES_APEX ?? MANAGED_APEX_URL).replace(/\/$/, '');
+/**
+ * The managed deployment's apex (create-org, my-orgs). Resolution order:
+ * ROWBOAT_SPACES_APEX (dev/local-stack override) → the api's /v1/config
+ * `spacesApexUrl` (per-environment, follows API_URL — staging api names the
+ * staging fleet) → error, since the config being null means no spaces fleet
+ * exists for this environment yet.
+ */
+export async function apexUrl(): Promise<string> {
+  const override = process.env.ROWBOAT_SPACES_APEX;
+  if (override) return override.replace(/\/$/, '');
+  const { getRemoteConfig } = await import('../config/remote-config.js');
+  const config = await getRemoteConfig();
+  if (!config.spacesApexUrl) {
+    throw new Error('Spaces is not available for this environment yet (no fleet configured)');
+  }
+  return config.spacesApexUrl.replace(/\/$/, '');
 }
 
 /**
@@ -206,7 +217,7 @@ export async function createOrgOnDeployment(input: {
   openBrowser: OpenBrowser;
   apexUrl?: string;
 }): Promise<OrgRecord> {
-  const apex = (input.apexUrl ?? apexUrl()).replace(/\/$/, '');
+  const apex = (input.apexUrl ?? (await apexUrl())).replace(/\/$/, '');
   const dance = await danceForTokens({ baseUrl: apex, openBrowser: input.openBrowser });
   const res = await fetch(`${apex}/v1/orgs`, {
     method: 'POST',

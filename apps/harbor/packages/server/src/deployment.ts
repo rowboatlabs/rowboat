@@ -76,6 +76,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
             db: options.db,
             directory,
             auth: new OidcAuthDriver({ issuer: options.issuer }),
+            hub,
             apexDomain,
             issuer: options.issuer,
             ...(options.consentPublishableKey ? { consentPublishableKey: options.consentPublishableKey } : {}),

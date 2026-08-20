@@ -191,7 +191,19 @@ describe('apex face (self-serve org creation)', () => {
     expect(me.status).toBe(200);
     expect(me.body.member.role).toBe('admin');
     expect(me.body.member.id).toBe(created.body.member.id);
-    // Fully functional org: create a space on it.
+
+    // Landing area: a Main space with a welcome README, attributed to the founder.
+    const spaces = (await http('roadboard.spaces.test', token).get('/v1/spaces')).body.spaces;
+    expect(spaces.map((s: any) => s.name)).toEqual(['Main']);
+    const readme = await http('roadboard.spaces.test', token).get(
+      `/v1/spaces/${spaces[0].id}/asset?path=README.md`,
+    );
+    expect(readme.status).toBe(200);
+    expect(readme.body.content).toContain('# Welcome to Roadboard');
+    expect(readme.body.content).toContain('When to make more spaces');
+    expect(readme.body.recentHistory[0].attribution.memberId).toBe(created.body.member.id);
+
+    // Still fully functional beyond the seed: create another space.
     expect((await http('roadboard.spaces.test', token).post('/v1/spaces', { name: 'General' })).status).toBe(200);
   });
 

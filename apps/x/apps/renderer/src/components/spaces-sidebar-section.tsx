@@ -113,8 +113,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onSignIn }:
             <SidebarMenuItem>
                 <div className="group/org flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-muted-foreground" title={`${org.address} · you are ${org.memberId}`}>
                     <OrgMonogram org={org} size="sm" />
-                    <span className="flex-1 truncate">{org.address.replace(/^https?:\/\//, '')}</span>
-                    {org.error && (
+                    <span className="flex-1 truncate">{org.name}</span>
+                    {needsSignIn ? (
                         <button
                             type="button"
                             onClick={needsSignIn ? onSignIn : onChanged}
