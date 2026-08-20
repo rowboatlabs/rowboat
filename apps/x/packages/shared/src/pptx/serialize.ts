@@ -35,10 +35,11 @@ import {
   shapeIdOf,
   tagNameOf,
   type XmlNode,
-} from './parse'
-import { normalizeShapeStyle, shapeStyleSnapshotOf, type ShapeStyleSnapshot } from './geometry'
-import { newPictureXml, newShapeXml, type NewShapeSpec, type XmlPrefixes } from './shape-xml'
-import type { NodePath, Paragraph, Shape, SlideDeck, TextAlign, TextRun } from './types'
+} from './parse.js'
+import { normalizeShapeStyle, shapeStyleSnapshotOf, type ShapeStyleSnapshot } from './geometry.js'
+import { resolveThemePath } from './restyle.js'
+import { newPictureXml, newShapeXml, type NewShapeSpec, type XmlPrefixes } from './shape-xml.js'
+import type { NodePath, Paragraph, Shape, SlideDeck, TextAlign, TextRun } from './types.js'
 
 // ------------------------------------------------------------------- types
 
@@ -792,13 +793,20 @@ function rebuildParagraphs(
 
     // Changed or new run: synthesize <a:r>, reusing the best-matching rPr
     // bytes we have (own provenance, else the source paragraph's first run's,
-    // else a neighbouring paragraph's).
+    // else a neighbouring paragraph's). When the source paragraph has real
+    // runs that are ALL bare, bare is the answer — its text renders on the
+    // shape's cascade, and the new text should too; walking to a neighbour
+    // here would clone unrelated formatting (e.g. a hand-bolded phrase in the
+    // paragraph below) onto plain replacement text.
     let rPrBytes = ''
     if (item?.rPr) rPrBytes = slice(item.rPr)
     else {
       const fallbackPara = srcP ?? srcParaOf(para.srcPara)
       const donor = fallbackPara?.items.find((it) => it.kind !== 'br' && it.rPr)
-      rPrBytes = donor?.rPr ? slice(donor.rPr) : donorRPrFor(paraIndex)
+      if (donor?.rPr) rPrBytes = slice(donor.rPr)
+      else if (!fallbackPara || !fallbackPara.items.some((it) => it.kind !== 'br')) {
+        rPrBytes = donorRPrFor(paraIndex)
+      }
     }
     // Then the run's OWN properties on top of whatever it inherited.
     rPrBytes = rPrWithOverrides(prefix, rPrBytes, runOverridesOf(nr, origRun))
@@ -1845,6 +1853,15 @@ export interface WriteDeckOptions {
    * positions) and `addSlides[].afterPath` is ignored.
    */
   slideOrder?: readonly string[]
+  /**
+   * Replace the deck's theme part with these bytes. The part swapped is the
+   * one the slide master references (resolved via the master's rels), so it
+   * targets the right part even for imported decks whose theme is named
+   * differently. Exactly that one entry changes; everything else is
+   * byte-identical. Fails closed (throws) when the master's theme reference
+   * can't be resolved unambiguously, so a swap never corrupts a package.
+   */
+  replaceTheme?: { xml: string }
 }
 
 /**
@@ -1913,6 +1930,14 @@ export async function writeDeck(
     deletions.length > 0 || adds.length > 0 || order !== undefined
       ? await packageReplacements(deck.source.zip, deletions, adds, order)
       : new Map<string, string>()
+
+  // Theme swap: replace exactly the part the master references. Resolved here
+  // so the option targets the right part regardless of its name; fail-closed
+  // resolution means an ambiguous package throws before anything is written.
+  if (options?.replaceTheme) {
+    const themePath = await resolveThemePath(deck.source.zip)
+    replacements.set(themePath, options.replaceTheme.xml)
+  }
 
   // Inserted media must be typed: add missing Defaults on top of whatever the
   // slide add/delete path already did to [Content_Types].xml.

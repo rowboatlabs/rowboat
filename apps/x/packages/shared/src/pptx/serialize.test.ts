@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { parsePptx, parseXml } from './parse'
-import { updateSlideXml, writeDeck, type ShapeTextEdit } from './serialize'
-import type { TextShape } from './types'
+import { parsePptx, parseXml } from './parse.js'
+import { updateSlideXml, writeDeck, type ShapeTextEdit } from './serialize.js'
+import type { TextShape } from './types.js'
 
 // Real-PowerPoint-shaped slide: CRLF after the declaration, one line, mixed
 // self-closing forms, an undecoded NCR (&#8217;), entities in attributes and

@@ -82,6 +82,17 @@ export const UserMessageContext = z.object({
             url: z.string(),
             title: z.string(),
         }),
+        // A .pptx open in the slide editor. Content is deliberately absent —
+        // a deck's content is what deck-review reads; carrying it on every
+        // message would bloat the turn. slideNumber is 1-BASED so it lines up
+        // with the deck tools' own slideNumber argument (the renderer does the
+        // +1 from its 0-based index).
+        z.object({
+            kind: z.literal("deck"),
+            path: z.string(),
+            slideNumber: z.number().int().min(1),
+            slideCount: z.number().int().min(1),
+        }),
     ]).optional(),
 });
 

@@ -136,6 +136,7 @@ import { readPrepNoteForEvent } from '@x/core/dist/knowledge/meeting_prep_brief.
 import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
+import { editSlide, generateDeckOutline, generateSlide } from '@x/core/dist/knowledge/deck_outline.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
@@ -1352,6 +1353,33 @@ export function setupIpcHandlers() {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to export a copy';
         return { saved: false, error: message };
+      }
+    },
+    'deck:generateOutline': async (_event, args) => {
+      try {
+        const outline = await generateDeckOutline(args);
+        return { outline };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to generate the deck outline';
+        return { error: message };
+      }
+    },
+    'deck:generateSlide': async (_event, args) => {
+      try {
+        const slide = await generateSlide(args);
+        return { slide };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to generate the slide';
+        return { error: message };
+      }
+    },
+    'deck:editSlide': async (_event, args) => {
+      try {
+        const slide = await editSlide(args);
+        return { slide };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to edit the slide';
+        return { error: message };
       }
     },
     'gmail:getImportant': async (_event, args) => {

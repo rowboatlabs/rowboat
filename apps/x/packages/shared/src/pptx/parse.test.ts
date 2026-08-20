@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { parsePptx, parseXml, resolveNodePath, resolveRelTarget, tagNameOf } from './parse'
-import { writeDeck } from './serialize'
-import type { GroupShape, ImageShape, PlaceholderShape, TextShape } from './types'
+import { parsePptx, parseXml, resolveNodePath, resolveRelTarget, tagNameOf } from './parse.js'
+import { writeDeck } from './serialize.js'
+import type { GroupShape, ImageShape, PlaceholderShape, TextShape } from './types.js'
 
 const SLIDE_W = 12192000
 const SLIDE_H = 6858000

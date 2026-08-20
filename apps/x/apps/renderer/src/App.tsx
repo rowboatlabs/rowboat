@@ -36,6 +36,7 @@ import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
+import { NewPresentationDialog } from '@/components/new-presentation-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
@@ -791,6 +792,10 @@ function App() {
   const [, setFileContent] = useState<string>('')
   const [editorContent, setEditorContent] = useState<string>('')
   const editorContentRef = useRef<string>('')
+  // The open deck's selected slide, reported by PptxEditor — the deck-kind
+  // sibling of editorContentRef: what the middle pane currently SHOWS, read
+  // when building each message's user context. slideNumber is 1-based.
+  const deckStateRef = useRef<{ path: string; slideNumber: number; slideCount: number } | null>(null)
   const [editorContentByPath, setEditorContentByPath] = useState<Record<string, string>>({})
   const editorContentByPathRef = useRef<Map<string, string>>(new Map())
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -813,6 +818,8 @@ function App() {
   const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
   const [googleDocPickerOpen, setGoogleDocPickerOpen] = useState(false)
   const [googleDocPickerTargetFolder, setGoogleDocPickerTargetFolder] = useState('knowledge')
+  const [newPresentationOpen, setNewPresentationOpen] = useState(false)
+  const [newPresentationTargetFolder, setNewPresentationTargetFolder] = useState('knowledge')
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
   // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
@@ -860,6 +867,14 @@ function App() {
 
   // Keep the latest selected path in a ref (avoids stale async updates when switching rapidly)
   const selectedPathRef = useRef<string | null>(null)
+  // The slide editor reporting which slide is on screen. Stamped with the path
+  // it belongs to, so a stale report from a deck the user has closed can never
+  // be attributed to whatever is open now.
+  const handleDeckSlideChange = useCallback((slideNumber: number, slideCount: number) => {
+    const path = selectedPathRef.current
+    if (!path) return
+    deckStateRef.current = { path, slideNumber, slideCount }
+  }, [])
   const editorPathRef = useRef<string | null>(null)
   const fileLoadRequestIdRef = useRef(0)
   const initialContentByPathRef = useRef<Map<string, string>>(new Map())
@@ -3856,6 +3871,7 @@ function App() {
   type MiddlePaneContextPayload =
     | { kind: 'note'; path: string; content: string }
     | { kind: 'browser'; url: string; title: string }
+    | { kind: 'deck'; path: string; slideNumber: number; slideCount: number }
   const buildMiddlePaneContext = async (): Promise<MiddlePaneContextPayload | undefined> => {
     // Nothing visible in the middle pane when the right pane is maximized.
     if (isRightPaneMaximized) return undefined
@@ -3874,9 +3890,25 @@ function App() {
       return undefined
     }
 
-    // Note case: only markdown files are meaningfully readable as context.
     const path = selectedPathRef.current
-    if (!path || !path.endsWith('.md')) return undefined
+    if (!path) return undefined
+
+    // Deck case: a .pptx open in the slide editor. The predicate matches the
+    // one that mounts PptxEditor, so the context and the editor can't drift.
+    // No content — a deck's content is what deck-review reads.
+    if (getViewerType(path) === 'pptx') {
+      const deck = deckStateRef.current
+      if (!deck || deck.path !== path) return undefined
+      return {
+        kind: 'deck',
+        path,
+        slideNumber: deck.slideNumber,
+        slideCount: deck.slideCount,
+      }
+    }
+
+    // Note case: only markdown files are meaningfully readable as context.
+    if (!path.endsWith('.md')) return undefined
     const content = editorContentRef.current ?? ''
     return { kind: 'note', path, content }
   }
@@ -5484,6 +5516,47 @@ function App() {
     }
   }, [sessionChat.chatState?.conversation, runId, applyAppNavigation])
 
+  // Deck auto-open / refresh: when the assistant writes a .pptx inside the
+  // workspace, open the editor on a brand-new deck (deck-create) and tell an
+  // already-open editor the file changed underneath it. Same seeding semantics
+  // as app-navigation above: transcript entries present on session switch are
+  // marked processed without replaying.
+  const processedDeckToolsRef = useRef<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() })
+  useEffect(() => {
+    const conversation = sessionChat.chatState?.conversation
+    if (!conversation) return
+    const completed = conversation.filter(
+      (item): item is ToolCall =>
+        isToolCall(item) &&
+        (item.name === 'deck-create' ||
+          item.name === 'deck-add-slide' ||
+          item.name === 'deck-edit-slide' ||
+          item.name === 'deck-restructure' ||
+          item.name === 'deck-restyle') &&
+        item.status === 'completed'
+    )
+    if (processedDeckToolsRef.current.key !== runId) {
+      processedDeckToolsRef.current = { key: runId, ids: new Set(completed.map((t) => t.id)) }
+      return
+    }
+    for (const tool of completed) {
+      if (processedDeckToolsRef.current.ids.has(tool.id)) continue
+      processedDeckToolsRef.current.ids.add(tool.id)
+      const result = tool.result as Record<string, unknown> | undefined
+      if (result && result.success && typeof result.workspaceRelPath === 'string') {
+        // Only a brand-new deck steals the view; edits to an existing one
+        // must not yank the user away from what they are doing.
+        if (tool.name === 'deck-create') {
+          void navigateToView({ type: 'file', path: result.workspaceRelPath })
+        }
+        // If the editor is already open on this file the navigation is a
+        // no-op, and the workspace watcher only covers allowlisted roots —
+        // so tell the editor directly that the file changed.
+        window.dispatchEvent(new CustomEvent('rowboat:deck-touched', { detail: { path: result.workspaceRelPath } }))
+      }
+    }
+  }, [sessionChat.chatState?.conversation, runId, navigateToView])
+
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
     if (currentViewState.type !== 'chat') {
@@ -5765,6 +5838,10 @@ function App() {
     addGoogleDoc: (parentPath: string = 'knowledge') => {
       setGoogleDocPickerTargetFolder(parentPath)
       setGoogleDocPickerOpen(true)
+    },
+    createPresentation: (parentPath: string = 'knowledge') => {
+      setNewPresentationTargetFolder(parentPath)
+      setNewPresentationOpen(true)
     },
     createFolder: async (parentPath: string = 'knowledge'): Promise<string> => {
       try {
@@ -6796,6 +6873,7 @@ function App() {
                       copyPath: knowledgeActions.copyPath,
                       revealInFileManager: knowledgeActions.revealInFileManager,
                       createNote: knowledgeActions.createNote,
+                      createPresentation: knowledgeActions.createPresentation,
                       addGoogleDoc: knowledgeActions.addGoogleDoc,
                       createFolder: knowledgeActions.createFolder,
                     }}
@@ -7059,7 +7137,11 @@ function App() {
                   </div>
                 ) : selectedPath && getViewerType(selectedPath) === 'pptx' ? (
                   <div className="flex-1 min-h-0 overflow-hidden">
-                    <PptxEditor key={selectedPath} path={selectedPath} />
+                    <PptxEditor
+                      key={selectedPath}
+                      path={selectedPath}
+                      onSlideChange={handleDeckSlideChange}
+                    />
                   </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-hidden">
@@ -7084,7 +7166,7 @@ function App() {
                   />
                 </div>
               ) : (
-              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
+              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }} onOpenFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="relative min-h-0 flex-1">
                   {chatTabs.map((tab) => {
@@ -7273,6 +7355,7 @@ function App() {
                 isToolOpenForTab={isToolOpenForTab}
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
+                onOpenFile={(path) => { navigateToFile(path) }}
                 onActivate={() => setActiveShortcutPane('right')}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 // Gated on mic ownership: when another composer (Home, a
@@ -7418,6 +7501,17 @@ function App() {
         targetFolder={googleDocPickerTargetFolder}
         onOpenChange={setGoogleDocPickerOpen}
         onImported={(path) => {
+          const parentPath = path.split('/').slice(0, -1).join('/') || 'knowledge'
+          setExpandedPaths(prev => new Set([...prev, parentPath]))
+          void loadDirectory().then(setTree)
+          navigateToFile(path)
+        }}
+      />
+      <NewPresentationDialog
+        open={newPresentationOpen}
+        targetFolder={newPresentationTargetFolder}
+        onOpenChange={setNewPresentationOpen}
+        onCreated={(path) => {
           const parentPath = path.split('/').slice(0, -1).join('/') || 'knowledge'
           setExpandedPaths(prev => new Set([...prev, parentPath]))
           void loadDirectory().then(setTree)

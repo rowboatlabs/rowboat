@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { parsePptx, parseXml } from './parse'
-import { updateSlideXml, writeDeck } from './serialize'
-import type { DrawingShape, TextShape } from './types'
+import { parsePptx, parseXml } from './parse.js'
+import { updateSlideXml, writeDeck } from './serialize.js'
+import type { DrawingShape, TextShape } from './types.js'
 import {
   DEFAULT_THEME,
   applyColorTransforms,
@@ -13,7 +13,7 @@ import {
   schemeColorHex,
   themeFontOf,
   type Theme,
-} from './theme'
+} from './theme.js'
 import {
   autoNumText,
   bulletCharFor,
@@ -24,8 +24,8 @@ import {
   parseListStyle,
   runLayerFromRPr,
   txStyleKindFor,
-} from './textstyle'
-import { fillFromNode, isLinePreset, lineFromLn, shapeVisualOf } from './geometry'
+} from './textstyle.js'
+import { fillFromNode, isLinePreset, lineFromLn, shapeVisualOf } from './geometry.js'
 
 const A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
 

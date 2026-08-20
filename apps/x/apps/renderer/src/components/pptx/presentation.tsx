@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-react'
-import type { Slide } from '@/lib/pptx/types'
+import type { Slide } from '@x/shared/dist/pptx/types.js'
 import { SlideThumbnail } from './canvas'
 
 /** How long the control bar lingers after the pointer stops moving. */

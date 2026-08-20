@@ -22,7 +22,7 @@ import {
   num,
   tagNameOf,
   type XmlNode,
-} from './parse'
+} from './parse.js'
 
 export interface ResolvedColor {
   /** RRGGBB, uppercase, no '#'. */

@@ -34,8 +34,8 @@ import {
   type TextDisplay,
   type TextRun,
   type TextShape,
-} from './types'
-import { DEFAULT_THEME, clrMapOfMaster, parseTheme, schemeColorHex, type Theme } from './theme'
+} from './types.js'
+import { DEFAULT_THEME, clrMapOfMaster, parseTheme, schemeColorHex, type Theme } from './theme.js'
 import {
   cssFontFamily,
   keptRunNodesOf,
@@ -47,8 +47,8 @@ import {
   txStyleKindFor,
   type ParsedListStyle,
   type SpacingSpec,
-} from './textstyle'
-import { backgroundFillOf, shapeStyleSnapshotOf, shapeVisualOf } from './geometry'
+} from './textstyle.js'
+import { backgroundFillOf, shapeStyleSnapshotOf, shapeVisualOf } from './geometry.js'
 
 const ATTRS = ':@'
 const ATTR_PREFIX = '@_'
@@ -463,7 +463,7 @@ async function loadSlideContext(
   slideRels: Map<string, Relationship>,
   presDefaultNode: XmlNode | undefined,
   cache: Map<string, SlideStyleContext>,
-  blobUrls: string[],
+  media: MediaSink,
 ): Promise<SlideStyleContext> {
   const layoutPath = relTargetOfType(slideRels, '/slideLayout') ?? ''
   const cached = cache.get(layoutPath)
@@ -531,11 +531,11 @@ async function loadSlideContext(
     out.layoutShowsMaster = !layoutRoot || attr(layoutRoot, 'showMasterSp') !== '0'
     if (masterDoc && masterPath && out.layoutShowsMaster) {
       out.masterUnderlay = await collectDecorations(
-        masterDoc, 'sldMaster', masterPath, masterRels, out, zip, blobUrls,
+        masterDoc, 'sldMaster', masterPath, masterRels, out, zip, media,
       )
     }
     out.layoutUnderlay = await collectDecorations(
-      layoutDoc, 'sldLayout', layoutPath, layoutRels, out, zip, blobUrls,
+      layoutDoc, 'sldLayout', layoutPath, layoutRels, out, zip, media,
     )
   }
 
@@ -579,12 +579,12 @@ async function collectDecorations(
   rels: Map<string, Relationship>,
   styles: SlideStyleContext,
   zip: JSZip,
-  blobUrls: string[],
+  media: MediaSink,
 ): Promise<Shape[]> {
   const root = childByLocal(doc, rootLocal)
   const spTree = root ? descend(root, 'cSld', 'spTree') : undefined
   if (!spTree) return []
-  const ctx: ShapeContext = { slideXmlPath: partPath, rels, styles, zip, blobUrls }
+  const ctx: ShapeContext = { slideXmlPath: partPath, rels, styles, zip, media }
   const out: Shape[] = []
   const kids = childrenOf(spTree)
   for (let i = 0; i < kids.length; i++) {
@@ -683,12 +683,23 @@ function isVideoPic(node: XmlNode): boolean {
 
 // ------------------------------------------------------------------ walk
 
+/**
+ * Where image blob: URLs land during a parse, and whether to mint them at
+ * all. `enabled: false` is for environments with no renderer for the URLs
+ * (the Electron main process): image shapes then carry an empty `blobUrl`
+ * and there is nothing for `disposeDeck` to revoke.
+ */
+interface MediaSink {
+  urls: string[]
+  enabled: boolean
+}
+
 interface ShapeContext {
   slideXmlPath: string
   rels: Map<string, Relationship>
   styles: SlideStyleContext
   zip: JSZip
-  blobUrls: string[]
+  media: MediaSink
 }
 
 /** Falls back to the layout/master slot when the shape carries no geometry. */
@@ -873,13 +884,18 @@ async function shapeFromNode(
       // Linked-but-absent media, or an external relationship we skipped.
       return { ...base, type: 'placeholder', kind: 'unknown' } satisfies PlaceholderShape
     }
+    const visual = shapeVisualOf(node, ctx.styles.theme)
+    if (!ctx.media.enabled) {
+      // No renderer for a blob: URL in this environment — keep the shape
+      // addressable (mediaPath intact) without touching the media bytes.
+      return { ...base, type: 'image', blobUrl: '', mediaPath, visual } satisfies ImageShape
+    }
     // Copy into a plain ArrayBuffer-backed view: jszip's output is typed as
     // possibly shared-buffer-backed, which Blob does not accept.
     const bytes = new Uint8Array(await file.async('uint8array'))
     const blob = new Blob([bytes], { type: mimeFor(mediaPath) })
     const blobUrl = URL.createObjectURL(blob)
-    ctx.blobUrls.push(blobUrl)
-    const visual = shapeVisualOf(node, ctx.styles.theme)
+    ctx.media.urls.push(blobUrl)
     return { ...base, type: 'image', blobUrl, mediaPath, visual } satisfies ImageShape
   }
 
@@ -918,7 +934,7 @@ async function parseSlide(
   zip: JSZip,
   xmlPath: string,
   xml: string,
-  blobUrls: string[],
+  media: MediaSink,
   presDefaultNode: XmlNode | undefined,
   styleCache: Map<string, SlideStyleContext>,
   /** For parts not (yet) in the zip — a freshly synthesized slide's rels. */
@@ -926,8 +942,8 @@ async function parseSlide(
 ): Promise<Slide> {
   const doc = parseXml(xml)
   const rels = relsOverride ?? (await readRels(zip, xmlPath))
-  const styles = await loadSlideContext(zip, rels, presDefaultNode, styleCache, blobUrls)
-  const ctx: ShapeContext = { slideXmlPath: xmlPath, rels, styles, zip, blobUrls }
+  const styles = await loadSlideContext(zip, rels, presDefaultNode, styleCache, media)
+  const ctx: ShapeContext = { slideXmlPath: xmlPath, rels, styles, zip, media }
 
   const sldIndex = doc.findIndex((n) => {
     const t = tagNameOf(n)
@@ -983,7 +999,18 @@ async function parseSlide(
 /** Default 4:3 deck, used only when presentation.xml omits or corrupts sldSz. */
 const FALLBACK_SIZE = { w: 9144000, h: 6858000 }
 
-export async function parsePptx(bytes: Uint8Array): Promise<SlideDeck> {
+export interface ParseOptions {
+  /**
+   * Mint blob: object URLs for image shapes (default true). Pass false in
+   * environments with no renderer for them — the Electron main process —
+   * where the URLs would only accumulate until process exit. Image shapes
+   * then carry an empty `blobUrl` (mediaPath still set) and `disposeDeck`
+   * has nothing to revoke.
+   */
+  mediaUrls?: boolean
+}
+
+export async function parsePptx(bytes: Uint8Array, opts?: ParseOptions): Promise<SlideDeck> {
   const zip = await JSZip.loadAsync(bytes)
 
   const presFile = zip.file('ppt/presentation.xml')
@@ -1025,7 +1052,7 @@ export async function parsePptx(bytes: Uint8Array): Promise<SlideDeck> {
 
   const presDefaultNode = childByLocal(childrenOf(pres), 'defaultTextStyle')
   const styleCache = new Map<string, SlideStyleContext>()
-  const blobUrls: string[] = []
+  const media: MediaSink = { urls: [], enabled: opts?.mediaUrls !== false }
   const slideXml: Record<string, string> = {}
   const slides: Slide[] = []
   for (const path of slidePaths) {
@@ -1033,7 +1060,7 @@ export async function parsePptx(bytes: Uint8Array): Promise<SlideDeck> {
     if (!file) continue
     const xml = await file.async('string')
     slideXml[path] = xml
-    slides.push(await parseSlide(zip, path, xml, blobUrls, presDefaultNode, styleCache))
+    slides.push(await parseSlide(zip, path, xml, media, presDefaultNode, styleCache))
   }
 
   const deck: SlideDeck = { slideSizeEmu, slides, source: { zip, slideXml } }
@@ -1060,6 +1087,7 @@ export async function parseAddedSlide(
   xmlPath: string,
   xml: string,
   relsXml: string,
+  opts?: ParseOptions,
 ): Promise<Slide> {
   const zip = deck.source.zip
   const rels = parseRelsXml(relsXml, dirNameOf(xmlPath))
@@ -1069,8 +1097,8 @@ export async function parseAddedSlide(
   const presDoc = presFile ? parseXml(await presFile.async('string')) : []
   const pres = childByLocal(presDoc, 'presentation')
   const presDefaultNode = pres ? childByLocal(childrenOf(pres), 'defaultTextStyle') : undefined
-  const blobUrls: string[] = []
-  return parseSlide(zip, xmlPath, xml, blobUrls, presDefaultNode, new Map(), rels)
+  const media: MediaSink = { urls: [], enabled: opts?.mediaUrls !== false }
+  return parseSlide(zip, xmlPath, xml, media, presDefaultNode, new Map(), rels)
 }
 
 /**
@@ -1092,7 +1120,8 @@ export function resolveNodePath(doc: XmlNode[], path: NodePath): XmlNode | undef
 /** Releases the object URLs held by a deck's image shapes, groups included. */
 export function disposeDeck(deck: SlideDeck): void {
   const revoke = (shape: Shape): void => {
-    if (shape.type === 'image') URL.revokeObjectURL(shape.blobUrl)
+    // blobUrl is '' when parsed with { mediaUrls: false } — nothing to revoke.
+    if (shape.type === 'image' && shape.blobUrl) URL.revokeObjectURL(shape.blobUrl)
     else if (shape.type === 'group') shape.children.forEach(revoke)
   }
   for (const slide of deck.slides) {

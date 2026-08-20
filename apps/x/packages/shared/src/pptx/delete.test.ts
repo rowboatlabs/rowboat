@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { parsePptx } from './parse'
-import { updateSlideXml, writeDeck, type DeleteShapeEdit, type SlideEdit } from './serialize'
-import type { GroupShape, ImageShape, PlaceholderShape, TextShape } from './types'
+import { parsePptx } from './parse.js'
+import { updateSlideXml, writeDeck, type DeleteShapeEdit, type SlideEdit } from './serialize.js'
+import type { GroupShape, ImageShape, PlaceholderShape, TextShape } from './types.js'
 
 // Realistic namespaces: the slide-relationship Type suffix and Target
 // resolution are part of what slide deletion validates.

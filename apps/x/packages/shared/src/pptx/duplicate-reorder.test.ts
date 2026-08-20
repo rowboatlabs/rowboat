@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { parseAddedSlide, parsePptx, relsPathFor } from './parse'
-import { writeDeck, type ShapeTextEdit, type SlideEdit } from './serialize'
-import { planDuplicateSlide, planNewSlide, readSlideRels } from './add-slide'
-import type { TextShape } from './types'
+import { parseAddedSlide, parsePptx, relsPathFor } from './parse.js'
+import { writeDeck, type ShapeTextEdit, type SlideEdit } from './serialize.js'
+import { planDuplicateSlide, planNewSlide, readSlideRels } from './add-slide.js'
+import type { TextShape } from './types.js'
 
 const NS_P = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
 const NS_A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'

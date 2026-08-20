@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
+import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
@@ -250,6 +251,34 @@ const ipcSchemas = {
   'workspace:didChange': {
     req: WorkspaceChangeEvent,
     res: z.null(),
+  },
+  // One-shot deck outline generation for the AI deck builder. Soft errors,
+  // like workspace:exportCopy: failures come back as { error } rather than a
+  // rejected invoke.
+  'deck:generateOutline': {
+    req: GenerateDeckOutlineRequest,
+    res: z.object({
+      outline: DeckOutline.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Generate ONE slide to insert into an existing deck (Gamma's sparkle).
+  // Soft errors like the outline channel: failures come back as { error }.
+  'deck:generateSlide': {
+    req: GenerateSlideRequest,
+    res: z.object({
+      slide: DeckOutlineSlide.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Apply an instruction to ONE existing slide; the response is the slide
+  // AFTER the edit, in the same outline schema. Soft errors as above.
+  'deck:editSlide': {
+    req: EditSlideRequest,
+    res: z.object({
+      slide: DeckOutlineSlide.optional(),
+      error: z.string().optional(),
+    }),
   },
   'gmail:getImportant': {
     req: z.object({

@@ -8,7 +8,7 @@
  */
 
 import type JSZip from 'jszip'
-import type { ShapeStyleSnapshot } from './geometry'
+import type { ShapeStyleSnapshot } from './geometry.js'
 
 /** English Metric Units per inch — the unit every OOXML coordinate is in. */
 export const EMU_PER_INCH = 914400
@@ -204,7 +204,11 @@ export interface DrawingShape extends ShapeBase {
 
 export interface ImageShape extends ShapeBase {
   type: 'image'
-  /** Object URL for the media part. Revoke via `disposeDeck`. */
+  /**
+   * Object URL for the media part. Revoke via `disposeDeck`. Empty string
+   * when the deck was parsed with `{ mediaUrls: false }` (non-renderer
+   * environments); `mediaPath` still addresses the bytes in the package.
+   */
   blobUrl: string
   /** Zip path of the backing media part, e.g. `ppt/media/image1.png`. */
   mediaPath: string

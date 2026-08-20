@@ -6,7 +6,7 @@ import {
   type ResolvedRunStyle,
   type Slide,
   type TextShape,
-} from '@/lib/pptx/types'
+} from '@x/shared/dist/pptx/types.js'
 import { SlideThumbnail } from './canvas'
 
 afterEach(cleanup)

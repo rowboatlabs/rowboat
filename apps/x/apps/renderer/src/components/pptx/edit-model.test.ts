@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import JSZip from 'jszip'
-import { parsePptx } from '@/lib/pptx/parse'
-import { updateSlideXml, writeDeck, type EditedParagraph } from '@/lib/pptx/serialize'
-import type { Paragraph, TextShape } from '@/lib/pptx/types'
+import { parsePptx } from '@x/shared/dist/pptx/parse.js'
+import { updateSlideXml, writeDeck, type EditedParagraph } from '@x/shared/dist/pptx/serialize.js'
+import type { Paragraph, TextShape } from '@x/shared/dist/pptx/types.js'
 import { buildEditableHtml, extractParagraphs } from './text-dom'
 import {
   EMPTY_DECK_EDITS,

@@ -8,6 +8,9 @@ import { WorkDir } from '../config/config.js';
 import { rewriteWikiLinksForRenamedKnowledgeFile } from './wiki-link-rewrite.js';
 import { commitAll } from '../knowledge/version_history.js';
 import { withFileLock } from '../knowledge/file-lock.js';
+import { assertEtagMatches, computeEtag } from '../filesystem/etag.js';
+
+export { computeEtag };
 
 // ============================================================================
 // Path Utilities
@@ -69,13 +72,6 @@ function isKnowledgeMarkdownRelPath(relPath: string): boolean {
 // ============================================================================
 // File System Utilities
 // ============================================================================
-
-/**
- * Compute ETag from file stats: `${size}:${mtimeMs}`
- */
-export function computeEtag(size: number, mtimeMs: number): string {
-  return `${size}:${mtimeMs}`;
-}
 
 /**
  * Convert fs.Stats to Stat schema
@@ -251,13 +247,12 @@ export async function writeFile(
   }
 
   const result = await withFileLock(filePath, async () => {
-    // Check expectedEtag if provided (conflict detection)
+    // Conflict detection: the caller read the file at expectedEtag and is
+    // writing only if nobody else did since. A file that has gone MISSING in
+    // between is the same conflict (EtagMismatchError, reason 'missing'),
+    // never a raw ENOENT — the renderer's file-sync keys on the marker.
     if (opts?.expectedEtag) {
-      const existingStats = await fs.lstat(filePath);
-      const existingEtag = computeEtag(existingStats.size, existingStats.mtimeMs);
-      if (existingEtag !== opts.expectedEtag) {
-        throw new Error('File was modified (ETag mismatch)');
-      }
+      await assertEtagMatches(filePath, opts.expectedEtag);
     }
 
     // Convert data to buffer based on encoding
