@@ -138,6 +138,11 @@ const PTT_TAP_MS = 350
 // Mic-ownership token for the Home composer (chat composers use their chatId).
 const HOME_VOICE_HOLDER = 'home-composer'
 const PTT_EDGE_ECHO_MS = 80
+// How long a hover summon waits for the voice/TTS probe to settle before
+// deciding voice isn't configured. Long enough for a cold boot (config read
+// + oauth state), short enough that a hung probe still gets the user a
+// surface (the text card) instead of silence.
+const VOICE_PROBE_WAIT_MS = 4000
 
 // Speakable fallback for a call reply that skipped <voice> tags: strip the
 // markdown that reads terribly aloud and cap the length — a minute-long
@@ -927,7 +932,7 @@ function App() {
   // The companion's OWN conversation binding. The hover bar, the Skipper,
   // and every call talk to THIS session — never to whatever chat the app
   // happens to be showing. Seeded from the chat a call was started on;
-  // switched from the bar's chip; untouched by app navigation, so hovering
+  // switched from the companion's chip; untouched by app navigation, so hovering
   // and browsing the app are fully independent.
   const [hoverRunId, setHoverRunId] = useState<string | null>(null)
   const hoverRunIdRef = useRef<string | null>(null)
@@ -1007,6 +1012,19 @@ function App() {
   // Voice mode state
   const [voiceAvailable, setVoiceAvailable] = useState(false)
   const [ttsAvailable, setTtsAvailable] = useState(false)
+  // Both start false and are filled by an async probe (two IPC round-trips
+  // at mount). A hover summon that lands before it resolves must NOT read
+  // that `false` as "no voice configured" — that answered the chord with
+  // the text card for the first seconds after every app start (the "old
+  // quick access comes up instead of hover mode" glitch). Refs + the
+  // in-flight promise let the summon WAIT for a real answer; the refs are
+  // written inside the probe too, so a waiter sees the result without
+  // depending on a React re-render.
+  const voiceAvailableRef = useRef(false)
+  voiceAvailableRef.current = voiceAvailable
+  const ttsAvailableRef = useRef(false)
+  ttsAvailableRef.current = ttsAvailable
+  const voiceProbeRef = useRef<Promise<void> | null>(null)
   // TTS plays only during calls now (the standing read-aloud toggle was
   // retired; a per-message "read aloud" action may replace it later).
   const ttsEnabledRef = useRef(false)
@@ -1014,6 +1032,11 @@ function App() {
   // t0 = utterance accepted, submit = message sent, speak = first TTS
   // speak(). Emitted as call_turn_latency when audio actually starts.
   const callTurnMarksRef = useRef<{ t0: number; submit?: number; speak?: number } | null>(null)
+  // A summon that CAN'T become a session (voice unconfigured, or the call
+  // engine failed to start) is explained by the APP window — the companion
+  // has no second surface of its own any more. Late-bound: the toast lives
+  // with the settings state far below.
+  const notifyVoiceUnavailableRef = useRef<((reason: 'voice' | 'failed') => void) | null>(null)
   // Late-bound handle to handleStop (defined much further down) so early
   // call handlers can stop the run without reordering the component.
   const stopRunRef = useRef<(() => Promise<void>) | null>(null)
@@ -1053,7 +1076,7 @@ function App() {
   }, [])
 
   // Speak newly completed <voice> blocks from the new runtime's live stream.
-  // Speech is a COMPANION concern (calls + the bar's voice toggle), so the
+  // Speech is a COMPANION concern (the hover session's replies), so the
   // segments come from the hover session's store — the app's visible chat
   // never starts talking, whatever it's bound to.
   const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
@@ -1064,10 +1087,6 @@ function App() {
   // cleared at submit, set by the segment player; the fallback-speech net
   // fires only when this is still false at turn completion.
   const spokeSegmentThisTurnRef = useRef(false)
-  // The current turn should be spoken aloud even without a call — set at
-  // submit for quick-ask questions with the voice toggle on. Per-turn so
-  // composer messages outside the bar never start talking.
-  const speakTurnRef = useRef(false)
   // Fallback-speech bookkeeping, armed per call turn at submit (see
   // handlePromptSubmit) and consumed by the effect below the segment player.
   const callTurnVoiceRef = useRef<{ pending: boolean; submitAt: number }>({
@@ -1098,7 +1117,7 @@ function App() {
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
       if (
-        (ttsEnabledRef.current || speakTurnRef.current) &&
+        ttsEnabledRef.current &&
         !suppressSpeechTurnRef.current &&
         !speakerMutedRef.current
       ) {
@@ -1124,8 +1143,8 @@ function App() {
       turn.pending = false
       return
     }
-    // Speaking this turn: call TTS, or the quick-ask voice toggle.
-    if (!(inCallRef.current ? ttsEnabledRef.current : speakTurnRef.current)) {
+    // Speaking this turn at all? (Only a live session speaks.)
+    if (!ttsEnabledRef.current) {
       turn.pending = false
       return
     }
@@ -1247,23 +1266,45 @@ function App() {
 
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
-    Promise.all([
+    const probe = Promise.all([
       window.ipc.invoke('voice:getConfig', null),
       window.ipc.invoke('oauth:getState', null),
     ]).then(([config, oauthState]) => {
       const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
       const hasVoice = !!config.deepgram || rowboatConnected
+      const hasTts = !!config.elevenlabs || rowboatConnected
+      voiceAvailableRef.current = hasVoice
+      ttsAvailableRef.current = hasTts
       setVoiceAvailable(hasVoice)
-      setTtsAvailable(!!config.elevenlabs || rowboatConnected)
+      setTtsAvailable(hasTts)
       // Pre-cache auth details so mic click skips IPC round-trips
       if (hasVoice) {
         voice.warmup()
       }
     }).catch(() => {
+      voiceAvailableRef.current = false
+      ttsAvailableRef.current = false
       setVoiceAvailable(false)
       setTtsAvailable(false)
     })
+    voiceProbeRef.current = probe
+    return probe
   }, [voice.warmup])
+
+  /**
+   * Wait for a definitive voice/TTS answer before treating "not available"
+   * as the truth. Capped: a probe that never settles must not swallow the
+   * summon — the caller falls back to the text card instead.
+   */
+  const awaitVoiceProbe = useCallback(async () => {
+    // Start one if nothing has probed yet — a summon must never decide
+    // "no voice" off a value nobody has looked up.
+    const probe = voiceProbeRef.current ?? refreshVoiceAvailability()
+    await Promise.race([
+      probe,
+      new Promise((resolve) => setTimeout(resolve, VOICE_PROBE_WAIT_MS)),
+    ])
+  }, [refreshVoiceAvailability])
 
   useEffect(() => {
     refreshVoiceAvailability()
@@ -1519,14 +1560,17 @@ function App() {
     }
   }, [video, setPttState])
 
-  // ONE hover mode: the ⌥⇧Space relay, the card's tuck handle, and the
-  // composer's call button all start THIS — a companion voice session on
-  // the Skipper surface. Sticky screen share replays the user's standing
-  // choice; without voice configured it falls back to the text card.
-  const startHoverCall = useCallback(async () => {
-    // Tell main the relay landed and a session is coming — cancels the
-    // "nothing answered" text-card fallback so slow device startup can't
-    // flash the old summoned bar before the Skipper pins.
+  // ONE hover mode: the ⌥⇧Space relay (chord, tray item, the card's tuck
+  // handle), the composer's call button, the Home Skipper, and the
+  // discoverability toast all start THIS — a companion voice session on the
+  // Skipper surface. Sticky screen share replays the user's standing choice
+  // (`share` forces it on for this summon); without voice configured it
+  // falls back to the text card — and so does a session that fails to
+  // start, so a summon is never a silent no-op.
+  const startHoverCall = useCallback(async (opts: { share?: boolean } = {}) => {
+    // Tell main the relay landed and a session is coming — stops its
+    // watchdog from re-sending the relay while devices are still starting
+    // up (acquisition can take seconds).
     void window.ipc.invoke('quickAsk:tuckAck', null).catch(() => {})
     if (inCallRef.current) {
       // Already on a call — just make sure the floating surface is up
@@ -1536,26 +1580,59 @@ function App() {
       void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
       return
     }
+    // A start is already in flight — its pin is coming.
     if (companionVoiceStartingRef.current) return
-    if (!(voiceAvailable && ttsAvailable)) {
-      // Voice-first has no voice — fall back to the text card.
-      void window.ipc.invoke('quickAsk:show', null).catch(() => {})
-      return
-    }
-    companionVoiceRef.current = true
+    // Guard covers the probe wait too, so a second chord can't start a
+    // parallel session while we're deciding.
     companionVoiceStartingRef.current = true
     try {
-      await startCall('voice')
-      // Sticky screen share: opted in once from the mascot's share pin →
-      // every summon starts already sharing, until toggled off.
-      if (localStorage.getItem('companion-share-sticky') === '1') {
-        const shared = await video.startScreenShare()
-        if (!shared) setPermissionDialog('screen-recording')
+      if (!(voiceAvailableRef.current && ttsAvailableRef.current)) {
+        // Not "no voice" — just "not known yet" right after an app start.
+        await awaitVoiceProbe()
       }
+      if (inCallRef.current) {
+        // Another entry point started a call while we waited — just make
+        // sure its floating surface is up.
+        setCallMinimized(true)
+        void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+        return
+      }
+      if (!(voiceAvailableRef.current && ttsAvailableRef.current)) {
+        // Genuinely no voice configured — say so in the app window.
+        notifyVoiceUnavailableRef.current?.('voice')
+        return
+      }
+      companionVoiceRef.current = true
+      await startCall('voice')
     } finally {
+      // Released the moment the call engine settles — NOT held across the
+      // screen share below: a share that stalls on the Screen Recording
+      // permission (getDisplayMedia can hang for seconds) used to leave
+      // this latched, and every later summon died silently against it.
       companionVoiceStartingRef.current = false
     }
-  }, [voiceAvailable, ttsAvailable, startCall, video])
+    if (!inCallRef.current) {
+      // The session didn't start (device denied/unavailable — startCall
+      // already raised the permission dialog). Bring the app forward so the
+      // user actually sees that explanation.
+      companionVoiceRef.current = false
+      notifyVoiceUnavailableRef.current?.('failed')
+      return
+    }
+    // Sticky screen share: opted in once from the mascot's share pin →
+    // every summon starts already sharing, until toggled off. Fire-and-
+    // forget: the Skipper is already up, the share badge lights when the
+    // capture is really live.
+    if (opts.share || localStorage.getItem('companion-share-sticky') === '1') {
+      void video.startScreenShare().then((shared) => {
+        if (!shared) setPermissionDialog('screen-recording')
+      })
+    }
+  }, [awaitVoiceProbe, startCall, video])
+  // Stable handle for the tuck-relay listener below — registered once,
+  // always calling the latest closure.
+  const startHoverCallRef = useRef(startHoverCall)
+  startHoverCallRef.current = startHoverCall
 
   // Composer call buttons: the call button on a chat always means "float
   // THIS chat". No call yet → start the hover session bound to it; call
@@ -1584,8 +1661,10 @@ function App() {
       void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
       return
     }
-    if (preset === 'voice') {
-      void startHoverCall()
+    if (preset === 'voice' || preset === 'share') {
+      // Both are the hover companion — 'share' is the same summon with the
+      // screen shared from the start (the menu's "Share screen").
+      void startHoverCall({ share: preset === 'share' })
     } else {
       void startCall(preset)
     }
@@ -1940,7 +2019,7 @@ function App() {
   // What's happening right now, at tool-NAME level ("Searching the web…",
   // "Reasoning…" — never arguments): the most recent activity wins — a
   // running tool by display name, else reasoning, else plain thinking.
-  // Feeds the summoned bar's status line AND the Skipper's chip/panel, so
+  // Feeds the Skipper's status chip and text panel, so
   // it reads the HOVER session's turn.
   const hoverActivityText = useMemo(() => {
     if (!hoverIsProcessing) return null
@@ -1962,7 +2041,29 @@ function App() {
   // The main process caches the latest state and replays it when the popout
   // loads.
   useEffect(() => {
-    if (!inCall) return
+    if (!inCall) {
+      // Call over (or not started): push an explicit idle state so main's
+      // cache can't carry a stale cameraOn/status into the next summon —
+      // main keeps the cache across fullscreen ⇄ popout flaps of a LIVE
+      // call (camera on must come back as the pill), so only this end
+      // marker clears it.
+      void window.ipc
+        .invoke('video:popoutState', {
+          ttsState: 'idle',
+          status: null,
+          cameraOn: false,
+          micMuted: false,
+          screenSharing: false,
+          speakerMuted: false,
+          activityText: null,
+          interimText: null,
+          pttLocked: false,
+          responseText: null,
+          questionText: null,
+        })
+        .catch(() => {})
+      return
+    }
     void window.ipc
       .invoke('video:popoutState', {
         ttsState: tts.state,
@@ -2052,7 +2153,7 @@ function App() {
         .catch(() => quickAskShortcut.DEFAULT_QUICK_ASK_SHORTCUT)
       playPopCue()
       toast('Ask Rowboat from anywhere', {
-        description: `Press ${quickAskShortcut.formatShortcut(accelerator, isMac)} in any app for a quick question — the answer shows up right there and in your chat.`,
+        description: `Press ${quickAskShortcut.formatShortcut(accelerator, isMac)} in any app to summon your Skipper — talk or type, the answer shows up right there.`,
         duration: 12000,
         closeButton: true,
         // Lift the card off the page, and move sonner's close button (which
@@ -2061,7 +2162,10 @@ function App() {
           'shadow-xl shadow-black/25 [&_[data-close-button]]:!left-auto [&_[data-close-button]]:!right-0 [&_[data-close-button]]:!translate-x-[15%] [&_[data-close-button]]:!-translate-y-[15%]',
         action: {
           label: 'Try it',
-          onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
+          // The SAME summon the chord performs — through main's relay, so
+          // the Skipper lands focused exactly as it does for the shortcut
+          // (text card only as its own voice-unavailable fallback).
+          onClick: () => void window.ipc.invoke('quickAsk:tuck', null).catch(() => {}),
         },
       })
     }, 3000)
@@ -2098,51 +2202,9 @@ function App() {
     lastScreenStateForNoticeRef.current = video.screenState
   }, [video.screenState])
 
-  // Quick-ask toggles (voice response / screen share), pushed from the bar.
-  // Screen share reuses the call engine's capture wholesale — the bar owns
-  // the share indicator, so no pill appears outside calls. Calls own the
-  // devices while live: bar toggles never fight an active call.
-  const quickAskOptionsRef = useRef({ voiceOutput: false, screenShare: false })
-  useEffect(() => {
-    return window.ipc.on('quick-ask:set-options', (opts) => {
-      quickAskOptionsRef.current = opts
-      if (inCallRef.current) return
-      if (opts.screenShare && video.screenState !== 'live') {
-        void (async () => {
-          await video.start({ camera: false })
-          const shared = await video.startScreenShare()
-          if (!shared) {
-            video.stop()
-            quickAskOptionsRef.current = { ...opts, screenShare: false }
-            setPermissionDialog('screen-recording')
-          }
-        })()
-      } else if (!opts.screenShare && video.screenState === 'live') {
-        video.stopScreenShare()
-        video.stop()
-      }
-    })
-  }, [video])
-
-  // Report the ACTUAL state back to the bar — its badge must reflect what
-  // capture is really doing (a denied permission means no share, whatever
-  // the toggle wished for).
-  useEffect(() => {
-    if (inCall) return
-    void window.ipc
-      .invoke('quickAsk:optionsState', {
-        voiceOutput: quickAskOptionsRef.current.voiceOutput,
-        screenSharing: video.screenState === 'live',
-      })
-      .catch(() => {})
-  }, [inCall, video.screenState])
-
-  // Quick-ask bar: a submit from the companion lands in the COMPANION's own
-  // session — never in whatever chat the app window is showing. The bar
-  // hosts the REAL composer, so the payload carries everything an in-app
-  // submit does; its model/effort picks are companion-scoped.
-  const quickAskActiveRef = useRef(false)
-  const quickAskStartedAtRef = useRef(0)
+  // (The companion's old standalone toggles — speak-the-answer and
+  // share-without-a-call — went with the retired ask bar. Sharing is a
+  // session control now: the Skipper's bow-light pin, on a live session.)
 
   // Send into the COMPANION's session. The lean twin of handlePromptSubmit:
   // same per-turn config (voice flags, frames, search/code, permissions,
@@ -2171,13 +2233,10 @@ function App() {
     if (inCallRef.current && marks && marks.submit === undefined) {
       marks.submit = performance.now()
     }
-    // Quick-ask voice toggle: this turn speaks its reply even without a call.
-    speakTurnRef.current =
-      !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
-    // Modality decides speech on calls: a TYPED question renders its reply
-    // silently; a SPOKEN one (PTT utterance) is read aloud.
+    // Speech follows the QUESTION's modality: a TYPED question renders its
+    // reply silently; a SPOKEN one (PTT utterance) is read aloud.
     suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
-    if (inCallRef.current || speakTurnRef.current) {
+    if (inCallRef.current) {
       // A new question supersedes whatever of the previous reply was still
       // unspoken — silence it and drop the frozen backlog.
       ttsRef.current.cancel()
@@ -2227,9 +2286,7 @@ function App() {
       // dead air.
       const reasoningEffort =
         selected?.effort ??
-        ((inCallRef.current && companionVoiceRef.current) || quickAskActiveRef.current
-          ? ('low' as const)
-          : undefined)
+        (inCallRef.current && companionVoiceRef.current ? ('low' as const) : undefined)
       const chatMaxModelCalls = await window.ipc
         .invoke('turnLimits:getSettings', null)
         .then((settings) => settings.chatMaxModelCalls)
@@ -2242,11 +2299,7 @@ function App() {
             composition: {
               workDirId: sessionId,
               ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
-              ...(ttsEnabledRef.current
-                ? { voiceOutput: ttsModeRef.current }
-                : speakTurnRef.current
-                  ? { voiceOutput: 'full' as const }
-                  : {}),
+              ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               ...(codeMode ? { codeMode } : {}),
               ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
@@ -2336,8 +2389,6 @@ function App() {
     return window.ipc.on('quick-ask:submit', (payload) => {
       const trimmed = payload.text.trim()
       if (!trimmed && !payload.attachments?.length) return
-      quickAskActiveRef.current = true
-      quickAskStartedAtRef.current = Date.now()
       if (payload.model) {
         hoverSelectionRef.current = {
           provider: payload.model.provider,
@@ -2362,52 +2413,25 @@ function App() {
     })
   }, [])
 
-  // Stop relay: the bar composer's send button becomes Stop while a turn is
-  // processing — the COMPANION's turn, not the app chat's.
-  useEffect(() => {
-    return window.ipc.on('quick-ask:stop', () => {
-      void hoverChatRef.current.stop().catch(() => {})
-    })
-  }, [])
-
   // (The old surface-based text-mode hush is gone: speech now follows each
   // question's modality, plus the explicit speaker mute below.)
 
-  // Tuck relay (⌥⇧Space, the card's tuck handle): the ONE hover flow.
+  // Tuck relay (⌥⇧Space, the tray item, the card's tuck handle): the ONE
+  // hover flow. Registered once (via the ref), then main is told this
+  // window can take relays — a summon that arrived while this window was
+  // still loading (or didn't exist yet: the user had closed it and the
+  // shortcut recreated it hidden) is delivered on that handshake.
   useEffect(() => {
-    return window.ipc.on('quick-ask:tuck', () => {
-      void startHoverCall()
+    const off = window.ipc.on('quick-ask:tuck', () => {
+      void startHoverCallRef.current()
     })
-  }, [startHoverCall])
+    void window.ipc.invoke('quickAsk:appReady', null).catch(() => {})
+    return off
+  }, [])
 
-  // Mirror the in-flight answer back to the bar while a quick-ask turn is
-  // live: streaming text while generating, the final assistant message when
-  // done (which also ends the mirror). Reads the LIVE chat state — the
-  // standalone conversation/currentAssistantMessage states are legacy
-  // pre-load fallbacks the new runtime never feeds (the original quick-ask
-  // read those, which is why its mirror never showed anything). Only
-  // messages from AFTER the submit count — the previous turn's answer is
-  // still the newest one in the conversation at submit time.
-  useEffect(() => {
-    if (!quickAskActiveRef.current) return
-    let text = hoverAssistantMessage
-    if (!text) {
-      for (let i = hoverConversation.length - 1; i >= 0; i--) {
-        const item = hoverConversation[i]
-        if (isChatMessage(item) && item.role === 'assistant') {
-          if (item.timestamp >= quickAskStartedAtRef.current) text = item.content
-          break
-        }
-      }
-    }
-    // Nothing new yet (run not started / no fresh answer): pushing would
-    // only flicker the bar's local "Thinking…" state away.
-    if (!text && !hoverIsProcessing) return
-    void window.ipc
-      .invoke('quickAsk:state', { processing: hoverIsProcessing, responseText: text || null, statusText: hoverActivityText })
-      .catch(() => {})
-    if (!hoverIsProcessing && text) quickAskActiveRef.current = false
-  }, [hoverIsProcessing, hoverActivityText, hoverAssistantMessage, hoverConversation])
+  // (No answer mirror any more: a typed question on the Skipper rides the
+  // SAME call mirror as a spoken one — video:popoutState — because there is
+  // always a live session behind the companion now.)
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -3921,8 +3945,8 @@ function App() {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => {
-    if (activeIsProcessing && (inCallRef.current || quickAskActiveRef.current)) {
-      // In-call and quick-ask input arrives at arbitrary moments — a hard
+    if (activeIsProcessing && inCallRef.current) {
+      // In-call input arrives at arbitrary moments — a hard
       // drop here silently ate utterances submitted while the previous turn
       // was still stopping (the PTT interrupt is async). Finish the stop and
       // proceed with this message instead. Ordinary typed sends proceed while
@@ -3945,11 +3969,6 @@ function App() {
       marks.submit = performance.now()
     }
 
-    // Quick-ask voice toggle: this turn speaks its reply even though no call
-    // is live. Per-turn (not a sticky flag) so composer messages typed
-    // outside the bar never start talking.
-    speakTurnRef.current =
-      !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
     // Modality decides speech on calls: a TYPED question (composer, Skipper
     // panel, popout input) renders its reply silently; a SPOKEN one (PTT
     // utterance — pendingVoiceInputRef is set just before submit) is spoken
@@ -3957,7 +3976,7 @@ function App() {
     // mid-reply never flips an in-flight answer.
     suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
 
-    if (inCallRef.current || speakTurnRef.current) {
+    if (inCallRef.current) {
       // A new question supersedes whatever of the previous reply was still
       // unspoken — silence it and drop the frozen backlog so it never plays
       // over the new turn. (The overlay resets its segment list when the
@@ -4040,14 +4059,12 @@ function App() {
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
       // Effort rides the ModelSelection. Hover-mode turns (companion voice
-      // sessions and bar submits) default to FAST thinking when there's no
-      // explicit pick — voice-to-first-word is the experience, and a long
-      // reasoning phase is dead air.
+      // sessions) default to FAST thinking when there's no explicit pick —
+      // voice-to-first-word is the experience, and a long reasoning phase
+      // is dead air.
       const reasoningEffort =
         selected?.effort ??
-        ((inCallRef.current && companionVoiceRef.current) || quickAskActiveRef.current
-          ? ('low' as const)
-          : undefined)
+        (inCallRef.current && companionVoiceRef.current ? ('low' as const) : undefined)
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.
@@ -4067,11 +4084,7 @@ function App() {
             composition: {
               workDirId: currentRunId,
               ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
-              ...(ttsEnabledRef.current
-                ? { voiceOutput: ttsModeRef.current }
-                : speakTurnRef.current
-                  ? { voiceOutput: 'full' as const }
-                  : {}),
+              ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               // Code-session pins: a bound chat always carries the session's
               // agent + cwd, so voice/quick-ask submits (which don't thread
@@ -4620,7 +4633,7 @@ function App() {
     handleNewChatTabInSidebar()
   }, [chatTabs, handleNewChatTabInSidebar])
 
-  // Quick-ask "+": the bar wants a fresh COMPANION conversation for its next
+  // The companion's "+": a fresh COMPANION conversation for its next
   // question. The app window's chat is untouched.
   useEffect(() => {
     return window.ipc.on('quick-ask:new-chat', () => {
@@ -4629,7 +4642,7 @@ function App() {
   }, [])
 
   // Companion-bar chat context: which conversation the companion is bound to
-  // (shown as the bar's destination chip) plus recents for its switcher.
+  // (shown as the companion's destination chip) plus recents for its switcher.
   // This is the HOVER binding — the app window's chat plays no part in it.
   useEffect(() => {
     void window.ipc
@@ -5210,14 +5223,30 @@ function App() {
   // being silently dead. Deliberately no automatic rebinding: a shortcut
   // that moves on its own is worse than one that's honestly broken.
   const [shortcutSettingsOpen, setShortcutSettingsOpen] = useState(false)
+  // Voice-setup nudge for a summon that can't start a session (see
+  // notifyVoiceUnavailableRef). The user is in another app when they press
+  // the chord, so the app window has to come forward to be seen.
+  const [voiceSetupOpen, setVoiceSetupOpen] = useState(false)
+  const notifyVoiceUnavailable = useCallback((reason: 'voice' | 'failed') => {
+    void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+    // 'failed' already raised its own permission dialog — don't double up.
+    if (reason === 'failed') return
+    toast('Hover mode needs voice', {
+      description:
+        'Sign in to Rowboat — or add your own Deepgram and ElevenLabs keys — to talk to your Skipper.',
+      duration: 8000,
+      action: { label: 'Open settings', onClick: () => setVoiceSetupOpen(true) },
+    })
+  }, [])
+  notifyVoiceUnavailableRef.current = notifyVoiceUnavailable
   useEffect(() => {
     const timer = setTimeout(async () => {
       try {
         const s = await window.ipc.invoke('quickAsk:getShortcut', null)
         if (s.registered) return
         const isMacHere = navigator.platform.toLowerCase().includes('mac')
-        toast.warning('Quick Ask shortcut unavailable', {
-          description: `${quickAskShortcut.formatShortcut(s.accelerator, isMacHere)} is in use by another app, so Quick Ask can't be summoned right now. Pick a different shortcut in Settings.`,
+        toast.warning('Hover shortcut unavailable', {
+          description: `${quickAskShortcut.formatShortcut(s.accelerator, isMacHere)} is in use by another app, so your Skipper can't be summoned right now. Pick a different shortcut in Settings.`,
           duration: 15000,
           closeButton: true,
           action: {
@@ -7480,6 +7509,11 @@ function App() {
         open={shortcutSettingsOpen}
         onOpenChange={setShortcutSettingsOpen}
         defaultTab="shortcuts"
+      />
+      <SettingsDialog
+        open={voiceSetupOpen}
+        onOpenChange={setVoiceSetupOpen}
+        defaultTab="account"
       />
       <OnboardingModal
         open={showOnboarding}
