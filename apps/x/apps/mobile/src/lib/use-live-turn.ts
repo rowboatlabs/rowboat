@@ -49,7 +49,7 @@ export function useLiveTurn(turnId: string | undefined, opts?: { deltas?: boolea
       }
     });
 
-    const stopFollowing = turnFollower.followTurn(turnId, {
+    const follower = turnFollower.followTurn(turnId, {
       fetchTurn: (id) => sessions.getTurn(id),
       subscribe: (listener) =>
         events.on('turns:events', (payload) => listener(payload as turns.TurnBusEvent)),
@@ -58,14 +58,17 @@ export function useLiveTurn(turnId: string | undefined, opts?: { deltas?: boolea
       onSnapshotFailed: (message) => setError(message),
     });
     const offResync = events.onResync(() => {
-      // followTurn refetches on offset gaps by itself; a transport-level
-      // resync only needs the overlay cleared (durable text re-converges).
+      // A reconnect can hide a finished turn forever: if the terminal events
+      // fired during the outage, nothing arrives for this turn again and the
+      // offset-gap check never trips. Force a fresh snapshot and drop the
+      // overlay (the refetched durable text supersedes it).
       liveTextRef.current = '';
       setLiveText('');
+      follower.refetch();
     });
 
     return () => {
-      stopFollowing();
+      follower.stop();
       offDeltas();
       offResync();
       releaseDeltas?.();

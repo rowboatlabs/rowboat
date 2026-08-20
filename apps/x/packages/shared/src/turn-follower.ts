@@ -34,7 +34,16 @@ export interface TurnFollowerDeps {
 const DEFAULT_RETRY_DELAY_MS = 1000
 const DEFAULT_MAX_RETRIES = 3
 
-export function followTurn(turnId: string, deps: TurnFollowerDeps): () => void {
+export interface TurnFollower {
+  stop: () => void
+  // Forces a fresh snapshot fetch. For transports that can drop (WebSocket):
+  // if the turn reached a terminal event while the feed was down, no later
+  // event for it ever arrives, so the offset-gap detection can't fire — the
+  // consumer must call this on reconnect to re-converge.
+  refetch: () => void
+}
+
+export function followTurn(turnId: string, deps: TurnFollowerDeps): TurnFollower {
   const retryDelayMs = deps.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
   const maxRetries = deps.maxRetries ?? DEFAULT_MAX_RETRIES
 
@@ -126,9 +135,20 @@ export function followTurn(turnId: string, deps: TurnFollowerDeps): () => void {
   })
 
   void fetchSnapshot()
-  return () => {
-    alive = false
-    if (retryTimer) clearTimeout(retryTimer)
-    unsubscribe()
+  return {
+    stop: () => {
+      alive = false
+      if (retryTimer) clearTimeout(retryTimer)
+      unsubscribe()
+    },
+    refetch: () => {
+      if (!alive) return
+      retries = 0
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+        retryTimer = null
+      }
+      resync()
+    },
   }
 }

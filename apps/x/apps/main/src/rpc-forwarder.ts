@@ -1,4 +1,3 @@
-import { app } from 'electron';
 import { isRpcChannel } from '@x/server';
 import { whenServerReady } from './server-host.js';
 
@@ -7,16 +6,16 @@ import { whenServerReady } from './server-host.js';
 // of calling core in-process, so the network API is exercised by the desktop
 // app on every keystroke — it cannot rot. Unmigrated channels are untouched.
 //
-// Kill switch: ROWBOAT_FORWARD_MIGRATED=0 pins everything in-process.
-// Default: forwarding on in dev, off in packaged builds until the slice has
-// soaked.
+// Forwarding is ON everywhere, packaged builds included — an HTTP path only
+// dev traffic exercises is the API-rot trap Q2 exists to prevent.
+// ROWBOAT_FORWARD_MIGRATED=0 is the emergency kill switch.
 
 export function forwardingEnabled(): boolean {
   const env = process.env.ROWBOAT_FORWARD_MIGRATED;
   if (env !== undefined) {
     return env !== '0' && env.toLowerCase() !== 'false';
   }
-  return !app.isPackaged;
+  return true;
 }
 
 export function shouldForwardChannel(channel: string): boolean {

@@ -39,7 +39,7 @@ export function useTurn(
     if (!turnId || !enabled) {
       return
     }
-    return followTurn(turnId, {
+    const follower = followTurn(turnId, {
       fetchTurn: (id) => window.ipc.invoke('sessions:getTurn', { turnId: id }),
       subscribe: subscribeTurnFeed,
       onState: (next) => {
@@ -51,6 +51,7 @@ export function useTurn(
       onSnapshotFailed: () => setSnapshotFailed(true),
       ...(maxRetries === undefined ? {} : { maxRetries }),
     })
+    return follower.stop
   }, [turnId, enabled, maxRetries])
 
   return { state, error, snapshotFailed }
