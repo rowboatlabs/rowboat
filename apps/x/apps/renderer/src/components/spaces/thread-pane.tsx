@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { Composer } from '@/components/spaces/composer'
+import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
 import type { SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
 import { usePresenceSender } from '@/hooks/use-space-chat'
@@ -26,7 +26,7 @@ import { containsRowboatAddress } from '@/lib/spaces-mentions'
 // Topics tab it is the centre column and the artifacts expand into a rail.
 
 export function ThreadPane({
-    org, space, topicId, threadInfo, topic: topicFromList, changeSets, entries, presence, memberNames, refreshTick,
+    org, space, topicId, threadInfo, topic: topicFromList, changeSets, entries, presence, members, memberNames, refreshTick,
     anchorChange, showBack, onBack, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding,
 }: {
     org: OrgWithSpaces
@@ -37,6 +37,7 @@ export function ThreadPane({
     changeSets: spaces.ChangeSet[]
     entries: spaces.SpacesAssetEntry[]
     presence: SpacePresence
+    members: spaces.Member[]
     memberNames: Map<string, string>
     refreshTick: number
     /** For standalone topics anchored to a change-set. */
@@ -90,13 +91,13 @@ export function ThreadPane({
     const isThread = !!marker
     const replies = messages.slice(1)
 
-    const post = async (body: string) => {
+    const post = async (body: string, agent?: AgentOptions) => {
         setPosting(true)
         try {
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId, body })
             markTopicRead(org.id, space.id, topicId)
             analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
-            maybeInvokeRowboat(org, space, result.topic, result.message.id, body)
+            maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not post', 'error')
             throw err
@@ -284,7 +285,7 @@ export function ThreadPane({
                 <div ref={bottomRef} />
             </div>
 
-            <Composer placeholder="Reply…" busy={posting} onSend={post} onType={onType} autoFocus />
+            <Composer placeholder="Reply…" busy={posting} onSend={post} onType={onType} autoFocus members={members} selfMemberId={org.memberId} />
 
         </div>
     )

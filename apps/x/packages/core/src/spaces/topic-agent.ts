@@ -32,6 +32,13 @@ export interface InvokeTopicAgentInput {
   messageId: string;
   /** The message body, verbatim (the @rowboat address included). */
   body: string;
+  /** Per-turn agent options from the composer's agent strip; absent = assistant defaults. */
+  options?: {
+    model?: { provider: string; model: string; effort?: 'low' | 'medium' | 'high' };
+    permissionMode?: 'auto' | 'manual';
+    searchEnabled?: boolean;
+    codeMode?: 'claude' | 'codex';
+  };
 }
 
 export interface InvokeTopicAgentResult {
@@ -94,6 +101,23 @@ export function buildInvocationMessage(input: InvokeTopicAgentInput, mcpServerNa
     '--- message from your person ---',
     input.body,
   ].join('\n');
+}
+
+/**
+ * Receipt wording for a failed turn (pure; tested). A dead sign-in is the common
+ * case and should say so — a bare HTTP status helps nobody in a team feed.
+ */
+export function describeTurnError(error: string | undefined): string {
+  const raw = (error ?? '').trim();
+  if (!raw) return 'unknown error';
+  if (/\b401\b|unauthori[sz]ed|unexpected HTTP response status code|not signed in|session expired/i.test(raw)) {
+    return "your Rowboat isn't signed in (or the session expired). Sign in again in Settings → Account, then retry.";
+  }
+  if (/\b(402|payment|credits?|quota)\b/i.test(raw)) {
+    return 'your Rowboat account is out of credits or the plan needs attention — check Settings → Account.';
+  }
+  if (/\b(429|rate limit)/i.test(raw)) return 'the model is rate-limited right now — try again in a minute.';
+  return truncate(raw, 200);
 }
 
 /** Does this turn event carry the agent's receipt for the given topic? (pure; tested) */
@@ -230,7 +254,7 @@ async function postBackstop(
 ): Promise<void> {
   let body: string;
   if (event.type === 'turn_failed') {
-    body = `⚠️ Rowboat couldn't complete this — ${truncate(event.error ?? 'unknown error', 200)}`;
+    body = `⚠️ Rowboat couldn't complete this — ${describeTurnError(event.error)}`;
   } else if (event.type === 'turn_cancelled') {
     body = `⚠️ Rowboat's run was stopped before it finished.`;
   } else {
@@ -290,8 +314,15 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
   const serverName = spacesMcpServerNameFor(input.orgId);
   const content = buildInvocationMessage(input, serverName);
 
-  const { getDefaultModelAndProvider } = await import('../models/defaults.js');
-  const selection = await getDefaultModelAndProvider();
+  // Model: the composer's pick for this turn, else the assistant's default.
+  const picked = input.options?.model;
+  const selection = picked
+    ? { provider: picked.provider, model: picked.model, effort: picked.effort }
+    : await (await import('../models/defaults.js')).getDefaultModelAndProvider();
+  const composition = {
+    ...(input.options?.searchEnabled ? { searchEnabled: true } : {}),
+    ...(input.options?.codeMode ? { codeMode: input.options.codeMode } : {}),
+  };
 
   const outcome = await sessions.sendOrQueueMessage(
     sessionId,
@@ -299,12 +330,17 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
     {
       agent: {
         agentId: 'copilot',
-        overrides: { model: { provider: selection.provider, model: selection.model } },
+        overrides: {
+          model: { provider: selection.provider, model: selection.model },
+          ...(Object.keys(composition).length > 0 ? { composition } : {}),
+        },
       },
       useCase: 'copilot_chat',
       subUseCase: 'space_topic',
       ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
-      autoPermission: true,
+      // Auto unless the composer asked for manual approval prompts (they
+      // surface in the topic's session, reachable from the working chip).
+      autoPermission: (input.options?.permissionMode ?? 'auto') === 'auto',
     },
   );
 

@@ -3541,6 +3541,16 @@ const ipcSchemas = {
       spaceName: z.string(),
       messageId: z.string(),
       body: z.string(),
+      // Per-turn agent options from the space composer's agent strip (shown
+      // when the draft addresses @rowboat). Absent = the assistant's defaults.
+      options: z
+        .object({
+          model: z.object({ provider: z.string(), model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() }).optional(),
+          permissionMode: z.enum(['auto', 'manual']).optional(),
+          searchEnabled: z.boolean().optional(),
+          codeMode: z.enum(['claude', 'codex']).optional(),
+        })
+        .optional(),
     }),
     res: z.object({ sessionId: z.string(), queued: z.boolean() }),
   },

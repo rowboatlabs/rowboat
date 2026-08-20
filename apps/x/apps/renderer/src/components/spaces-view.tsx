@@ -302,6 +302,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                             threads={threads}
                             topics={feed.topics}
                             presence={presence}
+                            members={members}
                             memberNames={memberNames}
                             onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
                         />
@@ -319,6 +320,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                                     changeSets={feed.changeSets}
                                     entries={entries}
                                     presence={presence}
+                                    members={members}
                                     memberNames={memberNames}
                                     refreshTick={refreshTick}
                                     anchorChange={selectedAnchor}

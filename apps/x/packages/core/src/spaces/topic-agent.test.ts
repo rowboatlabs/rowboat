@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildInvocationMessage, finalAssistantText, isTopicReceiptCall } from './topic-agent.js';
+import { buildInvocationMessage, describeTurnError, finalAssistantText, isTopicReceiptCall } from './topic-agent.js';
 
 const input = {
     orgId: 'org-1',
@@ -83,5 +83,15 @@ describe('finalAssistantText', () => {
         expect(finalAssistantText(undefined)).toBeNull();
         expect(finalAssistantText([])).toBeNull();
         expect(finalAssistantText([{ role: 'user', content: 'hi' }])).toBeNull();
+    });
+});
+
+describe('describeTurnError', () => {
+    it('turns auth failures into a sign-in hint and keeps other errors verbatim', () => {
+        expect(describeTurnError('unexpected HTTP response status code')).toMatch(/isn't signed in/);
+        expect(describeTurnError('401 Unauthorized')).toMatch(/isn't signed in/);
+        expect(describeTurnError('429 Too Many Requests')).toMatch(/rate-limited/);
+        expect(describeTurnError('tool foo exploded')).toBe('tool foo exploded');
+        expect(describeTurnError(undefined)).toBe('unknown error');
     });
 });

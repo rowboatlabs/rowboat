@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
-import { Composer } from '@/components/spaces/composer'
+import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
 import { rememberThread, usePresenceSender } from '@/hooks/use-space-chat'
@@ -20,7 +20,7 @@ import { containsRowboatAddress } from '@/lib/spaces-mentions'
 const scrollMemory = new Map<string, number>()
 
 export function GeneralStream({
-    org, space, general, threads, topics, presence, memberNames, onOpenThread,
+    org, space, general, threads, topics, presence, members, memberNames, onOpenThread,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -28,6 +28,7 @@ export function GeneralStream({
     threads: ThreadIndex
     topics: spaces.Topic[]
     presence: SpacePresence
+    members: spaces.Member[]
     memberNames: Map<string, string>
     onOpenThread: (topicId: string) => void
 }) {
@@ -88,14 +89,14 @@ export function GeneralStream({
         }
     }
 
-    const post = async (body: string) => {
+    const post = async (body: string, agent?: AgentOptions) => {
         if (!generalId) return
         setPosting(true)
         try {
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId: generalId, body })
             markTopicRead(org.id, space.id, generalId)
             analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
-            maybeInvokeRowboat(org, space, result.topic, result.message.id, body)
+            maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not post', 'error')
             throw err
@@ -202,6 +203,8 @@ export function GeneralStream({
                 onSend={post}
                 onType={onType}
                 seed={seed}
+                members={members}
+                selfMemberId={org.memberId}
             />
         </section>
     )
