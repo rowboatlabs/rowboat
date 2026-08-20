@@ -22,10 +22,10 @@ import type {
   Shape,
   Slide,
   TextShape,
-} from '@/lib/pptx/types'
-import type { EditedParagraph } from '@/lib/pptx/serialize'
-import { isLinePreset } from '@/lib/pptx/geometry'
-import { autoNumText } from '@/lib/pptx/textstyle'
+} from '@x/shared/dist/pptx/types.js'
+import type { EditedParagraph } from '@x/shared/dist/pptx/serialize.js'
+import { isLinePreset } from '@x/shared/dist/pptx/geometry.js'
+import { autoNumText } from '@x/shared/dist/pptx/textstyle.js'
 import {
   EMU_PER_INCH,
   EMU_PER_PT,

@@ -6,6 +6,7 @@ import { ImageLightbox, ImageOverlayButton } from '@/components/image-lightbox'
 import { useFileCard } from '@/contexts/file-card-context'
 import { useSidebarSection } from '@/contexts/sidebar-context'
 import { isImageFilePath } from '@/lib/file-utils'
+import { canOpenInApp } from '@/lib/file-types'
 import { wikiLabel } from '@/lib/wiki-links'
 
 const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac'])
@@ -35,6 +36,58 @@ function getFileCategory(ext: string): { label: string; icon: typeof FileIcon } 
 
 function getExtLabel(ext: string): string {
   return ext ? ext.slice(1).toUpperCase() : ''
+}
+
+// --- Opening a card's file ---
+
+// Workspace root fetched once per session; cards use it to map absolute paths
+// back to workspace-relative ones for the in-app file view. A failed lookup
+// clears the cache so the next click retries instead of degrading for good.
+let workspaceRootPromise: Promise<string> | null = null
+function getWorkspaceRoot(): Promise<string> {
+  workspaceRootPromise ??= window.ipc.invoke('workspace:getRoot', null)
+    .then((r) => r.root)
+    .catch((err) => { workspaceRootPromise = null; throw err })
+  return workspaceRootPromise
+}
+
+/**
+ * The workspace-relative form of a card's path, or null when it isn't a
+ * workspace file the app can address — an absolute path outside the root, a
+ * `~`/drive-letter path, or a root lookup that failed.
+ */
+async function workspaceRelPath(filePath: string): Promise<string | null> {
+  const isAbsolute = filePath.startsWith('/') || filePath.startsWith('~') || /^[A-Za-z]:[\\/]/.test(filePath)
+  if (!isAbsolute) return filePath
+  if (!filePath.startsWith('/')) return null
+  try {
+    const root = await getWorkspaceRoot()
+    const prefix = root.endsWith('/') ? root : `${root}/`
+    return filePath.startsWith(prefix) ? filePath.slice(prefix.length) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Opens a card's file the way the app itself would: a workspace file whose type
+ * the app can show goes to the in-app file view, so an assistant-written deck
+ * lands in the slide editor rather than Keynote. Everything else — outside the
+ * workspace, no in-app view, or a host surface that doesn't offer the in-app
+ * route — goes to the OS opener.
+ */
+function useOpenFilePath(filePath: string): () => Promise<void> {
+  const { onOpenFile } = useFileCard()
+  return useCallback(async () => {
+    if (onOpenFile && canOpenInApp(filePath)) {
+      const rel = await workspaceRelPath(filePath)
+      if (rel !== null) {
+        onOpenFile(rel)
+        return
+      }
+    }
+    await window.ipc.invoke('shell:openPath', { path: filePath })
+  }, [filePath, onOpenFile])
 }
 
 // Shared card shell used by all variants
@@ -141,9 +194,7 @@ function AudioFileCard({ filePath }: { filePath: string }) {
     }
   }, [])
 
-  const handleOpen = async () => {
-    await window.ipc.invoke('shell:openPath', { path: filePath })
-  }
+  const handleOpen = useOpenFilePath(filePath)
 
   return (
     <CardShell
@@ -161,7 +212,7 @@ function AudioFileCard({ filePath }: { filePath: string }) {
       }
       title={getFileNameWithoutExt(filePath)}
       subtitle={`Audio \u00b7 ${extLabel}`}
-      onClick={handleOpen}
+      onClick={() => { void handleOpen() }}
       action={
         <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
           Open
@@ -193,9 +244,7 @@ function SystemFileCard({ filePath }: { filePath: string }) {
     return () => { cancelled = true }
   }, [filePath, isImage])
 
-  const handleOpen = async () => {
-    await window.ipc.invoke('shell:openPath', { path: filePath })
-  }
+  const handleOpen = useOpenFilePath(filePath)
 
   return (
     <CardShell
@@ -206,7 +255,7 @@ function SystemFileCard({ filePath }: { filePath: string }) {
       }
       title={getFileNameWithoutExt(filePath)}
       subtitle={extLabel ? `${categoryLabel} \u00b7 ${extLabel}` : categoryLabel}
-      onClick={handleOpen}
+      onClick={() => { void handleOpen() }}
       action={
         <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
           Open

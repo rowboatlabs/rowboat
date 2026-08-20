@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type CSSProperties } from 'react'
-import type { EditedParagraph } from '@/lib/pptx/serialize'
-import type { TextShape } from '@/lib/pptx/types'
+import type { EditedParagraph } from '@x/shared/dist/pptx/serialize.js'
+import type { TextShape } from '@x/shared/dist/pptx/types.js'
 import {
   anchorJustify,
   buildEditableHtml,

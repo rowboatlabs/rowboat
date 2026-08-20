@@ -12,7 +12,7 @@
  * both halves, which is exactly the inheritance we want.
  */
 
-import type { EditedParagraph, EditedTextRun, RunFormatOverrides } from '@/lib/pptx/serialize'
+import type { EditedParagraph, EditedTextRun, RunFormatOverrides } from '@x/shared/dist/pptx/serialize.js'
 import {
   DEFAULT_LINE_HEIGHT,
   type Paragraph,
@@ -23,8 +23,8 @@ import {
   type TextAutofit,
   type TextRun,
   type TextShape,
-} from '@/lib/pptx/types'
-import { autoNumText, cssFontFamily } from '@/lib/pptx/textstyle'
+} from '@x/shared/dist/pptx/types.js'
+import { autoNumText, cssFontFamily } from '@x/shared/dist/pptx/textstyle.js'
 import { EMU_PER_PT } from './edit-model'
 
 export const DEFAULT_TEXT_PT = 18

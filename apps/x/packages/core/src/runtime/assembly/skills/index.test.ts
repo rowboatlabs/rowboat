@@ -241,3 +241,222 @@ describe("availability (catalog visibility)", () => {
     }
   });
 });
+
+// The deck tools are NOT in COPILOT_BASE_TOOLS, so the skill catalog is the
+// only thing that makes them discoverable: the model reads the catalog, loads
+// create-presentations, and that attaches deck-*. If this wiring regresses the
+// model silently falls back to rendering a PDF, which is the bug these pin.
+describe("presentation intent routes to the deck tools", () => {
+  it("create-presentations attaches every deck tool", async () => {
+    const skills = await import("./index.js");
+    const catalog = skills.buildSkillCatalog();
+    const section = catalog.split("## ").find((s) => s.startsWith("Create Presentations"));
+    expect(section).toBeDefined();
+    for (const tool of [
+      "deck-create",
+      "deck-review",
+      "deck-add-slide",
+      "deck-edit-slide",
+      "deck-restructure",
+      "deck-restyle",
+    ]) {
+      expect(section).toContain(tool);
+    }
+  });
+
+  it("the presentations entry claims the deck vocabulary and never PDF", async () => {
+    const skills = await import("./index.js");
+    const catalog = skills.buildSkillCatalog();
+    const section = catalog.split("## ").find((s) => s.startsWith("Create Presentations"))!;
+    for (const phrase of ["presentation", "slide deck", "pitch deck", ".pptx"]) {
+      expect(section.toLowerCase()).toContain(phrase.toLowerCase());
+    }
+    // The summary must not advertise the PDF path — that ambiguity is what
+    // sent the model to the HTML→PDF pipeline for plain deck requests.
+    const summaryLine = section.split("\n").find((l) => l.includes("Use it for:"))!;
+    expect(summaryLine).not.toMatch(/\bPDF presentations?\b/i);
+  });
+
+  // The clarify step is the difference between a real deck and filler: the
+  // agent has to ask a designer's questions as pickable options, in one message,
+  // and then build on a known arc. Open-ended prompts and interrogation loops
+  // are the failure modes these pin.
+  it("the skill body specifies the one-message intake, as answerable options", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    expect(body).toContain("## Ask first — one intake message");
+    // The four intake points, each with its named options.
+    expect(body).toContain(
+      "(a) pitch investors, (b) sell to a customer, (c) update the team, or (d) teach/present at an event",
+    );
+    expect(body).toContain("Quick (5-6 slides), standard (8-10), or detailed (12+)?");
+    expect(body).toContain("Formal, conversational, or punchy?");
+    // Per-purpose fact asks, not a generic "any numbers?".
+    expect(body).toMatch(/traction numbers \(revenue, growth, users\)/);
+    expect(body).toMatch(/the period it covers, the wins, the misses, and next steps/i);
+    // One message, no loops, partial answers still build.
+    expect(body).toContain("**One message, then build.**");
+    expect(body).toMatch(/never an interrogation loop/i);
+    expect(body).toMatch(/at most once for any given fact/i);
+    // The honesty contract it defers to is still spelled out here.
+    expect(body).toContain("needsInput");
+    expect(body).toMatch(/square-bracket placeholder/);
+  });
+
+  // The intake is a question CARD now, not a typed-out lettered list: the
+  // first move on a new-deck request is an ask-human call, choices live in
+  // `options` (capped at 4) and never in the question text, and the card
+  // supplies its own "Other" row. A regression here puts the questions back
+  // into prose, which is unclickable and re-opens the interrogation loop.
+  it("the intake is driven by the ask-human question card", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    expect(body).toMatch(/\*\*Ask with the question card, never with prose\.\*\*/);
+    expect(body).toMatch(/The FIRST thing you do for a new-deck request is call \\`ask-human\\`/);
+    // Choices go in `options`, never in the question string, and the card
+    // owns the "Other" row — all three are the tool's own hard rules.
+    expect(body).toMatch(/hard cap 4/);
+    expect(body).toMatch(/NOTHING in the question text/);
+    expect(body).toMatch(/Never add an "Other" or "Something else" option/);
+    expect(body).toMatch(/appends its own "Other \(type your answer\)" row/);
+    expect(body).toMatch(/Leave \\`multiSelect\\` off/);
+    // The tool says never to ask about low-stakes decisions; the skill has to
+    // claim the intake as the high-stakes exception, and hand tone back.
+    expect(body).toMatch(/low-stakes decision/);
+    expect(body).toMatch(/this intake is precisely the high-stakes case the tool exists for/);
+    expect(body).toContain("**Tone never earns a card.**");
+  });
+
+  it("the intake pins the exact option sets each card offers", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    // Purpose: single-select, exactly four rows, no hand-rolled "Other".
+    expect(body).toContain(
+      'options: ["Pitch investors", "Sell to a customer", "Update the team", "Teach or present"],',
+    );
+    // Length: single-select, the three named depths that map onto lengthChoice.
+    expect(body).toContain(
+      'options: ["Quick — 5-6 slides", "Standard — 8-10 slides", "Detailed — 12+ slides"],',
+    );
+    // Audience + facts: free text, which means `options` omitted entirely.
+    expect(body).toMatch(/ONE call with \\`options\\` omitted entirely/);
+    expect(body).toMatch(/who's in the room\?.*whenever the audience is still unknown/);
+    // The old prose enumerations survive only as the source of the option
+    // arrays — they must be labelled as what NOT to type into `question`.
+    expect(body).toMatch(/they belong in \\`options\\`, never in the question text/);
+    expect(body).toMatch(/is exactly what must NOT go into \\`question\\`/);
+  });
+
+  it("the intake caps the cards and takes Skip as a final answer", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    // One message of cards, two rounds at the very most, never more cards
+    // than the fields the user actually left open.
+    expect(body).toContain(
+      "**At most two cards in a message, and at most two rounds — never a third.**",
+    );
+    expect(body).toMatch(/parallel \\`ask-human\\` calls in a SINGLE message/);
+    expect(body).toMatch(/Never more cards than the fields the user actually left open/);
+    // Skip resolves the call with a sentinel; the model proceeds on its own
+    // judgment with placeholders instead of re-asking.
+    expect(body).toContain("**Skip is an answer, not a retry.**");
+    expect(body).toMatch(/never re-send that question, never rephrase it/);
+    expect(body).toMatch(/skipped facts become square-bracket placeholders with \\`needsInput\\`/);
+  });
+
+  it("the skill tells the model the intake is enforced by required tool arguments", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    // The three deck-create arguments that make the intake un-skippable, and
+    // the lengthChoice → slide-count mapping the intake options use.
+    expect(body).toMatch(/REQUIRES \\`purpose\\`/);
+    expect(body).toContain("\\`audience\\`");
+    expect(body).toContain("\\`lengthChoice\\`");
+    expect(body).toContain("quick = 5-6 slides, standard = 8-10, detailed = 12+");
+    // Content guardrails surface in the pattern docs…
+    expect(body).toContain("hard cap 6, each one line under 90 characters");
+    expect(body).toContain("up to 4 lines (each under 90 characters)");
+    // …and the emphasis contract is documented (plain text otherwise).
+    expect(body).toMatch(/\*\*bold\*\*/);
+    expect(body).toMatch(/\*italic\*/);
+  });
+
+  // Editing an open deck is the lighter path: review first, at most one
+  // options question when the ask is vague, none at all when it is specific,
+  // and never a rebuild. The new-deck intake firing on "polish this" would both
+  // annoy the user and risk clobbering slides they already edited.
+  it("the skill body gives editing its own lighter intake", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    expect(body).toContain("## Editing an open deck — a lighter intake");
+    // Review before asking.
+    expect(body).toMatch(/\*\*Look before you ask\.\*\* Call \\`deck-review\\` first/);
+    // The single options question, verbatim.
+    expect(body).toContain(
+      "Want me to (a) tighten the text, (b) restructure the flow, (c) restyle the look, or (d) all of it?",
+    );
+    expect(body).toMatch(/At most ONE question, and only when the request is ambiguous/);
+    // A specific request is answered with work, not questions.
+    expect(body).toContain("**A specific request gets NO questions.**");
+    expect(body).toMatch(/Shorten slide 3/);
+    // Edits go through the editing tools, never a rebuild.
+    expect(body).toContain("**Never regenerate the deck.**");
+    expect(body).toMatch(/Rebuilding with \\`deck-create\\` destroys all of that/);
+    // The new-deck intake is explicitly fenced off from edits, from both sides.
+    expect(body).toContain("**The new-deck intake above does NOT fire here**");
+    expect(body).toContain("**This is the intake for a NEW deck.**");
+  });
+
+  it("the skill body gives every deck type an arc to follow", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    expect(body).toContain("## Deck-type arcs");
+    for (const arc of [
+      "problem → solution → market → traction → team → ask",
+      "problem → cost of inaction → solution → proof → pricing → next steps",
+      "period → wins → metrics → misses → next steps",
+      "hook → concept → example → practice → recap",
+    ]) {
+      expect(body).toContain(arc);
+    }
+  });
+
+  it("the rules the intake sits on top of are untouched", async () => {
+    const skills = await import("./index.js");
+    const body = skills.resolveSkill("create-presentations")!.content;
+
+    // The open-deck targeting guidance and the deck-create guard.
+    expect(body).toContain("## Targeting the open deck");
+    expect(body).toContain("**Never call \\`deck-create\\` for an edit.**");
+    // The only-path rule.
+    expect(body).toMatch(/Do NOT render slides as PDF or HTML/);
+    // Absolute rule 2 still points at the section that carries the fact rules.
+    expect(body).toContain('See "Ask first — one intake message" below');
+  });
+
+  it("pdf-slides is gated to explicit PDF requests and defers to the deck skill", async () => {
+    const skills = await import("./index.js");
+    const resolved = skills.resolveSkill("pdf-slides");
+    expect(resolved).not.toBeNull();
+
+    const section = skills
+      .buildSkillCatalog()
+      .split("## ")
+      .find((s) => s.startsWith("PDF Slides"))!;
+    expect(section).toMatch(/only when the user explicitly asks/i);
+    expect(section).toContain("create-presentations");
+    // It must not attach deck tools, and must not claim the generic intent.
+    expect(section).not.toContain("deck-create");
+
+    // The skill body itself sends a non-PDF request back to the deck skill.
+    expect(resolved!.content).toContain("create-presentations");
+    expect(resolved!.content).toContain("deck-create");
+  });
+});

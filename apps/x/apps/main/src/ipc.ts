@@ -28,13 +28,14 @@ let caffeinateBlockerId: number | null = null;
 import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
 import {
   getCompanionMode,
+  getModeSeq,
   getExpandedSurface,
   getPopoutState,
   getQuickAskShortcutState,
-  getQuickAskWindow,
-  hideQuickAsk,
+  onAppReady,
+  onModeApplied,
   isPinnedCollapsed,
-  markSummonPending,
+  relaySummon,
   ackSummon,
   pushChatContext,
   pushPopoutState,
@@ -43,7 +44,6 @@ import {
   setPinnedCollapsed,
   setQuickAskShortcut,
   setShortcutCaptureActive,
-  showQuickAsk,
 } from './quick-ask.js';
 import { screenPointerService } from './screen-pointer.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
@@ -72,6 +72,7 @@ import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js'
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
 import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import { HomeThreadsTracker } from '@x/core/dist/home/threads.js';
 import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
@@ -135,6 +136,7 @@ import { readPrepNoteForEvent } from '@x/core/dist/knowledge/meeting_prep_brief.
 import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
+import { editSlide, generateDeckOutline, generateSlide } from '@x/core/dist/knowledge/deck_outline.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
@@ -476,7 +478,7 @@ const activeTtsStreams = new Map<string, AbortController>();
 // Match only real app windows — getAllWindows() can also contain the
 // companion window and hidden utility windows (e.g. PDF-export renderers),
 // which must not be shown, focused, or sent app events.
-function findMainAppWindow(): BrowserWindow | undefined {
+export function findMainAppWindow(): BrowserWindow | undefined {
   return BrowserWindow.getAllWindows().find((w) => {
     if (w.isDestroyed()) return false;
     const url = w.webContents.getURL();
@@ -734,6 +736,20 @@ export async function startCodeSessionStatusWatcher(): Promise<void> {
   });
 }
 
+// Home thread registry (the Deck): live status from the turn spine → a
+// debounced ping; the renderer refetches home:threads on it.
+let homeThreadsWatcher: (() => void) | null = null;
+export function startHomeThreadsWatcher(): void {
+  if (homeThreadsWatcher) {
+    return;
+  }
+  const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+  tracker.start();
+  homeThreadsWatcher = tracker.onChange(() => {
+    broadcastToWindows('home:threadsChanged', {});
+  });
+}
+
 let runsWatcher: (() => void) | null = null;
 export async function startRunsWatcher(): Promise<void> {
   if (runsWatcher) {
@@ -861,6 +877,12 @@ export function startRetentionSweep(): void {
         turnsRootDir: container.resolve<string>('turnsRootDir'),
         settings,
       });
+      // After the session sweep: clear code-mode residue whose chat is now
+      // gone (meta / ACP handle / workdir sidecar — worktrees stay on disk).
+      const orphaned = await container.resolve<CodeSessionService>('codeSessionService').sweepOrphanedMeta().catch(() => 0);
+      if (orphaned > 0) {
+        console.log(`[Retention] cleared code-mode meta for ${orphaned} deleted session(s)`);
+      }
       if (result.deletedSessions > 0 || result.deletedTurnFiles > 0) {
         console.log(
           `[Retention] sweep: deleted ${result.deletedSessions} session(s), ${result.deletedTurnFiles} turn file(s)`,
@@ -1134,7 +1156,7 @@ export function setupIpcHandlers() {
         }
       }
     },
-    // --- Quick-ask bar relays ---
+    // --- Hover companion relays ---
     'quickAsk:getShortcut': async () => {
       return getQuickAskShortcutState();
     },
@@ -1149,23 +1171,28 @@ export function setupIpcHandlers() {
       findMainAppWindow()?.webContents.send('quick-ask:submit', args);
       return {};
     },
-    'quickAsk:stop': async () => {
-      findMainAppWindow()?.webContents.send('quick-ask:stop', null);
-      return {};
-    },
     'quickAsk:getMode': async () => {
       return {
+        seq: getModeSeq(),
         mode: getCompanionMode(),
         collapsed: isPinnedCollapsed(),
         surface: getExpandedSurface(),
       };
     },
+    'quickAsk:modeApplied': async (_event, args) => {
+      onModeApplied(args.seq);
+      return {};
+    },
+    'quickAsk:appReady': async () => {
+      onAppReady();
+      return {};
+    },
     'quickAsk:tuck': async () => {
-      // The next pin gets focus (the user asked for their companion); the
-      // app window decides HOW to get there (start a voice call, or
-      // minimize a live call to the floating surface).
-      markSummonPending();
-      findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
+      // The card's tuck handle: the SAME relay as the chord (the next pin
+      // gets focus; the app window decides HOW to get there — start a voice
+      // call, or minimize a live call to the floating surface; a missing or
+      // loading app window is waited for; nothing answering falls back).
+      relaySummon();
       return {};
     },
     'quickAsk:tuckAck': async () => {
@@ -1184,24 +1211,8 @@ export function setupIpcHandlers() {
       findMainAppWindow()?.webContents.send('quick-ask:select-chat', args);
       return {};
     },
-    'quickAsk:hide': async () => {
-      hideQuickAsk();
-      return {};
-    },
-    'quickAsk:show': async () => {
-      showQuickAsk();
-      return {};
-    },
     'quickAsk:newChat': async () => {
       findMainAppWindow()?.webContents.send('quick-ask:new-chat', null);
-      return {};
-    },
-    'quickAsk:setOptions': async (_event, args) => {
-      findMainAppWindow()?.webContents.send('quick-ask:set-options', args);
-      return {};
-    },
-    'quickAsk:optionsState': async (_event, args) => {
-      getQuickAskWindow()?.webContents.send('quick-ask:options-state', args);
       return {};
     },
     'quickAsk:openChat': async () => {
@@ -1213,10 +1224,6 @@ export function setupIpcHandlers() {
         app.focus({ steal: true });
         main.webContents.send('quick-ask:open-chat', null);
       }
-      return {};
-    },
-    'quickAsk:state': async (_event, args) => {
-      getQuickAskWindow()?.webContents.send('quick-ask:state', args);
       return {};
     },
     'meeting:notifyNotesReady': async (_event, args) => {
@@ -1331,6 +1338,33 @@ export function setupIpcHandlers() {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to export a copy';
         return { saved: false, error: message };
+      }
+    },
+    'deck:generateOutline': async (_event, args) => {
+      try {
+        const outline = await generateDeckOutline(args);
+        return { outline };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to generate the deck outline';
+        return { error: message };
+      }
+    },
+    'deck:generateSlide': async (_event, args) => {
+      try {
+        const slide = await generateSlide(args);
+        return { slide };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to generate the slide';
+        return { error: message };
+      }
+    },
+    'deck:editSlide': async (_event, args) => {
+      try {
+        const slide = await editSlide(args);
+        return { slide };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to edit the slide';
+        return { error: message };
       }
     },
     'gmail:getImportant': async (_event, args) => {
@@ -1533,7 +1567,20 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'sessions:delete': async (_event, args) => {
-      await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      // An ADOPTED chat is a code session under a plain-chat door: deleting
+      // it through the runtime alone would orphan its code meta, stored ACP
+      // conversation, workdir sidecar — and leave a ghost row in the Code
+      // rail. Route through CodeSessionService.delete, which cleans all of
+      // that up (the runtime layer stays ignorant of code-mode). The
+      // worktree checkout is deliberately KEPT on disk — an unmerged
+      // worktree may hold the only copy of the work; explicit removal
+      // stays a Code-rail decision.
+      const codeMeta = await container.resolve<ICodeSessionsRepo>('codeSessionsRepo').get(args.sessionId).catch(() => null);
+      if (codeMeta) {
+        await container.resolve<CodeSessionService>('codeSessionService').delete(args.sessionId, { removeWorktree: false });
+      } else {
+        await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      }
       return { success: true };
     },
     'turns:subscribe': async (event, args) => {
@@ -1738,11 +1785,11 @@ export function setupIpcHandlers() {
     'codeMode:getConfig': async () => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
       const config = await repo.getConfig();
-      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy };
+      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy, defaultProjectId: config.defaultProjectId };
     },
     'codeMode:setConfig': async (_event, args) => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
-      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy });
+      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy, defaultProjectId: args.defaultProjectId });
       invalidateCopilotInstructionsCache();
       return { success: true };
     },
@@ -2846,7 +2893,7 @@ export function setupIpcHandlers() {
         const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
         const item = await addTodoItem(text);
         if (args.run || item.delegated) {
-          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual', code: args.code }).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return { success: true };
@@ -2856,11 +2903,56 @@ export function setupIpcHandlers() {
     },
     'todo:runItem': async (_event, args) => {
       try {
-        void runTodoItem(args.key, args.context).catch(() => {});
+        void runTodoItem(args.key, args.context, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    'home:threads': async () => {
+      const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+      return { threads: await tracker.snapshot() };
+    },
+    'home:markSeen': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.markSeen(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:setPinned': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.setPinned(args.sessionId, args.pinned);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:snooze': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.snooze(args.sessionId, args.hours);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:dismiss': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.dismiss(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:commandCenter': async () => {
+      const { ensureCommandCenterSession } = await import('@x/core/dist/home/command-center.js');
+      const sessionId = await ensureCommandCenterSession(container.resolve<ISessions>('sessions'));
+      return { sessionId };
     },
     'todo:stopRun': async (_event, args) => {
       try {

@@ -10,6 +10,11 @@ export type ScreenShareState = 'idle' | 'starting' | 'live';
  * AND variance means the content is blocked. Frames that can't be sampled
  * yet report NOT blank, so a slow capture spin-up never false-blocks.
  */
+// Ceiling on acquiring a screen capture (permission check + getDisplayMedia).
+// Generous for a slow first prompt; a hang past this is a denied/ineffective
+// permission, which must fail cleanly instead of wedging the share state.
+const SCREEN_SHARE_START_TIMEOUT_MS = 10_000;
+
 async function screenFrameLooksBlank(stream: MediaStream): Promise<boolean> {
     const video = document.createElement('video');
     video.muted = true;
@@ -323,14 +328,35 @@ export function useVideoMode() {
         // rebuilt binaries (a re-signed app keeps its Settings toggle but a
         // fresh TCC identity) in both directions. Ground truth comes from
         // sampling an actual frame below.
-        await window.ipc.invoke('meeting:checkScreenPermission', null).catch(() => null);
+        //
+        // Both steps are time-boxed: with the permission denied (or its
+        // prompt left unanswered) getDisplayMedia can hang INDEFINITELY —
+        // never resolving, never rejecting — which left screenState stuck at
+        // 'starting' for the rest of the session (every later share request
+        // "succeeded" against it without sharing anything, and a hover
+        // summon awaiting its sticky share never finished).
+        const deadline = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), SCREEN_SHARE_START_TIMEOUT_MS));
+        await Promise.race([
+            window.ipc.invoke('meeting:checkScreenPermission', null).catch(() => null),
+            deadline,
+        ]);
 
         let stream: MediaStream | null = null;
         try {
-            stream = await navigator.mediaDevices.getDisplayMedia({
+            const capture = navigator.mediaDevices.getDisplayMedia({
                 video: { frameRate: { ideal: 5 } },
                 audio: false,
             });
+            const result = await Promise.race([capture, deadline]);
+            if (result === 'timeout') {
+                console.error('[video] Screen share timed out — Screen Recording permission not effective');
+                // If the capture ever does materialize, nothing must keep
+                // recording behind the user's back.
+                void capture.then((late) => late.getTracks().forEach((t) => t.stop())).catch(() => {});
+                setScreenState('idle');
+                return false;
+            }
+            stream = result;
         } catch (err) {
             console.error('[video] Screen share failed:', err);
             setScreenState('idle');

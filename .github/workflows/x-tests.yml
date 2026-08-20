@@ -70,5 +70,6 @@ jobs:
       - name: Package Electron app without signing
         env:
           ROWBOAT_SKIP_CODE_SIGNING: "1"
+          NODE_OPTIONS: "--max-old-space-size=6144"
         run: npm run package
         working-directory: apps/x/apps/main

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
+import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
@@ -9,6 +10,7 @@ import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
 import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
+import { HomeThreadSchema } from './home-threads.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -249,6 +251,34 @@ const ipcSchemas = {
   'workspace:didChange': {
     req: WorkspaceChangeEvent,
     res: z.null(),
+  },
+  // One-shot deck outline generation for the AI deck builder. Soft errors,
+  // like workspace:exportCopy: failures come back as { error } rather than a
+  // rejected invoke.
+  'deck:generateOutline': {
+    req: GenerateDeckOutlineRequest,
+    res: z.object({
+      outline: DeckOutline.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Generate ONE slide to insert into an existing deck (Gamma's sparkle).
+  // Soft errors like the outline channel: failures come back as { error }.
+  'deck:generateSlide': {
+    req: GenerateSlideRequest,
+    res: z.object({
+      slide: DeckOutlineSlide.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Apply an instruction to ONE existing slide; the response is the slide
+  // AFTER the edit, in the same outline schema. Soft errors as above.
+  'deck:editSlide': {
+    req: EditSlideRequest,
+    res: z.object({
+      slide: DeckOutlineSlide.optional(),
+      error: z.string().optional(),
+    }),
   },
   'gmail:getImportant': {
     req: z.object({
@@ -768,6 +798,52 @@ const ipcSchemas = {
     req: TodoEvent,
     res: z.null(),
   },
+  // ── Home thread registry (the Deck) ──────────────────────────────────────
+  // One main-process snapshot of every thread through the attention lens:
+  // kind (task/code/chat), status (underway/needs-you/ready/idle), live
+  // activity, seen marks and pins. Derived in core/home/threads.ts; the
+  // Deck, triage pills, and Skipper's sitrep all read this one feed.
+  'home:threads': {
+    req: z.object({}),
+    res: z.object({ threads: z.array(HomeThreadSchema) }),
+  },
+  'home:markSeen': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // The operator's watch flag — a pinned thread keeps its Deck strip even
+  // while idle, and takes a 1–9 recall slot.
+  'home:setPinned': {
+    req: z.object({ sessionId: z.string(), pinned: z.boolean() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Snooze a needs-you thread out of the bay. It returns at the chosen time
+  // or on new session activity, whichever comes first — a tripwire, never a
+  // mute. Default 4 hours.
+  'home:snooze': {
+    req: z.object({ sessionId: z.string(), hours: z.number().positive().max(168).optional() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Dismiss a needs-you thread's claim entirely: no timer, only the
+  // activity tripwire returns it. Attention-state only — receipts and the
+  // thread itself are untouched.
+  'home:dismiss': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Push ping: the registry changed — refetch home:threads. Debounced in
+  // the tracker; carries no payload by design (the snapshot is the truth).
+  'home:threadsChanged': {
+    req: z.object({}),
+    res: z.null(),
+  },
+  // The Command Center session — get-or-create the ONE persistent operator
+  // conversation. Any turn on it is command-center-framed server-side
+  // (sessionCompositionPins), whatever surface sends it.
+  'home:commandCenter': {
+    req: z.object({}),
+    res: z.object({ sessionId: z.string() }),
+  },
   // The unified model catalog (core/models/catalog.ts): every connected
   // provider — Rowboat gateway, ChatGPT subscription (codex), BYOK keys,
   // local/custom endpoints — listed the same way, with per-provider status.
@@ -1163,6 +1239,9 @@ const ipcSchemas = {
   'voice:ptt-key': {
     req: z.object({
       type: z.enum(['down', 'up', 'chord']),
+      // Ghostwriter chord (⇧ held when Right ⌘ went down): this capture's
+      // result should be pasted at the user's cursor.
+      paste: z.boolean().optional(),
     }),
     res: z.null(),
   },
@@ -1231,8 +1310,8 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
-  // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
-  // Bar → main: relay a composer submit into the app window's chat.
+  // --- Hover companion (global ⌥⇧Space, own always-on-top window) ---
+  // Companion → main: relay a composer submit into the companion's chat.
   'quickAsk:submit': {
     req: QuickAskSubmitPayload,
     res: z.object({}),
@@ -1242,38 +1321,19 @@ const ipcSchemas = {
     req: QuickAskSubmitPayload,
     res: z.null(),
   },
-  // Bar → main → app window: stop the in-flight turn (the bar composer's
-  // send button becomes Stop while processing, same as in the app).
-  'quickAsk:stop': {
-    req: z.null(),
-    res: z.object({}),
-  },
-  'quick-ask:stop': {
-    req: z.null(),
-    res: z.null(),
-  },
-  // Bar → main: dismiss the bar (Esc).
-  'quickAsk:hide': {
-    req: z.null(),
-    res: z.object({}),
-  },
-  // Main → bar: the window was just summoned. viaShortcut distinguishes the
-  // global chord (⌥⇧Space — hold-to-talk starts capturing immediately) from
-  // programmatic shows (the discoverability toast), which must not touch
-  // the mic.
-  'quick-ask:summoned': {
-    req: z.object({ viaShortcut: z.boolean() }),
-    res: z.null(),
-  },
-  // The companion window's current role: summoned Spotlight bar, pinned
-  // call pill, or hidden. `collapsed` is the pinned pill tucked down to just
-  // the mascot (voice-to-voice). Pushed on every transition; the invoke
-  // covers the load race (the window may finish loading after a transition
-  // fired).
+  // The companion window's current role: `pinned` (the Skipper — the ONE
+  // hover surface) or `hidden`. `collapsed` is the Skipper tucked down to
+  // just the mascot (voice-to-voice). Pushed on every transition; the
+  // invoke covers the load race (the window may finish loading after a
+  // transition fired).
   'quickAsk:getMode': {
     req: z.null(),
     res: z.object({
-      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      // Monotonic per push — the renderer echoes it back over
+      // quickAsk:modeApplied once that role has PAINTED, and main reveals
+      // the window only then (never with the previous role still on screen).
+      seq: z.number(),
+      mode: z.enum(['hidden', 'pinned']),
       collapsed: z.boolean(),
       // Which surface the pinned role expands to: untuck returns you to the
       // surface you tucked FROM — 'card' (the bar-style text card, for
@@ -1285,11 +1345,28 @@ const ipcSchemas = {
   },
   'quick-ask:mode': {
     req: z.object({
-      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      seq: z.number(),
+      mode: z.enum(['hidden', 'pinned']),
       collapsed: z.boolean(),
       surface: z.enum(['card', 'pill']),
     }),
     res: z.null(),
+  },
+  // Companion window → main: the role carried by `seq` is on screen (painted)
+  // — main may now show/focus/resize the window for it. Without this ack the
+  // window could be revealed mid-transition: the summoned bar's layout for a
+  // frame (or, on first creation, for the whole page load) before the
+  // Skipper replaced it.
+  'quickAsk:modeApplied': {
+    req: z.object({ seq: z.number() }),
+    res: z.object({}),
+  },
+  // App window → main: the hover relay listener is registered — a summon
+  // that arrived while the app window was (re)loading (or didn't exist: the
+  // user closed it, the shortcut recreated it hidden) is delivered now.
+  'quickAsk:appReady': {
+    req: z.null(),
+    res: z.object({}),
   },
   // Bar → main → app window: tuck the text into the mascot. The app starts
   // the voice-preset call (mascot-only floating surface) — or, if a call is
@@ -1319,11 +1396,6 @@ const ipcSchemas = {
   // whether a reply is SPOKEN now follows the question's modality — spoken
   // questions get spoken replies, typed ones stay silent — plus the
   // explicit speaker mute on the Skipper.)
-  // App window → main: open the bar (the discoverability toast's "Try it").
-  'quickAsk:show': {
-    req: z.null(),
-    res: z.object({}),
-  },
   // Bar → main: jump to the conversation in the app — focuses the app
   // window and tells it to show the chat full-view (no middle pane).
   'quickAsk:openChat': {
@@ -1333,42 +1405,6 @@ const ipcSchemas = {
   // Push channel: main → app window for the jump above.
   'quick-ask:open-chat': {
     req: z.null(),
-    res: z.null(),
-  },
-  // Bar → main → app window: the bar's optional toggles. voiceOutput speaks
-  // the answers aloud; screenShare turns on the existing screen capture so
-  // frames ride along with bar submits (the bar owns the share indicator —
-  // no floating pill outside calls).
-  'quickAsk:setOptions': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenShare: z.boolean(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → app window with the toggles above.
-  'quick-ask:set-options': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenShare: z.boolean(),
-    }),
-    res: z.null(),
-  },
-  // App window → main → bar: the ACTUAL state (share can fail on the macOS
-  // permission; the bar must never show a "sharing" badge that lies).
-  'quickAsk:optionsState': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenSharing: z.boolean(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → bar for the state above.
-  'quick-ask:options-state': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenSharing: z.boolean(),
-    }),
     res: z.null(),
   },
   // App window → main → bar: the destination-chat context (see
@@ -1400,29 +1436,6 @@ const ipcSchemas = {
   // Push channel: main → app window for the reset above.
   'quick-ask:new-chat': {
     req: z.null(),
-    res: z.null(),
-  },
-  // App window → main: mirror of the in-flight answer for the bar
-  // (streaming text while processing, final text when done).
-  'quickAsk:state': {
-    req: z.object({
-      processing: z.boolean(),
-      responseText: z.string().nullable(),
-      // What the agent is doing right now ("Reasoning…", "Web search…") —
-      // shown blinking in the bar until the answer starts streaming.
-      statusText: z.string().nullable(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → bar with the latest answer state.
-  'quick-ask:state': {
-    req: z.object({
-      processing: z.boolean(),
-      responseText: z.string().nullable(),
-      // What the agent is doing right now ("Reasoning…", "Web search…") —
-      // shown blinking in the bar until the answer starts streaming.
-      statusText: z.string().nullable(),
-    }),
     res: z.null(),
   },
   // Any window → main: the current global quick-ask chord and whether the
@@ -1508,12 +1521,17 @@ const ipcSchemas = {
     res: z.object({
       enabled: z.boolean(),
       approvalPolicy: ApprovalPolicy.optional(),
+      // The repo coding work defaults into when none is named — set once in
+      // Settings → Code. With exactly one registered project, that project
+      // is the implicit default and this stays unset.
+      defaultProjectId: z.string().optional(),
     }),
   },
   'codeMode:setConfig': {
     req: z.object({
       enabled: z.boolean(),
       approvalPolicy: ApprovalPolicy.optional(),
+      defaultProjectId: z.string().optional(),
     }),
     res: z.object({
       success: z.literal(true),
@@ -1532,8 +1550,18 @@ const ipcSchemas = {
   'codeMode:checkAgentStatus': {
     req: z.null(),
     res: z.object({
-      claude: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
-      codex: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
+      claude: z.object({
+        installed: z.boolean(),
+        signedIn: z.boolean(),
+        // Who is signed in, when detectable: email plus the subscription tier
+        // ("max", "pro", "enterprise" for Claude; "plus", "go", … for Codex).
+        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      }),
+      codex: z.object({
+        installed: z.boolean(),
+        signedIn: z.boolean(),
+        account: z.object({ email: z.string().optional(), plan: z.string().optional() }).optional(),
+      }),
     }),
   },
   // Download + install an agent's native engine (the Settings "Enable" action).
@@ -2801,15 +2829,25 @@ const ipcSchemas = {
         path: z.string(),
         name: z.string(),
       })).optional(),
-      // Composer model selection — overrides the todo agent's model when
-      // the item runs now.
+      // Composer model selection (with its paired reasoning effort) —
+      // overrides the todo agent's model when the item runs now.
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
       permissionMode: z.enum(['auto', 'manual']).optional(),
+      // Code dispatch (the Helm): materialize a real code session on the
+      // item's thread before it runs — worktree lane by default, a row in
+      // the Code section, status tracking. The agent's code_agent_run then
+      // resolves the pin server-side.
+      code: z.object({
+        projectId: z.string(),
+        agent: z.enum(['claude', 'codex']).optional(),
+        isolation: z.enum(['in-repo', 'worktree']).optional(),
+      }).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2818,10 +2856,19 @@ const ipcSchemas = {
   },
   // Fire a run for one item, identified by its normalized line text.
   // Fire-and-forget: progress and completion arrive on todo:events.
+  // Carries the same model/permission overrides as todo:addItem so the run
+  // and retry chips honor the composer's picker instead of silently falling
+  // back to the default model.
   'todo:runItem': {
     req: z.object({
       key: z.string(),
       context: z.string().optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
+      }).optional(),
+      permissionMode: z.enum(['auto', 'manual']).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2864,6 +2911,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2896,6 +2944,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2931,6 +2980,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.

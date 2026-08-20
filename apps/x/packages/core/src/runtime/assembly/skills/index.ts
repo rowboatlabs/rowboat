@@ -19,6 +19,7 @@ import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
+import pdfSlidesSkill from "./pdf-slides/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
 import browserControlSkill from "./browser-control/skill.js";
@@ -30,6 +31,7 @@ import notifyUserSkill from "./notify-user/skill.js";
 import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
 import chartsSkill from "./charts/skill.js";
+import voiceSkill from "./voice/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/runtime/assembly/skills";
@@ -54,8 +56,23 @@ const definitions: SkillDefinition[] = [
   {
     id: "create-presentations",
     title: "Create Presentations",
-    summary: "Create PDF presentations and slide decks from natural language requests using knowledge base context.",
+    summary: "Build and edit real PowerPoint (.pptx) decks — presentations, slide decks, pitch decks, slides. Load for ANY presentation request, including adding/changing one slide or restyling a deck. Decks are never rendered as PDF or HTML and never hand-written via code.",
     content: createPresentationsSkill,
+    tools: [
+      "deck-create",
+      "deck-review",
+      "deck-add-slide",
+      "deck-edit-slide",
+      "deck-restructure",
+      "deck-restyle",
+      "file-mkdir",
+    ],
+  },
+  {
+    id: "pdf-slides",
+    title: "PDF Slides (explicit PDF requests only)",
+    summary: "Render flat HTML→PDF slides. ONLY when the user explicitly asks for a PDF or a printable handout. For any normal presentation / slide deck / pitch deck request use create-presentations instead, which produces an editable .pptx.",
+    content: pdfSlidesSkill,
     tools: ["file-writeText", "file-mkdir"],
   },
   {
@@ -205,6 +222,13 @@ const definitions: SkillDefinition[] = [
     summary: "Send native desktop notifications with optional clickable links — including rowboat:// deep links that open a specific note, chat, or view inside the app.",
     content: notifyUserSkill,
     tools: ["notify-user"],
+  },
+  {
+    id: "voice",
+    title: "Voice — Speak & Transcribe",
+    summary: "Turn text into spoken audio (text-to-speech saves an .mp3 in the workspace; two voices available for dialogue/podcast-style segments) and transcribe audio files to text (transcribe-audio). Uses the app's built-in voice stack — no API keys needed.",
+    content: voiceSkill,
+    tools: ["text-to-speech", "transcribe-audio"],
   },
 ];
 

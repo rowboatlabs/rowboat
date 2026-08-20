@@ -17,12 +17,16 @@ import {
   UnderlineIcon,
   Undo2Icon,
 } from 'lucide-react'
+import { PaletteIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { isFontAvailable } from '@/components/pptx/text-dom'
-import type { RunFormatOverrides } from '@/lib/pptx/serialize'
-import type { TextAlign } from '@/lib/pptx/types'
+import { DECK_PALETTES } from '@x/shared/dist/pptx/new-deck.js'
+import type { RunFormatOverrides } from '@x/shared/dist/pptx/serialize.js'
+import type { TextAlign } from '@x/shared/dist/pptx/types.js'
+import { cn } from '@/lib/utils'
 
 export type SaveStatus = 'clean' | 'saving' | 'saved' | 'error'
 
@@ -474,6 +478,83 @@ export interface EditorHeaderProps {
   saveStatus: SaveStatus
   onPlay: () => void
   onExport: () => void
+  /** The deck's current palette id, highlighted in the picker; null = unknown. */
+  paletteId: string | null
+  /** Swap the deck's theme to the chosen built-in palette. */
+  onChangeTheme: (paletteId: string) => void
+  /** True while a swap is in flight, so the picker disables. */
+  themeBusy: boolean
+}
+
+/** A row of the built-in palettes; the deck's current one is highlighted. */
+function ThemePalettePicker({
+  paletteId,
+  onChangeTheme,
+  busy,
+}: {
+  paletteId: string | null
+  onChangeTheme: (paletteId: string) => void
+  busy: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label="Change theme"
+              disabled={busy}
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+            >
+              <PaletteIcon className="size-4" />
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Change theme</TooltipContent>
+      </Tooltip>
+      <PopoverContent align="end" className="w-auto p-2">
+        <div className="mb-1.5 px-1 text-[11px] font-medium text-muted-foreground">Theme</div>
+        {/* Nine palettes: a compact grid, not a row. */}
+        <div className="grid grid-cols-3 gap-2">
+          {DECK_PALETTES.map((p) => {
+            const selected = p.id === paletteId
+            return (
+              <button
+                key={p.id}
+                type="button"
+                aria-label={p.name}
+                aria-pressed={selected}
+                disabled={busy}
+                onClick={() => {
+                  setOpen(false)
+                  if (!selected) onChangeTheme(p.id)
+                }}
+                className={cn(
+                  'w-16 rounded-md border p-1.5 text-left transition-colors disabled:opacity-50',
+                  selected ? 'border-primary ring-2 ring-primary/40' : 'border-border hover:border-primary/50',
+                )}
+              >
+                <div
+                  className="flex h-9 flex-col justify-between rounded border border-black/5 p-1"
+                  style={{ backgroundColor: `#${p.scheme.lt1}` }}
+                >
+                  <div className="h-1.5 w-2/3 rounded-sm" style={{ backgroundColor: `#${p.scheme.dk1}` }} />
+                  <div className="flex gap-0.5">
+                    {[p.scheme.accent1, p.scheme.accent2, p.scheme.accent3].map((hex, i) => (
+                      <div key={i} className="size-1.5 rounded-full" style={{ backgroundColor: `#${hex}` }} />
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-1 text-[11px] font-medium">{p.name}</div>
+              </button>
+            )
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 /**
@@ -487,6 +568,9 @@ export function EditorHeader({
   saveStatus,
   onPlay,
   onExport,
+  paletteId,
+  onChangeTheme,
+  themeBusy,
 }: EditorHeaderProps) {
   return (
     <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
@@ -502,6 +586,7 @@ export function EditorHeader({
       </Badge>
       <SaveState status={saveStatus} />
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <ThemePalettePicker paletteId={paletteId} onChangeTheme={onChangeTheme} busy={themeBusy} />
         <Tooltip>
           <TooltipTrigger asChild>
             <button

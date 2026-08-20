@@ -1,4 +1,5 @@
-import { shell, BrowserWindow } from 'electron';
+import { shell } from 'electron';
+import { findMainAppWindow } from './ipc.js';
 import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
 import { claimPickedFilesViaBackend } from '@x/core/dist/auth/google-backend-oauth.js';
 import { importGoogleDocWithToken } from '@x/core/dist/knowledge/google_docs.js';
@@ -56,7 +57,9 @@ function clearPending(): void {
 }
 
 function focusApp(): void {
-  const win = BrowserWindow.getAllWindows()[0];
+  // Same class of bug as the notification service's: getAllWindows()[0]
+  // can be the hidden companion window — focus the REAL app window only.
+  const win = findMainAppWindow();
   if (win) {
     if (win.isMinimized()) win.restore();
     win.focus();

@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
 import { runWhenPossible } from '../runtime/assembly/headless-app.js';
 import { asRunModelOptions, getKgModel } from '../models/defaults.js';
@@ -201,7 +200,7 @@ async function ensureUserEmail(): Promise<string | null> {
     try {
         const auth = await GoogleClientFactory.getClient();
         if (auth) {
-            const gmail = google.gmail({ version: 'v1', auth });
+            const gmail = GoogleClientFactory.gmailClient(auth);
             const profile = await gmail.users.getProfile({ userId: 'me' });
             if (profile.data.emailAddress) {
                 updateUserEmail(profile.data.emailAddress);

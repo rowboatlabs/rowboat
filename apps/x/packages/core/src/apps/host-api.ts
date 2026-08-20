@@ -13,7 +13,12 @@ import {
     MAX_COPILOT_PROMPT_BYTES,
     COPILOT_RUN_TIMEOUT_MS,
     COPILOT_MAX_CONCURRENT_PER_APP,
+    MAX_TTS_TEXT_CHARS,
+    MAX_VOICE_UPLOAD_BYTES,
+    VOICE_MAX_CONCURRENT_PER_APP,
+    LLM_TIMEOUT_MS,
 } from './constants.js';
+import { synthesizeSpeech, transcribeAudio } from '../voice/voice.js';
 import { composioAccountsRepo } from '../composio/repo.js';
 import {
     isConfigured as isComposioConfigured,
@@ -26,9 +31,19 @@ import { createProvider } from '../models/models.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import { isSignedIn } from '../account/account.js';
-import { createRun, createMessage } from '../runtime/legacy/runs.js';
+import { createRun, createMessage, stop as stopRun } from '../runtime/legacy/runs.js';
 import { extractAgentResponse, waitForRunCompletion } from '../runtime/legacy/utils.js';
 import { getBackgroundTaskAgentModel } from '../models/defaults.js';
+import { API_URL } from '../config/env.js';
+
+// An Unauthorized from the gateway while signed in almost always means the
+// session belongs to a DIFFERENT backend than this process's API_URL (e.g. a
+// dev app launched with a staging override against a prod login). Say so —
+// a bare "Unauthorized" cost a full debugging session to trace.
+function annotateAuthError(message: string): string {
+    if (!/unauthorized/i.test(message)) return message;
+    return `${message} (this app instance talks to ${API_URL} — if your login belongs to a different backend, sign out/in or relaunch without the API_URL override)`;
+}
 
 // Host API — M2 endpoints (spec §7.4–§7.7): Composio tools, SSRF-guarded fetch
 // proxy, LLM generation, and headless copilot runs. All gated by the single
@@ -199,6 +214,7 @@ async function handleFetchProxy(
     // Follow redirects manually so every hop passes the SSRF check (§7.5).
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+    res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     try {
         let current = target;
         for (let hop = 0; hop < 5; hop++) {
@@ -298,6 +314,14 @@ async function handleLlmGenerate(
     const resolved = await resolveAllowedModel(typeof body.model === 'string' ? body.model : undefined);
     if ('error' in resolved) return sendError(res, 400, 'model_not_allowed', resolved.error);
 
+    // Abort the upstream model call if the app goes away (page reload, view
+    // switch) — otherwise an orphaned call holds a concurrency slot and burns
+    // tokens after nobody is listening. The hard timeout guards the other
+    // leak: a hung provider call would otherwise pin a slot forever.
+    const abort = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+    const llmTimeout = setTimeout(() => abort.abort(), LLM_TIMEOUT_MS);
+
     llmInFlight.set(slug, inFlight + 1);
     try {
         const providerConfig = await resolveProviderConfig(resolved.provider);
@@ -308,6 +332,7 @@ async function handleLlmGenerate(
             ...(rawMessages ? { messages: rawMessages as ModelMessage[], allowSystemInMessages: true } : { prompt: prompt as string }),
             ...(temperature !== undefined ? { temperature } : {}),
             maxOutputTokens,
+            abortSignal: abort.signal,
         }));
         captureLlmUsage({ useCase: 'app_llm_generate', subUseCase: slug, model: resolved.model, provider: resolved.provider, usage: result.usage });
         res.json({
@@ -319,10 +344,87 @@ async function handleLlmGenerate(
             },
         });
     } catch (e) {
-        sendError(res, 503, 'llm_not_configured', e instanceof Error ? e.message : String(e));
+        sendError(res, 503, 'llm_not_configured', annotateAuthError(e instanceof Error ? e.message : String(e)));
     } finally {
+        clearTimeout(llmTimeout);
         const now = llmInFlight.get(slug) ?? 1;
         if (now <= 1) llmInFlight.delete(slug); else llmInFlight.set(slug, now - 1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Voice API — TTS + batch ASR through the app's own voice stack (ElevenLabs/
+// Deepgram keys or the signed-in Rowboat proxy). Capability: "voice".
+// ---------------------------------------------------------------------------
+
+const voiceInFlight = new Map<string, number>();
+
+function acquireVoiceSlot(slug: string, res: express.Response): boolean {
+    const inFlight = voiceInFlight.get(slug) ?? 0;
+    if (inFlight >= VOICE_MAX_CONCURRENT_PER_APP) {
+        sendError(res, 429, 'too_many_requests', `at most ${VOICE_MAX_CONCURRENT_PER_APP} concurrent voice calls per app`);
+        return false;
+    }
+    voiceInFlight.set(slug, inFlight + 1);
+    return true;
+}
+
+function releaseVoiceSlot(slug: string): void {
+    const now = voiceInFlight.get(slug) ?? 1;
+    if (now <= 1) voiceInFlight.delete(slug); else voiceInFlight.set(slug, now - 1);
+}
+
+async function handleVoiceTts(
+    slug: string,
+    manifest: RowboatAppManifest,
+    req: express.Request,
+    res: express.Response,
+): Promise<void> {
+    if (!checkCapability(manifest, 'voice')) return rejectCapability(res, 'voice');
+    const body = await readJsonBody(req, res, MAX_LLM_REQUEST_BYTES);
+    if (!body) return;
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) return sendError(res, 400, 'bad_request', '"text" is required');
+    if (text.length > MAX_TTS_TEXT_CHARS) {
+        return sendError(res, 400, 'too_large', `"text" exceeds ${MAX_TTS_TEXT_CHARS} chars — synthesize in segments`);
+    }
+    const voiceId = typeof body.voiceId === 'string' && body.voiceId ? body.voiceId : undefined;
+
+    if (!acquireVoiceSlot(slug, res)) return;
+    try {
+        // Apps produce durable audio — use the quality tier, not voice-mode's flash.
+        const { audioBase64, mimeType } = await synthesizeSpeech(text, { voiceId, modelId: 'eleven_turbo_v2_5' });
+        res.json({ audioBase64, mimeType });
+    } catch (e) {
+        sendError(res, 503, 'voice_error', e instanceof Error ? e.message : String(e));
+    } finally {
+        releaseVoiceSlot(slug);
+    }
+}
+
+async function handleVoiceTranscribe(
+    slug: string,
+    manifest: RowboatAppManifest,
+    req: express.Request,
+    res: express.Response,
+): Promise<void> {
+    if (!checkCapability(manifest, 'voice')) return rejectCapability(res, 'voice');
+    const body = await readJsonBody(req, res, MAX_VOICE_UPLOAD_BYTES);
+    if (!body) return;
+    const audioBase64 = typeof body.audioBase64 === 'string' ? body.audioBase64 : '';
+    if (!audioBase64) return sendError(res, 400, 'bad_request', '"audioBase64" is required');
+    const mimeType = typeof body.mimeType === 'string' && body.mimeType ? body.mimeType : undefined;
+    const audio = Buffer.from(audioBase64, 'base64');
+    if (audio.length === 0) return sendError(res, 400, 'bad_request', '"audioBase64" is not valid base64 audio');
+
+    if (!acquireVoiceSlot(slug, res)) return;
+    try {
+        const { transcript } = await transcribeAudio(audio, { mimeType });
+        res.json({ transcript });
+    } catch (e) {
+        sendError(res, 503, 'voice_error', e instanceof Error ? e.message : String(e));
+    } finally {
+        releaseVoiceSlot(slug);
     }
 }
 
@@ -331,6 +433,9 @@ async function handleLlmGenerate(
 // ---------------------------------------------------------------------------
 
 const copilotInFlight = new Map<string, number>();
+// slug → runId of the app-initiated run currently executing (concurrency is 1
+// per app, so this is unambiguous). Lets /_rowboat/copilot/cancel stop it.
+const copilotActiveRun = new Map<string, string>();
 
 async function handleCopilotRun(
     slug: string,
@@ -349,6 +454,7 @@ async function handleCopilotRun(
         return sendError(res, 429, 'too_many_requests', `at most ${COPILOT_MAX_CONCURRENT_PER_APP} concurrent copilot run per app`);
     }
     copilotInFlight.set(slug, inFlight + 1);
+    let activeRunId: string | null = null;
 
     try {
         // Headless tool profile: the background-task agent (no shell, no
@@ -363,6 +469,8 @@ async function handleCopilotRun(
             subUseCase: slug,
         });
         const runId = run.id;
+        activeRunId = runId;
+        copilotActiveRun.set(slug, runId);
 
         // Audit context (REQUIRED, §7.7): the model must know this request
         // originates from the app, not the user.
@@ -391,11 +499,30 @@ async function handleCopilotRun(
         if (msg === '__timeout__') {
             sendError(res, 504, 'copilot_timeout', `run did not complete within ${COPILOT_RUN_TIMEOUT_MS}ms`);
         } else {
-            sendError(res, 502, 'copilot_error', msg);
+            sendError(res, 502, 'copilot_error', annotateAuthError(msg));
         }
     } finally {
         const now = copilotInFlight.get(slug) ?? 1;
         if (now <= 1) copilotInFlight.delete(slug); else copilotInFlight.set(slug, now - 1);
+        if (activeRunId && copilotActiveRun.get(slug) === activeRunId) copilotActiveRun.delete(slug);
+    }
+}
+
+/** Cancel the app's currently-executing copilot run (if any). */
+async function handleCopilotCancel(
+    slug: string,
+    manifest: RowboatAppManifest,
+    _req: express.Request,
+    res: express.Response,
+): Promise<void> {
+    if (!checkCapability(manifest, 'copilot')) return rejectCapability(res, 'copilot');
+    const runId = copilotActiveRun.get(slug);
+    if (!runId) return void res.json({ cancelled: false });
+    try {
+        await stopRun(runId);
+        res.json({ cancelled: true, turnId: runId });
+    } catch (e) {
+        sendError(res, 502, 'cancel_failed', e instanceof Error ? e.message : String(e));
     }
 }
 
@@ -414,4 +541,7 @@ export function registerAppsHostApi(): void {
     registerHostApiRoute('/_rowboat/fetch', handleFetchProxy);
     registerHostApiRoute('/_rowboat/llm/generate', handleLlmGenerate);
     registerHostApiRoute('/_rowboat/copilot/run', handleCopilotRun);
+    registerHostApiRoute('/_rowboat/copilot/cancel', handleCopilotCancel);
+    registerHostApiRoute('/_rowboat/voice/tts', handleVoiceTts);
+    registerHostApiRoute('/_rowboat/voice/transcribe', handleVoiceTranscribe);
 }

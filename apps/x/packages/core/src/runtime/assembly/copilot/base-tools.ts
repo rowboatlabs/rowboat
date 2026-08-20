@@ -9,6 +9,11 @@
 // revisit once code-mode migrates to the turns runtime.
 export const COPILOT_BASE_TOOLS: readonly string[] = [
     "loadSkill",
+    // Blocking user question (async, requiresHuman) — resolved as a special
+    // descriptor in real-agent-resolver, not a BuiltinTools catalog entry.
+    // Headless/background turns run humanAvailable:false, where the runtime
+    // answers it immediately with "Human input is unavailable for this turn."
+    "ask-human",
     "file-getRoot",
     "file-exists",
     "file-list",
@@ -26,6 +31,13 @@ export const COPILOT_BASE_TOOLS: readonly string[] = [
     // "Add X to my list" must work in any chat — the to-do list is the home
     // surface and list-writing has no skill signal to trigger on.
     "todo-add",
+    // "What's running / what needs me?" reads the live thread registry —
+    // essential on the Command Center channel, useful in any chat, and like
+    // todo-add it has no skill signal to trigger on.
+    "home-status",
+    // Ghostwriter: "write this into my email" from the companion must work
+    // without a skill hop — availability-gated to macOS + registered service.
+    "paste-at-cursor",
     "executeCommand",
     "spawn-agent",
     "code_agent_run",

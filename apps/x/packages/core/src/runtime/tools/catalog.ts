@@ -23,7 +23,11 @@ import { liveNoteTools } from "./domains/live-note.js";
 import { backgroundTaskTools } from "./domains/background-tasks.js";
 import { notificationTools } from "./domains/notifications.js";
 import { todoTools } from "./domains/todo.js";
+import { deckTools } from "./domains/deck.js";
 import { screenPointerTools } from "./domains/screen-pointer.js";
+import { voiceTools } from "./domains/voice.js";
+import { homeTools } from "./domains/home.js";
+import { textInsertTools } from "./domains/text-insert.js";
 import { imageTools } from "./domains/image.js";
 import { BuiltinToolsSchema } from "./types.js";
 export { coalesceCodeRunEvents } from "./domains/code.js";
@@ -98,7 +102,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...codeTaskTools,
     ...notificationTools,
     ...todoTools,
+    ...deckTools,
     ...screenPointerTools,
+    // Merge order note: voiceTools shipped on main first — their catalog
+    // position is already in main users' provider payloads; the Helm's
+    // additions append after.
+    ...voiceTools,
+    ...homeTools,
+    ...textInsertTools,
     ...imageTools,
 
     [SPAWN_AGENT_TOOL_NAME]: {

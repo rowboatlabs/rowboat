@@ -12,9 +12,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "fast-xml-parser": "^5.10.1",
+    "jszip": "^3.10.1",
     "zod": "^4.2.1"
   },
   "devDependencies": {
+    "@types/node": "^25.0.3",
     "vitest": "catalog:"
   }
 }

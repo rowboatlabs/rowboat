@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { google, gmail_v1 as gmail } from 'googleapis';
+import { gmail_v1 as gmail } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { getMaxEmails } from '../config/gmail_sync_config.js';
@@ -22,6 +22,7 @@ import {
     writeSearchSnapshot,
     mirrorThreadReadState,
     mirrorThreadDraft,
+    listCachedThreadIds,
     stampClassificationFrontmatter,
     notifyNewEmailThreads,
     publishEmailSyncEvent,
@@ -91,7 +92,7 @@ const RECENT_BACKFILL_INTERVAL_MS = 15 * 60 * 1000;
 async function getGmailClientOrThrow() {
     const auth = await GoogleClientFactory.getClient();
     if (!auth) throw new Error('Gmail is not connected.');
-    return google.gmail({ version: 'v1', auth });
+    return GoogleClientFactory.gmailClient(auth);
 }
 
 export async function archiveThread(threadId: string): Promise<ThreadActionResult> {
@@ -324,7 +325,7 @@ export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentTh
         throw new Error('Gmail is not connected.');
     }
 
-    const gmailClient = google.gmail({ version: 'v1', auth });
+    const gmailClient = GoogleClientFactory.gmailClient(auth);
     const since = new Date();
     since.setDate(since.getDate() - daysAgo);
     const dateQuery = since.toISOString().split('T')[0].replace(/-/g, '/');
@@ -641,7 +642,7 @@ export async function downloadAttachment(args: {
 // --- Sync Logic ---
 
 async function processThread(auth: OAuth2Client, threadId: string, syncDir: string, attachmentsDir: string): Promise<SyncedThread | null> {
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = GoogleClientFactory.gmailClient(auth);
     try {
         const res = await gmail.users.threads.get({ userId: 'me', id: threadId });
         const thread = res.data;
@@ -745,7 +746,7 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
 async function pruneInboxCache(auth: OAuth2Client): Promise<void> {
     if (!fs.existsSync(CACHE_DIR)) return;
     try {
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = GoogleClientFactory.gmailClient(auth);
         const inInbox = new Set<string>();
         // threads.list returns a per-thread snippet for free — used below to
         // backfill `preview` on cache entries written before the field existed.
@@ -863,20 +864,63 @@ function shouldRunRecentBackfill(stateFile: string): boolean {
     return Date.now() - lastRunMs >= RECENT_BACKFILL_INTERVAL_MS;
 }
 
+/** Recent threads still carrying the INBOX label — the set the inbox cache
+ *  should contain for the lookback window. The date query matches messages,
+ *  so an old thread with a recent reply is included (unlike a bare
+ *  newest-N threads.list, which orders by thread creation). */
+async function listRecentInboxThreadIds(gmailClient: gmail.Gmail, lookbackDays: number): Promise<string[]> {
+    const dateQuery = recentDateQuery(lookbackDays);
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    let pageToken: string | undefined;
+
+    do {
+        const res = await gmailClient.users.threads.list({
+            userId: 'me',
+            labelIds: ['INBOX'],
+            q: `after:${dateQuery}`,
+            maxResults: 500,
+            pageToken,
+        });
+        for (const thread of res.data.threads || []) {
+            if (!thread.id || seen.has(thread.id)) continue;
+            seen.add(thread.id);
+            ids.push(thread.id);
+        }
+        pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+
+    return ids;
+}
+
 async function backfillMissingRecentThreads(
     auth: OAuth2Client,
     syncDir: string,
     attachmentsDir: string,
     stateFile: string,
     lookbackDays: number,
+    opts: { force?: boolean } = {},
 ): Promise<SyncedThread[]> {
-    if (!shouldRunRecentBackfill(stateFile)) return [];
+    if (!opts.force && !shouldRunRecentBackfill(stateFile)) return [];
 
-    const gmailClient = google.gmail({ version: 'v1', auth });
+    const gmailClient = GoogleClientFactory.gmailClient(auth);
     const recentThreads = await listRecentNonDeletedThreadIds(gmailClient, lookbackDays);
-    const missingThreadIds = recentThreads
-        .map((thread) => thread.threadId)
-        .filter((threadId) => !fs.existsSync(path.join(syncDir, `${threadId}.md`)));
+    const missingThreadIds = new Set(
+        recentThreads
+            .map((thread) => thread.threadId)
+            .filter((threadId) => !fs.existsSync(path.join(syncDir, `${threadId}.md`))),
+    );
+
+    // A markdown mirror alone doesn't mean the thread is synced: disconnect
+    // wipes the inbox cache but keeps gmail_sync/, and a cache-rebuilding full
+    // sync misses old threads with new replies entirely. So a recent thread
+    // still in INBOX with no cache entry counts as missing too. Scoped to
+    // INBOX so archived threads (deliberately uncached — caching would
+    // resurrect them in the inbox UI) aren't re-processed every pass.
+    const cached = new Set(listCachedThreadIds());
+    for (const threadId of await listRecentInboxThreadIds(gmailClient, lookbackDays)) {
+        if (!cached.has(threadId)) missingThreadIds.add(threadId);
+    }
 
     const synced: SyncedThread[] = [];
     for (const threadId of missingThreadIds) {
@@ -884,17 +928,28 @@ async function backfillMissingRecentThreads(
         if (result) synced.push(result);
     }
 
-    const profile = await gmailClient.users.getProfile({ userId: 'me' });
-    saveState(profile.data.historyId!, stateFile, { last_recent_backfill: new Date().toISOString() });
+    // Advance the history watermark only on the timer-driven pass. A forced
+    // pass runs right after a full sync, whose deliberately-early historyId
+    // (captured before listing) must survive so the next partial sync replays
+    // anything that arrived while the full sync was processing.
+    if (opts.force) {
+        const state = loadState(stateFile);
+        if (state.historyId) {
+            saveState(state.historyId, stateFile, { last_recent_backfill: new Date().toISOString() });
+        }
+    } else {
+        const profile = await gmailClient.users.getProfile({ userId: 'me' });
+        saveState(profile.data.historyId!, stateFile, { last_recent_backfill: new Date().toISOString() });
+    }
 
-    if (missingThreadIds.length > 0) {
-        console.log(`Recent Gmail backfill synced ${synced.length}/${missingThreadIds.length} missing thread(s).`);
+    if (missingThreadIds.size > 0) {
+        console.log(`Recent Gmail backfill synced ${synced.length}/${missingThreadIds.size} missing thread(s).`);
     }
     return synced;
 }
 
-async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number) {
-    const gmail = google.gmail({ version: 'v1', auth });
+async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number, opts: { ignoreLastSync?: boolean } = {}) {
+    const gmail = GoogleClientFactory.gmailClient(auth);
 
     // The onboarding / recovery fetch is bounded by a COUNT of the most recent
     // threads (maxEmails, configurable — default 500), not by a fixed date
@@ -908,11 +963,17 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
     // With no resumable last_sync (first connect, or a gap longer than the
     // lookback window) we drop the date floor entirely and just take the newest
     // `maxEmails` threads.
+    //
+    // ignoreLastSync: the caller needs the whole window re-walked even though
+    // last_sync is recent — the cache-backfill case, where inbox_lists/ was
+    // wiped (disconnect) but sync_state.json survived. Resuming from last_sync
+    // there would only re-list mail newer than the wipe, so the old inbox
+    // would never come back.
     const maxEmails = getMaxEmails();
     const state = loadState(stateFile);
     const lookbackFloor = new Date();
     lookbackFloor.setDate(lookbackFloor.getDate() - lookbackDays);
-    const resumeFrom = state.last_sync && new Date(state.last_sync) > lookbackFloor
+    const resumeFrom = !opts.ignoreLastSync && state.last_sync && new Date(state.last_sync) > lookbackFloor
         ? new Date(state.last_sync)
         : null;
     if (resumeFrom) {
@@ -1032,7 +1093,7 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
 
 async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number) {
     console.log(`Checking updates since historyId ${startHistoryId}...`);
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = GoogleClientFactory.gmailClient(auth);
 
     let run: ServiceRunContext | null = null;
     const ensureRun = async () => {
@@ -1211,7 +1272,7 @@ async function sweepUnclassifiedMarkdown(auth: OAuth2Client, llmBudget: number =
     } catch {
         return;
     }
-    const gmailClient = google.gmail({ version: 'v1', auth });
+    const gmailClient = GoogleClientFactory.gmailClient(auth);
     let classified = 0;
     let stamped = 0;
     for (const name of names) {
@@ -1350,18 +1411,37 @@ async function performSync() {
         // which is count-bounded (the newest maxEmails threads).
         const gapMs = state.last_sync ? Date.now() - new Date(state.last_sync).getTime() : 0;
         const gapTooLarge = gapMs > LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+        let ranFullSync = true;
         if (!state.historyId) {
             console.log("No history ID found, starting full sync...");
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else if (cacheMissing) {
+            // ignoreLastSync: after a disconnect→reconnect, purgeEmailCaches()
+            // wiped inbox_lists/ but sync_state.json (inside gmail_sync/, kept
+            // as knowledge source material) survived with a recent last_sync.
+            // Resuming from it would only re-list brand-new mail, so the old
+            // inbox would never be backfilled.
             console.log("History ID present but inbox cache empty — running full sync to backfill snapshots...");
-            await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
+            await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS, { ignoreLastSync: true });
         } else if (gapTooLarge) {
             console.log(`Last sync older than ${LOOKBACK_DAYS} days — running count-bounded full sync instead of partial sync...`);
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else {
             console.log("History ID found, starting partial sync...");
             await partialSync(auth, state.historyId, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
+            ranFullSync = false;
+        }
+
+        // A full sync lists the newest N threads, but threads.list orders by
+        // thread CREATION date — an old thread whose latest reply arrived an
+        // hour ago is invisible to it. Run the recent-window backfill
+        // immediately (its date query matches messages, so it catches those)
+        // instead of waiting out the 15-minute timer.
+        if (ranFullSync) {
+            const backfilled = await backfillMissingRecentThreads(
+                auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS, { force: true },
+            );
+            await publishGmailSyncEvent(backfilled);
         }
 
         // Keep inbox_lists/ in lock-step with Gmail's INBOX label —
@@ -1403,7 +1483,7 @@ export async function getAccountName(): Promise<string | null> {
     try {
         const auth = await GoogleClientFactory.getClient();
         if (!auth) return null;
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = GoogleClientFactory.gmailClient(auth);
         const list = await gmailClient.users.messages.list({ userId: 'me', labelIds: ['SENT'], maxResults: 1 });
         const id = list.data.messages?.[0]?.id;
         if (!id) {
@@ -1651,7 +1731,7 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
         const auth = await GoogleClientFactory.getClient();
         if (!auth) return { error: 'Gmail is not connected.' };
 
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = GoogleClientFactory.gmailClient(auth);
         const userEmail = await getUserEmail(auth);
         if (!userEmail) return { error: 'Could not determine your Gmail address.' };
 
@@ -1712,7 +1792,7 @@ export async function saveThreadDraft(opts: SaveDraftOptions): Promise<SaveDraft
         const auth = await GoogleClientFactory.getClient();
         if (!auth) return { error: 'Gmail is not connected.' };
 
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = GoogleClientFactory.gmailClient(auth);
         const userEmail = await getUserEmail(auth);
         if (!userEmail) return { error: 'Could not determine your Gmail address.' };
 
@@ -1781,7 +1861,7 @@ export async function deleteThreadDraft(draftId: string): Promise<{ ok: boolean;
         const auth = await GoogleClientFactory.getClient();
         if (!auth) return { ok: false, error: 'Gmail is not connected.' };
 
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = GoogleClientFactory.gmailClient(auth);
         await gmailClient.users.drafts.delete({ userId: 'me', id: draftId });
         triggerSync();
         return { ok: true };
@@ -1877,7 +1957,7 @@ export async function listDraftThreads(): Promise<{ threads: EmailThreadSnapshot
             return { threads: [], error: 'Gmail is not connected.' };
         }
 
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = GoogleClientFactory.gmailClient(auth);
         const list = await gmailClient.users.drafts.list({ userId: 'me', maxResults: 50 });
         const drafts = list.data.drafts || [];
 
@@ -1934,7 +2014,7 @@ export async function searchThreads(query: string, opts: { limit?: number } = {}
         const auth = await GoogleClientFactory.getClient();
         if (!auth) return { threads: [], error: 'Gmail is not connected.' };
 
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = GoogleClientFactory.gmailClient(auth);
         // Generous cap so the index isn't artificially small (Gmail allows 500).
         const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
         const list = await gmailClient.users.threads.list({ userId: 'me', q, maxResults: limit });

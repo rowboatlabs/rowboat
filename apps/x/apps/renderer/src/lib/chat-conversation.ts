@@ -184,6 +184,29 @@ export const getToolErrorText = (tool: ToolCall): string | undefined => {
   return 'Tool error'
 }
 
+/**
+ * Sentinel answer the ask-human card sends when the user skips the question.
+ * Phrased as an instruction so the model proceeds on its own; the settled
+ * transcript row matches on it to render "Skipped".
+ */
+export const ASK_HUMAN_SKIP_ANSWER =
+  'User skipped the question. Use your best judgment and proceed.'
+
+export type AskHumanCardData = {
+  question: string
+  /** The user's answer (or a runtime/cancel message). Null while pending. */
+  answer: string | null
+  skipped: boolean
+}
+
+export const getAskHumanCardData = (tool: ToolCall): AskHumanCardData | null => {
+  if (tool.name !== 'ask-human') return null
+  const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
+  const question = typeof input?.question === 'string' ? input.question : ''
+  const answer = typeof tool.result === 'string' && tool.result.trim() ? tool.result : null
+  return { question, answer, skipped: answer === ASK_HUMAN_SKIP_ANSWER }
+}
+
 export type WebSearchCardResult = { title: string; url: string; description: string }
 
 export type WebSearchCardData = {
@@ -960,6 +983,7 @@ const isPlainToolCall = (item: ConversationItem): item is ToolCall => {
   if (!isToolCall(item)) return false
   if (item.name === 'code_agent_run') return false // rich standalone block, never grouped
   if (item.name === 'spawn-agent') return false // rich standalone block, never grouped
+  if (item.name === 'ask-human') return false // question card, never swallowed into a tool group
   if (getWebSearchCardData(item)) return false
   if (getComposioConnectCardData(item)) return false
   if (getAppActionCardData(item)) return false

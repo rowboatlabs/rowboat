@@ -205,10 +205,53 @@ const HISTORICAL_KEY_ORDER = [
     "todo-add",
     "todo-propose",
     "todo-report",
+    "deck-create",
+    "deck-add-slide",
+    "deck-edit-slide",
+    "deck-restructure",
+    "deck-restyle",
+    "deck-review",
     "screen-pointer",
+    "text-to-speech",
+    "transcribe-audio",
+    "home-status",
+    "paste-at-cursor",
     "generate-image",
     "spawn-agent",
 ];
+
+// A skill's declared tool names are resolved against this catalog at
+// loadSkill time, and an unknown name is only a console.warn — so a typo
+// silently means "the model never gets that tool". Pin the bundled skills'
+// declarations against the live catalog instead.
+describe("bundled skills declare real builtin tools", () => {
+    it("every tool name a bundled skill attaches exists in BuiltinTools", async () => {
+        const { skillToolNames, availableSkills } = await import(
+            "../assembly/skills/index.js"
+        );
+        const unknown: string[] = [];
+        for (const skillId of availableSkills) {
+            for (const name of skillToolNames(skillId)) {
+                if (!BuiltinTools[name]) unknown.push(`${skillId} -> ${name}`);
+            }
+        }
+        expect(unknown).toEqual([]);
+    });
+
+    it("the presentations skill attaches the deck tools", async () => {
+        const { skillToolNames } = await import("../assembly/skills/index.js");
+        expect(skillToolNames("create-presentations")).toEqual(
+            expect.arrayContaining([
+                "deck-create",
+                "deck-review",
+                "deck-add-slide",
+                "deck-edit-slide",
+                "deck-restructure",
+                "deck-restyle",
+            ]),
+        );
+    });
+});
 
 describe("BuiltinTools catalog key order", () => {
     it("preserves the historical key order byte-for-byte", () => {
@@ -240,10 +283,21 @@ describe("BuiltinTools permission audit", () => {
             "file-mkdir": "file-boundary",
             parseFile: "file-boundary",
             LLMParse: "file-boundary",
+            "deck-create": "file-boundary",
+            "deck-add-slide": "file-boundary",
+            "deck-edit-slide": "file-boundary",
+            "deck-restructure": "file-boundary",
+            "deck-restyle": "file-boundary",
+            "deck-review": "file-boundary",
             executeCommand: "command-allowlist",
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
             "composio-execute-tool": "composio-execute",
+            "text-to-speech": "file-boundary",
+            "transcribe-audio": "file-boundary",
+            // Ghostwriter: types into ANOTHER app at the user's cursor —
+            // always gated (the auto judge keeps voice flow smooth).
+            "paste-at-cursor": "prompt",
         });
     });
 });

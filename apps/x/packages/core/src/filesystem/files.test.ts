@@ -157,6 +157,88 @@ describe("filesystem files", () => {
     await expect(files.writeText("etag.txt", "third", { expectedEtag: initial.etag })).rejects.toThrow("ETag mismatch");
   });
 
+  it("roundtrips binary data through writeBuffer", async () => {
+    const files = await loadFiles();
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x7f, 0x01]);
+
+    const result = await files.writeBuffer("bin/data.xlsx", bytes);
+
+    expect(result.isInsideWorkspace).toBe(true);
+    expect(result.etag).toBeTruthy();
+    await expect(fs.readFile(path.join(workspaceDir, "bin", "data.xlsx"))).resolves.toEqual(bytes);
+  });
+
+  it("rejects stale expectedEtag buffer writes", async () => {
+    const files = await loadFiles();
+    const initial = await files.writeBuffer("etag.bin", Buffer.from("first"));
+    await files.writeBuffer("etag.bin", Buffer.from("second-longer"));
+
+    await expect(
+      files.writeBuffer("etag.bin", Buffer.from("third"), { expectedEtag: initial.etag })
+    ).rejects.toThrow("ETag mismatch");
+  });
+
+  it("readBuffer reports the etag a guarded write can be keyed on", async () => {
+    const files = await loadFiles();
+    const written = await files.writeBuffer("etag.bin", Buffer.from("first"));
+
+    const read = await files.readBuffer("etag.bin");
+
+    expect(read.buffer).toEqual(Buffer.from("first"));
+    expect(read.etag).toBe(written.etag);
+    expect(read.stat.size).toBe(5);
+    // A read → modify → write round-trip keyed on that etag goes through...
+    await expect(
+      files.writeBuffer("etag.bin", Buffer.from("second"), { expectedEtag: read.etag })
+    ).resolves.toMatchObject({ isInsideWorkspace: true });
+    // ...and the stale etag is refused afterwards.
+    await expect(
+      files.writeBuffer("etag.bin", Buffer.from("third"), { expectedEtag: read.etag })
+    ).rejects.toBeInstanceOf(files.EtagMismatchError);
+  });
+
+  // A file that vanished between the caller's read and its guarded write is
+  // the same conflict as a file that changed — NOT a raw ENOENT. The raw error
+  // left the renderer's editor unable to save forever (every retry lstat'd the
+  // missing file and threw), since only the mismatch marker raises the
+  // conflict banner that offers a way out.
+  it("a missing file under expectedEtag is an ETag mismatch, not ENOENT (writeBuffer)", async () => {
+    const files = await loadFiles();
+    const initial = await files.writeBuffer("gone.bin", Buffer.from("first"));
+    await fs.unlink(path.join(workspaceDir, "gone.bin"));
+
+    const attempt = files.writeBuffer("gone.bin", Buffer.from("second"), { expectedEtag: initial.etag });
+    await expect(attempt).rejects.toBeInstanceOf(files.EtagMismatchError);
+    await expect(attempt).rejects.toThrow("ETag mismatch");
+    await expect(attempt).rejects.toMatchObject({ reason: "missing", code: "ETAG_MISMATCH" });
+    // The guard refused: the file was not silently recreated.
+    await expect(fs.access(path.join(workspaceDir, "gone.bin"))).rejects.toMatchObject({ code: "ENOENT" });
+    // An unguarded write (the editor's explicit "keep mine") recreates it.
+    await files.writeBuffer("gone.bin", Buffer.from("second"));
+    await expect(fs.readFile(path.join(workspaceDir, "gone.bin"), "utf8")).resolves.toBe("second");
+  });
+
+  it("a missing file under expectedEtag is an ETag mismatch, not ENOENT (writeText)", async () => {
+    const files = await loadFiles();
+    const initial = await files.writeText("gone.txt", "first");
+    await fs.unlink(path.join(workspaceDir, "gone.txt"));
+
+    const attempt = files.writeText("gone.txt", "second", { expectedEtag: initial.etag });
+    await expect(attempt).rejects.toBeInstanceOf(files.EtagMismatchError);
+    await expect(attempt).rejects.toMatchObject({ reason: "missing" });
+    await expect(fs.access(path.join(workspaceDir, "gone.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("a changed file under expectedEtag reports reason 'changed'", async () => {
+    const files = await loadFiles();
+    const initial = await files.writeBuffer("changed.bin", Buffer.from("first"));
+    await files.writeBuffer("changed.bin", Buffer.from("second-longer"));
+
+    await expect(
+      files.writeBuffer("changed.bin", Buffer.from("third"), { expectedEtag: initial.etag })
+    ).rejects.toMatchObject({ reason: "changed", code: "ETAG_MISMATCH" });
+  });
+
   it("requires unique editText matches unless replaceAll is true", async () => {
     const files = await loadFiles();
     await fs.mkdir(workspaceDir, { recursive: true });

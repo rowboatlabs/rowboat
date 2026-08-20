@@ -115,6 +115,9 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
             title={title}
             src={`${app.origin}/`}
             onLoad={() => setLoadState('ok')}
+            // Mic (voice-capable apps) + autoplay delegated into the app's
+            // origin; the session permission handler still gates "media".
+            allow="microphone; autoplay"
             className="h-full w-full border-0 bg-background"
           />
           {loadState === 'stuck' && (

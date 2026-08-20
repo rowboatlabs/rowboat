@@ -10,10 +10,19 @@
       html, body { margin: 0; padding: 0; }
       html.dark, html.dark body { background-color: #252525; }
       html.light, html.light body { background-color: #fff; }
+      /* Transparent utility windows (the hover companion, the screen-pointer
+         overlay) must never paint a backing slab — not even for the instant
+         before their React tree mounts and clears the backgrounds itself. */
+      html.transparent-window, html.transparent-window body { background: transparent; }
     </style>
     <script>
       // Apply theme class immediately before render
       (function() {
+        var hash = window.location.hash;
+        if (hash === '#quick-ask' || hash === '#screen-pointer') {
+          document.documentElement.classList.add('transparent-window');
+          return;
+        }
         var stored = localStorage.getItem('rowboat-theme');
         var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         var theme = stored || 'system';
