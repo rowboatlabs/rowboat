@@ -14,7 +14,7 @@ const ROOT = '/Users/test/rowboat'
 let openedPaths: string[]
 let shellOpened: string[]
 
-function installIpc() {
+function installIpc(opts?: { imageReadFails?: boolean }) {
   openedPaths = []
   shellOpened = []
   ;(window as unknown as { ipc: unknown }).ipc = {
@@ -26,7 +26,10 @@ function installIpc() {
         shellOpened.push((args as { path: string }).path)
         return { success: true }
       }
-      if (channel === 'shell:readFileBase64') return { mimeType: 'image/png', data: '' }
+      if (channel === 'shell:readFileBase64') {
+        if (opts?.imageReadFails) throw new Error('unreadable')
+        return { mimeType: 'image/png', data: '' }
+      }
       throw new Error(`no handler: ${channel}`)
     }),
   }
@@ -99,12 +102,39 @@ describe('file card open routing', () => {
   })
 
   it('routes the other in-app types the same way', async () => {
-    for (const path of ['docs/contract.docx', 'images/shot.png', 'clips/demo.mp4', 'notes/plan.md']) {
+    for (const path of ['docs/contract.docx', 'clips/demo.mp4', 'notes/plan.md']) {
       renderCard(path)
       clickCard()
       await waitFor(() => expect(openedPaths).toContain(path))
       cleanup()
     }
+    expect(shellOpened).toEqual([])
+  })
+
+  // Image paths are the one in-app type that skips the card entirely: they
+  // render as a bare ChatGPT-style picture, and clicking expands into the
+  // lightbox instead of routing anywhere.
+  it('shows an image inline and expands it on click instead of routing', async () => {
+    renderCard('images/shot.png')
+
+    // The picture only appears once its bytes arrive over IPC.
+    const img = await screen.findByRole('button', { name: 'shot.png' })
+    fireEvent.click(img)
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(openedPaths).toEqual([])
+    expect(shellOpened).toEqual([])
+  })
+
+  it('falls back to a routing card when the image bytes cannot be read', async () => {
+    installIpc({ imageReadFails: true })
+    renderCard('images/shot.png')
+
+    // The fallback card appears only after the read rejects.
+    const card = (await screen.findAllByRole('button'))[0]
+    fireEvent.click(card)
+
+    await waitFor(() => expect(openedPaths).toEqual(['images/shot.png']))
     expect(shellOpened).toEqual([])
   })
 
