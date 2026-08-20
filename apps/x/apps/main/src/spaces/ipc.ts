@@ -83,7 +83,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:addOrg': async (_event, args) => {
     const org = orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
-    void syncSpaceMentionWatch();
+    void syncSpaceMentionWatch({ force: true });
     return { org };
   },
 
@@ -94,7 +94,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:joinInvite': async (_event, args) => {
     const { org, result } = await spacesOAuth.joinViaInviteLink({ url: args.url, openBrowser });
-    void syncSpaceMentionWatch();
+    void syncSpaceMentionWatch({ force: true });
     return { org: orgSummary(org), space: result.space };
   },
 
@@ -107,7 +107,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:createOrg': async (_event, args) => {
     const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, slug: args.slug, openBrowser }));
-    void syncSpaceMentionWatch();
+    void syncSpaceMentionWatch({ force: true });
     return { org };
   },
 
@@ -120,7 +120,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (_event, args) => {
-    void syncSpaceMentionWatch();
+    void syncSpaceMentionWatch({ force: true });
     for (const [key, unsubscribe] of liveSubscriptions) {
       if (key.startsWith(`${args.orgId}/`)) {
         unsubscribe();
@@ -131,13 +131,18 @@ export const spacesIpcHandlers: SpacesHandlers = {
     return { success: true };
   },
 
-  'spaces:listSpaces': async (_event, args) => ({
-    spaces: await orgs.getClient(args.orgId).listSpaces(),
-  }),
+  'spaces:listSpaces': async (_event, args) => {
+    const spaces = await orgs.getClient(args.orgId).listSpaces();
+    // The renderer just reached this org — if it was down at boot (or restarted),
+    // this is the earliest signal that its spaces are watchable again. Unforced:
+    // repeated refreshes collapse into one sync.
+    void syncSpaceMentionWatch();
+    return { spaces };
+  },
 
   'spaces:createSpace': async (_event, args) => {
     const space = await orgs.getClient(args.orgId).createSpace(args.name);
-    void syncSpaceMentionWatch();
+    void syncSpaceMentionWatch({ force: true });
     return { space };
   },
 

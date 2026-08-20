@@ -24,7 +24,10 @@ export interface AgentOptions {
 
 interface MentionCandidate {
     id: string
+    /** Shown in the picker. */
     label: string
+    /** What gets typed into the message — a NAME, never the opaque member id. */
+    insert: string
     hint: string
     isAgent?: boolean
 }
@@ -95,10 +98,10 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
         if (!mentionMatch) return []
         const q = mentionMatch.query
         const list: MentionCandidate[] = []
-        if ('rowboat'.startsWith(q)) list.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
+        if ('rowboat'.startsWith(q)) list.push({ id: 'rowboat', label: 'rowboat', insert: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
         for (const m of members) {
             const hay = `${m.id} ${m.displayName}`.toLowerCase()
-            if (!q || hay.includes(q)) list.push({ id: m.id, label: m.displayName, hint: m.id === selfMemberId ? `@${m.id} · you` : `@${m.id}` })
+            if (!q || hay.includes(q)) list.push({ id: m.id, label: m.displayName, insert: m.displayName, hint: m.id === selfMemberId ? 'you' : '' })
         }
         return list.slice(0, 8)
     }, [mentionMatch, members, selfMemberId])
@@ -126,7 +129,7 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     }
     const pickCandidate = (c: MentionCandidate) => {
         if (!mentionMatch) return
-        insertAt(mentionMatch.start, caret, `@${c.id} `)
+        insertAt(mentionMatch.start, caret, `@${c.insert} `)
     }
 
     const insertRowboatChip = () => {
@@ -181,7 +184,7 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                                 )}
                                 <span className="min-w-0 flex-1">
                                     <span className="block truncate text-[13px] font-medium">{c.label}</span>
-                                    <span className="block truncate text-[11px] text-muted-foreground">{c.hint}</span>
+                                    {c.hint && <span className="block truncate text-[11px] text-muted-foreground">{c.hint}</span>}
                                 </span>
                             </button>
                         ))}

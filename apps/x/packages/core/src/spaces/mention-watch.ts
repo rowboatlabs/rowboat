@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { containsMemberAddress } from '@x/shared/dist/spaces.js';
+import { mentionsMember, type MentionIdentity } from '@x/shared/dist/spaces.js';
 import type { Member, ServerFrame } from '@rowboat/spaces-protocol';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import type { NotifyInput } from '../application/notification/service.js';
@@ -9,8 +9,10 @@ import { getClient, getLive, listOrgs } from './orgs.js';
 
 // Space mention notifications: main-side watcher that subscribes to EVERY
 // space of every org (independent of what's on screen), scans incoming
-// messages for @<my-member-id>, and notifies — suppressed while the app is
-// focused (onlyWhenBackground) and gated by the 'space_mention' category.
+// messages for a mention of me — by display name (what the composer types;
+// member ids are opaque IdP subjects) or by id (agent-written, older
+// messages) — and notifies, suppressed while the app is focused
+// (onlyWhenBackground) and gated by the 'space_mention' category.
 //
 // Offsets are persisted per space so a relaunch replays what arrived while
 // the app was closed: fresh mentions notify individually, older ones fold
@@ -25,6 +27,10 @@ const TOPIC_COOLDOWN_MS = 45_000;
 /** Missed mentions are summarised after the replay settles. */
 const MISSED_DEBOUNCE_MS = 3_000;
 const RESYNC_INTERVAL_MS = 5 * 60_000;
+/** Unforced syncs (e.g. the renderer listing spaces) coalesce into this window. */
+const SOFT_SYNC_WINDOW_MS = 15_000;
+/** An org that was unreachable is retried sooner than the slow loop. */
+const UNREACHABLE_RETRY_MS = 30_000;
 
 // --- pure helpers (tested) ---------------------------------------------------
 
@@ -131,6 +137,8 @@ const missed = new Map<string, MissedBucket>();
 let offsets = readOffsets();
 let offsetsFlush: ReturnType<typeof setTimeout> | null = null;
 let resyncTimer: ReturnType<typeof setInterval> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let lastSyncAt = 0;
 let syncing = false;
 
 function key(orgId: string, spaceId: string): string {
@@ -177,15 +185,16 @@ function queueMissed(k: string, orgId: string, spaceId: string, spaceName: strin
   missed.set(k, bucket);
 }
 
-function makeHandler(orgId: string, spaceId: string, spaceName: string, memberId: string): (frame: ServerFrame) => void {
+function makeHandler(orgId: string, spaceId: string, spaceName: string, me: MentionIdentity): (frame: ServerFrame) => void {
   const k = key(orgId, spaceId);
   return (frame) => {
     if (frame.kind !== 'event') return;
     noteOffset(k, frame.offset);
     if (frame.event.type !== 'message') return;
     const message = frame.event.message;
-    if (message.author.memberId === memberId) return;
-    if (!containsMemberAddress(message.body, memberId)) return;
+    if (message.author.memberId === me.id) return;
+    // People type the NAME (ids are opaque); agent-written mentions may carry the id.
+    if (!mentionsMember(message.body, me)) return;
 
     if (isMissedArrival(message.postedAt)) {
       queueMissed(k, orgId, spaceId, spaceName, message.topicId);
@@ -209,11 +218,19 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, memberId
 /**
  * Bring subscriptions in line with the org registry: subscribe every space of
  * every org, drop subscriptions to spaces that vanished, re-subscribe when the
- * org's identity changed. Safe to call often; concurrent calls coalesce.
+ * org's identity changed. Safe to call often; concurrent calls coalesce, and
+ * unforced calls (the renderer listing spaces) collapse into a short window.
+ *
+ * An org that is unreachable — down at boot, restarted, or just reconnected —
+ * keeps its existing subscriptions and is retried on a short timer, so a space
+ * that appears while we were away still gets watched without waiting out the
+ * slow loop.
  */
-export async function syncSpaceMentionWatch(): Promise<void> {
+export async function syncSpaceMentionWatch(opts?: { force?: boolean }): Promise<void> {
   if (syncing) return;
+  if (!opts?.force && Date.now() - lastSyncAt < SOFT_SYNC_WINDOW_MS) return;
   syncing = true;
+  let unreachable = false;
   try {
     const wanted = new Set<string>();
     for (const org of listOrgs()) {
@@ -221,7 +238,10 @@ export async function syncSpaceMentionWatch(): Promise<void> {
       try {
         spaces = await getClient(org.id).listSpaces();
       } catch {
-        continue; // org unreachable right now — keep whatever subscriptions exist
+        // Org unreachable right now — keep its subscriptions and try again soon.
+        unreachable = true;
+        for (const k of subs.keys()) if (k.startsWith(`${org.id}/`)) wanted.add(k);
+        continue;
       }
       for (const space of spaces) {
         const k = key(org.id, space.id);
@@ -230,7 +250,8 @@ export async function syncSpaceMentionWatch(): Promise<void> {
         if (existing && existing.memberId === org.auth.memberId) continue;
         existing?.unsubscribe();
 
-        // Member names for notification titles (best effort, cached).
+        // Member names: notification titles, and my own display name — the form
+        // teammates actually type when they mention me.
         try {
           const members: Member[] = await getClient(org.id).listMembers(space.id);
           memberNames.set(k, new Map(members.map((m) => [m.id, m.displayName])));
@@ -238,7 +259,11 @@ export async function syncSpaceMentionWatch(): Promise<void> {
           // ids stand in for names
         }
 
-        const handler = makeHandler(org.id, space.id, space.name, org.auth.memberId);
+        const myName = memberNames.get(k)?.get(org.auth.memberId);
+        const handler = makeHandler(org.id, space.id, space.name, {
+          id: org.auth.memberId,
+          ...(myName ? { displayName: myName } : {}),
+        });
         const stored = offsets[k];
         const unsubscribe = getLive(org.id).subscribe(space.id, handler, stored);
         subs.set(k, { memberId: org.auth.memberId, unsubscribe });
@@ -252,14 +277,22 @@ export async function syncSpaceMentionWatch(): Promise<void> {
     }
   } finally {
     syncing = false;
+    lastSyncAt = Date.now();
+    if (unreachable && !retryTimer) {
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        void syncSpaceMentionWatch({ force: true });
+      }, UNREACHABLE_RETRY_MS);
+      retryTimer.unref?.();
+    }
   }
 }
 
 /** Boot the watcher: initial sync + a slow re-sync loop (new spaces/orgs). */
 export function startSpaceMentionWatch(): void {
-  void syncSpaceMentionWatch();
+  void syncSpaceMentionWatch({ force: true });
   if (!resyncTimer) {
-    resyncTimer = setInterval(() => void syncSpaceMentionWatch(), RESYNC_INTERVAL_MS);
+    resyncTimer = setInterval(() => void syncSpaceMentionWatch({ force: true }), RESYNC_INTERVAL_MS);
     resyncTimer.unref?.();
   }
 }
@@ -267,6 +300,8 @@ export function startSpaceMentionWatch(): void {
 export function stopSpaceMentionWatch(): void {
   if (resyncTimer) clearInterval(resyncTimer);
   resyncTimer = null;
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
   for (const sub of subs.values()) sub.unsubscribe();
   subs.clear();
   for (const bucket of missed.values()) clearTimeout(bucket.timer);

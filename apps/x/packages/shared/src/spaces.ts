@@ -107,13 +107,35 @@ export function stripNonAddressRegions(text: string): string {
     .replace(/^[ \t]*>.*$/gm, ' '); // markdown-quoted lines (citing someone else's message)
 }
 
-/** Does the body genuinely ADDRESS @<handle>? Case-insensitive; handles are org-scoped member ids. */
+/** Does the body genuinely ADDRESS @<handle>? Case-insensitive. */
 export function containsMemberAddress(body: string, handle: string): boolean {
-  const escaped = handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Negative lookahead: not a longer handle ("@arjun.k", "@rowboat.com") — but
-  // trailing punctuation ("ping @arjun.") still counts as addressing.
-  const re = new RegExp(`(^|[\\s([{])@${escaped}(?!\\w|[.-]\\w)`, 'i');
-  return re.test(stripNonAddressRegions(body));
+  return addressRegExp(handle).test(stripNonAddressRegions(body));
+}
+
+function addressRegExp(handle: string): RegExp {
+  const escaped = handle.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Negative lookahead: not a longer handle ("@arjun.k", "@Arjun Kumaraswamy"
+  // when matching "Arjun Kumar") — but trailing punctuation ("ping @arjun.")
+  // still counts as addressing.
+  return new RegExp(`(^|[\\s([{])@${escaped}(?!\\w|[.-]\\w)`, 'i');
+}
+
+/** What a mention can name someone by. Ids are opaque (spec §4), so people type the display name. */
+export interface MentionIdentity {
+  id: string;
+  displayName?: string;
+}
+
+/**
+ * Does the body address this member? The composer inserts the DISPLAY NAME
+ * (an org's member ids are opaque IdP subjects — "@01M0F8S2…" helps nobody
+ * reading the log), so that is the primary form; the id still matches so
+ * agent-written and older messages keep working.
+ */
+export function mentionsMember(body: string, member: MentionIdentity): boolean {
+  const stripped = stripNonAddressRegions(body);
+  const handles = [member.displayName, member.id].filter((h): h is string => !!h && h.trim().length > 0);
+  return handles.some((handle) => addressRegExp(handle).test(stripped));
 }
 
 /** The @rowboat address — always the speaker's own agent (spec §8). */
