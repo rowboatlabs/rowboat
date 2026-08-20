@@ -492,6 +492,9 @@ export function QuickAskBar() {
   const recordingRef = useRef(false)
   const [voiceAvailable, setVoiceAvailable] = useState(false)
   const [ttsAvailable, setTtsAvailable] = useState(false)
+  // Whether the probe above has answered at all. Until it has, `false` means
+  // "not known yet", never "not configured".
+  const [voiceProbed, setVoiceProbed] = useState(false)
   useEffect(() => {
     Promise.all([
       window.ipc.invoke('voice:getConfig', null),
@@ -506,9 +509,13 @@ export function QuickAskBar() {
         setVoiceAvailable(false)
         setTtsAvailable(false)
       })
+      .finally(() => setVoiceProbed(true))
   }, [])
-  // Tucking starts a voice call — same gate as the call button.
-  const callAvailable = voiceAvailable && ttsAvailable
+  // Tucking starts a voice call — same gate as the call button, but
+  // OPTIMISTIC until this window's probe answers: the app window owns the
+  // authoritative check (and its own text-card fallback), so a summon that
+  // arrives first must relay, not die as a dimmed no-op click.
+  const callAvailable = voiceProbed ? voiceAvailable && ttsAvailable : true
 
   const tuck = useCallback(() => {
     void window.ipc.invoke('quickAsk:tuck', null).catch(() => {})

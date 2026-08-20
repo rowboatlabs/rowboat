@@ -137,6 +137,11 @@ const PTT_TAP_MS = 350
 // Mic-ownership token for the Home composer (chat composers use their chatId).
 const HOME_VOICE_HOLDER = 'home-composer'
 const PTT_EDGE_ECHO_MS = 80
+// How long a hover summon waits for the voice/TTS probe to settle before
+// deciding voice isn't configured. Long enough for a cold boot (config read
+// + oauth state), short enough that a hung probe still gets the user a
+// surface (the text card) instead of silence.
+const VOICE_PROBE_WAIT_MS = 4000
 
 // Speakable fallback for a call reply that skipped <voice> tags: strip the
 // markdown that reads terribly aloud and cap the length — a minute-long
@@ -992,6 +997,19 @@ function App() {
   // Voice mode state
   const [voiceAvailable, setVoiceAvailable] = useState(false)
   const [ttsAvailable, setTtsAvailable] = useState(false)
+  // Both start false and are filled by an async probe (two IPC round-trips
+  // at mount). A hover summon that lands before it resolves must NOT read
+  // that `false` as "no voice configured" — that answered the chord with
+  // the text card for the first seconds after every app start (the "old
+  // quick access comes up instead of hover mode" glitch). Refs + the
+  // in-flight promise let the summon WAIT for a real answer; the refs are
+  // written inside the probe too, so a waiter sees the result without
+  // depending on a React re-render.
+  const voiceAvailableRef = useRef(false)
+  voiceAvailableRef.current = voiceAvailable
+  const ttsAvailableRef = useRef(false)
+  ttsAvailableRef.current = ttsAvailable
+  const voiceProbeRef = useRef<Promise<void> | null>(null)
   // TTS plays only during calls now (the standing read-aloud toggle was
   // retired; a per-message "read aloud" action may replace it later).
   const ttsEnabledRef = useRef(false)
@@ -1232,23 +1250,45 @@ function App() {
 
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
-    Promise.all([
+    const probe = Promise.all([
       window.ipc.invoke('voice:getConfig', null),
       window.ipc.invoke('oauth:getState', null),
     ]).then(([config, oauthState]) => {
       const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
       const hasVoice = !!config.deepgram || rowboatConnected
+      const hasTts = !!config.elevenlabs || rowboatConnected
+      voiceAvailableRef.current = hasVoice
+      ttsAvailableRef.current = hasTts
       setVoiceAvailable(hasVoice)
-      setTtsAvailable(!!config.elevenlabs || rowboatConnected)
+      setTtsAvailable(hasTts)
       // Pre-cache auth details so mic click skips IPC round-trips
       if (hasVoice) {
         voice.warmup()
       }
     }).catch(() => {
+      voiceAvailableRef.current = false
+      ttsAvailableRef.current = false
       setVoiceAvailable(false)
       setTtsAvailable(false)
     })
+    voiceProbeRef.current = probe
+    return probe
   }, [voice.warmup])
+
+  /**
+   * Wait for a definitive voice/TTS answer before treating "not available"
+   * as the truth. Capped: a probe that never settles must not swallow the
+   * summon — the caller falls back to the text card instead.
+   */
+  const awaitVoiceProbe = useCallback(async () => {
+    // Start one if nothing has probed yet — a summon must never decide
+    // "no voice" off a value nobody has looked up.
+    const probe = voiceProbeRef.current ?? refreshVoiceAvailability()
+    await Promise.race([
+      probe,
+      new Promise((resolve) => setTimeout(resolve, VOICE_PROBE_WAIT_MS)),
+    ])
+  }, [refreshVoiceAvailability])
 
   useEffect(() => {
     refreshVoiceAvailability()
@@ -1526,14 +1566,27 @@ function App() {
     }
     // A start is already in flight — its pin is coming.
     if (companionVoiceStartingRef.current) return
-    if (!(voiceAvailable && ttsAvailable)) {
-      // Voice-first has no voice — fall back to the text card.
-      void window.ipc.invoke('quickAsk:show', null).catch(() => {})
-      return
-    }
-    companionVoiceRef.current = true
+    // Guard covers the probe wait too, so a second chord can't start a
+    // parallel session while we're deciding.
     companionVoiceStartingRef.current = true
     try {
+      if (!(voiceAvailableRef.current && ttsAvailableRef.current)) {
+        // Not "no voice" — just "not known yet" right after an app start.
+        await awaitVoiceProbe()
+      }
+      if (inCallRef.current) {
+        // Another entry point started a call while we waited — just make
+        // sure its floating surface is up.
+        setCallMinimized(true)
+        void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+        return
+      }
+      if (!(voiceAvailableRef.current && ttsAvailableRef.current)) {
+        // Voice-first genuinely has no voice — fall back to the text card.
+        void window.ipc.invoke('quickAsk:show', null).catch(() => {})
+        return
+      }
+      companionVoiceRef.current = true
       await startCall('voice')
     } finally {
       // Released the moment the call engine settles — NOT held across the
@@ -1558,7 +1611,7 @@ function App() {
         if (!shared) setPermissionDialog('screen-recording')
       })
     }
-  }, [voiceAvailable, ttsAvailable, startCall, video])
+  }, [awaitVoiceProbe, startCall, video])
   // Stable handle for the tuck-relay listener below — registered once,
   // always calling the latest closure.
   const startHoverCallRef = useRef(startHoverCall)
