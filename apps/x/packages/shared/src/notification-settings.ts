@@ -19,6 +19,7 @@ export const NotificationCategorySchema = z.enum([
   'todo',
   'meeting_detection',
   'meeting_notes_ready',
+  'space_mention',
 ]);
 
 export const NotificationCategoriesSchema = z.object({
@@ -29,6 +30,7 @@ export const NotificationCategoriesSchema = z.object({
   todo: z.boolean(),
   meeting_detection: z.boolean(),
   meeting_notes_ready: z.boolean(),
+  space_mention: z.boolean(),
 });
 
 export const NotificationSettingsSchema = z.object({
@@ -44,6 +46,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
     todo: true,
     meeting_detection: true,
     meeting_notes_ready: true,
+    space_mention: true,
   },
 };
 

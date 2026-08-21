@@ -1,6 +1,7 @@
 import { PrefixLogger } from './prefix-logger.js';
 
 export * as ipc from './ipc.js';
+export * as flags from './flags.js';
 export * as models from './models.js';
 export * as workspace from './workspace.js';
 export * as mcp from './mcp.js';
@@ -27,4 +28,5 @@ export * as time from './time.js';
 export * as todo from './todo.js';
 export * as rowboatApp from './rowboat-app.js';
 export * as quickAskShortcut from './quick-ask-shortcut.js';
+export * as spaces from './spaces.js';
 export { PrefixLogger };

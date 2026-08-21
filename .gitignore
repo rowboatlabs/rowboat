@@ -7,3 +7,8 @@ data/
 
 # Local-only meeting-prep planning doc
 /PLAN.md
+
+# Local agent tooling (npx skills add) — never committed
+.agents/
+.claude/skills/
+skills-lock.json

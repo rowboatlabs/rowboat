@@ -83,6 +83,10 @@ jobs:
           # Clean up certificate file
           rm -f $RUNNER_TEMP/certificate.p12
 
+      - name: Build apps/harbor (link deps)
+        run: pnpm install --frozen-lockfile && pnpm -r build
+        working-directory: apps/harbor
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         working-directory: apps/x
@@ -158,6 +162,10 @@ jobs:
 
             console.log('Updated version to:', version);
           "
+
+      - name: Build apps/harbor (link deps)
+        run: pnpm install --frozen-lockfile && pnpm -r build
+        working-directory: apps/harbor
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -238,6 +246,10 @@ jobs:
 
             console.log('Updated version to:', version);
           "
+
+      - name: Build apps/harbor (link deps)
+        run: pnpm install --frozen-lockfile && pnpm -r build
+        working-directory: apps/harbor
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

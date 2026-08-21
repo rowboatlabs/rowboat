@@ -60,6 +60,8 @@ import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
+import { startSpaceMentionWatch } from "@x/core/dist/spaces/mention-watch.js";
+import { flags } from "@x/shared";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { CodeSessionService } from "@x/core/dist/code-mode/sessions/service.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
@@ -534,6 +536,12 @@ app.whenReady().then(async () => {
   registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
   registerScreenPointerService(screenPointerService);
   registerTextInsertService(textInsertService);
+
+  // Space mentions: watch every space of every org and notify on @<me>
+  // while the app is unfocused (offset resume covers time away). Gated with
+  // the rest of the Spaces UI — no OS notifications for a feature the user
+  // can't open (the same flag hides the renderer surfaces via the preload).
+  if (flags.spacesEnabled(process.env)) startSpaceMentionWatch();
 
   setupIpcHandlers();
   setupBrowserEventForwarding();

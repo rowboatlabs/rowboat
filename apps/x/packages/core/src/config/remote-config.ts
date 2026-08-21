@@ -15,6 +15,8 @@ interface RemoteConfig {
     appUrl: string;
     supabaseUrl: string;
     websocketApiUrl: string;
+    /** Rowboat Spaces managed apex (org creation) — null until a fleet exists for this environment. */
+    spacesApexUrl: string | null;
 }
 
 let _cached: Promise<RemoteConfig> | null = null;
@@ -32,6 +34,7 @@ async function fetchRemoteConfig(): Promise<RemoteConfig> {
         appUrl: body.appUrl,
         supabaseUrl: body.supabaseUrl ?? "",
         websocketApiUrl: body.websocketApiUrl ?? "",
+        spacesApexUrl: body.spacesApexUrl ?? null,
     };
 }
 

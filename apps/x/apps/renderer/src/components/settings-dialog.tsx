@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { cn, compactPath, parentPath } from "@/lib/utils"
+import { SPACES_ENABLED } from "@/lib/feature-flags"
 import * as analytics from "@/lib/analytics"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
@@ -1506,9 +1507,9 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Notification Settings ---
 
-type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready"
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready" | "space_mention"
 
-const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
+const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
     key: "chat_completion",
     label: "Chat responses",
@@ -1544,7 +1545,16 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     label: "Meeting notes ready",
     description: "When your meeting notes finish generating after a call. Click to open the note. Only shown while the app is in the background.",
   },
+  {
+    key: "space_mention",
+    label: "Space mentions",
+    description: "When a teammate @mentions you in a space. Click to open the conversation. Only shown while the app is in the background.",
+  },
 ]
+
+// With Spaces dark, its notification category stays out of the settings UI
+// (the mention watcher that emits it is gated on the same flag in main).
+const NOTIFICATION_CATEGORIES = ALL_NOTIFICATION_CATEGORIES.filter((cat) => SPACES_ENABLED || cat.key !== "space_mention")
 
 function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [categories, setCategories] = useState<Record<NotificationCategoryKey, boolean> | null>(null)

@@ -23,6 +23,9 @@ export const RowboatApiConfig = z.object({
   appUrl: z.string(),
   websocketApiUrl: z.string(),
   supabaseUrl: z.string(),
+  // Rowboat Spaces managed apex (org creation) — null/absent until a spaces
+  // fleet exists for the environment behind API_URL
+  spacesApexUrl: z.string().nullable().optional(),
   billing: BillingCatalogSchema,
   // first-time-action reward catalog (non-archived entries); optional so the
   // app keeps working against API deployments that predate it — the rewards

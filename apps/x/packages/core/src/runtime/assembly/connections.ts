@@ -23,6 +23,15 @@ export async function isCodeModeAvailable(): Promise<boolean> {
     }
 }
 
+export async function isSpacesAvailable(): Promise<boolean> {
+    try {
+        const { listOrgs } = await import("../../spaces/orgs.js");
+        return listOrgs().length > 0;
+    } catch {
+        return false;
+    }
+}
+
 export async function isSlackAvailable(): Promise<boolean> {
     try {
         const repo = await lazyResolve<import("../../slack/repo.js").ISlackConfigRepo>("slackConfigRepo");

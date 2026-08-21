@@ -33,6 +33,16 @@ import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
 import { CodeProject, CodeSession, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
+import {
+    SpacesOrgSummary,
+    type SpacesAssetEntry,
+    type SpacesBusEvent,
+    type SpacesManageTopicAction,
+    type SpacesPostResult,
+    type SpacesProposeInput,
+    type SpacesTopicWithMessages,
+} from './spaces.js';
+import type * as SpacesTypes from './spaces.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -3408,6 +3418,207 @@ const ipcSchemas = {
       show: z.boolean(),
       chatDays: z.number().nullable(),
     }),
+  },
+
+  // ==========================================================================
+  // Spaces — shared containers on orgs speaking the spaces protocol.
+  // Wire contract: @rowboat/spaces-protocol (apps/harbor/CONTRACT.md).
+  // Protocol-shaped payloads cross as z.custom<T>() (see spaces.ts header).
+  // ==========================================================================
+  'spaces:listOrgs': {
+    req: z.null(),
+    res: z.object({ orgs: z.array(SpacesOrgSummary) }),
+  },
+  // Dev auth (stub Harbor / Tailscale dogfood): base URL + member id.
+  'spaces:addOrg': {
+    req: z.object({ baseUrl: z.string(), memberId: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // The OAuth journey (spec §4). Paste an invite link → resolve pre-auth →
+  // join (system-browser dance if this install has no auth on the org, then
+  // the server-side bind ceremony). signInOrg reruns the dance for a
+  // needs-relogin org. policy_refused / not_a_member surface as error
+  // messages verbatim — they are the honest states.
+  'spaces:resolveInviteLink': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ baseUrl: z.string(), resolved: z.custom<SpacesTypes.ResolveInviteResult>() }),
+  },
+  'spaces:joinInvite': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:signInOrg': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // Self-serve org creation on the managed deployment's apex (free for now —
+  // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
+  // caller is the org's first admin at <slug>.spaces.rowboatlabs.com.
+  'spaces:createOrg': {
+    req: z.object({ name: z.string(), slug: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // Where the Create button makes orgs (from /v1/config via core). null =
+  // no spaces fleet for this environment; the dialog says so honestly.
+  'spaces:apexInfo': {
+    req: z.null(),
+    res: z.object({ apexDomain: z.string().nullable() }),
+  },
+  'spaces:removeOrg': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:listSpaces': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
+  },
+  'spaces:createSpace': {
+    req: z.object({ orgId: z.string(), name: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:listMembers': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+  },
+  'spaces:createInvite': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), expiresInHours: z.number().optional() }),
+    res: z.custom<SpacesTypes.CreateInviteResult>(),
+  },
+  // Pre-auth by design (spec §4): resolvable before the org has been added,
+  // so the app can show what's being joined. baseUrl, not orgId.
+  'spaces:resolveInvite': {
+    req: z.object({ baseUrl: z.string(), token: z.string() }),
+    res: z.custom<SpacesTypes.ResolveInviteResult>(),
+  },
+  'spaces:acceptInvite': {
+    req: z.object({ orgId: z.string(), token: z.string() }),
+    res: z.custom<SpacesTypes.AcceptInviteResult>(),
+  },
+  'spaces:listAssets': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ entries: z.array(z.custom<SpacesAssetEntry>()) }),
+  },
+  'spaces:readAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      version: z.number().optional(),
+    }),
+    res: z.custom<SpacesTypes.ReadAssetResult>(),
+  },
+  // All three outcomes (applied | merged | conflict) return as values — a
+  // conflict is a normal result of merge-then-correct, not an error.
+  'spaces:proposeChange': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), input: z.custom<SpacesProposeInput>() }),
+    res: z.custom<SpacesTypes.ProposeChangeResult>(),
+  },
+  'spaces:assetHistory': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string().optional(),
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.object({ changeSets: z.array(z.custom<SpacesTypes.ChangeSet>()) }),
+  },
+  'spaces:diff': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      from: z.number(),
+      to: z.number(),
+    }),
+    res: z.object({ unified: z.string() }),
+  },
+  'spaces:listTopics': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), includeArchived: z.boolean().optional() }),
+    res: z.object({ topics: z.array(z.custom<SpacesTypes.Topic>()) }),
+  },
+  'spaces:listMessages': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), topicId: z.string() }),
+    res: z.custom<SpacesTopicWithMessages>(),
+  },
+  // actingMode is set by main ('direct' — the renderer is the human surface;
+  // agents write through the org's MCP face, never through IPC).
+  'spaces:postMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string().optional(),
+      anchorChangeSetId: z.string().optional(),
+      anchorMessageId: z.string().optional(),
+      body: z.string(),
+    }),
+    res: z.custom<SpacesPostResult>(),
+  },
+  'spaces:manageTopic': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string(),
+      action: z.custom<SpacesManageTopicAction>(),
+    }),
+    res: z.object({ topic: z.custom<SpacesTypes.Topic>() }),
+  },
+  // @rowboat in a topic (spec §8): the renderer detected an addressed message
+  // it just posted; main routes it into the topic's session (creating one on
+  // first use — the queue/steer machinery handles the rest). messageId is the
+  // posted feed message, stamped into the turn input as provenance.
+  'spaces:invokeRowboat': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string(),
+      topicTitle: z.string(),
+      spaceName: z.string(),
+      messageId: z.string(),
+      body: z.string(),
+      // Per-turn agent options from the space composer's agent strip (shown
+      // when the draft addresses @rowboat). Absent = the assistant's defaults.
+      options: z
+        .object({
+          model: z.object({ provider: z.string(), model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() }).optional(),
+          permissionMode: z.enum(['auto', 'manual']).optional(),
+          searchEnabled: z.boolean().optional(),
+          codeMode: z.enum(['claude', 'codex']).optional(),
+        })
+        .optional(),
+    }),
+    res: z.object({ sessionId: z.string(), queued: z.boolean() }),
+  },
+  // The topic's session, if any — powers the invoker-only "open the turn"
+  // affordance on the presence chip.
+  'spaces:topicSession': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), topicId: z.string() }),
+    res: z.object({ sessionId: z.string().nullable() }),
+  },
+  // Live: renderer subscribes per space; frames arrive on 'spaces:events'
+  // wrapped with their orgId. Offset resume mirrors the turn-event spine.
+  'spaces:subscribeSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), afterOffset: z.number().optional() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:unsubscribeSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Ephemeral presence from the human surface (viewing / typing / idle), scoped
+  // to a topic when set. agent_working is only ever sent by the topic agent.
+  'spaces:presence': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      state: z.enum(['viewing', 'typing', 'idle']),
+      topicId: z.string().optional(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:events': {
+    req: z.custom<SpacesBusEvent>(),
+    res: z.null(),
   },
 } as const;
 
