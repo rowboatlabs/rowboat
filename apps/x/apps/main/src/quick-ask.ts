@@ -173,6 +173,105 @@ export function onAppWindowClosed() {
 let skipperCorner: { x: number; y: number } | null = null;
 let applyingBounds = false;
 
+// --- Click-through ---
+// The frame is far bigger than anything it paints: the card sits at the
+// bottom with a tall transparent stage above it (so popovers open upward
+// without resizing), and the tucked Skipper is just the mascot in that same
+// frame. Transparency is only PAINT — macOS routes a click to the topmost
+// window by its RECT, not by pixel alpha — so without this the invisible
+// stage swallowed every click that landed on it: a ~500px square of dead
+// desktop around the companion. The window is created click-through and the
+// renderer flips it solid while the cursor is over something actually
+// painted (quickAsk:setInteractive), using `forward` so mouse MOVES keep
+// arriving while it is click-through — that is what makes the flip
+// possible.
+let companionInteractive = false;
+
+function applyInteractive(win: BrowserWindow, next: boolean) {
+  if (next === companionInteractive) return;
+  companionInteractive = next;
+  win.setIgnoreMouseEvents(!next, { forward: true });
+}
+
+/**
+ * The renderer's hit-test verdict: is the cursor over painted UI? Only a
+ * pinned companion may hold the cursor — anything else re-arms
+ * click-through, so a stale hover (window hidden mid-move, renderer
+ * reloaded) can never leave a dead rectangle behind.
+ */
+export function setCompanionInteractive(interactive: boolean) {
+  const win = getQuickAskWindow();
+  if (!win) return;
+  applyInteractive(win, interactive && mode === 'pinned');
+}
+
+/** Re-arm click-through (leaving the pinned role, window going away). */
+function releaseMouse() {
+  const win = getQuickAskWindow();
+  if (win) applyInteractive(win, false);
+}
+
+// Where the cursor is, polled from the OS while the companion is up.
+//
+// Mouse EVENTS are not a reliable witness for this: on macOS a
+// `-webkit-app-region: drag` area is a native view layered over the page, so
+// moves across it never reach the renderer — and the mascot is exactly that
+// area (it is the drag handle). Driven by events alone the mascot would stay
+// click-through: neither clickable nor draggable, the one thing the user
+// reaches for most. The OS always knows where the pointer is, so main asks
+// it and hands the point to the renderer, which is the only side that knows
+// whether that point is over paint.
+let cursorWatch: ReturnType<typeof setInterval> | null = null;
+let cursorWasInside = false;
+// Fast enough that the window is always solid by the time a hand that has
+// arrived somewhere presses the button, slow enough to be free.
+const CURSOR_WATCH_MS = 40;
+
+function pollCursor() {
+  const win = getQuickAskWindow();
+  if (!win || mode !== 'pinned') {
+    // The role is gone — the belt for the braces in setCompanionPinned.
+    // This is the ONLY place main decides the flag on its own; everywhere
+    // else the renderer is the single authority, so its cached verdict can
+    // never drift out of sync with the window. (Leaving the pinned role
+    // also deactivates the hook, which resets that cache.)
+    stopCursorWatch();
+    releaseMouse();
+    return;
+  }
+  // Hidden: nothing is painted to hit-test and no click can reach the
+  // window anyway, so leave the flag alone rather than desyncing the
+  // renderer's cache. Keep polling — a re-show picks straight back up.
+  if (!win.isVisible()) return;
+  const p = screen.getCursorScreenPoint();
+  const b = win.getBounds();
+  const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+  // Outside and already known to be outside: nothing to say. The one push
+  // AS it leaves carries an out-of-viewport point, which is how the
+  // renderer knows to hand the mouse back.
+  if (!inside && !cursorWasInside) return;
+  cursorWasInside = inside;
+  // Window bounds are DIP; the page is zoomed by SCALE, so its own CSS
+  // pixels are DIP / SCALE.
+  win.webContents.send('quick-ask:cursor', {
+    x: (p.x - b.x) / SCALE,
+    y: (p.y - b.y) / SCALE,
+  });
+}
+
+function startCursorWatch() {
+  if (cursorWatch) return;
+  cursorWasInside = false;
+  cursorWatch = setInterval(pollCursor, CURSOR_WATCH_MS);
+}
+
+function stopCursorWatch() {
+  if (!cursorWatch) return;
+  clearInterval(cursorWatch);
+  cursorWatch = null;
+  cursorWasInside = false;
+}
+
 function setBoundsGuarded(win: BrowserWindow, bounds: Electron.Rectangle) {
   applyingBounds = true;
   win.setBounds(bounds);
@@ -348,6 +447,11 @@ function createWindow(): BrowserWindow {
       preload: preloadPath,
     },
   });
+  // Click-through until the renderer says the cursor is over paint (see
+  // `applyInteractive`) — the transparent stage must never eat a click
+  // meant for whatever the user has underneath it.
+  win.setIgnoreMouseEvents(true, { forward: true });
+  companionInteractive = false;
   // Float over fullscreen Spaces too, keeping the Dock icon
   // (skipTransformProcessType — without it, visibleOnFullScreen turns the
   // app into a macOS "agent" app while the window exists). macOS concepts —
@@ -369,6 +473,8 @@ function createWindow(): BrowserWindow {
   });
   win.on('closed', () => {
     if (quickAskWin === win) quickAskWin = null;
+    companionInteractive = false;
+    stopCursorWatch();
   });
   // Zoom factor resets on navigation — apply it once the page is in, and
   // replay the state the renderer needs to pick up where things stand. (The
@@ -481,11 +587,14 @@ export function setCompanionPinned(pinned: boolean) {
       // shows the other. Recreate the window if it was destroyed — a live
       // call must never be left with no surface at all.
       const win0 = getQuickAskWindow() ?? createWindow();
-      if (pinnedCollapsed) positionTucked(win0);
+      // A folded CARD keeps the expanded frame (see setPinnedCollapsed) —
+      // only the pill has tucked bounds of its own.
+      if (pinnedCollapsed && getExpandedSurface() !== 'card') positionTucked(win0);
       else applyExpandedSurface(win0, getExpandedSurface());
       const seq0 = pushMode(win0);
       if (lastPopoutState) win0.webContents.send('video:popout-state', lastPopoutState);
       revealAfterMode(win0, seq0, { focus: false });
+      startCursorWatch();
       return;
     }
     let win = getQuickAskWindow();
@@ -521,6 +630,7 @@ export function setCompanionPinned(pinned: boolean) {
     // focus from the app the user switched to — that would be a focus grab
     // mid-work.
     revealAfterMode(win, seq, { focus: fromSummon });
+    startCursorWatch();
   } else {
     if (mode !== 'pinned') return;
     setMode('hidden', 'unpinned');
@@ -533,6 +643,8 @@ export function setCompanionPinned(pinned: boolean) {
     if (win) {
       pushMode(win);
       cancelPendingPaint();
+      stopCursorWatch();
+      releaseMouse();
       if (win.isVisible()) win.hide();
     }
   }
@@ -555,27 +667,38 @@ export function setPinnedCollapsed(collapsed: boolean) {
   // and idempotent.
   pinnedCollapsed = collapsed;
   if (collapsed) {
-    // Fold: push the layout FIRST and shrink the window once it's painted —
-    // shrinking first squeezes the still-open card into the mascot-sized
-    // bounds for a frame (every control looks dead). The mascot sits at
-    // the anchor corner in both layouts, so the shrink itself is invisible.
+    // Fold the CARD: the frame does not change at all. The card simply
+    // stops painting beside the mascot and the space it leaves is
+    // click-through, so there is nothing to shrink — and nothing to flash.
+    // (Shrinking here is what made the fold flicker: the frame is
+    // bottom-right anchored, so a 504px square becoming a 225px one moves
+    // its origin by 279px. On a transparent window the OS frame change and
+    // Chromium's repaint of the newly-sized viewport are not atomic, so for
+    // a frame or two the tucked layout was composited against the other
+    // geometry — the mascot appearing well above where it lands.)
     const seq = pushMode(win);
+    // Decided on the surface just PUSHED (not the one whose geometry is
+    // currently applied), so the bounds always match the layout the
+    // renderer is about to paint — the two can disagree for a tick when a
+    // device flips mid-fold.
+    if (getExpandedSurface() === 'card') return;
+    // The PILL still resizes: it folds to a DIFFERENT layout (the centered
+    // TuckedMascot), which only lands right in mascot-sized bounds. Push
+    // the layout FIRST and shrink once it's painted — shrinking first
+    // squeezes the still-open pill into those bounds for a frame (every
+    // control looks dead).
     afterModePainted(win, seq, () => {
       if (mode !== 'pinned' || !pinnedCollapsed) return;
-      if (appliedExpandedSurface === 'card') {
-        positionTucked(win);
-      } else {
-        const b = win.getBounds();
-        const wa = screen.getDisplayMatching(b).workArea;
-        const w = scaled(TUCKED_WIDTH);
-        const h = scaled(TUCKED_HEIGHT);
-        const inTopHalf = b.y + b.height / 2 < wa.y + wa.height / 2;
-        let x = b.x + b.width - w;
-        let y = inTopHalf ? b.y : b.y + b.height - h;
-        x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
-        y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
-        setBoundsGuarded(win, { x, y, width: w, height: h });
-      }
+      const b = win.getBounds();
+      const wa = screen.getDisplayMatching(b).workArea;
+      const w = scaled(TUCKED_WIDTH);
+      const h = scaled(TUCKED_HEIGHT);
+      const inTopHalf = b.y + b.height / 2 < wa.y + wa.height / 2;
+      let x = b.x + b.width - w;
+      let y = inTopHalf ? b.y : b.y + b.height - h;
+      x = Math.max(wa.x + 8, Math.min(x, wa.x + wa.width - w - 8));
+      y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - h - 8));
+      setBoundsGuarded(win, { x, y, width: w, height: h });
     });
     return;
   }

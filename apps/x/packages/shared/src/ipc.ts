@@ -1392,6 +1392,27 @@ const ipcSchemas = {
     req: z.object({ collapsed: z.boolean() }),
     res: z.object({}),
   },
+  // Companion → main: per-region click-through. The companion frame is far
+  // bigger than anything it paints (a tall transparent stage above the card
+  // so popovers can open upward), and transparency is only PAINT — the OS
+  // routes a click by the window rect — so the window is click-through by
+  // default and the renderer flips it solid while the cursor is actually
+  // over painted UI. Without this the invisible stage swallowed every click
+  // that landed on it.
+  'quickAsk:setInteractive': {
+    req: z.object({ interactive: z.boolean() }),
+    res: z.object({}),
+  },
+  // Main → companion: where the cursor is, in the window's own CSS pixels.
+  // Main polls it from the OS because mouse events are NOT a reliable
+  // witness here: macOS drag regions (the mascot IS one — it's the drag
+  // handle) are native views layered over the page, so moves across them
+  // never reach the renderer at all. The renderer hit-tests this point and
+  // answers on quickAsk:setInteractive.
+  'quick-ask:cursor': {
+    req: z.object({ x: z.number(), y: z.number() }),
+    res: z.null(),
+  },
   // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
   // whether a reply is SPOKEN now follows the question's modality — spoken
   // questions get spoken replies, typed ones stay silent — plus the
