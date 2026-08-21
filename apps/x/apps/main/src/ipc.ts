@@ -42,6 +42,7 @@ import {
   resizeCompanionPinned,
   setCompanionPinned,
   setPinnedCollapsed,
+  setCompanionInteractive,
   setQuickAskShortcut,
   setShortcutCaptureActive,
 } from './quick-ask.js';
@@ -1201,6 +1202,10 @@ export function setupIpcHandlers() {
     },
     'quickAsk:setPinnedCollapsed': async (_event, args) => {
       setPinnedCollapsed(args.collapsed);
+      return {};
+    },
+    'quickAsk:setInteractive': async (_event, args) => {
+      setCompanionInteractive(args.interactive);
       return {};
     },
     'quickAsk:chatContext': async (_event, args) => {
