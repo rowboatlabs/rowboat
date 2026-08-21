@@ -391,6 +391,14 @@ module.exports = {
                 stdio: 'inherit'
             });
 
+            // Build server (TypeScript compilation) - depends on shared, core;
+            // main imports it for the hosted rowboat-server transport
+            console.log('Building server...');
+            execSync('pnpm run build', {
+                cwd: path.join(__dirname, '../server'),
+                stdio: 'inherit'
+            });
+
             // Build renderer (Vite build) - depends on shared
             console.log('Building renderer...');
             execSync('pnpm run build', {

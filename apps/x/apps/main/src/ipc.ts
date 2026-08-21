@@ -53,6 +53,8 @@ import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
+import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';
+import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled } from './server-host.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
 import { getModelCatalog } from '@x/core/dist/models/catalog.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
@@ -513,12 +515,16 @@ export function registerIpcHandlers(handlers: InvokeHandlers) {
     InvokeChannels,
     InvokeHandler<InvokeChannels>
   ][]) {
+    // Strangler-fig: channels migrated to rowboat-server cross localhost HTTP
+    // instead of calling their in-process handler (which stays in the map as
+    // the ROWBOAT_FORWARD_MIGRATED=0 kill switch).
+    const forwarded = shouldForwardChannel(channel);
     ipcMain.handle(channel, async (event, rawArgs) => {
       // Validate request payload
       const args = ipc.validateRequest(channel, rawArgs);
 
-      // Call handler
-      const result = await handler(event, args);
+      // Call handler (or the migrated channel's HTTP twin)
+      const result = forwarded ? await forwardRpc(channel, args) : await handler(event, args);
 
       // Validate response payload
       return ipc.validateResponse(channel, result);
@@ -565,6 +571,19 @@ function emitKnowledgeCommitEvent(): void {
  */
 function emitWorkspaceChangeEvent(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): void {
   broadcastToWindows('workspace:didChange', event);
+  for (const listener of workspaceChangeListeners) {
+    listener(event);
+  }
+}
+
+// Non-window consumers of workspace:didChange — today the rowboat-server WS
+// hub, which relays it to paired phones.
+const workspaceChangeListeners = new Set<(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>) => void>();
+export function onWorkspaceChange(
+  listener: (event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>) => void,
+): () => void {
+  workspaceChangeListeners.add(listener);
+  return () => workspaceChangeListeners.delete(listener);
 }
 
 /**
@@ -852,7 +871,9 @@ export function startCodeRunFeedWatcher(): void {
 // sessions:list awaits this deferred; main.ts resolves it when the scan
 // settles (success or failure, so the list never hangs).
 let resolveSessionsIndexReady: () => void;
-const sessionsIndexReady = new Promise<void>((resolve) => {
+// Exported for the rowboat-server host, whose sessions:list handler shares
+// this gate (main and the hosted transport run on the same core instance).
+export const sessionsIndexReady = new Promise<void>((resolve) => {
   resolveSessionsIndexReady = resolve;
 });
 export function markSessionsIndexReady(): void {
@@ -3175,6 +3196,19 @@ export function setupIpcHandlers() {
         return { show: true, chatDays: settings.chatDays };
       }
       return { show: false, chatDays: settings.chatDays };
+    },
+    // Rowboat server (phone pairing) — client-local: answered by main, which
+    // hosts the transport.
+    'server:getPairingInfo': async () => {
+      return getPairingInfo();
+    },
+    'server:setLanEnabled': async (_event, args) => {
+      await setServerLanEnabled(args.enabled);
+      return { success: true };
+    },
+    'server:rotateKey': async () => {
+      await rotateServerKey();
+      return { success: true };
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,

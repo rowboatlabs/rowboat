@@ -126,7 +126,7 @@ const UpdaterStatusSchema = z.object({
   lastCheckedAt: z.number().optional(),
 });
 
-const ipcSchemas = {
+export const ipcSchemas = {
   'app:getVersions': {
     req: z.null(),
     res: z.object({
@@ -3388,6 +3388,36 @@ const ipcSchemas = {
       chatDays: z.number().nullable(),
     }),
   },
+  // Rowboat server (phone pairing) channels — client-local: answered by main,
+  // which hosts the HTTP/WS transport for external clients.
+  'server:getPairingInfo': {
+    req: z.null(),
+    res: z.object({
+      running: z.boolean(),
+      // Hostname shown on the phone during pairing.
+      name: z.string(),
+      port: z.number().nullable(),
+      lanEnabled: z.boolean(),
+      // Reachable base URLs, loopback first; LAN/Tailscale entries only when
+      // lanEnabled.
+      urls: z.array(z.string()),
+      token: z.string().nullable(),
+    }),
+  },
+  'server:setLanEnabled': {
+    req: z.object({ enabled: z.boolean() }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Mints a new server key and rebinds — every paired phone is revoked and
+  // must re-pair. This is the recovery path for a leaked QR/token.
+  'server:rotateKey': {
+    req: z.null(),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
 } as const;
 
 // ============================================================================
@@ -3437,4 +3467,12 @@ export function validateResponse<K extends keyof IPCChannels>(
 ): IPCChannels[K]['res'] {
   const schema = ipcSchemas[channel].res;
   return schema.parse(data) as IPCChannels[K]['res'];
+}
+
+/**
+ * Push channels (res schema is z.null()) flow server→client and map to the
+ * WebSocket event feed; invoke channels map to POST /rpc/{channel}.
+ */
+export function isPushChannel(channel: keyof IPCChannels): boolean {
+  return ipcSchemas[channel].res instanceof z.ZodNull;
 }
