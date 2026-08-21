@@ -8,6 +8,7 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { waitForComposioConnection } from "@/lib/composio-connection";
 
 interface ComposioConnectCardProps {
   toolkitSlug: string;
@@ -29,6 +30,7 @@ export function ComposioConnectCard({
   >(alreadyConnected ? "connected" : "idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const didFireCallback = useRef(alreadyConnected ?? false);
+  const connectionAttempt = useRef(0);
 
   // Listen for composio:didConnect events
   useEffect(() => {
@@ -36,6 +38,7 @@ export function ComposioConnectCard({
       "composio:didConnect",
       (event: { toolkitSlug: string; success: boolean; error?: string }) => {
         if (event.toolkitSlug !== toolkitSlug) return;
+        connectionAttempt.current += 1;
         if (event.success) {
           setConnectionState("connected");
           setErrorMessage(null);
@@ -52,7 +55,12 @@ export function ComposioConnectCard({
     return cleanup;
   }, [toolkitSlug, onConnected]);
 
+  useEffect(() => () => {
+    connectionAttempt.current += 1;
+  }, []);
+
   const handleConnect = useCallback(async () => {
+    const attempt = ++connectionAttempt.current;
     setConnectionState("connecting");
     setErrorMessage(null);
     try {
@@ -60,14 +68,38 @@ export function ComposioConnectCard({
         toolkitSlug,
       });
       if (!result.success) {
+        if (connectionAttempt.current !== attempt) return;
         setConnectionState("error");
         setErrorMessage(result.error || "Failed to initiate connection");
+        return;
+      }
+
+      const outcome = await waitForComposioConnection({
+        readStatus: () => window.ipc.invoke("composio:get-connection-status", { toolkitSlug }),
+        isCurrent: () => connectionAttempt.current === attempt,
+      });
+      if (connectionAttempt.current !== attempt) return;
+
+      if (outcome.state === "connected") {
+        setConnectionState("connected");
+        setErrorMessage(null);
+        if (!didFireCallback.current) {
+          didFireCallback.current = true;
+          onConnected?.(toolkitSlug);
+        }
+      } else if (outcome.state === "failed") {
+        setConnectionState("error");
+        setErrorMessage(`Connection status: ${outcome.status}`);
+      } else if (outcome.state === "timeout") {
+        setConnectionState("error");
+        setErrorMessage("Connection timed out");
       }
     } catch {
+      if (connectionAttempt.current !== attempt) return;
       setConnectionState("error");
       setErrorMessage("Failed to initiate connection");
     }
-  }, [toolkitSlug]);
+  }, [toolkitSlug, onConnected]);
 
   const isToolRunning = status === "pending" || status === "running";
   const displayName = toolkitDisplayName || toolkitSlug;

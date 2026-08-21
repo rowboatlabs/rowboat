@@ -7,6 +7,8 @@ import {
     ZConnectedAccount,
     ZCreateAuthConfigRequest,
     ZCreateAuthConfigResponse,
+    ZCreateConnectedAccountLinkRequest,
+    ZCreateConnectedAccountLinkResponse,
     ZCreateConnectedAccountRequest,
     ZCreateConnectedAccountResponse,
     ZDeleteOperationResponse,
@@ -242,6 +244,21 @@ export async function createConnectedAccount(
     request: z.infer<typeof ZCreateConnectedAccountRequest>
 ): Promise<z.infer<typeof ZCreateConnectedAccountResponse>> {
     return composioApiCall(ZCreateConnectedAccountResponse, "/connected_accounts", {}, {
+        method: 'POST',
+        body: JSON.stringify(request),
+    });
+}
+
+/**
+ * Create a Connect Link for a managed OAuth account.
+ *
+ * Composio no longer accepts managed OAuth connections through
+ * POST /connected_accounts. Connect Links are the supported replacement.
+ */
+export async function createConnectedAccountLink(
+    request: z.infer<typeof ZCreateConnectedAccountLinkRequest>
+): Promise<z.infer<typeof ZCreateConnectedAccountLinkResponse>> {
+    return composioApiCall(ZCreateConnectedAccountLinkResponse, "/connected_accounts/link", {}, {
         method: 'POST',
         body: JSON.stringify(request),
     });
