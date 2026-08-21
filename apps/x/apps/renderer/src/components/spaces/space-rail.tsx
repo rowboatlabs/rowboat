@@ -20,7 +20,7 @@ export type RailList = 'topics' | 'files'
 
 export function SpaceRail({
     orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, presence, unreadPaths, selection, onSelect, onCreateFile,
-    list, tabbed, onPickList, open, pinned, canPin, hint, onHoverChange, onTogglePin,
+    list, tabbed, onPickList, open, pinned, hint, onHoverChange, onTogglePin,
 }: {
     orgId: string
     spaceId: string
@@ -42,7 +42,6 @@ export function SpaceRail({
     onPickList: (list: RailList) => void
     open: boolean
     pinned: boolean
-    canPin: boolean
     hint: string
     onHoverChange: (hovering: boolean) => void
     onTogglePin: () => void
@@ -149,8 +148,7 @@ export function SpaceRail({
                         <button
                             type="button"
                             onClick={onTogglePin}
-                            disabled={!canPin}
-                            title={canPin ? (pinned ? 'Unpin — collapse when the mouse leaves' : 'Pin this rail open') : 'Window too narrow to pin the rail'}
+                            title={pinned ? 'Unpin — collapse when the mouse leaves' : 'Pin this rail open'}
                             className={cn(
                                 'flex size-6 shrink-0 items-center justify-center rounded-md border disabled:opacity-40',
                                 pinned ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-muted-foreground hover:text-foreground',
