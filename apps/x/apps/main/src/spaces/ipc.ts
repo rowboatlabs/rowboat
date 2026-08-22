@@ -37,6 +37,7 @@ type SpacesHandlers = {
   'spaces:listMessages': InvokeHandler<'spaces:listMessages'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
+  'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
@@ -206,6 +207,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:manageTopic': async (_event, args) => ({
     topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, args.action),
+  }),
+
+  'spaces:reactToMessage': async (_event, args) => ({
+    message: await orgs.getClient(args.orgId).reactToMessage(args.spaceId, args.messageId, {
+      emoji: args.emoji,
+      action: args.action,
+      actingMode: 'direct',
+    }),
   }),
 
   'spaces:invokeRowboat': async (_event, args) => invokeTopicAgent(args),

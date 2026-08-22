@@ -9,7 +9,7 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import type { AssetHead, Store, StoredEvent, StoredInvite } from './store.js';
+import type { AssetHead, Store, StoredEvent, StoredInvite, StoredReaction } from './store.js';
 
 // The real Harbor's storage (spec deployment plan: Postgres only, no S3 in
 // v1 — contents are ≤1MB text riding in the log rows; current state, history,
@@ -116,6 +116,26 @@ function rowToMessage(r: MessageRow): Message {
     body: r.body,
     postedAt: r.posted_at,
     offset: r.stream_offset,
+    // Live reaction state is folded in by the service on reads; rows carry none.
+    reactions: [],
+  };
+}
+
+interface ReactionRow {
+  space_id: string;
+  message_id: string;
+  emoji: string;
+  attribution: StoredReaction['by'];
+  at: string;
+}
+
+function rowToReaction(r: ReactionRow): StoredReaction {
+  return {
+    spaceId: r.space_id,
+    messageId: r.message_id,
+    emoji: r.emoji,
+    by: r.attribution,
+    at: r.at,
   };
 }
 
@@ -428,6 +448,55 @@ export class PgStore implements Store {
       [spaceId, fromTopicId, toTopicId],
     );
     return rows.length;
+  }
+
+  // --- reactions -------------------------------------------------------------
+
+  async getReaction(
+    spaceId: string,
+    messageId: string,
+    emoji: string,
+    memberId: string,
+  ): Promise<StoredReaction | undefined> {
+    const rows = await this.sql.query<ReactionRow>(
+      'select * from reactions where space_id = $1 and message_id = $2 and emoji = $3 and member_id = $4',
+      [spaceId, messageId, emoji, memberId],
+    );
+    return rows[0] ? rowToReaction(rows[0]) : undefined;
+  }
+
+  async putReaction(reaction: StoredReaction): Promise<void> {
+    await this.sql.query(
+      `insert into reactions (space_id, message_id, emoji, member_id, attribution, at)
+       values ($1, $2, $3, $4, $5::jsonb, $6)
+       on conflict (space_id, message_id, emoji, member_id) do update set attribution = excluded.attribution, at = excluded.at`,
+      [reaction.spaceId, reaction.messageId, reaction.emoji, reaction.by.memberId, JSON.stringify(reaction.by), reaction.at],
+    );
+  }
+
+  async deleteReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<void> {
+    await this.sql.query(
+      'delete from reactions where space_id = $1 and message_id = $2 and emoji = $3 and member_id = $4',
+      [spaceId, messageId, emoji, memberId],
+    );
+  }
+
+  async listReactionsByMessage(spaceId: string, messageId: string): Promise<StoredReaction[]> {
+    const rows = await this.sql.query<ReactionRow>(
+      'select * from reactions where space_id = $1 and message_id = $2 order by at, member_id',
+      [spaceId, messageId],
+    );
+    return rows.map(rowToReaction);
+  }
+
+  async listReactionsByTopic(spaceId: string, topicId: string): Promise<StoredReaction[]> {
+    const rows = await this.sql.query<ReactionRow>(
+      `select r.* from reactions r
+       join messages m on m.space_id = r.space_id and m.id = r.message_id
+       where r.space_id = $1 and m.topic_id = $2 order by r.at, r.member_id`,
+      [spaceId, topicId],
+    );
+    return rows.map(rowToReaction);
   }
 
   // --- invites ---------------------------------------------------------------

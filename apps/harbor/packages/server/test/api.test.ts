@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ProposeChangeResult } from '@rowboat/spaces-protocol';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
+import { liveClient } from './helpers.js';
 
 // Render-face contract tests: real HTTP against a real listener, every route.
 
@@ -455,6 +456,89 @@ describe('feed: topics and messages', () => {
       action: 'merge_into',
       targetTopicId: a.body.topic.id,
     })).status).toBe(400);
+  });
+});
+
+describe('reactions', () => {
+  let spaceId: string;
+  let messageId: string;
+  let topicId: string;
+
+  const react = (who: ReturnType<typeof api>, emoji: string, action: 'add' | 'remove') =>
+    who.post(`/v1/spaces/${spaceId}/messages/${messageId}/reactions`, { emoji, action, actingMode: 'direct' });
+
+  beforeAll(async () => {
+    const r = await ramnique.post('/v1/spaces', { name: 'Reactions' });
+    spaceId = r.body.space.id;
+    const inv = await ramnique.post('/v1/invites', { spaceId });
+    await gagan.post('/v1/invites/accept', { token: inv.body.token });
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      body: 'Shipped the importer fix 🎉',
+      actingMode: 'direct',
+    });
+    messageId = posted.body.message.id;
+    topicId = posted.body.topic.id;
+  });
+
+  it('any member reacts to any message; groups fold in first-reacted order', async () => {
+    const first = await react(gagan, '👍', 'add');
+    expect(first.status).toBe(200);
+    expect(first.body.message.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'] }]);
+
+    await react(ramnique, '👍', 'add'); // second member joins the group
+    const second = await react(ramnique, '🚀', 'add'); // new emoji appends a group
+    expect(second.body.message.reactions).toEqual([
+      { emoji: '👍', memberIds: ['gagan', 'ramnique'] },
+      { emoji: '🚀', memberIds: ['ramnique'] },
+    ]);
+
+    // Reads fold the same state in.
+    const msgs = await gagan.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
+    expect(msgs.body.messages[0].reactions).toEqual(second.body.message.reactions);
+  });
+
+  it('toggles are idempotent: re-add and re-remove write nothing and emit nothing', async () => {
+    // Live-only subscription (no replay): every event from here on is new.
+    const live = await liveClient(harbor, 'dev-ramnique');
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
+
+    const again = await react(gagan, '👍', 'add');
+    expect(again.status).toBe(200);
+    expect(again.body.message.reactions[0].memberIds).toEqual(['gagan', 'ramnique']);
+
+    const removed = await react(gagan, '👍', 'remove');
+    expect(removed.body.message.reactions[0].memberIds).toEqual(['ramnique']);
+    const removedAgain = await react(gagan, '👍', 'remove');
+    expect(removedAgain.status).toBe(200);
+    expect(removedAgain.body.message.reactions).toEqual(removed.body.message.reactions);
+
+    // Exactly ONE durable event for the three calls: the real removal.
+    await live.until((frames) => frames.some((f) => f.kind === 'event'), 'reaction event');
+    const reactionEvents = live.events().filter((f) => f.event.type === 'reaction');
+    expect(reactionEvents).toHaveLength(1);
+    expect(reactionEvents[0]!.event).toMatchObject({
+      type: 'reaction',
+      action: 'removed',
+      reaction: { messageId, topicId, emoji: '👍', by: { memberId: 'gagan', actingMode: 'direct' } },
+    });
+    live.close();
+  });
+
+  it('removing the last member drops the group', async () => {
+    await react(ramnique, '🚀', 'remove');
+    const r = await react(ramnique, '👍', 'remove');
+    expect(r.body.message.reactions).toEqual([]);
+  });
+
+  it('non-members are forbidden; unknown messages 404; whitespace is not an emoji', async () => {
+    expect((await react(prakhar, '👍', 'add')).status).toBe(403);
+    const ghost = await ramnique.post(
+      `/v1/spaces/${spaceId}/messages/01ARZ3NDEKTSV4RRFFQ69G5FAV/reactions`,
+      { emoji: '👍', action: 'add', actingMode: 'direct' },
+    );
+    expect(ghost.status).toBe(404);
+    expect((await react(ramnique, 'not an emoji', 'add')).status).toBe(400);
   });
 });
 

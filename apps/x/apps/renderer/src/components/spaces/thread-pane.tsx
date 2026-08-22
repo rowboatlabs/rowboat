@@ -126,6 +126,21 @@ export function ThreadPane({
         }
     }
 
+    // Toggle: add when the viewer isn't in the group yet, remove when they are.
+    const toggleReaction = async (message: spaces.Message, emoji: string) => {
+        const mine = (message.reactions ?? []).find((g) => g.emoji === emoji)?.memberIds.includes(org.memberId)
+        const action = mine ? 'remove' : 'add'
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
+                orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
+            })
+            setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+            analytics.spacesReactionToggled({ action })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not react', 'error')
+        }
+    }
+
     const manage = async (action: spaces.SpacesManageTopicAction) => {
         try {
             const res = await window.ipc.invoke('spaces:manageTopic', { orgId: org.id, spaceId: space.id, topicId, action })
@@ -155,7 +170,17 @@ export function ThreadPane({
             newShown = true
             prev = undefined
         }
-        rows.push(<MessageRow key={message.id} message={message} memberNames={memberNames} continuation={isContinuation(prev, message)} dense />)
+        rows.push(
+            <MessageRow
+                key={message.id}
+                message={message}
+                memberNames={memberNames}
+                continuation={isContinuation(prev, message)}
+                selfMemberId={org.memberId}
+                onReact={(m, emoji) => void toggleReaction(m, emoji)}
+                dense
+            />,
+        )
         prev = message
     }
 

@@ -128,6 +128,29 @@ export function artifactsForThread(changeSets: spaces.ChangeSet[], topicId: stri
 }
 
 // ---------------------------------------------------------------------------
+// Reactions — fold a live reaction event into a message's display groups.
+// Mirrors the org's fold exactly (first-reacted order, per-member dedupe), so
+// applying the delta and refetching land on the same pixels.
+// ---------------------------------------------------------------------------
+
+export function applyReaction(
+    groups: spaces.ReactionGroup[] | undefined,
+    event: { emoji: string; memberId: string; action: 'added' | 'removed' },
+): spaces.ReactionGroup[] {
+    const current = groups ?? []
+    const existing = current.find((g) => g.emoji === event.emoji)
+    if (event.action === 'added') {
+        if (existing?.memberIds.includes(event.memberId)) return current
+        if (!existing) return [...current, { emoji: event.emoji, memberIds: [event.memberId] }]
+        return current.map((g) => (g.emoji === event.emoji ? { ...g, memberIds: [...g.memberIds, event.memberId] } : g))
+    }
+    if (!existing?.memberIds.includes(event.memberId)) return current
+    return current
+        .map((g) => (g.emoji === event.emoji ? { ...g, memberIds: g.memberIds.filter((id) => id !== event.memberId) } : g))
+        .filter((g) => g.memberIds.length > 0)
+}
+
+// ---------------------------------------------------------------------------
 // Stream compaction — consecutive messages by the same author within a short
 // window render without repeating the avatar/name.
 // ---------------------------------------------------------------------------

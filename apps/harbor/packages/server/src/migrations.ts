@@ -191,6 +191,25 @@ export const MIGRATIONS: Migration[] = [
       `create unique index if not exists topics_anchor_message on topics (anchor_message_id) where anchor_message_id is not null`,
     ],
   },
+  {
+    id: '005-reactions',
+    statements: [
+      // Slack-style reactions: one row per (message, emoji, member) — the
+      // primary key IS the toggle invariant. `attribution` mirrors the
+      // change_sets column (jsonb Attribution); topic membership is derived
+      // through messages so merge_into needs no backfill here.
+      `create table if not exists reactions (
+        space_id text not null,
+        message_id text not null,
+        emoji text not null,
+        member_id text not null,
+        attribution jsonb not null,
+        at text not null,
+        primary key (space_id, message_id, emoji, member_id)
+      )`,
+      `create index if not exists reactions_space_message on reactions (space_id, message_id)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

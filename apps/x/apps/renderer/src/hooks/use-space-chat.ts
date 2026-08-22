@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import {
-    GENERAL_SEED_BODY, findGeneralTopic, isGeneralSeedMessage, parseThreadMarker, type ThreadMarker,
+    GENERAL_SEED_BODY, applyReaction, findGeneralTopic, isGeneralSeedMessage, parseThreadMarker, type ThreadMarker,
 } from '@/lib/spaces-conventions'
 import { getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceFeed, useSpaceLive } from '@/hooks/use-spaces'
 import { getTopicLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
@@ -61,6 +61,14 @@ async function loadGeneralMessages(orgId: string, spaceId: string, topic: spaces
     }
 }
 
+/** Replace one general message in place (e.g. the folded result of a reaction toggle). */
+export function updateGeneralMessage(orgId: string, spaceId: string, message: spaces.Message): void {
+    const k = key(orgId, spaceId)
+    const state = generalState.get(k)
+    if (!state?.messages.some((m) => m.id === message.id)) return
+    setGeneral(k, { messages: state.messages.map((m) => (m.id === message.id ? message : m)) })
+}
+
 /** Find general in the feed store's topics; seed it when the space has none. */
 async function ensureGeneral(orgId: string, spaceId: string): Promise<void> {
     const k = key(orgId, spaceId)
@@ -107,6 +115,19 @@ function wireBus(): void {
             } else if (state?.topic) {
                 // A message on another topic: a thread reply or a new thread's seed.
                 noteThreadActivity(event.orgId, frame.spaceId, message)
+            }
+        } else if (frame.event.type === 'reaction') {
+            // Fold the toggle into the message in place (thread panes refetch on
+            // their own tick; general keeps its messages live here).
+            const { reaction, action } = frame.event
+            if (state?.topic && state.messages.some((m) => m.id === reaction.messageId)) {
+                setGeneral(k, {
+                    messages: state.messages.map((m) =>
+                        m.id === reaction.messageId
+                            ? { ...m, reactions: applyReaction(m.reactions, { emoji: reaction.emoji, memberId: reaction.by.memberId, action }) }
+                            : m,
+                    ),
+                })
             }
         }
     })

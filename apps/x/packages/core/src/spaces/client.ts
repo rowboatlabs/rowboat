@@ -56,6 +56,7 @@ export interface SpacesClientOptions {
 
 type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
+type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 
 export class SpacesClient {
   private readonly baseUrl: string;
@@ -220,6 +221,18 @@ export class SpacesClient {
 
   async postMessage(spaceId: string, input: NewTopicMessage): Promise<{ topic: Topic; message: Message }> {
     return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
+  }
+
+  /** Toggle a reaction (idempotent). Returns the message with reactions folded. */
+  async reactToMessage(spaceId: string, messageId: string, input: ReactInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/reactions`),
+        routes.reactToMessage.response,
+        input,
+      )
+    ).message;
   }
 
   async manageTopic(spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {

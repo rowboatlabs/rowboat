@@ -210,6 +210,10 @@ export function spacesMessagePosted(props: { kind: 'general' | 'topic'; mentions
   posthog.capture('spaces_message_posted', { kind: props.kind, mentions_rowboat: props.mentionsRowboat })
 }
 
+export function spacesReactionToggled(props: { action: 'add' | 'remove' }) {
+  posthog.capture('spaces_reaction_toggled', { action: props.action })
+}
+
 export function spacesTopicStarted() {
   posthog.capture('spaces_topic_started')
 }

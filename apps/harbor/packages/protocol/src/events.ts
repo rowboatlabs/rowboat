@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Membership, Message, Topic } from './core.js';
+import { Membership, Message, Reaction, Topic } from './core.js';
 import { MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
@@ -18,6 +18,12 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     type: z.literal('membership'),
     membership: Membership,
     action: z.enum(['joined', 'left', 'removed']),
+  }),
+  /** A reaction toggled on or off a message. Idempotent re-adds/re-removes emit nothing. */
+  z.object({
+    type: z.literal('reaction'),
+    reaction: Reaction,
+    action: z.enum(['added', 'removed']),
   }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
