@@ -149,6 +149,7 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 **Spaces** (`components/spaces/*`, `components/spaces-view.tsx`):
 
 - `spaces_message_posted` — `{ kind: 'general' | 'topic', mentions_rowboat }` — a human posted in a space: to general, or into a topic
+- `spaces_reaction_toggled` — `{ action: 'add' | 'remove' }` — a human toggled an emoji reaction on a message
 - `spaces_topic_started` — replying to a general message created a new topic from it
 - `spaces_fold_requested` — "Fold into file…" asked the person's agent to fold a topic's decision into a file (the agent's resulting change is an `llm_usage` + a change-set on the org, not a renderer event)
 - `spaces_tab_viewed` — `{ tab: 'general' | 'topics' | 'files' }` — the segmented control inside a space

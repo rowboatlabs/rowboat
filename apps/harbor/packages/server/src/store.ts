@@ -1,4 +1,5 @@
 import type {
+  Attribution,
   ChangeSet,
   Member,
   Membership,
@@ -36,6 +37,19 @@ export interface StoredEvent {
   offset: number;
   at: string;
   event: SpaceEvent;
+}
+
+/**
+ * A reaction as stored: keyed (spaceId, messageId, emoji, by.memberId) — one
+ * per member+emoji, Slack semantics. Topic membership is derived through the
+ * message (merge_into repoints messages; reactions follow by messageId).
+ */
+export interface StoredReaction {
+  spaceId: string;
+  messageId: string;
+  emoji: string;
+  by: Attribution;
+  at: string;
 }
 
 export interface Store {
@@ -88,6 +102,15 @@ export interface Store {
   appendMessage(message: Message): Promise<void>;
   /** merge_into support: repoints messages; returns how many moved. */
   reassignMessages(spaceId: string, fromTopicId: string, toTopicId: string): Promise<number>;
+
+  // reactions — per-(member, emoji) toggles on messages
+  getReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<StoredReaction | undefined>;
+  putReaction(reaction: StoredReaction): Promise<void>;
+  deleteReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<void>;
+  /** Oldest first (fold order). */
+  listReactionsByMessage(spaceId: string, messageId: string): Promise<StoredReaction[]>;
+  /** All reactions on the topic's current messages, oldest first. */
+  listReactionsByTopic(spaceId: string, topicId: string): Promise<StoredReaction[]>;
 
   // invites
   putInvite(invite: StoredInvite): Promise<void>;

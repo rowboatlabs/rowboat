@@ -3563,6 +3563,19 @@ const ipcSchemas = {
     }),
     res: z.object({ topic: z.custom<SpacesTypes.Topic>() }),
   },
+  // Slack-style reaction toggle — any member, any message. Idempotent on the
+  // org (re-add / re-remove is a no-op); actingMode is stamped 'direct' by
+  // main like postMessage. Returns the message with reactions folded.
+  'spaces:reactToMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      emoji: z.string(),
+      action: z.enum(['add', 'remove']),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
   // @rowboat in a topic (spec §8): the renderer detected an addressed message
   // it just posted; main routes it into the topic's session (creating one on
   // first use — the queue/steer machinery handles the rest). messageId is the

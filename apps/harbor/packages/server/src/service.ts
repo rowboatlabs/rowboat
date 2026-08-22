@@ -15,6 +15,7 @@ import {
   type PresenceState,
   type ProposeChange,
   type ProposeChangeResult,
+  type ReactionGroup,
   type ReadAssetResult,
   type ResolveInviteResult,
   type Routes,
@@ -26,7 +27,7 @@ import type { z } from 'zod';
 import { HarborError } from './errors.js';
 import { SpaceHub } from './hub.js';
 import { merge3 } from './merge.js';
-import type { Store, StoredEvent } from './store.js';
+import type { Store, StoredEvent, StoredReaction } from './store.js';
 
 // The one service core (spec §9: one core, two faces). REST (http.ts) and MCP
 // (mcp.ts) are thin projections over this class; neither has a privileged path.
@@ -53,6 +54,7 @@ function seedDisplayName(identity: BindIdentity): string {
 
 type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
+type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 
 export interface OrgInfo {
   name: string;
@@ -413,7 +415,17 @@ export class HarborService {
     await this.requireMember(ctx, spaceId);
     const topic = await this.store.getTopic(spaceId, topicId);
     if (!topic) throw new HarborError('not_found', 'no such topic');
-    return { topic, messages: await this.store.listMessages(spaceId, topicId) };
+    const messages = await this.store.listMessages(spaceId, topicId);
+    // Fold live reaction state in — the reactions field on a stored message
+    // event is its at-post snapshot (empty); reads carry the current truth.
+    const byMessage = new Map<string, StoredReaction[]>();
+    for (const r of await this.store.listReactionsByTopic(spaceId, topicId)) {
+      byMessage.set(r.messageId, [...(byMessage.get(r.messageId) ?? []), r]);
+    }
+    return {
+      topic,
+      messages: messages.map((m) => ({ ...m, reactions: foldReactions(byMessage.get(m.id) ?? []) })),
+    };
   }
 
   async postMessage(
@@ -444,6 +456,7 @@ export class HarborService {
           body: input.body,
           postedAt: at,
           offset,
+          reactions: [],
         };
         await this.store.appendMessage(message);
         // Replying revives an archived topic; counts/lastActivity update without
@@ -498,12 +511,59 @@ export class HarborService {
         body: input.body,
         postedAt: at,
         offset: topicOffset + 1,
+        reactions: [],
       };
       await this.store.putTopic(topic);
       await this.store.appendMessage(message);
       await this.append(spaceId, topicOffset, at, { type: 'topic', topic });
       await this.append(spaceId, topicOffset + 1, at, { type: 'message', message });
       return { topic, message };
+    });
+  }
+
+  /**
+   * Toggle a reaction (Slack semantics): any member, any message in the
+   * space, one per (member, emoji). Re-adding what exists / removing what
+   * doesn't is an idempotent no-op — no write, no event. Returns the message
+   * with reactions folded so the caller can render without the live frame.
+   */
+  async reactToMessage(ctx: ActorCtx, spaceId: string, messageId: string, input: ReactInput): Promise<Message> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const message = await this.store.getMessage(spaceId, messageId);
+      if (!message) throw new HarborError('not_found', 'no such message');
+      const existing = await this.store.getReaction(spaceId, messageId, input.emoji, ctx.memberId);
+      const at = this.now();
+
+      if (input.action === 'add' && !existing) {
+        await this.store.putReaction({ spaceId, messageId, emoji: input.emoji, by, at });
+        const offset = (await this.store.head(spaceId)) + 1;
+        await this.append(spaceId, offset, at, {
+          type: 'reaction',
+          reaction: { spaceId, topicId: message.topicId, messageId, emoji: input.emoji, by, at },
+          action: 'added',
+        });
+      } else if (input.action === 'remove' && existing) {
+        await this.store.deleteReaction(spaceId, messageId, input.emoji, ctx.memberId);
+        const offset = (await this.store.head(spaceId)) + 1;
+        await this.append(spaceId, offset, at, {
+          type: 'reaction',
+          reaction: { spaceId, topicId: message.topicId, messageId, emoji: input.emoji, by, at },
+          action: 'removed',
+        });
+      }
+
+      return {
+        ...message,
+        reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, messageId)),
+      };
     });
   }
 
@@ -622,6 +682,17 @@ export class HarborService {
   async headOffset(spaceId: string): Promise<number> {
     return this.store.head(spaceId);
   }
+}
+
+/** Stored rows (oldest first) → display groups: emojis in first-reacted order, members likewise. */
+function foldReactions(reactions: StoredReaction[]): ReactionGroup[] {
+  const groups = new Map<string, string[]>();
+  for (const r of reactions) {
+    const members = groups.get(r.emoji) ?? [];
+    if (!members.includes(r.by.memberId)) members.push(r.by.memberId);
+    groups.set(r.emoji, members);
+  }
+  return [...groups.entries()].map(([emoji, memberIds]) => ({ emoji, memberIds }));
 }
 
 function deriveTitle(body: string): string {

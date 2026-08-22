@@ -128,6 +128,15 @@ team and a Roadboard space (`src/main.ts`).
 - **`merge_into`** repoints the source's messages, archives the source, returns
   the *target*. Durable message events keep their original `topicId` — clients
   refetch a thread when a topic event announces a merge.
+- **Reactions are per-(member, emoji) toggles on messages** (Slack semantics,
+  `reactToMessage` route + the `reaction` event): any member, any message, the
+  emoji itself on the wire (never a `:name:`). Re-adding what exists / removing
+  what doesn't is an idempotent 200 no-op — no write, no event. `Message`
+  carries folded `reactions` groups (first-reacted order) on reads; the copy
+  inside a stored `message` event is its at-post snapshot (empty), so clients
+  fold `reaction` events or refetch. Attribution rides the reaction
+  (`by: Attribution`) like every other act. Render-face only for now — the
+  six MCP tools deliberately don't react (an agent's ack is a reply).
 - **Unknown invite tokens are 404**; `expired`/`revoked` are resolvable states.
 - **MCP face attribution**: acting mode defaults to `agent`; automations
   declare `x-acting-mode: scheduled`; `x-agent-name` carries the display label.

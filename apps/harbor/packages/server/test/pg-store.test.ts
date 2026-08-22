@@ -124,6 +124,40 @@ describe('PgStore through the service', () => {
     expect(reread?.attribution).toEqual({ memberId: 'gagan', actingMode: 'agent', agentName: 'Claude Code' });
   });
 
+  it('reactions toggle on Postgres and follow a message across merge_into', async () => {
+    const posted = await service.postMessage(ram, spaceId, { body: 'React to me', actingMode: 'direct' });
+    const messageId = posted.message.id;
+
+    await service.reactToMessage(gagan, spaceId, messageId, { emoji: '👍', action: 'add', actingMode: 'direct' });
+    const both = await service.reactToMessage(ram, spaceId, messageId, {
+      emoji: '👍',
+      action: 'add',
+      actingMode: 'agent',
+      agentName: 'Rowboat',
+    });
+    expect(both.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'] }]);
+
+    // Attribution jsonb round-trips (same guarantee change_sets has).
+    const stored = await store.getReaction(spaceId, messageId, '👍', 'ramnique');
+    expect(stored?.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' });
+
+    // The reaction rides the message into the target topic (join, not a topic_id column).
+    const target = await service.postMessage(gagan, spaceId, { body: 'Merge target', actingMode: 'direct' });
+    await service.manageTopic(ram, spaceId, posted.topic.id, {
+      action: 'merge_into',
+      targetTopicId: target.topic.id,
+    });
+    const merged = await service.listMessages(ram, spaceId, target.topic.id);
+    expect(merged.messages.find((m) => m.id === messageId)?.reactions).toEqual([
+      { emoji: '👍', memberIds: ['gagan', 'ramnique'] },
+    ]);
+
+    // Remove drops the member; removing the last drops the group.
+    await service.reactToMessage(gagan, spaceId, messageId, { emoji: '👍', action: 'remove', actingMode: 'direct' });
+    const last = await service.reactToMessage(ram, spaceId, messageId, { emoji: '👍', action: 'remove', actingMode: 'direct' });
+    expect(last.reactions).toEqual([]);
+  });
+
   it('identity mapping: (iss, sub) → member, upsert repoints, unmapped is undefined', async () => {
     const iss = 'https://as.example/auth/v1';
     expect(await store.getMemberByIdentity(iss, 'sub-1')).toBeUndefined();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { spaces } from '@x/shared'
 import {
+    applyReaction,
     artifactsForThread,
     buildThreadSeed,
     findGeneralTopic,
@@ -36,6 +37,7 @@ function msg(over: Partial<spaces.Message> & { id: string }): spaces.Message {
         body: 'hello',
         postedAt: '2026-08-19T10:20:00Z',
         offset: 1,
+        reactions: [],
         ...over,
     }
 }
@@ -140,5 +142,27 @@ describe('stream helpers', () => {
         expect(formatDayLabel('2026-08-19T09:00:00', now)).toBe('Today')
         expect(formatDayLabel('2026-08-18T09:00:00', now)).toBe('Yesterday')
         expect(formatDayLabel('2026-08-12T09:00:00', now)).toMatch(/Aug/)
+    })
+})
+
+describe('reactions', () => {
+    it('adds into first-reacted order: new emoji appends a group, repeat member is a no-op', () => {
+        const one = applyReaction([], { emoji: '👍', memberId: 'gagan', action: 'added' })
+        expect(one).toEqual([{ emoji: '👍', memberIds: ['gagan'] }])
+        const two = applyReaction(one, { emoji: '👍', memberId: 'arjun', action: 'added' })
+        expect(two).toEqual([{ emoji: '👍', memberIds: ['gagan', 'arjun'] }])
+        const three = applyReaction(two, { emoji: '🚀', memberId: 'gagan', action: 'added' })
+        expect(three.map((g) => g.emoji)).toEqual(['👍', '🚀'])
+        expect(applyReaction(three, { emoji: '👍', memberId: 'gagan', action: 'added' })).toEqual(three)
+    })
+    it('removes a member; the emptied group disappears; absent removals are no-ops', () => {
+        const groups = [
+            { emoji: '👍', memberIds: ['gagan', 'arjun'] },
+            { emoji: '🚀', memberIds: ['gagan'] },
+        ]
+        const dropped = applyReaction(groups, { emoji: '🚀', memberId: 'gagan', action: 'removed' })
+        expect(dropped).toEqual([{ emoji: '👍', memberIds: ['gagan', 'arjun'] }])
+        expect(applyReaction(dropped, { emoji: '🚀', memberId: 'gagan', action: 'removed' })).toEqual(dropped)
+        expect(applyReaction(undefined, { emoji: '👍', memberId: 'gagan', action: 'removed' })).toEqual([])
     })
 })
