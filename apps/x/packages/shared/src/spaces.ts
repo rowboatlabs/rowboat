@@ -153,3 +153,51 @@ export function mentionsMember(body: string, member: MentionIdentity): boolean {
 export function containsRowboatAddress(body: string): boolean {
   return containsMemberAddress(body, 'rowboat');
 }
+
+/**
+ * The @here address — everyone in the space whose app is online, Slack-style.
+ * There is no server fan-out: every member's client scans incoming messages
+ * itself (mention-watch), so "online" is exactly "the app is running to see
+ * this arrive"; whoever was away catches it in the missed-replay summary.
+ */
+export function containsHereAddress(body: string): boolean {
+  return containsMemberAddress(body, 'here');
+}
+
+/**
+ * The one walker that turns wire member addresses ("@<memberId>") into
+ * people. Code regions stay literal (same address-vs-cite line the trigger
+ * logic draws); unknown ids pass through untouched; @rowboat and @here keep
+ * their handles. Every mention-rendering path — renderer surfaces AND main's
+ * notification text — goes through here. Fix it once.
+ */
+function mapMentions(body: string, memberNames: ReadonlyMap<string, string>, wrap: (handle: string) => string): string {
+  const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g);
+  return parts
+    .map((part, i) => {
+      if (i % 2 === 1) return part; // a code region — cite, not address
+      return part.replace(/(^|[\s([{])@([A-Za-z0-9][\w.-]*)/g, (match, pre: string, id: string) => {
+        if (id.toLowerCase() === 'rowboat') return `${pre}${wrap('@rowboat')}`;
+        if (id.toLowerCase() === 'here') return `${pre}${wrap('@here')}`;
+        const name = memberNames.get(id);
+        return name ? `${pre}${wrap(`@${name}`)}` : match;
+      });
+    })
+    .join('');
+}
+
+/**
+ * For markdown surfaces (message bodies): "@<memberId>" becomes
+ * "**@Display Name**" so the pipeline sets it off in bold.
+ */
+export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
+  return mapMentions(body, memberNames, (h) => `**${h}**`);
+}
+
+/**
+ * For plain-text surfaces (topic titles, crumbs, reasons, notification
+ * bodies): same resolution, no markup — safe for search haystacks too.
+ */
+export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
+  return mapMentions(body, memberNames, (h) => h);
+}

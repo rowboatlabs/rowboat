@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { mentionsMember, type MentionIdentity } from '@x/shared/dist/spaces.js';
+import { containsHereAddress, mentionsMember, resolveMentions, type MentionIdentity } from '@x/shared/dist/spaces.js';
 import type { Member, ServerFrame } from '@rowboat/spaces-protocol';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import type { NotifyInput } from '../application/notification/service.js';
@@ -10,9 +10,10 @@ import { getClient, getLive, listOrgs } from './orgs.js';
 // Space mention notifications: main-side watcher that subscribes to EVERY
 // space of every org (independent of what's on screen), scans incoming
 // messages for a mention of me — by display name (what the composer types;
-// member ids are opaque IdP subjects) or by id (agent-written, older
-// messages) — and notifies, suppressed while the app is focused
-// (onlyWhenBackground) and gated by the 'space_mention' category.
+// member ids are opaque IdP subjects), by id (agent-written, older
+// messages), or via @here (everyone online, Slack-style) — and notifies,
+// suppressed while the app is focused (onlyWhenBackground) and gated by the
+// 'space_mention' category.
 //
 // Offsets are persisted per space so a relaunch replays what arrived while
 // the app was closed: fresh mentions notify individually, older ones fold
@@ -41,6 +42,8 @@ export interface MentionHit {
   topicId: string;
   authorName: string;
   body: string;
+  /** 'you' = addressed me by name/id; 'here' = @here, addressed everyone online. */
+  kind: 'you' | 'here';
 }
 
 export function isMissedArrival(postedAt: string, now: number = Date.now()): boolean {
@@ -66,7 +69,7 @@ export function mentionExcerpt(body: string, max = 140): string {
 
 export function buildMentionNotify(hit: MentionHit): NotifyInput {
   return {
-    title: `${hit.authorName} mentioned you · ${hit.spaceName}`,
+    title: `${hit.authorName} ${hit.kind === 'here' ? 'mentioned everyone' : 'mentioned you'} · ${hit.spaceName}`,
     message: mentionExcerpt(hit.body),
     link: mentionLink(hit.orgId, hit.spaceId, hit.topicId),
     onlyWhenBackground: true,
@@ -77,13 +80,19 @@ export function buildMissedSummaryNotify(input: {
   orgId: string;
   spaceId: string;
   spaceName: string;
-  count: number;
+  /** Missed mentions that addressed me by name/id. */
+  youCount: number;
+  /** Missed @here mentions — surfaced on coming back online. */
+  hereCount: number;
   /** When every missed mention sits in one topic, click lands there. */
   soleTopicId?: string;
 }): NotifyInput {
+  const parts: string[] = [];
+  if (input.youCount > 0) parts.push(`${input.youCount} ${input.youCount === 1 ? 'mention' : 'mentions'} of you`);
+  if (input.hereCount > 0) parts.push(`${input.hereCount} @here`);
   return {
     title: `While you were away · ${input.spaceName}`,
-    message: `${input.count} ${input.count === 1 ? 'mention' : 'mentions'} of you`,
+    message: parts.join(' · '),
     link: mentionLink(input.orgId, input.spaceId, input.soleTopicId),
     onlyWhenBackground: true,
     // The summary IS the replay burst — never drop it to the startup grace.
@@ -124,7 +133,8 @@ interface SpaceSub {
 }
 
 interface MissedBucket {
-  count: number;
+  youCount: number;
+  hereCount: number;
   topicIds: Set<string>;
   spaceName: string;
   timer: ReturnType<typeof setTimeout>;
@@ -159,16 +169,17 @@ function authorName(k: string, memberId: string): string {
   return memberNames.get(k)?.get(memberId) ?? memberId;
 }
 
-function queueMissed(k: string, orgId: string, spaceId: string, spaceName: string, topicId: string): void {
+function queueMissed(k: string, orgId: string, spaceId: string, spaceName: string, topicId: string, kind: MentionHit['kind']): void {
   const existing = missed.get(k);
   if (existing) {
-    existing.count += 1;
+    existing[kind === 'here' ? 'hereCount' : 'youCount'] += 1;
     existing.topicIds.add(topicId);
     existing.timer.refresh();
     return;
   }
   const bucket: MissedBucket = {
-    count: 1,
+    youCount: kind === 'here' ? 0 : 1,
+    hereCount: kind === 'here' ? 1 : 0,
     topicIds: new Set([topicId]),
     spaceName,
     timer: setTimeout(() => {
@@ -177,7 +188,8 @@ function queueMissed(k: string, orgId: string, spaceId: string, spaceName: strin
         orgId,
         spaceId,
         spaceName: bucket.spaceName,
-        count: bucket.count,
+        youCount: bucket.youCount,
+        hereCount: bucket.hereCount,
         ...(bucket.topicIds.size === 1 ? { soleTopicId: [...bucket.topicIds][0] } : {}),
       }));
     }, MISSED_DEBOUNCE_MS),
@@ -193,11 +205,17 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
     if (frame.event.type !== 'message') return;
     const message = frame.event.message;
     if (message.author.memberId === me.id) return;
-    // People type the NAME (ids are opaque); agent-written mentions may carry the id.
-    if (!mentionsMember(message.body, me)) return;
+    // People type the NAME (ids are opaque); agent-written mentions may carry
+    // the id. A direct mention outranks @here when both appear.
+    const kind: MentionHit['kind'] | null = mentionsMember(message.body, me)
+      ? 'you'
+      : containsHereAddress(message.body)
+        ? 'here'
+        : null;
+    if (!kind) return;
 
     if (isMissedArrival(message.postedAt)) {
-      queueMissed(k, orgId, spaceId, spaceName, message.topicId);
+      queueMissed(k, orgId, spaceId, spaceName, message.topicId, kind);
       return;
     }
     const cooldownKey = `${k}/${message.topicId}`;
@@ -210,7 +228,9 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
       spaceName,
       topicId: message.topicId,
       authorName: authorName(k, message.author.memberId),
-      body: message.body,
+      // The wire carries "@<memberId>" addresses — show people, not ids.
+      body: resolveMentions(message.body, memberNames.get(k) ?? new Map()),
+      kind,
     }));
   };
 }
