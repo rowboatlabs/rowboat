@@ -1,6 +1,9 @@
-import { BrowserWindow, shell } from 'electron';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { BrowserWindow, dialog, shell } from 'electron';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
+import * as blobCache from './blob-cache.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
@@ -29,6 +32,8 @@ type SpacesHandlers = {
   'spaces:resolveInvite': InvokeHandler<'spaces:resolveInvite'>;
   'spaces:acceptInvite': InvokeHandler<'spaces:acceptInvite'>;
   'spaces:listAssets': InvokeHandler<'spaces:listAssets'>;
+  'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
+  'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
   'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
   'spaces:proposeChange': InvokeHandler<'spaces:proposeChange'>;
   'spaces:assetHistory': InvokeHandler<'spaces:assetHistory'>;
@@ -165,6 +170,28 @@ export const spacesIpcHandlers: SpacesHandlers = {
     entries: await orgs.getClient(args.orgId).listAssets(args.spaceId),
   }),
 
+  // Upload phase 1. Pastes arrive as bytes; drag-drop / picker sends the
+  // absolute path (via electronUtils.getPathForFile) so big files never cross
+  // IPC — main reads them from disk. mime falls back to the filename extension
+  // server-side sniffing has the final word anyway.
+  'spaces:uploadBlob': async (_event, args) => {
+    const bytes = args.bytes !== undefined ? new Uint8Array(args.bytes) : await fs.readFile(args.filePath!);
+    const blob = await orgs.getClient(args.orgId).uploadBlob(args.spaceId, bytes, {
+      ...(args.mime ? { declaredMime: args.mime } : {}),
+    });
+    return { blob };
+  },
+
+  'spaces:saveBlob': async (event, args) => {
+    const { bytes } = await blobCache.getBlob(args.orgId, args.spaceId, args.hash);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = { defaultPath: path.basename(args.suggestedName ?? args.hash.slice(0, 12)) };
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return { saved: false };
+    await fs.writeFile(result.filePath, bytes);
+    return { saved: true, path: result.filePath };
+  },
+
   'spaces:readAsset': async (_event, args) =>
     orgs.getClient(args.orgId).readAsset(args.spaceId, args.path, args.version),
 
@@ -172,7 +199,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
     orgs.getClient(args.orgId).proposeChange(args.spaceId, {
       assetPath: args.input.assetPath,
       baseVersion: args.input.baseVersion,
-      newContent: args.input.newContent,
+      // Exactly one of the two variants (contract decision 1, amended).
+      ...(args.input.blob !== undefined ? { blob: args.input.blob } : { newContent: args.input.newContent ?? '' }),
       ...(args.input.reason ? { reason: args.input.reason } : {}),
       actingMode: 'direct',
     }),

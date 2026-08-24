@@ -210,6 +210,29 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists reactions_space_message on reactions (space_id, message_id)`,
     ],
   },
+  {
+    id: '006-blobs',
+    statements: [
+      // Spec §6 binary assets: bytes live in the content-addressed BlobStore;
+      // the database carries {hash, size, mime} as jsonb (the attribution
+      // pattern). A version is text (content) XOR binary (blob) — one
+      // namespace, one log, only the populated column differs.
+      `alter table asset_versions alter column content drop not null`,
+      `alter table asset_versions add column if not exists blob jsonb`,
+      `alter table change_sets add column if not exists blob jsonb`,
+      // The space-level read gate for uploads: bytes dedup per org underneath,
+      // but a blob is referencable/servable only in spaces it was uploaded to.
+      `create table if not exists space_blobs (
+        space_id text not null,
+        hash text not null,
+        size bigint not null,
+        mime text not null,
+        uploaded_by text not null,
+        uploaded_at text not null,
+        primary key (space_id, hash)
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

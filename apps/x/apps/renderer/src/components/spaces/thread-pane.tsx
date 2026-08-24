@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Streamdown } from 'streamdown'
 import { Anchor, Archive, ArchiveRestore, ArrowLeft, Bot, Loader2, MoreHorizontal, Pencil, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
@@ -9,13 +8,14 @@ import {
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
-import { MemberName, MemberText, useMemberNames } from '@/components/spaces/member-text'
+import { MemberName, MemberText } from '@/components/spaces/member-text'
+import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
 import type { SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
 import { usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { artifactsForThread, isContinuation, stripThreadMarker } from '@/lib/spaces-conventions'
-import { attributionLabel, decorateMentions, formatFeedTime, shortId } from '@/lib/spaces-presentation'
+import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { toast } from '@/lib/toast'
@@ -319,6 +319,5 @@ export function ThreadPane({
 }
 
 function ParentBody({ body }: { body: string }) {
-    const names = useMemberNames()
-    return <Streamdown>{decorateMentions(body, names)}</Streamdown>
+    return <SpaceMarkdown body={body} />
 }

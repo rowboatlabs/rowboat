@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -164,6 +165,49 @@ describe('agent face (MCP)', () => {
     expect(retry.outcome).toBe('applied');
     await harshAgent.close();
     await ramniqueAgent.close();
+  });
+
+  it('propose_change blob variant files an already-uploaded attachment — no byte movement', async () => {
+    // A member attached bytes in chat (render-face upload, phase 1)…
+    const bytes = new TextEncoder().encode('quarterly,signups\nQ1,40\nQ2,55\n');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const uploaded = await fetch(`${harbor.url}/v1/spaces/${spaceId}/blobs`, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer dev-harsh', 'x-blob-sha256': hash, 'content-type': 'text/csv' },
+      body: bytes,
+    });
+    expect(uploaded.status).toBe(200);
+
+    // …and the agent files it into the tree by hash alone (phase 2 over MCP).
+    const client = await mcpClient('dev-harsh', { 'x-agent-name': 'Rowboat' });
+    const filed = (await client.callTool({
+      name: 'propose_change',
+      arguments: { spaceId, path: 'data/signups.csv', baseVersion: 0, blob: hash, reason: 'file the chat attachment' },
+    })) as { isError?: boolean; structuredContent?: unknown };
+    expect(filed.isError).toBeFalsy();
+    const applied = filed.structuredContent as { outcome: string; changeSet: { blob?: { hash: string; mime: string } } };
+    expect(applied.outcome).toBe('applied');
+    expect(applied.changeSet.blob).toMatchObject({ hash, mime: 'text/csv' });
+
+    // Exactly one of newContent/blob — both and neither are refused.
+    const both = await client.callTool({
+      name: 'propose_change',
+      arguments: { spaceId, path: 'data/x.csv', baseVersion: 0, newContent: 'a', blob: hash, reason: 'nope' },
+    });
+    expect(both.isError).toBe(true);
+    const neither = await client.callTool({
+      name: 'propose_change',
+      arguments: { spaceId, path: 'data/x.csv', baseVersion: 0, reason: 'nope' },
+    });
+    expect(neither.isError).toBe(true);
+
+    // A hash never uploaded to this space is refused, not invented.
+    const phantom = await client.callTool({
+      name: 'propose_change',
+      arguments: { spaceId, path: 'data/ghost.csv', baseVersion: 0, blob: 'e'.repeat(64), reason: 'nope' },
+    });
+    expect(phantom.isError).toBe(true);
+    await client.close();
   });
 
   it('reason is required on this face', async () => {

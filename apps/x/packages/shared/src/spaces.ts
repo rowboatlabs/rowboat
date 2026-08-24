@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type {
   AcceptInviteResult,
+  BlobInfo,
   ChangeSet,
   ConflictRegion,
   CreateInviteResult,
@@ -25,6 +26,7 @@ import type {
 
 export type {
   AcceptInviteResult,
+  BlobInfo,
   ChangeSet,
   ConflictRegion,
   CreateInviteResult,
@@ -58,6 +60,8 @@ export interface SpacesAssetEntry {
   path: string;
   version: number;
   updatedAt: string;
+  /** Present when the head version is binary (spec §6). */
+  blob?: BlobInfo;
 }
 
 export interface SpacesTopicWithMessages {
@@ -84,7 +88,10 @@ export type SpacesManageTopicAction =
 export interface SpacesProposeInput {
   assetPath: string;
   baseVersion: number;
-  newContent: string;
+  /** Text variant. Exactly one of newContent / blob (contract decision 1, amended). */
+  newContent?: string;
+  /** Binary variant: the hash of bytes already uploaded via spaces:uploadBlob. */
+  blob?: string;
   reason?: string;
 }
 

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Streamdown } from 'streamdown'
-import { ArrowLeft, Check, ChevronRight, Clock, History, Loader2, Pencil, Plus, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronRight, Clock, Download, FileText, History, Image as ImageIcon, Loader2, Pencil, Plus, Upload, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -10,13 +10,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { MemberText } from '@/components/spaces/member-text'
-import { attributionLabel, buildFileTree, formatFeedTime, type FileTreeNode } from '@/lib/spaces-presentation'
+import { attributionLabel, blobAppUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime, type FileTreeNode } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { MemberAvatar } from '@/components/spaces/atoms'
 
 // Files: the tree (README first) and the file column — rendered file
 // with one-tap checkboxes, Edit → draft→apply (merged / conflict handled),
-// History with diffs. Unchanged behaviour from the design pass.
+// History with diffs. Binary files (uploads, spec §6) render a preview or a
+// download card instead of the editor; Replace is the binary "edit" (a new
+// upload proposed at the same path against the current version).
 
 // ---------------------------------------------------------------------------
 // Files rail — the space's tree, README first, unread dots on moved files
@@ -67,18 +69,23 @@ export function FileTree({ entries, selectedPath, unreadPaths, onOpenFile, creat
         }
         const active = node.path === selectedPath
         const unread = unreadPaths.has(node.path)
+        const blob = node.entry?.blob
         return (
             <button
                 key={node.path}
                 type="button"
                 style={pad}
                 onClick={() => onOpenFile(node.path)}
+                title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
                 className={cn(
                     'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
                     active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
                 )}
             >
                 <span className="w-3 shrink-0" />
+                {blob && (isImageMime(blob.mime)
+                    ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
+                    : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
                 <span className="truncate flex-1">{node.name}</span>
                 {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
             </button>
@@ -251,6 +258,58 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
 
     const last = asset?.recentHistory[0]
     const fileName = path.split('/').pop() ?? path
+    const blob = asset?.blob ?? null
+
+    // Binary "edit": upload a replacement at this path against the current
+    // version. A stale base is conflict-or-replace on binaries (contract) —
+    // surfaced as a plain toast; retrying after a reload IS the replace.
+    const replaceInputRef = useRef<HTMLInputElement | null>(null)
+    const [replacing, setReplacing] = useState(false)
+    const replaceWith = async (file: File) => {
+        if (!asset) return
+        setReplacing(true)
+        try {
+            const filePath = window.electronUtils?.getPathForFile?.(file)
+            const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                orgId: org.id,
+                spaceId: space.id,
+                ...(filePath ? { filePath } : { bytes: await file.arrayBuffer() }),
+                name: file.name,
+                ...(file.type ? { mime: file.type } : {}),
+            })
+            const result = await window.ipc.invoke('spaces:proposeChange', {
+                orgId: org.id,
+                spaceId: space.id,
+                input: { assetPath: path, baseVersion: asset.version, blob: uploaded.blob.hash, reason: `replace with ${file.name}` },
+            })
+            if (result.outcome === 'conflict') {
+                toast(`Someone changed this file meanwhile (now v${result.currentVersion}) — it reloaded; replace again to overwrite`, 'error')
+            } else {
+                toast(`Replaced — now v${result.outcome === 'applied' ? result.version : asset.version}`, 'success')
+            }
+            await load()
+            onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not replace', 'error')
+        } finally {
+            setReplacing(false)
+        }
+    }
+
+    const download = async () => {
+        if (!blob) return
+        try {
+            const res = await window.ipc.invoke('spaces:saveBlob', {
+                orgId: org.id,
+                spaceId: space.id,
+                hash: blob.hash,
+                suggestedName: fileName,
+            })
+            if (res.saved) toast('Saved', 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not download', 'error')
+        }
+    }
 
     if (missing && !draft) {
         return (
@@ -277,6 +336,7 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                     </button>
                 )}
                 <code className="font-mono text-[11.5px] text-foreground/80 truncate" title={path}>{fileName}</code>
+                {blob && <span className="shrink-0">· {blob.mime} · {formatBytes(blob.size)}</span>}
                 {!draft && last && (
                     <span className="truncate">
                         · updated {formatFeedTime(last.committedAt)} by {attributionLabel(last.attribution, memberNames)}
@@ -286,9 +346,35 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                 <div className="flex-1" />
                 {!draft && asset && (
                     <>
-                        <button type="button" className="hover:text-foreground flex items-center gap-1" onClick={beginEdit}>
-                            <Pencil className="size-3" /> Edit
-                        </button>
+                        {blob ? (
+                            <>
+                                <input
+                                    ref={replaceInputRef}
+                                    type="file"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0]
+                                        if (file) void replaceWith(file)
+                                        e.target.value = ''
+                                    }}
+                                />
+                                <button type="button" className="hover:text-foreground flex items-center gap-1" onClick={() => void download()}>
+                                    <Download className="size-3" /> Download
+                                </button>
+                                <button
+                                    type="button"
+                                    className="hover:text-foreground flex items-center gap-1"
+                                    disabled={replacing}
+                                    onClick={() => replaceInputRef.current?.click()}
+                                >
+                                    {replacing ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />} Replace
+                                </button>
+                            </>
+                        ) : (
+                            <button type="button" className="hover:text-foreground flex items-center gap-1" onClick={beginEdit}>
+                                <Pencil className="size-3" /> Edit
+                            </button>
+                        )}
                         <button
                             type="button"
                             className={cn('hover:text-foreground flex items-center gap-1', historyOpen && 'text-foreground')}
@@ -341,6 +427,28 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                             className="w-full h-full min-h-full rounded-none border-0 font-mono text-sm resize-none focus-visible:ring-0 px-5 py-4"
                             onChange={(e) => setDraft({ ...draft, text: e.target.value, conflict: null })}
                         />
+                    ) : blob ? (
+                        <div className="p-5">
+                            {isImageMime(blob.mime) ? (
+                                <img
+                                    src={blobAppUrl({ orgId: org.id, spaceId: space.id }, blob.hash)}
+                                    alt={fileName}
+                                    className="max-w-full rounded-lg border border-border"
+                                />
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => void download()}
+                                    className="flex w-full max-w-sm items-center gap-3 rounded-xl border border-border bg-background p-4 text-left hover:border-foreground/30"
+                                >
+                                    <FileText className="size-8 shrink-0 text-muted-foreground" />
+                                    <span className="min-w-0">
+                                        <span className="block truncate text-sm font-medium">{fileName}</span>
+                                        <span className="block text-xs text-muted-foreground">{blob.mime} · {formatBytes(blob.size)} · click to download</span>
+                                    </span>
+                                </button>
+                            )}
+                        </div>
                     ) : asset ? (
                         <InteractiveMarkdown content={asset.content} onToggleCheckbox={(i) => void toggleCheckbox(i)} />
                     ) : (
@@ -461,6 +569,135 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
                 {changeSets.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No history yet.</div>}
             </div>
         </aside>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Upload to space files: phase-1 upload each picked file, then a binary
+// propose per file at <folder>/<filename>. Folders are keys, not objects —
+// typing "design/screens" is what creates the "folder".
+// ---------------------------------------------------------------------------
+
+interface UploadRow {
+    file: File
+    name: string
+    status: 'pending' | 'uploading' | 'done' | 'error'
+    error?: string
+}
+
+export function UploadFilesDialog({ org, space, files, entries, defaultFolder, onClose, onDone }: {
+    org: OrgWithSpaces
+    space: spaces.Space
+    files: File[]
+    entries: spaces.SpacesAssetEntry[]
+    /** Prefill, e.g. the folder of the currently open file. */
+    defaultFolder?: string
+    onClose: () => void
+    onDone: () => void
+}) {
+    const [folder, setFolder] = useState(defaultFolder ?? '')
+    const [rows, setRows] = useState<UploadRow[]>(files.map((file) => ({ file, name: file.name, status: 'pending' })))
+    const [running, setRunning] = useState(false)
+
+    const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, '')
+    const destFor = (name: string) => (cleanFolder ? `${cleanFolder}/${name}` : name)
+    const existing = useMemo(() => new Map(entries.map((e) => [e.path, e.version])), [entries])
+
+    const upload = async () => {
+        setRunning(true)
+        let failed = 0
+        for (const [i, row] of rows.entries()) {
+            if (row.status === 'done') continue
+            setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'uploading' } : r)))
+            try {
+                const filePath = window.electronUtils?.getPathForFile?.(row.file)
+                const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                    orgId: org.id,
+                    spaceId: space.id,
+                    ...(filePath ? { filePath } : { bytes: await row.file.arrayBuffer() }),
+                    name: row.name,
+                    ...(row.file.type ? { mime: row.file.type } : {}),
+                })
+                const dest = destFor(row.name)
+                const result = await window.ipc.invoke('spaces:proposeChange', {
+                    orgId: org.id,
+                    spaceId: space.id,
+                    input: {
+                        assetPath: dest,
+                        // Existing path = replace against its current head; new = create.
+                        baseVersion: existing.get(dest) ?? 0,
+                        blob: uploaded.blob.hash,
+                        reason: `upload ${row.name}`,
+                    },
+                })
+                if (result.outcome === 'conflict') {
+                    throw new Error(`someone changed ${dest} meanwhile — try again`)
+                }
+                setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'done' } : r)))
+            } catch (err) {
+                failed += 1
+                const message = err instanceof Error ? err.message : 'upload failed'
+                setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'error', error: message } : r)))
+            }
+        }
+        setRunning(false)
+        if (failed === 0) {
+            toast(rows.length === 1 ? `Uploaded ${destFor(rows[0]!.name)}` : `Uploaded ${rows.length} files`, 'success')
+            onDone()
+            onClose()
+        }
+    }
+
+    return (
+        <Dialog open onOpenChange={(open) => !open && !running && onClose()}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle className="text-sm">Upload to {space.name}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <label className="block text-xs text-muted-foreground">
+                        Folder <span className="text-muted-foreground/70">(optional — e.g. design/screens; created by the upload)</span>
+                        <Input
+                            value={folder}
+                            placeholder="(space root)"
+                            className="mt-1 h-7 text-xs font-mono"
+                            disabled={running}
+                            onChange={(e) => setFolder(e.target.value)}
+                        />
+                    </label>
+                    <div className="max-h-56 space-y-1 overflow-y-auto">
+                        {rows.map((row, i) => (
+                            <div key={i} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs">
+                                {row.status === 'uploading' ? (
+                                    <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                                ) : row.status === 'done' ? (
+                                    <Check className="size-3.5 shrink-0 text-emerald-600" />
+                                ) : row.status === 'error' ? (
+                                    <X className="size-3.5 shrink-0 text-red-500" />
+                                ) : (
+                                    <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                                )}
+                                <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-mono">{destFor(row.name)}</span>
+                                    {row.error && <span className="block truncate text-red-500">{row.error}</span>}
+                                </span>
+                                <span className="shrink-0 text-muted-foreground">{formatBytes(row.file.size)}</span>
+                                {existing.has(destFor(row.name)) && row.status === 'pending' && (
+                                    <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] text-amber-700 dark:bg-amber-950 dark:text-amber-400">replaces v{existing.get(destFor(row.name))}</span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={running} onClick={onClose}>Cancel</Button>
+                        <Button size="sm" className="h-7 text-xs" disabled={running || rows.length === 0} onClick={() => void upload()}>
+                            {running ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Upload className="size-3 mr-1" />}
+                            Upload {rows.length === 1 ? '' : `${rows.length} files`}
+                        </Button>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
     )
 }
 

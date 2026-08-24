@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { BlobInfo } from './blob.js';
 import { ChangeSet, ProposeChange, ProposeChangeResult, ReadAssetResult } from './changeset.js';
 import { ActingMode, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
-import { AssetPath, AssetVersion, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetPath, AssetVersion, BlobHash, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
   AcceptInviteResult,
@@ -93,7 +94,13 @@ export const routes = {
     params: z.object({ spaceId: SpaceId }),
     response: z.object({
       entries: z.array(
-        z.object({ path: AssetPath, version: AssetVersion, updatedAt: z.iso.datetime() }),
+        z.object({
+          path: AssetPath,
+          version: AssetVersion,
+          updatedAt: z.iso.datetime(),
+          /** Present when the head version is binary. Folders are display: clients group paths on `/`. */
+          blob: BlobInfo.optional(),
+        }),
       ),
     }),
   },
@@ -136,6 +143,39 @@ export const routes = {
       to: z.coerce.number().int().positive(),
     }),
     response: z.object({ unified: z.string() }),
+  },
+
+  // --- blobs ---------------------------------------------------------------
+  /**
+   * Phase 1 of every upload (spec §6): put the bytes, get the address. Body is
+   * the RAW BYTES, not JSON. Required header `x-blob-sha256`: the client-
+   * computed address — the org recomputes and refuses a mismatch, so a
+   * truncated or corrupted body can never be stored under a healthy name.
+   * `content-type` is advisory; the org sniffs well-known types and stores its
+   * own verdict. Idempotent by construction (same bytes → same hash → no-op).
+   * Referencing the hash (a message's blob link, or proposeChange's blob
+   * variant) is phase 2 — until then the blob is an orphan awaiting GC (§12).
+   */
+  uploadBlob: {
+    method: 'PUT',
+    path: '/v1/spaces/:spaceId/blobs',
+    params: z.object({ spaceId: SpaceId }),
+    response: z.object({ blob: BlobInfo }),
+  },
+  /**
+   * The bytes back: a stream (disk-driver orgs) or a 302 to a short-lived
+   * presigned URL (S3-family orgs) — clients just follow the redirect; which
+   * driver an org runs is never observable in client code. Membership-gated;
+   * hash-keyed means immutable, so responses are cacheable forever. Sniffed
+   * images serve inline; everything else is forced `attachment` + nosniff.
+   * `name` only shapes the download filename — never storage.
+   */
+  getBlob: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/blobs/:hash',
+    params: z.object({ spaceId: SpaceId, hash: BlobHash }),
+    query: z.object({ name: z.string().max(255).optional() }),
+    response: z.never(),
   },
 
   // --- feed ----------------------------------------------------------------

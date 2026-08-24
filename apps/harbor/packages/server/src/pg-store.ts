@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
+  BlobInfo,
   ChangeSet,
   Member,
   Membership,
@@ -9,11 +10,12 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import type { AssetHead, Store, StoredEvent, StoredInvite, StoredReaction } from './store.js';
+import type { AssetHead, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
 
-// The real Harbor's storage (spec deployment plan: Postgres only, no S3 in
-// v1 — contents are ≤1MB text riding in the log rows; current state, history,
-// feed, and the event stream are projections of the append-only log).
+// The real Harbor's storage: mergeable text lives inline in Postgres (≤1MB,
+// riding the log rows); binary versions carry {hash, size, mime} pointing into
+// the content-addressed BlobStore (spec §6). Current state, history, feed, and
+// the event stream are projections of the append-only log.
 //
 // Atomicity: withSpaceLock = one transaction holding a per-space advisory
 // lock; every store call inside the callback runs on that transaction via
@@ -48,6 +50,7 @@ interface ChangeSetRow {
   attribution: ChangeSet['attribution'];
   reason: string | null;
   topic_id: string | null;
+  blob: BlobInfo | null;
   committed_at: string;
   stream_offset: number;
 }
@@ -62,6 +65,7 @@ function rowToChangeSet(r: ChangeSetRow): ChangeSet {
     attribution: r.attribution,
     ...(r.reason !== null ? { reason: r.reason } : {}),
     ...(r.topic_id !== null ? { topicId: r.topic_id } : {}),
+    ...(r.blob !== null && r.blob !== undefined ? { blob: r.blob } : {}),
     committedAt: r.committed_at,
     offset: r.stream_offset,
   };
@@ -273,49 +277,99 @@ export class PgStore implements Store {
   // --- assets ----------------------------------------------------------------
 
   async listAssets(spaceId: string): Promise<AssetHead[]> {
-    const rows = await this.sql.query<{ path: string; version: number; updated_at: string }>(
-      'select path, version, updated_at from assets where space_id = $1 order by path',
+    // Head blob metadata rides on the head version's row (one fetch, spec §6).
+    const rows = await this.sql.query<{ path: string; version: number; updated_at: string; blob: BlobInfo | null }>(
+      `select a.path, a.version, a.updated_at, v.blob from assets a
+       join asset_versions v on v.space_id = a.space_id and v.path = a.path and v.version = a.version
+       where a.space_id = $1 order by a.path`,
       [spaceId],
     );
-    return rows.map((r) => ({ path: r.path, version: r.version, updatedAt: r.updated_at }));
+    return rows.map((r) => ({
+      path: r.path,
+      version: r.version,
+      updatedAt: r.updated_at,
+      ...(r.blob !== null && r.blob !== undefined ? { blob: r.blob } : {}),
+    }));
   }
 
   async getAssetHead(spaceId: string, path: string): Promise<AssetHead | undefined> {
-    const rows = await this.sql.query<{ path: string; version: number; updated_at: string }>(
-      'select path, version, updated_at from assets where space_id = $1 and path = $2',
+    const rows = await this.sql.query<{ path: string; version: number; updated_at: string; blob: BlobInfo | null }>(
+      `select a.path, a.version, a.updated_at, v.blob from assets a
+       join asset_versions v on v.space_id = a.space_id and v.path = a.path and v.version = a.version
+       where a.space_id = $1 and a.path = $2`,
       [spaceId, path],
     );
     const r = rows[0];
-    return r ? { path: r.path, version: r.version, updatedAt: r.updated_at } : undefined;
+    if (!r) return undefined;
+    return {
+      path: r.path,
+      version: r.version,
+      updatedAt: r.updated_at,
+      ...(r.blob !== null && r.blob !== undefined ? { blob: r.blob } : {}),
+    };
   }
 
-  async getAssetContent(spaceId: string, path: string, version: number): Promise<string | undefined> {
-    if (version === 0) return '';
-    const rows = await this.sql.query<{ content: string }>(
-      'select content from asset_versions where space_id = $1 and path = $2 and version = $3',
+  async getAssetVersion(spaceId: string, path: string, version: number): Promise<AssetVersionData | undefined> {
+    if (version === 0) return { content: '', blob: null };
+    const rows = await this.sql.query<{ content: string | null; blob: BlobInfo | null }>(
+      'select content, blob from asset_versions where space_id = $1 and path = $2 and version = $3',
       [spaceId, path, version],
     );
-    return rows[0]?.content;
+    const r = rows[0];
+    return r ? { content: r.content, blob: r.blob ?? null } : undefined;
   }
 
-  async putAssetVersion(spaceId: string, path: string, version: number, content: string, updatedAt: string): Promise<void> {
+  async putAssetVersion(spaceId: string, path: string, version: number, data: AssetVersionData, updatedAt: string): Promise<void> {
     await this.sql.query(
       `insert into assets (space_id, path, version, updated_at) values ($1, $2, $3, $4)
        on conflict (space_id, path) do update set version = excluded.version, updated_at = excluded.updated_at`,
       [spaceId, path, version, updatedAt],
     );
     await this.sql.query(
-      'insert into asset_versions (space_id, path, version, content) values ($1, $2, $3, $4)',
-      [spaceId, path, version, content],
+      'insert into asset_versions (space_id, path, version, content, blob) values ($1, $2, $3, $4, $5::jsonb)',
+      [spaceId, path, version, data.content, data.blob ? JSON.stringify(data.blob) : null],
     );
+  }
+
+  // --- uploaded blobs --------------------------------------------------------
+
+  async putSpaceBlob(blob: StoredSpaceBlob): Promise<void> {
+    // do nothing on conflict: first write wins (mime/uploader stay stable).
+    await this.sql.query(
+      `insert into space_blobs (space_id, hash, size, mime, uploaded_by, uploaded_at)
+       values ($1, $2, $3, $4, $5, $6) on conflict (space_id, hash) do nothing`,
+      [blob.spaceId, blob.hash, blob.size, blob.mime, blob.uploadedBy, blob.uploadedAt],
+    );
+  }
+
+  async getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined> {
+    const rows = await this.sql.query<{
+      space_id: string;
+      hash: string;
+      size: number | string;
+      mime: string;
+      uploaded_by: string;
+      uploaded_at: string;
+    }>('select * from space_blobs where space_id = $1 and hash = $2', [spaceId, hash]);
+    const r = rows[0];
+    if (!r) return undefined;
+    return {
+      spaceId: r.space_id,
+      hash: r.hash,
+      // bigint arrives as string under node-postgres, number under PGlite.
+      size: Number(r.size),
+      mime: r.mime,
+      uploadedBy: r.uploaded_by,
+      uploadedAt: r.uploaded_at,
+    };
   }
 
   // --- change log ------------------------------------------------------------
 
   async appendChangeSet(changeSet: ChangeSet): Promise<void> {
     await this.sql.query(
-      `insert into change_sets (id, space_id, asset_path, base_version, result_version, attribution, reason, topic_id, committed_at, stream_offset)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)`,
+      `insert into change_sets (id, space_id, asset_path, base_version, result_version, attribution, reason, topic_id, blob, committed_at, stream_offset)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10, $11)`,
       [
         changeSet.id,
         changeSet.spaceId,
@@ -325,6 +379,7 @@ export class PgStore implements Store {
         JSON.stringify(changeSet.attribution),
         changeSet.reason ?? null,
         changeSet.topicId ?? null,
+        changeSet.blob ? JSON.stringify(changeSet.blob) : null,
         changeSet.committedAt,
         changeSet.offset,
       ],

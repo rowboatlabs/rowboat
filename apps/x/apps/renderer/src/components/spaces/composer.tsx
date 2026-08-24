@@ -1,19 +1,43 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Bot, Globe, Loader2, ShieldCheck, Terminal } from 'lucide-react'
+import { ArrowUp, Bot, FileText, Globe, Loader2, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
 import { MemberAvatar } from '@/components/spaces/atoms'
+import { useSpaceRefs } from '@/components/spaces/space-markdown'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
-import { encodeMentions } from '@/lib/spaces-presentation'
+import { blobAppUrl, blobWireUrl, encodeMentions, formatBytes, isImageMime } from '@/lib/spaces-presentation'
+import { toast } from '@/lib/toast'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
 // line — with two things layered on: `@` autocompletes members and @rowboat,
 // and the moment the draft addresses @rowboat, a strip of agent options
 // (model · permissions · search · terminal) appears; they ride along with the
 // invocation for that one turn. The message itself always goes to the team.
+//
+// Attachments (paperclip · paste · drag-drop) upload at ATTACH time, not send
+// time — send is instant and can't fail on a slow upload (the two-phase upload
+// model, spec §6). Chips keep insertion order regardless of completion order;
+// send appends each done attachment as a canonical blob link on the wire.
+
+interface AttachmentState {
+    id: number
+    name: string
+    mime: string
+    size: number
+    status: 'uploading' | 'done' | 'error'
+    hash?: string
+    error?: string
+}
+
+/** Paste gives bytes; drag-drop and the picker give a real path (main reads from disk). */
+async function uploadInputFor(file: File): Promise<{ bytes?: ArrayBuffer; filePath?: string }> {
+    const filePath = window.electronUtils?.getPathForFile?.(file)
+    if (filePath) return { filePath }
+    return { bytes: await file.arrayBuffer() }
+}
 
 /** Per-turn agent options, sent with the invocation when the draft addresses @rowboat. */
 export interface AgentOptions {
@@ -48,6 +72,81 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     const [draft, setDraft] = useState('')
     const [appliedSeed, setAppliedSeed] = useState<number | null>(null)
     const ref = useRef<HTMLTextAreaElement | null>(null)
+
+    // --- attachments ---------------------------------------------------------
+    const refs = useSpaceRefs()
+    const [attachments, setAttachments] = useState<AttachmentState[]>([])
+    const attachmentIdRef = useRef(0)
+    const fileInputRef = useRef<HTMLInputElement | null>(null)
+    // Depth counter so nested dragenter/dragleave can't flicker the overlay.
+    const dragDepthRef = useRef(0)
+    const [dragOver, setDragOver] = useState(false)
+
+    const addFiles = (files: File[]) => {
+        if (!refs || files.length === 0) return
+        for (const file of files) {
+            const id = ++attachmentIdRef.current
+            const name = file.name || 'pasted-image.png'
+            // The chip appears immediately in drop order; the upload fills it in
+            // whenever it completes (slot reservation, so order is stable).
+            setAttachments((prev) => [
+                ...prev,
+                { id, name, mime: file.type || 'application/octet-stream', size: file.size, status: 'uploading' },
+            ])
+            void (async () => {
+                try {
+                    const input = await uploadInputFor(file)
+                    const res = await window.ipc.invoke('spaces:uploadBlob', {
+                        orgId: refs.orgId,
+                        spaceId: refs.spaceId,
+                        ...input,
+                        name,
+                        ...(file.type ? { mime: file.type } : {}),
+                    })
+                    setAttachments((prev) =>
+                        prev.map((a) => (a.id === id ? { ...a, status: 'done', hash: res.blob.hash, mime: res.blob.mime, size: res.blob.size } : a)),
+                    )
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : 'upload failed'
+                    setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, status: 'error', error: message } : a)))
+                    toast(`Could not upload ${name}: ${message}`, 'error')
+                }
+            })()
+        }
+    }
+
+    const removeAttachment = (id: number) => setAttachments((prev) => prev.filter((a) => a.id !== id))
+    const uploading = attachments.some((a) => a.status === 'uploading')
+
+    const dragHasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files')
+    const onDragEnter = (e: React.DragEvent) => {
+        if (!refs || !dragHasFiles(e)) return
+        e.preventDefault()
+        dragDepthRef.current += 1
+        setDragOver(true)
+    }
+    const onDragLeave = (e: React.DragEvent) => {
+        if (!refs || !dragHasFiles(e)) return
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+        if (dragDepthRef.current === 0) setDragOver(false)
+    }
+    const onDrop = (e: React.DragEvent) => {
+        if (!refs || !dragHasFiles(e)) return
+        e.preventDefault()
+        dragDepthRef.current = 0
+        setDragOver(false)
+        addFiles(Array.from(e.dataTransfer.files))
+    }
+    const onPaste = (e: React.ClipboardEvent) => {
+        if (!refs) return
+        const files = Array.from(e.clipboardData.items)
+            .filter((item) => item.kind === 'file')
+            .map((item) => item.getAsFile())
+            .filter((f): f is File => f !== null)
+        if (files.length === 0) return
+        e.preventDefault()
+        addFiles(files)
+    }
 
     // Agent options — only meaningful (and only shown) when @rowboat is addressed.
     const [model, setModel] = useState<ModelSelection | null>(null)
@@ -149,8 +248,21 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     // --- send ----------------------------------------------------------------
     const mentioned = containsRowboatAddress(draft)
     const send = async () => {
-        const body = encodeMentions(draft.trim(), members)
-        if (!body || busy) return
+        if (busy || uploading) return
+        const ready = attachments.filter((a) => a.status === 'done' && a.hash)
+        const text = encodeMentions(draft.trim(), members)
+        // Each attachment lands on the wire as a canonical blob link: images as
+        // markdown images (renderers show them inline), the rest as plain links
+        // (rendered as download cards). ?name= keeps the display filename.
+        const attachmentLines = refs
+            ? ready.map((a) =>
+                  isImageMime(a.mime)
+                      ? `![${a.name}](${blobWireUrl(refs, a.hash!, a.name)})`
+                      : `[${a.name}](${blobWireUrl(refs, a.hash!, a.name)})`,
+              )
+            : []
+        const body = [text, ...attachmentLines].filter(Boolean).join('\n')
+        if (!body) return
         const agent: AgentOptions | undefined = mentioned
             ? {
                   ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
@@ -161,12 +273,24 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
             : undefined
         await onSend(body, agent)
         setDraft('')
+        setAttachments([])
         setMentionOpen(false)
     }
 
     return (
         <div className="px-3 pb-3 pt-1 shrink-0">
-            <div className="relative rounded-xl border border-border bg-background shadow-sm focus-within:border-foreground/30">
+            <div
+                className="relative rounded-xl border border-border bg-background shadow-sm focus-within:border-foreground/30"
+                onDragEnter={onDragEnter}
+                onDragOver={(e) => { if (refs && dragHasFiles(e)) e.preventDefault() }}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+            >
+                {dragOver && (
+                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-foreground/40 bg-background/90 text-sm text-muted-foreground">
+                        Drop to attach
+                    </div>
+                )}
                 {showMentions && (
                     <div className="absolute bottom-full left-2 z-20 mb-1 w-72 overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-md">
                         {candidates.map((c, i) => (
@@ -191,6 +315,38 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                         <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
                     </div>
                 )}
+                {attachments.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
+                        {attachments.map((a) => (
+                            <span
+                                key={a.id}
+                                title={a.status === 'error' ? a.error : `${a.name} · ${formatBytes(a.size)}`}
+                                className={cn(
+                                    'inline-flex max-w-56 items-center gap-1.5 rounded-lg border px-2 py-1 text-xs',
+                                    a.status === 'error' ? 'border-red-300 text-red-600 dark:border-red-800 dark:text-red-400' : 'border-border text-foreground/90',
+                                )}
+                            >
+                                {a.status === 'uploading' ? (
+                                    <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+                                ) : refs && a.hash && isImageMime(a.mime) ? (
+                                    <img src={blobAppUrl({ orgId: refs.orgId, spaceId: refs.spaceId }, a.hash, { thumb: 64 })} alt="" className="size-5 shrink-0 rounded object-cover" />
+                                ) : (
+                                    <FileText className="size-3 shrink-0 text-muted-foreground" />
+                                )}
+                                <span className="truncate">{a.name}</span>
+                                <span className="shrink-0 text-[10px] text-muted-foreground">{a.status === 'uploading' ? 'uploading…' : a.status === 'error' ? 'failed' : formatBytes(a.size)}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => removeAttachment(a.id)}
+                                    aria-label={`Remove ${a.name}`}
+                                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                    <XIcon className="size-3" />
+                                </button>
+                            </span>
+                        ))}
+                    </div>
+                )}
                 <Textarea
                     ref={ref}
                     autoFocus={autoFocus}
@@ -198,6 +354,7 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                     placeholder={placeholder}
                     rows={1}
                     className="min-h-9 max-h-40 resize-none border-0 bg-transparent dark:bg-transparent px-3 pt-2.5 pb-1 text-sm shadow-none focus-visible:ring-0 field-sizing-content"
+                    onPaste={onPaste}
                     onChange={(e) => {
                         setDraft(e.target.value)
                         const pos = e.target.selectionStart ?? e.target.value.length
@@ -239,6 +396,28 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                     }}
                 />
                 <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
+                    {refs && (
+                        <>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                multiple
+                                className="hidden"
+                                onChange={(e) => {
+                                    addFiles(Array.from(e.target.files ?? []))
+                                    e.target.value = ''
+                                }}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                title="Attach files (or paste / drop them)"
+                                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                                <Paperclip className="size-4" />
+                            </button>
+                        </>
+                    )}
                     <button
                         type="button"
                         onClick={insertRowboatChip}
@@ -303,9 +482,9 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                     <button
                         type="button"
                         onClick={() => void send()}
-                        disabled={busy || !draft.trim()}
+                        disabled={busy || uploading || (!draft.trim() && !attachments.some((a) => a.status === 'done'))}
                         aria-label="Send"
-                        title="Send (↵ · Shift+↵ for a new line)"
+                        title={uploading ? 'Waiting for uploads…' : 'Send (↵ · Shift+↵ for a new line)'}
                         className="inline-flex size-7 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30 transition-opacity"
                     >
                         {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}

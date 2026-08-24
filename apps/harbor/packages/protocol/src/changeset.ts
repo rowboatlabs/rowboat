@@ -1,11 +1,17 @@
 import { z } from 'zod';
+import { BlobInfo } from './blob.js';
 import { Attribution, ActingMode } from './core.js';
-import { AssetPath, AssetVersion, ChangeSetId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetPath, AssetVersion, BlobHash, ChangeSetId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Decision 1 (CONTRACT.md): a proposal is full new content against a declared
 // base version; the org performs a line-level three-way merge. No operation
 // encoding on the wire. Decision 6: a conflict response carries everything a
 // human draft UI or an agent retry needs — no second round trip.
+//
+// Binary variant (spec §6): a proposal may carry an uploaded blob's hash
+// instead of text. One namespace, one log — `design.pdf` beside `README.md`,
+// only the populated field differs. Binary staleness never merges: a stale
+// binary base (or a binary head) is conflict-or-replace, never a three-way.
 
 /** The durable record of one applied change (spec §6). Content is fetched via read/history/diff, not carried here. */
 export const ChangeSet = z.object({
@@ -20,6 +26,8 @@ export const ChangeSet = z.object({
   reason: z.string().max(1_000).optional(),
   /** The topic the change was made from, when it was made from one (provenance). */
   topicId: TopicId.optional(),
+  /** Present when the change produced a binary version (proposeChange's blob variant). */
+  blob: BlobInfo.optional(),
   committedAt: z.iso.datetime(),
   offset: StreamOffset,
 });
@@ -29,13 +37,19 @@ export const ProposeChange = z.object({
   assetPath: AssetPath,
   /** Version the proposer last read. 0 = create; stale values trigger merge or conflict. */
   baseVersion: z.number().int().nonnegative(),
-  /** Full desired content. V1 assets are small text files; simplicity beats op-encoding. */
-  newContent: z.string().max(1_048_576),
+  /** Text variant: full desired content (inline cap 1MB — over that, or non-UTF-8, attach a blob instead). */
+  newContent: z.string().max(1_048_576).optional(),
+  /** Binary variant: the address of bytes already uploaded to this space (uploadBlob). Exactly one of newContent/blob. */
+  blob: BlobHash.optional(),
   reason: z.string().max(1_000).optional(),
   /** Provenance: the topic this change was made from. Omitted by prompt-driven agents, which append "· topic:<id>" to the reason instead — the org derives topicId from that suffix (topicIdFromReason). */
   topicId: TopicId.optional(),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),
+}).superRefine((v, ctx) => {
+  if ((v.newContent === undefined) === (v.blob === undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'exactly one of newContent or blob' });
+  }
 });
 export type ProposeChange = z.infer<typeof ProposeChange>;
 
@@ -86,12 +100,18 @@ export const ProposeChangeResult = z.discriminatedUnion('outcome', [
    * Overlapping edits. NOTHING was written. The proposer adjusts against
    * `currentContent`/`currentVersion` and re-proposes (spec §6 merge-then-correct).
    * `recentHistory` is the read-before-write bundle for agent retries.
+   *
+   * Binary: when either side of a stale propose is binary there is nothing to
+   * three-way-merge, so the conflict comes with `regions: []` — the current
+   * head is `currentBlob` (binary, `currentContent` is '') or `currentContent`
+   * (text). Re-proposing at `currentVersion` is the explicit replace.
    */
   z.object({
     outcome: z.literal('conflict'),
     currentVersion: AssetVersion,
     currentContent: z.string(),
-    regions: z.array(ConflictRegion).min(1),
+    currentBlob: BlobInfo.optional(),
+    regions: z.array(ConflictRegion),
     recentHistory: z.array(ChangeSet),
   }),
 ]);
@@ -100,7 +120,10 @@ export type ProposeChangeResult = z.infer<typeof ProposeChangeResult>;
 /** Read is bundled with recent history everywhere (spec §6: read-before-write is mechanical fact). */
 export const ReadAssetResult = z.object({
   path: AssetPath,
+  /** '' for binary versions — the bytes live behind getBlob, addressed by `blob.hash`. */
   content: z.string(),
+  /** Present when this version is binary. */
+  blob: BlobInfo.optional(),
   version: AssetVersion,
   recentHistory: z.array(ChangeSet),
 });

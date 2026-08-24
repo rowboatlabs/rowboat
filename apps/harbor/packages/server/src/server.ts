@@ -2,6 +2,7 @@ import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { getRequestListener } from '@hono/node-server';
 import { DevAuthDriver, ensureMember, type AuthDriver } from './auth.js';
+import { MemoryBlobStore, type BlobStore } from './blobs.js';
 import { buildHttpApp } from './http.js';
 import { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
@@ -38,6 +39,10 @@ export interface HarborOptions {
   allowedEmailDomains?: string[];
   /** Storage; defaults to in-memory. Pass a PgStore (init() run) for durable deployments. */
   store?: Store;
+  /** Blob bytes; defaults to in-memory (matching the store default). Pass Disk/S3 for durable deployments. */
+  blobs?: BlobStore;
+  /** Upload cap for the raw-bytes blob route (default 100MB). */
+  maxBlobBytes?: number;
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -63,13 +68,19 @@ export interface RunningHarbor {
 
 export async function startHarbor(options: HarborOptions = {}): Promise<RunningHarbor> {
   const store = options.store ?? new MemoryStore();
+  const blobs = options.blobs ?? new MemoryBlobStore();
   const auth: AuthDriver = options.auth ?? new DevAuthDriver();
   const hub = new SpaceHub();
-  const service = new HarborService(store, hub, {
-    name: options.orgName ?? 'Harbor (dev)',
-    address: options.address ?? 'localhost',
-    ...(options.allowedEmailDomains ? { allowedEmailDomains: options.allowedEmailDomains } : {}),
-  });
+  const service = new HarborService(
+    store,
+    hub,
+    {
+      name: options.orgName ?? 'Harbor (dev)',
+      address: options.address ?? 'localhost',
+      ...(options.allowedEmailDomains ? { allowedEmailDomains: options.allowedEmailDomains } : {}),
+    },
+    blobs,
+  );
 
   for (const m of options.seedMembers ?? []) {
     const existing = await store.getMember(m.id);
@@ -106,6 +117,7 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
     store,
     auth,
     ...(options.consent && issuer ? { consent: { issuer, publishableKey: options.consent.publishableKey } } : {}),
+    ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
   });
   const honoListener = getRequestListener(app.fetch);
   const server = createServer((req, res) => {

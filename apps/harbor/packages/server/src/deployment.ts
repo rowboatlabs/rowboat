@@ -4,6 +4,7 @@ import { getRequestListener } from '@hono/node-server';
 import { buildApexApp } from './apex.js';
 import { DevAuthDriver, type AuthDriver } from './auth.js';
 import { OidcAuthDriver } from './auth-oidc.js';
+import type { BlobStore } from './blobs.js';
 import { OrgDirectory, normalizeDomain, type CreateOrgInput, type OrgConfig } from './directory.js';
 import { buildHttpApp } from './http.js';
 import { SpaceHub } from './hub.js';
@@ -44,6 +45,14 @@ export interface DeploymentOptions {
   apexDomain?: string;
   /** The deployment's AS — apex auth + the issuer every created org pins. */
   issuer?: string;
+  /**
+   * Per-org blob stores (dedup scope is per org, never global — spec §6). The
+   * factory is called once per org runtime, typically an S3 driver with an
+   * org-scoped key prefix. Absent = uploads unconfigured on every org.
+   */
+  blobs?: (orgId: string) => BlobStore;
+  /** Upload cap for the raw-bytes blob route (default 100MB). */
+  maxBlobBytes?: number;
 }
 
 export interface RunningDeployment {
@@ -87,11 +96,16 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
   function buildRuntime(org: OrgConfig): OrgRuntime | undefined {
     if (!org.issuer && !options.allowDevOrgs) return undefined;
     const store = new PgStore(options.db, org.id);
-    const service = new HarborService(store, hub, {
-      name: org.name,
-      address: org.domains[0] ?? org.id,
-      ...(org.allowedEmailDomains ? { allowedEmailDomains: org.allowedEmailDomains } : {}),
-    });
+    const service = new HarborService(
+      store,
+      hub,
+      {
+        name: org.name,
+        address: org.domains[0] ?? org.id,
+        ...(org.allowedEmailDomains ? { allowedEmailDomains: org.allowedEmailDomains } : {}),
+      },
+      options.blobs?.(org.id),
+    );
     const auth: AuthDriver = org.issuer ? new OidcAuthDriver({ issuer: org.issuer }) : new DevAuthDriver();
     const app = buildHttpApp({
       service,
@@ -100,6 +114,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
       ...(org.issuer && options.consentPublishableKey
         ? { consent: { issuer: org.issuer, publishableKey: options.consentPublishableKey } }
         : {}),
+      ...(options.maxBlobBytes !== undefined ? { maxBlobBytes: options.maxBlobBytes } : {}),
     });
     return { service, store, auth, hono: getRequestListener(app.fetch) };
   }

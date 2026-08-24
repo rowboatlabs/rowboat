@@ -6,13 +6,14 @@ import type {
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
-import type { AssetHead, Store, StoredEvent, StoredInvite, StoredReaction } from './store.js';
+import type { AssetHead, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
 
 interface SpaceState {
   space: Space;
   memberships: Map<string, Membership>;
   assetHeads: Map<string, AssetHead>;
-  assetContents: Map<string, string>; // `${path}@${version}`
+  assetVersions: Map<string, AssetVersionData>; // `${path}@${version}`
+  blobs: Map<string, StoredSpaceBlob>; // hash → registration (first write wins)
   changeSets: ChangeSet[]; // append order == offset order
   changeSetsById: Map<string, ChangeSet>;
   topics: Map<string, Topic>;
@@ -65,7 +66,8 @@ export class MemoryStore implements Store {
       space,
       memberships: new Map(),
       assetHeads: new Map(),
-      assetContents: new Map(),
+      assetVersions: new Map(),
+      blobs: new Map(),
       changeSets: [],
       changeSetsById: new Map(),
       topics: new Map(),
@@ -113,21 +115,30 @@ export class MemoryStore implements Store {
     return this.state(spaceId)?.assetHeads.get(path);
   }
 
-  async getAssetContent(spaceId: string, path: string, version: number): Promise<string | undefined> {
-    if (version === 0) return '';
-    return this.state(spaceId)?.assetContents.get(`${path}@${version}`);
+  async getAssetVersion(spaceId: string, path: string, version: number): Promise<AssetVersionData | undefined> {
+    if (version === 0) return { content: '', blob: null };
+    return this.state(spaceId)?.assetVersions.get(`${path}@${version}`);
   }
 
   async putAssetVersion(
     spaceId: string,
     path: string,
     version: number,
-    content: string,
+    data: AssetVersionData,
     updatedAt: string,
   ): Promise<void> {
     const s = this.must(spaceId);
-    s.assetHeads.set(path, { path, version, updatedAt });
-    s.assetContents.set(`${path}@${version}`, content);
+    s.assetHeads.set(path, { path, version, updatedAt, ...(data.blob ? { blob: data.blob } : {}) });
+    s.assetVersions.set(`${path}@${version}`, data);
+  }
+
+  async putSpaceBlob(blob: StoredSpaceBlob): Promise<void> {
+    const s = this.must(blob.spaceId);
+    if (!s.blobs.has(blob.hash)) s.blobs.set(blob.hash, blob);
+  }
+
+  async getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined> {
+    return this.state(spaceId)?.blobs.get(hash);
   }
 
   async appendChangeSet(changeSet: ChangeSet): Promise<void> {

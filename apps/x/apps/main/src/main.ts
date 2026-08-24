@@ -18,6 +18,7 @@ import {
   stopWorkspaceWatcher
 } from "./ipc.js";
 import { disposeAllTerminals } from "./terminal.js";
+import * as spaceBlobCache from "./spaces/blob-cache.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
@@ -197,9 +198,13 @@ console.log("rendererPath", rendererPath);
 // AND for serving local workspace files to the renderer (images, PDFs, video).
 //
 //   app://workspace/<rel-path>  → workspace file (path-traversal guarded)
+//   app://space-blob/<orgId>/<spaceId>/<hash>[?thumb=<w>] → space upload,
+//     via the authed org client + content-addressed disk cache (blob-cache.ts).
+//     This is how <img> tags in space messages render: the renderer holds no
+//     org tokens, so blob bytes must resolve in main.
 //   app://<anything-else>/...   → renderer SPA (existing behavior)
 function registerAppProtocol() {
-  protocol.handle("app", (request) => {
+  protocol.handle("app", async (request) => {
     const url = new URL(request.url);
 
     // Workspace files: app://workspace/<rel-path>
@@ -211,6 +216,32 @@ function registerAppProtocol() {
         return net.fetch(pathToFileURL(absPath).toString());
       } catch {
         return new Response("Forbidden", { status: 403 });
+      }
+    }
+
+    // Space blobs: app://space-blob/<orgId>/<spaceId>/<hash>
+    if (url.host === "space-blob") {
+      try {
+        const [orgId, spaceId, hash] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        if (!orgId || !spaceId || !hash) return new Response("Not Found", { status: 404 });
+        const thumb = url.searchParams.get("thumb");
+        const headers = {
+          // Content-addressed → immutable; let Chromium keep it forever.
+          "cache-control": "private, max-age=31536000, immutable",
+          "x-content-type-options": "nosniff",
+        };
+        if (thumb) {
+          const png = await spaceBlobCache.getThumbnail(orgId, spaceId, hash, Number(thumb));
+          if (png) {
+            return new Response(new Uint8Array(png), { headers: { ...headers, "content-type": "image/png" } });
+          }
+          // Not an image — fall through to the full blob.
+        }
+        const blob = await spaceBlobCache.getBlob(orgId, spaceId, hash);
+        return new Response(new Uint8Array(blob.bytes), { headers: { ...headers, "content-type": blob.mime } });
+      } catch (err) {
+        console.error("[space-blob] failed to serve", request.url, err);
+        return new Response("Not Found", { status: 404 });
       }
     }
 

@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { assertBlobHash, blobHash, type BlobStore } from './blobs.js';
 
 // S3-compatible driver via the canonical AWS SDK. "S3-compatible" is the
@@ -90,6 +91,24 @@ export class S3BlobStore implements BlobStore {
   async delete(hash: string): Promise<void> {
     // S3 DeleteObject is idempotent — deleting a missing key succeeds.
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.keyFor(hash) }));
+  }
+
+  /** Presigned GET — the serving route 302s here so bytes go S3 → client directly. */
+  async downloadUrl(
+    hash: string,
+    opts: { expiresInSeconds: number; responseContentType?: string; responseContentDisposition?: string },
+  ): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: this.keyFor(hash),
+      // Objects are stored as octet-stream (put); the org's stored mime and
+      // disposition are re-asserted here, inside the signature.
+      ...(opts.responseContentType ? { ResponseContentType: opts.responseContentType } : {}),
+      ...(opts.responseContentDisposition
+        ? { ResponseContentDisposition: opts.responseContentDisposition }
+        : {}),
+    });
+    return getSignedUrl(this.client, command, { expiresIn: opts.expiresInSeconds });
   }
 }
 

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Streamdown } from 'streamdown'
 import { Bot, ChevronRight, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, SmilePlus } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -8,7 +7,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { decorateMentions, formatFeedTime } from '@/lib/spaces-presentation'
+import { SpaceMarkdown } from '@/components/spaces/space-markdown'
+import { formatFeedTime } from '@/lib/spaces-presentation'
 
 // One message in a stream (general or a thread). Consecutive messages by the
 // same author compact to a time gutter; hover reveals the action bar.
@@ -156,7 +156,7 @@ export function MessageRow({
                     </div>
                 )}
                 <div className={MESSAGE_PROSE}>
-                    <Streamdown>{decorateMentions(message.body, memberNames)}</Streamdown>
+                    <SpaceMarkdown body={message.body} />
                 </div>
                 {onReact && (
                     <ReactionChips

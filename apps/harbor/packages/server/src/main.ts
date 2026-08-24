@@ -1,6 +1,10 @@
 #!/usr/bin/env node
+import path from 'node:path';
 import type { AuthDriver } from './auth.js';
 import { OidcAuthDriver } from './auth-oidc.js';
+import type { BlobStore } from './blobs.js';
+import { DiskBlobStore } from './blobs-disk.js';
+import { S3BlobStore } from './blobs-s3.js';
 import { PgStore } from './pg-store.js';
 import { startHarbor } from './server.js';
 import { postgresDb } from './sql.js';
@@ -47,6 +51,41 @@ const ROADBOARD_ROADMAP = `# Roadmap
 
 const port = Number(process.env.PORT ?? 4272);
 
+// Blob storage from env, either mode. Dedup scope is per org (spec §6), so the
+// deployment factory scopes every driver by orgId; the single-org dev path
+// passes orgId 'org-default'.
+//   BLOBS_S3_BUCKET (+ BLOBS_S3_ENDPOINT/REGION/FORCE_PATH_STYLE,
+//     credentials via the AWS provider chain or BLOBS_S3_ACCESS_KEY_ID/SECRET)
+//   BLOBS_DIR — disk driver (self-hosted single-node)
+// Neither set: dev mode falls back to in-memory (restart = clean slate);
+// deployment mode leaves uploads unconfigured and the routes refuse loudly.
+function blobStoreFactory(): ((orgId: string) => BlobStore) | undefined {
+  const bucket = process.env.BLOBS_S3_BUCKET;
+  if (bucket) {
+    return (orgId) =>
+      new S3BlobStore({
+        bucket,
+        prefix: `blobs/${orgId}/`,
+        ...(process.env.BLOBS_S3_REGION ? { region: process.env.BLOBS_S3_REGION } : {}),
+        ...(process.env.BLOBS_S3_ENDPOINT ? { endpoint: process.env.BLOBS_S3_ENDPOINT } : {}),
+        ...(process.env.BLOBS_S3_FORCE_PATH_STYLE ? { forcePathStyle: true } : {}),
+        ...(process.env.BLOBS_S3_ACCESS_KEY_ID && process.env.BLOBS_S3_SECRET_ACCESS_KEY
+          ? {
+              credentials: {
+                accessKeyId: process.env.BLOBS_S3_ACCESS_KEY_ID,
+                secretAccessKey: process.env.BLOBS_S3_SECRET_ACCESS_KEY,
+              },
+            }
+          : {}),
+      });
+  }
+  const dir = process.env.BLOBS_DIR;
+  if (dir) return (orgId) => new DiskBlobStore(path.join(dir, orgId));
+  return undefined;
+}
+
+const maxBlobBytes = process.env.HARBOR_MAX_BLOB_BYTES ? Number(process.env.HARBOR_MAX_BLOB_BYTES) : undefined;
+
 // Deployment mode (the managed fleet / any multi-org host): HARBOR_MODE=deployment
 // + DATABASE_URL + APEX_DOMAIN + AUTH_ISSUER. No seeding, no dev tokens —
 // orgs are created self-serve on the apex face; members arrive via OAuth +
@@ -60,18 +99,24 @@ if (process.env.HARBOR_MODE === 'deployment') {
       process.exit(1);
     }
   }
+  const blobs = blobStoreFactory();
   const deployment = await startHarborDeployment({
     db: postgresDb(process.env.DATABASE_URL!),
     port,
     apexDomain: process.env.APEX_DOMAIN!,
     issuer: process.env.AUTH_ISSUER!,
     ...(process.env.AUTH_PUBLISHABLE_KEY ? { consentPublishableKey: process.env.AUTH_PUBLISHABLE_KEY } : {}),
+    ...(blobs ? { blobs } : {}),
+    ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
   });
   console.log(`Harbor deployment (multi-org, Postgres)`);
   console.log(``);
   console.log(`  apex       https://${process.env.APEX_DOMAIN}  (create org, my orgs)`);
   console.log(`  orgs       https://<slug>.${process.env.APEX_DOMAIN}  (render /v1/*, live /v1/live, agent /mcp)`);
   console.log(`  issuer     ${process.env.AUTH_ISSUER}`);
+  console.log(
+    `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'UNCONFIGURED — uploads will be refused (set BLOBS_S3_BUCKET or BLOBS_DIR)'}`,
+  );
   console.log(`  listening  :${deployment.port}`);
   process.on('SIGTERM', () => void deployment.close().then(() => process.exit(0)));
 } else {
@@ -94,9 +139,13 @@ if (process.env.AUTH_ISSUER) {
   });
 }
 
+const blobFactory = blobStoreFactory();
+
 const harbor = await startHarbor({
   port,
   ...(store ? { store } : {}),
+  ...(blobFactory ? { blobs: blobFactory('org-default') } : {}),
+  ...(maxBlobBytes !== undefined ? { maxBlobBytes } : {}),
   ...(auth ? { auth } : {}),
   ...(auth && process.env.AUTH_PUBLISHABLE_KEY
     ? { consent: { publishableKey: process.env.AUTH_PUBLISHABLE_KEY } }
@@ -121,6 +170,9 @@ const harbor = await startHarbor({
 const spaces = await harbor.service.listSpaces({ memberId: 'ramnique' });
 
 console.log(`Harbor (single org, ${store ? 'Postgres via DATABASE_URL' : 'in-memory — restart = clean slate'})`);
+console.log(
+  `  blobs      ${process.env.BLOBS_S3_BUCKET ? `s3 bucket ${process.env.BLOBS_S3_BUCKET}` : process.env.BLOBS_DIR ? `disk ${process.env.BLOBS_DIR}` : 'in-memory (set BLOBS_DIR or BLOBS_S3_BUCKET for durable uploads)'}`,
+);
 console.log(``);
 console.log(`  org        ${harbor.service.org.name}  @  ${harbor.address}`);
 console.log(`  render     ${harbor.url}/v1/*`);
