@@ -5675,11 +5675,11 @@ function App() {
     }
   }, [sessionChat.chatState?.conversation, runId, navigateToView])
 
-  // Spreadsheet auto-open: when the assistant creates or edits a spreadsheet
-  // inside the workspace, open the in-app viewer on it (a no-op navigation if
-  // it's already open; the viewer refreshes itself via workspace:didChange).
-  // Same seeding semantics as app-navigation above: transcript entries present
-  // on session switch are marked processed without replaying.
+  // Spreadsheet auto-open / refresh: when the assistant writes a spreadsheet
+  // inside the workspace, open the viewer on a brand-new file
+  // (spreadsheet-create) and tell an already-open viewer the file changed
+  // underneath it. Same seeding semantics as app-navigation above: transcript
+  // entries present on session switch are marked processed without replaying.
   const processedSpreadsheetToolsRef = useRef<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() })
   useEffect(() => {
     const conversation = sessionChat.chatState?.conversation
@@ -5699,7 +5699,11 @@ function App() {
       processedSpreadsheetToolsRef.current.ids.add(tool.id)
       const result = tool.result as Record<string, unknown> | undefined
       if (result && result.success && typeof result.workspaceRelPath === 'string') {
-        void navigateToView({ type: 'file', path: result.workspaceRelPath })
+        // Only a brand-new spreadsheet steals the view; edits to an existing
+        // one must not yank the user away from what they are doing.
+        if (tool.name === 'spreadsheet-create') {
+          void navigateToView({ type: 'file', path: result.workspaceRelPath })
+        }
         // If the viewer is already open on this file the navigation is a
         // no-op, and the workspace watcher only covers allowlisted roots —
         // so tell the viewer directly that the file changed.
