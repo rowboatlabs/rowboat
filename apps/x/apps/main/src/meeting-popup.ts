@@ -129,7 +129,7 @@ export function showMeetingPopup(meeting: DetectedMeeting): void {
     // seen while the user is IN the meeting, wherever that is.
     win.setAlwaysOnTop(true, "screen-saver");
     // `skipTransformProcessType` keeps the Dock icon (same as the video
-    // popout and quick-ask bar): without it, visibleOnFullScreen flips the
+    // popout and the hover companion): without it, visibleOnFullScreen flips the
     // app's activation policy to "accessory" — the Dock icon disappears and
     // an app.dock.show() repair is unreliable (the policy comes back, so
     // Cmd-Tab works, but the Dock tile often never re-registers until

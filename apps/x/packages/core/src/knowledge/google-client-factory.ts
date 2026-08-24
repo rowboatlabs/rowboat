@@ -1,4 +1,5 @@
 import { OAuth2Client } from 'google-auth-library';
+import { google, gmail_v1, type Common } from 'googleapis';
 import container from '../di/container.js';
 import { IOAuthRepo } from '../auth/repo.js';
 import { IClientRegistrationRepo } from '../auth/client-repo.js';
@@ -13,6 +14,23 @@ import {
 } from '../auth/google-backend-oauth.js';
 
 type Mode = 'byok' | 'rowboat';
+
+const RATE_LIMIT_REASONS = new Set(['rateLimitExceeded', 'userRateLimitExceeded']);
+
+/** 429 anywhere, or Gmail's alternate 403-with-rate-limit-reason form. */
+function isRateLimitError(err: Common.GaxiosError): boolean {
+    const status = err.response?.status ?? err.status;
+    if (status === 429) return true;
+    if (status !== 403) return false;
+    const data = err.response?.data as { error?: { errors?: { reason?: string }[] } } | undefined;
+    return (data?.error?.errors ?? []).some((e) => e.reason !== undefined && RATE_LIMIT_REASONS.has(e.reason));
+}
+
+/** Retry-After in ms, capped at 30s; 2s when the header is absent/unparsable. */
+function rateLimitDelayMs(err: Common.GaxiosError): number {
+    const seconds = Number(err.response?.headers?.get('retry-after'));
+    return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 30) * 1000 : 2000;
+}
 
 /**
  * Factory for creating and managing Google OAuth2Client instances.
@@ -326,6 +344,32 @@ export class GoogleClientFactory {
         this.cache.clientId = clientId;
         this.cache.clientSecret = clientSecret ?? null;
         console.log('[OAuth] Google OAuth configuration initialized');
+    }
+
+    /**
+     * Gmail API client with rate-limit retry — parity with Outlook's
+     * graphFetch (outlook-client-factory.ts): one retry per request on a
+     * throttled response, waiting out Retry-After capped at 30s (2s when the
+     * header is absent). gaxios' stock retry can't express this — its delay
+     * formula never reads Retry-After, and its default method list excludes
+     * POST, which modify/trash/send all use — so both hooks are custom. A
+     * request still throttled after the retry fails like any other error.
+     */
+    static gmailClient(auth: OAuth2Client): gmail_v1.Gmail {
+        return google.gmail({
+            version: 'v1',
+            auth,
+            retryConfig: {
+                retry: 1,
+                shouldRetry: (err) =>
+                    (err.config.retryConfig?.currentRetryAttempt ?? 0) < 1 && isRateLimitError(err),
+                retryBackoff: (err) => {
+                    const waitMs = rateLimitDelayMs(err);
+                    console.warn(`[Gmail] rate limited — retrying after ${waitMs}ms`);
+                    return new Promise((resolve) => setTimeout(resolve, waitMs));
+                },
+            },
+        });
     }
 
     /** BYOK OAuth2Client — has client_id + secret + refresh_token. */

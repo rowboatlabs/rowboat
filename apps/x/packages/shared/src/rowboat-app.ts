@@ -23,7 +23,7 @@ export const RowboatAppManifestSchema = z.object({
     agents: z.array(z.string().regex(/^[a-z0-9][a-z0-9-_]*\.yaml$/)).default([])
         .describe('Filenames under agents/. Each must exist in the package.'),
     capabilities: z.array(z.string()).default([])
-        .describe('Capability identifiers this app may use (D7): Composio toolkit slugs for /_rowboat/tools/*, plus the reserved identifiers "llm" (§7.6) and "copilot" (§7.7). Empty = none.'),
+        .describe('Capability identifiers this app may use (D7): Composio toolkit slugs for /_rowboat/tools/*, plus the reserved identifiers "llm" (§7.6), "copilot" (§7.7), and "voice" (/_rowboat/voice/* TTS + transcription). Empty = none.'),
     dataContracts: z.array(z.object({
         file: z.string(), // path relative to data/, e.g. "data.json"
         requiredKeys: z.array(z.string()).default([]),

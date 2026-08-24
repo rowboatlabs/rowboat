@@ -70,7 +70,7 @@ if (window.location.hash === '#meeting-detected') {
     </StrictMode>,
   )
 } else if (window.location.hash === '#quick-ask') {
-  // Global ⌥⇧Space quick-ask bar; same pattern.
+  // The hover companion (global ⌥⇧Space); same pattern.
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QuickAskBar />

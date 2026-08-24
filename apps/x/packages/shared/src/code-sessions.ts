@@ -45,7 +45,12 @@ export const CodeSession = z.object({
     projectId: z.string(),
     title: z.string(),
     agent: CodingAgent,
-    policy: ApprovalPolicy,
+    // Absent = the user never chose — each run resolves chip → global
+    // settings → ask. Stored ONLY on an explicit user choice (the new-
+    // session dialog, the Code rail's approvals select); adoption and
+    // dispatch never write it, so a transient chip toggle can't freeze
+    // into a permanent, invisible posture.
+    policy: ApprovalPolicy.optional(),
     // Where the agent works: the project path, or the worktree path.
     cwd: z.string(),
     worktree: CodeWorktree.optional(),

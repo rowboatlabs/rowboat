@@ -165,6 +165,7 @@ describe("RealAgentResolver", () => {
                 codeCwd: null,
                 videoMode: false,
                 coachMode: false,
+                commandCenter: false,
             }),
         );
     });

@@ -26,6 +26,8 @@ function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserM
             sections.push(`Middle pane:\nState: empty`);
         } else if (userMessageContext.middlePane.kind === 'note') {
             sections.push(`Middle pane:\nState: note\nPath: ${userMessageContext.middlePane.path}\n\nContent:\n\`\`\`\n${userMessageContext.middlePane.content}\n\`\`\``);
+        } else if (userMessageContext.middlePane.kind === 'deck') {
+            sections.push(`Middle pane:\nState: deck\nPath: ${userMessageContext.middlePane.path}\nSlide: ${userMessageContext.middlePane.slideNumber} of ${userMessageContext.middlePane.slideCount}`);
         } else {
             sections.push(`Middle pane:\nState: browser\nURL: ${userMessageContext.middlePane.url}\nTitle: ${userMessageContext.middlePane.title}`);
         }

@@ -37,12 +37,17 @@ const MIME_TYPES: Record<string, string> = {
     '.jpg': 'image/jpeg',
     '.js': 'application/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
+    '.m4a': 'audio/mp4',
     '.map': 'application/json; charset=utf-8',
     '.mjs': 'application/javascript; charset=utf-8',
+    '.mp3': 'audio/mpeg',
+    '.ogg': 'audio/ogg',
     '.png': 'image/png',
     '.svg': 'image/svg+xml; charset=utf-8',
     '.txt': 'text/plain; charset=utf-8',
     '.wasm': 'application/wasm',
+    '.wav': 'audio/wav',
+    '.webm': 'audio/webm',
     '.webp': 'image/webp',
     '.woff': 'font/woff',
     '.woff2': 'font/woff2',
@@ -217,8 +222,17 @@ const BOOTSTRAP = String.raw`<script>
 </script>`;
 
 function injectBootstrap(htmlContent: string): string {
-    if (/<\/body>/i.test(htmlContent)) return htmlContent.replace(/<\/body>/i, `${BOOTSTRAP}\n</body>`);
-    return `${htmlContent}\n${BOOTSTRAP}`;
+    // Inject before the LAST </body>, not the first. An app whose markup
+    // contains a literal "</body>" earlier — a template inside a <textarea>,
+    // an HTML string inside a <script> — got the bootstrap spliced into that
+    // text instead: visible junk at best, a broken <script> at worst, and no
+    // live reload either way. (Regex loop rather than toLowerCase+lastIndexOf:
+    // case mapping can change string length and misalign the index.)
+    const re = /<\/body>/gi;
+    let idx = -1;
+    for (let m = re.exec(htmlContent); m; m = re.exec(htmlContent)) idx = m.index;
+    if (idx === -1) return `${htmlContent}\n${BOOTSTRAP}`;
+    return `${htmlContent.slice(0, idx)}${BOOTSTRAP}\n${htmlContent.slice(idx)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -612,6 +626,16 @@ async function handleStatic(
         return html503(res, 'App entry not found', `dist/${entryRel} does not exist.`);
     }
 
+    // The entry itself is missing. `dist/index.html` has an extension, so the
+    // SPA-fallback branch above never catches it and this fell through to the
+    // JSON asset error — opening the app showed a raw {"error":...} blob
+    // instead of a page. This is the common copilot failure shape: manifest
+    // and dist/ get written, the entry does not.
+    const entryOnDisk = confinePath(distRoot, `/${entryRel}`);
+    if (entryOnDisk && resolved === entryOnDisk) {
+        return html503(res, 'App entry not found', `dist/${entryRel} does not exist.`);
+    }
+
     sendError(res, 404, 'not_found', 'asset not found');
 }
 
@@ -646,6 +670,13 @@ function createApp(): express.Express {
             }
             const slug = match[1];
             if (!FOLDER_SLUG_RE.test(slug) || !fs.existsSync(appDirFor(slug))) {
+                // A browser navigating here — the app frame reloading after its folder
+                // was deleted or renamed — should get a page, not a JSON blob. Asset and
+                // XHR requests keep the machine-readable error.
+                if (req.method === 'GET' && (req.headers.accept ?? '').includes('text/html')) {
+                    html503(res, 'App not found', `There is no app folder named “${slug}”. It may have been deleted or renamed.`);
+                    return;
+                }
                 sendError(res, 404, 'app_not_found', `no app folder named "${slug}"`);
                 return;
             }
@@ -731,7 +762,17 @@ async function startWatcher(): Promise<void> {
         if (!['add', 'addDir', 'change', 'unlink', 'unlinkDir'].includes(eventName)) return;
         const hit = slugFromAbsolutePath(absolutePath);
         if (!hit || hit.rel.endsWith('.tmp') || /\.tmp-[0-9a-f]+$/.test(hit.rel)) return;
-        const area: 'dist' | 'data' = hit.rel === 'data' || hit.rel.startsWith('data/') ? 'data' : 'dist';
+        // Only dist/, data/ and the manifest change what the app serves.
+        // Everything else in the folder fell into the "dist" bucket and forced
+        // a full page reload — README.md, .rowboat-install.json,
+        // .rowboat-publish.json (rewritten at every publish step), agents/,
+        // defaults/, .previous/ — discarding whatever the user had typed in the
+        // open app for a file the app never reads.
+        const top = hit.rel.split('/')[0];
+        let area: 'dist' | 'data';
+        if (top === 'data') area = 'data';
+        else if (top === 'dist' || hit.rel === 'rowboat-app.json') area = 'dist';
+        else return;
         scheduleChangeBroadcast(hit.slug, area, hit.rel);
         if (hit.rel === 'data/config.json' && (eventName === 'add' || eventName === 'change')) {
             scheduleAgentKick(hit.slug);

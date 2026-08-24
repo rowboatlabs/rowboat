@@ -8,6 +8,9 @@ import { WorkDir } from '../config/config.js';
 import { withFileLock } from '../knowledge/file-lock.js';
 import { commitAll } from '../knowledge/version_history.js';
 import { rewriteWikiLinksForRenamedKnowledgeFile } from '../workspace/wiki-link-rewrite.js';
+import { assertEtagMatches, computeEtag, EtagMismatchError, isEtagMismatchError } from './etag.js';
+
+export { computeEtag, EtagMismatchError, isEtagMismatchError };
 
 export type FileOperation = 'read' | 'list' | 'search' | 'write' | 'delete';
 
@@ -154,10 +157,6 @@ export async function resolveFilePathForPermission(inputPath: string): Promise<C
     isInsideWorkspace,
     workspaceRelPath,
   };
-}
-
-export function computeEtag(size: number, mtimeMs: number): string {
-  return `${size}:${mtimeMs}`;
 }
 
 function statToSchema(stats: Stats): FileStat {
@@ -388,14 +387,23 @@ export async function readText(inputPath: string, offset?: number, limit?: numbe
   };
 }
 
-export async function readBuffer(inputPath: string): Promise<{ buffer: Buffer; path: string; resolvedPath: string; isInsideWorkspace: boolean }> {
+// Returns the etag alongside the bytes so a read → modify → write caller can
+// make its write transactional (`writeBuffer(..., { expectedEtag })`). The
+// stat is taken BEFORE the read on purpose: an external write landing between
+// the two then yields a stale etag for the new bytes and the guard refuses the
+// write (safe), whereas stat-after-read would pair the OLD bytes with the NEW
+// etag and let the write clobber whatever landed in between.
+export async function readBuffer(inputPath: string): Promise<{ buffer: Buffer; path: string; resolvedPath: string; isInsideWorkspace: boolean; stat: FileStat; etag: string }> {
   const resolved = resolveFilePath(inputPath);
+  const stats = await fs.lstat(resolved.resolvedPath);
   const buffer = await fs.readFile(resolved.resolvedPath);
   return {
     buffer,
     path: resolved.originalPath,
     resolvedPath: resolved.resolvedPath,
     isInsideWorkspace: resolved.isInsideWorkspace,
+    stat: statToSchema(stats),
+    etag: computeEtag(stats.size, stats.mtimeMs),
   };
 }
 
@@ -410,11 +418,7 @@ export async function writeText(inputPath: string, data: string, opts?: WriteTex
 
   const result = await withFileLock(resolved.resolvedPath, async () => {
     if (opts?.expectedEtag) {
-      const existingStats = await fs.lstat(resolved.resolvedPath);
-      const existingEtag = computeEtag(existingStats.size, existingStats.mtimeMs);
-      if (existingEtag !== opts.expectedEtag) {
-        throw new Error('File was modified (ETag mismatch)');
-      }
+      await assertEtagMatches(resolved.resolvedPath, opts.expectedEtag);
     }
 
     const buffer = Buffer.from(data, 'utf8');
@@ -453,11 +457,7 @@ export async function writeBuffer(inputPath: string, data: Buffer, opts?: WriteT
 
   const result = await withFileLock(resolved.resolvedPath, async () => {
     if (opts?.expectedEtag) {
-      const existingStats = await fs.lstat(resolved.resolvedPath);
-      const existingEtag = computeEtag(existingStats.size, existingStats.mtimeMs);
-      if (existingEtag !== opts.expectedEtag) {
-        throw new Error('File was modified (ETag mismatch)');
-      }
+      await assertEtagMatches(resolved.resolvedPath, opts.expectedEtag);
     }
 
     if (atomic) {

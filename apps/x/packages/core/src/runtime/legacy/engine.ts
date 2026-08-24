@@ -913,9 +913,11 @@ export async function* streamAgent({
             searchEnabled,
             codeMode,
             codeCwd,
-            // The legacy runs engine never composes video/coach modes.
+            // The legacy runs engine never composes video/coach modes, and
+            // the Command Center session lives on the turns runtime only.
             videoMode: false,
             coachMode: false,
+            commandCenter: false,
         });
         let streamError: string | null = null;
         for await (const event of streamLlm(

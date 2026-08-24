@@ -24,7 +24,16 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/x/pnpm-lock.yaml
+          cache-dependency-path: |
+            apps/x/pnpm-lock.yaml
+            apps/harbor/pnpm-lock.yaml
+
+      # apps/x consumes @rowboat/spaces-protocol (shared/core) and the stub
+      # Harbor (core tests) via link: dependencies into apps/harbor — install
+      # and build that workspace first or the shared build and core tests fail.
+      - name: Build apps/harbor (link deps)
+        run: pnpm install --frozen-lockfile && pnpm -r build
+        working-directory: apps/harbor
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -45,6 +54,41 @@ jobs:
       - name: Typecheck apps/x packages
         run: npm run typecheck
 
+  apps-harbor-vitest:
+    name: apps/harbor typecheck + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/harbor
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/harbor/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm -r build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      # Merge-fixture conformance, REST/WS/MCP faces, the spec §11
+      # day-in-the-life on both memory and Postgres (in-process PGlite), and
+      # blob-store conformance (disk always; the S3 driver's identical suite
+      # is env-gated on HARBOR_TEST_S3_BUCKET and skips here).
+      - name: Run apps/harbor tests
+        run: pnpm -r test
+
   apps-x-electron-package:
     name: apps/x Electron package smoke test
     runs-on: ubuntu-latest
@@ -62,7 +106,13 @@ jobs:
         with:
           node-version: 24.15.0
           cache: pnpm
-          cache-dependency-path: apps/x/pnpm-lock.yaml
+          cache-dependency-path: |
+            apps/x/pnpm-lock.yaml
+            apps/harbor/pnpm-lock.yaml
+
+      - name: Build apps/harbor (link deps)
+        run: pnpm install --frozen-lockfile && pnpm -r build
+        working-directory: apps/harbor
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -70,5 +120,6 @@ jobs:
       - name: Package Electron app without signing
         env:
           ROWBOAT_SKIP_CODE_SIGNING: "1"
+          NODE_OPTIONS: "--max-old-space-size=6144"
         run: npm run package
         working-directory: apps/x/apps/main

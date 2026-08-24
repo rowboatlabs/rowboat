@@ -74,14 +74,26 @@ export function CodeView({
   onSessionSelected,
   openDiffPath,
   onDiffOpened,
+  focusSessionId,
+  onFocusConsumed,
 }: {
   onSessionSelected?: (active: ActiveCodeSession | null) => void
   // A file path the chat asked to review (clicking a changed file in a tool call).
   openDiffPath?: string | null
   onDiffOpened?: () => void
+  // Deep-link from elsewhere (a Home Deck strip): select this session on
+  // mount/change instead of the remembered one.
+  focusSessionId?: string | null
+  onFocusConsumed?: () => void
 }) {
   const { projects, sessions, statusOf, refresh } = useCodeSessions()
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(readStoredSelectedSessionId)
+
+  useEffect(() => {
+    if (!focusSessionId) return
+    setSelectedSessionId(focusSessionId)
+    onFocusConsumed?.()
+  }, [focusSessionId, onFocusConsumed])
   const [newSessionProjectId, setNewSessionProjectId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CodeSession | null>(null)
   const [terminalOpen, setTerminalOpen] = useState(false)
@@ -274,9 +286,11 @@ export function CodeView({
                       variant="ghost"
                       size="sm"
                       className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-                      title={POLICY_LABEL[selectedSession.policy]}
+                      title={selectedSession.policy
+                        ? POLICY_LABEL[selectedSession.policy]
+                        : 'Approvals: Auto — follows the composer chip / global setting until you pick one here'}
                     >
-                      <span className="whitespace-nowrap">{POLICY_HEADER_LABEL[selectedSession.policy]}</span>
+                      <span className="whitespace-nowrap">{selectedSession.policy ? POLICY_HEADER_LABEL[selectedSession.policy] : 'Auto'}</span>
                       <ChevronDown className="size-3" />
                     </Button>
                   </DropdownMenuTrigger>

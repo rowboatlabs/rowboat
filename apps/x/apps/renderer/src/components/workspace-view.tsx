@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Pencil,
   Plus,
+  Presentation,
   Trash2,
   UploadCloud,
 } from 'lucide-react'
@@ -57,6 +58,7 @@ type WorkspaceActions = {
   copyPath: (path: string) => void
   revealInFileManager: (path: string, isDir: boolean) => void
   createNote: (parentPath?: string) => void
+  createPresentation: (parentPath?: string) => void
   addGoogleDoc: (parentPath?: string) => void
   createFolder: (parentPath?: string) => Promise<string>
   onOpenInNewTab?: (path: string) => void
@@ -435,6 +437,10 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
                 <DropdownMenuItem onClick={() => actions.createNote(currentPath)}>
                   <FilePlus className="mr-2 size-4" />
                   New note
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => actions.createPresentation(currentPath)}>
+                  <Presentation className="mr-2 size-4" />
+                  New presentation
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => actions.addGoogleDoc(currentPath)}>
                   <GoogleDriveIcon className="mr-2 size-4" />

@@ -132,7 +132,7 @@ export function ShortcutSettings() {
   }, [pending, apply, closeModal])
 
   // While the modal is up, main releases the current global chord —
-  // otherwise pressing it would summon the quick-ask bar over the recorder
+  // otherwise pressing it would summon the companion over the recorder
   // instead of showing up as keycaps here.
   useEffect(() => {
     if (!open) return
@@ -226,7 +226,7 @@ export function ShortcutSettings() {
       <div>
         <h4 className="text-sm font-medium mb-3">Quick Ask</h4>
         <p className="text-xs text-muted-foreground mb-4">
-          Summon the Quick Ask bar from anywhere — press the shortcut in any app.
+          Summon your Skipper from anywhere — press the shortcut in any app to talk or type; press it again to tuck the text away.
         </p>
         <div className="rounded-lg border border-border p-4">
           <div className="flex items-center justify-between gap-4">

@@ -24,6 +24,8 @@ A later user message means revision or continuation of work you already did in t
 
 You have the full toolkit, including \`executeCommand\` and coding-agent runs. Tool permissions work exactly like chat: under auto mode a permission judge approves as you go; under manual mode your turn pauses until the user approves from this item's chat — just proceed with the call and let the system handle the pause. Never claim you "cannot" do something a command could do (converting files, generating PDFs, processing data) — do it.
 
+**Coding work** goes through \`code_agent_run\` — never your own file tools on a repo. When the item names no folder, omit \`cwd\`: the run lands in the user's default code repo on its own isolated branch. Repo changes are outward-facing under the trust rules: report \`ready\` (never \`done\`) with what changed and how you verified it — merging is the user's check.
+
 # Producing Real Files
 
 When the deliverable is a real file (a PDF letter, a spreadsheet, an image):
@@ -75,14 +77,18 @@ Avoid: "Done!", "I have completed the task."
 `;
 
 export function buildTodoItemAgent(): z.infer<typeof Agent> {
-    // Copilot-parity toolset: shell and coding-agent runs included — the
-    // permission system (auto judge, or manual suspension the user approves
-    // from the item's chat) is the guardrail, same as chat. Only the
-    // bg-task self-management trio stays out (recursive-cascade risk).
+    // Full builtin toolset (a superset of the copilot's 16-tool base):
+    // shell and coding-agent runs included — the permission system (auto
+    // judge, or manual suspension the user approves from the item's chat)
+    // is the guardrail, same as chat. Excluded: the bg-task
+    // self-management trio (recursive-cascade risk) and launch-code-task,
+    // which requires a background-task slug with a projectId that a todo
+    // run can never supply — coding work goes through code_agent_run.
     const EXCLUDED = new Set([
         'run-background-task-agent',
         'create-background-task',
         'patch-background-task',
+        'launch-code-task',
     ]);
 
     const tools: Record<string, z.infer<typeof ToolAttachment>> = {};

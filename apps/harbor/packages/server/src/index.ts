@@ -1,0 +1,36 @@
+// @rowboat/harbor — the spaces server. Currently the in-memory stub that
+// unblocks client work (CONTRACT.md "Next" step 1); the real Harbor grows here
+// behind the same contract, starting with a Postgres Store.
+
+export { startHarbor } from './server.js';
+export type { HarborOptions, RunningHarbor, SeedMember, SeedSpace } from './server.js';
+export { HarborService } from './service.js';
+export type { ActorCtx, OrgInfo } from './service.js';
+export { MemoryStore } from './memory-store.js';
+export { PgStore } from './pg-store.js';
+export { blobHash, BLOB_HASH_RE } from './blobs.js';
+export type { BlobStore } from './blobs.js';
+export { DiskBlobStore } from './blobs-disk.js';
+export { S3BlobStore } from './blobs-s3.js';
+export type { S3BlobStoreOptions } from './blobs-s3.js';
+export { postgresDb } from './sql.js';
+export type { SqlDb, SqlExecutor } from './sql.js';
+export type { Store, StoredEvent, StoredInvite, AssetHead } from './store.js';
+export { SpaceHub } from './hub.js';
+export { merge3 } from './merge.js';
+export type { MergeResult, MergeConflictRegion } from './merge.js';
+export { HarborError } from './errors.js';
+export { DevAuthDriver, ensureMember, DEV_ISSUER } from './auth.js';
+export type { AuthDriver, AuthIdentity } from './auth.js';
+export { OidcAuthDriver } from './auth-oidc.js';
+export type { OidcOptions } from './auth-oidc.js';
+export { consentPageHtml } from './consent.js';
+export type { ConsentPageOptions } from './consent.js';
+export { startHarborDeployment } from './deployment.js';
+export type { DeploymentOptions, RunningDeployment } from './deployment.js';
+export { OrgDirectory, normalizeDomain } from './directory.js';
+export type { OrgConfig, CreateOrgInput } from './directory.js';
+export { DEFAULT_ORG_ID } from './pg-store.js';
+export { migrate, MIGRATIONS } from './migrations.js';
+export type { Migration } from './migrations.js';
+export type { BindIdentity } from './service.js';

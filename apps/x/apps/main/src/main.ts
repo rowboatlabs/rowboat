@@ -7,6 +7,7 @@ import {
   startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
+  startHomeThreadsWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
@@ -17,6 +18,7 @@ import {
   stopWorkspaceWatcher
 } from "./ipc.js";
 import { disposeAllTerminals } from "./terminal.js";
+import * as spaceBlobCache from "./spaces/blob-cache.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
@@ -42,6 +44,7 @@ import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tas
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
 import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/runtime/assembly/skills/watcher.js";
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
+import { cleanInstallTmp } from "@x/core/dist/apps/installer.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
 import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
@@ -57,7 +60,9 @@ import started from "electron-squirrel-startup";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService } from "@x/core/dist/di/container.js";
+import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
+import { startSpaceMentionWatch } from "@x/core/dist/spaces/mention-watch.js";
+import { flags } from "@x/shared";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { CodeSessionService } from "@x/core/dist/code-mode/sessions/service.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
@@ -66,6 +71,7 @@ import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { setupBrowserExtensions } from "./browser/extensions.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { screenPointerService } from "./screen-pointer.js";
+import { textInsertService } from "./text-insert.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
   DEEP_LINK_SCHEME,
@@ -79,7 +85,7 @@ import { ensureLoginItemRegistration } from "./login_item.js";
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
 import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
-import { initQuickAsk } from "./quick-ask.js";
+import { initQuickAsk, onAppWindowClosed } from "./quick-ask.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -192,9 +198,13 @@ console.log("rendererPath", rendererPath);
 // AND for serving local workspace files to the renderer (images, PDFs, video).
 //
 //   app://workspace/<rel-path>  → workspace file (path-traversal guarded)
+//   app://space-blob/<orgId>/<spaceId>/<hash>[?thumb=<w>] → space upload,
+//     via the authed org client + content-addressed disk cache (blob-cache.ts).
+//     This is how <img> tags in space messages render: the renderer holds no
+//     org tokens, so blob bytes must resolve in main.
 //   app://<anything-else>/...   → renderer SPA (existing behavior)
 function registerAppProtocol() {
-  protocol.handle("app", (request) => {
+  protocol.handle("app", async (request) => {
     const url = new URL(request.url);
 
     // Workspace files: app://workspace/<rel-path>
@@ -206,6 +216,32 @@ function registerAppProtocol() {
         return net.fetch(pathToFileURL(absPath).toString());
       } catch {
         return new Response("Forbidden", { status: 403 });
+      }
+    }
+
+    // Space blobs: app://space-blob/<orgId>/<spaceId>/<hash>
+    if (url.host === "space-blob") {
+      try {
+        const [orgId, spaceId, hash] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        if (!orgId || !spaceId || !hash) return new Response("Not Found", { status: 404 });
+        const thumb = url.searchParams.get("thumb");
+        const headers = {
+          // Content-addressed → immutable; let Chromium keep it forever.
+          "cache-control": "private, max-age=31536000, immutable",
+          "x-content-type-options": "nosniff",
+        };
+        if (thumb) {
+          const png = await spaceBlobCache.getThumbnail(orgId, spaceId, hash, Number(thumb));
+          if (png) {
+            return new Response(new Uint8Array(png), { headers: { ...headers, "content-type": "image/png" } });
+          }
+          // Not an image — fall through to the full blob.
+        }
+        const blob = await spaceBlobCache.getBlob(orgId, spaceId, hash);
+        return new Response(new Uint8Array(blob.bytes), { headers: { ...headers, "content-type": blob.mime } });
+      } catch (err) {
+        console.error("[space-blob] failed to serve", request.url, err);
+        return new Response("Not Found", { status: 404 });
       }
     }
 
@@ -414,6 +450,8 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
     setMainWindowForDeepLinks(null);
+    // The call engine lived in this window — take its floating surface down.
+    onAppWindowClosed();
   });
 
   // Show window when content is ready to prevent blank screen.
@@ -528,14 +566,27 @@ app.whenReady().then(async () => {
   registerBrowserControlService(new ElectronBrowserControlService());
   registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
   registerScreenPointerService(screenPointerService);
+  registerTextInsertService(textInsertService);
+
+  // Space mentions: watch every space of every org and notify on @<me>
+  // while the app is unfocused (offset resume covers time away). Gated with
+  // the rest of the Spaces UI — no OS notifications for a feature the user
+  // can't open (the same flag hides the renderer surfaces via the preload).
+  if (flags.spacesEnabled(process.env)) startSpaceMentionWatch();
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
   setupBrowserExtensions();
 
-  // Quick-ask bar: global ⌥⇧Space summons a Spotlight-style ask-anything
-  // window over whatever app the user is in.
-  initQuickAsk();
+  // Quick-ask / hover companion: global ⌥⇧Space summons the Skipper over
+  // whatever app the user is in. The app window owns the call engine it
+  // relays to — if the user closed that window, the summon recreates it
+  // hidden so the shortcut keeps working from anywhere.
+  initQuickAsk({
+    ensureAppWindow: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow({ startHidden: true });
+    },
+  });
 
   // Start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) BEFORE
   // the window and the long service-init chain below. The Apps view is
@@ -556,6 +607,13 @@ app.whenReady().then(async () => {
     isAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+  });
+  // Startup hygiene: drop leftover install/update stagings. A cancelled URL
+  // preview retains its staging by design and a failed download leaves a
+  // partial bundle.zip; nothing else ever removes them, so they accumulate
+  // across launches. Fire-and-forget — never block or fail startup on it.
+  cleanInstallTmp().catch((error) => {
+    console.error('[Apps] Failed to clear install stagings:', error);
   });
   initAppsServer().catch((error) => {
     console.error('[Apps] Failed to start:', error);
@@ -691,6 +749,16 @@ app.whenReady().then(async () => {
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
+
+  // start the Home thread registry (the Deck's underway/needs-you feed)
+  startHomeThreadsWatcher();
+
+  // Self-heal: strip any code-session meta that leaked onto the Command
+  // Center session before the never-adopt guard existed (its worktree, if
+  // any, is left on disk — see detachCodeMeta).
+  import('@x/core/dist/home/command-center.js')
+    .then((m) => m.repairCommandCenterSession())
+    .catch(() => {});
 
   // start services watcher
   startServicesWatcher();

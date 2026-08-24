@@ -1,6 +1,6 @@
 import { FolderGit2, FolderPlus, MoreHorizontal, Plus, Trash2 } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions.js'
-import { cn } from '@/lib/utils'
+import { cn, compactPath, parentPath } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -84,6 +84,13 @@ export function SessionRail({
                       <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1 truncate text-xs font-medium">
                         {project.name}
+                        {/* Where it lives — same-named repos in different
+                            parents stay tellable-apart at a glance. */}
+                        {parentPath(project.path) && (
+                          <span className="ml-1.5 font-normal text-muted-foreground/60">
+                            {compactPath(parentPath(project.path), 26)}
+                          </span>
+                        )}
                       </span>
                     </span>
                   </TooltipTrigger>

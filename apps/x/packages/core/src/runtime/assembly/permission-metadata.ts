@@ -51,7 +51,15 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'LLMParse':
         case 'file-exists':
         case 'file-stat':
+        case 'deck-review':
+        case 'transcribe-audio':
             return pathArg ? { operation: 'read', paths: [pathArg] } : null;
+        case 'text-to-speech': {
+            // Only an explicit outputPath can escape the workspace; the
+            // default target is always inside it.
+            const out = typeof args.outputPath === 'string' ? args.outputPath : undefined;
+            return out ? { operation: 'write', paths: [out] } : null;
+        }
         case 'file-list':
             return pathArg ? { operation: 'list', paths: [pathArg || '.'] } : null;
         case 'file-glob':
@@ -61,6 +69,11 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'file-writeText':
         case 'file-editText':
         case 'file-mkdir':
+        case 'deck-create':
+        case 'deck-add-slide':
+        case 'deck-edit-slide':
+        case 'deck-restructure':
+        case 'deck-restyle':
         case 'spreadsheet-create':
         case 'spreadsheet-edit':
             return pathArg ? { operation: 'write', paths: [pathArg] } : null;

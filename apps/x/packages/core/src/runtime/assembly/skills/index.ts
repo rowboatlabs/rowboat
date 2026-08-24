@@ -9,6 +9,7 @@ import {
   isCodeModeAvailable,
   isComposioAvailable,
   isSlackAvailable,
+  isSpacesAvailable,
 } from "../connections.js";
 import { loadDiskSkills } from "./disk-loader.js";
 import builtinToolsSkill from "./builtin-tools/skill.js";
@@ -19,6 +20,7 @@ import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
+import pdfSlidesSkill from "./pdf-slides/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
 import browserControlSkill from "./browser-control/skill.js";
@@ -29,7 +31,9 @@ import backgroundTaskSkill from "./background-task/skill.js";
 import notifyUserSkill from "./notify-user/skill.js";
 import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
+import spacesSkill from "./spaces/skill.js";
 import chartsSkill from "./charts/skill.js";
+import voiceSkill from "./voice/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/runtime/assembly/skills";
@@ -54,8 +58,23 @@ const definitions: SkillDefinition[] = [
   {
     id: "create-presentations",
     title: "Create Presentations",
-    summary: "Create PDF presentations and slide decks from natural language requests using knowledge base context.",
+    summary: "Build and edit real PowerPoint (.pptx) decks — presentations, slide decks, pitch decks, slides. Load for ANY presentation request, including adding/changing one slide or restyling a deck. Decks are never rendered as PDF or HTML and never hand-written via code.",
     content: createPresentationsSkill,
+    tools: [
+      "deck-create",
+      "deck-review",
+      "deck-add-slide",
+      "deck-edit-slide",
+      "deck-restructure",
+      "deck-restyle",
+      "file-mkdir",
+    ],
+  },
+  {
+    id: "pdf-slides",
+    title: "PDF Slides (explicit PDF requests only)",
+    summary: "Render flat HTML→PDF slides. ONLY when the user explicitly asks for a PDF or a printable handout. For any normal presentation / slide deck / pitch deck request use create-presentations instead, which produces an editable .pptx.",
+    content: pdfSlidesSkill,
     tools: ["file-writeText", "file-mkdir"],
   },
   {
@@ -114,6 +133,14 @@ const definitions: SkillDefinition[] = [
     summary: "Discovering, executing, and integrating MCP tools. Use this to check what external capabilities are available and execute MCP tools on behalf of users.",
     content: mcpIntegrationSkill,
     tools: ["addMcpServer", "listMcpServers", "listMcpTools", "executeMcpTool"],
+  },
+  {
+    id: "spaces",
+    availability: isSpacesAvailable,
+    title: "Spaces (shared team containers)",
+    summary: "Work in the team's shared spaces — read and update shared files (roadmaps, notes), push standup items, post to the team feed when asked. Use for 'push/add/update ... to <space name>' (e.g. 'push my standup to Roadboard'), 'team roadmap', 'shared doc/space'. Writes are visible to the whole team, attributed to your person.",
+    content: spacesSkill,
+    tools: ["listMcpServers", "listMcpTools", "executeMcpTool"],
   },
   {
     id: "composio-integration",
@@ -205,6 +232,13 @@ const definitions: SkillDefinition[] = [
     summary: "Send native desktop notifications with optional clickable links — including rowboat:// deep links that open a specific note, chat, or view inside the app.",
     content: notifyUserSkill,
     tools: ["notify-user"],
+  },
+  {
+    id: "voice",
+    title: "Voice — Speak & Transcribe",
+    summary: "Turn text into spoken audio (text-to-speech saves an .mp3 in the workspace; two voices available for dialogue/podcast-style segments) and transcribe audio files to text (transcribe-audio). Uses the app's built-in voice stack — no API keys needed.",
+    content: voiceSkill,
+    tools: ["text-to-speech", "transcribe-audio"],
   },
 ];
 

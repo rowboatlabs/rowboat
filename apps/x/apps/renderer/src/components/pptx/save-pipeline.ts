@@ -37,6 +37,25 @@ export interface SavePipeline {
    * edit made before this call is covered — awaiting an in-flight save first.
    */
   flush(): Promise<void>
+  /**
+   * True when everything the user did is on disk: no armed debounce, no save
+   * in flight, no generation behind. The external-change reload asks this —
+   * an idle pipeline means a reload from disk loses nothing.
+   */
+  isIdle(): boolean
+  /**
+   * Abandons every pending edit WITHOUT writing — the explicit "discard my
+   * unsaved changes" path of an external-change reload. The caller owns
+   * resetting its edit state; from here on the pipeline behaves as freshly
+   * created. An in-flight save is not interrupted (its guarded write decides
+   * its own fate); its completion no longer marks anything covered.
+   */
+  discard(): void
+  /**
+   * Resolves once any in-flight save has finished (successfully or not),
+   * WITHOUT starting one — unlike flush(). Never rejects.
+   */
+  settled(): Promise<void>
 }
 
 export function createSavePipeline(opts: SavePipelineOptions): SavePipeline {
@@ -99,6 +118,11 @@ export function createSavePipeline(opts: SavePipelineOptions): SavePipeline {
       opts.onStatus('saving')
       clearTimer()
       timer = setTimeout(() => {
+        // The debounce has fired: it is no longer "armed". Leaving the dead
+        // handle here made isIdle() false for the rest of the session after
+        // the FIRST autosave — every external change then took the banner
+        // path instead of reloading a clean editor in place.
+        timer = null
         void persist()
       }, opts.debounceMs)
     },
@@ -106,6 +130,18 @@ export function createSavePipeline(opts: SavePipelineOptions): SavePipeline {
     async flush() {
       clearTimer()
       if (inFlight !== null || editGen !== savedGen) await persist()
+    },
+    isIdle() {
+      return timer === null && inFlight === null && editGen === savedGen
+    },
+    discard() {
+      clearTimer()
+      savedGen = editGen
+      lastWritten = null
+      opts.onStatus('clean')
+    },
+    settled() {
+      return inFlight ?? Promise.resolve()
     },
   }
 }
