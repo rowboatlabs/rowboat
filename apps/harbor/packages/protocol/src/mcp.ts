@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { BlobInfo } from './blob.js';
 import { ProposeChangeResult, ReadAssetResult } from './changeset.js';
 import { Message, Topic } from './core.js';
-import { AssetPath, AssetVersion, MessageId, SpaceId, TopicId } from './ids.js';
+import { AssetPath, AssetVersion, BlobHash, MessageId, SpaceId, TopicId } from './ids.js';
 
 // Decision 5 (CONTRACT.md): the agent face. These six tools are direct
 // projections of the core operations; the MCP server attributes every call as
@@ -91,13 +91,20 @@ export const proposeChange = tool({
   name: 'propose_change',
   description:
     'Propose the full new content of a file against the version you read (baseVersion; 0 to create). ' +
+    'Provide EXACTLY ONE of newContent (text) or blob (binary). `blob` files bytes already uploaded to ' +
+    'this space by their sha256 — e.g. the hash inside a message attachment link ".../b/<hash>" — so ' +
+    '"put that attachment in the space files" is a pure reference, no re-upload. ' +
     'Outcome "applied"/"merged" means it is saved (on "merged", mergedContent is what now exists — re-read it). ' +
-    'Outcome "conflict" means nothing was written: adjust against currentContent and re-propose.',
+    'Outcome "conflict" means nothing was written: adjust against currentContent and re-propose ' +
+    '(binary conflicts come with regions: [] — re-proposing at currentVersion is the explicit replace).',
+  // One-of newContent/blob is enforced by the server (kept out of the schema so
+  // the JSON-schema projection stays plain).
   input: z.object({
     spaceId: SpaceId,
     path: AssetPath,
     baseVersion: z.number().int().nonnegative(),
-    newContent: z.string().max(1_048_576),
+    newContent: z.string().max(1_048_576).optional(),
+    blob: BlobHash.optional(),
     /** One line: why this change. Shown in the feed and in history forever. */
     reason: z.string().min(1).max(1_000),
   }),

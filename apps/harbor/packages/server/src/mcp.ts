@@ -151,11 +151,22 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
       return service.readAsset(ctx, a.spaceId, a.path);
     }
     case 'propose_change': {
-      const a = args as { spaceId: string; path: string; baseVersion: number; newContent: string; reason: string };
+      const a = args as {
+        spaceId: string;
+        path: string;
+        baseVersion: number;
+        newContent?: string;
+        blob?: string;
+        reason: string;
+      };
+      // One-of lives here rather than in the JSON schema (kept plain on purpose).
+      if ((a.newContent === undefined) === (a.blob === undefined)) {
+        throw new HarborError('invalid_request', 'provide exactly one of newContent (text) or blob (an uploaded sha256)');
+      }
       return service.proposeChange(ctx, a.spaceId, {
         assetPath: a.path,
         baseVersion: a.baseVersion,
-        newContent: a.newContent,
+        ...(a.blob !== undefined ? { blob: a.blob } : { newContent: a.newContent! }),
         reason: a.reason, // required on this face (CONTRACT.md decision 5)
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
