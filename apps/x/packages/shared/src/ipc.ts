@@ -3608,6 +3608,33 @@ const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), topicId: z.string() }),
     res: z.object({ sessionId: z.string().nullable() }),
   },
+  // Upload phase 1 (spec §6): bytes in, {hash, size, mime} out. Bytes travel
+  // either inline (clipboard pastes — ArrayBuffer over structured clone) or as
+  // an absolute file path (drag-drop / picker via electronUtils.getPathForFile)
+  // so a 100MB file never crosses IPC — main reads it from disk.
+  'spaces:uploadBlob': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      bytes: z.custom<ArrayBuffer>().optional(),
+      filePath: z.string().optional(),
+      /** Display filename (drives the markdown label / mime fallback); never storage. */
+      name: z.string(),
+      mime: z.string().optional(),
+    }),
+    res: z.object({ blob: z.custom<SpacesTypes.BlobInfo>() }),
+  },
+  // Explicit download: main pulls through the content-addressed cache and
+  // shows the save dialog. saved:false = the person cancelled.
+  'spaces:saveBlob': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      hash: z.string(),
+      suggestedName: z.string().optional(),
+    }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
   // Live: renderer subscribes per space; frames arrive on 'spaces:events'
   // wrapped with their orgId. Offset resume mirrors the turn-event spine.
   'spaces:subscribeSpace': {

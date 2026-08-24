@@ -132,6 +132,34 @@ describe('SpacesClient', () => {
     expect(removed.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'] }]);
   });
 
+  it('blob upload → binary propose → listing → fetch round-trip', async () => {
+    const bytes = new TextEncoder().encode('%PDF-1.4 pretend-pdf payload');
+    const blob = await ramnique.uploadBlob(spaceId, bytes, { declaredMime: 'application/pdf' });
+    expect(blob.mime).toBe('application/pdf');
+    expect(blob.size).toBe(bytes.byteLength);
+    expect(blob.hash).toMatch(/^[0-9a-f]{64}$/);
+
+    const proposed = await ramnique.proposeChange(spaceId, {
+      assetPath: 'docs/spec.pdf',
+      baseVersion: 0,
+      blob: blob.hash,
+      reason: 'attach the spec',
+      actingMode: 'direct',
+    });
+    expect(proposed.outcome).toBe('applied');
+    if (proposed.outcome === 'applied') expect(proposed.changeSet.blob?.hash).toBe(blob.hash);
+
+    const entries = await ramnique.listAssets(spaceId);
+    expect(entries.find((e) => e.path === 'docs/spec.pdf')?.blob?.mime).toBe('application/pdf');
+
+    const fetched = await ramnique.fetchBlob(spaceId, blob.hash);
+    expect(Buffer.from(fetched.bytes)).toEqual(Buffer.from(bytes));
+    expect(fetched.mime).toBe('application/pdf');
+
+    // Never-uploaded hashes are not_found (membership/space gating is the stub suite's job).
+    await expect(ramnique.fetchBlob(spaceId, 'f'.repeat(64))).rejects.toMatchObject({ code: 'not_found' });
+  });
+
   it('errors carry the wire code', async () => {
     await expect(ramnique.readAsset(spaceId, 'ghost.md')).rejects.toMatchObject({
       code: 'not_found',

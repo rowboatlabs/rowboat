@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Bot, FileText, Folder, MessagesSquare, Pin, Plus, Search } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { Bot, FileText, Folder, MessagesSquare, Pin, Plus, Search, Upload } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { FileTree } from '@/components/spaces/files-tab'
@@ -19,7 +19,7 @@ import type { RailSelection } from '@/lib/spaces-selection'
 export type RailList = 'topics' | 'files'
 
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, presence, unreadPaths, selection, onSelect, onCreateFile,
+    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles,
     list, tabbed, onPickList, open, pinned, hint, onHoverChange, onTogglePin,
 }: {
     orgId: string
@@ -35,6 +35,8 @@ export function SpaceRail({
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     onCreateFile: (path: string) => void
+    /** Picked or dropped files headed for the space's file tree (upload dialog opens in the pane). */
+    onUploadFiles: (files: File[]) => void
     /** Which list the rail carries right now (follows the rendered surface). */
     list: RailList
     /** Split: one rail, a Topics/Files switcher instead of a title. */
@@ -49,6 +51,7 @@ export function SpaceRail({
     const [query, setQuery] = useState('')
     const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all')
     const [creatingFile, setCreatingFile] = useState(false)
+    const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
     const generalId = general.topic?.id ?? null
 
@@ -252,6 +255,25 @@ export function SpaceRail({
                             <div className="flex h-8 shrink-0 items-center gap-2 px-3 pr-2 pt-1">
                                 <span className="text-[11px] text-muted-foreground/70">{entries.length} {entries.length === 1 ? 'file' : 'files'}</span>
                                 <span className="flex-1" />
+                                <input
+                                    ref={uploadInputRef}
+                                    type="file"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        const files = Array.from(e.target.files ?? [])
+                                        if (files.length > 0) onUploadFiles(files)
+                                        e.target.value = ''
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    title="Upload files (or drop them here)"
+                                    onClick={() => uploadInputRef.current?.click()}
+                                    className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                    <Upload className="size-3.5" />
+                                </button>
                                 <button
                                     type="button"
                                     title="New file"
@@ -261,7 +283,16 @@ export function SpaceRail({
                                     <Plus className="size-3.5" />
                                 </button>
                             </div>
-                            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+                            <div
+                                className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
+                                onDragOver={(e) => { if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault() }}
+                                onDrop={(e) => {
+                                    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+                                    e.preventDefault()
+                                    const files = Array.from(e.dataTransfer.files)
+                                    if (files.length > 0) onUploadFiles(files)
+                                }}
+                            >
                                 <FileTree
                                     entries={entries}
                                     selectedPath={selectedPath}

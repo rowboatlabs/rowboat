@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type { spaces } from '@x/shared'
 import {
+    blobAppUrl,
+    blobWireUrl,
     buildFileTree,
     decorateMentions,
     encodeMentions,
+    formatBytes,
     formatFeedTime,
     initials,
     isUnreadChange,
     orgMonogram,
+    parseBlobAppUrl,
     resolveMentions,
+    rewriteBlobLinks,
 } from './spaces-presentation'
 
 function cs(over: Partial<spaces.ChangeSet> & { id: string; committedAt: string }): spaces.ChangeSet {
@@ -102,6 +107,44 @@ describe('mentions — compose names, wire ids', () => {
         expect(resolveMentions('`@01HXAMPLEULIDHARSH000000` in code, @unknown alone', names))
             .toBe('`@01HXAMPLEULIDHARSH000000` in code, @unknown alone')
         expect(resolveMentions('@rowboat plan this', names)).toBe('@rowboat plan this')
+    })
+})
+
+describe('blob links', () => {
+    const HASH = 'a'.repeat(64)
+    // A valid Crockford ULID — no I/L/O/U (the rewrite matches real ids only).
+    const SPACE = '01HXAMPZESPACE00000000000A'
+    const refs = { orgId: 'org-1', orgAddress: 'rowboat.spaces.example.com', spaceId: SPACE }
+
+    it('wire and app URL forms round-trip through the rewrite', () => {
+        const wire = blobWireUrl(refs, HASH, 'design doc.pdf')
+        expect(wire).toBe(`https://rowboat.spaces.example.com/s/${SPACE}/b/${HASH}?name=design%20doc.pdf`)
+        const body = `see this: ![shot](${blobWireUrl(refs, HASH)}) and [doc](${wire})`
+        const rewritten = rewriteBlobLinks(body, refs)
+        expect(rewritten).toContain(`![shot](app://space-blob/org-1/${SPACE}/${HASH})`)
+        // The ?name= query survives the rewrite (it trails the matched prefix).
+        expect(rewritten).toContain(`[doc](app://space-blob/org-1/${SPACE}/${HASH}?name=design%20doc.pdf)`)
+    })
+
+    it('rewrites only this org, leaves code regions and foreign hosts alone', () => {
+        const foreign = `![x](https://other.org/s/${SPACE}/b/${HASH})`
+        expect(rewriteBlobLinks(foreign, refs)).toBe(foreign)
+        const code = `\`https://rowboat.spaces.example.com/s/${SPACE}/b/${HASH}\``
+        expect(rewriteBlobLinks(code, refs)).toBe(code)
+    })
+
+    it('parseBlobAppUrl inverts blobAppUrl', () => {
+        const url = blobAppUrl({ orgId: 'org-1', spaceId: SPACE }, HASH, { thumb: 320 })
+        expect(url).toBe(`app://space-blob/org-1/${SPACE}/${HASH}?thumb=320`)
+        expect(parseBlobAppUrl(url)).toEqual({ orgId: 'org-1', spaceId: SPACE, hash: HASH })
+        expect(parseBlobAppUrl('app://space-blob/org-1/only-two-parts')).toBeNull()
+    })
+
+    it('formatBytes reads like a file card', () => {
+        expect(formatBytes(532)).toBe('532 B')
+        expect(formatBytes(1536)).toBe('1.5 KB')
+        expect(formatBytes(1_258_291)).toBe('1.2 MB')
+        expect(formatBytes(104_857_600)).toBe('100 MB')
     })
 })
 

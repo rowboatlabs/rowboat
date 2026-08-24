@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import {
   routes,
   type AcceptInviteResult,
+  type BlobInfo,
   type ChangeSet,
   type CreateInviteResult,
   type Member,
@@ -173,7 +175,9 @@ export class SpacesClient {
 
   // --- assets ---------------------------------------------------------------
 
-  async listAssets(spaceId: string): Promise<Array<{ path: string; version: number; updatedAt: string }>> {
+  async listAssets(
+    spaceId: string,
+  ): Promise<Array<{ path: string; version: number; updatedAt: string; blob?: BlobInfo }>> {
     return (await this.request('GET', this.space(spaceId, '/assets'), routes.listAssets.response)).entries;
   }
 
@@ -202,6 +206,77 @@ export class SpacesClient {
   async diff(spaceId: string, path: string, from: number, to: number): Promise<string> {
     const q = new URLSearchParams({ path, from: String(from), to: String(to) });
     return (await this.request('GET', this.space(spaceId, `/diff?${q}`), routes.diff.response)).unified;
+  }
+
+  // --- blobs ----------------------------------------------------------------
+
+  /**
+   * Upload phase 1 (spec §6): raw bytes → {hash, size, mime}. The client-side
+   * sha256 rides as x-blob-sha256 so a truncated body can never be stored
+   * under a healthy address. Idempotent — re-uploading the same bytes is a
+   * no-op with the same hash.
+   */
+  async uploadBlob(spaceId: string, bytes: Uint8Array, opts: { declaredMime?: string } = {}): Promise<BlobInfo> {
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const send = async (token: string) =>
+      this.fetchImpl(`${this.baseUrl}${this.space(spaceId, '/blobs')}`, {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-blob-sha256': hash,
+          ...(opts.declaredMime ? { 'content-type': opts.declaredMime } : {}),
+        },
+        body: bytes as unknown as BodyInit,
+      });
+    let res = await send(await this.currentToken());
+    if (res.status === 401 && typeof this.token !== 'string') {
+      res = await send(await this.currentToken({ forceRefresh: true }));
+    }
+    const json = (await res.json().catch(() => undefined)) as unknown;
+    if (!res.ok) {
+      const parsed = (json ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? `upload failed with ${res.status}`,
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    const result = routes.uploadBlob.response.safeParse(json);
+    if (!result.success) {
+      throw new SpacesRequestError(res.status, {
+        code: 'internal',
+        message: `response failed contract validation: ${result.error.message}`,
+        retryable: false,
+      });
+    }
+    return result.data.blob;
+  }
+
+  /**
+   * The bytes back. The org either streams or 302s to a presigned URL; fetch
+   * follows the redirect, so this client never knows which driver served it.
+   */
+  async fetchBlob(spaceId: string, hash: string): Promise<{ bytes: Uint8Array; mime: string }> {
+    const send = async (token: string) =>
+      this.fetchImpl(`${this.baseUrl}${this.space(spaceId, `/blobs/${hash}`)}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+    let res = await send(await this.currentToken());
+    if (res.status === 401 && typeof this.token !== 'string') {
+      res = await send(await this.currentToken({ forceRefresh: true }));
+    }
+    if (!res.ok) {
+      const parsed = ((await res.json().catch(() => undefined)) ?? {}) as Partial<SpacesApiError>;
+      throw new SpacesRequestError(res.status, {
+        code: parsed.code ?? 'internal',
+        message: parsed.message ?? `blob fetch failed with ${res.status}`,
+        retryable: parsed.retryable ?? false,
+      });
+    }
+    return {
+      bytes: new Uint8Array(await res.arrayBuffer()),
+      mime: res.headers.get('content-type') ?? 'application/octet-stream',
+    };
   }
 
   // --- feed -----------------------------------------------------------------

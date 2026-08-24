@@ -131,6 +131,80 @@ export function shortId(id: string): string {
     return id.slice(-6).toLowerCase()
 }
 
+// ---------------------------------------------------------------------------
+// Blobs — uploads referenced from markdown (contract decision 1, amended).
+// The wire form is the link grammar's canonical https URL on the org address
+// (stable for other clients and agents); display resolves it to the app://
+// protocol main serves through the content-addressed cache.
+// ---------------------------------------------------------------------------
+
+export interface SpaceRefs {
+    orgId: string
+    /** host[:port] — the org address links are minted on. */
+    orgAddress: string
+    spaceId: string
+}
+
+/** The canonical wire link for a blob — what goes INTO a message body. */
+export function blobWireUrl(refs: SpaceRefs, hash: string, name?: string): string {
+    const q = name ? `?name=${encodeURIComponent(name)}` : ''
+    return `https://${refs.orgAddress}/s/${refs.spaceId}/b/${hash}${q}`
+}
+
+/** The renderable form — app://space-blob/… served by main's protocol handler. */
+export function blobAppUrl(refs: { orgId: string; spaceId: string }, hash: string, opts?: { thumb?: number }): string {
+    const q = opts?.thumb ? `?thumb=${opts.thumb}` : ''
+    return `app://space-blob/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${hash}${q}`
+}
+
+const BLOB_APP_URL_RE = /^app:\/\/space-blob\/([^/]+)\/([^/]+)\/([0-9a-f]{64})/
+
+/** Parse an app://space-blob URL back into its parts (anchor-click interception). */
+export function parseBlobAppUrl(url: string): { orgId: string; spaceId: string; hash: string } | null {
+    const m = BLOB_APP_URL_RE.exec(url)
+    if (!m) return null
+    return { orgId: decodeURIComponent(m[1]!), spaceId: decodeURIComponent(m[2]!), hash: m[3]! }
+}
+
+/**
+ * Rewrite the org's blob links inside a markdown body to their app:// form so
+ * plain <img>/<a> rendering just works. Any space on the org is matched — the
+ * serving path re-checks membership; a link the viewer can't fetch 404s into
+ * a broken image, never into leaked bytes. Code regions stay literal.
+ */
+export function rewriteBlobLinks(body: string, refs: SpaceRefs): string {
+    const host = refs.orgAddress.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(`https://${host}/s/([0-9A-HJKMNP-TV-Z]{26})/b/([0-9a-f]{64})`, 'g')
+    const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    return parts
+        .map((part, i) => {
+            if (i % 2 === 1) return part // a code region — cite, not render
+            return part.replace(re, (_m, spaceId: string, hash: string) =>
+                blobAppUrl({ orgId: refs.orgId, spaceId }, hash),
+            )
+        })
+        .join('')
+}
+
+export function isImageMime(mime: string | undefined): boolean {
+    return !!mime && mime.startsWith('image/')
+}
+
+/** "1234567" → "1.2 MB" — file cards and upload chips. */
+export function formatBytes(size: number): string {
+    if (!Number.isFinite(size) || size < 0) return ''
+    if (size < 1024) return `${size} B`
+    const units = ['KB', 'MB', 'GB']
+    let value = size
+    let unit = 'B'
+    for (const u of units) {
+        if (value < 1024) break
+        value /= 1024
+        unit = u
+    }
+    return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${unit}`
+}
+
 /**
  * The one walker that turns wire member addresses ("@<memberId>") into
  * people. Code regions stay literal (same address-vs-cite line the trigger

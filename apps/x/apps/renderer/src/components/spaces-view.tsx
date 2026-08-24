@@ -6,7 +6,7 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { AddOrgDialog, AvatarStack, OrgMonogram } from '@/components/spaces/atoms'
-import { FileColumn } from '@/components/spaces/files-tab'
+import { FileColumn, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { SpaceRail, type RailList } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
@@ -14,6 +14,7 @@ import { ThreadPane } from '@/components/spaces/thread-pane'
 import { useGeneral, useSpacePresence, useThreadIndex } from '@/hooks/use-space-chat'
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { SpaceMembersProvider } from '@/components/spaces/member-text'
+import { SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, stripThreadMarker } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { markRead, markTopicRead } from '@/lib/spaces-read-state'
@@ -413,9 +414,14 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
         : crumbTopicId ? 'Back to topic' : null
     const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames)
 
+    // Files picked (rail Upload button) or dropped on the tree, awaiting the
+    // destination-folder dialog. Prefill the open file's folder when there is one.
+    const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
+    const uploadDefaultFolder = centerPath?.includes('/') ? centerPath.slice(0, centerPath.lastIndexOf('/')) : ''
 
     return (
         <SpaceMembersProvider members={memberNames}>
+        <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
         <div className="flex-1 min-h-0 flex flex-col">
             <header className="flex items-center gap-3 px-4 h-12 shrink-0 border-b border-border">
                 <OrgMonogram org={org} />
@@ -487,6 +493,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     selection={selection}
                     onSelect={select}
                     onCreateFile={openFile}
+                    onUploadFiles={setUploadFiles}
                     list={railList}
                     tabbed={effMode === 'split'}
                     onPickList={setSplitList}
@@ -583,7 +590,19 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     </aside>
                 )}
             </div>
+            {uploadFiles && (
+                <UploadFilesDialog
+                    org={org}
+                    space={space}
+                    files={uploadFiles}
+                    entries={entries}
+                    defaultFolder={uploadDefaultFolder}
+                    onClose={() => setUploadFiles(null)}
+                    onDone={() => setRefreshTick((t) => t + 1)}
+                />
+            )}
         </div>
+        </SpaceRefsProvider>
         </SpaceMembersProvider>
     )
 }
