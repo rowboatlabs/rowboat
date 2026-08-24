@@ -105,6 +105,20 @@ export function SpaceRail({
                 open ? 'bg-muted/20' : 'bg-background',
             )}
         >
+            {/* Always mounted: the rail collapses on mouse-leave while the native
+                file picker is open (the pointer is in the OS dialog), and an input
+                unmounted mid-pick never delivers its change event. */}
+            <input
+                ref={uploadInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                    const files = Array.from(e.target.files ?? [])
+                    if (files.length > 0) onUploadFiles(files)
+                    e.target.value = ''
+                }}
+            />
             {!open ? (
                 // The closed edge: what lives here (topics + files), and how much is unread.
                 <div className="flex flex-1 flex-col items-center gap-2.5 py-3.5">
@@ -229,17 +243,6 @@ export function SpaceRail({
                             <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
                             <span className="text-[11px] text-muted-foreground/70">{entries.length}</span>
                             <span className="flex-1" />
-                            <input
-                                ref={uploadInputRef}
-                                type="file"
-                                multiple
-                                className="hidden"
-                                onChange={(e) => {
-                                    const files = Array.from(e.target.files ?? [])
-                                    if (files.length > 0) onUploadFiles(files)
-                                    e.target.value = ''
-                                }}
-                            />
                             <button
                                 type="button"
                                 title="Upload files (or drop them here)"
