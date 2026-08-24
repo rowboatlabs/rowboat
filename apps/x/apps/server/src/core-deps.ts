@@ -31,6 +31,30 @@ import type { HomeThreadsTracker } from '@x/core/dist/home/threads.js';
 import { fetchTask, listTasks, readRunIds as readTaskRunIds } from '@x/core/dist/background-tasks/fileops.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { getCreditsState } from '@x/core/dist/billing/credits.js';
+import * as versionHistory from '@x/core/dist/knowledge/version_history.js';
+import { editSlide, generateDeckOutline, generateSlide } from '@x/core/dist/knowledge/deck_outline.js';
+import { invalidateCopilotInstructionsCache } from '@x/core/dist/runtime/assembly/copilot/instructions.js';
+import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync } from '@x/core/dist/knowledge/sources/sync_slack.js';
+import { markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
+import { saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
+import { saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
+import { saveRetentionSettings } from '@x/core/dist/config/retention.js';
+import { setPlannerConfig } from '@x/core/dist/todo/planner-task.js';
+import { recordPlannerSignal, addYourRule as addPlannerRule, takeSuggestion as takeTodoSuggestion } from '@x/core/dist/todo/planner-memory.js';
+import {
+  saveTodo,
+  addItem as addTodoItem,
+  addSubItem as addTodoSubItem,
+  clearCompleted as clearTodoCompleted,
+  dismissItem as dismissTodoItem,
+  restoreItem as restoreTodoItem,
+  deleteArchived as deleteTodoArchived,
+  importTodoAttachments,
+  linksToText as todoLinksToText,
+  findItem as findTodoItem,
+} from '@x/core/dist/todo/fileops.js';
+import { todoBus } from '@x/core/dist/todo/bus.js';
+import { runTodoItem, stopTodoRun, commentOnTodoItem, startHomeChat, replyHomeChat } from '@x/core/dist/todo/runner.js';
 import type { RpcHandlers } from './channels.js';
 import type { EventSources } from './server.js';
 
@@ -208,6 +232,276 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     'notifications:getSettings': async () => loadNotificationSettings(),
     'turnLimits:getSettings': async () => loadTurnLimitsSettings(),
     'retention:getSettings': async () => loadRetentionSettings(),
+    // ── Phase 2: workspace & knowledge writes, todo/home/deck, settings setters ──
+    'workspace:writeFile': async (args) => workspaceCore.writeFile(args.path, args.data, args.opts),
+    'workspace:mkdir': async (args) => workspaceCore.mkdir(args.path, args.recursive),
+    'workspace:rename': async (args) => workspaceCore.rename(args.from, args.to, args.overwrite),
+    'workspace:copy': async (args) => workspaceCore.copy(args.from, args.to, args.overwrite),
+    'workspace:remove': async (args) => workspaceCore.remove(args.path, args.opts),
+    'deck:generateOutline': async (args) => {
+      try {
+        const outline = await generateDeckOutline(args);
+        return { outline };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : 'Failed to generate the deck outline' };
+      }
+    },
+    'deck:generateSlide': async (args) => {
+      try {
+        const slide = await generateSlide(args);
+        return { slide };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : 'Failed to generate the slide' };
+      }
+    },
+    'deck:editSlide': async (args) => {
+      try {
+        const slide = await editSlide(args);
+        return { slide };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : 'Failed to edit the slide' };
+      }
+    },
+    'knowledgeSources:upsert': async (args) => {
+      const config = knowledgeSourcesRepo.upsertSource(args);
+      if (args.provider === 'slack') {
+        invalidateCopilotInstructionsCache();
+        triggerSlackKnowledgeSync();
+        void syncSlackKnowledgeSources().catch((error: unknown) => {
+          console.error('[SlackKnowledge] Immediate sync after settings update failed:', error);
+        });
+      }
+      return config;
+    },
+    'onboarding:markComplete': async () => {
+      markOnboardingComplete();
+      return { success: true };
+    },
+    'knowledge:history': async (args) => {
+      const commits = await versionHistory.getFileHistory(args.path);
+      return { commits };
+    },
+    'knowledge:fileAtCommit': async (args) => {
+      const content = await versionHistory.getFileAtCommit(args.path, args.oid);
+      return { content };
+    },
+    'knowledge:restore': async (args) => {
+      await versionHistory.restoreFile(args.path, args.oid);
+      return { ok: true };
+    },
+    'todo:acceptSuggestion': async (args) => {
+      try {
+        const taken = await takeTodoSuggestion(args.text);
+        if (!taken) return { success: false, error: 'Suggestion no longer exists' };
+        await addTodoItem(taken, { proposed: true });
+        void recordPlannerSignal('kept', taken).catch(() => {});
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:declineSuggestion': async (args) => {
+      try {
+        const taken = await takeTodoSuggestion(args.text);
+        if (!taken) return { success: false, error: 'Suggestion no longer exists' };
+        void recordPlannerSignal('dismissed', taken).catch(() => {});
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:setPlanner': async (args) => setPlannerConfig(args),
+    'todo:save': async (args) => {
+      try {
+        const list = await saveTodo(args.list);
+        return { success: true, list };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:addItem': async (args) => {
+      try {
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
+        const item = await addTodoItem(text);
+        if (args.run || item.delegated) {
+          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual', code: args.code }).catch(() => {});
+        }
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:addSubItem': async (args) => {
+      try {
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
+        const child = await addTodoSubItem(args.parentKey, text);
+        if (!child) return { success: false, error: 'Parent not found' };
+        if (args.run || child.delegated) {
+          void runTodoItem(child.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+        }
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:runItem': async (args) => {
+      try {
+        void runTodoItem(args.key, args.context, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:stopRun': async (args) => {
+      try {
+        const stopped = await stopTodoRun(args.key);
+        return stopped ? { success: true } : { success: false, error: 'No live run to stop' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:startChat': async (args) => {
+      try {
+        const result = await startHomeChat(args.text);
+        return result.sessionId
+          ? { success: true, sessionId: result.sessionId }
+          : { success: false, error: result.error ?? 'Failed to start chat' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:chatReply': async (args) => {
+      try {
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const message = links.length > 0 ? `${args.message}\n\nAttached: ${todoLinksToText(links)}` : args.message;
+        void replyHomeChat(args.sessionId, message, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:comment': async (args) => {
+      try {
+        const links = await importTodoAttachments(args.attachments ?? []);
+        const message = links.length > 0 ? `${args.message}\n\nAttached: ${todoLinksToText(links)}` : args.message;
+        void commentOnTodoItem(args.key, message, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:clearCompleted': async () => {
+      try {
+        const archived = await clearTodoCompleted();
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true, archived };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:dismiss': async (args) => {
+      try {
+        const found = await findTodoItem(args.key).catch(() => null);
+        const ok = await dismissTodoItem(args.key);
+        if (ok && found?.item.proposed) {
+          void recordPlannerSignal('dismissed', found.item.text).catch(() => {});
+        }
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true, wasProposed: !!found?.item.proposed } : { success: false, error: 'Item not found' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:teach': async (args) => {
+      try {
+        await addPlannerRule(`Don't suggest items like: "${args.text}"`);
+        void recordPlannerSignal('taught', args.text).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:deleteArchived': async (args) => {
+      try {
+        const ok = await deleteTodoArchived(args.month, args.blockIndex, args.key);
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true } : { success: false, error: 'Item moved — refresh and retry' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:restore': async (args) => {
+      try {
+        const ok = await restoreTodoItem(args.month, args.blockIndex, args.key);
+        todoBus.publish({ type: 'list_changed' });
+        return ok ? { success: true } : { success: false, error: 'Item moved — refresh and retry' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'home:markSeen': async (args) => {
+      try {
+        await container.resolve<HomeThreadsTracker>('homeThreadsTracker').markSeen(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:setPinned': async (args) => {
+      try {
+        await container.resolve<HomeThreadsTracker>('homeThreadsTracker').setPinned(args.sessionId, args.pinned);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:snooze': async (args) => {
+      try {
+        await container.resolve<HomeThreadsTracker>('homeThreadsTracker').snooze(args.sessionId, args.hours);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:dismiss': async (args) => {
+      try {
+        await container.resolve<HomeThreadsTracker>('homeThreadsTracker').dismiss(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:commandCenter': async () => {
+      const { ensureCommandCenterSession } = await import('@x/core/dist/home/command-center.js');
+      const sessionId = await ensureCommandCenterSession(sessions());
+      return { sessionId };
+    },
+    'notifications:setSettings': async (args) => {
+      saveNotificationSettings(args);
+      return { success: true };
+    },
+    'turnLimits:setSettings': async (args) => {
+      await saveTurnLimitsSettings(args);
+      return { success: true };
+    },
+    'retention:setSettings': async (args) => {
+      await saveRetentionSettings(args);
+      return { success: true };
+    },
+    'retention:consumeFirstRunNotice': async () => {
+      const settings = await loadRetentionSettings();
+      if (settings.enabled && !settings.noticeShown) {
+        await saveRetentionSettings({ noticeShown: true });
+        return { show: true, chatDays: settings.chatDays };
+      }
+      return { show: false, chatDays: settings.chatDays };
+    },
   };
 }
 
