@@ -15,6 +15,8 @@ import type { Store } from './store.js';
 
 type Env = { Variables: { memberId: string; identity?: AuthIdentity } };
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+/** Uploads only (raw-bytes route). 100MB across the board — dogfood decision 2026-08-24. */
+const DEFAULT_MAX_BLOB_BYTES = 100 * 1024 * 1024;
 
 function parseWith<S extends z.ZodType>(schema: S, value: unknown): z.infer<S> {
   const r = schema.safeParse(value);
@@ -53,8 +55,11 @@ export function buildHttpApp(deps: {
   auth: AuthDriver;
   /** Mounts the login/consent page (Supabase-flagship glue; consent.ts). */
   consent?: { issuer: string; publishableKey: string };
+  /** Upload cap for the raw-bytes blob route (default 100MB). */
+  maxBlobBytes?: number;
 }): Hono<Env> {
   const { service, store, auth, consent } = deps;
+  const maxBlobBytes = deps.maxBlobBytes ?? DEFAULT_MAX_BLOB_BYTES;
   const app = new Hono<Env>();
 
   app.onError((err, c) => {
@@ -222,6 +227,55 @@ export function buildHttpApp(deps: {
     });
     const unified = await service.diff(actor(c), spaceId, q.path, q.from, q.to);
     return reply(c, routes.diff.response, { unified });
+  });
+
+  // --- blobs -----------------------------------------------------------------
+
+  // Phase 1 of every upload: raw bytes in, {hash, size, mime} out (spec §6).
+  // The x-blob-sha256 header is the client's claim of the address; the service
+  // recomputes and refuses a mismatch, so a truncated body can't be stored.
+  app.put('/v1/spaces/:spaceId/blobs', async (c) => {
+    const { spaceId } = parseWith(routes.uploadBlob.params, c.req.param());
+    const declared = c.req.header('x-blob-sha256')?.toLowerCase();
+    if (!declared || !/^[0-9a-f]{64}$/.test(declared)) {
+      throw new HarborError('invalid_request', 'x-blob-sha256 header (sha256 hex of the body) is required');
+    }
+    const claimedLen = Number(c.req.header('content-length') ?? '0');
+    if (claimedLen > maxBlobBytes) {
+      throw new HarborError('payload_too_large', `blob exceeds the ${maxBlobBytes}-byte upload limit`);
+    }
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    if (bytes.byteLength > maxBlobBytes) {
+      throw new HarborError('payload_too_large', `blob exceeds the ${maxBlobBytes}-byte upload limit`);
+    }
+    const blob = await service.uploadBlob(actor(c), spaceId, bytes, {
+      declaredSha256: declared,
+      ...(c.req.header('content-type') ? { declaredMime: c.req.header('content-type') } : {}),
+    });
+    return reply(c, routes.uploadBlob.response, { blob });
+  });
+
+  // The bytes back: 302 to a presigned URL (S3-family drivers) or a direct
+  // stream (disk/memory). Immutable by address → cache forever, privately.
+  app.get('/v1/spaces/:spaceId/blobs/:hash', async (c) => {
+    const { spaceId, hash } = parseWith(routes.getBlob.params, c.req.param());
+    const q = parseWith(routes.getBlob.query, {
+      ...(c.req.query('name') !== undefined ? { name: c.req.query('name') } : {}),
+    });
+    const result = await service.downloadBlob(actor(c), spaceId, hash, q.name);
+    if (result.url) {
+      // Do not cache the redirect itself beyond the presign window.
+      c.header('cache-control', 'private, max-age=240');
+      return c.redirect(result.url, 302);
+    }
+    c.header('content-type', result.blob.mime);
+    c.header('content-length', String(result.blob.size));
+    c.header('content-disposition', result.disposition);
+    c.header('cache-control', 'private, max-age=31536000, immutable');
+    c.header('x-content-type-options', 'nosniff');
+    c.header('content-security-policy', "default-src 'none'");
+    const bytes = result.bytes!;
+    return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
   });
 
   // --- feed ------------------------------------------------------------------

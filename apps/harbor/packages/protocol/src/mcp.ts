@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BlobInfo } from './blob.js';
 import { ProposeChangeResult, ReadAssetResult } from './changeset.js';
 import { Message, Topic } from './core.js';
 import { AssetPath, AssetVersion, MessageId, SpaceId, TopicId } from './ids.js';
@@ -43,7 +44,13 @@ export const listSpaces = tool({
         name: z.string(),
         memberCount: z.number().int().nonnegative(),
         assets: z.array(
-          z.object({ path: AssetPath, version: AssetVersion, updatedAt: z.iso.datetime() }),
+          z.object({
+            path: AssetPath,
+            version: AssetVersion,
+            updatedAt: z.iso.datetime(),
+            /** Present = a binary file (image, pdf, …); read_asset returns its metadata, not bytes. */
+            blob: BlobInfo.optional(),
+          }),
         ),
       }),
     ),
@@ -73,7 +80,9 @@ export const readAsset = tool({
   name: 'read_asset',
   description:
     'Read a file in a space. Returns content, current version, and recent change history. ' +
-    'Always read before proposing a change; the version you read is your base version.',
+    'Always read before proposing a change; the version you read is your base version. ' +
+    'Binary files (images, pdfs, uploads) return empty content plus a `blob` {hash, size, mime} — ' +
+    'describe them by their metadata; the bytes are not readable over this face.',
   input: z.object({ spaceId: SpaceId, path: AssetPath }),
   output: ReadAssetResult,
 });

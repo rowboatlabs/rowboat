@@ -7,7 +7,9 @@ import {
   type ActingMode,
   type AcceptInviteResult,
   type Attribution,
+  type BlobInfo,
   type ChangeSet,
+  type ConflictRegion,
   type CreateInviteResult,
   type Member,
   type Membership,
@@ -24,10 +26,12 @@ import {
   type Topic,
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
+import { blobHash, type BlobStore } from './blobs.js';
 import { HarborError } from './errors.js';
 import { SpaceHub } from './hub.js';
 import { merge3 } from './merge.js';
-import type { Store, StoredEvent, StoredReaction } from './store.js';
+import { dispositionFor, resolveMime } from './mime.js';
+import type { AssetVersionData, Store, StoredEvent, StoredReaction } from './store.js';
 
 // The one service core (spec §9: one core, two faces). REST (http.ts) and MCP
 // (mcp.ts) are thin projections over this class; neither has a privileged path.
@@ -84,6 +88,8 @@ export class HarborService {
     private readonly store: Store,
     private readonly hub: SpaceHub,
     org: OrgInfo,
+    /** Absent = uploads unconfigured on this org (routes refuse loudly, everything else works). */
+    private readonly blobs?: BlobStore,
   ) {
     this.org = org;
   }
@@ -279,9 +285,90 @@ export class HarborService {
     const head = await this.store.getAssetHead(spaceId, path);
     if (!head) throw new HarborError('not_found', 'no such asset');
     const v = version ?? head.version;
-    const content = await this.store.getAssetContent(spaceId, path, v);
-    if (content === undefined) throw new HarborError('not_found', `no version ${v} of ${path}`);
-    return { path, content, version: v, recentHistory: await this.recentHistory(spaceId, path, v) };
+    const data = await this.store.getAssetVersion(spaceId, path, v);
+    if (data === undefined) throw new HarborError('not_found', `no version ${v} of ${path}`);
+    return {
+      path,
+      content: data.content ?? '',
+      ...(data.blob ? { blob: data.blob } : {}),
+      version: v,
+      recentHistory: await this.recentHistory(spaceId, path, v),
+    };
+  }
+
+  // --- uploaded blobs --------------------------------------------------------
+
+  private requireBlobStore(): BlobStore {
+    if (!this.blobs) {
+      throw new HarborError('internal', 'file uploads are not configured on this org');
+    }
+    return this.blobs;
+  }
+
+  /**
+   * Phase 1 of an upload (spec §6): store the bytes, register the hash for
+   * this space. Not a space fact — no event, no feed row; the reference
+   * (a message's blob link, proposeChange's blob variant) is what narrates.
+   */
+  async uploadBlob(
+    ctx: ActorCtx,
+    spaceId: string,
+    bytes: Uint8Array,
+    opts: { declaredSha256: string; declaredMime?: string },
+  ): Promise<BlobInfo> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    const blobs = this.requireBlobStore();
+    const hash = blobHash(bytes);
+    if (opts.declaredSha256 !== hash) {
+      throw new HarborError(
+        'invalid_request',
+        `x-blob-sha256 mismatch: body hashes to ${hash} — upload was corrupted or truncated`,
+      );
+    }
+    const mime = resolveMime(bytes, opts.declaredMime);
+    await blobs.put(bytes);
+    await this.store.putSpaceBlob({
+      spaceId,
+      hash,
+      size: bytes.byteLength,
+      mime,
+      uploadedBy: ctx.memberId,
+      uploadedAt: this.now(),
+    });
+    // First registration wins (idempotent re-uploads keep the original mime).
+    const stored = await this.store.getSpaceBlob(spaceId, hash);
+    return { hash, size: stored?.size ?? bytes.byteLength, mime: stored?.mime ?? mime };
+  }
+
+  /**
+   * The bytes back: a presigned URL when the driver can mint one (S3-family —
+   * bytes never transit Harbor), the bytes themselves otherwise (disk/memory).
+   * Which one an org uses is a driver detail, invisible in the route contract.
+   */
+  async downloadBlob(
+    ctx: ActorCtx,
+    spaceId: string,
+    hash: string,
+    name?: string,
+  ): Promise<{ blob: BlobInfo; disposition: string; url?: string; bytes?: Uint8Array }> {
+    await this.requireMember(ctx, spaceId);
+    const blobs = this.requireBlobStore();
+    const stored = await this.store.getSpaceBlob(spaceId, hash);
+    if (!stored) throw new HarborError('not_found', 'no such blob in this space');
+    const blob: BlobInfo = { hash: stored.hash, size: stored.size, mime: stored.mime };
+    const disposition = dispositionFor(stored.mime, name);
+    if (blobs.downloadUrl) {
+      const url = await blobs.downloadUrl(hash, {
+        expiresInSeconds: 300,
+        responseContentType: stored.mime,
+        responseContentDisposition: disposition,
+      });
+      return { blob, disposition, url };
+    }
+    const bytes = await blobs.get(hash);
+    if (!bytes) throw new HarborError('internal', 'blob registered but bytes are missing from storage');
+    return { blob, disposition, bytes };
   }
 
   async proposeChange(ctx: ActorCtx, spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {
@@ -289,6 +376,19 @@ export class HarborService {
     this.guardWrite();
     if (input.topicId && !(await this.store.getTopic(spaceId, input.topicId))) {
       throw new HarborError('invalid_request', 'topicId does not exist in this space');
+    }
+    // Binary variant: the hash must be phase-1-uploaded to THIS space — a
+    // version row can never point at nothing (and never at another space's
+    // upload; the registry is the read gate).
+    let proposal: AssetVersionData;
+    if (input.blob !== undefined) {
+      const stored = await this.store.getSpaceBlob(spaceId, input.blob);
+      if (!stored) {
+        throw new HarborError('invalid_request', 'blob is not uploaded to this space — call uploadBlob first');
+      }
+      proposal = { content: null, blob: { hash: stored.hash, size: stored.size, mime: stored.mime } };
+    } else {
+      proposal = { content: input.newContent ?? '', blob: null };
     }
     const attribution: Attribution = {
       memberId: ctx.memberId,
@@ -303,7 +403,7 @@ export class HarborService {
         if (input.baseVersion !== 0) {
           throw new HarborError('not_found', 'asset does not exist; propose with baseVersion 0 to create it');
         }
-        const changeSet = await this.commit(spaceId, input, attribution, 1, input.newContent);
+        const changeSet = await this.commit(spaceId, input, attribution, 1, proposal);
         return { outcome: 'applied' as const, changeSet, version: 1 };
       }
 
@@ -313,34 +413,48 @@ export class HarborService {
 
       if (input.baseVersion === head.version) {
         const version = head.version + 1;
-        const changeSet = await this.commit(spaceId, input, attribution, version, input.newContent);
+        const changeSet = await this.commit(spaceId, input, attribution, version, proposal);
         return { outcome: 'applied' as const, changeSet, version };
       }
 
-      // Stale base: three-way merge (CONTRACT.md decision 1).
-      const base = await this.store.getAssetContent(spaceId, input.assetPath, input.baseVersion);
-      const current = await this.store.getAssetContent(spaceId, input.assetPath, head.version);
+      // Stale base: three-way merge (CONTRACT.md decision 1) — but only when
+      // proposal, base, and current are ALL text. Binary staleness never
+      // merges (spec §6): there is nothing to three-way in a JPEG, so any
+      // binary side surfaces as conflict-or-replace with empty regions.
+      const base = await this.store.getAssetVersion(spaceId, input.assetPath, input.baseVersion);
+      const current = await this.store.getAssetVersion(spaceId, input.assetPath, head.version);
       if (base === undefined || current === undefined) {
         throw new HarborError('internal', 'asset version content missing');
       }
-      const result = merge3(base, current, input.newContent);
+
+      const conflictOf = async (regions: ConflictRegion[]) => ({
+        outcome: 'conflict' as const,
+        currentVersion: head.version,
+        currentContent: current.content ?? '',
+        ...(current.blob ? { currentBlob: current.blob } : {}),
+        regions,
+        recentHistory: await this.recentHistory(spaceId, input.assetPath),
+      });
+
+      if (proposal.blob !== null || base.blob !== null || current.blob !== null) {
+        return conflictOf([]);
+      }
+
+      const result = merge3(base.content ?? '', current.content ?? '', proposal.content ?? '');
 
       if (result.outcome === 'conflict') {
         // Nothing written. Decision 6: everything needed to retry, one round trip.
-        return {
-          outcome: 'conflict' as const,
-          currentVersion: head.version,
-          currentContent: current,
-          regions: result.regions,
-          recentHistory: await this.recentHistory(spaceId, input.assetPath),
-        };
+        return conflictOf(result.regions);
       }
 
       // Clean merge — stored even when it lands identical content, so the
       // second standup-pusher's change-set exists, attributed, in history
       // (principle 4; fixture 06's product beat).
       const version = head.version + 1;
-      const changeSet = await this.commit(spaceId, input, attribution, version, result.content);
+      const changeSet = await this.commit(spaceId, input, attribution, version, {
+        content: result.content,
+        blob: null,
+      });
       return { outcome: 'merged' as const, changeSet, version, mergedContent: result.content };
     });
   }
@@ -351,7 +465,7 @@ export class HarborService {
     input: ProposeChange,
     attribution: Attribution,
     version: number,
-    content: string,
+    data: AssetVersionData,
   ): Promise<ChangeSet> {
     const at = this.now();
     const offset = (await this.store.head(spaceId)) + 1;
@@ -368,10 +482,11 @@ export class HarborService {
       attribution,
       ...(input.reason ? { reason: input.reason } : {}),
       ...(topicId ? { topicId } : {}),
+      ...(data.blob ? { blob: data.blob } : {}),
       committedAt: at,
       offset,
     };
-    await this.store.putAssetVersion(spaceId, input.assetPath, version, content, at);
+    await this.store.putAssetVersion(spaceId, input.assetPath, version, data, at);
     await this.store.appendChangeSet(changeSet);
     await this.append(spaceId, offset, at, { type: 'change', changeSet });
     return changeSet;
@@ -394,14 +509,31 @@ export class HarborService {
     await this.requireMember(ctx, spaceId);
     const head = await this.store.getAssetHead(spaceId, path);
     if (!head) throw new HarborError('not_found', 'no such asset');
-    const fromContent = await this.store.getAssetContent(spaceId, path, from);
-    const toContent = await this.store.getAssetContent(spaceId, path, to);
-    if (fromContent === undefined || toContent === undefined) {
+    const fromData = await this.store.getAssetVersion(spaceId, path, from);
+    const toData = await this.store.getAssetVersion(spaceId, path, to);
+    if (fromData === undefined || toData === undefined) {
       throw new HarborError('not_found', 'no such version');
     }
-    return createTwoFilesPatch(`${path}@v${from}`, `${path}@v${to}`, fromContent, toContent, undefined, undefined, {
-      context: 3,
-    });
+    // Binary on either side: no text diff exists — return a readable stub in
+    // the same unified-header shape so diff views degrade gracefully.
+    if (fromData.blob !== null || toData.blob !== null) {
+      const describe = (d: AssetVersionData) =>
+        d.blob ? `(${d.blob.mime}, ${d.blob.size} bytes)` : `(text, ${(d.content ?? '').length} chars)`;
+      return (
+        `--- ${path}@v${from} ${describe(fromData)}\n` +
+        `+++ ${path}@v${to} ${describe(toData)}\n` +
+        `Binary change — no text diff.\n`
+      );
+    }
+    return createTwoFilesPatch(
+      `${path}@v${from}`,
+      `${path}@v${to}`,
+      fromData.content ?? '',
+      toData.content ?? '',
+      undefined,
+      undefined,
+      { context: 3 },
+    );
   }
 
   // --- feed ------------------------------------------------------------------

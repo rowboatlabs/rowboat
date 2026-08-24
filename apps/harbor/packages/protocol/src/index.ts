@@ -4,6 +4,7 @@
 // expected and fine, but they happen HERE, via PR — never in a Slack message.
 
 export * from './ids.js';
+export * from './blob.js';
 export * from './core.js';
 export * from './changeset.js';
 export * from './events.js';

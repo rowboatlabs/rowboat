@@ -1,5 +1,6 @@
 import type {
   Attribution,
+  BlobInfo,
   ChangeSet,
   Member,
   Membership,
@@ -21,6 +22,28 @@ export interface AssetHead {
   path: string;
   version: number;
   updatedAt: string;
+  /** Present when the head version is binary. */
+  blob?: BlobInfo;
+}
+
+/** One version's stored data: exactly one side is populated (spec §6: one namespace, one log). */
+export interface AssetVersionData {
+  content: string | null;
+  blob: BlobInfo | null;
+}
+
+/**
+ * The space-level read gate for uploaded bytes (the analogue of Buzz's
+ * per-community sidecar): bytes dedup per org in the BlobStore underneath,
+ * but a blob is referencable and servable only in spaces it was uploaded to.
+ */
+export interface StoredSpaceBlob {
+  spaceId: string;
+  hash: string;
+  size: number;
+  mime: string;
+  uploadedBy: string;
+  uploadedAt: string;
 }
 
 export interface StoredInvite {
@@ -74,11 +97,16 @@ export interface Store {
   putMembership(membership: Membership): Promise<void>;
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
-  // assets — every version's content is kept; version 0 reads as ''
+  // assets — every version's data is kept; version 0 reads as { content: '', blob: null }
   listAssets(spaceId: string): Promise<AssetHead[]>;
   getAssetHead(spaceId: string, path: string): Promise<AssetHead | undefined>;
-  getAssetContent(spaceId: string, path: string, version: number): Promise<string | undefined>;
-  putAssetVersion(spaceId: string, path: string, version: number, content: string, updatedAt: string): Promise<void>;
+  getAssetVersion(spaceId: string, path: string, version: number): Promise<AssetVersionData | undefined>;
+  putAssetVersion(spaceId: string, path: string, version: number, data: AssetVersionData, updatedAt: string): Promise<void>;
+
+  // uploaded blobs (space-scoped registry; bytes live in the BlobStore)
+  /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
+  putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
+  getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
 
   // change log (append-only)
   appendChangeSet(changeSet: ChangeSet): Promise<void>;

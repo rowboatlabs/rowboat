@@ -40,6 +40,10 @@ export type AssetPath = z.infer<typeof AssetPath>;
 export const AssetVersion = z.number().int().positive();
 export type AssetVersion = z.infer<typeof AssetVersion>;
 
+/** sha256 hex of the bytes — a blob's address (spec §6: content-addressed, immutable). */
+export const BlobHash = z.string().regex(/^[0-9a-f]{64}$/, 'expected a sha256 hex blob hash');
+export type BlobHash = z.infer<typeof BlobHash>;
+
 /** Per-space durable log offset. Change-sets, messages, and topic events share one sequence. */
 export const StreamOffset = z.number().int().nonnegative();
 export type StreamOffset = z.infer<typeof StreamOffset>;
@@ -52,7 +56,12 @@ export type StreamOffset = z.infer<typeof StreamOffset>;
  *   asset       https://<org>/s/<spaceId>/f/<assetPath>
  *   topic       https://<org>/s/<spaceId>/t/<topicId>
  *   change-set  https://<org>/s/<spaceId>/c/<changeSetId>
+ *   blob        https://<org>/s/<spaceId>/b/<blobHash>[?name=<filename>]
  *   invite      https://<org>/join/<inviteToken>
+ *
+ * Blob links are how message bodies reference uploads (`![shot](…/b/<hash>)`);
+ * the app resolves them through the authenticated getBlob route. `name` is
+ * display-only — storage is content-addressed and never learns filenames.
  */
 export function spaceUrl(orgAddress: string, spaceId: SpaceId): string {
   return `https://${orgAddress}/s/${spaceId}`;
@@ -65,6 +74,10 @@ export function topicUrl(orgAddress: string, spaceId: SpaceId, topicId: TopicId)
 }
 export function changeSetUrl(orgAddress: string, spaceId: SpaceId, changeSetId: ChangeSetId): string {
   return `${spaceUrl(orgAddress, spaceId)}/c/${changeSetId}`;
+}
+export function blobLinkUrl(orgAddress: string, spaceId: SpaceId, hash: BlobHash, name?: string): string {
+  const query = name ? `?name=${encodeURIComponent(name)}` : '';
+  return `${spaceUrl(orgAddress, spaceId)}/b/${hash}${query}`;
 }
 export function inviteUrl(orgAddress: string, token: string): string {
   return `https://${orgAddress}/join/${token}`;

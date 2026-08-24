@@ -8,9 +8,9 @@ import { createHash } from 'node:crypto';
 // endpoint + forcePathStyle). Dedup scope is per deployment prefix/directory —
 // per org, never global, when multi-org routing arrives.
 //
-// NOT yet wired to any route: the upload feature is deferred (spec §12) and
-// lands as a contract PR adding the endpoint + a binary propose variant. This
-// is the finished primitive that feature lands on.
+// Wired (2026-08-24): uploadBlob/getBlob routes (http.ts) + proposeChange's
+// binary variant ride this primitive; space-level readability lives in the
+// space_blobs registry (store.ts), never here.
 
 export const BLOB_HASH_RE = /^[0-9a-f]{64}$/;
 
@@ -31,6 +31,43 @@ export interface BlobStore {
   has(hash: string): Promise<boolean>;
   /** GC only (refcount sweep, spec §12). Deleting a missing blob is fine. */
   delete(hash: string): Promise<void>;
+  /**
+   * Optional capability: a short-lived direct-download URL (S3 presigned).
+   * When present, the serving route 302s to it and the bytes never transit
+   * Harbor; when absent (disk, memory), the route streams via get(). The
+   * response-* overrides ride inside the signed URL, so the redirect target
+   * still serves with the org's authoritative headers.
+   */
+  downloadUrl?(
+    hash: string,
+    opts: { expiresInSeconds: number; responseContentType?: string; responseContentDisposition?: string },
+  ): Promise<string>;
+}
+
+/** In-memory driver — tests and the dev stub (restart = clean slate, matching MemoryStore). */
+export class MemoryBlobStore implements BlobStore {
+  private blobs = new Map<string, Uint8Array>();
+
+  async put(bytes: Uint8Array): Promise<string> {
+    const hash = blobHash(bytes);
+    this.blobs.set(hash, new Uint8Array(bytes));
+    return hash;
+  }
+
+  async get(hash: string): Promise<Uint8Array | undefined> {
+    assertBlobHash(hash);
+    return this.blobs.get(hash);
+  }
+
+  async has(hash: string): Promise<boolean> {
+    assertBlobHash(hash);
+    return this.blobs.has(hash);
+  }
+
+  async delete(hash: string): Promise<void> {
+    assertBlobHash(hash);
+    this.blobs.delete(hash);
+  }
 }
 
 /** Guards drivers against malformed addresses (and disk against path games). */
