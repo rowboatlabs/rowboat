@@ -234,10 +234,33 @@ export class SessionsImpl implements ISessions {
         return this.sessionRepo.withLock(sessionId, async () => {
             const events = await this.sessionRepo.read(sessionId);
             const state = reduceSession(events);
-            const latestTurnState = await this.latestTurnState(state);
-            const status = latestTurnState
+            let latestTurnState = await this.latestTurnState(state);
+            let status = latestTurnState
                 ? deriveTurnStatus(latestTurnState)
                 : "none";
+            // An "idle" turn with no live advance in this process is a turn
+            // NOTHING is running: the process driving it died (or its advance
+            // rejected as infrastructure) before a terminal event was written.
+            // It will never settle, so deliver-ASAP must not park messages
+            // behind it forever — cancel it (the §22 fast-path: no live
+            // dependencies, never re-issues a model call) and deliver this
+            // message as a fresh turn. A suspended turn is different: it is
+            // parked on a permission or async tool and legitimately waits
+            // with no advance, so it still queues.
+            if (
+                status === "idle" &&
+                state.latestTurnId &&
+                !this.active.has(state.latestTurnId)
+            ) {
+                await this.abortOrCancel(
+                    state.latestTurnId,
+                    "interrupted: the app quit or crashed while this turn was running",
+                );
+                latestTurnState = await this.latestTurnState(state);
+                status = latestTurnState
+                    ? deriveTurnStatus(latestTurnState)
+                    : "none";
+            }
             const settled =
                 status === "none" ||
                 status === "completed" ||
