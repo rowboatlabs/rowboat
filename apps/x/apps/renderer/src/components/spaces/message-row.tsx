@@ -1,15 +1,101 @@
+import { useState } from 'react'
 import { Streamdown } from 'streamdown'
-import { Bot, ChevronRight, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal } from 'lucide-react'
+import { Bot, ChevronRight, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, SmilePlus } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { decorateMentions, formatFeedTime } from '@/lib/spaces-presentation'
 
 // One message in a stream (general or a thread). Consecutive messages by the
 // same author compact to a time gutter; hover reveals the action bar.
+
+/** The quick palette (Slack's defaults plus the team's usual suspects). */
+const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '🎉', '😂', '🚀', '🙏', '💯', '🔥', '😮', '👎']
+
+function ReactionPicker({ onPick, onOpenChange, children }: {
+    onPick: (emoji: string) => void
+    onOpenChange?: (open: boolean) => void
+    children: React.ReactNode
+}) {
+    const [open, setOpen] = useState(false)
+    const setBoth = (next: boolean) => {
+        setOpen(next)
+        onOpenChange?.(next)
+    }
+    return (
+        <Popover open={open} onOpenChange={setBoth}>
+            <PopoverTrigger asChild>{children}</PopoverTrigger>
+            <PopoverContent align="end" className="w-auto p-1.5">
+                <div className="grid grid-cols-6 gap-0.5">
+                    {REACTION_PALETTE.map((emoji) => (
+                        <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => {
+                                setBoth(false)
+                                onPick(emoji)
+                            }}
+                            className="inline-flex size-7 items-center justify-center rounded-md text-base hover:bg-accent"
+                        >
+                            {emoji}
+                        </button>
+                    ))}
+                </div>
+            </PopoverContent>
+        </Popover>
+    )
+}
+
+function reactionTitle(group: spaces.ReactionGroup, memberNames: Map<string, string>, selfMemberId?: string): string {
+    const names = group.memberIds.map((id) => (id === selfMemberId ? 'You' : memberNames.get(id) ?? id))
+    return `${names.join(', ')} reacted with ${group.emoji}`
+}
+
+function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOpenChange }: {
+    message: spaces.Message
+    memberNames: Map<string, string>
+    selfMemberId?: string
+    onReact: (message: spaces.Message, emoji: string) => void
+    onPickerOpenChange: (open: boolean) => void
+}) {
+    const groups = message.reactions ?? []
+    if (groups.length === 0) return null
+    return (
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+            {groups.map((group) => {
+                const mine = !!selfMemberId && group.memberIds.includes(selfMemberId)
+                return (
+                    <button
+                        key={group.emoji}
+                        type="button"
+                        title={reactionTitle(group, memberNames, selfMemberId)}
+                        onClick={() => onReact(message, group.emoji)}
+                        className={cn(
+                            'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5',
+                            mine ? 'border-foreground/40 bg-accent' : 'border-border bg-background hover:border-foreground/30',
+                        )}
+                    >
+                        <span className="text-[13px] leading-none">{group.emoji}</span>
+                        <span className="text-[11px] font-medium leading-none tabular-nums text-muted-foreground">{group.memberIds.length}</span>
+                    </button>
+                )
+            })}
+            <ReactionPicker onPick={(emoji) => onReact(message, emoji)} onOpenChange={onPickerOpenChange}>
+                <button
+                    type="button"
+                    title="Add reaction"
+                    className="inline-flex items-center rounded-full border border-border bg-background px-1.5 py-0.5 text-muted-foreground opacity-0 hover:border-foreground/30 hover:text-foreground group-hover/msg:opacity-100 data-[state=open]:opacity-100"
+                >
+                    <SmilePlus className="size-3.5" />
+                </button>
+            </ReactionPicker>
+        </div>
+    )
+}
 
 const MESSAGE_PROSE = 'text-sm leading-relaxed [&_p]:my-0.5 [&_h1]:text-base [&_h2]:text-[15px] [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-2 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_ul]:my-1 [&_ol]:my-1'
 
@@ -22,7 +108,7 @@ export interface ThreadRowData {
 }
 
 export function MessageRow({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, dense, selfMemberId,
 }: {
     message: spaces.Message
     memberNames: Map<string, string>
@@ -35,6 +121,8 @@ export function MessageRow({
     onReplyInThread?: (message: spaces.Message) => void
     onAskRowboat?: (message: spaces.Message) => void
     onCopyLink?: (message: spaces.Message) => void
+    /** Toggles the caller's reaction (add when absent, remove when present). */
+    onReact?: (message: spaces.Message, emoji: string) => void
     /** Thread panes use the smaller avatar. */
     dense?: boolean
 }) {
@@ -42,7 +130,9 @@ export function MessageRow({
     const viaAgent = message.author.actingMode !== 'direct'
     const avatarSize = dense ? 'md' : 'lg'
     const gutter = dense ? 'w-7' : 'w-8'
-    const showActions = !!(onReplyInThread || onAskRowboat || onCopyLink)
+    const showActions = !!(onReplyInThread || onAskRowboat || onCopyLink || onReact)
+    // While the emoji picker is open the hover-revealed chrome must stay put.
+    const [pickerOpen, setPickerOpen] = useState(false)
 
     return (
         <div className={cn('group/msg relative flex items-start gap-2.5 rounded-lg px-2 hover:bg-accent/40', continuation ? 'py-0.5' : 'py-1.5')}>
@@ -68,6 +158,15 @@ export function MessageRow({
                 <div className={MESSAGE_PROSE}>
                     <Streamdown>{decorateMentions(message.body, memberNames)}</Streamdown>
                 </div>
+                {onReact && (
+                    <ReactionChips
+                        message={message}
+                        memberNames={memberNames}
+                        selfMemberId={selfMemberId}
+                        onReact={onReact}
+                        onPickerOpenChange={setPickerOpen}
+                    />
+                )}
                 {thread && thread.replyCount > 0 && onOpenThread && (
                     <button
                         type="button"
@@ -104,7 +203,18 @@ export function MessageRow({
                 )}
             </div>
             {showActions && (
-                <div className="absolute right-2 top-1 hidden items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-sm group-hover/msg:flex">
+                <div className={cn('absolute right-2 top-1 items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-sm', pickerOpen ? 'flex' : 'hidden group-hover/msg:flex')}>
+                    {onReact && (
+                        <ReactionPicker onPick={(emoji) => onReact(message, emoji)} onOpenChange={setPickerOpen}>
+                            <button
+                                type="button"
+                                title="Add reaction"
+                                className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <SmilePlus className="size-3.5" />
+                            </button>
+                        </ReactionPicker>
+                    )}
                     {onReplyInThread && (
                         <button
                             type="button"

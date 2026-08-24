@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet, ProposeChange, ProposeChangeResult, ReadAssetResult } from './changeset.js';
-import { ActingMode, Member, Message, Space, Topic } from './core.js';
+import { ActingMode, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
 import { AssetPath, AssetVersion, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -158,6 +158,24 @@ export const routes = {
     params: z.object({ spaceId: SpaceId }),
     request: NewTopicMessage,
     response: z.object({ topic: Topic, message: Message }),
+  },
+  /**
+   * Toggle a reaction (Slack semantics: any member, any message, one per
+   * member+emoji). Idempotent — re-adding or re-removing is a 200 no-op with
+   * no event. The response carries the message with reactions folded in, so
+   * the caller renders without waiting for the live frame.
+   */
+  reactToMessage: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/messages/:messageId/reactions',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    request: z.object({
+      emoji: ReactionEmoji,
+      action: z.enum(['add', 'remove']),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ message: Message }),
   },
   manageTopic: {
     method: 'POST',

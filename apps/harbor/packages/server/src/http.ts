@@ -248,6 +248,13 @@ export function buildHttpApp(deps: {
     return reply(c, routes.postMessage.response, await service.postMessage(actor(c), spaceId, input));
   });
 
+  app.post('/v1/spaces/:spaceId/messages/:messageId/reactions', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.reactToMessage.params, c.req.param());
+    const input = await body(c, routes.reactToMessage.request);
+    const message = await service.reactToMessage(actor(c), spaceId, messageId, input);
+    return reply(c, routes.reactToMessage.response, { message });
+  });
+
   app.post('/v1/spaces/:spaceId/topics/:topicId', async (c) => {
     const { spaceId, topicId } = parseWith(routes.manageTopic.params, c.req.param());
     const input = await body(c, routes.manageTopic.request);

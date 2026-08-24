@@ -116,6 +116,22 @@ describe('SpacesClient', () => {
     expect((await ramnique.listTopics(spaceId)).map((t) => t.id)).toContain(started.topic.id);
   });
 
+  it('reactions toggle and fold into message reads', async () => {
+    const started = await ramnique.postMessage(spaceId, { body: 'Reaction target', actingMode: 'direct' });
+    const messageId = started.message.id;
+
+    const one = await gagan.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'add', actingMode: 'direct' });
+    expect(one.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'] }]);
+    const two = await ramnique.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'add', actingMode: 'direct' });
+    expect(two.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'] }]);
+
+    const { messages } = await gagan.listMessages(spaceId, started.topic.id);
+    expect(messages.find((m) => m.id === messageId)?.reactions).toEqual(two.reactions);
+
+    const removed = await gagan.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'remove', actingMode: 'direct' });
+    expect(removed.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'] }]);
+  });
+
   it('errors carry the wire code', async () => {
     await expect(ramnique.readAsset(spaceId, 'ghost.md')).rejects.toMatchObject({
       code: 'not_found',

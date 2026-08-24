@@ -5,7 +5,7 @@ import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
-import { rememberThread, usePresenceSender } from '@/hooks/use-space-chat'
+import { rememberThread, updateGeneralMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { buildThreadSeed, dayKey, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
@@ -143,6 +143,21 @@ export function GeneralStream({
         setSeed({ text: `@rowboat \n\n${quote}\n— ${name}`, nonce: Date.now() })
     }
 
+    // Toggle: add when the viewer isn't in the group yet, remove when they are.
+    const toggleReaction = async (message: spaces.Message, emoji: string) => {
+        const mine = (message.reactions ?? []).find((g) => g.emoji === emoji)?.memberIds.includes(org.memberId)
+        const action = mine ? 'remove' : 'add'
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
+                orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
+            })
+            updateGeneralMessage(org.id, space.id, updated)
+            analytics.spacesReactionToggled({ action })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not react', 'error')
+        }
+    }
+
     const copyLink = async (message: spaces.Message) => {
         try {
             await navigator.clipboard.writeText(`https://${org.address}/s/${space.id}/t/${message.topicId}#${message.id}`)
@@ -182,6 +197,7 @@ export function GeneralStream({
                 onReplyInThread={(m) => void replyInThread(m)}
                 onAskRowboat={askRowboat}
                 onCopyLink={(m) => void copyLink(m)}
+                onReact={(m, emoji) => void toggleReaction(m, emoji)}
             />,
         )
         prev = message

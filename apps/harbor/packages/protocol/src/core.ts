@@ -75,6 +75,38 @@ export const Topic = z.object({
 });
 export type Topic = z.infer<typeof Topic>;
 
+/** The emoji itself ("👍", ZWJ sequences included), rendered verbatim — never a :name:. */
+export const ReactionEmoji = z
+  .string()
+  .min(1)
+  .max(32)
+  .refine((e) => !/\s/.test(e), 'an emoji has no whitespace');
+export type ReactionEmoji = z.infer<typeof ReactionEmoji>;
+
+/**
+ * One member's reaction to one message — a per-(member, emoji) toggle, Slack
+ * semantics. Attribution follows the contract's one rule (principle 4): the
+ * act belongs to a member, `by.actingMode` says how it happened. `topicId` is
+ * where the message lived when the reaction happened (merge_into may repoint
+ * the message later; reactions follow it by messageId).
+ */
+export const Reaction = z.object({
+  spaceId: SpaceId,
+  topicId: TopicId,
+  messageId: MessageId,
+  emoji: ReactionEmoji,
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type Reaction = z.infer<typeof Reaction>;
+
+/** Display aggregate: who reacted with one emoji, in first-reacted order. */
+export const ReactionGroup = z.object({
+  emoji: ReactionEmoji,
+  memberIds: z.array(MemberId).min(1),
+});
+export type ReactionGroup = z.infer<typeof ReactionGroup>;
+
 export const Message = z.object({
   id: MessageId,
   topicId: TopicId,
@@ -84,5 +116,11 @@ export const Message = z.object({
   body: z.string().min(1).max(65_536),
   postedAt: z.iso.datetime(),
   offset: StreamOffset,
+  /**
+   * Folded reactions, groups in first-reacted order. The default keeps pre-
+   * reaction payloads (older servers, stored message events) parseable; reads
+   * fold live state in, so the field is current wherever messages are listed.
+   */
+  reactions: z.array(ReactionGroup).default([]),
 });
 export type Message = z.infer<typeof Message>;

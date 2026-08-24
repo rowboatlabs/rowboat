@@ -6,7 +6,7 @@ import type {
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
-import type { AssetHead, Store, StoredEvent, StoredInvite } from './store.js';
+import type { AssetHead, Store, StoredEvent, StoredInvite, StoredReaction } from './store.js';
 
 interface SpaceState {
   space: Space;
@@ -17,6 +17,7 @@ interface SpaceState {
   changeSetsById: Map<string, ChangeSet>;
   topics: Map<string, Topic>;
   messages: Map<string, Message[]>; // topicId → oldest first
+  reactions: Map<string, StoredReaction[]>; // messageId → oldest first
   events: StoredEvent[]; // offsets start at 1; events[i].offset === i + 1
   lock: Promise<void>;
 }
@@ -69,6 +70,7 @@ export class MemoryStore implements Store {
       changeSetsById: new Map(),
       topics: new Map(),
       messages: new Map(),
+      reactions: new Map(),
       events: [],
       lock: Promise.resolve(),
     });
@@ -199,6 +201,48 @@ export class MemoryStore implements Store {
     s.messages.set(toTopicId, combined);
     s.messages.delete(fromTopicId);
     return moving.length;
+  }
+
+  async getReaction(
+    spaceId: string,
+    messageId: string,
+    emoji: string,
+    memberId: string,
+  ): Promise<StoredReaction | undefined> {
+    return this.state(spaceId)?.reactions
+      .get(messageId)
+      ?.find((r) => r.emoji === emoji && r.by.memberId === memberId);
+  }
+
+  async putReaction(reaction: StoredReaction): Promise<void> {
+    const s = this.must(reaction.spaceId);
+    const list = (s.reactions.get(reaction.messageId) ?? []).filter(
+      (r) => !(r.emoji === reaction.emoji && r.by.memberId === reaction.by.memberId),
+    );
+    list.push(reaction);
+    s.reactions.set(reaction.messageId, list);
+  }
+
+  async deleteReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<void> {
+    const s = this.must(spaceId);
+    const list = (s.reactions.get(messageId) ?? []).filter(
+      (r) => !(r.emoji === emoji && r.by.memberId === memberId),
+    );
+    if (list.length === 0) s.reactions.delete(messageId);
+    else s.reactions.set(messageId, list);
+  }
+
+  async listReactionsByMessage(spaceId: string, messageId: string): Promise<StoredReaction[]> {
+    return [...(this.must(spaceId).reactions.get(messageId) ?? [])].sort(
+      (a, b) => a.at.localeCompare(b.at) || a.by.memberId.localeCompare(b.by.memberId),
+    );
+  }
+
+  async listReactionsByTopic(spaceId: string, topicId: string): Promise<StoredReaction[]> {
+    const s = this.must(spaceId);
+    return (s.messages.get(topicId) ?? [])
+      .flatMap((m) => s.reactions.get(m.id) ?? [])
+      .sort((a, b) => a.at.localeCompare(b.at) || a.by.memberId.localeCompare(b.by.memberId));
   }
 
   async putInvite(invite: StoredInvite): Promise<void> {
