@@ -187,8 +187,11 @@ function grepFiles(query: string, dir: string, includeGlobs: string | string[]):
   const globs = Array.isArray(includeGlobs) ? includeGlobs : [includeGlobs];
   return new Promise((resolve, reject) => {
     execFile(
+      // -F: the search bar takes literal text, not a regex — this matches the
+      // literal preview scan below and stops a query like "C++" or "cost()"
+      // from being read as a (mis)pattern. -e / -- guard a query starting "-".
       'grep',
-      ['-ril', ...globs.map((g) => '--include=' + g), query, dir],
+      ['-rilF', ...globs.map((g) => '--include=' + g), '-e', query, '--', dir],
       { maxBuffer: 1024 * 1024 },
       (error, stdout) => {
         if (error) {
