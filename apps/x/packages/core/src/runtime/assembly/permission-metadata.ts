@@ -74,6 +74,8 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'deck-edit-slide':
         case 'deck-restructure':
         case 'deck-restyle':
+        case 'spreadsheet-create':
+        case 'spreadsheet-edit':
             return pathArg ? { operation: 'write', paths: [pathArg] } : null;
         case 'file-copy':
         case 'file-rename': {

@@ -216,6 +216,8 @@ const HISTORICAL_KEY_ORDER = [
     "transcribe-audio",
     "home-status",
     "paste-at-cursor",
+    "spreadsheet-create",
+    "spreadsheet-edit",
     "spawn-agent",
 ];
 
@@ -288,6 +290,8 @@ describe("BuiltinTools permission audit", () => {
             "deck-restructure": "file-boundary",
             "deck-restyle": "file-boundary",
             "deck-review": "file-boundary",
+            "spreadsheet-create": "file-boundary",
+            "spreadsheet-edit": "file-boundary",
             executeCommand: "command-allowlist",
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
