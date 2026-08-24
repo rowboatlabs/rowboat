@@ -54,7 +54,14 @@ export const WS_CLOSE_NO_HELLO = 4400;
 export interface WsHub {
   attach(
     server: HttpServer,
-    opts: { path?: string; serverKey: string; serverVersion: string; helloTimeoutMs?: number },
+    opts: {
+      path?: string;
+      serverKey: string;
+      serverVersion: string;
+      helloTimeoutMs?: number;
+      /** When set, upgrades with a foreign Host header are refused (DNS-rebinding guard). */
+      allowedHosts?: Set<string>;
+    },
   ): void;
   /** Broadcast a push-channel event to every fully-connected client. */
   broadcast(channel: PushChannel, payload: unknown): void;
@@ -101,6 +108,13 @@ export function createWsHub(): WsHub {
       if (url.pathname !== wsPath) {
         socket.destroy();
         return;
+      }
+      if (opts.allowedHosts) {
+        const hostHeader = request.headers.host?.replace(/:\d+$/, '').toLowerCase();
+        if (!hostHeader || !opts.allowedHosts.has(hostHeader)) {
+          socket.destroy();
+          return;
+        }
       }
       const token = extractBearer(request.headers.authorization, url.searchParams.get('token'));
       if (!token || !tokenMatches(token, opts.serverKey)) {

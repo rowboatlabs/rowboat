@@ -39,9 +39,17 @@ export function createWorkspaceRoutes(resolveWorkspacePath: (relPath: string) =>
     }
 
     try {
-      const stats = await fs.stat(absPath);
+      // resolveWorkspacePath guards `..` traversal but not a symlink inside
+      // the workspace pointing out of it — realpath both sides and require
+      // containment before touching the file.
+      const realRoot = await fs.realpath(resolveWorkspacePath(''));
+      const realTarget = await fs.realpath(absPath);
+      if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) {
+        return c.text('Forbidden', 403);
+      }
+      const stats = await fs.stat(realTarget);
       if (!stats.isFile()) return c.text('Not Found', 404);
-      const data = await fs.readFile(absPath);
+      const data = await fs.readFile(realTarget);
       const type = CONTENT_TYPES[path.extname(absPath).toLowerCase()] ?? 'application/octet-stream';
       return c.body(new Uint8Array(data), 200, {
         'Content-Type': type,
