@@ -153,7 +153,7 @@ describe('rowboat-server transport', () => {
   });
 
   it('404s channels outside the allowlist without leaking the surface', async () => {
-    for (const channel of ['models:list', 'no-such-channel', 'turns:subscribe']) {
+    for (const channel of ['models:saveConfig', 'no-such-channel', 'turns:subscribe']) {
       const res = await fetch(`${base}/rpc/${channel}`, authed({ method: 'POST', body: '{}' }));
       expect(res.status).toBe(404);
       const body = (await res.json()) as { error: { code: string } };
