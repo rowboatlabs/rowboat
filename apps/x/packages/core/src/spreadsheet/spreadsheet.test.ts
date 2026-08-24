@@ -67,6 +67,26 @@ describe("createWorkbook", () => {
         expect(win.rows[1]).toEqual(["Rex", 'says "woof", loudly']);
     });
 
+    it("preserves non-ASCII CSV text through read and edit (codepage 65001)", async () => {
+        const spreadsheet = await loadModule();
+
+        await spreadsheet.createWorkbook("data/i18n.csv", [
+            { rows: [["name", "note"], ["日本語", "café ünïcode"]] },
+        ]);
+
+        // BOM-less UTF-8 CSV must not be decoded as cp1252 when read back...
+        const win = await spreadsheet.loadSheetWindow("data/i18n.csv", undefined, 0, 10);
+        expect(win.rows[1]).toEqual(["日本語", "café ünïcode"]);
+
+        // ...and an edit's read-modify-write must not corrupt untouched cells.
+        await spreadsheet.applyWorkbookOps("data/i18n.csv", [
+            { op: "appendRows", rows: [["probe", "x"]] },
+        ]);
+        const raw = await fs.readFile(path.join(workspaceDir, "data", "i18n.csv"), "utf8");
+        expect(raw).toContain("日本語");
+        expect(raw).toContain("café ünïcode");
+    });
+
     it("rejects multi-sheet CSV, existing files without overwrite, and unwritable formats", async () => {
         const spreadsheet = await loadModule();
 

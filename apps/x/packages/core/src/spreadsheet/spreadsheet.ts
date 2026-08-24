@@ -183,7 +183,12 @@ async function readWorkbook(inputPath: string): Promise<{
     }
 
     const { buffer } = await files.readBuffer(inputPath);
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    // codepage 65001 = UTF-8. Without it SheetJS decodes BOM-less CSV as
+    // cp1252, and since this read also feeds applyWorkbookOps, an edit would
+    // write the mis-decoded text back — corrupting non-ASCII cells the edit
+    // never touched. Only affects CSV/text parsing; xlsx carries its own
+    // encoding.
+    const workbook = XLSX.read(buffer, { type: 'buffer', codepage: 65001 });
     parseCache = { resolvedPath: resolved.resolvedPath, etag: stat.etag, format, workbook };
     return { XLSX, workbook, format, resolved, etag: stat.etag };
 }
