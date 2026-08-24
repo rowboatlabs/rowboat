@@ -172,8 +172,11 @@ async function searchChats(query: string, limit: number, sessions: ChatSessionMe
 function grepFiles(query: string, dir: string, includeGlob: string): Promise<Array<{ file: string; line: string }>> {
   return new Promise((resolve, reject) => {
     execFile(
+      // -F: the search bar takes literal text, not a regex — this matches the
+      // literal preview scan below and stops a query like "C++" or "cost()"
+      // from being read as a (mis)pattern. -e / -- guard a query starting "-".
       'grep',
-      ['-ril', '--include=' + includeGlob, query, dir],
+      ['-rilF', '--include=' + includeGlob, '-e', query, '--', dir],
       { maxBuffer: 1024 * 1024 },
       (error, stdout) => {
         if (error) {

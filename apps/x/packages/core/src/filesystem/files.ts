@@ -14,6 +14,10 @@ export { computeEtag, EtagMismatchError, isEtagMismatchError };
 
 export type FileOperation = 'read' | 'list' | 'search' | 'write' | 'delete';
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export type ResolvedFilePath = {
   originalPath: string;
   resolvedPath: string;
@@ -650,7 +654,16 @@ export async function grep({
     })
     : [path.basename(root.resolvedPath)];
   const baseDir = stats.isDirectory() ? root.resolvedPath : path.dirname(root.resolvedPath);
-  const regex = new RegExp(pattern, 'i');
+  // The pattern is a regex, but the assistant routinely passes literal text
+  // that happens to contain regex metacharacters ("C++", "cost (est.)"). An
+  // invalid pattern used to throw here and fail the whole tool call; fall back
+  // to matching it as a literal so those searches return results instead.
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, 'i');
+  } catch {
+    regex = new RegExp(escapeRegExp(pattern), 'i');
+  }
   const matches: Array<{ file: string; resolvedPath: string; line: number; content: string; before?: string[]; after?: string[] }> = [];
 
   // Matched "lines" in synced data (email HTML, base64 blobs) can be
