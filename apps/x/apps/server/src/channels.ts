@@ -150,6 +150,29 @@ export const RPC_CHANNELS = [
   'githubAuth:status',
   'githubAuth:signOut',
   'migration:check-composio-google',
+  // Phase 3b (SEPARATION_PLAN.md): OAuth/connector flows — the loopback
+  // server and orchestration live in core now; opening the browser is a
+  // client capability delegated through the url-opener seam (RFC Q14 in DI
+  // form; a WS capability request after the flip).
+  'oauth:connect',
+  'oauth:disconnect',
+  'oauth:list-providers',
+  'oauth:getState',
+  'composio:is-configured',
+  'composio:set-api-key',
+  'composio:initiate-connection',
+  'composio:get-connection-status',
+  'composio:sync-connection',
+  'composio:disconnect',
+  'composio:list-connected',
+  'composio:list-toolkits',
+  'composio:execute-tool',
+  'composio:search-tools',
+  'chatgpt:signIn',
+  'chatgpt:cancelSignIn',
+  'chatgpt:signOut',
+  'githubAuth:start',
+  'google-docs:pickViaManaged',
 ] as const satisfies readonly ipc.InvokeChannels[];
 
 export type RpcChannel = (typeof RPC_CHANNELS)[number];

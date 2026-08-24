@@ -9,7 +9,13 @@ import type { turns } from '@x/shared';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
-export type PushChannel = 'turns:events' | 'sessions:events' | 'workspace:didChange';
+export type PushChannel =
+  | 'turns:events'
+  | 'sessions:events'
+  | 'workspace:didChange'
+  | 'oauth:didConnect'
+  | 'composio:didConnect'
+  | 'chatgpt:statusChanged';
 
 interface ServerMessage {
   seq: number;

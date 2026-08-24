@@ -81,6 +81,15 @@ import { maybeActivateCredit, getCreditsState } from '@x/core/dist/billing/credi
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
 import * as githubAuthCore from '@x/core/dist/apps/github-auth.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
+import { connectProvider, disconnectProvider, listProviders } from '@x/core/dist/auth/oauth-flows.js';
+import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
+import * as composioFlows from '@x/core/dist/composio/flows.js';
+import { signInWithChatGPT, cancelChatGPTSignIn } from '@x/core/dist/auth/chatgpt-signin.js';
+import { signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
+import { chatgptStatusBus, oauthConnectBus, composioConnectBus } from '@x/core/dist/auth/connector-events.js';
+import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
+import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
+import { startManagedGooglePick } from '@x/core/dist/knowledge/google-picker-managed.js';
 import type { RpcHandlers } from './channels.js';
 import type { EventSources } from './server.js';
 
@@ -860,6 +869,63 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     'migration:check-composio-google': async () => {
       return qualifyAndDisconnectComposioGoogle();
     },
+    // ── Phase 3b: OAuth/connector flows (core-relocated) ──
+    'oauth:connect': async (args) => {
+      const credentials = args.clientId && args.clientSecret
+        ? { clientId: args.clientId.trim(), clientSecret: args.clientSecret.trim() }
+        : undefined;
+      return await connectProvider(args.provider, credentials);
+    },
+    'oauth:disconnect': async (args) => disconnectProvider(args.provider),
+    'oauth:list-providers': async () => listProviders(),
+    'oauth:getState': async () => {
+      const repo = container.resolve<IOAuthRepo>('oauthRepo');
+      const config = await repo.getClientFacingConfig();
+      return { config };
+    },
+    'composio:is-configured': async () => composioFlows.isConfigured(),
+    'composio:set-api-key': async (args) => composioFlows.setApiKey(args.apiKey),
+    'composio:initiate-connection': async (args) => composioFlows.initiateConnection(args.toolkitSlug),
+    'composio:get-connection-status': async (args) => composioFlows.getConnectionStatus(args.toolkitSlug),
+    'composio:sync-connection': async (args) => composioFlows.syncConnection(args.toolkitSlug, args.connectedAccountId),
+    'composio:disconnect': async (args) => composioFlows.disconnect(args.toolkitSlug),
+    'composio:list-connected': async () => composioFlows.listConnected(),
+    'composio:list-toolkits': async () => composioFlows.listToolkits(),
+    'composio:execute-tool': async (args) => composioFlows.executeTool(args.toolkitSlug, args.toolSlug, args.arguments),
+    'composio:search-tools': async (args) => composioFlows.searchToolsInToolkit(args.toolkitSlug, args.query),
+    'chatgpt:signIn': async () => {
+      const result = await signInWithChatGPT();
+      if (result.signedIn) {
+        chatgptStatusBus.publish({ signedIn: true });
+        captureProviderConnected('codex');
+      }
+      return result;
+    },
+    'chatgpt:cancelSignIn': async () => {
+      await cancelChatGPTSignIn();
+      return { success: true };
+    },
+    'chatgpt:signOut': async () => {
+      try {
+        await signOutChatGPT();
+        chatgptStatusBus.publish({ signedIn: false });
+        captureProviderDisconnected('codex');
+        return { success: true };
+      } catch (error) {
+        console.error('[ChatGPTAuth] Sign-out failed:', error);
+        return { success: false };
+      }
+    },
+    'githubAuth:start': async () => {
+      const result = await githubAuthCore.startDeviceFlow();
+      void openExternalUrl(result.verificationUri);
+      return result;
+    },
+    'google-docs:pickViaManaged': async (args) => {
+      const result = await startManagedGooglePick(args.targetFolder);
+      if (!result) return null;
+      return result;
+    },
     // Rowboat Apps handlers (spec §13)
 
   };
@@ -874,6 +940,9 @@ export function createCoreEventSources(): EventSources {
       container.resolve<ITurnEventBus>('turnEventBus').subscribeAll(listener),
     subscribeSessionEvents: (listener) =>
       container.resolve<EmitterSessionBus>('sessionBus').subscribe(listener),
+    subscribeOAuthEvents: (listener) => oauthConnectBus.subscribe(listener),
+    subscribeComposioEvents: (listener) => composioConnectBus.subscribe(listener),
+    subscribeChatgptEvents: (listener) => chatgptStatusBus.subscribe(listener),
   };
 }
 

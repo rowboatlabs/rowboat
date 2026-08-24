@@ -24,6 +24,9 @@ export interface EventSources {
   subscribeTurnEvents(listener: (e: TurnBusEvent) => void): () => void;
   subscribeSessionEvents(listener: (e: SessionBusEvent) => void): () => void;
   subscribeWorkspaceEvents?(listener: (e: z.infer<typeof WorkspaceChangeEvent>) => void): () => void;
+  subscribeOAuthEvents?(listener: (e: unknown) => void): () => void;
+  subscribeComposioEvents?(listener: (e: unknown) => void): () => void;
+  subscribeChatgptEvents?(listener: (e: unknown) => void): () => void;
 }
 
 export interface RowboatServerOptions {
@@ -177,6 +180,9 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
     opts.events.subscribeTurnEvents((e) => hub.handleTurnEvent(e)),
     opts.events.subscribeSessionEvents((e) => hub.broadcast('sessions:events', e)),
     opts.events.subscribeWorkspaceEvents?.((e) => hub.broadcast('workspace:didChange', e)),
+    opts.events.subscribeOAuthEvents?.((e) => hub.broadcast('oauth:didConnect', e)),
+    opts.events.subscribeComposioEvents?.((e) => hub.broadcast('composio:didConnect', e)),
+    opts.events.subscribeChatgptEvents?.((e) => hub.broadcast('chatgpt:statusChanged', e)),
   ];
 
   return {
