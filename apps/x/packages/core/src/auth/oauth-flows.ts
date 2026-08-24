@@ -1,31 +1,44 @@
-import { shell } from 'electron';
 import type { Server } from 'http';
-import { createAuthServer } from './auth-server.js';
-import { DEFAULT_CALLBACK_PORT } from '@x/core/dist/auth/client-repo.js';
-import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
-import type { Configuration } from '@x/core/dist/auth/oauth-client.js';
-import { getProviderConfig, getAvailableProviders } from '@x/core/dist/auth/providers.js';
-import container from '@x/core/dist/di/container.js';
-import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
-import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
-import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
-import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
-import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
-import { triggerSync as triggerOutlookSync } from '@x/core/dist/knowledge/sync_outlook.js';
-import { triggerSync as triggerOutlookCalendarSync } from '@x/core/dist/knowledge/sync_outlook_calendar.js';
-import { purgeEmailCaches } from '@x/core/dist/knowledge/email/store.js';
-import { isEmailProviderConnected } from '@x/core/dist/knowledge/email/active-provider.js';
-import { invalidateContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
-import { invalidateSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
-import { invalidateSentContacts as invalidateOutlookSentContacts } from '@x/core/dist/knowledge/outlook_sent_contacts.js';
-import { emitOAuthEvent } from './ipc.js';
-import { getBillingInfo } from '@x/core/dist/billing/billing.js';
-import { capture as analyticsCapture, identify as analyticsIdentify, reset as analyticsReset } from '@x/core/dist/analytics/posthog.js';
-import { isSignedIn } from '@x/core/dist/account/account.js';
-import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
-import { claimTokensViaBackend } from '@x/core/dist/auth/google-backend-oauth.js';
-import { applyRowboatInitialSelection, clearRowboatSelections } from '@x/core/dist/models/rowboat-selection.js';
-import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
+import { createAuthServer } from './loopback-server.js';
+import { DEFAULT_CALLBACK_PORT } from '../auth/client-repo.js';
+import * as oauthClient from '../auth/oauth-client.js';
+import type { Configuration } from '../auth/oauth-client.js';
+import { getProviderConfig, getAvailableProviders } from '../auth/providers.js';
+import container from '../di/container.js';
+import { IOAuthRepo } from '../auth/repo.js';
+import { IClientRegistrationRepo } from '../auth/client-repo.js';
+import { triggerSync as triggerGmailSync } from '../knowledge/sync_gmail.js';
+import { triggerSync as triggerCalendarSync } from '../knowledge/sync_calendar.js';
+import { triggerSync as triggerFirefliesSync } from '../knowledge/sync_fireflies.js';
+import { triggerSync as triggerOutlookSync } from '../knowledge/sync_outlook.js';
+import { triggerSync as triggerOutlookCalendarSync } from '../knowledge/sync_outlook_calendar.js';
+import { purgeEmailCaches } from '../knowledge/email/store.js';
+import { isEmailProviderConnected } from '../knowledge/email/active-provider.js';
+import { invalidateContactIndex } from '../knowledge/gmail_contacts.js';
+import { invalidateSentContacts } from '../knowledge/gmail_sent_contacts.js';
+import { invalidateSentContacts as invalidateOutlookSentContacts } from '../knowledge/outlook_sent_contacts.js';
+import { openExternalUrl } from './url-opener.js';
+import { oauthConnectBus, type OAuthConnectEvent } from './connector-events.js';
+import { invalidateCopilotInstructionsCache } from '../runtime/assembly/copilot/instructions.js';
+import { maybeActivateCredit } from '../billing/credits.js';
+
+// Core half of what main's emitOAuthEvent did: prompt-cache invalidation and
+// the first-connect credit are core concerns; hosts subscribe to the bus for
+// client fan-out (oauth:didConnect).
+function emitOAuthEvent(event: OAuthConnectEvent): void {
+  invalidateCopilotInstructionsCache();
+  if ((event.provider === 'google' || event.provider === 'microsoft') && event.success) {
+    void maybeActivateCredit('first_gmail_connected');
+  }
+  oauthConnectBus.publish(event);
+}
+import { getBillingInfo } from '../billing/billing.js';
+import { capture as analyticsCapture, identify as analyticsIdentify, reset as analyticsReset } from '../analytics/posthog.js';
+import { isSignedIn } from '../account/account.js';
+import { getWebappUrl } from '../config/remote-config.js';
+import { claimTokensViaBackend } from '../auth/google-backend-oauth.js';
+import { applyRowboatInitialSelection, clearRowboatSelections } from '../models/rowboat-selection.js';
+import { captureProviderConnected, captureProviderDisconnected } from '../analytics/model-providers.js';
 
 function buildRedirectUri(port: number): string {
   return `http://localhost:${port}/oauth/callback`;
@@ -276,7 +289,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
         if (await isSignedIn()) {
           try {
             const webappUrl = await getWebappUrl();
-            await shell.openExternal(`${webappUrl}/oauth/google/start`);
+            await openExternalUrl(`${webappUrl}/oauth/google/start`);
             console.log('[OAuth] Started rowboat-mode Google connect (browser opened to webapp)');
             return { success: true };
           } catch (error) {
@@ -512,7 +525,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
 
       // Open in system browser (shares cookies/sessions with user's regular browser)
       console.log(`[OAuth] ${provider}: opening browser with flow state=${state} (authUrl state=${authUrl.searchParams.get('state') ?? '<missing>'})`);
-      shell.openExternal(authUrl.toString());
+      void openExternalUrl(authUrl.toString());
 
       return { success: true };
     } catch (setupError) {

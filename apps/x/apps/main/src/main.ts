@@ -4,6 +4,8 @@ import fsPromises from "node:fs/promises";
 import os from "node:os";
 import {
   setupIpcHandlers,
+  startConnectorEventsWatcher,
+  findMainAppWindow,
   startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady, startRetentionSweep,
   startCodeRunFeedWatcher,
   startChannelsWatcher,
@@ -77,7 +79,8 @@ import {
   extractDeepLinkFromArgv,
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
-import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
+import { disconnectGoogleIfScopesStale } from "@x/core/dist/auth/oauth-flows.js";
+import { registerUrlOpener } from "@x/core/dist/auth/url-opener.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { ensureLoginItemRegistration } from "./login_item.js";
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
@@ -541,6 +544,18 @@ app.whenReady().then(async () => {
     console.error('[Analytics] Failed to sync provider properties:', error);
   });
 
+  // Interactive sign-in flows run in core now (client-server separation,
+  // Phase 3b) — the browser they open is a client capability.
+  registerUrlOpener({
+    open: (url) => shell.openExternal(url),
+    focusClient: () => {
+      const win = findMainAppWindow();
+      if (win) {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+      }
+    },
+  });
   registerBrowserControlService(new ElectronBrowserControlService());
   registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
   registerScreenPointerService(screenPointerService);
@@ -698,6 +713,7 @@ app.whenReady().then(async () => {
     markSessionsIndexReady();
   }
   startSessionsWatcher();
+  startConnectorEventsWatcher();
   // Daily auto-delete of old chats & task transcripts (delayed first run).
   startRetentionSweep();
   // Turn event spine: durable events of every turn (session, headless,

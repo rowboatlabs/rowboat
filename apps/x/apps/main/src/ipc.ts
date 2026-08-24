@@ -6,7 +6,7 @@ import {
   connectProvider,
   disconnectProvider,
   listProviders,
-} from './oauth-handler.js';
+} from '@x/core/dist/auth/oauth-flows.js';
 import { watcher as watcherCore, workspace } from '@x/core';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { workspace as workspaceShared } from '@x/shared';
@@ -63,7 +63,7 @@ import { isSignedIn } from '@x/core/dist/account/account.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
-import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
+import { signInWithChatGPT, cancelChatGPTSignIn } from '@x/core/dist/auth/chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
@@ -109,7 +109,8 @@ let voiceCallActive = false;
 function updateSelfCaptureState() {
   setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
 }
-import * as composioHandler from './composio-handler.js';
+import * as composioHandler from '@x/core/dist/composio/flows.js';
+import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
@@ -151,7 +152,7 @@ import { loadEmailInstructions, saveEmailInstructions } from '@x/core/dist/knowl
 import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/knowledge/email_labels.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
-import { startManagedGooglePick } from './google-picker-managed.js';
+import { startManagedGooglePick } from '@x/core/dist/knowledge/google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -587,17 +588,15 @@ function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
   broadcastToWindows('services:events', event);
 }
 
-export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
-  // Native connection status (e.g. Google) is baked into the Copilot system
-  // prompt, so any OAuth state change must rebuild it.
-  invalidateCopilotInstructionsCache();
-  broadcastToWindows('oauth:didConnect', event);
-  // Email connect (Google BYOK, Google rowboat-mode, and Microsoft all funnel
-  // through here) is the "connected email" first-time reward. The stored
-  // credit key keeps its historical name — renaming would double-grant.
-  if ((event.provider === 'google' || event.provider === 'microsoft') && event.success) {
-    void maybeActivateCredit('first_gmail_connected');
-  }
+// Connector state pushes now originate in core (oauth-flows/composio/chatgpt
+// buses); this watcher relays them to renderer windows.
+let connectorEventsWatcher = false;
+export function startConnectorEventsWatcher(): void {
+  if (connectorEventsWatcher) return;
+  connectorEventsWatcher = true;
+  oauthConnectBus.subscribe((event) => broadcastToWindows('oauth:didConnect', event));
+  composioConnectBus.subscribe((event) => broadcastToWindows('composio:didConnect', event));
+  chatgptStatusBus.subscribe((event) => broadcastToWindows('chatgpt:statusChanged', event));
 }
 
 async function requireCodeSession(sessionId: string): Promise<CodeSession> {
@@ -1626,7 +1625,7 @@ export function setupIpcHandlers() {
       if (result.signedIn) {
         // Model lists gate on sign-in state (composer picker, models:list) —
         // push the change so they refresh without polling.
-        broadcastToWindows('chatgpt:statusChanged', { signedIn: true });
+        chatgptStatusBus.publish({ signedIn: true });
         captureProviderConnected('codex');
       }
       return result;
@@ -1638,7 +1637,7 @@ export function setupIpcHandlers() {
     'chatgpt:signOut': async () => {
       try {
         await signOutChatGPT();
-        broadcastToWindows('chatgpt:statusChanged', { signedIn: false });
+        chatgptStatusBus.publish({ signedIn: false });
         captureProviderDisconnected('codex');
         return { success: true };
       } catch (error) {

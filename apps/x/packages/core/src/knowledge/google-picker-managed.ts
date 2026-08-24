@@ -1,9 +1,9 @@
-import { shell } from 'electron';
-import { findMainAppWindow } from './ipc.js';
-import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
-import { claimPickedFilesViaBackend } from '@x/core/dist/auth/google-backend-oauth.js';
-import { importGoogleDocWithToken } from '@x/core/dist/knowledge/google_docs.js';
-import type { GoogleDocListItem } from '@x/core/dist/knowledge/google_docs.js';
+import { openExternalUrl } from '../auth/url-opener.js';
+import { focusClient } from '../auth/url-opener.js';
+import { getWebappUrl } from '../config/remote-config.js';
+import { claimPickedFilesViaBackend } from '../auth/google-backend-oauth.js';
+import { importGoogleDocWithToken } from '../knowledge/google_docs.js';
+import type { GoogleDocListItem } from '../knowledge/google_docs.js';
 
 // Managed (rowboat-mode) OAuth-redirect Picker. Unlike BYOK, the OAuth runs on
 // the Rowboat backend with the COMPANY Google client — the desktop never holds
@@ -57,13 +57,9 @@ function clearPending(): void {
 }
 
 function focusApp(): void {
-  // Same class of bug as the notification service's: getAllWindows()[0]
-  // can be the hidden companion window — focus the REAL app window only.
-  const win = findMainAppWindow();
-  if (win) {
-    if (win.isMinimized()) win.restore();
-    win.focus();
-  }
+  // Bringing the app back to front after the browser round-trip is a client
+  // capability — delegated through the url-opener seam.
+  focusClient();
 }
 
 /**
@@ -88,7 +84,7 @@ export async function startManagedGooglePick(targetFolder: string): Promise<Mana
       }
     }, TIMEOUT_MS);
     pending = { targetFolder, resolve, reject, timer };
-    void shell.openExternal(`${webappUrl}/oauth/google/picker/start`);
+    void openExternalUrl(`${webappUrl}/oauth/google/picker/start`);
   });
 }
 

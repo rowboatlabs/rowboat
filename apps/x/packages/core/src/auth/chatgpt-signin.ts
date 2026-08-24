@@ -1,9 +1,9 @@
-import { shell } from 'electron';
+import { openExternalUrl } from './url-opener.js';
 import type { Server } from 'http';
-import { createAuthServer } from './auth-server.js';
-import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
-import { exchangeChatGPTCode, getChatGPTStatus } from '@x/core/dist/auth/chatgpt-auth.js';
-import { applyCodexInitialSelection } from '@x/core/dist/models/chatgpt-selection.js';
+import { createAuthServer } from './loopback-server.js';
+import * as oauthClient from '../auth/oauth-client.js';
+import { exchangeChatGPTCode, getChatGPTStatus } from '../auth/chatgpt-auth.js';
+import { applyCodexInitialSelection } from '../models/chatgpt-selection.js';
 import {
   CHATGPT_AUTHORIZE_URL,
   CHATGPT_CALLBACK_PATH,
@@ -12,7 +12,7 @@ import {
   CHATGPT_EXTRA_AUTHORIZE_PARAMS,
   CHATGPT_REDIRECT_URI,
   CHATGPT_SCOPES,
-} from '@x/core/dist/auth/chatgpt-constants.js';
+} from '../auth/chatgpt-constants.js';
 
 // Interactive "Sign in with ChatGPT" flow (OAuth 2.0 + PKCE, Codex CLI client
 // — see chatgpt-constants.ts). Orchestration only: PKCE/state generation and
@@ -246,7 +246,7 @@ function startAttempt(): ActiveAttempt {
 
       try {
         // System browser: shares the user's existing ChatGPT session cookies.
-        await shell.openExternal(authUrl.toString());
+        await openExternalUrl(authUrl.toString());
       } catch (error) {
         void finish({
           signedIn: false,

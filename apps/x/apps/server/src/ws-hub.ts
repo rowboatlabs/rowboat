@@ -15,7 +15,13 @@ import { extractBearer, tokenMatches } from './auth.js';
 // detects a gap refetches what it displays (the event-sourced turn design
 // makes that exact; see @x/shared turn-follower).
 
-export type PushChannel = 'turns:events' | 'sessions:events' | 'workspace:didChange';
+export type PushChannel =
+  | 'turns:events'
+  | 'sessions:events'
+  | 'workspace:didChange'
+  | 'oauth:didConnect'
+  | 'composio:didConnect'
+  | 'chatgpt:statusChanged';
 
 const ClientMessage = z.discriminatedUnion('type', [
   z.object({
