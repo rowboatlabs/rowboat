@@ -8,7 +8,7 @@ import {
 import { AddOrgDialog, AvatarStack, OrgMonogram } from '@/components/spaces/atoms'
 import { FileColumn, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
-import { SpaceRail, type RailList } from '@/components/spaces/space-rail'
+import { SpaceRail } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { useGeneral, useSpacePresence, useThreadIndex } from '@/hooks/use-space-chat'
@@ -26,9 +26,9 @@ export { AddOrgDialog, OrgMonogram } from '@/components/spaces/atoms'
 
 // Spaces — one surface at a time ("One Surface" layout). A space opens in
 // Talk (the stream); Read shows the document; Split shows both, and declines
-// below SPLIT_FLOOR. One edge rail carries the list the rendered surface
-// needs (topics / files / tabbed in Split): it peeks briefly to teach, opens
-// on hover by pushing the surface over, and pins per surface. Data stays the
+// below SPLIT_FLOOR. One edge rail carries the same sidebar on every surface
+// (topics with the files below them): it peeks briefly to teach, opens on
+// hover by pushing the surface over, and can be pinned. Data stays the
 // v0 contract; general/topic/artifact semantics come from the contract with
 // legacy fallbacks in lib/spaces-conventions.ts.
 
@@ -219,16 +219,11 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     // Read = the document, Split = both. Split declines below SPLIT_FLOOR
     // (600px document + 480px chat + the 28px rail edge).
     // ------------------------------------------------------------------
-    const [mode, setModeRaw] = useState<SpaceMode>(() => (selection.kind === 'file' ? 'read' : 'talk'))
-    const [splitList, setSplitList] = useState<RailList>('topics')
+    const [mode, setMode] = useState<SpaceMode>(() => (selection.kind === 'file' ? 'read' : 'talk'))
     const [railHover, setRailHover] = useState(false)
     const [railPeek, setRailPeek] = useState(false)
     const peekTimer = useRef<number | null>(null)
-    const seenRead = useRef(selection.kind === 'file')
-    const [pins, setPins] = useState(() => ({
-        talk: localStorage.getItem('spaces:railPin:talk') === '1',
-        read: localStorage.getItem('spaces:railPin:read') === '1',
-    }))
+    const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railPin') === '1')
 
     // Width of the pane drives the Split floor and pinnability.
     const paneRef = useRef<HTMLDivElement | null>(null)
@@ -245,8 +240,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     // The teach-peek: push the rail open, hold a beat, release — the same
     // motion the cursor makes at the edge. Once the user has hovered or
     // pinned that list themselves, it has done its job and stays quiet.
-    const peekRail = useCallback((list: RailList) => {
-        if (localStorage.getItem(`spaces:railTaught:${list}`) === '1') return
+    const peekRail = useCallback(() => {
+        if (localStorage.getItem('spaces:railTaught') === '1') return
         if (peekTimer.current) window.clearTimeout(peekTimer.current)
         setRailPeek(true)
         peekTimer.current = window.setTimeout(() => setRailPeek(false), 1900)
@@ -255,18 +250,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
         if (peekTimer.current) window.clearTimeout(peekTimer.current)
     }, [])
     useEffect(() => {
-        peekRail(seenRead.current ? 'files' : 'topics')
+        peekRail()
         // Landing peek only — once per space open.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
-
-    const setMode = useCallback((next: SpaceMode) => {
-        setModeRaw(next)
-        if (next === 'read' && !seenRead.current) {
-            seenRead.current = true
-            peekRail('files')
-        }
-    }, [peekRail])
 
     // Stable listener; requestMode itself re-derives per render (splitFits).
     const requestModeRef = useRef<(next: SpaceMode) => void>(() => {})
@@ -283,10 +270,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
 
     const splitFits = paneWidth >= SPLIT_FLOOR
     // What actually renders: a Split that doesn't fit falls back to the one
-    // surface the selection needs. The rail follows the rendered surface.
+    // surface the selection needs.
     const effMode: SpaceMode = mode === 'split' && !splitFits ? (selection.kind === 'file' ? 'read' : 'talk') : mode
-    const railList: RailList = effMode === 'split' ? splitList : effMode === 'read' ? 'files' : 'topics'
-    const railPinned = mode === 'read' ? pins.read : pins.talk
     const railOpen = railPeek || railHover || railPinned
 
     /** The header buttons and ⌘1/2/3: say why when Split can't render. */
@@ -298,22 +283,20 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
 
     const onRailHover = (hovering: boolean) => {
         setRailHover(hovering)
-        if (hovering) localStorage.setItem(`spaces:railTaught:${railList}`, '1')
+        if (hovering) localStorage.setItem('spaces:railTaught', '1')
     }
     const toggleRailPin = () => {
-        localStorage.setItem(`spaces:railTaught:${railList}`, '1')
-        setPins((p) => {
-            const key = mode === 'read' ? 'read' : 'talk'
-            const next = { ...p, [key]: !p[key] }
-            localStorage.setItem(`spaces:railPin:${key}`, next[key] ? '1' : '0')
-            return next
+        localStorage.setItem('spaces:railTaught', '1')
+        setRailPinned((p) => {
+            localStorage.setItem('spaces:railPin', p ? '0' : '1')
+            return !p
         })
     }
 
     // Selecting is also choreography: a topic opened from Read grows into
-    // Split; a file opened from Talk switches to Read; a file opened from a
-    // topic (an artifact link) opens beside the thread. The rail slides away
-    // once it has been used.
+    // Split; a file opened from Talk (or from a topic's artifact link) opens
+    // beside the conversation in Split. The rail slides away once it has
+    // been used.
     const select = (next: RailSelection) => {
         onSelect(next)
         analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'topic' ? 'topics' : 'files')
@@ -322,8 +305,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
         if (next.kind === 'topic' && mode === 'read') setMode('split')
         else if (next.kind === 'general' && mode === 'read') setMode('talk')
         else if (next.kind === 'file') {
-            if (next.fromTopicId) { setMode('split'); setSplitList('files') }
-            else if (mode === 'talk') setMode('read')
+            // A file opened while talking keeps the conversation beside it:
+            // Split (effMode falls back to Read below the floor).
+            if (next.fromTopicId || mode === 'talk') setMode('split')
         }
     }
     const openFile = (path: string) => select({ kind: 'file', path })
@@ -335,8 +319,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     useEffect(() => {
         if (prevSelKey.current === selKey) return
         prevSelKey.current = selKey
-        if (selection.kind === 'file' && mode === 'talk') setModeRaw('read')
-        else if (selection.kind !== 'file' && mode === 'read') setModeRaw('talk')
+        if (selection.kind === 'file' && mode === 'talk') setMode('split')
+        else if (selection.kind !== 'file' && mode === 'read') setMode('talk')
     }, [selKey, selection.kind, mode])
 
     // The document pane: an explicitly opened file, else the space's front
@@ -401,6 +385,13 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     const toggleArtifactsRail = () => {
         if (!chatTopicId) return
         setRailPins((prev) => new Map(prev).set(chatTopicId, !artifactsRailOpen))
+    }
+
+    // Split: dismissing the document closes it and returns to Talk, landing
+    // on the conversation that was beside it.
+    const dismissFile = () => {
+        if (selection.kind === 'file') onSelect(chatTopicId ? { kind: 'topic', topicId: chatTopicId } : { kind: 'general' })
+        setMode('talk')
     }
 
     // Crumb for a file opened from a topic.
@@ -494,9 +485,6 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     onSelect={select}
                     onCreateFile={openFile}
                     onUploadFiles={setUploadFiles}
-                    list={railList}
-                    tabbed={effMode === 'split'}
-                    onPickList={setSplitList}
                     open={railOpen}
                     pinned={railPinned}
                     hint={railPinned ? 'pinned' : railPeek ? 'sliding away' : 'hover · pin to keep'}
@@ -575,8 +563,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                                     crumb={selection.kind === 'file' && crumbTopicId && crumbLabel ? {
                                         label: crumbLabel,
                                         // Back to the topic means back to the conversation: Talk.
-                                        onBack: () => { select({ kind: 'topic', topicId: crumbTopicId }); setModeRaw('talk') },
+                                        onBack: () => { select({ kind: 'topic', topicId: crumbTopicId }); setMode('talk') },
                                     } : null}
+                                    onDismiss={effMode === 'split' ? dismissFile : null}
                                 />
                             ) : (
                                 <div className="flex-1 flex items-center justify-center p-8 text-center">

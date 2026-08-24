@@ -134,7 +134,7 @@ interface DraftState {
     conflict: Extract<spaces.ProposeChangeResult, { outcome: 'conflict' }> | null
 }
 
-export function FileColumn({ org, space, path, memberNames, refreshTick, onChanged, crumb }: {
+export function FileColumn({ org, space, path, memberNames, refreshTick, onChanged, crumb, onDismiss }: {
     org: OrgWithSpaces
     space: spaces.Space
     path: string
@@ -143,6 +143,8 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     onChanged: () => void
     /** Where the reader came from (a topic) — renders "← <label>" and makes Esc go back there. */
     crumb?: { label: string; onBack: () => void } | null
+    /** Split only: renders an × that closes the document and returns to Talk. */
+    onDismiss?: (() => void) | null
 }) {
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
@@ -400,6 +402,16 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                             <X className="size-3 mr-1" /> Discard
                         </Button>
                     </>
+                )}
+                {onDismiss && !draft && (
+                    <button
+                        type="button"
+                        title="Close the file — back to Talk"
+                        onClick={onDismiss}
+                        className="inline-flex size-5 shrink-0 items-center justify-center rounded hover:bg-accent hover:text-foreground"
+                    >
+                        <X className="size-3.5" />
+                    </button>
                 )}
             </div>
             <div className="mx-5 border-t border-border" />
