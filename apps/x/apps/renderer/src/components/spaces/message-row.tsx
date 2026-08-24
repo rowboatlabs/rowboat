@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
@@ -50,10 +51,13 @@ function ReactionPicker({ onPick, onOpenChange, children }: {
     )
 }
 
-function reactionTitle(group: spaces.ReactionGroup, memberNames: Map<string, string>, selfMemberId?: string): string {
-    const names = group.memberIds.map((id) => (id === selfMemberId ? 'You' : memberNames.get(id) ?? id))
-    return `${names.join(', ')} reacted with ${group.emoji}`
+function joinNames(names: string[]): string {
+    if (names.length <= 1) return names[0] ?? ''
+    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
+
+/** How many reactor avatars the hover card shows before collapsing to +N. */
+const REACTOR_AVATAR_CAP = 8
 
 function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOpenChange }: {
     message: spaces.Message
@@ -68,20 +72,41 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
         <div className="mt-1 flex flex-wrap items-center gap-1">
             {groups.map((group) => {
                 const mine = !!selfMemberId && group.memberIds.includes(selfMemberId)
+                const nameOf = (id: string) => (id === selfMemberId ? 'You' : memberNames.get(id) ?? id)
                 return (
-                    <button
-                        key={group.emoji}
-                        type="button"
-                        title={reactionTitle(group, memberNames, selfMemberId)}
-                        onClick={() => onReact(message, group.emoji)}
-                        className={cn(
-                            'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5',
-                            mine ? 'border-foreground/40 bg-accent' : 'border-border bg-background hover:border-foreground/30',
-                        )}
-                    >
-                        <span className="text-[13px] leading-none">{group.emoji}</span>
-                        <span className="text-[11px] font-medium leading-none tabular-nums text-muted-foreground">{group.memberIds.length}</span>
-                    </button>
+                    <HoverCard key={group.emoji} openDelay={250} closeDelay={100}>
+                        <HoverCardTrigger asChild>
+                            <button
+                                type="button"
+                                onClick={() => onReact(message, group.emoji)}
+                                className={cn(
+                                    'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5',
+                                    mine ? 'border-foreground/40 bg-accent' : 'border-border bg-background hover:border-foreground/30',
+                                )}
+                            >
+                                <span className="text-[13px] leading-none">{group.emoji}</span>
+                                <span className="text-[11px] font-medium leading-none tabular-nums text-muted-foreground">{group.memberIds.length}</span>
+                            </button>
+                        </HoverCardTrigger>
+                        <HoverCardContent side="top" className="w-auto max-w-60 p-3">
+                            <div className="flex flex-col items-center gap-1.5 text-center">
+                                <span className="text-2xl leading-none">{group.emoji}</span>
+                                <div className="flex flex-wrap items-center justify-center -space-x-1">
+                                    {group.memberIds.slice(0, REACTOR_AVATAR_CAP).map((id) => (
+                                        <MemberAvatar key={id} id={id} name={nameOf(id)} size="sm" className="ring-2 ring-popover" />
+                                    ))}
+                                    {group.memberIds.length > REACTOR_AVATAR_CAP && (
+                                        <span className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground ring-2 ring-popover">
+                                            +{group.memberIds.length - REACTOR_AVATAR_CAP}
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="text-xs leading-snug text-muted-foreground">
+                                    <span className="font-medium text-foreground">{joinNames(group.memberIds.map(nameOf))}</span> reacted with {group.emoji}
+                                </p>
+                            </div>
+                        </HoverCardContent>
+                    </HoverCard>
                 )
             })}
             <ReactionPicker onPick={(emoji) => onReact(message, emoji)} onOpenChange={onPickerOpenChange}>

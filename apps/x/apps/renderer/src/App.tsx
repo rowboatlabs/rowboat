@@ -5030,6 +5030,9 @@ function App() {
   // which used to live outside this system as a sentinel tab), applying a
   // view can never strand a stale section on screen.
   const applyViewState = useCallback(async (view: ViewState) => {
+    // Whether this navigation ENTERS Spaces (vs a click within it) — read
+    // before closeAllSections resets the flag.
+    const wasSpacesOpen = isSpacesOpen
     closeAllSections()
     switch (view.type) {
       case 'file':
@@ -5099,6 +5102,10 @@ function App() {
         if (!SPACES_ENABLED) return
         if (view.orgId && view.spaceId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId })
         setRailSelection(view.rail ?? { kind: 'general' })
+        // Spaces carries its own conversation surface, so entering it
+        // collapses the assistant chat pane by default; in-space navigation
+        // (topics, files, history within Spaces) leaves it as the user set it.
+        if (!wasSpacesOpen) setIsChatSidebarOpen(false)
         setIsSpacesOpen(true)
         return
       case 'chat':
@@ -5109,7 +5116,7 @@ function App() {
         }
         return
     }
-  }, [closeAllSections, bindChatToRun, handleNewChat])
+  }, [closeAllSections, bindChatToRun, handleNewChat, isSpacesOpen])
   applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
