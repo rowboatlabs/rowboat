@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
+import os from 'node:os';
 import { createAdaptorServer } from '@hono/node-server';
 import { Hono } from 'hono';
 import type { TurnBusEvent } from '@x/shared/dist/turns.js';
@@ -8,6 +9,7 @@ import { z } from 'zod';
 import { extractBearer, loadOrCreateServerKey, tokenMatches } from './auth.js';
 import type { RpcHandlers } from './channels.js';
 import { loadServerConfig } from './config.js';
+import { acquireWorkdirLock } from './lock.js';
 import { createRpcRoutes } from './router.js';
 import { createWorkspaceRoutes } from './workspace-route.js';
 import { createWsHub, type WsHub } from './ws-hub.js';
@@ -63,14 +65,57 @@ function listenOnce(server: HttpServer, host: string, port: number): Promise<voi
   });
 }
 
+// DNS-rebinding guard: a hostile page can point its own domain at 127.0.0.1
+// and fetch with the browser happily sending that domain as Host. Bearer auth
+// already stops it reading anything, but rejecting foreign Hosts outright is
+// cheap defense-in-depth. The set is the machine's own names and addresses.
+export function buildAllowedHosts(): Set<string> {
+  const hosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1', os.hostname().toLowerCase()]);
+  for (const infos of Object.values(os.networkInterfaces())) {
+    for (const info of infos ?? []) {
+      hosts.add(info.family === 'IPv6' ? `[${info.address.toLowerCase()}]` : info.address);
+    }
+  }
+  return hosts;
+}
+
+export function hostAllowed(hostHeader: string | undefined, allowed: Set<string>): boolean {
+  if (!hostHeader) return false;
+  // Strip the port: "name:3220" or "[::1]:3220".
+  const host = hostHeader.replace(/:\d+$/, '').toLowerCase();
+  return allowed.has(host);
+}
+
+/** Is the process answering on this port another rowboat-server? */
+async function isRowboatServer(port: number): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: controller.signal });
+    clearTimeout(timer);
+    const body = (await res.json().catch(() => null)) as { name?: string } | null;
+    return body?.name === 'rowboat-server';
+  } catch {
+    return false;
+  }
+}
+
 export async function createRowboatServer(opts: RowboatServerOptions): Promise<RowboatServer> {
   const config = await loadServerConfig(opts.workDir);
   const key = await loadOrCreateServerKey(opts.workDir);
   const host = opts.host ?? (config.lanEnabled ? '0.0.0.0' : '127.0.0.1');
   const startPort = opts.port ?? config.port;
 
+  // Whoever hosts the transport owns core for this workdir — a second host is
+  // a split-brain, not a peer. Held until close().
+  const releaseLock = await acquireWorkdirLock(opts.workDir);
+
+  const allowedHosts = buildAllowedHosts();
   const app = new Hono();
   app.use('*', async (c, next) => {
+    if (!hostAllowed(c.req.header('host'), allowedHosts)) {
+      return c.json({ error: { code: 'forbidden', message: 'unrecognized Host header' } }, 403);
+    }
     await next();
     c.header('x-rowboat-api-version', '0');
   });
@@ -94,14 +139,28 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
 
   const httpServer = createAdaptorServer({ fetch: app.fetch }) as HttpServer;
 
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await listenOnce(httpServer, host, startPort + attempt);
-      break;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EADDRINUSE' || attempt >= PORT_FALLBACK_ATTEMPTS - 1) throw err;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      const tryPort = startPort + attempt;
+      try {
+        await listenOnce(httpServer, host, tryPort);
+        break;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'EADDRINUSE' || attempt >= PORT_FALLBACK_ATTEMPTS - 1) throw err;
+        // Colliding with another rowboat-server means two hosts are live —
+        // that must fail loudly, never quietly bind one port over.
+        if (tryPort !== 0 && (await isRowboatServer(tryPort))) {
+          throw new Error(
+            `another rowboat-server is already listening on port ${tryPort} — refusing to start a second instance`,
+          );
+        }
+        console.warn(`[server] port ${tryPort} is taken by another app; trying ${tryPort + 1}`);
+      }
     }
+  } catch (err) {
+    await releaseLock();
+    throw err;
   }
   const address = httpServer.address();
   const boundPort = typeof address === 'object' && address ? address.port : startPort;
@@ -111,6 +170,7 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
     serverKey: key,
     serverVersion: opts.serverVersion,
     helloTimeoutMs: opts.helloTimeoutMs,
+    allowedHosts,
   });
 
   const unsubscribers = [
@@ -129,6 +189,7 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
       for (const unsub of unsubscribers) unsub?.();
       hub.close();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+      await releaseLock();
     },
   };
 }

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, dialog, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
+import fsPromises from "node:fs/promises";
 import os from "node:os";
 import {
   setupIpcHandlers,
@@ -202,14 +203,24 @@ function registerAppProtocol() {
 
     // Workspace files: app://workspace/<rel-path>
     if (url.host === "workspace") {
-      try {
-        const relPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
-        if (!relPath) return new Response("Not Found", { status: 404 });
-        const absPath = resolveWorkspacePath(relPath);
-        return net.fetch(pathToFileURL(absPath).toString());
-      } catch {
-        return new Response("Forbidden", { status: 403 });
-      }
+      return (async () => {
+        try {
+          const relPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+          if (!relPath) return new Response("Not Found", { status: 404 });
+          const absPath = resolveWorkspacePath(relPath);
+          // Parity with the server's /workspace route: `..` is guarded above,
+          // but a symlink inside the workspace can still point out of it —
+          // realpath both sides and require containment.
+          const realRoot = await fsPromises.realpath(resolveWorkspacePath(""));
+          const realTarget = await fsPromises.realpath(absPath);
+          if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) {
+            return new Response("Forbidden", { status: 403 });
+          }
+          return net.fetch(pathToFileURL(realTarget).toString());
+        } catch {
+          return new Response("Forbidden", { status: 403 });
+        }
+      })();
     }
 
     // Renderer SPA — existing logic

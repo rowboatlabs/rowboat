@@ -81,9 +81,19 @@ export function createEventsClient(opts: {
     if (closed) return;
     setStatus('connecting');
     lastSeq = 0;
-    // React Native's WebSocket accepts a headers option; browsers don't.
-    // The ?token= fallback works everywhere, so use it unconditionally.
-    const ws = new WebSocket(`${wsUrl}?token=${encodeURIComponent(opts.token)}`);
+    // React Native's WebSocket accepts a headers option — use it so the
+    // token stays out of URLs (and any log that captures them). Browsers and
+    // Node's undici WebSocket can't set headers, so they fall back to
+    // ?token=, which the server accepts for exactly this reason.
+    const isReactNative =
+      typeof navigator !== 'undefined' && (navigator as { product?: string }).product === 'ReactNative';
+    const ws = isReactNative
+      ? new (WebSocket as unknown as new (
+          url: string,
+          protocols: string[] | null,
+          options: { headers: Record<string, string> },
+        ) => WebSocket)(wsUrl, null, { headers: { authorization: `Bearer ${opts.token}` } })
+      : new WebSocket(`${wsUrl}?token=${encodeURIComponent(opts.token)}`);
     socket = ws;
 
     ws.onopen = () => {

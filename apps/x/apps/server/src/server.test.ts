@@ -284,3 +284,88 @@ describe('rowboat-server transport', () => {
     await fs.rm(tmp, { recursive: true, force: true });
   });
 });
+
+describe('hardening guards', () => {
+  const noEvents: EventSources = {
+    subscribeTurnEvents: () => () => {},
+    subscribeSessionEvents: () => () => {},
+  };
+  const stub = stubHandlers({});
+
+  async function makeServer(workDir: string, port = 0) {
+    return createRowboatServer({
+      workDir,
+      handlers: stub,
+      events: noEvents,
+      resolveWorkspacePath: (rel) => {
+        if (rel.includes('..') || path.isAbsolute(rel)) throw new Error('traversal');
+        return path.join(workDir, rel);
+      },
+      serverVersion: 'test',
+      port,
+    });
+  }
+
+  it('rejects requests with a foreign Host header (DNS rebinding)', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-host-'));
+    const server = await makeServer(dir);
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          host: '127.0.0.1',
+          port: server.port,
+          path: '/health',
+          headers: { host: 'evil.example.com', authorization: `Bearer ${server.key}` },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    expect(status).toBe(403);
+    // Legit local host still works.
+    const ok = await fetch(`http://127.0.0.1:${server.port}/health`);
+    expect(ok.status).toBe(200);
+    await server.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('refuses to serve a symlink that escapes the workspace', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-symlink-'));
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-outside-'));
+    await fs.writeFile(path.join(outside, 'secret.txt'), 'top secret');
+    await fs.symlink(path.join(outside, 'secret.txt'), path.join(dir, 'escape.txt'));
+    await fs.writeFile(path.join(dir, 'fine.txt'), 'fine');
+    const server = await makeServer(dir);
+    const authed = { headers: { authorization: `Bearer ${server.key}` } };
+
+    const escape = await fetch(`http://127.0.0.1:${server.port}/workspace/escape.txt`, authed);
+    expect(escape.status).toBe(403);
+    const fine = await fetch(`http://127.0.0.1:${server.port}/workspace/fine.txt`, authed);
+    expect(fine.status).toBe(200);
+
+    await server.close();
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  it('refuses a workdir whose lock is held by a live foreign process', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-lock-'));
+    await fs.writeFile(path.join(dir, 'server.lock'), '1'); // pid 1 is always alive
+    await expect(makeServer(dir)).rejects.toThrow(/refusing to split-brain/);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('fails loudly when the port is held by another rowboat-server', async () => {
+    const dirA = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-portA-'));
+    const dirB = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-portB-'));
+    const a = await makeServer(dirA);
+    await expect(makeServer(dirB, a.port)).rejects.toThrow(/refusing to start a second instance/);
+    await a.close();
+    await fs.rm(dirA, { recursive: true, force: true });
+    await fs.rm(dirB, { recursive: true, force: true });
+  });
+});

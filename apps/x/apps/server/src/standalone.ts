@@ -1,5 +1,3 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import process from 'node:process';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { initConfigs } from '@x/core/dist/config/initConfigs.js';
@@ -25,36 +23,9 @@ import { createRowboatServer } from './server.js';
 // schedulers, knowledge sync (gmail/calendar/granola/fireflies), event
 // processor, live-note + bg-task agents.
 
-const LOCK_FILE = 'server.lock';
-
-async function acquireLock(workDir: string): Promise<() => Promise<void>> {
-  const lockPath = path.join(workDir, LOCK_FILE);
-  try {
-    const existing = parseInt(await fs.readFile(lockPath, 'utf8'), 10);
-    if (Number.isFinite(existing)) {
-      try {
-        process.kill(existing, 0); // throws if the pid is gone
-        throw new Error(
-          `another rowboat-server (pid ${existing}) already owns ${workDir} — refusing to split-brain`,
-        );
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err;
-        // stale lock from a dead process — take over
-      }
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-  await fs.mkdir(workDir, { recursive: true });
-  await fs.writeFile(lockPath, String(process.pid));
-  return async () => {
-    await fs.rm(lockPath, { force: true });
-  };
-}
-
 async function main(): Promise<void> {
-  const releaseLock = await acquireLock(WorkDir);
-
+  // The workdir lock is acquired by createRowboatServer itself — a live
+  // Electron-hosted transport makes this boot fail loudly, as it must.
   await initConfigs();
   registerNotificationService({ isSupported: () => false, notify: () => {} });
   registerBrowserControlService({
@@ -80,7 +51,6 @@ async function main(): Promise<void> {
 
   const shutdown = async () => {
     await server.close();
-    await releaseLock();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown());
