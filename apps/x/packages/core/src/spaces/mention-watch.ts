@@ -263,11 +263,14 @@ export async function syncSpaceMentionWatch(opts?: { force?: boolean }): Promise
         for (const k of subs.keys()) if (k.startsWith(`${org.id}/`)) wanted.add(k);
         continue;
       }
-      for (const space of spaces) {
+      // Concurrent per space: the boot sync used to await listMembers one
+      // space at a time, serializing N round trips right when the renderer
+      // is loading the same org.
+      await Promise.all(spaces.map(async (space) => {
         const k = key(org.id, space.id);
         wanted.add(k);
         const existing = subs.get(k);
-        if (existing && existing.memberId === org.auth.memberId) continue;
+        if (existing && existing.memberId === org.auth.memberId) return;
         existing?.unsubscribe();
 
         // Member names: notification titles, and my own display name — the form
@@ -287,7 +290,7 @@ export async function syncSpaceMentionWatch(opts?: { force?: boolean }): Promise
         const stored = offsets[k];
         const unsubscribe = getLive(org.id).subscribe(space.id, handler, stored);
         subs.set(k, { memberId: org.auth.memberId, unsubscribe });
-      }
+      }));
     }
     for (const [k, sub] of subs) {
       if (!wanted.has(k)) {

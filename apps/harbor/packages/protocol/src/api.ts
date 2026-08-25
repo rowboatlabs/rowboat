@@ -266,10 +266,28 @@ export const routes = {
     response: z.object({ topic: Topic, message: Message }),
   },
   /**
+   * Author-only tombstone (the content plane is role-flat, so deleter ==
+   * author — spec §4). The body is redacted everywhere it lives (message row
+   * AND the stored message event) and a message_deleted event goes on the
+   * log. Idempotent — re-deleting is a 200 no-op with no event. Returns the
+   * tombstoned message. POST like leaveSpace: the acting mode rides the body.
+   */
+  deleteMessage: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/messages/:messageId/delete',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    request: z.object({
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ message: Message }),
+  },
+  /**
    * Toggle a reaction (Slack semantics: any member, any message, one per
    * member+emoji). Idempotent — re-adding or re-removing is a 200 no-op with
    * no event. The response carries the message with reactions folded in, so
-   * the caller renders without waiting for the live frame.
+   * the caller renders without waiting for the live frame. Tombstones take no
+   * new reactions (removes still work, so cleanup stays possible).
    */
   reactToMessage: {
     method: 'POST',

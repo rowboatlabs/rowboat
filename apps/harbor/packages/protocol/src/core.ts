@@ -107,15 +107,37 @@ export const ReactionGroup = z.object({
 });
 export type ReactionGroup = z.infer<typeof ReactionGroup>;
 
+/**
+ * The author tombstoning their own message — the one act the content plane
+ * restricts to a single member (deleter == author always; admin powers are
+ * membership/policy, never content — spec §4). Like Reaction, `topicId` is
+ * where the message lived when it happened.
+ */
+export const MessageDeletion = z.object({
+  spaceId: SpaceId,
+  topicId: TopicId,
+  messageId: MessageId,
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type MessageDeletion = z.infer<typeof MessageDeletion>;
+
 export const Message = z.object({
   id: MessageId,
   topicId: TopicId,
   spaceId: SpaceId,
   author: Attribution,
-  /** Markdown. The link grammar (ids.ts) is valid inside message bodies. */
-  body: z.string().min(1).max(65_536),
+  /**
+   * Markdown. The link grammar (ids.ts) is valid inside message bodies.
+   * Empty exactly when the message is deleted (post routes keep min 1 on
+   * their request shapes) — a tombstone keeps its id and offset but carries
+   * no content, anywhere, ever again.
+   */
+  body: z.string().max(65_536),
   postedAt: z.iso.datetime(),
   offset: StreamOffset,
+  /** Set when the author deleted the message (deleter == author, so no separate attribution). */
+  deletedAt: z.iso.datetime().optional(),
   /**
    * Folded reactions, groups in first-reacted order. The default keeps pre-
    * reaction payloads (older servers, stored message events) parseable; reads

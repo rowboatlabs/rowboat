@@ -4,7 +4,7 @@ import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import {
     GENERAL_SEED_BODY, applyReaction, findGeneralTopic, isGeneralSeedMessage, parseThreadMarker, type ThreadMarker,
 } from '@/lib/spaces-conventions'
-import { getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceFeed, useSpaceLive } from '@/hooks/use-spaces'
+import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceFeed, useSpaceLive } from '@/hooks/use-spaces'
 import { getTopicLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
 
 // Chat-first stores for one space (push-1 spike, see the daily-chat plan):
@@ -21,9 +21,35 @@ function key(orgId: string, spaceId: string): string {
 // General
 // ---------------------------------------------------------------------------
 
+/**
+ * A message as chat surfaces hold it: the wire shape plus optimistic-send
+ * state. `pending` renders the instant Enter lands and clears when the org's
+ * write confirms; `failed` keeps the row with retry/discard. Client-only —
+ * never on the wire.
+ */
+export type ChatMessage = spaces.Message & { pending?: boolean; failed?: boolean }
+
+let pendingSeq = 0
+
+/** A local echo of a send: a temp id no ULID collides with, sorted after every server offset. */
+export function buildPendingMessage(spaceId: string, topicId: string, memberId: string, body: string): ChatMessage {
+    pendingSeq += 1
+    return {
+        id: `pending-${pendingSeq}-${Date.now()}`,
+        topicId,
+        spaceId,
+        author: { memberId, actingMode: 'direct' },
+        body,
+        postedAt: new Date().toISOString(),
+        offset: Number.MAX_SAFE_INTEGER - 1_000_000 + pendingSeq,
+        reactions: [],
+        pending: true,
+    }
+}
+
 export interface GeneralState {
     topic: spaces.Topic | null
-    messages: spaces.Message[]
+    messages: ChatMessage[]
     /** True once topics were loaded and general was found or seeded. */
     ready: boolean
     /** Set when seeding failed (org unreachable, not a member …). */
@@ -53,7 +79,12 @@ async function loadGeneralMessages(orgId: string, spaceId: string, topic: spaces
     generalLoading.add(k)
     try {
         const res = await window.ipc.invoke('spaces:listMessages', { orgId, spaceId, topicId: topic.id })
-        setGeneral(k, { topic: res.topic, messages: res.messages, ready: true })
+        // A refetch must not eat optimistic sends: carry pending/failed rows
+        // the response doesn't already contain.
+        const carried = (generalState.get(k)?.messages ?? []).filter(
+            (m) => (m.pending || m.failed) && !res.messages.some((r) => r.author.memberId === m.author.memberId && r.body === m.body),
+        )
+        setGeneral(k, { topic: res.topic, messages: [...res.messages, ...carried], ready: true })
     } catch (err) {
         setGeneral(k, { topic, ready: true, error: err instanceof Error ? err.message : String(err) })
     } finally {
@@ -81,7 +112,43 @@ export function ingestGeneralMessage(orgId: string, spaceId: string, message: sp
     const state = generalState.get(k)
     if (!state?.topic || message.topicId !== state.topic.id) return
     if (state.messages.some((m) => m.id === message.id)) return
-    setGeneral(k, { messages: [...state.messages, message].sort((a, b) => a.offset - b.offset) })
+    // The live frame can beat our own HTTP response: an arriving copy of an
+    // optimistic send replaces its pending row instead of doubling it. (A
+    // pending row being ADDED never matches — sending the same text twice is
+    // two messages.)
+    const echoed =
+        message.author.actingMode === 'direct' && !(message as ChatMessage).pending
+            ? state.messages.find((m) => m.pending && m.author.memberId === message.author.memberId && m.body === message.body)
+            : undefined
+    const rest = echoed ? state.messages.filter((m) => m.id !== echoed.id) : state.messages
+    setGeneral(k, { messages: [...rest, message].sort((a, b) => a.offset - b.offset) })
+}
+
+/** The write confirmed: swap the pending row for the org's message (a no-op side if the live frame landed it first). */
+export function resolvePendingGeneralMessage(orgId: string, spaceId: string, pendingId: string, message: spaces.Message): void {
+    const k = key(orgId, spaceId)
+    const state = generalState.get(k)
+    if (!state) return
+    const rest = state.messages.filter((m) => m.id !== pendingId)
+    setGeneral(k, {
+        messages: rest.some((m) => m.id === message.id) ? rest : [...rest, message].sort((a, b) => a.offset - b.offset),
+    })
+}
+
+/** The write failed: the row stays, marked, with retry/discard in the stream. */
+export function failPendingGeneralMessage(orgId: string, spaceId: string, pendingId: string): void {
+    const k = key(orgId, spaceId)
+    const state = generalState.get(k)
+    if (!state?.messages.some((m) => m.id === pendingId)) return
+    setGeneral(k, { messages: state.messages.map((m) => (m.id === pendingId ? { ...m, pending: false, failed: true } : m)) })
+}
+
+/** Drop a message row outright (discarding a failed send, or re-sending it). */
+export function removeGeneralMessage(orgId: string, spaceId: string, messageId: string): void {
+    const k = key(orgId, spaceId)
+    const state = generalState.get(k)
+    if (!state?.messages.some((m) => m.id === messageId)) return
+    setGeneral(k, { messages: state.messages.filter((m) => m.id !== messageId) })
 }
 
 /** Find general in the feed store's topics; seed it when the space has none. */
@@ -123,7 +190,10 @@ function wireBus(): void {
             // A (re)connected subscription. Whatever was published while the
             // socket was dead may be gone for good (a subscription that never
             // saw an event resumes live-only, with no offset to replay from) —
-            // resync the HTTP views so the stream is whole again.
+            // resync the HTTP views so the stream is whole again. The BOOT
+            // subscribe is exempt: it lands right behind the store's own first
+            // fetch, and resyncing then just doubles every request.
+            if (feedSyncedRecently(event.orgId, frame.spaceId)) return
             const k = key(event.orgId, frame.spaceId)
             const state = generalState.get(k)
             void refreshSpaceFeed(event.orgId, frame.spaceId)
@@ -151,6 +221,17 @@ function wireBus(): void {
                         m.id === reaction.messageId
                             ? { ...m, reactions: applyReaction(m.reactions, { emoji: reaction.emoji, memberId: reaction.by.memberId, action }) }
                             : m,
+                    ),
+                })
+            }
+        } else if (frame.event.type === 'message_deleted') {
+            // Tombstone in place — the row stays (threads may anchor to it), the
+            // body is gone. Thread panes pick theirs up on the feed-refresh tick.
+            const { deletion } = frame.event
+            if (state?.topic && state.messages.some((m) => m.id === deletion.messageId)) {
+                setGeneral(k, {
+                    messages: state.messages.map((m) =>
+                        m.id === deletion.messageId ? { ...m, body: '', deletedAt: deletion.at } : m,
                     ),
                 })
             }
@@ -199,6 +280,15 @@ export function useGeneral(orgId: string, spaceId: string): GeneralState {
 
 export interface ThreadInfo {
     topicId: string
+    /** Orders contested parents (legacy data only) and thread rows deterministically. */
+    createdAt: string
+    /**
+     * The topic's seed message. Only populated when this client created the
+     * thread, or on the legacy (pre-004 server) fetch path — contract servers
+     * carry parentage on the topic itself, so the index never downloads every
+     * topic's messages. Title/preview consumers fall back to the parent
+     * message (same first line) or the topic title.
+     */
     firstMessage: spaces.Message | null
     marker: ThreadMarker | null
     /** The message this topic grew from — the contract field, else the legacy marker. */
@@ -217,6 +307,16 @@ function emitThreads(): void {
     for (const l of threadListeners) l()
 }
 
+function putThreadInfos(k: string, infos: ThreadInfo[]): void {
+    if (infos.length === 0) return
+    const spaceMap = new Map(threadState.get(k) ?? [])
+    for (const info of infos) spaceMap.set(info.topicId, info)
+    const next = new Map(threadState)
+    next.set(k, spaceMap)
+    threadState = next
+    emitThreads()
+}
+
 async function indexThreads(orgId: string, spaceId: string): Promise<void> {
     const k = key(orgId, spaceId)
     const feed = getSpaceFeed(orgId, spaceId)
@@ -225,6 +325,26 @@ async function indexThreads(orgId: string, spaceId: string): Promise<void> {
     const known = threadState.get(k) ?? new Map<string, ThreadInfo>()
     const pending = feed.topics.filter((t) => t.id !== general?.id && !known.has(t.id) && !threadInflight.has(`${k}:${t.id}`))
     if (pending.length === 0) return
+
+    // A server that marks its stream topic is post-004: every topic carries
+    // its own parentage (anchorMessageId, markers backfilled), so the index
+    // is a pure projection of the topics list — zero message fetches. This
+    // was the boot-time request storm: one full listMessages per topic.
+    if (feed.topics.some((t) => t.kind === 'general')) {
+        putThreadInfos(
+            k,
+            pending.map((topic) => ({
+                topicId: topic.id,
+                createdAt: topic.createdAt,
+                firstMessage: null,
+                marker: null,
+                parentMessageId: topic.anchorMessageId ?? null,
+            })),
+        )
+        return
+    }
+
+    // Legacy pre-004 server: parentage only lives in first-message markers.
     await Promise.all(
         pending.map(async (topic) => {
             const ik = `${k}:${topic.id}`
@@ -233,13 +353,7 @@ async function indexThreads(orgId: string, spaceId: string): Promise<void> {
                 const res = await window.ipc.invoke('spaces:listMessages', { orgId, spaceId, topicId: topic.id })
                 const first = res.messages[0] ?? null
                 const marker = first ? parseThreadMarker(first.body) : null
-                const info: ThreadInfo = { topicId: topic.id, firstMessage: first, marker, parentMessageId: threadParentOf(topic, marker) }
-                const spaceMap = new Map(threadState.get(k) ?? [])
-                spaceMap.set(topic.id, info)
-                const next = new Map(threadState)
-                next.set(k, spaceMap)
-                threadState = next
-                emitThreads()
+                putThreadInfos(k, [{ topicId: topic.id, createdAt: topic.createdAt, firstMessage: first, marker, parentMessageId: threadParentOf(topic, marker) }])
             } catch {
                 // unreachable right now; retried on the next feed refresh
             } finally {
@@ -251,14 +365,8 @@ async function indexThreads(orgId: string, spaceId: string): Promise<void> {
 
 /** Remember a parent→thread link the moment this client creates it (no fetch needed). */
 export function rememberThread(orgId: string, spaceId: string, topic: spaces.Topic, firstMessage: spaces.Message): void {
-    const k = key(orgId, spaceId)
-    const spaceMap = new Map(threadState.get(k) ?? [])
     const marker = parseThreadMarker(firstMessage.body)
-    spaceMap.set(topic.id, { topicId: topic.id, firstMessage, marker, parentMessageId: threadParentOf(topic, marker) })
-    const next = new Map(threadState)
-    next.set(k, spaceMap)
-    threadState = next
-    emitThreads()
+    putThreadInfos(key(orgId, spaceId), [{ topicId: topic.id, createdAt: topic.createdAt, firstMessage, marker, parentMessageId: threadParentOf(topic, marker) }])
 }
 
 function noteThreadActivity(orgId: string, spaceId: string, message: spaces.Message): void {
@@ -298,7 +406,7 @@ export function useThreadIndex(orgId: string, spaceId: string): ThreadIndex {
         const byParent = new Map<string, string>()
         // Oldest thread wins if two claim the same parent (only reachable via
         // pre-contract data — the server now enforces one topic per message).
-        const ordered = [...byTopic.values()].sort((a, b) => (a.firstMessage?.postedAt ?? '').localeCompare(b.firstMessage?.postedAt ?? ''))
+        const ordered = [...byTopic.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.topicId.localeCompare(b.topicId))
         for (const info of ordered) {
             if (info.parentMessageId && !byParent.has(info.parentMessageId)) byParent.set(info.parentMessageId, info.topicId)
         }
@@ -448,7 +556,7 @@ export function countSpaceUnread(orgId: string, spaceId: string, selfMemberId: s
         const mark = getTopicLastReadAt(orgId, spaceId, general.id)
         const state = generalState.get(key(orgId, spaceId))
         if (state?.ready && state.topic?.id === general.id) {
-            count += state.messages.filter((m, i) => !isGeneralSeedMessage(general, m, i) && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
+            count += state.messages.filter((m, i) => !m.deletedAt && !isGeneralSeedMessage(general, m, i) && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
         } else if ((!mark || general.lastActivityAt > mark) && general.messageCount > 1) {
             count += 1
         }

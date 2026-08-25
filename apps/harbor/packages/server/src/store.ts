@@ -151,6 +151,13 @@ export interface Store {
   listMessages(spaceId: string, topicId: string): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;
   appendMessage(message: Message): Promise<void>;
+  /**
+   * Tombstone: blanks the row's body and sets deletedAt — and redacts the
+   * stored `message` event the same way. That event rewrite is the one
+   * mutation the log allows: a deleted body must be unrecoverable, replay
+   * included. The message_deleted event itself is appended by the service.
+   */
+  markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
   /** merge_into support: repoints messages; returns how many moved. */
   reassignMessages(spaceId: string, fromTopicId: string, toTopicId: string): Promise<number>;
 

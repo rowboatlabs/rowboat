@@ -542,6 +542,104 @@ describe('reactions', () => {
   });
 });
 
+describe('message deletion', () => {
+  let spaceId: string;
+  let topicId: string;
+
+  const del = (who: ReturnType<typeof api>, messageId: string) =>
+    who.post(`/v1/spaces/${spaceId}/messages/${messageId}/delete`, { actingMode: 'direct' });
+  const react = (who: ReturnType<typeof api>, messageId: string, emoji: string, action: 'add' | 'remove') =>
+    who.post(`/v1/spaces/${spaceId}/messages/${messageId}/reactions`, { emoji, action, actingMode: 'direct' });
+
+  beforeAll(async () => {
+    const r = await ramnique.post('/v1/spaces', { name: 'Deletion' });
+    spaceId = r.body.space.id;
+    const inv = await ramnique.post('/v1/invites', { spaceId });
+    await gagan.post('/v1/invites/accept', { token: inv.body.token });
+  });
+
+  it('the author tombstones a message; reads and replay never show the body again', async () => {
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      body: 'oops — that was for another space',
+      actingMode: 'direct',
+    });
+    const messageId = posted.body.message.id;
+    topicId = posted.body.topic.id;
+
+    const r = await del(ramnique, messageId);
+    expect(r.status).toBe(200);
+    expect(r.body.message.body).toBe('');
+    expect(r.body.message.deletedAt).toBeTruthy();
+
+    // Reads carry the tombstone, and it no longer counts.
+    const msgs = await gagan.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
+    const m = msgs.body.messages.find((x: any) => x.id === messageId);
+    expect(m.body).toBe('');
+    expect(m.deletedAt).toBe(r.body.message.deletedAt);
+    expect(msgs.body.topic.messageCount).toBe(0);
+
+    // Replay redaction: a full catch-up gets the REDACTED message event plus the deletion.
+    const live = await liveClient(harbor, 'dev-gagan');
+    live.send({ kind: 'subscribe', spaceId, afterOffset: 0 });
+    await live.until(
+      (frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'message_deleted'),
+      'replayed deletion',
+    );
+    const replayed = live.events().find((f) => f.event.type === 'message' && f.event.message.id === messageId)!;
+    expect(replayed.event).toMatchObject({
+      type: 'message',
+      message: { id: messageId, body: '', deletedAt: r.body.message.deletedAt },
+    });
+    expect(live.events().find((f) => f.event.type === 'message_deleted')!.event).toMatchObject({
+      type: 'message_deleted',
+      deletion: { messageId, topicId, by: { memberId: 'ramnique', actingMode: 'direct' } },
+    });
+    live.close();
+  });
+
+  it('only the author can delete; non-members and unknown messages refuse', async () => {
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'keep out', actingMode: 'direct' });
+    const messageId = posted.body.message.id;
+    expect((await del(gagan, messageId)).status).toBe(403);
+    expect((await del(prakhar, messageId)).status).toBe(403);
+    expect((await del(ramnique, '01ARZ3NDEKTSV4RRFFQ69G5FAV')).status).toBe(404);
+  });
+
+  it('re-deleting is an idempotent no-op: one event for two calls', async () => {
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'delete me twice', actingMode: 'direct' });
+    const messageId = posted.body.message.id;
+
+    // Live-only subscription (no replay): every event from here on is new.
+    const live = await liveClient(harbor, 'dev-ramnique');
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
+
+    await del(ramnique, messageId);
+    const again = await del(ramnique, messageId);
+    expect(again.status).toBe(200);
+    expect(again.body.message.deletedAt).toBeTruthy();
+
+    await live.until(
+      (frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'message_deleted'),
+      'deletion event',
+    );
+    expect(live.events().filter((f) => f.event.type === 'message_deleted')).toHaveLength(1);
+    live.close();
+  });
+
+  it('tombstones take no new reactions; removes still work', async () => {
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'react then delete', actingMode: 'direct' });
+    const messageId = posted.body.message.id;
+    await react(gagan, messageId, '👍', 'add');
+    await del(ramnique, messageId);
+
+    expect((await react(gagan, messageId, '🚀', 'add')).status).toBe(400);
+    const removed = await react(gagan, messageId, '👍', 'remove');
+    expect(removed.status).toBe(200);
+    expect(removed.body.message.reactions).toEqual([]);
+  });
+});
+
 describe('read-only limit (spec §4: never lockout)', () => {
   it('writes pause, reads keep working', async () => {
     const r = await ramnique.post('/v1/spaces', { name: 'Limits' });

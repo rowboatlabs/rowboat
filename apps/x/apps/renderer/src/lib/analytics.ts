@@ -214,6 +214,10 @@ export function spacesReactionToggled(props: { action: 'add' | 'remove' }) {
   posthog.capture('spaces_reaction_toggled', { action: props.action })
 }
 
+export function spacesMessageDeleted() {
+  posthog.capture('spaces_message_deleted')
+}
+
 export function spacesTopicStarted() {
   posthog.capture('spaces_topic_started')
 }

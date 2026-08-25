@@ -62,6 +62,7 @@ export interface SpacesClientOptions {
 type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
+type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 
 export class SpacesClient {
   private readonly baseUrl: string;
@@ -315,6 +316,18 @@ export class SpacesClient {
 
   async postMessage(spaceId: string, input: NewTopicMessage): Promise<{ topic: Topic; message: Message }> {
     return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
+  }
+
+  /** Author-only tombstone (idempotent). Returns the deleted message (body '', deletedAt set). */
+  async deleteMessage(spaceId: string, messageId: string, input: DeleteMessageInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/delete`),
+        routes.deleteMessage.response,
+        input,
+      )
+    ).message;
   }
 
   /** Toggle a reaction (idempotent). Returns the message with reactions folded. */

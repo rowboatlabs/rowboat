@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { useSpaceRefs } from '@/components/spaces/space-markdown'
+import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import { blobAppUrl, blobWireUrl, encodeMentions, encodeSpaceLinkTarget, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -146,14 +146,36 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
         addFiles(Array.from(e.dataTransfer.files))
     }
     const onPaste = (e: React.ClipboardEvent) => {
-        if (!refs) return
-        const files = Array.from(e.clipboardData.items)
-            .filter((item) => item.kind === 'file')
-            .map((item) => item.getAsFile())
-            .filter((f): f is File => f !== null)
-        if (files.length === 0) return
+        if (refs) {
+            const files = Array.from(e.clipboardData.items)
+                .filter((item) => item.kind === 'file')
+                .map((item) => item.getAsFile())
+                .filter((f): f is File => f !== null)
+            if (files.length > 0) {
+                e.preventDefault()
+                addFiles(files)
+                return
+            }
+        }
+        // A pasted direct image address (a GIF link) becomes the image, not
+        // the URL text — markdown image syntax, nothing re-hosted: the message
+        // keeps pointing at the original. Only when the paste IS the URL;
+        // a URL inside a sentence stays as typed.
+        const text = e.clipboardData.getData('text/plain').trim()
+        if (!text || /\s/.test(text) || !isDirectImageUrl(text)) return
         e.preventDefault()
-        addFiles(files)
+        const el = ref.current
+        const start = el?.selectionStart ?? draft.length
+        const end = el?.selectionEnd ?? draft.length
+        const inserted = `![](${text})`
+        setDraft(draft.slice(0, start) + inserted + draft.slice(end))
+        onType?.()
+        requestAnimationFrame(() => {
+            const node = ref.current
+            if (!node) return
+            const pos = start + inserted.length
+            node.setSelectionRange(pos, pos)
+        })
     }
 
     // Agent options — only meaningful (and only shown) when @rowboat is addressed.

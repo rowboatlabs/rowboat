@@ -37,6 +37,7 @@ type SpacesHandlers = {
   'spaces:restoreAsset': InvokeHandler<'spaces:restoreAsset'>;
   'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
   'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
+  'spaces:saveImageUrl': InvokeHandler<'spaces:saveImageUrl'>;
   'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
   'spaces:proposeChange': InvokeHandler<'spaces:proposeChange'>;
   'spaces:assetHistory': InvokeHandler<'spaces:assetHistory'>;
@@ -46,6 +47,7 @@ type SpacesHandlers = {
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
+  'spaces:deleteMessage': InvokeHandler<'spaces:deleteMessage'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
@@ -219,6 +221,21 @@ export const spacesIpcHandlers: SpacesHandlers = {
     return { saved: true, path: result.filePath };
   },
 
+  // External image save: dialog first (a cancel never downloads), then main
+  // fetches the bytes — the renderer cannot cross-origin. https only.
+  'spaces:saveImageUrl': async (event, args) => {
+    const url = new URL(args.url);
+    if (url.protocol !== 'https:') throw new Error('only https images can be saved');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = { defaultPath: path.basename(url.pathname) || 'image' };
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return { saved: false };
+    const res = await fetch(args.url);
+    if (!res.ok) throw new Error(`image fetch failed with ${res.status}`);
+    await fs.writeFile(result.filePath, Buffer.from(await res.arrayBuffer()));
+    return { saved: true, path: result.filePath };
+  },
+
   'spaces:readAsset': async (_event, args) =>
     orgs.getClient(args.orgId).readAsset(args.spaceId, args.path, args.version),
 
@@ -268,6 +285,12 @@ export const spacesIpcHandlers: SpacesHandlers = {
     message: await orgs.getClient(args.orgId).reactToMessage(args.spaceId, args.messageId, {
       emoji: args.emoji,
       action: args.action,
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:deleteMessage': async (_event, args) => ({
+    message: await orgs.getClient(args.orgId).deleteMessage(args.spaceId, args.messageId, {
       actingMode: 'direct',
     }),
   }),

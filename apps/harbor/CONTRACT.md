@@ -137,6 +137,16 @@ team and a Roadboard space (`src/main.ts`).
   fold `reaction` events or refetch. Attribution rides the reaction
   (`by: Attribution`) like every other act. Render-face only for now — the
   six MCP tools deliberately don't react (an agent's ack is a reply).
+- **Message deletion is an author-only tombstone** (`deleteMessage` route + the
+  `message_deleted` event): the content plane stays role-flat, so deleter ==
+  author, always. The row keeps its id/offset (threads stay anchored) but
+  `body` is redacted to `''` and `deletedAt` set — **in the messages row AND
+  the stored `message` event**, the one in-place log rewrite the design
+  allows, because a deleted body must be unrecoverable, replay included.
+  Deletion decrements the topic's `messageCount` without bumping
+  `lastActivityAt` and emits no topic event. Re-deleting is an idempotent 200
+  no-op. Tombstones take no new reactions (`invalid_request`); removes still
+  work so cleanup stays possible. Render-face only, like reactions.
 - **Unknown invite tokens are 404**; `expired`/`revoked` are resolvable states.
 - **MCP face attribution**: acting mode defaults to `agent`; automations
   declare `x-acting-mode: scheduled`; `x-agent-name` carries the display label.

@@ -158,6 +158,35 @@ describe('PgStore through the service', () => {
     expect(last.reactions).toEqual([]);
   });
 
+  it('deletion tombstones the row AND redacts the stored message event jsonb', async () => {
+    const posted = await service.postMessage(ram, spaceId, { body: 'the secret was rosebud', actingMode: 'direct' });
+    const messageId = posted.message.id;
+
+    const deleted = await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
+    expect(deleted.body).toBe('');
+    expect(deleted.deletedAt).toBeTruthy();
+
+    // The row is a tombstone.
+    const reread = await store.getMessage(spaceId, messageId);
+    expect(reread?.body).toBe('');
+    expect(reread?.deletedAt).toBe(deleted.deletedAt);
+
+    // The stored message event was redacted in place — replay carries no body —
+    // and the message_deleted event narrates with full attribution.
+    const events = await service.eventsAfter(spaceId, 0);
+    const messageEvent = events.find((e) => e.event.type === 'message' && e.event.message.id === messageId)!;
+    expect(messageEvent.event).toMatchObject({ message: { body: '', deletedAt: deleted.deletedAt } });
+    const deletion = events.find((e) => e.event.type === 'message_deleted')!;
+    expect(deletion.event).toMatchObject({
+      deletion: { messageId, topicId: posted.topic.id, by: { memberId: 'ramnique', actingMode: 'direct' } },
+    });
+
+    // Idempotent: re-deleting writes nothing new.
+    const head = await service.headOffset(spaceId);
+    await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
+    expect(await service.headOffset(spaceId)).toBe(head);
+  });
+
   it('identity mapping: (iss, sub) → member, upsert repoints, unmapped is undefined', async () => {
     const iss = 'https://as.example/auth/v1';
     expect(await store.getMemberByIdentity(iss, 'sub-1')).toBeUndefined();
