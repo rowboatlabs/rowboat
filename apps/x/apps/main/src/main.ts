@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, protocol, net, shell, session, safeStorage, type Session } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import os from "node:os";
 import {
@@ -62,6 +62,7 @@ import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import { startSpaceMentionWatch } from "@x/core/dist/spaces/mention-watch.js";
+import { bounceAllLive } from "@x/core/dist/spaces/orgs.js";
 import { flags } from "@x/shared";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { CodeSessionService } from "@x/core/dist/code-mode/sessions/service.js";
@@ -573,6 +574,11 @@ app.whenReady().then(async () => {
   // the rest of the Spaces UI — no OS notifications for a feature the user
   // can't open (the same flag hides the renderer surfaces via the preload).
   if (flags.spacesEnabled(process.env)) startSpaceMentionWatch();
+
+  // Sleep leaves spaces WebSockets half-open (no close ever fires; see
+  // SpacesLive's liveness notes). Bounce them on wake so every stream
+  // reconnects and replays immediately instead of waiting out the watchdog.
+  powerMonitor.on("resume", () => bounceAllLive());
 
   setupIpcHandlers();
   setupBrowserEventForwarding();

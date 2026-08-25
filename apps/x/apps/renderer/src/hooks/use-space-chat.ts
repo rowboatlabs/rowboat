@@ -69,6 +69,21 @@ export function updateGeneralMessage(orgId: string, spaceId: string, message: sp
     setGeneral(k, { messages: state.messages.map((m) => (m.id === message.id ? message : m)) })
 }
 
+/**
+ * Append a general message to the store. The live bus and post handlers both
+ * land here: a post handler echoes its own HTTP result IMMEDIATELY (the WS
+ * event may be seconds away — or the socket half-open after sleep, in which
+ * case it never comes) and the dedupe makes whichever copy arrives second a
+ * no-op.
+ */
+export function ingestGeneralMessage(orgId: string, spaceId: string, message: spaces.Message): void {
+    const k = key(orgId, spaceId)
+    const state = generalState.get(k)
+    if (!state?.topic || message.topicId !== state.topic.id) return
+    if (state.messages.some((m) => m.id === message.id)) return
+    setGeneral(k, { messages: [...state.messages, message].sort((a, b) => a.offset - b.offset) })
+}
+
 /** Find general in the feed store's topics; seed it when the space has none. */
 async function ensureGeneral(orgId: string, spaceId: string): Promise<void> {
     const k = key(orgId, spaceId)
@@ -104,14 +119,24 @@ function wireBus(): void {
     // (a rename or archive) through the feed store, which refreshes on the same event.
     subscribeSpacesFeed((event) => {
         const frame = event.frame
+        if (frame.kind === 'subscribed') {
+            // A (re)connected subscription. Whatever was published while the
+            // socket was dead may be gone for good (a subscription that never
+            // saw an event resumes live-only, with no offset to replay from) —
+            // resync the HTTP views so the stream is whole again.
+            const k = key(event.orgId, frame.spaceId)
+            const state = generalState.get(k)
+            void refreshSpaceFeed(event.orgId, frame.spaceId)
+            if (state?.topic) void loadGeneralMessages(event.orgId, frame.spaceId, state.topic)
+            return
+        }
         if (frame.kind !== 'event') return
         const k = key(event.orgId, frame.spaceId)
         const state = generalState.get(k)
         if (frame.event.type === 'message') {
             const message = frame.event.message
             if (state?.topic && message.topicId === state.topic.id) {
-                if (state.messages.some((m) => m.id === message.id)) return
-                setGeneral(k, { messages: [...state.messages, message].sort((a, b) => a.offset - b.offset) })
+                ingestGeneralMessage(event.orgId, frame.spaceId, message)
             } else if (state?.topic) {
                 // A message on another topic: a thread reply or a new thread's seed.
                 noteThreadActivity(event.orgId, frame.spaceId, message)

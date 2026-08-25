@@ -43,6 +43,8 @@ export interface HarborOptions {
   blobs?: BlobStore;
   /** Upload cap for the raw-bytes blob route (default 100MB). */
   maxBlobBytes?: number;
+  /** Live-face heartbeat cadence (default 25s). A test knob; production keeps the default. */
+  liveHeartbeatMs?: number;
   /** Auth driver; defaults to dev tokens (never expose publicly). Pass an OidcAuthDriver for real deployments. */
   auth?: AuthDriver;
   /**
@@ -127,7 +129,11 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
     }
     honoListener(req, res);
   });
-  const closeLive = attachLive(server, () => ({ service, hub, store, auth }));
+  const closeLive = attachLive(
+    server,
+    () => ({ service, hub, store, auth }),
+    options.liveHeartbeatMs !== undefined ? { heartbeatMs: options.liveHeartbeatMs } : {},
+  );
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
   const port = (server.address() as AddressInfo).port;

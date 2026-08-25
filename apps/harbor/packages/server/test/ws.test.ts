@@ -173,4 +173,34 @@ describe('live face', () => {
     await client.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'socket still alive');
     client.close();
   });
+
+  it('heartbeat: ping beacons reach every connection, subscribed or not', async () => {
+    // Separate instance so the fast cadence doesn't spam the shared harbor.
+    const beating = await startHarbor({
+      seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
+      liveHeartbeatMs: 60,
+    });
+    const ws = new WebSocket(`ws://localhost:${beating.port}/v1/live?token=dev-ramnique`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', resolve);
+        ws.once('error', reject);
+      });
+      const pings: ServerFrame[] = [];
+      ws.on('message', (data) => {
+        const frame = JSON.parse(String(data)) as ServerFrame;
+        if (frame.kind === 'ping') pings.push(frame);
+      });
+      // No subscribe on purpose: liveness must not depend on having spaces open.
+      const deadline = Date.now() + 3_000;
+      while (pings.length < 2 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(pings.length).toBeGreaterThanOrEqual(2);
+      expect(pings[0]).toMatchObject({ kind: 'ping', at: expect.any(String) });
+    } finally {
+      ws.close();
+      await beating.close();
+    }
+  });
 });

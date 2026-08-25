@@ -5,7 +5,7 @@ import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
-import { rememberThread, updateGeneralMessage, usePresenceSender } from '@/hooks/use-space-chat'
+import { ingestGeneralMessage, rememberThread, updateGeneralMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { buildThreadSeed, dayKey, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
@@ -111,6 +111,9 @@ export function GeneralStream({
         setPosting(true)
         try {
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId: generalId, body })
+            // Echo the saved message NOW — the live event may be seconds away,
+            // or the socket half-open after sleep, in which case it never comes.
+            ingestGeneralMessage(org.id, space.id, result.message)
             markTopicRead(org.id, space.id, generalId)
             analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
             maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
