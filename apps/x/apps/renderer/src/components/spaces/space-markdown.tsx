@@ -8,8 +8,10 @@ import {
     decorateMentions,
     parseAssetWireUrl,
     parseBlobAppUrl,
+    parseSpaceFileAppUrl,
     resolveSpaceLink,
     rewriteBlobLinks,
+    rewriteFileLinks,
     type SpaceRefs,
 } from '@/lib/spaces-presentation'
 
@@ -116,8 +118,12 @@ function SpaceAnchor({ href, children, ...rest }: ComponentProps<'a'>) {
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }
     // A relative link in a message is a file link (resolved from the space
-    // root); the contract's canonical asset URL for this space opens the same way.
-    const filePath = resolveSpaceLink(url, '') ?? (refs ? parseAssetWireUrl(url, refs) : null)
+    // root — rewritten pre-parse to app://space-file so Streamdown's URL
+    // hardening doesn't strip it); the contract's canonical asset URL for
+    // this space opens the same way.
+    const filePath = parseSpaceFileAppUrl(url)?.path
+        ?? resolveSpaceLink(url, '')
+        ?? (refs ? parseAssetWireUrl(url, refs) : null)
     if (filePath && openFile) {
         return (
             <button
@@ -143,7 +149,8 @@ export function SpaceMarkdown({ body, className }: { body: string; className?: s
     const memberNames = useMemberNames()
     const text = useMemo(() => {
         const withBlobs = refs ? rewriteBlobLinks(body, refs) : body
-        return decorateMentions(withBlobs, memberNames)
+        const withFiles = refs ? rewriteFileLinks(withBlobs, refs) : withBlobs
+        return decorateMentions(withFiles, memberNames)
     }, [body, refs, memberNames])
     return (
         <div className={cn(className)}>

@@ -19,6 +19,7 @@ import { EmailBlockExtension, EmailsBlockExtension } from '@/extensions/email-bl
 import { TranscriptBlockExtension } from '@/extensions/transcript-block'
 import { MermaidBlockExtension } from '@/extensions/mermaid-block'
 import { WikiLink } from '@/extensions/wiki-link'
+import { allowRelativeAndAppHrefs } from '@/lib/viewer-links'
 import '@/styles/editor.css'
 
 const BLANK_LINE_MARKER = '\u200B'
@@ -64,6 +65,10 @@ export function RichMarkdownViewer({ content, onToggleTask, onOpenLink }: {
           rel: 'noopener noreferrer',
           target: '_blank',
         },
+        // Only when a link handler is mounted: the default validator drops
+        // relative hrefs (a/b.md) and app:// links at parse time — exactly the
+        // links the handler exists to open.
+        ...(onOpenLink ? { isAllowedUri: allowRelativeAndAppHrefs } : {}),
       }),
       Image.configure({
         inline: false,
