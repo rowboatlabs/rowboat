@@ -17,6 +17,8 @@ import {
   type RowboatServer,
 } from '@x/server';
 import { WorkDir } from '@x/core/dist/config/config.js';
+import { createRelayAuthServer } from '@x/core/dist/auth/loopback-server.js';
+import type { Server as HttpServer } from 'node:http';
 import { broadcastToWindows, findMainAppWindow, onWorkspaceChange, sessionsIndexReady } from './ipc.js';
 import { ElectronNotificationService } from './notification/electron-notification-service.js';
 import { ElectronBrowserControlService } from './browser/control-service.js';
@@ -80,6 +82,18 @@ const PUSH_CHANNELS = [
   'knowledge:didCommit',
 ] as const;
 
+// OAuth loopback listeners this client hosts on the server's behalf (Phase
+// 8b): the server's `loopback-bind` reverse call binds a local 127.0.0.1
+// listener here — the machine whose browser receives the redirect — and every
+// callback hit is relayed to the server's oauth:deliverLoopbackCallback RPC,
+// which answers with the page to render.
+const relayListeners = new Map<string, HttpServer>();
+
+function closeRelayListeners(): void {
+  for (const server of relayListeners.values()) server.close();
+  relayListeners.clear();
+}
+
 // The client half shared by child and remote modes: WS events relay to
 // renderer windows plus the Electron-side capability handlers for the
 // server's reverse calls.
@@ -118,6 +132,35 @@ function createDesktopEventsClient(baseUrl: string, key: string): EventsClient {
         const p = payload as { type: 'captureTarget' | 'insert'; text?: string };
         if (p.type === 'insert') return textInsertService.insert(p.text ?? '');
         await textInsertService.captureTarget();
+        return { ok: true };
+      },
+      'loopback-bind': async (payload) => {
+        const p = payload as { bindingId: string; port: number; fallback: boolean; callbackPath: string };
+        const { server, port } = await createRelayAuthServer(
+          p.port,
+          async (callbackUrl) => {
+            const res = await fetch(`${baseUrl}/rpc/oauth:deliverLoopbackCallback`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+              body: JSON.stringify({ bindingId: p.bindingId, url: callbackUrl.toString() }),
+            });
+            const body = (await res.json().catch(() => null)) as
+              | { accepted?: boolean; message?: string }
+              | null;
+            if (!res.ok || !body) {
+              return { accepted: false, message: 'Could not reach the Rowboat server to complete sign-in' };
+            }
+            return { accepted: body.accepted === true, message: body.message };
+          },
+          { fallback: p.fallback, callbackPath: p.callbackPath },
+        );
+        relayListeners.set(p.bindingId, server);
+        return { port };
+      },
+      'loopback-close': (payload) => {
+        const p = payload as { bindingId: string };
+        relayListeners.get(p.bindingId)?.close();
+        relayListeners.delete(p.bindingId);
         return { ok: true };
       },
     },
@@ -264,6 +307,7 @@ export async function stopServerHost(): Promise<void> {
   current = null;
   ready = null;
   if (!server) return;
+  closeRelayListeners();
   if ('close' in server) {
     await server.close();
   } else {

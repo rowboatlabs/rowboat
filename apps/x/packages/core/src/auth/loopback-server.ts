@@ -32,6 +32,34 @@ interface CallbackHandlingOpts {
    * without disturbing the live flow.
    */
   validateCallback?: (url: URL) => string | null;
+  /**
+   * Relay mode (remote-server client): every hit on callbackPath is shipped
+   * verbatim to the machine that owns the flow, which runs the validate /
+   * error / callback logic itself and answers with what page to render.
+   * When set, validateCallback/onError/onCallback are bypassed locally.
+   */
+  relay?: (url: URL) => Promise<{ accepted: boolean; message?: string }>;
+}
+
+function renderSuccessPage(res: import('http').ServerResponse): void {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Authorization Successful</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          .success { color: #2e7d32; }
+        </style>
+      </head>
+      <body>
+        <h1 class="success">Authorization Successful</h1>
+        <p>You can close this window.</p>
+        <script>setTimeout(() => window.close(), 2000);</script>
+      </body>
+    </html>
+  `);
 }
 
 function renderErrorPage(res: import('http').ServerResponse, message: string): void {
@@ -78,6 +106,20 @@ function tryBindPort(
       const url = new URL(req.url, `http://localhost:${port}`);
 
       if (url.pathname === opts.callbackPath) {
+        if (opts.relay) {
+          opts
+            .relay(url)
+            .then((r) => {
+              if (r.accepted) renderSuccessPage(res);
+              else renderErrorPage(res, r.message ?? 'Sign-in failed');
+            })
+            .catch((err: unknown) => {
+              console.error('[OAuth] Callback relay failed:', err);
+              renderErrorPage(res, err instanceof Error ? err.message : 'Callback relay failed');
+            });
+          return;
+        }
+
         // Gatekeeper first: stale/foreign requests must not reach onError or
         // onCallback (a stale tab's redirect must never settle a live flow).
         const rejection = opts.validateCallback?.(url) ?? null;
@@ -107,24 +149,7 @@ function tryBindPort(
         // the handler failed hides the failure from the user and leaves the
         // app-side flow spinning with no visible cause.
         Promise.resolve(onCallback(url)).then(() => {
-          res.writeHead(200, { 'Content-Type': 'text/html' });
-          res.end(`
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <title>Authorization Successful</title>
-                <style>
-                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-                  .success { color: #2e7d32; }
-                </style>
-              </head>
-              <body>
-                <h1 class="success">Authorization Successful</h1>
-                <p>You can close this window.</p>
-                <script>setTimeout(() => window.close(), 2000);</script>
-              </body>
-            </html>
-          `);
+          renderSuccessPage(res);
         }).catch((err: unknown) => {
           console.error('[OAuth] Callback handling failed:', err);
           renderErrorPage(res, err instanceof Error ? err.message : 'Callback handling failed');
@@ -260,3 +285,65 @@ export async function createAuthServer(
   throw new Error(`No available port found in range ${port}–${limit}.`);
 }
 
+
+// ============================================================================
+// Loopback host seam (Phase 8b — SEPARATION_PLAN.md)
+// ============================================================================
+//
+// OAuth redirects land on 127.0.0.1 of whatever machine runs the BROWSER —
+// which, with a remote rowboat-server, is the client's machine, not this one.
+// A registered LoopbackHost lets the standalone server delegate "listen on
+// loopback port N and hand me the callback" to a connected client over the
+// WS reverse-call channel. Flows call openLoopback() instead of
+// createAuthServer(); with no host registered (Electron in-process mode,
+// tests) or no capable client connected, it binds locally — the pre-8b
+// behaviour, byte for byte.
+
+export interface LoopbackHandle {
+  port: number;
+  /** Resolves (when a promise) once the listener has released the port. */
+  close(): void | Promise<void>;
+}
+
+export type LoopbackHost = (
+  port: number,
+  onCallback: (callbackUrl: URL) => void | Promise<void>,
+  opts: { fallback?: boolean } & Partial<Omit<CallbackHandlingOpts, 'relay'>>,
+) => Promise<LoopbackHandle | null>;
+
+let loopbackHost: LoopbackHost | null = null;
+
+export function registerLoopbackHost(host: LoopbackHost): void {
+  loopbackHost = host;
+}
+
+/** What every OAuth flow calls: delegates to the registered host, falls back to a local bind. */
+export async function openLoopback(
+  port: number,
+  onCallback: (callbackUrl: URL) => void | Promise<void>,
+  opts: { fallback?: boolean } & Partial<Omit<CallbackHandlingOpts, 'relay'>> = {},
+): Promise<LoopbackHandle> {
+  if (loopbackHost) {
+    const handle = await loopbackHost(port, onCallback, opts);
+    if (handle) return handle;
+  }
+  const { server, port: boundPort } = await createAuthServer(port, onCallback, opts);
+  return {
+    port: boundPort,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+/**
+ * The client half of the relay: a real local listener whose every callback
+ * hit is shipped verbatim to the flow's owner (the server), which answers
+ * with what page to render. Used by the desktop app when it receives a
+ * `loopback-bind` reverse call.
+ */
+export async function createRelayAuthServer(
+  port: number,
+  relay: (callbackUrl: URL) => Promise<{ accepted: boolean; message?: string }>,
+  opts: { fallback?: boolean; callbackPath?: string } = {},
+): Promise<AuthServerResult> {
+  return createAuthServer(port, () => {}, { ...opts, relay });
+}

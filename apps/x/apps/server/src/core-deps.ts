@@ -1,4 +1,5 @@
 import container from '@x/core/dist/di/container.js';
+import { deliverLoopbackCallback } from './loopback-relay.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import * as workspaceCore from '@x/core/dist/workspace/workspace.js';
@@ -1506,6 +1507,11 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
       disposeTerminal(args.id);
       return { success: true };
     },
+
+    // Phase 8b: OAuth loopback relay — the loopback-capable client posts
+    // every callback hit here; the relay settles the owning flow and answers
+    // with the page to render.
+    'oauth:deliverLoopbackCallback': async (args) => deliverLoopbackCallback(args),
 
 
     // Rowboat Apps handlers (spec §13)

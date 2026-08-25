@@ -3056,6 +3056,13 @@ export function setupIpcHandlers() {
       await rotateServerKey();
       return { success: true };
     },
+    // Server-only channel: the client's relay listener calls it over HTTP
+    // (see server-host.ts) — it always forwards, this local stub is
+    // unreachable unless forwarding is killed, where the relay can't work
+    // anyway.
+    'oauth:deliverLoopbackCallback': async () => {
+      throw new Error('oauth:deliverLoopbackCallback is served by rowboat-server');
+    },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,
   });
