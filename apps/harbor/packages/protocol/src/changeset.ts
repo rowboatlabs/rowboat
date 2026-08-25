@@ -28,6 +28,14 @@ export const ChangeSet = z.object({
   topicId: TopicId.optional(),
   /** Present when the change produced a binary version (proposeChange's blob variant). */
   blob: BlobInfo.optional(),
+  /**
+   * Namespace operations (absent = a content edit). Only content edits bump
+   * the version — an op change-set carries baseVersion === resultVersion:
+   * the version the file had when it was moved/deleted/restored.
+   */
+  op: z.enum(['move', 'delete', 'restore']).optional(),
+  /** op 'move' only: where the file lived before (assetPath is where it lives now). */
+  movedFrom: AssetPath.optional(),
   committedAt: z.iso.datetime(),
   offset: StreamOffset,
 });
@@ -116,6 +124,39 @@ export const ProposeChangeResult = z.discriminatedUnion('outcome', [
   }),
 ]);
 export type ProposeChangeResult = z.infer<typeof ProposeChangeResult>;
+
+/**
+ * Stale-base bundle for namespace ops (move/delete): the file changed while
+ * you were deciding. Same retry contract as a propose conflict, minus merge
+ * regions — there is nothing to line-merge in a move or a delete.
+ */
+const StaleAsset = z.object({
+  outcome: z.literal('conflict'),
+  currentVersion: AssetVersion,
+  currentContent: z.string(),
+  currentBlob: BlobInfo.optional(),
+  recentHistory: z.array(ChangeSet),
+});
+
+export const MoveAssetResult = z.discriminatedUnion('outcome', [
+  z.object({ outcome: z.literal('moved'), changeSet: ChangeSet, version: AssetVersion }),
+  StaleAsset,
+]);
+export type MoveAssetResult = z.infer<typeof MoveAssetResult>;
+
+export const DeleteAssetResult = z.discriminatedUnion('outcome', [
+  z.object({ outcome: z.literal('deleted'), changeSet: ChangeSet }),
+  StaleAsset,
+]);
+export type DeleteAssetResult = z.infer<typeof DeleteAssetResult>;
+
+/** Restore never conflicts (the file is frozen while deleted); occupied paths refuse as errors. */
+export const RestoreAssetResult = z.object({
+  outcome: z.literal('restored'),
+  changeSet: ChangeSet,
+  version: AssetVersion,
+});
+export type RestoreAssetResult = z.infer<typeof RestoreAssetResult>;
 
 /** Read is bundled with recent history everywhere (spec §6: read-before-write is mechanical fact). */
 export const ReadAssetResult = z.object({

@@ -187,8 +187,31 @@ export function buildHttpApp(deps: {
 
   app.get('/v1/spaces/:spaceId/assets', async (c) => {
     const { spaceId } = parseWith(routes.listAssets.params, c.req.param());
-    const entries = await service.listAssets(actor(c), spaceId);
+    // NOTE: any present value counts as true (z.coerce.boolean; clients send the flag only when they mean it).
+    const q = parseWith(routes.listAssets.query, {
+      ...(c.req.query('includeDeleted') !== undefined ? { includeDeleted: c.req.query('includeDeleted') } : {}),
+    });
+    const entries = await service.listAssets(actor(c), spaceId, q.includeDeleted ?? false);
     return reply(c, routes.listAssets.response, { entries });
+  });
+
+  app.post('/v1/spaces/:spaceId/assets/move', async (c) => {
+    const { spaceId } = parseWith(routes.moveAsset.params, c.req.param());
+    const input = await body(c, routes.moveAsset.request);
+    // 200 for both outcomes, conflict included (same posture as propose).
+    return reply(c, routes.moveAsset.response, await service.moveAsset(actor(c), spaceId, input));
+  });
+
+  app.post('/v1/spaces/:spaceId/assets/delete', async (c) => {
+    const { spaceId } = parseWith(routes.deleteAsset.params, c.req.param());
+    const input = await body(c, routes.deleteAsset.request);
+    return reply(c, routes.deleteAsset.response, await service.deleteAsset(actor(c), spaceId, input));
+  });
+
+  app.post('/v1/spaces/:spaceId/assets/restore', async (c) => {
+    const { spaceId } = parseWith(routes.restoreAsset.params, c.req.param());
+    const input = await body(c, routes.restoreAsset.request);
+    return reply(c, routes.restoreAsset.response, await service.restoreAsset(actor(c), spaceId, input));
   });
 
   app.get('/v1/spaces/:spaceId/asset', async (c) => {

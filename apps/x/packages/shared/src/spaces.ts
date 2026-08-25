@@ -3,6 +3,9 @@ import type {
   AcceptInviteResult,
   BlobInfo,
   ChangeSet,
+  DeleteAssetResult,
+  MoveAssetResult,
+  RestoreAssetResult,
   ConflictRegion,
   CreateInviteResult,
   Member,
@@ -28,6 +31,9 @@ export type {
   AcceptInviteResult,
   BlobInfo,
   ChangeSet,
+  DeleteAssetResult,
+  MoveAssetResult,
+  RestoreAssetResult,
   ConflictRegion,
   CreateInviteResult,
   Member,
@@ -62,6 +68,8 @@ export interface SpacesAssetEntry {
   updatedAt: string;
   /** Present when the head version is binary (spec §6). */
   blob?: BlobInfo;
+  /** Present only on trash entries (listAssets includeDeleted); absent = live. */
+  state?: 'deleted';
 }
 
 export interface SpacesTopicWithMessages {

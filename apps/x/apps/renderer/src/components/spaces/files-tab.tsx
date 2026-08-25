@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Streamdown } from 'streamdown'
-import { ArrowLeft, Check, ChevronRight, Clock, Download, FileText, History, Image as ImageIcon, Loader2, Pencil, Plus, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronRight, Clock, Download, FileText, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { MemberText } from '@/components/spaces/member-text'
@@ -25,7 +28,9 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 // ---------------------------------------------------------------------------
 
 /** The space's file tree (README first, folders collapsible) — rendered inside the space rail. */
-export function FileTree({ entries, selectedPath, unreadPaths, onOpenFile, creating, onCreateFile, onCancelCreate }: {
+export function FileTree({ orgId, spaceId, entries, selectedPath, unreadPaths, onOpenFile, creating, onCreateFile, onCancelCreate }: {
+    orgId: string
+    spaceId: string
     entries: spaces.SpacesAssetEntry[]
     selectedPath: string | null
     /** Files with a change by someone else (or an agent) since the read mark. */
@@ -39,6 +44,25 @@ export function FileTree({ entries, selectedPath, unreadPaths, onOpenFile, creat
     const tree = useMemo(() => buildFileTree(entries), [entries])
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [newPath, setNewPath] = useState('')
+
+    // Row actions. Rename/move edits the FULL path inline (folders are key
+    // prefixes — typing a new prefix moves the file); the server's change
+    // event refreshes every pane. Delete asks for an optional reason.
+    const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
+    const [deleting, setDeleting] = useState<spaces.SpacesAssetEntry | null>(null)
+    const commitMove = async (entry: spaces.SpacesAssetEntry, toPath: string) => {
+        setRenaming(null)
+        if (!toPath || toPath === entry.path) return
+        try {
+            const res = await window.ipc.invoke('spaces:moveAsset', {
+                orgId, spaceId, fromPath: entry.path, toPath, baseVersion: entry.version,
+            })
+            if (res.outcome === 'conflict') toast(`${entry.path} changed meanwhile — try again`, 'error')
+            else toast(`Moved to ${toPath}`, 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not move', 'error')
+        }
+    }
 
     const toggle = (path: string) =>
         setCollapsed((prev) => {
@@ -70,30 +94,80 @@ export function FileTree({ entries, selectedPath, unreadPaths, onOpenFile, creat
         const active = node.path === selectedPath
         const unread = unreadPaths.has(node.path)
         const blob = node.entry?.blob
+        if (renaming?.path === node.path && node.entry) {
+            const entry = node.entry
+            return (
+                <div key={node.path} style={pad} className="py-0.5 pr-2">
+                    <input
+                        autoFocus
+                        value={renaming.value}
+                        onChange={(e) => setRenaming({ path: node.path, value: e.target.value })}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') void commitMove(entry, renaming.value.trim())
+                            if (e.key === 'Escape') setRenaming(null)
+                        }}
+                        onBlur={() => setRenaming(null)}
+                        placeholder="path/to/file.md"
+                        className="w-full rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 font-mono text-xs outline-none"
+                    />
+                </div>
+            )
+        }
         return (
-            <button
-                key={node.path}
-                type="button"
-                style={pad}
-                onClick={() => onOpenFile(node.path)}
-                title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
-                className={cn(
-                    'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
-                    active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+            <div key={node.path} className="group/filerow relative">
+                <button
+                    type="button"
+                    style={pad}
+                    onClick={() => onOpenFile(node.path)}
+                    title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
+                    className={cn(
+                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
+                        active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                    )}
+                >
+                    <span className="w-3 shrink-0" />
+                    {blob && (isImageMime(blob.mime)
+                        ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
+                        : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
+                    <span className="truncate flex-1">{node.name}</span>
+                    {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
+                </button>
+                {node.entry && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                type="button"
+                                aria-label="File actions"
+                                className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/filerow:inline-flex data-[state=open]:inline-flex"
+                            >
+                                <MoreHorizontal className="size-3.5" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setRenaming({ path: node.path, value: node.path })}>
+                                <Pencil className="size-3.5 mr-2" /> Rename / move
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => setDeleting(node.entry!)}>
+                                <Trash2 className="size-3.5 mr-2" /> Delete…
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 )}
-            >
-                <span className="w-3 shrink-0" />
-                {blob && (isImageMime(blob.mime)
-                    ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
-                    : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
-                <span className="truncate flex-1">{node.name}</span>
-                {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
-            </button>
+            </div>
         )
     }
 
     return (
         <div className="flex flex-col">
+            {deleting && (
+                <DeleteAssetDialog
+                    orgId={orgId}
+                    spaceId={spaceId}
+                    entry={deleting}
+                    onClose={() => setDeleting(null)}
+                />
+            )}
             {tree.map((node) => renderNode(node, 0))}
             {tree.length === 0 && !creating && <div className="px-2 py-1 text-xs text-muted-foreground">No files yet.</div>}
             {creating && (
@@ -134,7 +208,7 @@ interface DraftState {
     conflict: Extract<spaces.ProposeChangeResult, { outcome: 'conflict' }> | null
 }
 
-export function FileColumn({ org, space, path, memberNames, refreshTick, onChanged, crumb, onDismiss }: {
+export function FileColumn({ org, space, path, memberNames, refreshTick, onChanged, crumb, onDismiss, onRenamed, onDeleted, onRedirect }: {
     org: OrgWithSpaces
     space: spaces.Space
     path: string
@@ -145,6 +219,11 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     crumb?: { label: string; onBack: () => void } | null
     /** Split only: renders an × that closes the document and returns to Talk. */
     onDismiss?: (() => void) | null
+    /** The file moved (a rename here, or a followed redirect) — re-point the selection. */
+    onRenamed?: (path: string) => void
+    onDeleted?: () => void
+    /** An old link resolved to the file's current path (server redirect signal). */
+    onRedirect?: (path: string) => void
 }) {
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
@@ -156,12 +235,18 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     const load = useCallback(async () => {
         try {
             const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, path })
+            if (res.path !== path) {
+                // The server followed a redirect: this file lives elsewhere now.
+                onRedirect?.(res.path)
+                return
+            }
             setAsset(res)
             setMissing(false)
         } catch {
             setAsset(null)
             setMissing(true)
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [org.id, space.id, path])
 
     useEffect(() => {
@@ -313,6 +398,30 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
         }
     }
 
+    // Rename/move edits the full path inline where the filename sits.
+    const [editingPath, setEditingPath] = useState<string | null>(null)
+    const [deleteOpen, setDeleteOpen] = useState(false)
+    const commitMove = async () => {
+        const toPath = editingPath?.trim()
+        setEditingPath(null)
+        if (!asset || !toPath || toPath === path) return
+        try {
+            const res = await window.ipc.invoke('spaces:moveAsset', {
+                orgId: org.id, spaceId: space.id, fromPath: path, toPath, baseVersion: asset.version,
+            })
+            if (res.outcome === 'conflict') {
+                toast('The file changed meanwhile — it reloaded, try again', 'error')
+                await load()
+            } else {
+                toast(`Moved to ${toPath}`, 'success')
+                onChanged()
+                onRenamed?.(toPath)
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not move', 'error')
+        }
+    }
+
     if (missing && !draft) {
         return (
             <section className="flex-1 min-w-0 flex flex-col">
@@ -337,7 +446,22 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                         <ArrowLeft className="size-3 shrink-0" /> <span className="truncate">{crumb.label}</span>
                     </button>
                 )}
-                <code className="font-mono text-[11.5px] text-foreground/80 truncate" title={path}>{fileName}</code>
+                {editingPath !== null ? (
+                    <input
+                        autoFocus
+                        value={editingPath}
+                        onChange={(e) => setEditingPath(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') void commitMove()
+                            if (e.key === 'Escape') setEditingPath(null)
+                        }}
+                        onBlur={() => setEditingPath(null)}
+                        placeholder="path/to/file.md"
+                        className="w-72 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 font-mono text-[11.5px] outline-none"
+                    />
+                ) : (
+                    <code className="font-mono text-[11.5px] text-foreground/80 truncate" title={path}>{fileName}</code>
+                )}
                 {blob && <span className="shrink-0">· {blob.mime} · {formatBytes(blob.size)}</span>}
                 {!draft && last && (
                     <span className="truncate">
@@ -384,7 +508,35 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                         >
                             <History className="size-3" /> History
                         </button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button type="button" aria-label="File actions" className="hover:text-foreground flex items-center">
+                                    <MoreHorizontal className="size-3.5" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => setEditingPath(path)}>
+                                    <Pencil className="size-3.5 mr-2" /> Rename / move
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => setDeleteOpen(true)}>
+                                    <Trash2 className="size-3.5 mr-2" /> Delete…
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </>
+                )}
+                {deleteOpen && asset && (
+                    <DeleteAssetDialog
+                        orgId={org.id}
+                        spaceId={space.id}
+                        entry={{ path, version: asset.version, updatedAt: '' }}
+                        onClose={() => setDeleteOpen(false)}
+                        onDeleted={() => {
+                            onChanged()
+                            onDeleted?.()
+                        }}
+                    />
                 )}
                 {draft && (
                     <>
@@ -572,6 +724,11 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
                             <MemberAvatar id={cs.attribution.memberId} name={memberNames.get(cs.attribution.memberId) ?? cs.attribution.memberId} size="sm" />
                             <div className="text-xs font-medium truncate">{attributionLabel(cs.attribution, memberNames)}</div>
                         </div>
+                        {cs.op && (
+                            <div className="mt-1 pl-7 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground">
+                                {cs.op === 'move' ? `moved from ${cs.movedFrom ?? '…'}` : cs.op === 'delete' ? 'deleted' : 'restored'}
+                            </div>
+                        )}
                         {cs.reason && <div className="text-xs text-muted-foreground mt-1 pl-7">&ldquo;<MemberText text={cs.reason} />&rdquo;</div>}
                         <div className="text-[10.5px] text-muted-foreground mt-1 pl-7 flex items-center gap-1">
                             <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
@@ -581,6 +738,144 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
                 {changeSets.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No history yet.</div>}
             </div>
         </aside>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Delete → trash. Nothing is destroyed: the file freezes with its history and
+// shows up in Trash, restorable while its path stays free.
+// ---------------------------------------------------------------------------
+
+export function DeleteAssetDialog({ orgId, spaceId, entry, onClose, onDeleted }: {
+    orgId: string
+    spaceId: string
+    entry: spaces.SpacesAssetEntry
+    onClose: () => void
+    onDeleted?: () => void
+}) {
+    const [reason, setReason] = useState('')
+    const [busy, setBusy] = useState(false)
+    const confirm = async () => {
+        setBusy(true)
+        try {
+            const res = await window.ipc.invoke('spaces:deleteAsset', {
+                orgId, spaceId, path: entry.path, baseVersion: entry.version,
+                ...(reason.trim() ? { reason: reason.trim() } : {}),
+            })
+            if (res.outcome === 'conflict') {
+                toast(`${entry.path} changed meanwhile — review and try again`, 'error')
+            } else {
+                toast(`Moved to Trash — restorable any time`, 'success')
+                onDeleted?.()
+            }
+            onClose()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not delete', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+    return (
+        <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+            <DialogContent className="max-w-sm">
+                <DialogHeader>
+                    <DialogTitle className="text-sm">Delete <code className="font-mono text-[12px]">{entry.path}</code>?</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                        It moves to Trash — history stays, and anyone can restore it. The feed will show who deleted it and why.
+                    </p>
+                    <Input
+                        value={reason}
+                        placeholder="Why? (optional — shows in the feed and history)"
+                        className="h-7 text-xs"
+                        disabled={busy}
+                        onChange={(e) => setReason(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void confirm() }}
+                    />
+                    <div className="flex justify-end gap-2">
+                        <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={busy} onClick={onClose}>Cancel</Button>
+                        <Button variant="destructive" size="sm" className="h-7 text-xs" disabled={busy} onClick={() => void confirm()}>
+                            {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Trash2 className="size-3 mr-1" />} Delete
+                        </Button>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Trash — deleted files, restorable in place while their path is free.
+// ---------------------------------------------------------------------------
+
+export function TrashDialog({ org, space, onClose }: {
+    org: OrgWithSpaces
+    space: spaces.Space
+    onClose: () => void
+}) {
+    const [entries, setEntries] = useState<spaces.SpacesAssetEntry[] | null>(null)
+    const [restoring, setRestoring] = useState<string | null>(null)
+
+    const load = useCallback(async () => {
+        try {
+            const res = await window.ipc.invoke('spaces:listAssets', { orgId: org.id, spaceId: space.id, includeDeleted: true })
+            setEntries(res.entries.filter((e) => e.state === 'deleted'))
+        } catch {
+            setEntries([])
+        }
+    }, [org.id, space.id])
+
+    useEffect(() => {
+        void load()
+    }, [load])
+
+    const restore = async (path: string) => {
+        setRestoring(path)
+        try {
+            await window.ipc.invoke('spaces:restoreAsset', { orgId: org.id, spaceId: space.id, path })
+            toast(`Restored ${path}`, 'success')
+            await load()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not restore', 'error')
+        } finally {
+            setRestoring(null)
+        }
+    }
+
+    return (
+        <Dialog open onOpenChange={(open) => !open && onClose()}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle className="text-sm flex items-center gap-1.5"><Trash2 className="size-3.5" /> Trash</DialogTitle>
+                </DialogHeader>
+                <div className="max-h-72 space-y-1 overflow-y-auto">
+                    {entries === null && <div className="py-2 text-xs text-muted-foreground">Loading…</div>}
+                    {entries?.length === 0 && <div className="py-2 text-xs text-muted-foreground">Nothing here — deleted files land in this list, restorable any time.</div>}
+                    {entries?.map((e) => (
+                        <div key={e.path} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs">
+                            {e.blob && isImageMime(e.blob.mime)
+                                ? <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                                : <FileText className="size-3.5 shrink-0 text-muted-foreground" />}
+                            <span className="min-w-0 flex-1">
+                                <span className="block truncate font-mono">{e.path}</span>
+                                <span className="block text-[10.5px] text-muted-foreground">deleted {formatFeedTime(e.updatedAt)}{e.blob ? ` · ${formatBytes(e.blob.size)}` : ''}</span>
+                            </span>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 shrink-0 text-xs"
+                                disabled={restoring !== null}
+                                onClick={() => void restore(e.path)}
+                            >
+                                {restoring === e.path ? <Loader2 className="size-3 mr-1 animate-spin" /> : <RotateCcw className="size-3 mr-1" />}
+                                Restore
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+            </DialogContent>
+        </Dialog>
     )
 }
 

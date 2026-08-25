@@ -18,10 +18,18 @@ import type {
 // withSpaceLock(spaceId). In memory that is a per-space async mutex; in
 // Postgres it becomes a transaction with the space row locked.
 
-export interface AssetHead {
+/**
+ * An asset as stored — the inode model (migration 007): `id` is the storage
+ * identity (version rows and change-sets key on it, forever), `path` is the
+ * product identity and a mutable property, unique among the living. Nothing
+ * relocates on move/delete/restore; only these fields change.
+ */
+export interface AssetRecord {
+  id: string;
   path: string;
   version: number;
   updatedAt: string;
+  state: 'live' | 'deleted';
   /** Present when the head version is binary. */
   blob?: BlobInfo;
 }
@@ -97,24 +105,39 @@ export interface Store {
   putMembership(membership: Membership): Promise<void>;
   deleteMembership(spaceId: string, memberId: string): Promise<void>;
 
-  // assets — every version's data is kept; version 0 reads as { content: '', blob: null }
-  listAssets(spaceId: string): Promise<AssetHead[]>;
-  getAssetHead(spaceId: string, path: string): Promise<AssetHead | undefined>;
-  getAssetVersion(spaceId: string, path: string, version: number): Promise<AssetVersionData | undefined>;
-  putAssetVersion(spaceId: string, path: string, version: number, data: AssetVersionData, updatedAt: string): Promise<void>;
+  // assets — id-keyed (inode model); every version's data is kept; version 0
+  // reads as { content: '', blob: null }
+  listAssets(spaceId: string, includeDeleted: boolean): Promise<AssetRecord[]>;
+  getLiveAssetByPath(spaceId: string, path: string): Promise<AssetRecord | undefined>;
+  /** Most recently deleted asset whose path is `path` (the trash entry restore targets). */
+  getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined>;
+  getAssetById(spaceId: string, assetId: string): Promise<AssetRecord | undefined>;
+  /** Insert the assets row (its first version arrives via putAssetVersion). */
+  createAsset(spaceId: string, record: AssetRecord): Promise<void>;
+  getAssetVersion(spaceId: string, assetId: string, version: number): Promise<AssetVersionData | undefined>;
+  /** Writes the version row and bumps the head (version, updatedAt, head blob). */
+  putAssetVersion(spaceId: string, assetId: string, version: number, data: AssetVersionData, updatedAt: string): Promise<void>;
+  setAssetPath(spaceId: string, assetId: string, path: string, updatedAt: string): Promise<void>;
+  setAssetState(spaceId: string, assetId: string, state: 'live' | 'deleted', updatedAt: string): Promise<void>;
+
+  // redirects — old paths forwarding to their asset (hot only while the asset is live)
+  putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void>;
+  getRedirect(spaceId: string, path: string): Promise<string | undefined>;
+  deleteRedirect(spaceId: string, path: string): Promise<void>;
 
   // uploaded blobs (space-scoped registry; bytes live in the BlobStore)
   /** First write wins — re-uploading the same bytes never changes the recorded mime/uploader. */
   putSpaceBlob(blob: StoredSpaceBlob): Promise<void>;
   getSpaceBlob(spaceId: string, hash: string): Promise<StoredSpaceBlob | undefined>;
 
-  // change log (append-only)
-  appendChangeSet(changeSet: ChangeSet): Promise<void>;
+  // change log (append-only). assetId is the internal lineage key — never on
+  // the wire; it makes per-file history a filter instead of a chain walk.
+  appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void>;
   getChangeSet(spaceId: string, id: string): Promise<ChangeSet | undefined>;
-  /** Newest first. `path` filters to one asset; `beforeOffset` pages backwards. */
+  /** Newest first. `assetId` filters to one file's lineage; `beforeOffset` pages backwards. */
   listChangeSets(
     spaceId: string,
-    opts: { path?: string; beforeOffset?: number; limit: number },
+    opts: { assetId?: string; beforeOffset?: number; limit: number },
   ): Promise<ChangeSet[]>;
 
   // topics & messages

@@ -11,15 +11,18 @@ import {
   type ChangeSet,
   type ConflictRegion,
   type CreateInviteResult,
+  type DeleteAssetResult,
   type Member,
   type Membership,
   type Message,
+  type MoveAssetResult,
   type PresenceState,
   type ProposeChange,
   type ProposeChangeResult,
   type ReactionGroup,
   type ReadAssetResult,
   type ResolveInviteResult,
+  type RestoreAssetResult,
   type Routes,
   type Space,
   type SpaceEvent,
@@ -31,7 +34,7 @@ import { HarborError } from './errors.js';
 import { SpaceHub } from './hub.js';
 import { merge3 } from './merge.js';
 import { dispositionFor, resolveMime } from './mime.js';
-import type { AssetVersionData, Store, StoredEvent, StoredReaction } from './store.js';
+import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredReaction } from './store.js';
 
 // The one service core (spec §9: one core, two faces). REST (http.ts) and MCP
 // (mcp.ts) are thin projections over this class; neither has a privileged path.
@@ -268,32 +271,235 @@ export class HarborService {
   }
 
   // --- assets ----------------------------------------------------------------
+  // The inode model (migration 007): paths are the product identity, the
+  // internal asset id is the storage identity. Reads resolve path → asset
+  // (following redirects left by moves); history is a lineage filter, never
+  // a chain walk; move/delete/restore are property updates that append one
+  // op change-set each. Only content edits bump versions.
 
-  async listAssets(ctx: ActorCtx, spaceId: string) {
+  async listAssets(ctx: ActorCtx, spaceId: string, includeDeleted = false) {
     await this.requireMember(ctx, spaceId);
-    return this.store.listAssets(spaceId);
+    const records = await this.store.listAssets(spaceId, includeDeleted);
+    return records.map((a) => ({
+      path: a.path,
+      version: a.version,
+      updatedAt: a.updatedAt,
+      ...(a.blob ? { blob: a.blob } : {}),
+      ...(a.state === 'deleted' ? { state: 'deleted' as const } : {}),
+    }));
   }
 
-  private async recentHistory(spaceId: string, path: string, upToVersion?: number): Promise<ChangeSet[]> {
-    const all = await this.store.listChangeSets(spaceId, { path, limit: 1_000 });
+  /** Live asset at `path`, or the live target of a redirect there (moved files keep answering to old links). */
+  private async resolveAsset(spaceId: string, path: string): Promise<{ asset: AssetRecord; redirected: boolean } | undefined> {
+    const live = await this.store.getLiveAssetByPath(spaceId, path);
+    if (live) return { asset: live, redirected: false };
+    const redirectId = await this.store.getRedirect(spaceId, path);
+    if (redirectId) {
+      const target = await this.store.getAssetById(spaceId, redirectId);
+      if (target && target.state === 'live') return { asset: target, redirected: true };
+    }
+    return undefined;
+  }
+
+  private async recentHistory(spaceId: string, assetId: string, upToVersion?: number): Promise<ChangeSet[]> {
+    const all = await this.store.listChangeSets(spaceId, { assetId, limit: 1_000 });
     const filtered = upToVersion === undefined ? all : all.filter((cs) => cs.resultVersion <= upToVersion);
     return filtered.slice(0, RECENT_HISTORY);
   }
 
   async readAsset(ctx: ActorCtx, spaceId: string, path: string, version?: number): Promise<ReadAssetResult> {
     await this.requireMember(ctx, spaceId);
-    const head = await this.store.getAssetHead(spaceId, path);
-    if (!head) throw new HarborError('not_found', 'no such asset');
-    const v = version ?? head.version;
-    const data = await this.store.getAssetVersion(spaceId, path, v);
+    const resolved = await this.resolveAsset(spaceId, path);
+    if (!resolved) {
+      const dead = await this.store.getLatestDeletedByPath(spaceId, path);
+      if (dead) throw new HarborError('not_found', `${path} was deleted — it can be restored from Trash`);
+      throw new HarborError('not_found', 'no such asset');
+    }
+    const { asset } = resolved;
+    const v = version ?? asset.version;
+    const data = await this.store.getAssetVersion(spaceId, asset.id, v);
     if (data === undefined) throw new HarborError('not_found', `no version ${v} of ${path}`);
     return {
-      path,
+      // The asset's CURRENT path — differing from the requested path is the
+      // redirect signal (the client re-points its selection).
+      path: asset.path,
       content: data.content ?? '',
       ...(data.blob ? { blob: data.blob } : {}),
       version: v,
-      recentHistory: await this.recentHistory(spaceId, path, v),
+      recentHistory: await this.recentHistory(spaceId, asset.id, v),
     };
+  }
+
+  /** Stale-base retry bundle for namespace ops — the propose conflict, minus merge regions. */
+  private async staleAsset(spaceId: string, asset: AssetRecord) {
+    const data = await this.store.getAssetVersion(spaceId, asset.id, asset.version);
+    return {
+      outcome: 'conflict' as const,
+      currentVersion: asset.version,
+      currentContent: data?.content ?? '',
+      ...(data?.blob ? { currentBlob: data.blob } : {}),
+      recentHistory: await this.recentHistory(spaceId, asset.id),
+    };
+  }
+
+  async moveAsset(
+    ctx: ActorCtx,
+    spaceId: string,
+    input: z.infer<Routes['moveAsset']['request']>,
+  ): Promise<MoveAssetResult> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    if (input.topicId && !(await this.store.getTopic(spaceId, input.topicId))) {
+      throw new HarborError('invalid_request', 'topicId does not exist in this space');
+    }
+    const attribution: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+    return this.store.withSpaceLock(spaceId, async () => {
+      if (input.toPath === input.fromPath) {
+        throw new HarborError('invalid_request', 'destination is the same path');
+      }
+      const from = await this.store.getLiveAssetByPath(spaceId, input.fromPath);
+      if (!from) {
+        const resolved = await this.resolveAsset(spaceId, input.fromPath);
+        if (resolved) throw new HarborError('invalid_request', `this file already moved to ${resolved.asset.path}`);
+        throw new HarborError('not_found', 'no such asset');
+      }
+      if (input.baseVersion > from.version) {
+        throw new HarborError('invalid_request', `baseVersion ${input.baseVersion} is ahead of the asset (v${from.version})`);
+      }
+      if (input.baseVersion !== from.version) return this.staleAsset(spaceId, from);
+      if (await this.store.getLiveAssetByPath(spaceId, input.toPath)) {
+        throw new HarborError('invalid_request', 'a file already exists at the destination — moves never overwrite, pick another name');
+      }
+      const at = this.now();
+      await this.store.setAssetPath(spaceId, from.id, input.toPath, at);
+      // The old path forwards to the file; anything previously forwarding
+      // from the destination is shadowed by the new occupant.
+      await this.store.putRedirect(spaceId, input.fromPath, from.id, at);
+      await this.store.deleteRedirect(spaceId, input.toPath);
+      const changeSet = await this.appendOpChangeSet(spaceId, from.id, {
+        assetPath: input.toPath,
+        version: from.version,
+        attribution,
+        op: 'move',
+        movedFrom: input.fromPath,
+        reason: input.reason,
+        topicId: input.topicId,
+        at,
+      });
+      return { outcome: 'moved' as const, changeSet, version: from.version };
+    });
+  }
+
+  async deleteAsset(
+    ctx: ActorCtx,
+    spaceId: string,
+    input: z.infer<Routes['deleteAsset']['request']>,
+  ): Promise<DeleteAssetResult> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    if (input.topicId && !(await this.store.getTopic(spaceId, input.topicId))) {
+      throw new HarborError('invalid_request', 'topicId does not exist in this space');
+    }
+    const attribution: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+    return this.store.withSpaceLock(spaceId, async () => {
+      const asset = await this.store.getLiveAssetByPath(spaceId, input.path);
+      if (!asset) throw new HarborError('not_found', 'no such asset');
+      if (input.baseVersion > asset.version) {
+        throw new HarborError('invalid_request', `baseVersion ${input.baseVersion} is ahead of the asset (v${asset.version})`);
+      }
+      if (input.baseVersion !== asset.version) return this.staleAsset(spaceId, asset);
+      const at = this.now();
+      // Freeze in place: rows keep their keys, the path frees (live-unique
+      // index only binds the living). Restore is the inverse flip.
+      await this.store.setAssetState(spaceId, asset.id, 'deleted', at);
+      const changeSet = await this.appendOpChangeSet(spaceId, asset.id, {
+        assetPath: input.path,
+        version: asset.version,
+        attribution,
+        op: 'delete',
+        reason: input.reason,
+        topicId: input.topicId,
+        at,
+      });
+      return { outcome: 'deleted' as const, changeSet };
+    });
+  }
+
+  async restoreAsset(
+    ctx: ActorCtx,
+    spaceId: string,
+    input: z.infer<Routes['restoreAsset']['request']>,
+  ): Promise<RestoreAssetResult> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    const attribution: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+    return this.store.withSpaceLock(spaceId, async () => {
+      const dead = await this.store.getLatestDeletedByPath(spaceId, input.path);
+      if (!dead) throw new HarborError('not_found', 'nothing deleted at this path');
+      if (await this.store.getLiveAssetByPath(spaceId, input.path)) {
+        throw new HarborError('invalid_request', 'a file now exists at this path — move it first, then restore');
+      }
+      const at = this.now();
+      await this.store.deleteRedirect(spaceId, input.path);
+      await this.store.setAssetState(spaceId, dead.id, 'live', at);
+      const changeSet = await this.appendOpChangeSet(spaceId, dead.id, {
+        assetPath: input.path,
+        version: dead.version,
+        attribution,
+        op: 'restore',
+        reason: input.reason,
+        at,
+      });
+      return { outcome: 'restored' as const, changeSet, version: dead.version };
+    });
+  }
+
+  /** Inside the space lock only: one op change-set (no version bump) + its event, as one fact. */
+  private async appendOpChangeSet(
+    spaceId: string,
+    assetId: string,
+    input: {
+      assetPath: string;
+      version: number;
+      attribution: Attribution;
+      op: 'move' | 'delete' | 'restore';
+      movedFrom?: string;
+      reason?: string;
+      topicId?: string;
+      at: string;
+    },
+  ): Promise<ChangeSet> {
+    const offset = (await this.store.head(spaceId)) + 1;
+    const topicId = input.topicId ?? topicIdFromReason(input.reason);
+    const changeSet: ChangeSet = {
+      id: this.ulid(),
+      spaceId,
+      assetPath: input.assetPath,
+      baseVersion: input.version,
+      resultVersion: input.version,
+      attribution: input.attribution,
+      ...(input.reason ? { reason: input.reason } : {}),
+      ...(topicId ? { topicId } : {}),
+      op: input.op,
+      ...(input.movedFrom ? { movedFrom: input.movedFrom } : {}),
+      committedAt: input.at,
+      offset,
+    };
+    await this.store.appendChangeSet(changeSet, assetId);
+    await this.append(spaceId, offset, input.at, { type: 'change', changeSet });
+    return changeSet;
   }
 
   // --- uploaded blobs --------------------------------------------------------
@@ -397,23 +603,35 @@ export class HarborService {
     };
 
     return this.store.withSpaceLock(spaceId, async () => {
-      const head = await this.store.getAssetHead(spaceId, input.assetPath);
+      const asset = await this.store.getLiveAssetByPath(spaceId, input.assetPath);
 
-      if (!head) {
+      if (!asset) {
         if (input.baseVersion !== 0) {
+          // A stale propose at a moved-away path gets told where the file went
+          // instead of a bare 404 (the version it declares is meaningless here).
+          const resolved = await this.resolveAsset(spaceId, input.assetPath);
+          if (resolved) {
+            throw new HarborError('invalid_request', `this file moved to ${resolved.asset.path} — propose there`);
+          }
           throw new HarborError('not_found', 'asset does not exist; propose with baseVersion 0 to create it');
         }
-        const changeSet = await this.commit(spaceId, input, attribution, 1, proposal);
+        // Create. A redirect at this path is shadowed by the new occupant
+        // (vacant-lot rule); a deleted asset here never blocks — it keeps its
+        // own record and the newcomer starts a fresh lineage.
+        await this.store.deleteRedirect(spaceId, input.assetPath);
+        const id = this.ulid();
+        await this.store.createAsset(spaceId, { id, path: input.assetPath, version: 1, updatedAt: this.now(), state: 'live' });
+        const changeSet = await this.commit(spaceId, id, input, attribution, 1, proposal);
         return { outcome: 'applied' as const, changeSet, version: 1 };
       }
 
-      if (input.baseVersion > head.version) {
-        throw new HarborError('invalid_request', `baseVersion ${input.baseVersion} is ahead of the asset (v${head.version})`);
+      if (input.baseVersion > asset.version) {
+        throw new HarborError('invalid_request', `baseVersion ${input.baseVersion} is ahead of the asset (v${asset.version})`);
       }
 
-      if (input.baseVersion === head.version) {
-        const version = head.version + 1;
-        const changeSet = await this.commit(spaceId, input, attribution, version, proposal);
+      if (input.baseVersion === asset.version) {
+        const version = asset.version + 1;
+        const changeSet = await this.commit(spaceId, asset.id, input, attribution, version, proposal);
         return { outcome: 'applied' as const, changeSet, version };
       }
 
@@ -421,19 +639,19 @@ export class HarborService {
       // proposal, base, and current are ALL text. Binary staleness never
       // merges (spec §6): there is nothing to three-way in a JPEG, so any
       // binary side surfaces as conflict-or-replace with empty regions.
-      const base = await this.store.getAssetVersion(spaceId, input.assetPath, input.baseVersion);
-      const current = await this.store.getAssetVersion(spaceId, input.assetPath, head.version);
+      const base = await this.store.getAssetVersion(spaceId, asset.id, input.baseVersion);
+      const current = await this.store.getAssetVersion(spaceId, asset.id, asset.version);
       if (base === undefined || current === undefined) {
         throw new HarborError('internal', 'asset version content missing');
       }
 
       const conflictOf = async (regions: ConflictRegion[]) => ({
         outcome: 'conflict' as const,
-        currentVersion: head.version,
+        currentVersion: asset.version,
         currentContent: current.content ?? '',
         ...(current.blob ? { currentBlob: current.blob } : {}),
         regions,
-        recentHistory: await this.recentHistory(spaceId, input.assetPath),
+        recentHistory: await this.recentHistory(spaceId, asset.id),
       });
 
       if (proposal.blob !== null || base.blob !== null || current.blob !== null) {
@@ -450,8 +668,8 @@ export class HarborService {
       // Clean merge — stored even when it lands identical content, so the
       // second standup-pusher's change-set exists, attributed, in history
       // (principle 4; fixture 06's product beat).
-      const version = head.version + 1;
-      const changeSet = await this.commit(spaceId, input, attribution, version, {
+      const version = asset.version + 1;
+      const changeSet = await this.commit(spaceId, asset.id, input, attribution, version, {
         content: result.content,
         blob: null,
       });
@@ -462,6 +680,7 @@ export class HarborService {
   /** Inside the space lock only: writes the version, the change-set, and the event as one fact. */
   private async commit(
     spaceId: string,
+    assetId: string,
     input: ProposeChange,
     attribution: Attribution,
     version: number,
@@ -486,8 +705,8 @@ export class HarborService {
       committedAt: at,
       offset,
     };
-    await this.store.putAssetVersion(spaceId, input.assetPath, version, data, at);
-    await this.store.appendChangeSet(changeSet);
+    await this.store.putAssetVersion(spaceId, assetId, version, data, at);
+    await this.store.appendChangeSet(changeSet, assetId);
     await this.append(spaceId, offset, at, { type: 'change', changeSet });
     return changeSet;
   }
@@ -498,8 +717,18 @@ export class HarborService {
     opts: { path?: string; beforeOffset?: number; limit?: number },
   ): Promise<ChangeSet[]> {
     await this.requireMember(ctx, spaceId);
+    // A path filter means "this file's lineage": resolve to the asset (live,
+    // redirected, or most recently deleted here) and filter by its id — the
+    // record stays queryable across moves and after deletion.
+    let assetId: string | undefined;
+    if (opts.path !== undefined) {
+      const resolved = await this.resolveAsset(spaceId, opts.path);
+      const asset = resolved?.asset ?? (await this.store.getLatestDeletedByPath(spaceId, opts.path));
+      if (!asset) return [];
+      assetId = asset.id;
+    }
     return this.store.listChangeSets(spaceId, {
-      ...(opts.path !== undefined ? { path: opts.path } : {}),
+      ...(assetId !== undefined ? { assetId } : {}),
       ...(opts.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
       limit: opts.limit ?? 50,
     });
@@ -507,10 +736,11 @@ export class HarborService {
 
   async diff(ctx: ActorCtx, spaceId: string, path: string, from: number, to: number): Promise<string> {
     await this.requireMember(ctx, spaceId);
-    const head = await this.store.getAssetHead(spaceId, path);
-    if (!head) throw new HarborError('not_found', 'no such asset');
-    const fromData = await this.store.getAssetVersion(spaceId, path, from);
-    const toData = await this.store.getAssetVersion(spaceId, path, to);
+    const resolved = await this.resolveAsset(spaceId, path);
+    const asset = resolved?.asset ?? (await this.store.getLatestDeletedByPath(spaceId, path));
+    if (!asset) throw new HarborError('not_found', 'no such asset');
+    const fromData = await this.store.getAssetVersion(spaceId, asset.id, from);
+    const toData = await this.store.getAssetVersion(spaceId, asset.id, to);
     if (fromData === undefined || toData === undefined) {
       throw new HarborError('not_found', 'no such version');
     }
