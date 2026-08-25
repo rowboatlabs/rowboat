@@ -337,3 +337,4 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
         </Dialog>
     )
 }
+

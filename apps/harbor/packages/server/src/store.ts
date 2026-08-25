@@ -50,6 +50,9 @@ export interface StoredSpaceBlob {
   hash: string;
   size: number;
   mime: string;
+  /** Pixel dimensions for sniffed images (BlobInfo doc) — display hint, may be absent. */
+  width?: number;
+  height?: number;
   uploadedBy: string;
   uploadedAt: string;
 }

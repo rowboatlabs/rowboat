@@ -149,16 +149,42 @@ export interface SpaceRefs {
     spaceId: string
 }
 
-/** The canonical wire link for a blob — what goes INTO a message body. */
-export function blobWireUrl(refs: SpaceRefs, hash: string, name?: string): string {
-    const q = name ? `?name=${encodeURIComponent(name)}` : ''
-    return `https://${refs.orgAddress}/s/${refs.spaceId}/b/${hash}${q}`
+/**
+ * The canonical wire link for a blob — what goes INTO a message body.
+ * `name` and `w`/`h` are display-only hints (the filename, and the pixel
+ * dimensions from BlobInfo so renderers reserve the exact box before the
+ * image loads) — storage is content-addressed and ignores them.
+ */
+export function blobWireUrl(refs: SpaceRefs, hash: string, name?: string, dims?: { width: number; height: number }): string {
+    // Hand-built query: names keep the established %20 form (URLSearchParams
+    // would switch to '+', silently changing the wire bytes of blob links).
+    const parts: string[] = []
+    if (name) parts.push(`name=${encodeURIComponent(name)}`)
+    if (dims) parts.push(`w=${dims.width}`, `h=${dims.height}`)
+    const qs = parts.length > 0 ? `?${parts.join('&')}` : ''
+    return `https://${refs.orgAddress}/s/${refs.spaceId}/b/${hash}${qs}`
 }
 
 /** The renderable form — app://space-blob/… served by main's protocol handler. */
-export function blobAppUrl(refs: { orgId: string; spaceId: string }, hash: string, opts?: { thumb?: number }): string {
-    const q = opts?.thumb ? `?thumb=${opts.thumb}` : ''
-    return `app://space-blob/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${hash}${q}`
+export function blobAppUrl(refs: { orgId: string; spaceId: string }, hash: string, opts?: { thumb?: number; width?: number; height?: number }): string {
+    const parts: string[] = []
+    if (opts?.thumb) parts.push(`thumb=${opts.thumb}`)
+    if (opts?.width && opts?.height) parts.push(`w=${opts.width}`, `h=${opts.height}`)
+    const qs = parts.length > 0 ? `?${parts.join('&')}` : ''
+    return `app://space-blob/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${hash}${qs}`
+}
+
+/** The w/h display hints off a blob URL (wire or app form) — null unless both parse positive. */
+export function imageDimsFromUrl(url: string): { width: number; height: number } | null {
+    try {
+        const u = new URL(url)
+        const width = Number(u.searchParams.get('w'))
+        const height = Number(u.searchParams.get('h'))
+        if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return null
+        return { width, height }
+    } catch {
+        return null
+    }
 }
 
 const BLOB_APP_URL_RE = /^app:\/\/space-blob\/([^/]+)\/([^/]+)\/([0-9a-f]{64})/

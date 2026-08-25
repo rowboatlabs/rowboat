@@ -7,6 +7,7 @@ import { toast } from '@/lib/toast'
 import { useMemberNames } from '@/components/spaces/member-text'
 import {
     decorateMentions,
+    imageDimsFromUrl,
     parseAssetWireUrl,
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
@@ -117,10 +118,21 @@ function ImageLightbox({ src, alt, open, onOpenChange, children }: {
 }
 
 /** An uploaded image in a message: inline preview, click to view, download from the viewer. */
-function BlobImage({ src, alt }: { src: string; alt: string }) {
+/** Chat/file blob images cap at max-h-80 (320px) — the reserved box matches. */
+const IMAGE_MAX_H = 320
+
+export function BlobImage({ src, alt }: { src: string; alt: string }) {
     const [open, setOpen] = useState(false)
     const [saving, setSaving] = useState(false)
+    const [loaded, setLoaded] = useState(false)
     const parsed = parseBlobAppUrl(src)
+    // BlobInfo dimensions ride the link as display-only ?w=&h= — reserve the
+    // image's exact final box (shimmering until the bytes arrive), so a
+    // loading image never shifts the stream. Without them: plain img.
+    const dims = imageDimsFromUrl(src)
+    const style = dims
+        ? { width: Math.round(Math.min(dims.width, (IMAGE_MAX_H * dims.width) / dims.height)), aspectRatio: `${dims.width} / ${dims.height}` }
+        : undefined
     const save = async () => {
         if (saving || !parsed) return
         setSaving(true)
@@ -152,7 +164,13 @@ function BlobImage({ src, alt }: { src: string; alt: string }) {
                 alt={alt}
                 loading="lazy"
                 onClick={() => setOpen(true)}
-                className="my-1 block max-h-80 max-w-full cursor-zoom-in rounded-lg border border-border object-contain"
+                onLoad={() => setLoaded(true)}
+                style={style}
+                className={cn(
+                    'my-1 block max-h-80 max-w-full cursor-zoom-in rounded-lg border border-border object-contain',
+                    dims && 'bg-muted',
+                    dims && !loaded && 'animate-pulse',
+                )}
             />
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
                 {parsed && (

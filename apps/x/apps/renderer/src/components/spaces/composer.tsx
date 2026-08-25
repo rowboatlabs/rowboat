@@ -31,6 +31,9 @@ interface AttachmentState {
     size: number
     status: 'uploading' | 'done' | 'error'
     hash?: string
+    /** Pixel dimensions from the org's upload sniff (images) — ride the wire link as ?w=&h=. */
+    width?: number
+    height?: number
     error?: string
 }
 
@@ -112,7 +115,16 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                         ...(file.type ? { mime: file.type } : {}),
                     })
                     setAttachments((prev) =>
-                        prev.map((a) => (a.id === id ? { ...a, status: 'done', hash: res.blob.hash, mime: res.blob.mime, size: res.blob.size } : a)),
+                        prev.map((a) => (a.id === id
+                            ? {
+                                  ...a,
+                                  status: 'done',
+                                  hash: res.blob.hash,
+                                  mime: res.blob.mime,
+                                  size: res.blob.size,
+                                  ...(res.blob.width && res.blob.height ? { width: res.blob.width, height: res.blob.height } : {}),
+                              }
+                            : a)),
                     )
                 } catch (err) {
                     const message = err instanceof Error ? err.message : 'upload failed'
@@ -300,13 +312,15 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
         const text = encodeMentions(draft.trim(), members)
         // Each attachment lands on the wire as a canonical blob link: images as
         // markdown images (renderers show them inline), the rest as plain links
-        // (rendered as download cards). ?name= keeps the display filename.
+        // (rendered as download cards). ?name= keeps the display filename;
+        // images add ?w=&h= so renderers reserve the exact box before loading.
         const attachmentLines = refs
-            ? ready.map((a) =>
-                  isImageMime(a.mime)
-                      ? `![${a.name}](${blobWireUrl(refs, a.hash!, a.name)})`
-                      : `[${a.name}](${blobWireUrl(refs, a.hash!, a.name)})`,
-              )
+            ? ready.map((a) => {
+                  const dims = a.width && a.height ? { width: a.width, height: a.height } : undefined
+                  return isImageMime(a.mime)
+                      ? `![${a.name}](${blobWireUrl(refs, a.hash!, a.name, dims)})`
+                      : `[${a.name}](${blobWireUrl(refs, a.hash!, a.name)})`
+              })
             : []
         const body = [text, ...attachmentLines].filter(Boolean).join('\n')
         if (!body) return

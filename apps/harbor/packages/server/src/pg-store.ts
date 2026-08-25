@@ -412,9 +412,9 @@ export class PgStore implements Store {
   async putSpaceBlob(blob: StoredSpaceBlob): Promise<void> {
     // do nothing on conflict: first write wins (mime/uploader stay stable).
     await this.sql.query(
-      `insert into space_blobs (space_id, hash, size, mime, uploaded_by, uploaded_at)
-       values ($1, $2, $3, $4, $5, $6) on conflict (space_id, hash) do nothing`,
-      [blob.spaceId, blob.hash, blob.size, blob.mime, blob.uploadedBy, blob.uploadedAt],
+      `insert into space_blobs (space_id, hash, size, mime, width, height, uploaded_by, uploaded_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict (space_id, hash) do nothing`,
+      [blob.spaceId, blob.hash, blob.size, blob.mime, blob.width ?? null, blob.height ?? null, blob.uploadedBy, blob.uploadedAt],
     );
   }
 
@@ -424,6 +424,8 @@ export class PgStore implements Store {
       hash: string;
       size: number | string;
       mime: string;
+      width: number | null;
+      height: number | null;
       uploaded_by: string;
       uploaded_at: string;
     }>('select * from space_blobs where space_id = $1 and hash = $2', [spaceId, hash]);
@@ -435,6 +437,7 @@ export class PgStore implements Store {
       // bigint arrives as string under node-postgres, number under PGlite.
       size: Number(r.size),
       mime: r.mime,
+      ...(r.width !== null && r.height !== null ? { width: Number(r.width), height: Number(r.height) } : {}),
       uploadedBy: r.uploaded_by,
       uploadedAt: r.uploaded_at,
     };

@@ -8,6 +8,7 @@ import {
     encodeMentions,
     encodeSpaceLinkTarget,
     formatBytes,
+    imageDimsFromUrl,
     formatFeedTime,
     initials,
     isUnreadChange,
@@ -256,6 +257,23 @@ describe('blob links', () => {
         expect(rewritten).toContain(`![shot](app://space-blob/org-1/${SPACE}/${HASH})`)
         // The ?name= query survives the rewrite (it trails the matched prefix).
         expect(rewritten).toContain(`[doc](app://space-blob/org-1/${SPACE}/${HASH}?name=design%20doc.pdf)`)
+    })
+
+    it('carries image dimensions as display-only ?w=&h= and parses them back', () => {
+        const wire = blobWireUrl(refs, HASH, 'shot.png', { width: 1920, height: 1080 })
+        expect(wire).toContain('?name=shot.png&w=1920&h=1080')
+        expect(imageDimsFromUrl(wire)).toEqual({ width: 1920, height: 1080 })
+        const app = blobAppUrl({ orgId: 'org-1', spaceId: SPACE }, HASH, { width: 640, height: 480 })
+        expect(imageDimsFromUrl(app)).toEqual({ width: 640, height: 480 })
+        // The dims survive the wire→app rewrite like ?name= does.
+        expect(imageDimsFromUrl(rewriteBlobLinks(`![x](${wire})`, refs).slice(5, -1))).toEqual({ width: 1920, height: 1080 })
+    })
+    it('imageDimsFromUrl rejects missing, partial, and garbage dims', () => {
+        expect(imageDimsFromUrl(blobWireUrl(refs, HASH, 'x.png'))).toBeNull()
+        expect(imageDimsFromUrl(`https://a.com/x?w=100`)).toBeNull()
+        expect(imageDimsFromUrl(`https://a.com/x?w=100&h=abc`)).toBeNull()
+        expect(imageDimsFromUrl(`https://a.com/x?w=-5&h=10`)).toBeNull()
+        expect(imageDimsFromUrl('not a url')).toBeNull()
     })
 
     it('rewrites only this org, leaves code regions and foreign hosts alone', () => {
