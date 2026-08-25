@@ -10,12 +10,26 @@ import type { Store } from './store.js';
 // The live face (CONTRACT.md decision 2): one WebSocket per org, per-space
 // subscriptions, offset-based resume. subscribe{afterOffset} replays durable
 // events after that offset then goes live; presence is ephemeral pass-through.
+//
+// Liveness is two-sided. Every HEARTBEAT_MS the server (a) sends a protocol
+// ping and terminates connections that produced no pong or traffic since the
+// last beat — dead clients stop holding hub subscriptions — and (b) sends the
+// JSON {kind:'ping'} frame, which is the CLIENT'S evidence of life: a laptop
+// that slept or changed networks holds a half-open socket that will never see
+// a close event, so prolonged frame-silence is what tells it to bounce.
 
 interface Deps {
   service: HarborService;
   hub: SpaceHub;
   store: Store;
   auth: AuthDriver;
+}
+
+const DEFAULT_HEARTBEAT_MS = 25_000;
+
+interface LiveSocket extends WebSocket {
+  /** False until the next pong/message proves the peer is still there. */
+  sawLifeSinceLastBeat?: boolean;
 }
 
 /**
@@ -25,8 +39,26 @@ interface Deps {
  */
 export type LiveDepsResolver = (host: string | undefined) => Deps | undefined | Promise<Deps | undefined>;
 
-export function attachLive(server: Server, resolve: LiveDepsResolver): () => void {
+export function attachLive(
+  server: Server,
+  resolve: LiveDepsResolver,
+  opts: { heartbeatMs?: number } = {},
+): () => void {
   const wss = new WebSocketServer({ noServer: true });
+
+  const heartbeat = setInterval(() => {
+    const at = new Date().toISOString();
+    const beacon = JSON.stringify({ kind: 'ping', at });
+    for (const client of wss.clients as Set<LiveSocket>) {
+      if (client.sawLifeSinceLastBeat === false) {
+        client.terminate();
+        continue;
+      }
+      client.sawLifeSinceLastBeat = false;
+      client.ping();
+      if (client.readyState === WebSocket.OPEN) client.send(beacon);
+    }
+  }, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -66,13 +98,19 @@ export function attachLive(server: Server, resolve: LiveDepsResolver): () => voi
   });
 
   return () => {
+    clearInterval(heartbeat);
     for (const client of wss.clients) client.terminate();
     wss.close();
   };
 }
 
-function handleConnection(ws: WebSocket, memberId: string, deps: Deps): void {
+function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
   const subscriptions = new Map<string, () => void>();
+
+  ws.sawLifeSinceLastBeat = true;
+  ws.on('pong', () => {
+    ws.sawLifeSinceLastBeat = true;
+  });
 
   const send = (frame: ServerFrame): void => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
@@ -82,6 +120,7 @@ function handleConnection(ws: WebSocket, memberId: string, deps: Deps): void {
   };
 
   ws.on('message', (data) => {
+    ws.sawLifeSinceLastBeat = true;
     void (async () => {
       let raw: unknown;
       try {

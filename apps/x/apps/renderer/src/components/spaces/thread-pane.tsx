@@ -93,10 +93,18 @@ export function ThreadPane({
     const marker = threadInfo?.marker ?? null
     const replies = messages.slice(1)
 
+    // Echo a just-posted reply into the pane — the live event that would
+    // otherwise render it may be seconds away, or never come at all when the
+    // socket went half-open (sleep). Dedupe keeps the eventual frame a no-op.
+    const echo = (message: spaces.Message) => {
+        setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
+    }
+
     const post = async (body: string, agent?: AgentOptions) => {
         setPosting(true)
         try {
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId, body })
+            echo(result.message)
             markTopicRead(org.id, space.id, topicId)
             analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
             maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
@@ -115,6 +123,7 @@ export function ThreadPane({
         try {
             const body = `@rowboat fold this topic’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· topic:${topicId}”.`
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId, body })
+            echo(result.message)
             markTopicRead(org.id, space.id, topicId)
             analytics.spacesFoldRequested()
             maybeInvokeRowboat(org, space, result.topic, result.message.id, body)
