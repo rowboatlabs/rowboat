@@ -42,6 +42,15 @@ export function getExtension(filePath: string): string {
     return dotIndex > 0 ? name.slice(dotIndex + 1).toLowerCase() : '';
 }
 
+// Formats the chat filepath card previews inline. Deliberately narrower than
+// IMAGE_MIMES above (no bmp/ico/tiff — poor <img> support or not worth a
+// large preview). Expects plain paths, no query strings.
+const INLINE_PREVIEW_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+
+export function isImageFilePath(filePath: string): boolean {
+    return INLINE_PREVIEW_IMAGE_EXTENSIONS.has(getExtension(filePath));
+}
+
 export function toFileUrl(filePath: string): string {
     if (!filePath) return filePath;
     if (

@@ -218,6 +218,7 @@ const HISTORICAL_KEY_ORDER = [
     "paste-at-cursor",
     "spreadsheet-create",
     "spreadsheet-edit",
+    "generate-image",
     "spawn-agent",
 ];
 

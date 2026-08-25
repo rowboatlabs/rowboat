@@ -55,7 +55,7 @@ import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
-import { getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { getImageModelCatalog, getModelCatalog } from '@x/core/dist/models/catalog.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
@@ -1660,6 +1660,9 @@ export function setupIpcHandlers() {
     'models:list': async (_event, args) => {
       return await getModelCatalog({ refreshProvider: args?.refreshProvider });
     },
+    'models:listImageModels': async () => {
+      return await getImageModelCatalog();
+    },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
     },
@@ -1702,6 +1705,7 @@ export function setupIpcHandlers() {
           backgroundTask: tasks.backgroundTask ?? null,
           subagent: tasks.subagent ?? null,
         },
+        imageModel: cfg?.imageModel ?? null,
         deferBackgroundTasks: cfg?.deferBackgroundTasks === true,
       };
     },

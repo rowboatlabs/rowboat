@@ -4,10 +4,10 @@ import { isSignedIn } from "../account/account.js";
 import { getChatGPTStatus } from "../auth/chatgpt-auth.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "./repo.js";
-import { listGatewayModels } from "./gateway.js";
+import { listGatewayImageModels, listGatewayModels } from "./gateway.js";
 import { listCodexModels } from "./codex.js";
-import { listModelsForProvider } from "./models.js";
-import { listOnboardingModels } from "./models-dev.js";
+import { listImageModelsForProvider, listModelsForProvider } from "./models.js";
+import { getImageModelIds, listOnboardingModels } from "./models-dev.js";
 import { getDefaultModelAndProvider } from "./defaults.js";
 
 /**
@@ -275,6 +275,78 @@ export async function getModelCatalog(options?: GetModelCatalogOptions): Promise
     }
 
     return { providers: entries, defaultModel };
+}
+
+/**
+ * One provider in the image-model catalog (the settings "Image model"
+ * picker). Same id/flavor/status contract as CatalogProviderEntry; models
+ * are bare ids (no reasoning metadata — image models take no effort).
+ */
+export interface ImageCatalogProviderEntry {
+    id: string;
+    flavor: string;
+    status: "ok" | "error";
+    error?: string;
+    models: string[];
+}
+
+// Flavors generate-image can build an image model for (the gateway plus
+// runtime/tools/domains/image.ts makeBackend's cases). Every one of them
+// lists — the picker only ever offers models a provider reported.
+const IMAGE_FLAVORS = new Set(["rowboat", "openrouter", "google", "openai", "ollama", "openai-compatible"]);
+// …of which these two carry no image-capability metadata anywhere in their
+// listing (Ollama's /api/tags and an OpenAI-compatible /models are bare id
+// lists), so they offer their FULL model list. Picking a non-image model
+// there surfaces the runtime's own readable error — a worse pick than a
+// filtered list, a better one than a free-typed id nothing can check.
+const IMAGE_UNFILTERABLE_FLAVORS = new Set(["ollama", "openai-compatible"]);
+// Vendors whose image models come from the models.dev catalog's output
+// modalities; their own /models endpoints don't say who generates images.
+const IMAGE_MODELS_DEV_FLAVORS = new Set(["openai", "google"]);
+
+/** Where one provider's image-model list comes from. Throws on failure. */
+async function listImageModels(provider: DiscoveredProvider): Promise<string[]> {
+    if (provider.id === "rowboat") return await listGatewayImageModels();
+    if (IMAGE_MODELS_DEV_FLAVORS.has(provider.flavor)) {
+        const ids = await getImageModelIds(provider.flavor as "openai" | "google");
+        if (ids === null) {
+            throw new Error("Model catalog unavailable — check your connection and retry");
+        }
+        return ids;
+    }
+    if (!provider.config) {
+        throw new Error(`Provider '${provider.id}' has no configuration to list models with`);
+    }
+    if (IMAGE_UNFILTERABLE_FLAVORS.has(provider.flavor)) {
+        return await listModelsForProvider(provider.config);
+    }
+    return await listImageModelsForProvider(provider.config);
+}
+
+/**
+ * The image-model catalog: the connected providers that can generate
+ * images, each with the image models it lists. Same provider discovery as
+ * the chat catalog; no cache — it's fetched when the settings surface opens
+ * and on its Retry. Failures surface as status "error" per provider (the
+ * picker shows the message and a Retry row), never as a throw; an empty ok
+ * list means the provider genuinely reported nothing.
+ */
+export async function getImageModelCatalog(): Promise<{ providers: ImageCatalogProviderEntry[] }> {
+    const discovered = (await discoverProviders()).filter((p) => IMAGE_FLAVORS.has(p.flavor));
+    const providers = await Promise.all(discovered.map(async (provider): Promise<ImageCatalogProviderEntry> => {
+        const base = { id: provider.id, flavor: provider.flavor };
+        try {
+            return { ...base, status: "ok", models: await listImageModels(provider) };
+        } catch (err) {
+            return {
+                ...base,
+                status: "error",
+                error: err instanceof Error ? err.message : "Failed to list image models",
+                models: [],
+            };
+        }
+    }));
+    return { providers };
 }
 
 /** Test-only: reset the per-provider list cache. */
