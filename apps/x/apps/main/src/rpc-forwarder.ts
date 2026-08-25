@@ -24,7 +24,7 @@ export function shouldForwardChannel(channel: string): boolean {
 
 export async function forwardRpc(channel: string, args: unknown): Promise<unknown> {
   const server = await whenServerReady();
-  const res = await fetch(`http://127.0.0.1:${server.port}/rpc/${channel}`, {
+  const res = await fetch(`${server.baseUrl}/rpc/${channel}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

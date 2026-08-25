@@ -18,7 +18,8 @@ export type PushChannel =
   | 'chatgpt:statusChanged'
   | 'terminal:data'
   | 'terminal:exit'
-  | 'voice:tts-chunk';
+  | 'voice:tts-chunk'
+  | 'knowledge:didCommit';
 
 interface ServerMessage {
   seq: number;

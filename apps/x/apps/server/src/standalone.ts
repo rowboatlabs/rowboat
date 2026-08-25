@@ -9,6 +9,7 @@ import container, {
 } from '@x/core/dist/di/container.js';
 import type { ISessions } from '@x/core/dist/runtime/sessions/index.js';
 import { createCoreEventSources, createCoreRpcHandlers, resolveWorkspacePath } from './core-deps.js';
+import { startWorkspaceWatcher, subscribeWorkspaceEvents, subscribeKnowledgeEvents } from './workspace-watcher.js';
 import { prepareCoreData, initCoreServices } from '@x/core/dist/boot/services.js';
 import { createRowboatServer } from './server.js';
 import { capabilityBroker } from './capabilities.js';
@@ -77,11 +78,15 @@ async function main(): Promise<void> {
   // the Electron host (Phase 6): the standalone server now runs everything.
   await sessionsIndexReady;
   await initCoreServices();
+  // Filesystem change feed lives server-side (Phase 8): clients — local or
+  // remote — get workspace/knowledge pushes over the WS, not from their own
+  // disk.
+  await startWorkspaceWatcher();
 
   const server = await createRowboatServer({
     workDir: WorkDir,
     handlers: createCoreRpcHandlers({ sessionsIndexReady }),
-    events: createCoreEventSources(),
+    events: { ...createCoreEventSources(), subscribeWorkspaceEvents, subscribeKnowledgeEvents },
     resolveWorkspacePath,
     serverVersion: process.env.npm_package_version ?? '0.0.0',
   });

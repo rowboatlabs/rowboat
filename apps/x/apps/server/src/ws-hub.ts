@@ -19,6 +19,7 @@ export type PushChannel =
   | 'turns:events'
   | 'sessions:events'
   | 'workspace:didChange'
+  | 'knowledge:didCommit'
   | 'oauth:didConnect'
   | 'composio:didConnect'
   | 'chatgpt:statusChanged'
