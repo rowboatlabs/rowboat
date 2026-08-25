@@ -357,6 +357,41 @@ export function rewriteFileLinks(body: string, refs: { orgId: string; spaceId: s
         .join('')
 }
 
+/** A line that is nothing but image references (one or more, optional titles). */
+const IMAGE_LINE_RE = /^\s*(?:!\[[^\]]*\]\([^()\s]+(?:\s+"[^"]*")?\)\s*)+$/
+
+/**
+ * Give image-only lines their own markdown paragraph. Messages written before
+ * the composer separated attachments (and agent-written ones) join text and
+ * images with plain newlines — one paragraph, so image tiles flow INLINE
+ * beside the text. Inserting the blank lines at render time gives every
+ * message the same layout: text above, a clean tile row below. Fenced code is
+ * a cite and stays untouched; an image referenced mid-sentence is not an
+ * image-only line and keeps its place.
+ */
+export function separateImageParagraphs(body: string): string {
+    const lines = body.split('\n')
+    const out: string[] = []
+    let fence: string | null = null
+    for (const line of lines) {
+        const fenceMark = line.match(/^\s*(```+|~~~+)/)?.[1]
+        if (fenceMark) {
+            if (fence === null) fence = fenceMark[0]!
+            else if (fenceMark[0] === fence) fence = null
+            out.push(line)
+            continue
+        }
+        const prev = out[out.length - 1]
+        if (fence === null && prev !== undefined && prev.trim() !== '') {
+            // A boundary between text and an image run (either direction) gets
+            // a blank line; consecutive image lines stay one paragraph (the row).
+            if (IMAGE_LINE_RE.test(line) !== IMAGE_LINE_RE.test(prev)) out.push('')
+        }
+        out.push(line)
+    }
+    return out.join('\n')
+}
+
 /**
  * Rewrite relative image references in a markdown body to renderable URLs
  * (app://space-blob through srcFor). Only references that resolve to a real

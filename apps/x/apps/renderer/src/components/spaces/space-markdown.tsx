@@ -14,6 +14,7 @@ import {
     resolveSpaceLink,
     rewriteBlobLinks,
     rewriteFileLinks,
+    separateImageParagraphs,
     type SpaceRefs,
 } from '@/lib/spaces-presentation'
 
@@ -319,7 +320,9 @@ export function SpaceMarkdown({ body, className }: { body: string; className?: s
     const text = useMemo(() => {
         const withBlobs = refs ? rewriteBlobLinks(body, refs) : body
         const withFiles = refs ? rewriteFileLinks(withBlobs, refs) : withBlobs
-        return decorateMentions(withFiles, memberNames)
+        // Pre-separator messages joined text and images in one paragraph —
+        // normalize so every message gets text above, a clean tile row below.
+        return decorateMentions(separateImageParagraphs(withFiles), memberNames)
     }, [body, refs, memberNames])
     return (
         <div className={cn(className)}>

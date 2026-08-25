@@ -21,6 +21,7 @@ import {
     rewriteBlobLinks,
     rewriteFileLinks,
     rewriteRelativeImages,
+    separateImageParagraphs,
     spaceFileAppUrl,
     toggleTaskAt,
 } from './spaces-presentation'
@@ -307,5 +308,29 @@ describe('unread changes', () => {
         expect(isUnreadChange(theirs, '2026-08-19T18:04:00Z', 'me')).toBe(false)
         expect(isUnreadChange(mine, null, 'me')).toBe(false)
         expect(isUnreadChange(myAgent, null, 'me')).toBe(true)
+    })
+})
+
+describe('separateImageParagraphs — old messages get the tile-row layout too', () => {
+    const img = (n: string) => `![${n}](app://space-blob/o/s/${'a'.repeat(64)}?name=${n})`
+    it('splits text and a trailing image run into separate paragraphs', () => {
+        expect(separateImageParagraphs(`look at these\n${img('a.png')}\n${img('b.png')}`))
+            .toBe(`look at these\n\n${img('a.png')}\n${img('b.png')}`)
+    })
+    it('separates in both directions and leaves image runs together', () => {
+        expect(separateImageParagraphs(`${img('a.png')}\ngIF TEST`))
+            .toBe(`${img('a.png')}\n\ngIF TEST`)
+        expect(separateImageParagraphs(`before\n${img('a.png')}\n${img('b.png')}\nafter`))
+            .toBe(`before\n\n${img('a.png')}\n${img('b.png')}\n\nafter`)
+    })
+    it('already-separated messages are unchanged', () => {
+        const body = `text\n\n${img('a.png')}\n${img('b.png')}`
+        expect(separateImageParagraphs(body)).toBe(body)
+    })
+    it('leaves inline images mid-sentence and fenced code alone', () => {
+        const inline = `see ${img('a.png')} here`
+        expect(separateImageParagraphs(inline)).toBe(inline)
+        const fenced = '```\ntext\n![x](y.png)\n```'
+        expect(separateImageParagraphs(fenced)).toBe(fenced)
     })
 })
