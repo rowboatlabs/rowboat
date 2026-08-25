@@ -78,12 +78,17 @@ export function GeneralStream({
     const memoryKey = `${org.id}/${space.id}`
     const restoredRef = useRef(false)
     const lastScrollTopRef = useRef<number | null>(null)
-    useEffect(() => {
+    // Layout effect: the anchor lands before paint — no flash of the top.
+    useLayoutEffect(() => {
         const el = scrollRef.current
         if (!el || !general.ready) return
         if (!restoredRef.current) {
             restoredRef.current = true
             const saved = scrollMemory.get(memoryKey)
+            // A saved position is never the bottom (bottom deletes it) — mark
+            // follow-mode off NOW, before the scroll event lands, so the tail
+            // pin can't yank a restored position down meanwhile.
+            if (saved !== undefined) lastScrollTopRef.current = saved
             el.scrollTop = saved ?? el.scrollHeight
             return
         }
@@ -239,6 +244,7 @@ export function GeneralStream({
         const pending = pendingRestoreRef.current
         if (!el || !pending || pending.oldest !== undefined) return
         el.scrollTop = el.scrollHeight - pending.height + pending.top
+        lastScrollTopRef.current = el.scrollTop
         pendingRestoreRef.current = null
     }, [renderCap])
     // A fetch restores once the older page actually prepended.
@@ -249,12 +255,33 @@ export function GeneralStream({
         const oldestNow = general.messages.find((m) => !m.pending && !m.failed)?.offset
         if (oldestNow !== undefined && oldestNow < pending.oldest) {
             el.scrollTop = el.scrollHeight - pending.height + pending.top
+            lastScrollTopRef.current = el.scrollTop
             pendingRestoreRef.current = null
         } else if (!general.loadingOlder) {
             // Settled without a prepend (failed, or raced empty).
             pendingRestoreRef.current = null
         }
     }, [general.messages, general.loadingOlder])
+
+    // The bottom anchor is not one-shot: message bodies keep growing after
+    // first layout (lazy images have no reserved height, code highlighting and
+    // mermaid render async), and every late growth ABOVE the viewport shoves a
+    // one-time anchor to a random middle point. While the reader is following
+    // the tail (hasn't scrolled up), any content-size change re-pins the
+    // bottom; the moment they scroll away, the pin lets go.
+    const contentRef = useRef<HTMLDivElement | null>(null)
+    useEffect(() => {
+        const el = scrollRef.current
+        const content = contentRef.current
+        if (!el || !content) return
+        const ro = new ResizeObserver(() => {
+            if (lastScrollTopRef.current === null && !pendingRestoreRef.current) {
+                el.scrollTop = el.scrollHeight
+            }
+        })
+        ro.observe(content)
+        return () => ro.disconnect()
+    }, [])
 
     // Render: day dividers, compaction, the New line, thread rows.
     const rows: ReactNode[] = []
@@ -337,6 +364,8 @@ export function GeneralStream({
                     if (el.scrollTop < 80) loadEarlier()
                 }}
             >
+                {/* One measurable child — the tail pin observes its size. */}
+                <div ref={contentRef}>
                 {!general.ready && (
                     <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
                 )}
@@ -361,6 +390,7 @@ export function GeneralStream({
                 )}
                 <TypingIndicator names={typingNames} />
                 <div ref={bottomRef} />
+                </div>
             </div>
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
