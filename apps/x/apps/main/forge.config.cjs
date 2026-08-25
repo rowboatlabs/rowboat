@@ -399,6 +399,14 @@ module.exports = {
                 stdio: 'inherit'
             });
 
+            // Build client (TypeScript compilation) - depends on shared;
+            // main imports it for the child-server events bridge
+            console.log('Building client...');
+            execSync('pnpm run build', {
+                cwd: path.join(__dirname, '../../packages/client'),
+                stdio: 'inherit'
+            });
+
             // Build renderer (Vite build) - depends on shared
             console.log('Building renderer...');
             execSync('pnpm run build', {
