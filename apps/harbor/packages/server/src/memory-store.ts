@@ -203,6 +203,26 @@ export class MemoryStore implements Store {
     s.messages.set(message.topicId, list);
   }
 
+  async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
+    const s = this.must(spaceId);
+    for (const [topicId, list] of s.messages) {
+      const idx = list.findIndex((m) => m.id === messageId);
+      if (idx === -1) continue;
+      const next = [...list];
+      next[idx] = { ...next[idx]!, body: '', deletedAt };
+      s.messages.set(topicId, next);
+      break;
+    }
+    // Redact the stored message event too — replay must never resurrect the body.
+    for (let i = 0; i < s.events.length; i++) {
+      const e = s.events[i]!;
+      if (e.event.type === 'message' && e.event.message.id === messageId) {
+        s.events[i] = { ...e, event: { type: 'message', message: { ...e.event.message, body: '', deletedAt } } };
+        break;
+      }
+    }
+  }
+
   async reassignMessages(spaceId: string, fromTopicId: string, toTopicId: string): Promise<number> {
     const s = this.must(spaceId);
     const moving = (s.messages.get(fromTopicId) ?? []).map((m) => ({ ...m, topicId: toTopicId }));

@@ -1,7 +1,11 @@
 import { useState } from 'react'
-import { Bot, ChevronRight, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, SmilePlus } from 'lucide-react'
+import { Bot, ChevronRight, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, SmilePlus, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import {
+    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub,
+    ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -133,7 +137,7 @@ export interface ThreadRowData {
 }
 
 export function MessageRow({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, dense, selfMemberId,
 }: {
     message: spaces.Message
     memberNames: Map<string, string>
@@ -148,6 +152,8 @@ export function MessageRow({
     onCopyLink?: (message: spaces.Message) => void
     /** Toggles the caller's reaction (add when absent, remove when present). */
     onReact?: (message: spaces.Message, emoji: string) => void
+    /** Deletes the message — only offered on the viewer's own (the org enforces it too). */
+    onDelete?: (message: spaces.Message) => void
     /** Thread panes use the smaller avatar. */
     dense?: boolean
 }) {
@@ -155,11 +161,18 @@ export function MessageRow({
     const viaAgent = message.author.actingMode !== 'direct'
     const avatarSize = dense ? 'md' : 'lg'
     const gutter = dense ? 'w-7' : 'w-8'
-    const showActions = !!(onReplyInThread || onAskRowboat || onCopyLink || onReact)
-    // While the emoji picker is open the hover-revealed chrome must stay put.
+    // A tombstone renders only its note (and any thread row under it) — no
+    // reactions, no hover actions; the deed is done.
+    const deleted = !!message.deletedAt
+    const canDelete = !!onDelete && !deleted && selfMemberId === message.author.memberId
+    const showActions = !deleted && !!(onReplyInThread || onAskRowboat || onCopyLink || onReact || canDelete)
+    // While the emoji picker or the ⋯ menu is open the hover-revealed chrome
+    // must stay put — unmounting it collapses the popper anchor and the menu
+    // would jump to the viewport edge.
     const [pickerOpen, setPickerOpen] = useState(false)
+    const [menuOpen, setMenuOpen] = useState(false)
 
-    return (
+    const row = (
         <div className={cn('group/msg relative flex items-start gap-2.5 rounded-lg px-2 hover:bg-accent/40', continuation ? 'py-0.5' : 'py-1.5')}>
             {continuation ? (
                 <span className={cn('shrink-0 pt-1 text-right text-[10px] leading-5 text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
@@ -180,10 +193,14 @@ export function MessageRow({
                         <span className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
                     </div>
                 )}
-                <div className={MESSAGE_PROSE}>
-                    <SpaceMarkdown body={message.body} />
-                </div>
-                {onReact && (
+                {deleted ? (
+                    <div className="text-sm italic leading-relaxed text-muted-foreground">This message was deleted</div>
+                ) : (
+                    <div className={MESSAGE_PROSE}>
+                        <SpaceMarkdown body={message.body} />
+                    </div>
+                )}
+                {!deleted && onReact && (
                     <ReactionChips
                         message={message}
                         memberNames={memberNames}
@@ -228,7 +245,7 @@ export function MessageRow({
                 )}
             </div>
             {showActions && (
-                <div className={cn('absolute right-2 top-1 items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-sm', pickerOpen ? 'flex' : 'hidden group-hover/msg:flex')}>
+                <div className={cn('absolute right-2 top-1 items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-sm', pickerOpen || menuOpen ? 'flex' : 'hidden group-hover/msg:flex')}>
                     {onReact && (
                         <ReactionPicker onPick={(emoji) => onReact(message, emoji)} onOpenChange={setPickerOpen}>
                             <button
@@ -260,23 +277,89 @@ export function MessageRow({
                             <Bot className="size-3.5" />
                         </button>
                     )}
-                    {onCopyLink && (
-                        <DropdownMenu>
+                    {(onCopyLink || canDelete) && (
+                        <DropdownMenu onOpenChange={setMenuOpen}>
                             <DropdownMenuTrigger asChild>
                                 <button type="button" title="More" className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => onCopyLink(message)}>
-                                    <LinkIcon className="size-3.5 mr-2" /> Copy link
-                                </DropdownMenuItem>
+                                {onCopyLink && (
+                                    <DropdownMenuItem onClick={() => onCopyLink(message)}>
+                                        <LinkIcon className="size-3.5 mr-2" /> Copy link
+                                    </DropdownMenuItem>
+                                )}
+                                {canDelete && (
+                                    <DropdownMenuItem variant="destructive" onClick={() => onDelete!(message)}>
+                                        <Trash2 className="size-3.5 mr-2" /> Delete message
+                                    </DropdownMenuItem>
+                                )}
                             </DropdownMenuContent>
                         </DropdownMenu>
                     )}
                 </div>
             )}
         </div>
+    )
+
+    // Right-click mirrors the hover bar. Reactions live behind a submenu on
+    // purpose — the menu opens at the cursor, and an inline emoji row right
+    // under it kept catching accidental clicks. Tombstones and action-less
+    // rows get the plain row.
+    if (!showActions) return row
+    const hasTopItems = !!(onReact || onReplyInThread || onAskRowboat || onCopyLink)
+    return (
+        <ContextMenu>
+            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+            <ContextMenuContent className="w-56">
+                {onReact && (
+                    <ContextMenuSub>
+                        <ContextMenuSubTrigger>
+                            <SmilePlus className="size-3.5 mr-2" /> Add reaction
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="w-auto p-1.5">
+                            <div className="grid grid-cols-6 gap-0.5">
+                                {REACTION_PALETTE.map((emoji) => (
+                                    <ContextMenuItem
+                                        key={emoji}
+                                        onSelect={() => onReact(message, emoji)}
+                                        className="size-7 justify-center p-0 text-base"
+                                    >
+                                        {emoji}
+                                    </ContextMenuItem>
+                                ))}
+                            </div>
+                        </ContextMenuSubContent>
+                    </ContextMenuSub>
+                )}
+                {onReplyInThread && (
+                    <ContextMenuItem
+                        onSelect={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
+                    >
+                        <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
+                    </ContextMenuItem>
+                )}
+                {onAskRowboat && (
+                    <ContextMenuItem onSelect={() => onAskRowboat(message)}>
+                        <Bot className="size-3.5 mr-2" /> Ask @rowboat about this
+                    </ContextMenuItem>
+                )}
+                {onCopyLink && (
+                    <ContextMenuItem onSelect={() => onCopyLink(message)}>
+                        <LinkIcon className="size-3.5 mr-2" /> Copy link
+                    </ContextMenuItem>
+                )}
+                {canDelete && (
+                    <>
+                        {hasTopItems && <ContextMenuSeparator />}
+                        <ContextMenuItem variant="destructive" onSelect={() => onDelete!(message)}>
+                            <Trash2 className="size-3.5 mr-2" /> Delete message
+                        </ContextMenuItem>
+                    </>
+                )}
+            </ContextMenuContent>
+        </ContextMenu>
     )
 }
 

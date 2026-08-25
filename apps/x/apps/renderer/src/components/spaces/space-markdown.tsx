@@ -2,6 +2,7 @@ import { createContext, useContext, useMemo, useState, type ComponentProps, type
 import { Streamdown } from 'streamdown'
 import { FileDown, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/lib/toast'
 import { useMemberNames } from '@/components/spaces/member-text'
 import {
@@ -75,28 +76,152 @@ function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }
     )
 }
 
+/**
+ * Discord-style viewer: the image large on a dimmed backdrop. Esc or a click
+ * outside closes; the row under the image carries the source-specific action
+ * (download for blobs, open-original for external links).
+ */
+function ImageLightbox({ src, alt, open, onOpenChange, children }: {
+    src: string
+    alt: string
+    open: boolean
+    onOpenChange: (open: boolean) => void
+    children?: ReactNode
+}) {
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent
+                showCloseButton={false}
+                className="flex w-auto max-w-[92vw] flex-col items-center border-none bg-transparent p-0 shadow-none outline-none sm:max-w-[92vw]"
+            >
+                <DialogTitle className="sr-only">{alt || 'Image'}</DialogTitle>
+                <img src={src} alt={alt} className="max-h-[82vh] max-w-[92vw] rounded-lg object-contain" />
+                {children && <div className="flex items-center gap-3 self-start text-xs">{children}</div>}
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+/** An uploaded image in a message: inline preview, click to view, download from the viewer. */
+function BlobImage({ src, alt }: { src: string; alt: string }) {
+    const [open, setOpen] = useState(false)
+    const [saving, setSaving] = useState(false)
+    const parsed = parseBlobAppUrl(src)
+    const save = async () => {
+        if (saving || !parsed) return
+        setSaving(true)
+        try {
+            const name = (() => {
+                try {
+                    return new URL(src).searchParams.get('name') ?? undefined
+                } catch {
+                    return undefined
+                }
+            })()
+            const res = await window.ipc.invoke('spaces:saveBlob', {
+                orgId: parsed.orgId,
+                spaceId: parsed.spaceId,
+                hash: parsed.hash,
+                ...(name ? { suggestedName: name } : {}),
+            })
+            if (res.saved) toast('Saved', 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not download', 'error')
+        } finally {
+            setSaving(false)
+        }
+    }
+    return (
+        <>
+            <img
+                src={src}
+                alt={alt}
+                loading="lazy"
+                onClick={() => setOpen(true)}
+                className="my-1 block max-h-80 max-w-full cursor-zoom-in rounded-lg border border-border object-contain"
+            />
+            <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
+                {parsed && (
+                    <button type="button" onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">
+                        {saving ? 'Saving…' : 'Download'}
+                    </button>
+                )}
+            </ImageLightbox>
+        </>
+    )
+}
+
+/** A direct https image address — the path itself names an image (query strings welcome). */
+function isDirectImageUrl(url: string): boolean {
+    try {
+        const u = new URL(url)
+        return u.protocol === 'https:' && /\.(gif|png|jpe?g|webp)$/i.test(u.pathname)
+    } catch {
+        return false
+    }
+}
+
+/** The bare text of a link, when it has one (an autolinked URL renders its own address). */
+function plainLabel(children: ReactNode): string | null {
+    if (typeof children === 'string') return children
+    if (Array.isArray(children) && children.length === 1 && typeof children[0] === 'string') return children[0]
+    return null
+}
+
+/**
+ * An external image (a pasted GIF link, a markdown image). Same frame as blob
+ * images; a URL that never loads falls back to the plain link it came from.
+ */
+function ExternalImage({ src, alt }: { src: string; alt: string }) {
+    const [failed, setFailed] = useState(false)
+    const [open, setOpen] = useState(false)
+    if (failed) {
+        return (
+            <a href={src} target="_blank" rel="noreferrer">
+                {alt || src}
+            </a>
+        )
+    }
+    return (
+        <>
+            <img
+                src={src}
+                alt={alt}
+                title={src}
+                loading="lazy"
+                onClick={() => setOpen(true)}
+                onError={() => setFailed(true)}
+                className="my-1 block max-h-80 max-w-full cursor-zoom-in rounded-lg border border-border object-contain"
+            />
+            <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
+                <a href={src} target="_blank" rel="noreferrer" className="text-white/80 hover:text-white hover:underline">
+                    Open original
+                </a>
+            </ImageLightbox>
+        </>
+    )
+}
+
 type StreamdownComponents = NonNullable<ComponentProps<typeof Streamdown>['components']>
 
 const spaceComponents: StreamdownComponents = {
     img: ({ src, alt }) => {
         const url = typeof src === 'string' ? src : ''
         if (url.startsWith('app://space-blob/')) {
-            return (
-                <img
-                    src={url}
-                    alt={alt ?? ''}
-                    loading="lazy"
-                    className="my-1 block max-h-80 max-w-full rounded-lg border border-border object-contain"
-                />
-            )
+            return <BlobImage src={url} alt={alt ?? ''} />
         }
-        // Non-blob images (external URLs) keep default treatment.
-        return <img src={url} alt={alt ?? ''} loading="lazy" className="max-w-full" />
+        return <ExternalImage src={url} alt={alt ?? ''} />
     },
     a: ({ href, children, ...rest }) => {
         const url = typeof href === 'string' ? href : ''
         if (url.startsWith('app://space-blob/')) {
             return <BlobLinkCard href={url}>{children}</BlobLinkCard>
+        }
+        // A pasted GIF/image address shows the picture, not the URL — but only
+        // when the link IS its own text; a labelled [link](url) stays a link.
+        // No <a> wrapper: the failure fallback is itself the link.
+        if (plainLabel(children) === url && isDirectImageUrl(url)) {
+            return <ExternalImage src={url} alt="" />
         }
         return (
             <a href={url} target="_blank" rel="noreferrer" {...rest}>

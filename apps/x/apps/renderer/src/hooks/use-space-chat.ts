@@ -129,6 +129,17 @@ function wireBus(): void {
                     ),
                 })
             }
+        } else if (frame.event.type === 'message_deleted') {
+            // Tombstone in place — the row stays (threads may anchor to it), the
+            // body is gone. Thread panes pick theirs up on the feed-refresh tick.
+            const { deletion } = frame.event
+            if (state?.topic && state.messages.some((m) => m.id === deletion.messageId)) {
+                setGeneral(k, {
+                    messages: state.messages.map((m) =>
+                        m.id === deletion.messageId ? { ...m, body: '', deletedAt: deletion.at } : m,
+                    ),
+                })
+            }
         }
     })
     // Feed store changes (topics list) → re-evaluate general + the thread index.
@@ -423,7 +434,7 @@ export function countSpaceUnread(orgId: string, spaceId: string, selfMemberId: s
         const mark = getTopicLastReadAt(orgId, spaceId, general.id)
         const state = generalState.get(key(orgId, spaceId))
         if (state?.ready && state.topic?.id === general.id) {
-            count += state.messages.filter((m, i) => !isGeneralSeedMessage(general, m, i) && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
+            count += state.messages.filter((m, i) => !m.deletedAt && !isGeneralSeedMessage(general, m, i) && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
         } else if ((!mark || general.lastActivityAt > mark) && general.messageCount > 1) {
             count += 1
         }

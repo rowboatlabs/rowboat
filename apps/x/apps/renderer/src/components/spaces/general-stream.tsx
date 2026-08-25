@@ -167,6 +167,19 @@ export function GeneralStream({
         }
     }
 
+    const deleteMessage = async (message: spaces.Message) => {
+        if (!window.confirm('Delete this message? This cannot be undone.')) return
+        try {
+            const { message: deleted } = await window.ipc.invoke('spaces:deleteMessage', {
+                orgId: org.id, spaceId: space.id, messageId: message.id,
+            })
+            updateGeneralMessage(org.id, space.id, deleted)
+            analytics.spacesMessageDeleted()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not delete', 'error')
+        }
+    }
+
     // Render: day dividers, compaction, the New line, thread rows.
     const rows: ReactNode[] = []
     let prev: spaces.Message | undefined
@@ -174,6 +187,10 @@ export function GeneralStream({
     let newShown = false
     general.messages.forEach((message, index) => {
         if (general.topic && isGeneralSeedMessage(general.topic, message, index)) return
+        // Deleted messages disappear — unless a thread grew from one, which
+        // keeps a tombstone row so the thread stays reachable.
+        const thread = threadRowFor(message)
+        if (message.deletedAt && !thread) return
         const day = dayKey(message.postedAt)
         if (day !== prevDay) {
             rows.push(<DayDivider key={`day:${day}`} label={formatDayLabel(message.postedAt)} />)
@@ -191,13 +208,14 @@ export function GeneralStream({
                 message={message}
                 memberNames={memberNames}
                 continuation={isContinuation(prev, message)}
-                thread={threadRowFor(message)}
+                thread={thread}
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
                 onReplyInThread={(m) => void replyInThread(m)}
                 onAskRowboat={askRowboat}
                 onCopyLink={(m) => void copyLink(m)}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
+                onDelete={(m) => void deleteMessage(m)}
             />,
         )
         prev = message

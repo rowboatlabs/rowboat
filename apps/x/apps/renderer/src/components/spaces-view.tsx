@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
+import { Check, ChevronDown, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { AddOrgDialog, AvatarStack, OrgMonogram } from '@/components/spaces/atoms'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { AddOrgDialog, AvatarStack, MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { FileColumn, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { SpaceRail } from '@/components/spaces/space-rail'
@@ -367,6 +368,11 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     const docWidthEff = Math.max(420, Math.min(docWidth, paneWidth - CHAT_FLOOR - 34))
 
     const here = presence.here.filter((id) => members.some((m) => m.id === id))
+    // Roster for the members popover: whoever is here floats up, then A–Z.
+    const hereSet = new Set(here)
+    const roster = [...members].sort(
+        (a, b) => Number(hereSet.has(b.id)) - Number(hereSet.has(a.id)) || a.displayName.localeCompare(b.displayName),
+    )
 
     // The chat surface keeps its context while a file has focus: a topic
     // stays open beside the document it changed (fromTopicId), otherwise the
@@ -420,17 +426,56 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                 <span className="text-xs text-muted-foreground truncate hidden md:inline" title={`${org.address} · you are ${org.memberId}`}>
                     {org.address}
                 </span>
-                <button
-                    type="button"
-                    className="flex items-center gap-2 rounded-md px-1 py-0.5 hover:bg-accent/60"
-                    title={`${members.map((m) => m.displayName).join(', ')}\nClick to copy an invite link`}
-                    onClick={() => void invite()}
-                >
-                    <AvatarStack members={members} />
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {members.length} {members.length === 1 ? 'member' : 'members'}
-                    </span>
-                </button>
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <button
+                            type="button"
+                            className="group flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 hover:bg-accent/60 data-[state=open]:bg-accent/60"
+                            title="See who's in this space"
+                        >
+                            <AvatarStack members={members} />
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                {members.length} {members.length === 1 ? 'member' : 'members'}
+                            </span>
+                            <ChevronDown className="-ml-1 size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-data-[state=open]:opacity-100" />
+                        </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-64 p-1.5">
+                        <div className="px-2 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Members — {members.length}
+                        </div>
+                        <div className="max-h-72 overflow-y-auto">
+                            {roster.map((m) => {
+                                const isHere = hereSet.has(m.id)
+                                return (
+                                    <div key={m.id} className="flex items-center gap-2 rounded-md px-2 py-1.5">
+                                        <span className="relative shrink-0">
+                                            <MemberAvatar id={m.id} name={m.displayName} size="md" />
+                                            {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-popover" />}
+                                        </span>
+                                        <span className="min-w-0 flex-1 truncate text-sm">
+                                            {m.displayName}
+                                            {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
+                                        </span>
+                                        {m.role === 'admin' && (
+                                            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
+                                        )}
+                                        {isHere && <span className="shrink-0 text-[10.5px] text-emerald-600">here</span>}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                        <div className="mt-1 border-t border-border pt-1">
+                            <button
+                                type="button"
+                                onClick={() => void invite()}
+                                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <LinkIcon className="size-3.5" /> Copy invite link
+                            </button>
+                        </div>
+                    </PopoverContent>
+                </Popover>
                 {here.length > 0 && (
                     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={here.map((id) => memberNames.get(id) ?? id).join(', ')}>
                         <span className="size-1.5 rounded-full bg-emerald-500" /> {here.length} here

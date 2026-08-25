@@ -233,6 +233,16 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    id: '007-message-deletion',
+    statements: [
+      // Author-only tombstones: deleted_at is the marker; the body is redacted
+      // in place — in the messages row AND the stored message event, the one
+      // log rewrite the design allows (replay must never resurrect a deleted
+      // body). No backfill: nothing was deletable before this.
+      `alter table messages add column if not exists deleted_at text`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

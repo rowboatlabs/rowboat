@@ -3576,6 +3576,16 @@ const ipcSchemas = {
     }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
   },
+  // Author-only tombstone — the org enforces caller == author; actingMode is
+  // stamped 'direct' by main. Returns the tombstone (body '', deletedAt set).
+  'spaces:deleteMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
   // @rowboat in a topic (spec §8): the renderer detected an addressed message
   // it just posted; main routes it into the topic's session (creating one on
   // first use — the queue/steer machinery handles the rest). messageId is the

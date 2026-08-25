@@ -141,6 +141,19 @@ export function ThreadPane({
         }
     }
 
+    const deleteMessage = async (message: spaces.Message) => {
+        if (!window.confirm('Delete this message? This cannot be undone.')) return
+        try {
+            const { message: deleted } = await window.ipc.invoke('spaces:deleteMessage', {
+                orgId: org.id, spaceId: space.id, messageId: message.id,
+            })
+            setMessages((prev) => prev.map((m) => (m.id === deleted.id ? deleted : m)))
+            analytics.spacesMessageDeleted()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not delete', 'error')
+        }
+    }
+
     const manage = async (action: spaces.SpacesManageTopicAction) => {
         try {
             const res = await window.ipc.invoke('spaces:manageTopic', { orgId: org.id, spaceId: space.id, topicId, action })
@@ -160,11 +173,13 @@ export function ThreadPane({
         }
     }
 
-    // Replies with compaction and the New line.
+    // Replies with compaction and the New line. Deleted replies disappear
+    // (nothing anchors to a reply, so no tombstone row is needed here).
+    const visibleReplies = replies.filter((m) => !m.deletedAt)
     const rows: ReactNode[] = []
     let prev: spaces.Message | undefined
     let newShown = false
-    for (const message of replies) {
+    for (const message of visibleReplies) {
         if (!newShown && newSince && message.postedAt > newSince && message.author.memberId !== org.memberId) {
             rows.push(<NewDivider key="new" />)
             newShown = true
@@ -178,6 +193,7 @@ export function ThreadPane({
                 continuation={isContinuation(prev, message)}
                 selfMemberId={org.memberId}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
+                onDelete={(m) => void deleteMessage(m)}
                 dense
             />,
         )
@@ -287,7 +303,7 @@ export function ThreadPane({
                 />
 
                 <div className="flex items-center gap-2 px-1 pb-1 pt-3">
-                    <span className="text-[11px] font-medium text-muted-foreground">{replies.length} {replies.length === 1 ? 'reply' : 'replies'}</span>
+                    <span className="text-[11px] font-medium text-muted-foreground">{visibleReplies.length} {visibleReplies.length === 1 ? 'reply' : 'replies'}</span>
                     <span className="h-px flex-1 bg-border" />
                 </div>
                 {rows}

@@ -59,6 +59,7 @@ function seedDisplayName(identity: BindIdentity): string {
 type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
+type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 
 export interface OrgInfo {
   name: string;
@@ -654,6 +655,58 @@ export class HarborService {
   }
 
   /**
+   * Author-only tombstone (spec §4: the content plane is role-flat, so
+   * deleter == author — admins moderate membership, never content). The body
+   * is redacted everywhere it lives, message row and stored message event
+   * alike, and a message_deleted event narrates; the row itself stays so
+   * threads anchored to the message keep their parent. Re-deleting is an
+   * idempotent 200 no-op with no event, like reaction toggles.
+   */
+  async deleteMessage(
+    ctx: ActorCtx,
+    spaceId: string,
+    messageId: string,
+    input: DeleteMessageInput,
+  ): Promise<Message> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const message = await this.store.getMessage(spaceId, messageId);
+      if (!message) throw new HarborError('not_found', 'no such message');
+      if (message.author.memberId !== ctx.memberId) {
+        throw new HarborError('forbidden', 'only the author can delete a message');
+      }
+      const withReactions = async (m: Message): Promise<Message> => ({
+        ...m,
+        reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, messageId)),
+      });
+      if (message.deletedAt) return withReactions(message);
+
+      const at = this.now();
+      await this.store.markMessageDeleted(spaceId, messageId, at);
+      // The tombstone stays a row but stops counting; activity is not bumped
+      // (deleting must not resurface a quiet topic). No topic event — clients
+      // refresh their topic lists off the deletion event like any other.
+      const topic = await this.store.getTopic(spaceId, message.topicId);
+      if (topic) {
+        await this.store.putTopic({ ...topic, messageCount: Math.max(0, topic.messageCount - 1) });
+      }
+      const offset = (await this.store.head(spaceId)) + 1;
+      await this.append(spaceId, offset, at, {
+        type: 'message_deleted',
+        deletion: { spaceId, topicId: message.topicId, messageId, by, at },
+      });
+      return withReactions({ ...message, body: '', deletedAt: at });
+    });
+  }
+
+  /**
    * Toggle a reaction (Slack semantics): any member, any message in the
    * space, one per (member, emoji). Re-adding what exists / removing what
    * doesn't is an idempotent no-op — no write, no event. Returns the message
@@ -671,6 +724,10 @@ export class HarborService {
     return this.store.withSpaceLock(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
+      if (message.deletedAt && input.action === 'add') {
+        // Removes stay legal so people can clean up reactions left on a tombstone.
+        throw new HarborError('invalid_request', 'cannot react to a deleted message');
+      }
       const existing = await this.store.getReaction(spaceId, messageId, input.emoji, ctx.memberId);
       const at = this.now();
 

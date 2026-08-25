@@ -132,6 +132,25 @@ describe('SpacesClient', () => {
     expect(removed.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'] }]);
   });
 
+  it('deletion tombstones the message: author-only, body gone from reads', async () => {
+    const started = await ramnique.postMessage(spaceId, { body: 'posted in the wrong space', actingMode: 'direct' });
+    const messageId = started.message.id;
+
+    await expect(gagan.deleteMessage(spaceId, messageId, { actingMode: 'direct' })).rejects.toMatchObject({
+      code: 'forbidden',
+      status: 403,
+    });
+
+    const deleted = await ramnique.deleteMessage(spaceId, messageId, { actingMode: 'direct' });
+    expect(deleted.body).toBe('');
+    expect(deleted.deletedAt).toBeTruthy();
+
+    const { messages } = await gagan.listMessages(spaceId, started.topic.id);
+    const tombstone = messages.find((m) => m.id === messageId);
+    expect(tombstone?.body).toBe('');
+    expect(tombstone?.deletedAt).toBe(deleted.deletedAt);
+  });
+
   it('blob upload → binary propose → listing → fetch round-trip', async () => {
     const bytes = new TextEncoder().encode('%PDF-1.4 pretend-pdf payload');
     const blob = await ramnique.uploadBlob(spaceId, bytes, { declaredMime: 'application/pdf' });

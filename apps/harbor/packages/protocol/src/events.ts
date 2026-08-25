@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Membership, Message, Reaction, Topic } from './core.js';
+import { Membership, Message, MessageDeletion, Reaction, Topic } from './core.js';
 import { MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
@@ -24,6 +24,17 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     type: z.literal('reaction'),
     reaction: Reaction,
     action: z.enum(['added', 'removed']),
+  }),
+  /**
+   * A message tombstoned by its author. The stored `message` event is
+   * redacted in place (body '', deletedAt set) — the one mutation the log
+   * allows, because deletion's whole point is that the content is gone,
+   * replay included. This event is what live/folding clients apply.
+   * Re-deleting is an idempotent no-op and emits nothing.
+   */
+  z.object({
+    type: z.literal('message_deleted'),
+    deletion: MessageDeletion,
   }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
