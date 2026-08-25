@@ -1,8 +1,9 @@
-// Builtin tools: image generation domain. Dual-mode like web-search: a
-// signed-in user renders through the Rowboat gateway first, falling back to
-// the user's own image-capable provider (OpenRouter, Google, OpenAI, Ollama,
-// or an OpenAI-compatible server); BYOK-only users go straight to their
-// provider. Available when either path exists.
+// Builtin tools: image generation domain. Renders with the image model the
+// user picked in model settings (models.json `imageModel`, seeded with the
+// Rowboat gateway's default on sign-in) — the same durable
+// { provider, model } selection text models use. Nothing is resolved at
+// runtime and nothing falls back: the configured provider's error is the
+// tool's error. Unavailable until an image model is configured.
 
 import { z } from "zod";
 import * as path from "path";
@@ -22,28 +23,13 @@ import type { IModelConfigRepo } from "../../../models/repo.js";
 import { BuiltinToolsSchema } from "../types.js";
 import type { ToolContext } from "../exec-tool.js";
 
-// The gateway's image model until it publishes an official default. Kept
-// separate from the BYOK defaults so they can diverge.
-const GATEWAY_IMAGE_MODEL = "google/gemini-2.5-flash-image";
-
-// Per-flavor BYOK defaults, each in its provider's own naming (only
-// OpenRouter prefixes the vendor). openai-compatible has NO default — the
-// server's catalog is unknowable, so the user must name the model.
-const OPENROUTER_IMAGE_MODEL = "google/gemini-2.5-flash-image";
-const GOOGLE_IMAGE_MODEL = "gemini-2.5-flash-image";
-// Newest id the installed @ai-sdk/openai documents (beyond gpt-image-1).
-const OPENAI_IMAGE_MODEL = "gpt-image-2";
-// Ollama's launch image model, published under the `x/` namespace; must be
-// pulled locally (`ollama pull x/z-image-turbo`).
-const OLLAMA_IMAGE_MODEL = "x/z-image-turbo";
-
-type ImageFlavor = "openrouter" | "google" | "openai" | "ollama" | "openai-compatible";
+// BYOK flavors that can build an AI SDK image model. "rowboat" (the
+// signed-in gateway) is the credential-less sixth path; anthropic /
+// aigateway / codex have no image surface here.
+type ImageFlavor = "openrouter" | "google" | "openai" | "ollama" | "openai-compatible" | "rowboat";
 
 interface ImageBackend {
     flavor: ImageFlavor;
-    config: z.infer<typeof LlmProvider>;
-    /** null = no safe default for this flavor; the user must name a model. */
-    defaultModel: string | null;
     makeImageModel: (modelId: string) => ImageModel;
 }
 
@@ -57,38 +43,31 @@ function ollamaV1BaseURL(baseURL: string | undefined): string {
     return `${host}/v1`;
 }
 
-// The per-flavor image entry point. Providers are built directly (not via
-// createProvider) — that path casts to ProviderV4 and predates image use;
-// building here keeps each flavor's own imageModel typing intact.
+// The per-flavor image entry point for a BYOK provider entry. Providers are
+// built directly (not via createProvider) — that path casts to ProviderV4
+// and predates image use; building here keeps each flavor's own imageModel
+// typing intact. null = the flavor has no image surface.
 function makeBackend(config: z.infer<typeof LlmProvider>): ImageBackend | null {
     const { apiKey, baseURL, headers } = config;
     switch (config.flavor) {
         case "openrouter":
             return {
                 flavor: "openrouter",
-                config,
-                defaultModel: OPENROUTER_IMAGE_MODEL,
                 makeImageModel: (id) => createOpenRouter({ apiKey, baseURL, headers }).imageModel(id),
             };
         case "google":
             return {
                 flavor: "google",
-                config,
-                defaultModel: GOOGLE_IMAGE_MODEL,
                 makeImageModel: (id) => createGoogleGenerativeAI({ apiKey, baseURL, headers }).imageModel(id),
             };
         case "openai":
             return {
                 flavor: "openai",
-                config,
-                defaultModel: OPENAI_IMAGE_MODEL,
                 makeImageModel: (id) => createOpenAI({ apiKey, baseURL, headers }).imageModel(id),
             };
         case "ollama":
             return {
                 flavor: "ollama",
-                config,
-                defaultModel: OLLAMA_IMAGE_MODEL,
                 makeImageModel: (id) => createOpenAICompatible({
                     name: "ollama",
                     apiKey,
@@ -99,8 +78,6 @@ function makeBackend(config: z.infer<typeof LlmProvider>): ImageBackend | null {
         case "openai-compatible":
             return {
                 flavor: "openai-compatible",
-                config,
-                defaultModel: null,
                 makeImageModel: (id) => createOpenAICompatible({
                     name: "openai-compatible",
                     apiKey,
@@ -113,26 +90,55 @@ function makeBackend(config: z.infer<typeof LlmProvider>): ImageBackend | null {
     }
 }
 
-// First image-capable provider from models.json, with the assistant model's
-// provider tried first (mirrors the models catalog ordering). An unreadable
-// config just gates the tool off rather than erroring.
-async function resolveImageBackend(): Promise<ImageBackend | null> {
+const NO_IMAGE_MODEL_ERROR = "No image model configured. Pick one under model settings → Image model: signed-in users can use the Rowboat gateway; otherwise choose an OpenRouter, Google, OpenAI, Ollama, or OpenAI-compatible provider and one of its image models.";
+
+type ImageResolution =
+    | { ok: true; backend: ImageBackend; model: string }
+    | { ok: false; error: string };
+
+// The configured image model, resolved to a backend — the ONE decision path
+// for both availability and execution so the two can never disagree.
+// "rowboat" is the gateway (needs sign-in); any other provider id is an
+// entry in models.json's providers map. No provider walk, no defaults.
+async function resolveImageBackend(): Promise<ImageResolution> {
+    let cfg;
     try {
         const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
-        const cfg = await repo.getConfig();
-        const assistantProvider = cfg.assistantModel?.provider ?? "";
-        const ids = Object.keys(cfg.providers)
-            .sort((a, b) => (a === assistantProvider ? -1 : b === assistantProvider ? 1 : 0));
-        for (const id of ids) {
-            const entry = cfg.providers[id];
-            if (!entry) continue;
-            const backend = makeBackend(entry);
-            if (backend) return backend;
-        }
-        return null;
+        cfg = await repo.getConfig();
     } catch {
-        return null;
+        // Fresh install before ensureConfig ran, or an unreadable file.
+        return { ok: false, error: NO_IMAGE_MODEL_ERROR };
     }
+    const selection = cfg.imageModel;
+    if (!selection) return { ok: false, error: NO_IMAGE_MODEL_ERROR };
+    if (selection.provider === "rowboat") {
+        if (!(await isSignedIn())) {
+            return {
+                ok: false,
+                error: "The configured image model runs on the Rowboat gateway, but you are signed out. Sign in, or pick another image model in model settings.",
+            };
+        }
+        return {
+            ok: true,
+            backend: { flavor: "rowboat", makeImageModel: (id) => getGatewayProvider().imageModel(id) },
+            model: selection.model,
+        };
+    }
+    const entry = cfg.providers[selection.provider];
+    if (!entry) {
+        return {
+            ok: false,
+            error: `The configured image model references provider '${selection.provider}', which is not set up. Reconnect it or pick another image model in model settings.`,
+        };
+    }
+    const backend = makeBackend(entry);
+    if (!backend) {
+        return {
+            ok: false,
+            error: `The configured image model's provider '${selection.provider}' (${entry.flavor}) does not support image generation. Pick an OpenRouter, Google, OpenAI, Ollama, or OpenAI-compatible provider in model settings.`,
+        };
+    }
+    return { ok: true, backend, model: selection.model };
 }
 
 // Filesystem-safe basename: lowercase, [a-z0-9-] only, no leading/trailing
@@ -158,11 +164,15 @@ const ASPECT_RATIO_SHAPE = /^(auto|\d+(\.\d+)?:\d+(\.\d+)?)$/;
 const GENERIC_MODEL_TOKENS = new Set(["image", "preview", "pro", "flash", "lite", "turbo", "quality"]);
 
 // The unknown-model shape, shared by the error text and the did-you-mean
-// lookup so the two can never disagree about what a 404 is.
+// lookup so the two can never disagree about what a 404 is. "No endpoints"
+// is OpenRouter's (and so the gateway's) wording for an id it can't route.
 function isModelNotFoundError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
-    return statusCode === 404 || message.includes("404") || /model.*not.*found/i.test(message);
+    return statusCode === 404
+        || message.includes("404")
+        || /no endpoints/i.test(message)
+        || /model.*not.*found|unknown model/i.test(message);
 }
 
 // Best-effort "did you mean" for an unknown OpenRouter image model. The
@@ -209,7 +219,8 @@ async function suggestOpenRouterImageModels(requestedId: string): Promise<string
 
 // Readable failure text for the common image-generation faults, tuned per
 // flavor; always carries the underlying error message so nothing is
-// swallowed.
+// swallowed. The gateway gets its own framing where the fix differs: its
+// auth is the sign-in (no key to check) and its catalog is an allowlist.
 function describeImageError(error: unknown, modelId: string, flavor: ImageFlavor): string {
     const message = error instanceof Error ? error.message : String(error);
     if (NoImageGeneratedError.isInstance(error)) {
@@ -220,37 +231,27 @@ function describeImageError(error: unknown, modelId: string, flavor: ImageFlavor
         return `Could not reach Ollama. Is Ollama running? (ollama serve) (${message})`;
     }
     if (statusCode === 402 || message.includes("402")) {
+        if (flavor === "rowboat") {
+            return `Your Rowboat account reported a billing problem (HTTP 402) — check your plan and credits. (${message})`;
+        }
         return flavor === "openrouter"
             ? `OpenRouter account is out of credits (HTTP 402). Add credits at openrouter.ai to generate images. (${message})`
             : `Your ${flavor} account reported a billing problem (HTTP 402). (${message})`;
     }
     if (isModelNotFoundError(error)) {
+        if (flavor === "rowboat") {
+            return `Image model '${modelId}' was not found on the Rowboat gateway — it may not be on the gateway's image allowlist (GET /v1/llm/models?output_modalities=image lists it). Pick a listed model in model settings. (${message})`;
+        }
         const pullHint = flavor === "ollama" ? ` Pull it first: ollama pull ${modelId}.` : "";
         return `Image model '${modelId}' was not found on ${flavor} (HTTP 404).${pullHint} (${message})`;
     }
     if (statusCode === 401 || statusCode === 403 || /unauthorized|API_KEY_INVALID|invalid.{0,10}api.?key|incorrect api key/i.test(message)) {
+        if (flavor === "rowboat") {
+            return `The Rowboat gateway rejected the request as unauthorized — your sign-in may have expired. Sign in again. (${message})`;
+        }
         return `The ${flavor} provider rejected the request as unauthorized — its API key may be invalid or missing. Check the ${flavor} entry in model settings. (${message})`;
     }
     return `Image generation failed: ${message}`;
-}
-
-// Gateway failures get their own framing: a 404 / "No endpoints" /
-// unknown-model shape most likely means the gateway doesn't route image
-// models yet. The raw error text is kept verbatim so the failure can be
-// diagnosed from the tool result alone.
-function describeGatewayError(error: unknown): string {
-    const message = error instanceof Error ? error.message : String(error);
-    const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
-    if (
-        statusCode === 404
-        || message.includes("404")
-        || /no endpoints/i.test(message)
-        || /model.*not.*found|unknown model/i.test(message)
-        || NoImageGeneratedError.isInstance(error)
-    ) {
-        return `The Rowboat gateway may not expose image generation yet (model '${GATEWAY_IMAGE_MODEL}'). Raw error: ${message}`;
-    }
-    return `Image generation via the Rowboat gateway failed: ${message}`;
 }
 
 // OpenAI's image API takes a fixed `size` rather than an aspect ratio (the
@@ -288,7 +289,7 @@ function formatWarnings(warnings: Warning[]): string[] {
 // generateText + responseModalities branch is needed.) The turn's abort
 // signal rides along so a stopped turn cancels the (billed) request.
 async function runImageGeneration(
-    backend: Pick<ImageBackend, "flavor" | "makeImageModel">,
+    backend: ImageBackend,
     modelId: string,
     prompt: string,
     aspectRatio: `${number}:${number}` | undefined,
@@ -300,8 +301,8 @@ async function runImageGeneration(
     const result = await generateImage({
         model: backend.makeImageModel(modelId),
         prompt,
-        // OpenAI takes size, everyone else takes the ratio; sending both
-        // would only add a second warning.
+        // OpenAI takes size, everyone else (the gateway fronts OpenRouter)
+        // takes the ratio; sending both would only add a second warning.
         ...(size ? { size } : aspectRatio ? { aspectRatio } : {}),
         abortSignal: signal,
     });
@@ -344,17 +345,14 @@ async function saveGeneratedImage(
 export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
     'generate-image': {
         permission: "none",
-        description: "Generate an image from a text prompt. Use this tool whenever the user asks to generate, create, or draw an image or picture. It renders the prompt with the default image model — unless the user explicitly names one — and saves the result as an image file, returning the saved file's absolute path. After a successful call, present that path to the user wrapped in a ```filepath code block. The prompt should be a vivid, self-contained description of the desired image.",
+        description: "Generate an image from a text prompt. Use this tool whenever the user asks to generate, create, or draw an image or picture. It renders the prompt with the image model configured in model settings — unless the user explicitly names one — and saves the result as an image file, returning the saved file's absolute path. After a successful call, present that path to the user wrapped in a ```filepath code block. The prompt should be a vivid, self-contained description of the desired image.",
         inputSchema: z.object({
             prompt: z.string().describe('A vivid, self-contained description of the image to generate. Include the subject, style, setting, and any important details.'),
             filename: z.string().optional().describe('Short kebab-case basename for the saved file, without extension (e.g. "sunset-over-lake"). Derived from the prompt when omitted.'),
             aspectRatio: z.string().optional().describe('Aspect ratio of the image as width:height — common values are "1:1", "16:9", "9:16", "4:3" — or "auto". Only pass this when the user asks for a specific shape.'),
-            model: z.string().optional().describe('Image model id in the ACTIVE provider\'s naming: OpenRouter "vendor/model" (e.g. "x-ai/grok-imagine-image-quality", "bytedance-seed/seedream-4.5", "google/gemini-2.5-flash-image"), Google "gemini-…" (e.g. "gemini-2.5-flash-image"), OpenAI "gpt-image-…", Ollama a locally pulled model name. Pass ONLY when the user explicitly names an image model or provider (e.g. "use gpt-image-1", "make it with Grok"); omit otherwise to use the default model.'),
+            model: z.string().optional().describe('Image model id to use INSTEAD of the configured one, on the SAME configured provider (the provider cannot be changed per call). Use that provider\'s naming: Rowboat gateway / OpenRouter "vendor/model" (e.g. "google/gemini-2.5-flash-image", "x-ai/grok-imagine-image-quality", "bytedance-seed/seedream-4.5"), Google "gemini-…" (e.g. "gemini-2.5-flash-image"), OpenAI "gpt-image-…", Ollama a locally pulled model name. Pass ONLY when the user explicitly names an image model (e.g. "use gpt-image-1", "make it with Grok"); omit otherwise to use the configured model.'),
         }),
-        isAvailable: async () => {
-            if (await isSignedIn()) return true;
-            return (await resolveImageBackend()) !== null;
-        },
+        isAvailable: async () => (await resolveImageBackend()).ok,
         execute: async (
             { prompt, filename, aspectRatio, model }: { prompt: string; filename?: string; aspectRatio?: string; model?: string },
             ctx?: ToolContext,
@@ -377,102 +375,41 @@ export const imageTools: z.infer<typeof BuiltinToolsSchema> = {
             if (modelOverride && !MODEL_ID_SHAPE.test(modelOverride)) {
                 return {
                     success: false,
-                    error: `Invalid image model id '${modelOverride}'. Use the active provider's naming — OpenRouter "vendor/model" (e.g. "x-ai/grok-imagine-image-quality", "bytedance-seed/seedream-4.5"), Google "gemini-…", OpenAI "gpt-image-…", Ollama a locally pulled model name.`,
+                    error: `Invalid image model id '${modelOverride}'. Use the configured provider's naming — Rowboat gateway / OpenRouter "vendor/model" (e.g. "google/gemini-2.5-flash-image", "x-ai/grok-imagine-image-quality"), Google "gemini-…", OpenAI "gpt-image-…", Ollama a locally pulled model name.`,
                 };
             }
 
-            // One config read serves the whole call: the same backend gates
-            // model overrides, is the gateway fallback, and runs BYOK.
-            const backend = await resolveImageBackend();
-
-            // Signed-in: the gateway is the primary path; the user's own
-            // provider (when configured) is the fallback, with the gateway
-            // failure noted on the result. The gateway always renders
-            // GATEWAY_IMAGE_MODEL — gateway billing is Rowboat's, so per-call
-            // model overrides are not offered there — and an explicit model
-            // choice skips it and runs on the user's own provider.
-            let gatewayNote: string | undefined;
-            if (await isSignedIn()) {
-                if (modelOverride) {
-                    if (!backend) {
-                        return {
-                            success: false,
-                            error: `Choosing a specific image model requires your own provider (OpenRouter, Google, OpenAI, Ollama, or an OpenAI-compatible server). Add one in model settings, or omit the model to use the default (${GATEWAY_IMAGE_MODEL}).`,
-                        };
-                    }
-                } else {
-                    try {
-                        // The gateway fronts OpenRouter, so it takes the ratio
-                        // the same way the openrouter flavor does.
-                        const { image, warnings } = await runImageGeneration(
-                            { flavor: "openrouter", makeImageModel: (id) => getGatewayProvider().imageModel(id) },
-                            GATEWAY_IMAGE_MODEL,
-                            prompt,
-                            aspect,
-                            signal,
-                        );
-                        const filePath = await saveGeneratedImage(image, filename, prompt);
-                        return {
-                            success: true,
-                            path: filePath,
-                            provider: "rowboat",
-                            model: GATEWAY_IMAGE_MODEL,
-                            ...(warnings.length > 0 ? { warnings } : {}),
-                        };
-                    } catch (error) {
-                        // A stopped turn is not a gateway fault: let it
-                        // propagate so the runtime records the cancellation
-                        // instead of retrying on the user's own provider.
-                        if (signal?.aborted) throw error;
-                        // Only a backend that can run without an explicit
-                        // model is a usable fallback here (openai-compatible
-                        // has no default).
-                        if (!backend?.defaultModel) {
-                            return {
-                                success: false,
-                                error: describeGatewayError(error),
-                            };
-                        }
-                        const message = error instanceof Error ? error.message : String(error);
-                        gatewayNote = `Rowboat gateway image call failed (${message.slice(0, 120)}); used your ${backend.flavor} provider instead.`;
-                    }
-                }
+            const resolved = await resolveImageBackend();
+            if (!resolved.ok) {
+                return { success: false, error: resolved.error };
             }
-
-            if (!backend) {
-                return {
-                    success: false,
-                    error: "No image-capable model provider configured. Add an OpenRouter, Google, OpenAI, Ollama, or OpenAI-compatible provider in model settings to enable image generation.",
-                };
-            }
-
-            const byokModel = modelOverride ?? backend.defaultModel;
-            if (!byokModel) {
-                return {
-                    success: false,
-                    error: `Your ${backend.flavor} provider has no default image model. Ask again naming the image model your server hosts (e.g. "generate ... with <model-id>").`,
-                };
-            }
+            const { backend } = resolved;
+            // An explicit model swaps only the id; the provider stays the
+            // configured one (the gateway's allowlist is enforced server-
+            // side, so an unlisted id there fails like any unknown model).
+            const modelId = modelOverride ?? resolved.model;
 
             try {
-                const { image, warnings } = await runImageGeneration(backend, byokModel, prompt, aspect, signal);
+                const { image, warnings } = await runImageGeneration(backend, modelId, prompt, aspect, signal);
                 const filePath = await saveGeneratedImage(image, filename, prompt);
                 return {
                     success: true,
                     path: filePath,
                     provider: backend.flavor,
-                    model: byokModel,
+                    model: modelId,
                     ...(warnings.length > 0 ? { warnings } : {}),
-                    ...(gatewayNote ? { note: gatewayNote } : {}),
                 };
             } catch (error) {
+                // A stopped turn is not a provider fault: let it propagate so
+                // the runtime records the cancellation.
                 if (signal?.aborted) throw error;
-                let errorText = describeImageError(error, byokModel, backend.flavor);
+                let errorText = describeImageError(error, modelId, backend.flavor);
                 // An unknown OpenRouter id is usually a near-miss on a real
                 // one; the catalog lookup is decorative and never changes the
-                // outcome when it fails.
+                // outcome when it fails. (Not for the gateway: its allowlist,
+                // not OpenRouter's catalog, decides what it serves.)
                 if (backend.flavor === "openrouter" && isModelNotFoundError(error)) {
-                    const suggestions = await suggestOpenRouterImageModels(byokModel);
+                    const suggestions = await suggestOpenRouterImageModels(modelId);
                     if (suggestions && suggestions.length > 0) {
                         errorText += ` Did you mean: ${suggestions.join(", ")}?`;
                     }
