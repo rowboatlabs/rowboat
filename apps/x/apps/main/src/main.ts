@@ -27,7 +27,7 @@ import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
 import { DEV_SERVER_URL } from "./dev-server.js";
 import { stopSkillsWatcher } from "@x/core/dist/runtime/assembly/skills/watcher.js";
-import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
+import { shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
 import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
@@ -37,7 +37,7 @@ import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { prepareCoreData, initCoreServices } from "@x/core/dist/boot/services.js";
-import { startServerHost, stopServerHost } from "./server-host.js";
+import { startServerHost, stopServerHost, childServerMode } from "./server-host.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
@@ -560,7 +560,7 @@ app.whenReady().then(async () => {
   // every app iframe hit connection-refused (blank app) for the first ~10s of
   // each launch. Route registration and the token cipher are synchronous;
   // the listen itself is fire-and-forget.
-  registerAppsHostApi();
+  if (!childServerMode()) registerAppsHostApi();
   // GitHub publish token at rest: encrypt via the OS keychain when available
   // (core stays electron-free; the cipher is injected here).
   setGithubTokenCipher({
@@ -573,9 +573,6 @@ app.whenReady().then(async () => {
     isAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
-  });
-  initAppsServer().catch((error) => {
-    console.error('[Apps] Failed to start:', error);
   });
 
   // Resident app (Granola-style): register as an OS login item once, on the
@@ -654,18 +651,25 @@ app.whenReady().then(async () => {
   // start runs watcher
   startRunsWatcher();
 
-  // One-time data repairs (legacy runs migration, code-session chat
-  // backfill) — shared with the standalone server boot.
-  await prepareCoreData();
+  if (!childServerMode()) {
+    // One-time data repairs (legacy runs migration, code-session chat
+    // backfill) — shared with the standalone server boot.
+    await prepareCoreData();
+  }
   // New runtime: build the in-memory session index (startup scan), then
   // forward the session bus to windows. The renderer window is already up and
   // may have called sessions:list — that handler blocks on
   // markSessionsIndexReady, which must fire even if the scan throws so the
   // list never hangs.
-  try {
-    await container.resolve<ISessions>('sessions').initialize();
-  } finally {
+  if (childServerMode()) {
+    // The child owns the session index; main's in-process gate is moot.
     markSessionsIndexReady();
+  } else {
+    try {
+      await container.resolve<ISessions>('sessions').initialize();
+    } finally {
+      markSessionsIndexReady();
+    }
   }
   startSessionsWatcher();
   startConnectorEventsWatcher();
@@ -715,8 +719,10 @@ app.whenReady().then(async () => {
 
   // Schedulers, sync services, event processor, background agents — the
   // headless-safe half of boot, shared with the standalone rowboat-server
-  // (Phase 6, SEPARATION_PLAN.md).
-  await initCoreServices();
+  // (Phase 6, SEPARATION_PLAN.md). In child-server mode the child runs them.
+  if (!childServerMode()) {
+    await initCoreServices();
+  }
 
   app.on("activate", () => {
     // Reveal the hidden/closed main window (login launches start hidden).

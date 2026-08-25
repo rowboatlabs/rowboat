@@ -13,6 +13,7 @@ import { acquireWorkdirLock } from './lock.js';
 import { createRpcRoutes } from './router.js';
 import { createWorkspaceRoutes } from './workspace-route.js';
 import { createWsHub, type WsHub } from './ws-hub.js';
+import { setCapabilityTransport } from './capabilities.js';
 
 // Assembles the transport: HTTP router + workspace files + WS event hub on
 // one node:http server. Deliberately does NOT boot @x/core — the host (today
@@ -170,6 +171,11 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
   const boundPort = typeof address === 'object' && address ? address.port : startPort;
 
   const hub = createWsHub();
+  setCapabilityTransport({
+    request: (capability, payload, opts) => hub.requestCapability(capability, payload, opts),
+    broadcast: (capability, payload) => hub.broadcastCapability(capability, payload),
+    hasCapableClient: (capability) => hub.hasCapableClient(capability),
+  });
   hub.attach(httpServer, {
     serverKey: key,
     serverVersion: opts.serverVersion,

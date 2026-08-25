@@ -58,6 +58,9 @@ importers:
       '@agentclientprotocol/codex-acp':
         specifier: ^1.2.0
         version: 1.2.0
+      '@x/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@x/core':
         specifier: workspace:*
         version: link:../../packages/core

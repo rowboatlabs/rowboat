@@ -21,10 +21,16 @@ export type PushChannel =
 
 interface ServerMessage {
   seq: number;
-  type: 'welcome' | 'event' | 'error';
+  type: 'welcome' | 'event' | 'error' | 'capability-request';
   channel?: PushChannel;
   payload?: unknown;
+  id?: string;
+  capability?: string;
+  fireAndForget?: boolean;
 }
+
+/** Handler for a server→client reverse call (RFC Q14). */
+export type CapabilityHandler = (payload: unknown) => Promise<unknown> | unknown;
 
 export interface EventsClient {
   /** Listen to one push channel. Returns unsubscribe. */
@@ -53,6 +59,11 @@ export function createEventsClient(opts: {
   clientVersion?: string;
   /** Fired on a 4401 close — the server key was rotated; stop reconnecting. */
   onUnauthorized?: () => void;
+  /**
+   * Capabilities this client performs for the server (declared in the hello;
+   * requests arrive as capability-request messages and are answered here).
+   */
+  capabilities?: Record<string, CapabilityHandler>;
 }): EventsClient {
   const wsUrl = `${opts.baseUrl.replace(/\/+$/, '').replace(/^http/, 'ws')}/events`;
 
@@ -109,7 +120,7 @@ export function createEventsClient(opts: {
         type: 'hello',
         v: 1,
         client: { name: opts.clientName, version: opts.clientVersion },
-        capabilities: [],
+        capabilities: Object.keys(opts.capabilities ?? {}),
       });
     };
 
@@ -138,6 +149,24 @@ export function createEventsClient(opts: {
         }
         if (everConnected) fireResync();
         everConnected = true;
+        return;
+      }
+      if (msg.type === 'capability-request' && msg.capability && msg.id) {
+        const handler = opts.capabilities?.[msg.capability];
+        const reply = (ok: boolean, result?: unknown, error?: string) => {
+          if (!msg.fireAndForget) send({ type: 'capability-response', id: msg.id, ok, result, error });
+        };
+        if (!handler) {
+          reply(false, undefined, `capability '${msg.capability}' not provided`);
+          return;
+        }
+        void (async () => {
+          try {
+            reply(true, await handler(msg.payload));
+          } catch (err) {
+            reply(false, undefined, err instanceof Error ? err.message : String(err));
+          }
+        })();
         return;
       }
       if (msg.type === 'event' && msg.channel) {
