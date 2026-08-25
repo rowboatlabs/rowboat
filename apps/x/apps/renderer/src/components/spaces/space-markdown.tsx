@@ -166,7 +166,7 @@ function BlobImage({ src, alt }: { src: string; alt: string }) {
 }
 
 /** A direct https image address — the path itself names an image (query strings welcome). */
-function isDirectImageUrl(url: string): boolean {
+export function isDirectImageUrl(url: string): boolean {
     try {
         const u = new URL(url)
         return u.protocol === 'https:' && /\.(gif|png|jpe?g|webp)$/i.test(u.pathname)
@@ -189,6 +189,19 @@ function plainLabel(children: ReactNode): string | null {
 function ExternalImage({ src, alt }: { src: string; alt: string }) {
     const [failed, setFailed] = useState(false)
     const [open, setOpen] = useState(false)
+    const [saving, setSaving] = useState(false)
+    const save = async () => {
+        if (saving) return
+        setSaving(true)
+        try {
+            const res = await window.ipc.invoke('spaces:saveImageUrl', { url: src })
+            if (res.saved) toast('Saved', 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not download', 'error')
+        } finally {
+            setSaving(false)
+        }
+    }
     if (failed) {
         return (
             <a href={src} target="_blank" rel="noreferrer">
@@ -208,6 +221,9 @@ function ExternalImage({ src, alt }: { src: string; alt: string }) {
                 className="my-1 block max-h-80 max-w-full cursor-zoom-in rounded-lg border border-border object-contain"
             />
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
+                <button type="button" onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">
+                    {saving ? 'Saving…' : 'Download'}
+                </button>
                 <a href={src} target="_blank" rel="noreferrer" className="text-white/80 hover:text-white hover:underline">
                     Open original
                 </a>

@@ -11,10 +11,10 @@ import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { MemberName, MemberText } from '@/components/spaces/member-text'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
-import type { SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
-import { usePresenceSender } from '@/hooks/use-space-chat'
+import type { ChatMessage, SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
+import { buildPendingMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { artifactsForThread, explicitTitle, isContinuation, stripThreadMarker } from '@/lib/spaces-conventions'
+import { artifactsForThread, explicitTitle, isContinuation, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
 import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -54,9 +54,8 @@ export function ThreadPane({
     onFolding?: (busy: boolean) => void
 }) {
     const [topic, setTopic] = useState<spaces.Topic | null>(topicFromList ?? null)
-    const [messages, setMessages] = useState<spaces.Message[]>([])
+    const [messages, setMessages] = useState<ChatMessage[]>([])
     const [loaded, setLoaded] = useState(false)
-    const [posting, setPosting] = useState(false)
     const [folding, setFolding] = useState(false)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, topicId)
@@ -70,7 +69,14 @@ export function ThreadPane({
             .then((res) => {
                 if (cancelled) return
                 setTopic(res.topic)
-                setMessages(res.messages)
+                // A refetch must not eat optimistic sends: carry pending/failed
+                // rows the response doesn't already contain.
+                setMessages((prev) => [
+                    ...res.messages,
+                    ...prev.filter(
+                        (m) => (m.pending || m.failed) && !res.messages.some((r) => r.author.memberId === m.author.memberId && r.body === m.body),
+                    ),
+                ])
                 setLoaded(true)
                 markTopicRead(org.id, space.id, topicId)
             })
@@ -89,8 +95,10 @@ export function ThreadPane({
 
     const parent = threadInfo?.firstMessage ?? messages[0] ?? null
     const isThread = !!threadInfo?.parentMessageId
-    // Display metadata (who said the parent, when) still rides in the marker.
-    const marker = threadInfo?.marker ?? null
+    // Display metadata (who said the parent, when) rides in the seed's marker.
+    // The index no longer prefetches it on contract servers, so parse it from
+    // our own loaded copy of the seed.
+    const marker = threadInfo?.marker ?? (parent ? parseThreadMarker(parent.body) : null)
     const replies = messages.slice(1)
 
     // Echo a just-posted reply into the pane — the live event that would
@@ -100,21 +108,34 @@ export function ThreadPane({
         setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
     }
 
+    // Optimistic send, same shape as the stream's: render now (dimmed as
+    // pending), confirm — or fail into a retry/discard row — in the
+    // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
-        setPosting(true)
-        try {
-            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId, body })
-            echo(result.message)
-            markTopicRead(org.id, space.id, topicId)
-            analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
-            maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not post', 'error')
-            throw err
-        } finally {
-            setPosting(false)
-        }
+        const pending = buildPendingMessage(space.id, topicId, org.memberId, body)
+        setMessages((prev) => [...prev, pending])
+        markTopicRead(org.id, space.id, topicId)
+        void window.ipc
+            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId, body })
+            .then((result) => {
+                setMessages((prev) => {
+                    const rest = prev.filter((m) => m.id !== pending.id)
+                    return rest.some((m) => m.id === result.message.id) ? rest : [...rest, result.message].sort((a, b) => a.offset - b.offset)
+                })
+                markTopicRead(org.id, space.id, topicId)
+                analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
+                maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
+            })
+            .catch(() => {
+                setMessages((prev) => prev.map((m) => (m.id === pending.id ? { ...m, pending: false, failed: true } : m)))
+            })
     }
+
+    const retryFailed = (message: spaces.Message) => {
+        setMessages((prev) => prev.filter((m) => m.id !== message.id))
+        void post(message.body)
+    }
+    const discardFailed = (message: spaces.Message) => setMessages((prev) => prev.filter((m) => m.id !== message.id))
 
     // Fold = a visible ask to your own agent, posted in the thread, then invoked.
     const fold = async (path: string) => {
@@ -214,6 +235,8 @@ export function ThreadPane({
                 selfMemberId={org.memberId}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
+                onRetryFailed={retryFailed}
+                onDiscardFailed={discardFailed}
                 dense
             />,
         )
@@ -361,7 +384,7 @@ export function ThreadPane({
                 <div ref={bottomRef} />
             </div>
 
-            <Composer placeholder="Reply…" busy={posting} onSend={post} onType={onType} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />
+            <Composer placeholder="Reply…" busy={false} onSend={post} onType={onType} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />
 
         </div>
     )

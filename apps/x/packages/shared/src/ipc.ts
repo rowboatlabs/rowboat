@@ -3735,6 +3735,13 @@ const ipcSchemas = {
     }),
     res: z.object({ saved: z.boolean(), path: z.string().optional() }),
   },
+  // Save an external image (a pasted GIF/image link) to disk. Main fetches
+  // the URL — the renderer can't (CORS) — after the save dialog, so a
+  // cancel never downloads. https only. saved:false = the person cancelled.
+  'spaces:saveImageUrl': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
   // Live: renderer subscribes per space; frames arrive on 'spaces:events'
   // wrapped with their orgId. Offset resume mirrors the turn-event spine.
   'spaces:subscribeSpace': {

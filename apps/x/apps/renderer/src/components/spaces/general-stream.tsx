@@ -5,7 +5,10 @@ import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
-import { ingestGeneralMessage, rememberThread, updateGeneralMessage, usePresenceSender } from '@/hooks/use-space-chat'
+import {
+    buildPendingMessage, failPendingGeneralMessage, ingestGeneralMessage, rememberThread, removeGeneralMessage,
+    resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
+} from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { buildThreadSeed, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
@@ -20,6 +23,9 @@ import { containsRowboatAddress } from '@/lib/spaces-mentions'
 
 /** Scroll position per space, so coming back (a topic, a file, the top ‹ ›) lands where you were. */
 const scrollMemory = new Map<string, number>()
+
+/** How many messages render at first; the data is local, so expanding is instant. */
+const RENDER_CAP = 100
 
 export function GeneralStream({
     org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onOpenSession,
@@ -37,7 +43,6 @@ export function GeneralStream({
     onOpenThread: (topicId: string) => void
     onOpenSession?: (sessionId: string) => void
 }) {
-    const [posting, setPosting] = useState(false)
     const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -98,8 +103,10 @@ export function GeneralStream({
         if (!topic) return null
         const mark = getTopicLastReadAt(org.id, space.id, topicId)
         const hasNew = !mark || topic.lastActivityAt > mark
-        // A renamed thread shows its name on the chip; auto-titled ones stay compact.
-        const named = explicitTitle(topic, threads.byTopic.get(topicId)?.firstMessage?.body)
+        // A renamed thread shows its name on the chip; auto-titled ones stay
+        // compact. Without the seed prefetch the parent message stands in —
+        // the seed's first line IS the parent's, so the comparison holds.
+        const named = explicitTitle(topic, threads.byTopic.get(topicId)?.firstMessage?.body ?? message.body)
         return {
             topicId,
             replyCount: Math.max(0, topic.messageCount - 1),
@@ -111,24 +118,33 @@ export function GeneralStream({
         }
     }
 
+    // Optimistic send (the Slack pattern): the message renders the moment
+    // Enter lands, dimmed as pending; the org's write confirms — or fails,
+    // leaving a retry/discard row — in the background. The composer never
+    // waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
         if (!generalId) return
-        setPosting(true)
-        try {
-            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId: generalId, body })
-            // Echo the saved message NOW — the live event may be seconds away,
-            // or the socket half-open after sleep, in which case it never comes.
-            ingestGeneralMessage(org.id, space.id, result.message)
-            markTopicRead(org.id, space.id, generalId)
-            analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
-            maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not post', 'error')
-            throw err
-        } finally {
-            setPosting(false)
-        }
+        const pending = buildPendingMessage(space.id, generalId, org.memberId, body)
+        ingestGeneralMessage(org.id, space.id, pending)
+        markTopicRead(org.id, space.id, generalId)
+        void window.ipc
+            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId: generalId, body })
+            .then((result) => {
+                resolvePendingGeneralMessage(org.id, space.id, pending.id, result.message)
+                markTopicRead(org.id, space.id, generalId)
+                analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
+                maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
+            })
+            .catch(() => {
+                failPendingGeneralMessage(org.id, space.id, pending.id)
+            })
     }
+
+    const retryFailed = (message: spaces.Message) => {
+        removeGeneralMessage(org.id, space.id, message.id)
+        void post(message.body)
+    }
+    const discardFailed = (message: spaces.Message) => removeGeneralMessage(org.id, space.id, message.id)
 
     const replyInThread = async (parent: spaces.Message) => {
         try {
@@ -188,13 +204,37 @@ export function GeneralStream({
         }
     }
 
+    // Long histories: render only the tail — every message is markdown through
+    // Streamdown, so an uncapped list makes the first paint crawl. "Show
+    // earlier" just lifts the cap; the messages are already in memory.
+    const streamMessages = useMemo(
+        () => general.messages.filter((m, i) => !(general.topic && isGeneralSeedMessage(general.topic, m, i))),
+        [general.messages, general.topic],
+    )
+    const [renderCap, setRenderCap] = useState(RENDER_CAP)
+    useEffect(() => setRenderCap(RENDER_CAP), [memoryKey])
+    const hiddenCount = Math.max(0, streamMessages.length - renderCap)
+    const visibleMessages = hiddenCount > 0 ? streamMessages.slice(hiddenCount) : streamMessages
+
     // Render: day dividers, compaction, the New line, thread rows.
     const rows: ReactNode[] = []
     let prev: spaces.Message | undefined
     let prevDay = ''
     let newShown = false
-    general.messages.forEach((message, index) => {
-        if (general.topic && isGeneralSeedMessage(general.topic, message, index)) return
+    if (hiddenCount > 0) {
+        rows.push(
+            <div key="earlier" className="flex justify-center py-2">
+                <button
+                    type="button"
+                    onClick={() => setRenderCap((c) => c + 200)}
+                    className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                >
+                    Show earlier messages ({hiddenCount} more)
+                </button>
+            </div>,
+        )
+    }
+    visibleMessages.forEach((message) => {
         // Deleted messages disappear — unless a thread grew from one, which
         // keeps a tombstone row so the thread stays reachable.
         const thread = threadRowFor(message)
@@ -224,6 +264,8 @@ export function GeneralStream({
                 onCopyLink={(m) => void copyLink(m)}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
+                onRetryFailed={retryFailed}
+                onDiscardFailed={discardFailed}
             />,
         )
         prev = message
@@ -276,7 +318,7 @@ export function GeneralStream({
             </div>
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
-                busy={posting || !generalId}
+                busy={!generalId}
                 onSend={post}
                 onType={onType}
                 seed={seed}

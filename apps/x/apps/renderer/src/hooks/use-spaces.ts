@@ -169,6 +169,17 @@ function emitFeed(): void {
 }
 
 const feedDirty = new Set<string>()
+const feedRefreshedAt = new Map<string, number>()
+
+/**
+ * True while a feed fetch is in flight or one landed moments ago — the
+ * "already covered" test that keeps the boot-time `subscribed` resync from
+ * double-fetching what the store just loaded.
+ */
+export function feedSyncedRecently(orgId: string, spaceId: string, withinMs = 5_000): boolean {
+    const key = liveKey(orgId, spaceId)
+    return feedInflight.has(key) || Date.now() - (feedRefreshedAt.get(key) ?? 0) < withinMs
+}
 
 export function refreshSpaceFeed(orgId: string, spaceId: string): Promise<void> {
     const key = liveKey(orgId, spaceId)
@@ -187,6 +198,7 @@ export function refreshSpaceFeed(orgId: string, spaceId: string): Promise<void> 
             const next = new Map(feedState)
             next.set(key, { topics: topicsRes.topics, changeSets: historyRes.changeSets, loaded: true })
             feedState = next
+            feedRefreshedAt.set(key, Date.now())
             emitFeed()
         } catch {
             // org unreachable; panes show their own error states
@@ -199,6 +211,8 @@ export function refreshSpaceFeed(orgId: string, spaceId: string): Promise<void> 
     return promise
 }
 
+const feedRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
 function wireFeedBus(): void {
     if (feedBusWired) return
     feedBusWired = true
@@ -206,7 +220,17 @@ function wireFeedBus(): void {
         const frame = event.frame
         if (frame.kind !== 'event') return
         const key = liveKey(event.orgId, frame.spaceId)
-        if (feedReleases.has(key)) void refreshSpaceFeed(event.orgId, frame.spaceId)
+        if (!feedReleases.has(key) || feedRefreshTimers.has(key)) return
+        // Trailing debounce: a burst of events (an agent replying, a thread's
+        // seed + reply, a reaction volley) lands as ONE topics+history
+        // refetch, not one per event.
+        feedRefreshTimers.set(
+            key,
+            setTimeout(() => {
+                feedRefreshTimers.delete(key)
+                void refreshSpaceFeed(event.orgId, frame.spaceId)
+            }, 400),
+        )
     })
 }
 

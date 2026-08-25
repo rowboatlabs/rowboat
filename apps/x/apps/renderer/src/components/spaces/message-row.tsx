@@ -139,9 +139,9 @@ export interface ThreadRowData {
 }
 
 export function MessageRow({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onRetryFailed, onDiscardFailed, dense, selfMemberId,
 }: {
-    message: spaces.Message
+    message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
     /** Names the viewer's own agent "Your Rowboat" on thread rows. */
     selfMemberId?: string
@@ -156,6 +156,9 @@ export function MessageRow({
     onReact?: (message: spaces.Message, emoji: string) => void
     /** Deletes the message — only offered on the viewer's own (the org enforces it too). */
     onDelete?: (message: spaces.Message) => void
+    /** A failed optimistic send: try it again / drop the row. */
+    onRetryFailed?: (message: spaces.Message) => void
+    onDiscardFailed?: (message: spaces.Message) => void
     /** Thread panes use the smaller avatar. */
     dense?: boolean
 }) {
@@ -166,8 +169,11 @@ export function MessageRow({
     // A tombstone renders only its note (and any thread row under it) — no
     // reactions, no hover actions; the deed is done.
     const deleted = !!message.deletedAt
-    const canDelete = !!onDelete && !deleted && selfMemberId === message.author.memberId
-    const showActions = !deleted && !!(onReplyInThread || onAskRowboat || onCopyLink || onReact || canDelete)
+    // Unconfirmed sends (pending or failed) have no server id yet — nothing
+    // can act on them either.
+    const unconfirmed = !!message.pending || !!message.failed
+    const canDelete = !!onDelete && !deleted && !unconfirmed && selfMemberId === message.author.memberId
+    const showActions = !deleted && !unconfirmed && !!(onReplyInThread || onAskRowboat || onCopyLink || onReact || canDelete)
     // While the emoji picker or the ⋯ menu is open the hover-revealed chrome
     // must stay put — unmounting it collapses the popper anchor and the menu
     // would jump to the viewport edge.
@@ -198,11 +204,26 @@ export function MessageRow({
                 {deleted ? (
                     <div className="text-sm italic leading-relaxed text-muted-foreground">This message was deleted</div>
                 ) : (
-                    <div className={MESSAGE_PROSE}>
+                    <div className={cn(MESSAGE_PROSE, message.pending && 'opacity-60')}>
                         <SpaceMarkdown body={message.body} />
                     </div>
                 )}
-                {!deleted && onReact && (
+                {message.failed && (
+                    <div className="mt-0.5 flex items-center gap-2 text-xs text-destructive">
+                        <span>Failed to send</span>
+                        {onRetryFailed && (
+                            <button type="button" onClick={() => onRetryFailed(message)} className="font-medium underline hover:no-underline">
+                                Retry
+                            </button>
+                        )}
+                        {onDiscardFailed && (
+                            <button type="button" onClick={() => onDiscardFailed(message)} className="underline hover:no-underline">
+                                Discard
+                            </button>
+                        )}
+                    </div>
+                )}
+                {!deleted && !unconfirmed && onReact && (
                     <ReactionChips
                         message={message}
                         memberNames={memberNames}

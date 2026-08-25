@@ -111,8 +111,12 @@ export function SpaceRail({
             const info = threads.byTopic.get(t.id)
             // A renamed topic shows its name; an auto-titled thread keeps
             // showing its seed text (its derived title is a noisy quote).
-            const named = explicitTitle(t, info?.firstMessage?.body)
-            const raw = named ?? (info?.parentMessageId && info.firstMessage ? stripThreadMarker(info.firstMessage.body).split('\n')[0] ?? t.title : t.title)
+            // Without the seed prefetch the PARENT message (already loaded in
+            // general) stands in — the seed's first line is the parent's.
+            const parentBody = info?.parentMessageId ? general.messages.find((m) => m.id === info.parentMessageId)?.body : undefined
+            const seedBody = info?.firstMessage ? stripThreadMarker(info.firstMessage.body) : parentBody
+            const named = explicitTitle(t, seedBody)
+            const raw = named ?? (info?.parentMessageId && seedBody ? seedBody.split('\n')[0] ?? t.title : t.title)
             // Titles resolve before the search filter so searching a person's
             // name finds the topics that mention them.
             return { topic: t, title: resolveMentions(raw, memberNames) }
