@@ -230,6 +230,32 @@ export const RPC_CHANNELS = [
   'bg-task:create',
   'bg-task:delete',
   'bg-task:stop',
+  // Phase 5 (SEPARATION_PLAN.md): code-mode & terminal — the PTY lives with
+  // core now (RFC Q13: the terminal shows the machine core runs on).
+  // codeMode:provisionEngine stays client-local (sender-scoped progress).
+  'codeRun:resolvePermission',
+  'codeMode:getConfig',
+  'codeMode:setConfig',
+  'codeMode:checkAgentStatus',
+  'codeMode:listModelOptions',
+  'codeProject:add',
+  'codeProject:remove',
+  'codeProject:list',
+  'codeSession:create',
+  'codeSession:list',
+  'codeSession:update',
+  'codeSession:delete',
+  'codeSession:stop',
+  'codeSession:gitStatus',
+  'codeSession:fileDiff',
+  'codeSession:readdir',
+  'codeSession:readFile',
+  'codeSession:mergeBack',
+  'codeSession:cleanupWorktree',
+  'terminal:ensure',
+  'terminal:input',
+  'terminal:resize',
+  'terminal:dispose',
 ] as const satisfies readonly ipc.InvokeChannels[];
 
 export type RpcChannel = (typeof RPC_CHANNELS)[number];

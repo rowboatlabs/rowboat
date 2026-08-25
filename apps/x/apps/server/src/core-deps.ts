@@ -106,6 +106,27 @@ import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowle
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
 import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
+import type { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
+import type { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
+import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
+import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js';
+import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
+import type { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
+import type { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
+import * as codeGit from '@x/core/dist/code-mode/git/service.js';
+import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
+import type { CodeSession } from '@x/shared/dist/code-sessions.js';
+import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal, subscribeTerminalEvents } from '@x/core/dist/terminal/terminal.js';
+
+async function requireCodeSession(sessionId: string): Promise<CodeSession> {
+  const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+  const session = await repo.get(sessionId);
+  if (!session) {
+    throw new Error(`Unknown code session: ${sessionId}`);
+  }
+  return session;
+}
 
 // Process-local caches mirrored from apps/main/src/ipc.ts — memoization only,
 // no cross-process invariants (each host keeps its own).
@@ -1327,6 +1348,141 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
+    // ── Phase 5: code-mode & terminal (verbatim lifts) ──
+    'codeRun:resolvePermission': async (args) => {
+      const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
+      registry.resolve(args.requestId, args.decision);
+      return { success: true };
+    },
+    'codeMode:getConfig': async () => {
+      const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+      const config = await repo.getConfig();
+      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy, defaultProjectId: config.defaultProjectId };
+    },
+    'codeMode:setConfig': async (args) => {
+      const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy, defaultProjectId: args.defaultProjectId });
+      invalidateCopilotInstructionsCache();
+      return { success: true };
+    },
+    'codeMode:checkAgentStatus': async () => {
+      return await checkCodeModeAgentStatus();
+    },
+    'codeMode:listModelOptions': async (args) => {
+      const manager = container.resolve<CodeModeManager>('codeModeManager');
+      return manager.listModelOptions(args.agent);
+    },
+    'codeProject:add': async (args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.add(args.path);
+      const git = await codeGit.repoInfo(project.path);
+      return { project, git };
+    },
+    'codeProject:remove': async (args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      await repo.remove(args.projectId);
+      return { success: true };
+    },
+    'codeProject:list': async () => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const projects = await repo.list();
+      return {
+        projects: await Promise.all(projects.map(async (project) => ({
+          project,
+          git: await codeGit.repoInfo(project.path),
+        }))),
+      };
+    },
+    'codeSession:create': async (args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      const session = await service.create(args);
+      capture('code_session_created', { agent: session.agent });
+      return { session };
+    },
+    'codeSession:list': async () => {
+      const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+      const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
+      return { sessions: await repo.list(), statuses: tracker.getStatuses() };
+    },
+    'codeSession:update': async (args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return { session: await service.update(args.sessionId, args.patch) };
+    },
+    'codeSession:delete': async (args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      disposeTerminal(args.sessionId);
+      await service.delete(args.sessionId, {
+        removeWorktree: args.removeWorktree,
+        deleteBranch: args.deleteBranch,
+      });
+      return { success: true };
+    },
+    'codeSession:stop': async (args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      await service.stop(args.sessionId);
+      return { success: true };
+    },
+    'codeSession:gitStatus': async (args) => {
+      const session = await requireCodeSession(args.sessionId);
+      const info = await codeGit.repoInfo(session.cwd);
+      if (!info.isGitRepo) {
+        return { isRepo: false, branch: null, hasCommits: false, files: [] };
+      }
+      let files = await codeGit.status(session.cwd);
+      if (session.worktree && !session.worktree.removedAt && session.worktree.baseBranch) {
+        const branchFiles = await codeGit.changedSinceBase(session.cwd, session.worktree.baseBranch);
+        const byPath = new Map(branchFiles.map((file) => [file.path, file]));
+        for (const file of files) {
+          if (!byPath.has(file.path)) byPath.set(file.path, file);
+        }
+        files = [...byPath.values()];
+      }
+      return { isRepo: true, branch: info.branch, hasCommits: info.hasCommits, files };
+    },
+    'codeSession:fileDiff': async (args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return codeGit.fileDiff(session.cwd, args.path, {
+        baseRef: session.worktree && !session.worktree.removedAt ? session.worktree.baseBranch : null,
+      });
+    },
+    'codeSession:readdir': async (args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return { entries: await readProjectDir(session.cwd, args.relPath) };
+    },
+    'codeSession:readFile': async (args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return readProjectFile(session.cwd, args.relPath);
+    },
+    'codeSession:mergeBack': async (args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return service.mergeBack(args.sessionId);
+    },
+    'codeSession:cleanupWorktree': async (args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      try {
+        await service.cleanupWorktree(args.sessionId, args.deleteBranch);
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to clean up worktree';
+        return { success: false, error: message };
+      }
+    },
+    'terminal:ensure': async (args) => {
+      return ensureTerminal(args.id, args.cwd, args.cols, args.rows);
+    },
+    'terminal:input': async (args) => {
+      writeTerminal(args.id, args.data);
+      return { success: true };
+    },
+    'terminal:resize': async (args) => {
+      resizeTerminal(args.id, args.cols, args.rows);
+      return { success: true };
+    },
+    'terminal:dispose': async (args) => {
+      disposeTerminal(args.id);
+      return { success: true };
+    },
+
 
     // Rowboat Apps handlers (spec §13)
 
@@ -1345,6 +1501,7 @@ export function createCoreEventSources(): EventSources {
     subscribeOAuthEvents: (listener) => oauthConnectBus.subscribe(listener),
     subscribeComposioEvents: (listener) => composioConnectBus.subscribe(listener),
     subscribeChatgptEvents: (listener) => chatgptStatusBus.subscribe(listener),
+    subscribeTerminalEvents: (listener) => subscribeTerminalEvents(listener),
   };
 }
 

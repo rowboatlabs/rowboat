@@ -27,6 +27,7 @@ export interface EventSources {
   subscribeOAuthEvents?(listener: (e: unknown) => void): () => void;
   subscribeComposioEvents?(listener: (e: unknown) => void): () => void;
   subscribeChatgptEvents?(listener: (e: unknown) => void): () => void;
+  subscribeTerminalEvents?(listener: (e: { channel: 'terminal:data' | 'terminal:exit'; payload: unknown }) => void): () => void;
 }
 
 export interface RowboatServerOptions {
@@ -183,6 +184,7 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
     opts.events.subscribeOAuthEvents?.((e) => hub.broadcast('oauth:didConnect', e)),
     opts.events.subscribeComposioEvents?.((e) => hub.broadcast('composio:didConnect', e)),
     opts.events.subscribeChatgptEvents?.((e) => hub.broadcast('chatgpt:statusChanged', e)),
+    opts.events.subscribeTerminalEvents?.((e) => hub.broadcast(e.channel, e.payload)),
   ];
 
   return {

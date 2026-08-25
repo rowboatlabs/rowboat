@@ -5,6 +5,7 @@ import os from "node:os";
 import {
   setupIpcHandlers,
   startConnectorEventsWatcher,
+  startTerminalEventsWatcher,
   findMainAppWindow,
   startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady, startRetentionSweep,
   startCodeRunFeedWatcher,
@@ -20,7 +21,7 @@ import {
   stopServicesWatcher,
   stopWorkspaceWatcher
 } from "./ipc.js";
-import { disposeAllTerminals } from "./terminal.js";
+import { disposeAllTerminals } from "@x/core/dist/terminal/terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
@@ -714,6 +715,7 @@ app.whenReady().then(async () => {
   }
   startSessionsWatcher();
   startConnectorEventsWatcher();
+  startTerminalEventsWatcher();
   // Daily auto-delete of old chats & task transcripts (delayed first run).
   startRetentionSweep();
   // Turn event spine: durable events of every turn (session, headless,

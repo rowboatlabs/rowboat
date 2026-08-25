@@ -15,7 +15,9 @@ export type PushChannel =
   | 'workspace:didChange'
   | 'oauth:didConnect'
   | 'composio:didConnect'
-  | 'chatgpt:statusChanged';
+  | 'chatgpt:statusChanged'
+  | 'terminal:data'
+  | 'terminal:exit';
 
 interface ServerMessage {
   seq: number;
