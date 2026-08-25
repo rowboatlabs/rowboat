@@ -111,7 +111,9 @@ describe.each(drivers.map((d) => [d.name, d] as const))('blob store conformance 
     expect((await store.get(hash))!.byteLength).toBe(0);
   });
 
-  it('a 1MB blob round-trips intact', async () => {
+  // I/O-bound (1MB write + read + hash on shared CI disks) — the 5s default
+  // flakes on starved runners; give it real headroom.
+  it('a 1MB blob round-trips intact', { timeout: 30_000 }, async () => {
     const bytes = randomBytes(1024 * 1024);
     const hash = await put(bytes);
     expect(Buffer.from((await store.get(hash))!)).toEqual(bytes);
