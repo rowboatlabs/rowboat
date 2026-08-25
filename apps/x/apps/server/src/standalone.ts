@@ -7,6 +7,7 @@ import container, {
 } from '@x/core/dist/di/container.js';
 import type { ISessions } from '@x/core/dist/runtime/sessions/index.js';
 import { createCoreEventSources, createCoreRpcHandlers, resolveWorkspacePath } from './core-deps.js';
+import { prepareCoreData, initCoreServices } from '@x/core/dist/boot/services.js';
 import { createRowboatServer } from './server.js';
 
 // Headless rowboat-server: the RFC's end-state entrypoint, where main spawns
@@ -19,9 +20,6 @@ import { createRowboatServer } from './server.js';
 // silent. Intended use today: integration tests and dev, always with an
 // isolated ROWBOAT_WORKDIR.
 //
-// Deliberately NOT started here (Phase 1 work, moves over with the flip):
-// schedulers, knowledge sync (gmail/calendar/granola/fireflies), event
-// processor, live-note + bg-task agents.
 
 async function main(): Promise<void> {
   // The workdir lock is acquired by createRowboatServer itself — a live
@@ -34,10 +32,15 @@ async function main(): Promise<void> {
     },
   });
 
+  await prepareCoreData();
   const sessions = container.resolve<ISessions>('sessions');
   const sessionsIndexReady = sessions.initialize().catch((err: unknown) => {
     console.error('[server] session index scan failed:', err);
   });
+  // Schedulers, sync, event processor, background agents — full parity with
+  // the Electron host (Phase 6): the standalone server now runs everything.
+  await sessionsIndexReady;
+  await initCoreServices();
 
   const server = await createRowboatServer({
     workDir: WorkDir,
