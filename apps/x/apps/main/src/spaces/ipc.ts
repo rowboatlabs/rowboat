@@ -266,7 +266,10 @@ export const spacesIpcHandlers: SpacesHandlers = {
   }),
 
   'spaces:listMessages': async (_event, args) =>
-    orgs.getClient(args.orgId).listMessages(args.spaceId, args.topicId),
+    orgs.getClient(args.orgId).listMessages(args.spaceId, args.topicId, {
+      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    }),
 
   'spaces:postMessage': async (_event, args) =>
     orgs.getClient(args.orgId).postMessage(args.spaceId, {

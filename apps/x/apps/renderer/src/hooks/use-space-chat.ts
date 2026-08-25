@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import {
-    GENERAL_SEED_BODY, applyReaction, findGeneralTopic, isGeneralSeedMessage, parseThreadMarker, type ThreadMarker,
+    GENERAL_SEED_BODY, applyReaction, findGeneralTopic, isGeneralSeedMessage, mergeMessages, parseThreadMarker, type ThreadMarker,
 } from '@/lib/spaces-conventions'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceFeed, useSpaceLive } from '@/hooks/use-spaces'
 import { getTopicLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
@@ -49,14 +49,19 @@ export function buildPendingMessage(spaceId: string, topicId: string, memberId: 
 
 export interface GeneralState {
     topic: spaces.Topic | null
+    /** The loaded window (newest page first; older pages prepend on demand) plus optimistic rows. */
     messages: ChatMessage[]
+    /** Older messages exist below the loaded window (scroll up to load them). */
+    hasMore: boolean
+    /** An older page is on its way. */
+    loadingOlder: boolean
     /** True once topics were loaded and general was found or seeded. */
     ready: boolean
     /** Set when seeding failed (org unreachable, not a member …). */
     error?: string
 }
 
-const EMPTY_GENERAL: GeneralState = { topic: null, messages: [], ready: false }
+const EMPTY_GENERAL: GeneralState = { topic: null, messages: [], hasMore: false, loadingOlder: false, ready: false }
 
 let generalState: ReadonlyMap<string, GeneralState> = new Map()
 const generalListeners = new Set<() => void>()
@@ -78,17 +83,54 @@ async function loadGeneralMessages(orgId: string, spaceId: string, topic: spaces
     if (generalLoading.has(k)) return
     generalLoading.add(k)
     try {
+        // The latest page (the server windows newest-first). A refetch merges:
+        // older pages the reader scrolled to stay put, hasMore keeps describing
+        // OUR oldest edge, and optimistic pending/failed rows the response
+        // doesn't already contain are carried over.
         const res = await window.ipc.invoke('spaces:listMessages', { orgId, spaceId, topicId: topic.id })
-        // A refetch must not eat optimistic sends: carry pending/failed rows
-        // the response doesn't already contain.
-        const carried = (generalState.get(k)?.messages ?? []).filter(
+        const prev = generalState.get(k)
+        const sameTopic = prev?.topic?.id === res.topic.id
+        const settled = sameTopic ? prev.messages.filter((m) => !m.pending && !m.failed) : []
+        const carried = (sameTopic ? prev.messages : []).filter(
             (m) => (m.pending || m.failed) && !res.messages.some((r) => r.author.memberId === m.author.memberId && r.body === m.body),
         )
-        setGeneral(k, { topic: res.topic, messages: [...res.messages, ...carried], ready: true })
+        const reachesDeeper = (settled[0]?.offset ?? Infinity) < (res.messages[0]?.offset ?? Infinity)
+        setGeneral(k, {
+            topic: res.topic,
+            messages: [...mergeMessages(settled, res.messages), ...carried],
+            hasMore: reachesDeeper && sameTopic ? prev.hasMore : res.hasMore,
+            ready: true,
+        })
     } catch (err) {
         setGeneral(k, { topic, ready: true, error: err instanceof Error ? err.message : String(err) })
     } finally {
         generalLoading.delete(k)
+    }
+}
+
+const olderLoading = new Set<string>()
+
+/** Scroll-up pagination: fetch the page below the loaded window and prepend it. */
+export async function loadOlderGeneralMessages(orgId: string, spaceId: string): Promise<void> {
+    const k = key(orgId, spaceId)
+    const state = generalState.get(k)
+    const topic = state?.topic
+    const oldest = state?.messages.find((m) => !m.pending && !m.failed)
+    if (!topic || !oldest || !state.hasMore || olderLoading.has(k)) return
+    olderLoading.add(k)
+    setGeneral(k, { loadingOlder: true })
+    try {
+        const res = await window.ipc.invoke('spaces:listMessages', { orgId, spaceId, topicId: topic.id, beforeOffset: oldest.offset })
+        const cur = generalState.get(k)
+        setGeneral(k, {
+            messages: mergeMessages(cur?.messages ?? [], res.messages),
+            hasMore: res.hasMore,
+            loadingOlder: false,
+        })
+    } catch {
+        setGeneral(k, { loadingOlder: false })
+    } finally {
+        olderLoading.delete(k)
     }
 }
 
@@ -242,7 +284,7 @@ function wireBus(): void {
         for (const k of watched) {
             const [orgId, spaceId] = k.split('/') as [string, string]
             void ensureGeneral(orgId, spaceId)
-            void indexThreads(orgId, spaceId)
+            indexThreads(orgId, spaceId)
         }
     })
 }
@@ -301,7 +343,6 @@ function threadParentOf(topic: spaces.Topic, marker: ThreadMarker | null): strin
 
 let threadState: ReadonlyMap<string, ReadonlyMap<string, ThreadInfo>> = new Map()
 const threadListeners = new Set<() => void>()
-const threadInflight = new Set<string>()
 
 function emitThreads(): void {
     for (const l of threadListeners) l()
@@ -317,47 +358,31 @@ function putThreadInfos(k: string, infos: ThreadInfo[]): void {
     emitThreads()
 }
 
-async function indexThreads(orgId: string, spaceId: string): Promise<void> {
+function indexThreads(orgId: string, spaceId: string): void {
     const k = key(orgId, spaceId)
     const feed = getSpaceFeed(orgId, spaceId)
     if (!feed.loaded) return
     const general = findGeneralTopic(feed.topics)
     const known = threadState.get(k) ?? new Map<string, ThreadInfo>()
-    const pending = feed.topics.filter((t) => t.id !== general?.id && !known.has(t.id) && !threadInflight.has(`${k}:${t.id}`))
+    const pending = feed.topics.filter((t) => t.id !== general?.id && !known.has(t.id))
     if (pending.length === 0) return
 
-    // A server that marks its stream topic is post-004: every topic carries
-    // its own parentage (anchorMessageId, markers backfilled), so the index
-    // is a pure projection of the topics list — zero message fetches. This
-    // was the boot-time request storm: one full listMessages per topic.
-    if (feed.topics.some((t) => t.kind === 'general')) {
-        putThreadInfos(
-            k,
-            pending.map((topic) => ({
+    // listTopics carries every topic's (immutable) first message, so the index
+    // is a pure projection of the topics list — zero message fetches. This was
+    // the boot-time request storm: one full listMessages per topic. A bare
+    // Topic without the field (a pre-pagination server) still projects its
+    // parentage from anchorMessageId; only marker-era parentage would be lost.
+    putThreadInfos(
+        k,
+        pending.map((topic) => {
+            const first = topic.firstMessage ?? null
+            const marker = first ? parseThreadMarker(first.body) : null
+            return {
                 topicId: topic.id,
                 createdAt: topic.createdAt,
-                firstMessage: null,
-                marker: null,
-                parentMessageId: topic.anchorMessageId ?? null,
-            })),
-        )
-        return
-    }
-
-    // Legacy pre-004 server: parentage only lives in first-message markers.
-    await Promise.all(
-        pending.map(async (topic) => {
-            const ik = `${k}:${topic.id}`
-            threadInflight.add(ik)
-            try {
-                const res = await window.ipc.invoke('spaces:listMessages', { orgId, spaceId, topicId: topic.id })
-                const first = res.messages[0] ?? null
-                const marker = first ? parseThreadMarker(first.body) : null
-                putThreadInfos(k, [{ topicId: topic.id, createdAt: topic.createdAt, firstMessage: first, marker, parentMessageId: threadParentOf(topic, marker) }])
-            } catch {
-                // unreachable right now; retried on the next feed refresh
-            } finally {
-                threadInflight.delete(ik)
+                firstMessage: first,
+                marker,
+                parentMessageId: threadParentOf(topic, marker),
             }
         }),
     )
@@ -398,7 +423,7 @@ export function useThreadIndex(orgId: string, spaceId: string): ThreadIndex {
     const feed = useSpaceFeed(orgId, spaceId)
     useEffect(() => {
         wireBus()
-        void indexThreads(orgId, spaceId)
+        indexThreads(orgId, spaceId)
     }, [orgId, spaceId, feed.topics])
     return useMemo(() => {
         const byTopic = state.get(key(orgId, spaceId))

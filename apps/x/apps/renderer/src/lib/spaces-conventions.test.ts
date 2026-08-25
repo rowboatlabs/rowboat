@@ -10,6 +10,7 @@ import {
     formatDayLabel,
     isContinuation,
     isGeneralSeedMessage,
+    mergeMessages,
     parseThreadMarker,
     stripThreadMarker,
     stripThreadRef,
@@ -192,5 +193,24 @@ describe('reactions', () => {
         expect(dropped).toEqual([{ emoji: '👍', memberIds: ['gagan', 'arjun'] }])
         expect(applyReaction(dropped, { emoji: '🚀', memberId: 'gagan', action: 'removed' })).toEqual(dropped)
         expect(applyReaction(undefined, { emoji: '👍', memberId: 'gagan', action: 'removed' })).toEqual([])
+    })
+})
+
+describe('mergeMessages — windowed pages, echoes, and resyncs share one merge', () => {
+    it('unions by id in offset order; the incoming copy wins (folded reactions)', () => {
+        const older = [msg({ id: 'a', offset: 1 }), msg({ id: 'b', offset: 2 })]
+        const fresh = [msg({ id: 'b', offset: 2, reactions: [{ emoji: '👍', memberIds: ['gagan'] }] }), msg({ id: 'c', offset: 3 })]
+        const merged = mergeMessages(older, fresh)
+        expect(merged.map((m) => m.id)).toEqual(['a', 'b', 'c'])
+        expect(merged[1]!.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan'] }])
+    })
+    it('prepends an older page below an existing window', () => {
+        const window = [msg({ id: 'e', offset: 5 }), msg({ id: 'f', offset: 6 })]
+        const olderPage = [msg({ id: 'c', offset: 3 }), msg({ id: 'd', offset: 4 })]
+        expect(mergeMessages(window, olderPage).map((m) => m.id)).toEqual(['c', 'd', 'e', 'f'])
+    })
+    it('an echo already present is a no-op on content', () => {
+        const win = [msg({ id: 'a', offset: 1 })]
+        expect(mergeMessages(win, [msg({ id: 'a', offset: 1 })])).toEqual(win)
     })
 })

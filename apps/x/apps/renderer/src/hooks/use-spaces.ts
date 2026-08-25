@@ -151,7 +151,8 @@ export function useSpaceLive(
 // ---------------------------------------------------------------------------
 
 export interface SpaceFeedData {
-    topics: spaces.Topic[]
+    /** Listing entries — each topic carries its immutable first message. */
+    topics: spaces.TopicListing[]
     changeSets: spaces.ChangeSet[]
     loaded: boolean
 }

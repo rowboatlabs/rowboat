@@ -17,6 +17,7 @@ import {
   type Routes,
   type Space,
   type Topic,
+  type TopicListing,
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 
@@ -301,15 +302,24 @@ export class SpacesClient {
 
   // --- feed -----------------------------------------------------------------
 
-  async listTopics(spaceId: string, includeArchived = false): Promise<Topic[]> {
+  async listTopics(spaceId: string, includeArchived = false): Promise<TopicListing[]> {
     const qs = includeArchived ? '?includeArchived=true' : '';
     return (await this.request('GET', this.space(spaceId, `/topics${qs}`), routes.listTopics.response)).topics;
   }
 
-  async listMessages(spaceId: string, topicId: string): Promise<{ topic: Topic; messages: Message[] }> {
+  /** Windowed, newest-first: without beforeOffset the LATEST page — never the full history. */
+  async listMessages(
+    spaceId: string,
+    topicId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<{ topic: Topic; messages: Message[]; hasMore: boolean }> {
+    const q = new URLSearchParams();
+    if (opts?.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
+    if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.size > 0 ? `?${q.toString()}` : '';
     return this.request(
       'GET',
-      this.space(spaceId, `/topics/${encodeURIComponent(topicId)}/messages`),
+      this.space(spaceId, `/topics/${encodeURIComponent(topicId)}/messages${qs}`),
       routes.listMessages.response,
     );
   }

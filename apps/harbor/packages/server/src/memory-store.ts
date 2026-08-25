@@ -246,8 +246,19 @@ export class MemoryStore implements Store {
     return [...this.must(spaceId).messages.values()].flat().find((m) => m.id === messageId);
   }
 
-  async listMessages(spaceId: string, topicId: string): Promise<Message[]> {
-    return [...(this.must(spaceId).messages.get(topicId) ?? [])];
+  async listMessages(spaceId: string, topicId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+    let list = this.must(spaceId).messages.get(topicId) ?? [];
+    if (opts?.beforeOffset !== undefined) list = list.filter((m) => m.offset < opts.beforeOffset!);
+    if (opts?.limit !== undefined) list = list.slice(-opts.limit);
+    return [...list];
+  }
+
+  async getFirstMessages(spaceId: string): Promise<Map<string, Message>> {
+    const out = new Map<string, Message>();
+    for (const [topicId, list] of this.must(spaceId).messages) {
+      if (list[0]) out.set(topicId, list[0]);
+    }
+    return out;
   }
 
   async listMessagesBySpace(spaceId: string): Promise<Message[]> {

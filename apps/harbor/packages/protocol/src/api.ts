@@ -42,6 +42,17 @@ const NewTopicMessage = z.object({
   agentName: z.string().max(64).optional(),
 });
 
+/**
+ * A listTopics entry: the topic plus its immutable FIRST message — every
+ * consumer needs it (derived titles, thread parent cards, seed detection), so
+ * it is always included rather than fetched per topic. Listing decoration
+ * only: Topic objects inside events and post responses stay lean. The
+ * firstMessage's `reactions` are the at-post snapshot (not folded live) —
+ * this field is title/parent material, not a message listing.
+ */
+export const TopicListing = Topic.extend({ firstMessage: Message.nullable() });
+export type TopicListing = z.infer<typeof TopicListing>;
+
 export const routes = {
   // --- identity ------------------------------------------------------------
   /** Who am I on this org — the client's only source of its own memberId under OAuth. */
@@ -250,13 +261,25 @@ export const routes = {
     path: '/v1/spaces/:spaceId/topics',
     params: z.object({ spaceId: SpaceId }),
     query: z.object({ includeArchived: z.coerce.boolean().optional() }),
-    response: z.object({ topics: z.array(Topic) }),
+    response: z.object({ topics: z.array(TopicListing) }),
   },
+  /**
+   * A topic's messages, windowed newest-first (returned oldest-first for
+   * rendering): without `beforeOffset` the LATEST `limit` messages — never the
+   * full history. Page back by passing the oldest received offset. `hasMore`
+   * = older messages exist below the window. Message offsets ride the
+   * space's one event sequence, so they are strictly increasing and are the
+   * cursor (no timestamp ties).
+   */
   listMessages: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/topics/:topicId/messages',
     params: z.object({ spaceId: SpaceId, topicId: TopicId }),
-    response: z.object({ topic: Topic, messages: z.array(Message) }),
+    query: z.object({
+      beforeOffset: z.coerce.number().int().positive().optional(),
+      limit: z.coerce.number().int().positive().max(200).optional(),
+    }),
+    response: z.object({ topic: Topic, messages: z.array(Message), hasMore: z.boolean() }),
   },
   postMessage: {
     method: 'POST',

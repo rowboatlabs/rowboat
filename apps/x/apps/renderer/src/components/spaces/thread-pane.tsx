@@ -14,7 +14,7 @@ import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/mes
 import type { ChatMessage, SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
 import { buildPendingMessage, rememberThread, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
+import { artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, mergeMessages, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
 import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -56,6 +56,11 @@ export function ThreadPane({
     const [topic, setTopic] = useState<spaces.Topic | null>(topicFromList ?? null)
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [loaded, setLoaded] = useState(false)
+    const [hasMore, setHasMore] = useState(false)
+    const [loadingOlder, setLoadingOlder] = useState(false)
+    // The deepest (oldest) offset any fetch has reached — a refetch of the
+    // newest page must not reset hasMore after the reader paged further back.
+    const oldestLoadedRef = useRef<number | null>(null)
     const [folding, setFolding] = useState(false)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, topicId)
@@ -69,14 +74,20 @@ export function ThreadPane({
             .then((res) => {
                 if (cancelled) return
                 setTopic(res.topic)
-                // A refetch must not eat optimistic sends: carry pending/failed
-                // rows the response doesn't already contain.
+                // A refetch merges (older loaded pages stay put) and must not
+                // eat optimistic sends: pending/failed rows the response
+                // doesn't already contain are carried over.
                 setMessages((prev) => [
-                    ...res.messages,
+                    ...mergeMessages(prev.filter((m) => !m.pending && !m.failed && m.topicId === topicId), res.messages),
                     ...prev.filter(
                         (m) => (m.pending || m.failed) && !res.messages.some((r) => r.author.memberId === m.author.memberId && r.body === m.body),
                     ),
                 ])
+                const windowOldest = res.messages[0]?.offset ?? null
+                if (oldestLoadedRef.current === null || windowOldest === null || windowOldest <= oldestLoadedRef.current) {
+                    oldestLoadedRef.current = windowOldest ?? oldestLoadedRef.current
+                    setHasMore(res.hasMore)
+                }
                 setLoaded(true)
                 markTopicRead(org.id, space.id, topicId)
             })
@@ -86,6 +97,24 @@ export function ThreadPane({
         }
     }, [org.id, space.id, topicId, refreshTick])
 
+    const loadOlderReplies = async () => {
+        const oldest = messages.find((m) => !m.pending && !m.failed)
+        if (!oldest || loadingOlder) return
+        setLoadingOlder(true)
+        try {
+            const res = await window.ipc.invoke('spaces:listMessages', {
+                orgId: org.id, spaceId: space.id, topicId, beforeOffset: oldest.offset,
+            })
+            setMessages((prev) => mergeMessages(prev, res.messages))
+            oldestLoadedRef.current = res.messages[0]?.offset ?? oldestLoadedRef.current
+            setHasMore(res.hasMore)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not load earlier replies', 'error')
+        } finally {
+            setLoadingOlder(false)
+        }
+    }
+
     const workingAgents = presence.working.get(topicId) ?? []
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ block: 'end' })
@@ -93,13 +122,14 @@ export function ThreadPane({
 
     const groups = useMemo(() => artifactsForThread(changeSets, topicId), [changeSets, topicId])
 
-    const parent = threadInfo?.firstMessage ?? messages[0] ?? null
+    // The opener comes from the thread index (listTopics carries every first
+    // message); a window that reaches the start supplies it too. A PARTIAL
+    // window's first row is just the oldest loaded reply — never the opener.
+    const parent = threadInfo?.firstMessage ?? (hasMore ? null : messages[0] ?? null)
     const isThread = !!threadInfo?.parentMessageId
     // Display metadata (who said the parent, when) rides in the seed's marker.
-    // The index no longer prefetches it on contract servers, so parse it from
-    // our own loaded copy of the seed.
     const marker = threadInfo?.marker ?? (parent ? parseThreadMarker(parent.body) : null)
-    const replies = messages.slice(1)
+    const replies = messages.filter((m) => m.id !== parent?.id)
 
     // Echo a just-posted reply into the pane — the live event that would
     // otherwise render it may be seconds away, or never come at all when the
@@ -359,8 +389,20 @@ export function ThreadPane({
                 />
 
                 <div className="flex items-center gap-2 px-1 pb-1 pt-3">
-                    <span className="text-[11px] font-medium text-muted-foreground">{visibleReplies.length} {visibleReplies.length === 1 ? 'reply' : 'replies'}</span>
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                        {Math.max(visibleReplies.length, (topic?.messageCount ?? 1) - 1)} {Math.max(visibleReplies.length, (topic?.messageCount ?? 1) - 1) === 1 ? 'reply' : 'replies'}
+                    </span>
                     <span className="h-px flex-1 bg-border" />
+                    {hasMore && (
+                        <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                            disabled={loadingOlder}
+                            onClick={() => void loadOlderReplies()}
+                        >
+                            {loadingOlder ? <Loader2 className="size-3 animate-spin" /> : null} show earlier replies
+                        </button>
+                    )}
                 </div>
                 {rows}
 
