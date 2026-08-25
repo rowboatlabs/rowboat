@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildInvocationMessage, describeTurnError, finalAssistantText, isTopicReceiptCall } from './topic-agent.js';
+import { RECLAIMED_TURN_REASON } from '../runtime/sessions/api.js';
+import { backstopBody, buildInvocationMessage, describeTurnError, finalAssistantText, isTopicReceiptCall } from './topic-agent.js';
 
 const input = {
     orgId: 'org-1',
@@ -93,5 +94,26 @@ describe('describeTurnError', () => {
         expect(describeTurnError('429 Too Many Requests')).toMatch(/rate-limited/);
         expect(describeTurnError('tool foo exploded')).toBe('tool foo exploded');
         expect(describeTurnError(undefined)).toBe('unknown error');
+    });
+});
+
+describe('backstopBody', () => {
+    it('tells a reclaimed crash-orphaned turn apart from a person pressing Stop', () => {
+        expect(backstopBody({ type: 'turn_cancelled', reason: RECLAIMED_TURN_REASON })).toBe(
+            '⚠️ An earlier Rowboat run here was interrupted — picking up your latest message now.',
+        );
+        expect(backstopBody({ type: 'turn_cancelled' })).toBe(
+            "⚠️ Rowboat's run was stopped before it finished.",
+        );
+        expect(backstopBody({ type: 'turn_cancelled', reason: 'user asked' })).toBe(
+            "⚠️ Rowboat's run was stopped before it finished.",
+        );
+    });
+
+    it('keeps the failed and no-receipt wordings', () => {
+        expect(backstopBody({ type: 'turn_failed', error: '401' })).toMatch(/isn't signed in/);
+        expect(backstopBody({ type: 'turn_completed' })).toBe(
+            'Rowboat finished without posting a receipt or leaving a note.',
+        );
     });
 });
