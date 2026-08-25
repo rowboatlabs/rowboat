@@ -20,6 +20,7 @@ import { loadRetentionSettings } from '@x/core/dist/config/retention.js';
 import type { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import type { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import * as voice from '@x/core/dist/voice/voice.js';
+import { publishTtsChunk, subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import { fetchLiveNote, listLiveNotes, setLiveNote, setLiveNoteActive, deleteLiveNote } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
@@ -130,6 +131,7 @@ async function requireCodeSession(sessionId: string): Promise<CodeSession> {
 
 // Process-local caches mirrored from apps/main/src/ipc.ts — memoization only,
 // no cross-process invariants (each host keeps its own).
+const activeTtsStreams = new Map<string, AbortController>();
 const appInstallPreviews = new Map<string, Awaited<ReturnType<typeof appsInstaller.previewInstall>>>();
 let lastAppsFingerprint: string | null = null;
 import type { RpcHandlers } from './channels.js';
@@ -1243,6 +1245,28 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     'inline-task:process': async (args) => {
       return await processRowboatInstruction(args.instruction, args.noteContent, args.notePath);
     },
+    'voice:synthesizeStreamStart': async (args) => {
+      const { requestId, text } = args;
+      const controller = new AbortController();
+      activeTtsStreams.set(requestId, controller);
+      void voice
+        .synthesizeSpeechStream(
+          text,
+          (chunk: Buffer) => publishTtsChunk({ requestId, chunkBase64: chunk.toString('base64'), done: false }),
+          controller.signal,
+        )
+        .then(() => publishTtsChunk({ requestId, done: true }))
+        .catch((err: unknown) => {
+          publishTtsChunk({ requestId, done: true, error: err instanceof Error ? err.message : String(err) });
+        })
+        .finally(() => activeTtsStreams.delete(requestId));
+      return { ok: true };
+    },
+    'voice:synthesizeStreamCancel': async (args) => {
+      activeTtsStreams.get(args.requestId)?.abort();
+      activeTtsStreams.delete(args.requestId);
+      return {};
+    },
     'voice:synthesize': async (args) => {
       return voice.synthesizeSpeech(args.text);
     },
@@ -1502,6 +1526,7 @@ export function createCoreEventSources(): EventSources {
     subscribeComposioEvents: (listener) => composioConnectBus.subscribe(listener),
     subscribeChatgptEvents: (listener) => chatgptStatusBus.subscribe(listener),
     subscribeTerminalEvents: (listener) => subscribeTerminalEvents(listener),
+    subscribeTtsChunks: (listener) => subscribeTtsChunks(listener),
   };
 }
 
