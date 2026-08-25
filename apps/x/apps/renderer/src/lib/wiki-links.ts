@@ -1,3 +1,5 @@
+import { getViewerType } from './file-types'
+
 const KNOWLEDGE_PREFIX = 'knowledge/'
 
 export const stripKnowledgePrefix = (path: string) =>
@@ -28,7 +30,10 @@ export const normalizeWikiPath = (input: string) => {
 export const ensureMarkdownExtension = (path: string) => {
   const { path: basePath, heading } = splitWikiFragment(path)
   if (!basePath) return heading ? `#${heading}` : path
-  const filePath = basePath.toLowerCase().endsWith('.md') ? basePath : `${basePath}.md`
+  // Media files (spreadsheets etc.) are mentionable as-is; only extensionless
+  // note names get .md appended.
+  const hasFileExtension = basePath.toLowerCase().endsWith('.md') || getViewerType(basePath) !== null
+  const filePath = hasFileExtension ? basePath : `${basePath}.md`
   return heading ? `${filePath}#${heading}` : filePath
 }
 

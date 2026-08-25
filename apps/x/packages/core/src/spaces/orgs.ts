@@ -243,6 +243,16 @@ export async function removeOrg(orgId: string): Promise<void> {
   }
 }
 
+/**
+ * Wake-from-sleep / network-change nudge (wired to Electron's powerMonitor in
+ * main): drop every org's live socket and reconnect immediately, replaying
+ * each stream from its last seen offset. Sleeping laptops hold half-open
+ * sockets that never emit close — see SpacesLive's liveness notes.
+ */
+export function bounceAllLive(): void {
+  for (const runtime of runtimes.values()) runtime.live.bounce();
+}
+
 /** The client pair for an org — created lazily, one WS per org for the process lifetime. */
 export function orgRuntime(orgId: string): OrgRuntime {
   const cached = runtimes.get(orgId);

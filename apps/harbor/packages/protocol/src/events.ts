@@ -81,6 +81,15 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     code: z.string(),
     message: z.string(),
   }),
+  /**
+   * Liveness beacon, sent to every connection every ~25s regardless of
+   * subscriptions. Carries no state — its arrival IS the signal: clients
+   * treat prolonged silence as a half-open socket (laptop sleep, network
+   * change, a proxy vanishing without FIN) and bounce the connection, which
+   * replays from the last seen offset. Pre-ping clients ignore unknown frame
+   * kinds by contract, so this is a v0-legal addition.
+   */
+  z.object({ kind: z.literal('ping'), at: z.iso.datetime() }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 

@@ -13,6 +13,15 @@ import type {
 } from "@x/shared/dist/turns.js";
 import type { Turn } from "../turns/api.js";
 
+/**
+ * The cancel reason sendOrQueueMessage records when it reclaims a
+ * crash-orphaned turn (idle in the log, no live advance — nothing will ever
+ * settle it). Consumers that narrate turn endings (e.g. the spaces topic
+ * watchdog) match on it to tell a reclaim apart from a person pressing Stop.
+ */
+export const RECLAIMED_TURN_REASON =
+    "interrupted: the app quit or crashed while this turn was running";
+
 // Per-message configuration; it lands on the turn (sessions store none).
 export interface SendMessageConfig {
     agent: z.infer<typeof RequestedAgent>;

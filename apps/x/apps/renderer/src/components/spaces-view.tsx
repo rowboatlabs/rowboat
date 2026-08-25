@@ -189,8 +189,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     }, [org.id, space.id, refreshTick])
 
     useSpaceLive(org.id, space.id, (frame) => {
-        if (frame.kind !== 'event') return
-        // Coarse-grained on purpose: any durable event refreshes the open panes.
+        // Coarse-grained on purpose: any durable event refreshes the open
+        // panes — and so does a (re)subscribe, since events published while a
+        // socket was dead may have no replay to arrive by.
+        if (frame.kind !== 'event' && frame.kind !== 'subscribed') return
         setRefreshTick((t) => t + 1)
     })
 

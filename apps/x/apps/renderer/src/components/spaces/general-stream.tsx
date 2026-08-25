@@ -5,9 +5,9 @@ import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
-import { rememberThread, updateGeneralMessage, usePresenceSender } from '@/hooks/use-space-chat'
+import { ingestGeneralMessage, rememberThread, updateGeneralMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { buildThreadSeed, dayKey, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
+import { buildThreadSeed, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -96,6 +96,8 @@ export function GeneralStream({
         if (!topic) return null
         const mark = getTopicLastReadAt(org.id, space.id, topicId)
         const hasNew = !mark || topic.lastActivityAt > mark
+        // A renamed thread shows its name on the chip; auto-titled ones stay compact.
+        const named = explicitTitle(topic, threads.byTopic.get(topicId)?.firstMessage?.body)
         return {
             topicId,
             replyCount: Math.max(0, topic.messageCount - 1),
@@ -103,6 +105,7 @@ export function GeneralStream({
             // Count isn't known without the thread's messages; 1 reads as "has new" on the row.
             unreadCount: hasNew && topic.messageCount > 1 ? 1 : 0,
             workingAgents: presence.working.get(topicId) ?? [],
+            title: named ? resolveMentions(named, memberNames) : null,
         }
     }
 
@@ -111,6 +114,9 @@ export function GeneralStream({
         setPosting(true)
         try {
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId: generalId, body })
+            // Echo the saved message NOW — the live event may be seconds away,
+            // or the socket half-open after sleep, in which case it never comes.
+            ingestGeneralMessage(org.id, space.id, result.message)
             markTopicRead(org.id, space.id, generalId)
             analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
             maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)

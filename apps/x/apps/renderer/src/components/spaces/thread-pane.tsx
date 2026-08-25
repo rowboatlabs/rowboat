@@ -14,7 +14,7 @@ import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/mes
 import type { SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
 import { usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { artifactsForThread, isContinuation, stripThreadMarker } from '@/lib/spaces-conventions'
+import { artifactsForThread, explicitTitle, isContinuation, stripThreadMarker } from '@/lib/spaces-conventions'
 import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -93,10 +93,18 @@ export function ThreadPane({
     const marker = threadInfo?.marker ?? null
     const replies = messages.slice(1)
 
+    // Echo a just-posted reply into the pane — the live event that would
+    // otherwise render it may be seconds away, or never come at all when the
+    // socket went half-open (sleep). Dedupe keeps the eventual frame a no-op.
+    const echo = (message: spaces.Message) => {
+        setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
+    }
+
     const post = async (body: string, agent?: AgentOptions) => {
         setPosting(true)
         try {
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId, body })
+            echo(result.message)
             markTopicRead(org.id, space.id, topicId)
             analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
             maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
@@ -115,6 +123,7 @@ export function ThreadPane({
         try {
             const body = `@rowboat fold this topic’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· topic:${topicId}”.`
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId, body })
+            echo(result.message)
             markTopicRead(org.id, space.id, topicId)
             analytics.spacesFoldRequested()
             maybeInvokeRowboat(org, space, result.topic, result.message.id, body)
@@ -161,6 +170,17 @@ export function ThreadPane({
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not update the topic', 'error')
         }
+    }
+
+    // Inline title editing (window.prompt is a no-op in Electron — the old
+    // Retitle item died silently). null = not editing.
+    const [editingTitle, setEditingTitle] = useState<string | null>(null)
+    const named = topic ? explicitTitle(topic, (threadInfo?.firstMessage ?? messages[0])?.body ?? null) : null
+    const commitTitle = async () => {
+        const title = editingTitle?.trim()
+        setEditingTitle(null)
+        if (!title || title === topic?.title) return
+        await manage({ action: 'retitle', title })
     }
 
     const openTopicSession = async () => {
@@ -215,7 +235,25 @@ export function ThreadPane({
                 )}
                 <span className="pl-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topic</span>
                 <span className="truncate text-xs text-muted-foreground">
-                    {isThread ? 'from a message' : <MemberText text={topic?.title ?? ''} />}{groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? 'file' : 'files'} changed` : ''}
+                    {editingTitle !== null ? (
+                        <input
+                            autoFocus
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') void commitTitle()
+                                if (e.key === 'Escape') setEditingTitle(null)
+                            }}
+                            onBlur={() => setEditingTitle(null)}
+                            placeholder="Topic name"
+                            className="w-64 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-xs text-foreground outline-none"
+                        />
+                    ) : (
+                        <>
+                            {isThread ? (named ? <MemberText text={named} /> : 'from a message') : <MemberText text={topic?.title ?? ''} />}
+                            {groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? 'file' : 'files'} changed` : ''}
+                        </>
+                    )}
                 </span>
                 <span className="flex-1" />
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
@@ -224,13 +262,8 @@ export function ThreadPane({
                         <Button variant="ghost" size="icon" className="size-7 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                            onClick={() => {
-                                const title = window.prompt('New title', topic?.title ?? '')
-                                if (title?.trim()) void manage({ action: 'retitle', title: title.trim() })
-                            }}
-                        >
-                            <Pencil className="size-3.5 mr-2" /> Retitle
+                        <DropdownMenuItem onClick={() => setEditingTitle(named ?? topic?.title ?? '')}>
+                            <Pencil className="size-3.5 mr-2" /> Rename
                         </DropdownMenuItem>
                         {topic?.archived ? (
                             <DropdownMenuItem onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>

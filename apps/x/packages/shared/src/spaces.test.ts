@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { containsRowboatAddress, mentionsMember, stripNonAddressRegions } from './spaces.js';
+import { containsHereAddress, containsRowboatAddress, mentionsMember, stripNonAddressRegions } from './spaces.js';
 
 const arjun = { id: '01M0F8S2MC8HYMF4MYWM61MR7B', displayName: 'Arjun Kumar' };
 
@@ -36,5 +36,21 @@ describe('mentionsMember', () => {
   it('leaves @rowboat alone', () => {
     expect(containsRowboatAddress('@rowboat summarise this')).toBe(true);
     expect(containsRowboatAddress('email@rowboat.com')).toBe(false);
+  });
+});
+
+describe('containsHereAddress', () => {
+  it('matches a genuine @here address, any case', () => {
+    expect(containsHereAddress('@here standup in 5')).toBe(true);
+    expect(containsHereAddress('heads up @HERE.')).toBe(true);
+    expect(containsHereAddress('(@here) deploy going out')).toBe(true);
+  });
+
+  it('ignores longer handles, cites, code, and emails', () => {
+    expect(containsHereAddress('@hereabouts is a word')).toBe(false);
+    expect(containsHereAddress('> @here said someone else')).toBe(false);
+    expect(containsHereAddress('use `@here` sparingly')).toBe(false);
+    expect(containsHereAddress('mail me@here.com')).toBe(false);
+    expect(containsHereAddress('come here now')).toBe(false);
   });
 });

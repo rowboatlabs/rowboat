@@ -227,6 +227,47 @@ describe('SpacesLive', () => {
   });
 });
 
+describe('SpacesLive liveness', () => {
+  it('the watchdog bounces a silent socket and the stream resumes; new events still arrive', async () => {
+    // A harbor whose heartbeat effectively never fires is the client's-eye
+    // view of a half-open socket after sleep: OPEN, silent, no close coming.
+    const silent = await startHarbor({
+      orgName: 'Silent Org',
+      seedMembers: [{ id: 'ramnique', displayName: 'Ramnique' }],
+      liveHeartbeatMs: 3_600_000,
+    });
+    try {
+      const client = new SpacesClient({ baseUrl: silent.url, token: 'dev-ramnique' });
+      const space = await client.createSpace('Liveness');
+      await client.proposeChange(space.id, { assetPath: 'a.md', baseVersion: 0, newContent: 'a\n', actingMode: 'direct' });
+
+      const live = new SpacesLive({
+        baseUrl: silent.url,
+        token: 'dev-ramnique',
+        staleAfterMs: 250,
+        watchdogTickMs: 60,
+      });
+      const frames: Array<{ kind: string }> = [];
+      live.subscribe(space.id, (frame) => frames.push({ kind: frame.kind }), 0);
+      const subscribes = () => frames.filter((f) => f.kind === 'subscribed').length;
+
+      await waitFor(() => subscribes() >= 1, 'first subscribe');
+      // No beacons arrive → the watchdog presumes the socket dead, drops it,
+      // and the reconnect machinery resubscribes on its own.
+      await waitFor(() => subscribes() >= 2, 'watchdog resubscribe', 5000);
+
+      // The resumed stream still carries new durable events (offset resume).
+      const eventsBefore = frames.filter((f) => f.kind === 'event').length;
+      await client.proposeChange(space.id, { assetPath: 'a.md', baseVersion: 1, newContent: 'a\nb\n', actingMode: 'direct' });
+      await waitFor(() => frames.filter((f) => f.kind === 'event').length > eventsBefore, 'event after bounce', 5000);
+
+      live.close();
+    } finally {
+      await silent.close();
+    }
+  });
+});
+
 async function waitFor(pred: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!pred()) {

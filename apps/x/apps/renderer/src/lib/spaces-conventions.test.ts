@@ -4,6 +4,8 @@ import {
     applyReaction,
     artifactsForThread,
     buildThreadSeed,
+    deriveTopicTitle,
+    explicitTitle,
     findGeneralTopic,
     formatDayLabel,
     isContinuation,
@@ -95,6 +97,32 @@ describe('topic-from-message marker', () => {
         expect(stripThreadMarker(seed)).toBe('Standup — Wed. Shipped the copy pass.\nBlocked on SSO.')
         expect(parseThreadMarker('just a message')).toBeNull()
         expect(stripThreadMarker('just a message')).toBe('just a message')
+    })
+})
+
+describe('topic titles — derived vs explicitly renamed', () => {
+    it('deriveTopicTitle mirrors the server: first non-empty line, heading/bullet stripped, capped', () => {
+        expect(deriveTopicTitle('# Ship it\ndetails')).toBe('Ship it')
+        expect(deriveTopicTitle('\n\n- first bullet\nmore')).toBe('first bullet')
+        expect(deriveTopicTitle('   ')).toBe('Untitled')
+        const long = 'x'.repeat(300)
+        expect(deriveTopicTitle(long)).toBe(`${'x'.repeat(255)}…`)
+    })
+
+    it('a topic still wearing its auto-derived title has no explicit name', () => {
+        const seed = buildThreadSeed(msg({ id: '01J9PARENT', body: 'Standup — Wed. Shipped the copy pass.' }))
+        const t = topic({ id: '01J9TOPIC', title: deriveTopicTitle(seed) })
+        expect(explicitTitle(t, seed)).toBeNull()
+        // No first message loaded yet → stay compact rather than guessing.
+        expect(explicitTitle(t, null)).toBeNull()
+    })
+
+    it('a renamed topic surfaces its name — and renaming never touches the message body', () => {
+        const seed = buildThreadSeed(msg({ id: '01J9PARENT', body: 'Standup — Wed. Shipped the copy pass.' }))
+        const renamed = topic({ id: '01J9TOPIC', title: 'SSO rollout' })
+        expect(explicitTitle(renamed, seed)).toBe('SSO rollout')
+        // The seed (the first message) is an input, never an output: unchanged.
+        expect(stripThreadMarker(seed)).toBe('Standup — Wed. Shipped the copy pass.')
     })
 })
 
