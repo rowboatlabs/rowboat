@@ -324,11 +324,11 @@ export async function listModelsForProvider(
 }
 
 /**
- * Image-capable model ids for a BYOK provider. Only OpenRouter's catalog
- * can be filtered by output modality (the public endpoint, no auth needed);
- * no other flavor's listing carries a reliable image-capability signal, so
- * the image picker takes a typed model id for those instead (see
- * getImageModelCatalog in catalog.ts).
+ * Image-capable model ids for a BYOK provider. OpenRouter is the one flavor
+ * whose own catalog can be filtered by output modality (the public
+ * endpoint, no auth needed); the other image flavors get their lists
+ * elsewhere — models.dev for openai/google, the plain model list for
+ * ollama/openai-compatible (see getImageModelCatalog in catalog.ts).
  */
 export async function listImageModelsForProvider(
     providerConfig: z.infer<typeof Provider>,
