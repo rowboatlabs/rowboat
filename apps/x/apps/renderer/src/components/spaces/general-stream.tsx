@@ -6,11 +6,11 @@ import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
 import {
-    buildPendingMessage, failPendingGeneralMessage, ingestGeneralMessage, rememberThread, removeGeneralMessage,
+    buildPendingMessage, failPendingGeneralMessage, ingestGeneralMessage, removeGeneralMessage,
     resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { buildThreadSeed, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
+import { dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -28,7 +28,7 @@ const scrollMemory = new Map<string, number>()
 const RENDER_CAP = 100
 
 export function GeneralStream({
-    org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onOpenSession,
+    org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onStartThread, onOpenSession,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -41,6 +41,8 @@ export function GeneralStream({
     /** The space's files — the composer's @ typeahead offers them as links. */
     entries?: spaces.SpacesAssetEntry[]
     onOpenThread: (topicId: string) => void
+    /** Reply on a message with no thread yet — open a draft pane (no topic until first send). */
+    onStartThread: (parent: spaces.Message) => void
     onOpenSession?: (sessionId: string) => void
 }) {
     const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null)
@@ -146,18 +148,13 @@ export function GeneralStream({
     }
     const discardFailed = (message: spaces.Message) => removeGeneralMessage(org.id, space.id, message.id)
 
-    const replyInThread = async (parent: spaces.Message) => {
-        try {
-            // anchorMessageId is the contract linkage; the seed's marker stays for
-            // teammates on pre-contract builds to parse.
-            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body: buildThreadSeed(parent), anchorMessageId: parent.id })
-            rememberThread(org.id, space.id, result.topic, result.message)
-            markTopicRead(org.id, space.id, result.topic.id)
-            analytics.spacesTopicStarted()
-            onOpenThread(result.topic.id)
-        } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not start the topic', 'error')
-        }
+    // Reply creates NOTHING: an existing thread opens (even a 0-reply one left
+    // by an older build), otherwise a draft pane — the topic is created only
+    // when the first reply is actually sent (DraftThreadPane).
+    const replyInThread = (parent: spaces.Message) => {
+        const existing = threads.byParent.get(parent.id)
+        if (existing) onOpenThread(existing)
+        else onStartThread(parent)
     }
 
     const askRowboat = (message: spaces.Message) => {
@@ -259,7 +256,7 @@ export function GeneralStream({
                 thread={thread}
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
-                onReplyInThread={(m) => void replyInThread(m)}
+                onReplyInThread={replyInThread}
                 onAskRowboat={askRowboat}
                 onCopyLink={(m) => void copyLink(m)}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}

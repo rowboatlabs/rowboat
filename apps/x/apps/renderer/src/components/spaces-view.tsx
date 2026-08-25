@@ -11,7 +11,7 @@ import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
-import { ThreadPane } from '@/components/spaces/thread-pane'
+import { DraftThreadPane, ThreadPane } from '@/components/spaces/thread-pane'
 import { useGeneral, useSpacePresence, useThreadIndex } from '@/hooks/use-space-chat'
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { SpaceMembersProvider } from '@/components/spaces/member-text'
@@ -322,10 +322,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     // been used.
     const select = (next: RailSelection) => {
         onSelect(next)
-        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'topic' ? 'topics' : 'files')
+        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : 'topics')
         setRailHover(false)
         setRailPeek(false)
-        if (next.kind === 'topic' && mode === 'read') setMode('split')
+        if ((next.kind === 'topic' || next.kind === 'draft') && mode === 'read') setMode('split')
         else if (next.kind === 'general' && mode === 'read') setMode('talk')
         else if (next.kind === 'file') {
             // A file opened while talking keeps the conversation beside it:
@@ -401,9 +401,20 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     // last chat selection sticks until the user picks another.
     const chatContextRef = useRef<string | null>(null)
     if (selection.kind === 'topic') chatContextRef.current = selection.topicId
-    else if (selection.kind === 'general') chatContextRef.current = null
-    else if (selection.fromTopicId) chatContextRef.current = selection.fromTopicId
+    else if (selection.kind === 'general' || selection.kind === 'draft') chatContextRef.current = null
+    else if (selection.kind === 'file' && selection.fromTopicId) chatContextRef.current = selection.fromTopicId
     const chatTopicId = chatContextRef.current
+
+    // Draft thread: the reply pane before any topic exists. The parent lives
+    // in the general stream; a stale draft (relaunch, deep link) falls back.
+    const draftParent = selection.kind === 'draft'
+        ? general.messages.find((m) => m.id === selection.parentMessageId) ?? null
+        : null
+    const draftMissing = selection.kind === 'draft' && general.ready && !draftParent
+    useEffect(() => {
+        if (draftMissing) onSelect({ kind: 'general' })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draftMissing])
 
     const selectedTopic = chatTopicId ? feed.topics.find((t) => t.id === chatTopicId) : undefined
     const selectedInfo = chatTopicId ? threads.byTopic.get(chatTopicId) : undefined
@@ -568,7 +579,21 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     the document; Split shows both around a draggable divider. */}
                 {effMode !== 'read' && (
                     <div className="flex-1 min-w-0 min-h-0 flex">
-                        {chatTopicId ? (
+                        {draftParent ? (
+                            <section className="flex-1 min-w-0 min-h-0 flex flex-col">
+                                <DraftThreadPane
+                                    key={draftParent.id}
+                                    org={org}
+                                    space={space}
+                                    parent={draftParent}
+                                    members={members}
+                                    memberNames={memberNames}
+                                    entries={entries}
+                                    onBack={() => select({ kind: 'general' })}
+                                    onCreated={(topicId) => select({ kind: 'topic', topicId })}
+                                />
+                            </section>
+                        ) : chatTopicId ? (
                             <section className="flex-1 min-w-0 min-h-0 flex flex-col">
                                 <ThreadPane
                                     key={chatTopicId}
@@ -605,6 +630,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                                 memberNames={memberNames}
                                 entries={entries}
                                 onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
+                                onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
                                 onOpenSession={onOpenSession}
                             />
                         )}

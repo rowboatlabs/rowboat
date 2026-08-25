@@ -12,9 +12,9 @@ import { MemberName, MemberText } from '@/components/spaces/member-text'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
 import type { ChatMessage, SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
-import { buildPendingMessage, usePresenceSender } from '@/hooks/use-space-chat'
+import { buildPendingMessage, rememberThread, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { artifactsForThread, explicitTitle, isContinuation, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
+import { artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
 import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -392,4 +392,88 @@ export function ThreadPane({
 
 function ParentBody({ body }: { body: string }) {
     return <SpaceMarkdown body={body} />
+}
+
+// ---------------------------------------------------------------------------
+// Draft thread — Reply opened a pane, but nothing exists yet. The topic (seed
+// message + the reply) is created only when the first reply is actually SENT;
+// clicking Reply and walking away leaves no trace in anyone's space.
+// ---------------------------------------------------------------------------
+
+export function DraftThreadPane({ org, space, parent, members, memberNames, entries, onBack, onCreated }: {
+    org: OrgWithSpaces
+    space: spaces.Space
+    /** The general message being replied to. */
+    parent: spaces.Message
+    members: spaces.Member[]
+    memberNames: Map<string, string>
+    entries: spaces.SpacesAssetEntry[]
+    onBack: () => void
+    /** The first reply landed — the pane should be swapped for the real topic. */
+    onCreated: (topicId: string) => void
+}) {
+    const [posting, setPosting] = useState(false)
+    // If the seed landed but the reply failed, a retry must reuse the topic —
+    // never mint a second one on the same parent.
+    const seededRef = useRef<{ topic: spaces.Topic; message: spaces.Message } | null>(null)
+
+    const post = async (body: string, agent?: AgentOptions) => {
+        setPosting(true)
+        try {
+            if (!seededRef.current) {
+                seededRef.current = await window.ipc.invoke('spaces:postMessage', {
+                    orgId: org.id, spaceId: space.id, body: buildThreadSeed(parent), anchorMessageId: parent.id,
+                })
+                rememberThread(org.id, space.id, seededRef.current.topic, seededRef.current.message)
+                analytics.spacesTopicStarted()
+            }
+            const seeded = seededRef.current
+            const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId: seeded.topic.id, body })
+            markTopicRead(org.id, space.id, seeded.topic.id)
+            analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
+            maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
+            onCreated(seeded.topic.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not post', 'error')
+            throw err
+        } finally {
+            setPosting(false)
+        }
+    }
+
+    const authorName = memberNames.get(parent.author.memberId) ?? parent.author.memberId
+    return (
+        <div className="flex h-full min-h-0 flex-col bg-background">
+            <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-2 pr-2">
+                <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={onBack} aria-label="Back to messages">
+                    <ArrowLeft className="size-4" />
+                </Button>
+                <span className="pl-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topic</span>
+                <span className="truncate text-xs text-muted-foreground">new — created when you send</span>
+                <span className="flex-1" />
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+                <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <MemberAvatar id={parent.author.memberId} name={authorName} size="md" className="mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-1.5 text-xs">
+                            <span className="font-semibold">{authorName}</span>
+                            <span className="text-muted-foreground">{formatFeedTime(parent.postedAt)} · in Messages</span>
+                        </div>
+                        <div className="text-sm leading-relaxed [&_p]:my-0.5">
+                            <ParentBody body={parent.body} />
+                        </div>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 px-1 pb-1 pt-3">
+                    <span className="text-[11px] font-medium text-muted-foreground">0 replies</span>
+                    <span className="h-px flex-1 bg-border" />
+                </div>
+                <div className="px-2 py-2 text-xs text-muted-foreground">
+                    Nothing here yet — sending a reply is what starts the topic for everyone.
+                </div>
+            </div>
+            <Composer placeholder="Reply…" busy={posting} onSend={post} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />
+        </div>
+    )
 }
