@@ -27,6 +27,8 @@ import { init as initChromeSync } from '../knowledge/chrome-extension/server/ser
 import { disconnectGoogleIfScopesStale } from '../auth/oauth-flows.js';
 import { migrateRuns } from '../migrations/runs/migrate.js';
 import { startModelsDevRefresh } from '../models/models-dev.js';
+import { init as initAppsServer } from '../apps/server.js';
+import { registerAppsHostApi } from '../apps/host-api.js';
 
 // The headless-safe half of Rowboat's boot: everything that runs schedulers,
 // sync services, and background agents against the workdir. Extracted from
@@ -99,6 +101,12 @@ export async function initCoreServices(): Promise<void> {
 
   startRetentionSweep();
   startModelsDevRefresh();
+
+  // Rowboat Apps server (per-app origins on 127.0.0.1:3210).
+  registerAppsHostApi();
+  initAppsServer().catch((error) => {
+    console.error('[Apps] Failed to start:', error);
+  });
 
   initChannels().catch((error) => {
     console.error('[Channels] Failed to start mobile channels:', error);

@@ -54,7 +54,7 @@ import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';
-import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled } from './server-host.js';
+import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled, bridgeDeltaSubscribe, bridgeDeltaUnsubscribe, childServerMode } from './server-host.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
 import { getModelCatalog } from '@x/core/dist/models/catalog.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
@@ -570,7 +570,7 @@ export function stopWorkspaceWatcher(): void {
 // The one renderer fan-out: send a payload to every live window on a channel.
 // All broadcast feeds (runs, services, sessions, turns, code runs, agent
 // status) go through here.
-function broadcastToWindows(channel: string, payload: unknown): void {
+export function broadcastToWindows(channel: string, payload: unknown): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {
@@ -1446,10 +1446,14 @@ export function setupIpcHandlers() {
     },
     'turns:subscribe': async (event, args) => {
       subscribeTurnDeltas(event.sender, args.turnId);
+      // Child-server mode: deltas arrive over the WS feed, so mirror the
+      // window's interest onto the wire subscription.
+      if (childServerMode()) bridgeDeltaSubscribe(args.turnId);
       return { success: true };
     },
     'turns:unsubscribe': async (event, args) => {
       unsubscribeTurnDeltas(event.sender, args.turnId);
+      if (childServerMode()) bridgeDeltaUnsubscribe(args.turnId);
       return { success: true };
     },
     'sessions:downloadLog': async (event, args) => {

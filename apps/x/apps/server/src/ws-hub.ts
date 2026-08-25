@@ -44,6 +44,14 @@ const ClientMessage = z.discriminatedUnion('type', [
     topic: z.literal('turn-deltas'),
     turnId: z.string(),
   }),
+  // Reply to a server→client capability request (RFC Q14 reverse calls).
+  z.object({
+    type: z.literal('capability-response'),
+    id: z.string(),
+    ok: z.boolean(),
+    result: z.unknown().optional(),
+    error: z.string().optional(),
+  }),
 ]);
 
 interface Connection {
@@ -51,6 +59,7 @@ interface Connection {
   seq: number;
   helloed: boolean;
   deltaSubs: Set<string>;
+  capabilities: Set<string>;
 }
 
 const HELLO_TIMEOUT_MS = 5000;
@@ -58,6 +67,8 @@ const HELLO_TIMEOUT_MS = 5000;
 // Close codes (4xxx = application-defined).
 export const WS_CLOSE_UNAUTHORIZED = 4401;
 export const WS_CLOSE_NO_HELLO = 4400;
+
+const CAPABILITY_TIMEOUT_MS = 30_000;
 
 export interface WsHub {
   attach(
@@ -75,6 +86,11 @@ export interface WsHub {
   broadcast(channel: PushChannel, payload: unknown): void;
   /** Route one turn-spine event: durable → broadcast, delta → subscribers only. */
   handleTurnEvent(event: TurnBusEvent): void;
+  /** Reverse call: ask one client advertising `capability` to act; await its reply. */
+  requestCapability(capability: string, payload: unknown, opts?: { timeoutMs?: number }): Promise<unknown>;
+  /** Fire-and-forget a capability event to every advertising client. */
+  broadcastCapability(capability: string, payload: unknown): void;
+  hasCapableClient(capability: string): boolean;
   connectionCount(): number;
   close(): void;
 }
@@ -82,6 +98,18 @@ export interface WsHub {
 export function createWsHub(): WsHub {
   const connections = new Set<Connection>();
   let wss: WebSocketServer | null = null;
+  let nextRequestId = 0;
+  const pendingRequests = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+
+  const capableConnection = (capability: string): Connection | undefined => {
+    // Most recently connected capable client wins (matches "the window the
+    // user is looking at" heuristic well enough for a v1 router).
+    let found: Connection | undefined;
+    for (const conn of connections) {
+      if (conn.helloed && conn.capabilities.has(capability)) found = conn;
+    }
+    return found;
+  };
 
   const send = (conn: Connection, message: Record<string, unknown>) => {
     if (conn.socket.readyState !== WebSocket.OPEN) return;
@@ -139,7 +167,7 @@ export function createWsHub(): WsHub {
     });
 
     wss.on('connection', (socket: WebSocket) => {
-      const conn: Connection = { socket, seq: 0, helloed: false, deltaSubs: new Set() };
+      const conn: Connection = { socket, seq: 0, helloed: false, deltaSubs: new Set(), capabilities: new Set() };
       connections.add(conn);
 
       const helloTimer = setTimeout(() => {
@@ -158,6 +186,7 @@ export function createWsHub(): WsHub {
           case 'hello':
             if (!conn.helloed) {
               conn.helloed = true;
+              for (const cap of parsed.capabilities ?? []) conn.capabilities.add(cap);
               clearTimeout(helloTimer);
               send(conn, {
                 type: 'welcome',
@@ -173,6 +202,16 @@ export function createWsHub(): WsHub {
           case 'unsubscribe':
             conn.deltaSubs.delete(parsed.turnId);
             break;
+          case 'capability-response': {
+            const pending = pendingRequests.get(parsed.id);
+            if (pending) {
+              pendingRequests.delete(parsed.id);
+              clearTimeout(pending.timer);
+              if (parsed.ok) pending.resolve(parsed.result);
+              else pending.reject(new Error(parsed.error ?? 'capability request failed'));
+            }
+            break;
+          }
         }
       });
 
@@ -187,10 +226,37 @@ export function createWsHub(): WsHub {
     });
   };
 
+  const requestCapability: WsHub['requestCapability'] = (capability, payload, opts) => {
+    const conn = capableConnection(capability);
+    if (!conn) {
+      return Promise.reject(new Error(`no client connected that provides '${capability}'`));
+    }
+    const id = `cap-${++nextRequestId}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingRequests.delete(id);
+        reject(new Error(`capability '${capability}' request timed out`));
+      }, opts?.timeoutMs ?? CAPABILITY_TIMEOUT_MS);
+      pendingRequests.set(id, { resolve, reject, timer });
+      send(conn, { type: 'capability-request', id, capability, payload });
+    });
+  };
+
+  const broadcastCapability: WsHub['broadcastCapability'] = (capability, payload) => {
+    for (const conn of connections) {
+      if (conn.helloed && conn.capabilities.has(capability)) {
+        send(conn, { type: 'capability-request', id: `cap-${++nextRequestId}`, capability, payload, fireAndForget: true });
+      }
+    }
+  };
+
   return {
     attach,
     broadcast,
     handleTurnEvent,
+    requestCapability,
+    broadcastCapability,
+    hasCapableClient: (capability) => capableConnection(capability) !== undefined,
     connectionCount: () => connections.size,
     close: () => {
       for (const conn of connections) {

@@ -9,6 +9,8 @@ import type { ISessions } from '@x/core/dist/runtime/sessions/index.js';
 import { createCoreEventSources, createCoreRpcHandlers, resolveWorkspacePath } from './core-deps.js';
 import { prepareCoreData, initCoreServices } from '@x/core/dist/boot/services.js';
 import { createRowboatServer } from './server.js';
+import { capabilityBroker } from './capabilities.js';
+import { registerUrlOpener } from '@x/core/dist/auth/url-opener.js';
 
 // Headless rowboat-server: the RFC's end-state entrypoint, where main spawns
 // this as a child process (or it runs on a remote box) and core lives here.
@@ -25,11 +27,24 @@ async function main(): Promise<void> {
   // The workdir lock is acquired by createRowboatServer itself — a live
   // Electron-hosted transport makes this boot fail loudly, as it must.
   await initConfigs();
-  registerNotificationService({ isSupported: () => false, notify: () => {} });
+  // Client capabilities route over the WS as reverse calls (RFC Q14): the
+  // connected client that advertises each capability performs it.
+  const broker = capabilityBroker();
+  registerNotificationService({
+    isSupported: () => broker.hasCapableClient('notifications'),
+    notify: (input) => broker.broadcast('notifications', input),
+  });
   registerBrowserControlService({
-    execute: async () => {
-      throw new Error('browser control is unavailable on a headless server');
+    execute: async (input, ctx) => {
+      void ctx;
+      return (await broker.request('browser-control', input, { timeoutMs: 120_000 })) as never;
     },
+  });
+  registerUrlOpener({
+    open: async (url) => {
+      await broker.request('open-url', { url }, { timeoutMs: 15_000 });
+    },
+    focusClient: () => broker.broadcast('focus-client', {}),
   });
 
   await prepareCoreData();

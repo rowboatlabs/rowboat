@@ -125,3 +125,61 @@ describe('events client ↔ rowboat-server', () => {
     release();
   });
 });
+
+describe('reverse calls (capability requests)', () => {
+  it('routes a request to a capable client and returns its reply', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rowboat-cap-'));
+    const server = await createRowboatServer({
+      workDir: dir,
+      handlers: stubHandlers,
+      events: { subscribeTurnEvents: () => () => {}, subscribeSessionEvents: () => () => {} },
+      resolveWorkspacePath: (rel) => path.join(dir, rel),
+      serverVersion: 'test',
+      port: 0,
+    });
+    const seen: unknown[] = [];
+    const cap = createEventsClient({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      token: server.key,
+      clientName: 'cap-client',
+      capabilities: {
+        'open-url': async (payload) => {
+          seen.push(payload);
+          return { opened: true };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      const off = cap.onStatus((s) => {
+        if (s === 'connected') {
+          off();
+          resolve();
+        }
+      });
+    });
+
+    const result = await server.hub.requestCapability('open-url', { url: 'https://example.com' }, { timeoutMs: 5000 });
+    expect(result).toEqual({ opened: true });
+    expect(seen).toEqual([{ url: 'https://example.com' }]);
+
+    // No client advertises this one — must reject, not hang.
+    await expect(server.hub.requestCapability('browser-control', {}, { timeoutMs: 1000 })).rejects.toThrow(/no client/);
+
+    // Handler errors surface as rejections.
+    const failing = createEventsClient({
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      token: server.key,
+      clientName: 'failing',
+      capabilities: { boom: () => { throw new Error('kaput'); } },
+    });
+    await new Promise<void>((resolve) => {
+      const off = failing.onStatus((s) => { if (s === 'connected') { off(); resolve(); } });
+    });
+    await expect(server.hub.requestCapability('boom', {}, { timeoutMs: 5000 })).rejects.toThrow('kaput');
+
+    cap.close();
+    failing.close();
+    await server.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
