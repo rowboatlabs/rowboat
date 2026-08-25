@@ -14,7 +14,7 @@ import { ThreadPane } from '@/components/spaces/thread-pane'
 import { useGeneral, useSpacePresence, useThreadIndex } from '@/hooks/use-space-chat'
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { SpaceMembersProvider } from '@/components/spaces/member-text'
-import { SpaceRefsProvider } from '@/components/spaces/space-markdown'
+import { SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, stripThreadMarker } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { markRead, markTopicRead } from '@/lib/spaces-read-state'
@@ -154,6 +154,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
 }) {
     const [members, setMembers] = useState<spaces.Member[]>([])
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
+    // Local-only empty folders: folders are key prefixes, so an empty one has
+    // nothing to store — it lives here until its first file lands (then the
+    // real entries carry it and it's pruned), or until removed.
+    const [draftFolders, setDraftFolders] = useState<string[]>([])
     const [refreshTick, setRefreshTick] = useState(0)
     const [, setFolding] = useState(false)
 
@@ -186,6 +190,22 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
             cancelled = true
         }
     }, [org.id, space.id, refreshTick])
+
+    // A draft folder is done the moment a real file lives under it.
+    useEffect(() => {
+        setDraftFolders((prev) => {
+            const next = prev.filter((f) => !entries.some((e) => e.path.startsWith(`${f}/`)))
+            return next.length === prev.length ? prev : next
+        })
+    }, [entries])
+    const addFolder = (path: string) => {
+        const cleaned = path.split('/').filter((s) => s && s !== '.' && s !== '..').join('/')
+        if (!cleaned) return
+        setDraftFolders((prev) =>
+            prev.includes(cleaned) || entries.some((e) => e.path.startsWith(`${cleaned}/`)) ? prev : [...prev, cleaned])
+    }
+    const removeFolder = (path: string) =>
+        setDraftFolders((prev) => prev.filter((f) => f !== path && !f.startsWith(`${path}/`)))
 
     useSpaceLive(org.id, space.id, (frame) => {
         // Coarse-grained on purpose: any durable event refreshes the open
@@ -416,6 +436,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     return (
         <SpaceMembersProvider members={memberNames}>
         <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
+        <SpaceNavProvider onOpenFile={openFile}>
         <div className="flex-1 min-h-0 flex flex-col">
             <header className="flex items-center gap-3 px-4 h-12 shrink-0 border-b border-border">
                 <OrgMonogram org={org} />
@@ -482,6 +503,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     threads={threads}
                     changeSets={feed.changeSets}
                     entries={entries}
+                    draftFolders={draftFolders}
                     presence={presence}
                     unreadPaths={unreadPaths}
                     selection={selection}
@@ -489,6 +511,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     onCreateFile={openFile}
                     onUploadFiles={setUploadFiles}
                     onOpenTrash={() => setTrashOpen(true)}
+                    onAddFolder={addFolder}
+                    onRemoveFolder={removeFolder}
                     open={railOpen}
                     pinned={railPinned}
                     hint={railPinned ? 'pinned' : railPeek ? 'sliding away' : 'hover · pin to keep'}
@@ -534,6 +558,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                                 presence={presence}
                                 members={members}
                                 memberNames={memberNames}
+                                entries={entries}
                                 onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
                                 onOpenSession={onOpenSession}
                             />
@@ -561,11 +586,13 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                                     org={org}
                                     space={space}
                                     path={centerPath}
+                                    entries={entries}
                                     memberNames={memberNames}
                                     refreshTick={refreshTick}
                                     onChanged={() => setRefreshTick((t) => t + 1)}
                                     onRenamed={openFile}
                                     onRedirect={openFile}
+                                    onOpenFile={openFile}
                                     onDeleted={() => select({ kind: 'general' })}
                                     crumb={selection.kind === 'file' && crumbTopicId && crumbLabel ? {
                                         label: crumbLabel,
@@ -601,6 +628,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                 />
             )}
         </div>
+        </SpaceNavProvider>
         </SpaceRefsProvider>
         </SpaceMembersProvider>
     )

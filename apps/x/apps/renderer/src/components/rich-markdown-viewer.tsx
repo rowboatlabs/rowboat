@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { EditorContent, useEditor } from '@tiptap/react'
+import { useEffect, useRef } from 'react'
+import { EditorContent, useEditor, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
@@ -34,7 +34,21 @@ function preprocessMarkdown(markdown: string): string {
   })
 }
 
-export function RichMarkdownViewer({ content }: { content: string }) {
+export function RichMarkdownViewer({ content, onToggleTask, onOpenLink }: {
+  content: string
+  /** Makes read-only checkboxes tappable — called with the task's index in document order. The content prop is the source of truth: pass the updated markdown back in. */
+  onToggleTask?: (index: number, checked: boolean) => void
+  /** Anchor-click interception; return true when handled (e.g. an in-app relative link). Unhandled links keep the default open-in-browser behavior. */
+  onOpenLink?: (href: string) => boolean
+}) {
+  // The editor is created once; these refs keep late callback props live, and
+  // editorRef lets extension callbacks (configured before useEditor returns)
+  // reach the instance.
+  const onToggleTaskRef = useRef(onToggleTask)
+  onToggleTaskRef.current = onToggleTask
+  const onOpenLinkRef = useRef(onOpenLink)
+  onOpenLinkRef.current = onOpenLink
+  const editorRef = useRef<Editor | null>(null)
   const editor = useEditor({
     editable: false,
     extensions: [
@@ -74,6 +88,30 @@ export function RichMarkdownViewer({ content }: { content: string }) {
       TaskList,
       TaskItem.configure({
         nested: true,
+        // Only when a handler is mounted: otherwise read-only checkboxes stay
+        // disabled (configuring this at all makes TipTap enable them).
+        ...(onToggleTask
+          ? {
+              onReadOnlyChecked: (node, checked) => {
+                const cb = onToggleTaskRef.current
+                const instance = editorRef.current
+                if (!cb || !instance) return false
+                let index = -1
+                let seen = 0
+                instance.state.doc.descendants((n) => {
+                  if (n.type.name === 'taskItem') {
+                    if (n === node) index = seen
+                    seen += 1
+                  }
+                  return true
+                })
+                if (index === -1) return false
+                cb(index, checked)
+                // false: the flipped markdown comes back through `content`.
+                return false
+              },
+            }
+          : {}),
       }),
       TableKit.configure({
         table: { resizable: false },
@@ -91,8 +129,22 @@ export function RichMarkdownViewer({ content }: { content: string }) {
       attributes: {
         class: 'prose prose-sm max-w-none focus:outline-none',
       },
+      handleDOMEvents: {
+        // Runs before Link's openOnClick plugin; returning true stops it.
+        click: (_view, event) => {
+          const cb = onOpenLinkRef.current
+          if (!cb) return false
+          const anchor = (event.target as HTMLElement | null)?.closest?.('a')
+          const href = anchor?.getAttribute('href')
+          if (!href) return false
+          if (!cb(href)) return false
+          event.preventDefault()
+          return true
+        },
+      },
     },
   })
+  editorRef.current = editor
 
   useEffect(() => {
     if (!editor) return

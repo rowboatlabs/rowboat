@@ -22,7 +22,7 @@ import { containsRowboatAddress } from '@/lib/spaces-mentions'
 const scrollMemory = new Map<string, number>()
 
 export function GeneralStream({
-    org, space, general, threads, topics, presence, members, memberNames, onOpenThread, onOpenSession,
+    org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onOpenSession,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -32,6 +32,8 @@ export function GeneralStream({
     presence: SpacePresence
     members: spaces.Member[]
     memberNames: Map<string, string>
+    /** The space's files — the composer's @ typeahead offers them as links. */
+    entries?: spaces.SpacesAssetEntry[]
     onOpenThread: (topicId: string) => void
     onOpenSession?: (sessionId: string) => void
 }) {
@@ -261,6 +263,7 @@ export function GeneralStream({
                 onType={onType}
                 seed={seed}
                 members={members}
+                entries={entries}
                 selfMemberId={org.memberId}
             />
         </section>
