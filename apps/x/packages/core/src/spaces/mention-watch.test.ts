@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveMentions } from '@x/shared/dist/spaces.js';
 import { buildMentionNotify, buildMissedSummaryNotify, isMissedArrival, mentionExcerpt, mentionLink } from './mention-watch.js';
 
 describe('isMissedArrival', () => {
@@ -22,22 +23,35 @@ describe('mentionExcerpt', () => {
         expect(mentionExcerpt('@arjun can you look?\n```js\nsecret()\n```\n> old quote\n**soon**')).toBe('@arjun can you look? soon');
         expect(mentionExcerpt('x'.repeat(200))).toHaveLength(140);
     });
+    it('resolved wire bodies show people, not member ids', () => {
+        const names = new Map([['01M0KTADMQSQ35V1M2WH15XNTY', 'Arjun']]);
+        expect(mentionExcerpt(resolveMentions('@here ping @01M0KTADMQSQ35V1M2WH15XNTY', names)))
+            .toBe('@here ping @Arjun');
+    });
 });
 
 describe('notification payloads', () => {
     it('builds a background-only mention notification with a topic deep link', () => {
-        const n = buildMentionNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', topicId: 't1', authorName: 'Harsh', body: '@arjun ping' });
+        const n = buildMentionNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', topicId: 't1', authorName: 'Harsh', body: '@arjun ping', kind: 'you' });
         expect(n.title).toBe('Harsh mentioned you · Roadboard');
         expect(n.message).toBe('@arjun ping');
         expect(n.link).toContain('topicId=t1');
         expect(n.onlyWhenBackground).toBe(true);
     });
+    it('titles an @here hit as mentioning everyone', () => {
+        const n = buildMentionNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', topicId: 't1', authorName: 'Harsh', body: '@here standup', kind: 'here' });
+        expect(n.title).toBe('Harsh mentioned everyone · Roadboard');
+    });
     it('summarises missed mentions, landing on the sole topic when there is one', () => {
-        const one = buildMissedSummaryNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', count: 1, soleTopicId: 't1' });
+        const one = buildMissedSummaryNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', youCount: 1, hereCount: 0, soleTopicId: 't1' });
         expect(one.message).toBe('1 mention of you');
         expect(one.link).toContain('topicId=t1');
-        const many = buildMissedSummaryNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', count: 3 });
+        const many = buildMissedSummaryNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', youCount: 3, hereCount: 0 });
         expect(many.message).toBe('3 mentions of you');
         expect(many.link).not.toContain('topicId');
+    });
+    it('counts @here separately in the missed summary', () => {
+        expect(buildMissedSummaryNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', youCount: 0, hereCount: 2 }).message).toBe('2 @here');
+        expect(buildMissedSummaryNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', youCount: 2, hereCount: 1 }).message).toBe('2 mentions of you · 1 @here');
     });
 });

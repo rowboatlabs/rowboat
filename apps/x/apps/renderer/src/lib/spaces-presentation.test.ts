@@ -94,6 +94,14 @@ describe('mentions — compose names, wire ids', () => {
         expect(encodeMentions('@rowboat go', [{ id: '01HIMPOSTOR', displayName: 'rowboat' }])).toBe('@rowboat go')
     })
 
+    it('@here stays literal on the wire and decorates like a mention', () => {
+        expect(encodeMentions('@here standup in 5', members)).toBe('@here standup in 5')
+        expect(encodeMentions('@here go', [{ id: '01HIMPOSTOR', displayName: 'here' }])).toBe('@here go')
+        const names = new Map(members.map((m) => [m.id, m.displayName]))
+        expect(decorateMentions('@here standup in 5', names)).toBe('**@here** standup in 5')
+        expect(resolveMentions('`@here` in code stays', names)).toBe('`@here` in code stays')
+    })
+
     it('round-trips: encoded wire body decorates back to the name', () => {
         const names = new Map(members.map((m) => [m.id, m.displayName]))
         expect(decorateMentions(encodeMentions('hey @Ramnique Singh', members), names))

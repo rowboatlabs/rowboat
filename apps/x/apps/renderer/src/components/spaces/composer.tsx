@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Bot, FileText, Globe, Loader2, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, Bot, FileText, Globe, Loader2, Megaphone, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
@@ -12,7 +12,8 @@ import { blobAppUrl, blobWireUrl, encodeMentions, formatBytes, isImageMime } fro
 import { toast } from '@/lib/toast'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
-// line — with two things layered on: `@` autocompletes members and @rowboat,
+// line — with two things layered on: `@` autocompletes members, @here (notify
+// everyone online) and @rowboat,
 // and the moment the draft addresses @rowboat, a strip of agent options
 // (model · permissions · search · terminal) appears; they ride along with the
 // invocation for that one turn. The message itself always goes to the team.
@@ -52,6 +53,7 @@ interface MentionCandidate {
     label: string
     hint?: string
     isAgent?: boolean
+    isBroadcast?: boolean
 }
 
 const MENTION_RE = /(^|[\s([{])@([\w.-]*)$/
@@ -196,6 +198,7 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
         const q = mentionMatch.query
         const list: MentionCandidate[] = []
         if ('rowboat'.startsWith(q)) list.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
+        if ('here'.startsWith(q)) list.push({ id: 'here', label: 'here', hint: 'notify everyone online', isBroadcast: true })
         for (const m of members) {
             const hay = `${m.id} ${m.displayName}`.toLowerCase()
             if (!q || hay.includes(q)) list.push({ id: m.id, label: m.displayName, ...(m.id === selfMemberId ? { hint: 'you' } : {}) })
@@ -303,6 +306,8 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                             >
                                 {c.isAgent ? (
                                     <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><Bot className="size-3.5" /></span>
+                                ) : c.isBroadcast ? (
+                                    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Megaphone className="size-3.5" /></span>
                                 ) : (
                                     <MemberAvatar id={c.id} name={c.label} size="sm" className="size-6 text-[10px]" />
                                 )}
