@@ -130,6 +130,8 @@ export interface ThreadRowData {
     lastActivityAt: string
     unreadCount: number
     workingAgents: string[]
+    /** The topic's explicit name (renamed by someone), mentions already resolved; null while auto-titled. */
+    title?: string | null
 }
 
 export function MessageRow({
@@ -199,7 +201,8 @@ export function MessageRow({
                         className="mt-1.5 inline-flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs hover:border-foreground/30"
                     >
                         <MessageSquare className="size-3 text-muted-foreground" />
-                        <span className={cn(thread.unreadCount > 0 ? 'font-bold' : 'font-semibold')}>
+                        {thread.title && <span className="max-w-48 truncate font-semibold">{thread.title}</span>}
+                        <span className={cn(thread.unreadCount > 0 ? 'font-bold' : 'font-semibold', thread.title && 'font-normal text-muted-foreground')}>
                             {thread.replyCount} {thread.replyCount === 1 ? 'reply' : 'replies'}
                         </span>
                         {thread.unreadCount > 0 && <span className="font-semibold text-orange-600">{thread.unreadCount} new</span>}
