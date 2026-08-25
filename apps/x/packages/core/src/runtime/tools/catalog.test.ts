@@ -304,11 +304,11 @@ describe("BuiltinTools permission audit", () => {
             // Ghostwriter: types into ANOTHER app at the user's cursor —
             // always gated (the auto judge keeps voice flow smooth).
             "paste-at-cursor": "prompt",
-            // Spaces blob bridge: upload pushes local bytes to a team-visible
-            // org, download pulls team bytes to disk — both gated like the
-            // executeMcpTool calls they sit beside (the auto judge decides).
+            // Spaces blob bridge: upload pushes local bytes toward a
+            // team-visible org, so it's gated (the auto judge decides);
+            // download is deliberately "none" — a member-readable fetch into
+            // the app-owned cache.
             "spaces-upload-blob": "prompt",
-            "spaces-download-blob": "prompt",
         });
     });
 });

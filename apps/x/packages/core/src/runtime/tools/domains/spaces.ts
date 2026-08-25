@@ -144,7 +144,10 @@ export const spacesTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
     "spaces-download-blob": {
-        permission: "prompt",
+        // Ungated by decision: it only reads space content the member already
+        // has access to, into the app-owned cache — the outward acts (upload,
+        // propose_change, post) are where gating lives.
+        permission: "none",
         isAvailable: isSpacesAvailable,
         description:
             "Download a space blob (a message attachment or a binary file in the space's files) to local disk and " +
