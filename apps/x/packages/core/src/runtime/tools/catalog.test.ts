@@ -219,6 +219,8 @@ const HISTORICAL_KEY_ORDER = [
     "spreadsheet-create",
     "spreadsheet-edit",
     "generate-image",
+    "spaces-upload-blob",
+    "spaces-download-blob",
     "spawn-agent",
 ];
 
@@ -302,6 +304,11 @@ describe("BuiltinTools permission audit", () => {
             // Ghostwriter: types into ANOTHER app at the user's cursor —
             // always gated (the auto judge keeps voice flow smooth).
             "paste-at-cursor": "prompt",
+            // Spaces blob bridge: upload pushes local bytes toward a
+            // team-visible org, so it's gated (the auto judge decides);
+            // download is deliberately "none" — a member-readable fetch into
+            // the app-owned cache.
+            "spaces-upload-blob": "prompt",
         });
     });
 });

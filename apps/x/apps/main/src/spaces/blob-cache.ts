@@ -1,25 +1,17 @@
-import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { nativeImage } from "electron";
 import { WorkDir } from "@x/core/dist/config/config.js";
-import * as orgs from "@x/core/dist/spaces/orgs.js";
+import * as blobCache from "@x/core/dist/spaces/blob-cache.js";
 
-// Content-addressed local cache for space blobs. The address IS the sha256 of
-// the bytes, so a cache hit is correct forever — no invalidation problem
-// exists. Each blob downloads once per machine; the app:// protocol handler
-// (main.ts) and the save-dialog IPC both read through here.
+// Main's view of the space-blob cache. The content-addressed read-through
+// itself lives in core (spaces/blob-cache.ts) — shared with the agent's
+// spaces-download-blob tool — while the thumbnail layer stays here: it needs
+// Electron's nativeImage, and we own the only client so the server ships no
+// thumbnails. Cache keys inherit content-addressing.
 //
-// Layout under ~/.rowboat/cache/:
-//   blobs/<hash>            the bytes
-//   blobs/<hash>.json       { mime }  (the org's stored verdict at fetch time)
-//   thumbs/<hash>-<w>.png   nativeImage downscales, generated lazily
-//
-// Thumbnails are deliberately client-side (the server ships none): we own the
-// only client, Electron's nativeImage needs no dependencies, and the cache
-// keys inherit content-addressing.
+//   ~/.rowboat/cache/thumbs/<hash>-<w>.png   nativeImage downscales, lazily
 
-const blobsDir = path.join(WorkDir, "cache", "blobs");
 const thumbsDir = path.join(WorkDir, "cache", "thumbs");
 
 const HASH_RE = /^[0-9a-f]{64}$/;
@@ -28,46 +20,11 @@ function assertHash(hash: string): void {
   if (!HASH_RE.test(hash)) throw new Error(`not a blob hash: ${hash}`);
 }
 
-async function writeAtomic(finalPath: string, bytes: Uint8Array): Promise<void> {
-  await fs.mkdir(path.dirname(finalPath), { recursive: true });
-  const tmp = path.join(path.dirname(finalPath), `.tmp-${randomBytes(8).toString("hex")}`);
-  try {
-    await fs.writeFile(tmp, bytes);
-    await fs.rename(tmp, finalPath);
-  } catch (err) {
-    await fs.rm(tmp, { force: true }).catch(() => {});
-    throw err;
-  }
-}
-
-export interface CachedBlob {
-  bytes: Uint8Array;
-  mime: string;
-}
+export type CachedBlob = blobCache.CachedBlob;
 
 /** The read-through: local cache first, the org (via the authed client) on a miss. */
 export async function getBlob(orgId: string, spaceId: string, hash: string): Promise<CachedBlob> {
-  assertHash(hash);
-  const blobPath = path.join(blobsDir, hash);
-  try {
-    const bytes = await fs.readFile(blobPath);
-    // Integrity: a torn write or disk corruption must never serve wrong bytes
-    // under a content address — verify cheap (local read) and refetch on fail.
-    if (createHash("sha256").update(bytes).digest("hex") === hash) {
-      const meta = await fs.readFile(`${blobPath}.json`, "utf8").then(
-        (raw) => JSON.parse(raw) as { mime?: string },
-        () => ({}) as { mime?: string },
-      );
-      return { bytes, mime: meta.mime ?? "application/octet-stream" };
-    }
-    await fs.rm(blobPath, { force: true });
-  } catch {
-    // miss — fall through to the network
-  }
-  const fetched = await orgs.getClient(orgId).fetchBlob(spaceId, hash);
-  await writeAtomic(blobPath, fetched.bytes);
-  await writeAtomic(`${blobPath}.json`, new TextEncoder().encode(JSON.stringify({ mime: fetched.mime })));
-  return { bytes: fetched.bytes, mime: fetched.mime };
+  return blobCache.getBlob(orgId, spaceId, hash);
 }
 
 /**
@@ -97,6 +54,14 @@ export async function getThumbnail(
     return bytes;
   }
   const png = image.resize({ width: w }).toPNG();
-  await writeAtomic(thumbPath, png);
+  await fs.mkdir(thumbsDir, { recursive: true });
+  const tmp = path.join(thumbsDir, `.tmp-${hash}-${w}-${Date.now().toString(36)}`);
+  try {
+    await fs.writeFile(tmp, png);
+    await fs.rename(tmp, thumbPath);
+  } catch (err) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
   return png;
 }
