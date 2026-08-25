@@ -284,6 +284,16 @@ export const MIGRATIONS: Migration[] = [
       `alter table messages add column if not exists deleted_at text`,
     ],
   },
+  {
+    id: '009-blob-dimensions',
+    statements: [
+      // Pixel dimensions for sniffed images, parsed at upload (BlobInfo doc).
+      // Display hint only — no backfill: blobs uploaded before this simply
+      // have no dimensions, and clients fall back to unreserved rendering.
+      `alter table space_blobs add column if not exists width int`,
+      `alter table space_blobs add column if not exists height int`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

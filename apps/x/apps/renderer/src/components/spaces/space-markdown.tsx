@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type ComponentProps, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { Streamdown } from 'streamdown'
 import { FileDown, FileText, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -7,6 +7,7 @@ import { toast } from '@/lib/toast'
 import { useMemberNames } from '@/components/spaces/member-text'
 import {
     decorateMentions,
+    imageDimsFromUrl,
     parseAssetWireUrl,
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
@@ -117,10 +118,35 @@ function ImageLightbox({ src, alt, open, onOpenChange, children }: {
 }
 
 /** An uploaded image in a message: inline preview, click to view, download from the viewer. */
-function BlobImage({ src, alt }: { src: string; alt: string }) {
+// Chat images render as Slack-style tiles: one consistent height, side by
+// side on a line (wrapping), very wide shots cropped to a max tile width —
+// the lightbox has the full image. Small images keep their natural size
+// (tiles never upscale).
+const TILE_H = 240
+const TILE_MAX_W = 360
+
+/** The tile look: soft corners, hairline border, a whisper of elevation that lifts on hover. */
+const TILE_CLASS =
+    'mb-1 mr-1.5 inline-block cursor-zoom-in rounded-xl border border-border bg-muted object-cover align-top shadow-sm transition-shadow hover:shadow-md'
+
+/** Tile geometry from known dimensions: exact box, reserved before load. */
+function tileStyle(dims: { width: number; height: number } | null): CSSProperties | undefined {
+    if (!dims) return undefined
+    if (dims.height <= TILE_H && dims.width <= TILE_MAX_W) return { width: dims.width, height: dims.height }
+    return { width: Math.round(Math.min(TILE_MAX_W, (TILE_H * dims.width) / dims.height)), height: TILE_H }
+}
+
+export function BlobImage({ src, alt }: { src: string; alt: string }) {
     const [open, setOpen] = useState(false)
     const [saving, setSaving] = useState(false)
+    const [loaded, setLoaded] = useState(false)
     const parsed = parseBlobAppUrl(src)
+    // BlobInfo dimensions ride the link as display-only ?w=&h= — reserve the
+    // tile's exact final box (shimmering until the bytes arrive), so a
+    // loading image never shifts the stream. Without them the tile height
+    // still holds; only the width settles on load.
+    const dims = imageDimsFromUrl(src)
+    const style = tileStyle(dims)
     const save = async () => {
         if (saving || !parsed) return
         setSaving(true)
@@ -152,7 +178,9 @@ function BlobImage({ src, alt }: { src: string; alt: string }) {
                 alt={alt}
                 loading="lazy"
                 onClick={() => setOpen(true)}
-                className="my-1 block max-h-80 max-w-full cursor-zoom-in rounded-lg border border-border object-contain"
+                onLoad={() => setLoaded(true)}
+                style={style}
+                className={cn(TILE_CLASS, !style && 'h-60 max-w-[360px]', dims && !loaded && 'animate-pulse')}
             />
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
                 {parsed && (
@@ -218,7 +246,7 @@ function ExternalImage({ src, alt }: { src: string; alt: string }) {
                 loading="lazy"
                 onClick={() => setOpen(true)}
                 onError={() => setFailed(true)}
-                className="my-1 block max-h-80 max-w-full cursor-zoom-in rounded-lg border border-border object-contain"
+                className={cn(TILE_CLASS, 'h-60 max-w-[360px]')}
             />
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
                 <button type="button" onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">

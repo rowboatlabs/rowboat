@@ -97,7 +97,7 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
       'content-type': 'application/octet-stream', // wrong on purpose; sniff wins
     });
     expect(r.status).toBe(200);
-    expect(r.body.blob).toEqual({ hash: blobHash(PNG_1PX), size: PNG_1PX.byteLength, mime: 'image/png' });
+    expect(r.body.blob).toEqual({ hash: blobHash(PNG_1PX), size: PNG_1PX.byteLength, mime: 'image/png', width: 1, height: 1 });
   });
 
   it('re-uploading the same bytes is an idempotent no-op with the same address', async () => {
@@ -190,7 +190,7 @@ describe.each([['memory'], ['postgres']] as const)('blob uploads over the render
     expect(propose.status).toBe(200);
     expect(propose.body.outcome).toBe('applied');
     const changeSet = propose.body.changeSet as ChangeSet;
-    expect(changeSet.blob).toEqual({ hash: blobHash(PNG_1PX), size: PNG_1PX.byteLength, mime: 'image/png' });
+    expect(changeSet.blob).toEqual({ hash: blobHash(PNG_1PX), size: PNG_1PX.byteLength, mime: 'image/png', width: 1, height: 1 });
 
     const listing = await ramnique.get(`/v1/spaces/${spaceId}/assets`);
     const entry = listing.body.entries.find((e: { path: string }) => e.path === 'design/screens/home.png');

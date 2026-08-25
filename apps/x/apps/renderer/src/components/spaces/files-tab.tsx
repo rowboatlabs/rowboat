@@ -763,7 +763,12 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                                 <img
                                     src={blobAppUrl({ orgId: org.id, spaceId: space.id }, blob.hash)}
                                     alt={fileName}
-                                    className="max-w-full rounded-lg border border-border"
+                                    // Dimensions (upload-time sniff) reserve the exact box
+                                    // before the bytes arrive — no layout shift on open.
+                                    style={blob.width && blob.height
+                                        ? { aspectRatio: `${blob.width} / ${blob.height}`, width: blob.width }
+                                        : undefined}
+                                    className={cn('max-w-full rounded-lg border border-border', blob.width && blob.height && 'bg-muted')}
                                 />
                             ) : (
                                 <button

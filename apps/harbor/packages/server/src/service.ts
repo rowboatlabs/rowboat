@@ -32,13 +32,20 @@ import {
 
 /** listMessages window bounds — the default page and the per-request cap. */
 const MESSAGES_PAGE_DEFAULT = 100;
+
+/** BlobInfo's optional dimensions from a stored blob record — both or neither. */
+function blobDims(stored: { width?: number; height?: number }): { width: number; height: number } | Record<string, never> {
+  return stored.width !== undefined && stored.height !== undefined
+    ? { width: stored.width, height: stored.height }
+    : {};
+}
 const MESSAGES_PAGE_MAX = 200;
 import type { z } from 'zod';
 import { blobHash, type BlobStore } from './blobs.js';
 import { HarborError } from './errors.js';
 import { SpaceHub } from './hub.js';
 import { merge3 } from './merge.js';
-import { dispositionFor, resolveMime } from './mime.js';
+import { dispositionFor, imageDimensions, resolveMime } from './mime.js';
 import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredReaction } from './store.js';
 
 // The one service core (spec §9: one core, two faces). REST (http.ts) and MCP
@@ -539,18 +546,29 @@ export class HarborService {
       );
     }
     const mime = resolveMime(bytes, opts.declaredMime);
+    // Sniffed images get their pixel dimensions parsed from the header bytes —
+    // clients reserve the exact box before the image loads (no layout shift).
+    const dims = imageDimensions(bytes, mime);
     await blobs.put(bytes);
     await this.store.putSpaceBlob({
       spaceId,
       hash,
       size: bytes.byteLength,
       mime,
+      ...(dims ?? {}),
       uploadedBy: ctx.memberId,
       uploadedAt: this.now(),
     });
     // First registration wins (idempotent re-uploads keep the original mime).
     const stored = await this.store.getSpaceBlob(spaceId, hash);
-    return { hash, size: stored?.size ?? bytes.byteLength, mime: stored?.mime ?? mime };
+    return {
+      hash,
+      size: stored?.size ?? bytes.byteLength,
+      mime: stored?.mime ?? mime,
+      ...(stored?.width !== undefined && stored?.height !== undefined
+        ? { width: stored.width, height: stored.height }
+        : dims ?? {}),
+    };
   }
 
   /**
@@ -568,7 +586,7 @@ export class HarborService {
     const blobs = this.requireBlobStore();
     const stored = await this.store.getSpaceBlob(spaceId, hash);
     if (!stored) throw new HarborError('not_found', 'no such blob in this space');
-    const blob: BlobInfo = { hash: stored.hash, size: stored.size, mime: stored.mime };
+    const blob: BlobInfo = { hash: stored.hash, size: stored.size, mime: stored.mime, ...blobDims(stored) };
     const disposition = dispositionFor(stored.mime, name);
     if (blobs.downloadUrl) {
       const url = await blobs.downloadUrl(hash, {
@@ -598,7 +616,7 @@ export class HarborService {
       if (!stored) {
         throw new HarborError('invalid_request', 'blob is not uploaded to this space — call uploadBlob first');
       }
-      proposal = { content: null, blob: { hash: stored.hash, size: stored.size, mime: stored.mime } };
+      proposal = { content: null, blob: { hash: stored.hash, size: stored.size, mime: stored.mime, ...blobDims(stored) } };
     } else {
       proposal = { content: input.newContent ?? '', blob: null };
     }
