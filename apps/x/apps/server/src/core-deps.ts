@@ -20,7 +20,7 @@ import { loadRetentionSettings } from '@x/core/dist/config/retention.js';
 import type { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import type { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import * as voice from '@x/core/dist/voice/voice.js';
-import { fetchLiveNote, listLiveNotes } from '@x/core/dist/knowledge/live-note/fileops.js';
+import { fetchLiveNote, listLiveNotes, setLiveNote, setLiveNoteActive, deleteLiveNote } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
 import { getConversation as getTodoConversation, deriveConversation as deriveSessionConversation } from '@x/core/dist/todo/conversation.js';
@@ -28,7 +28,7 @@ import { listSuggestions as listTodoSuggestions } from '@x/core/dist/todo/planne
 import { getPlannerConfig } from '@x/core/dist/todo/planner-task.js';
 import { readTodo, listArchived as listTodoArchived } from '@x/core/dist/todo/fileops.js';
 import type { HomeThreadsTracker } from '@x/core/dist/home/threads.js';
-import { fetchTask, listTasks, readRunIds as readTaskRunIds } from '@x/core/dist/background-tasks/fileops.js';
+import { fetchTask, listTasks, readRunIds as readTaskRunIds, createTask, patchTask, deleteTask } from '@x/core/dist/background-tasks/fileops.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import * as versionHistory from '@x/core/dist/knowledge/version_history.js';
 import { editSlide, generateDeckOutline, generateSlide } from '@x/core/dist/knowledge/deck_outline.js';
@@ -90,6 +90,27 @@ import { chatgptStatusBus, oauthConnectBus, composioConnectBus } from '@x/core/d
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
 import { startManagedGooglePick } from '@x/core/dist/knowledge/google-picker-managed.js';
+import { testModelConnection, generateOneShot } from '@x/core/dist/models/models.js';
+import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
+import * as appsIndexer from '@x/core/dist/apps/indexer.js';
+import * as appsServer from '@x/core/dist/apps/server.js';
+import * as appsAgents from '@x/core/dist/apps/agents.js';
+import * as appsStars from '@x/core/dist/apps/stars.js';
+import * as appsInstaller from '@x/core/dist/apps/installer.js';
+import * as appsPublisher from '@x/core/dist/apps/publisher.js';
+import { registryClient } from '@x/core/dist/apps/registry.js';
+import { capture } from '@x/core/dist/analytics/posthog.js';
+import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
+import { search } from '@x/core/dist/search/search.js';
+import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
+import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
+import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
+import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
+
+// Process-local caches mirrored from apps/main/src/ipc.ts — memoization only,
+// no cross-process invariants (each host keeps its own).
+const appInstallPreviews = new Map<string, Awaited<ReturnType<typeof appsInstaller.previewInstall>>>();
+let lastAppsFingerprint: string | null = null;
 import type { RpcHandlers } from './channels.js';
 import type { EventSources } from './server.js';
 
@@ -926,6 +947,387 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
       if (!result) return null;
       return result;
     },
+    // ── Phase 4: feature channels (verbatim lifts) ──
+
+
+
+    'mcp:executeTool': async (args) => {
+      return { result: await mcpCore.executeTool(args.serverName, args.toolName, args.input) };
+    },
+    'runs:create': async (args) => {
+      return runsCore.createRun(args);
+    },
+    'runs:createMessage': async (args) => {
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode, args.codeCwd, args.codePolicy) };
+    },
+    'runs:authorizePermission': async (args) => {
+      await runsCore.authorizePermission(args.runId, args.authorization);
+      return { success: true };
+    },
+    'runs:provideHumanInput': async (args) => {
+      await runsCore.replyToHumanInputRequest(args.runId, args.reply);
+      return { success: true };
+    },
+    'runs:stop': async (args) => {
+      await runsCore.stop(args.runId, args.force);
+      return { success: true };
+    },
+    'runs:fetch': async (args) => {
+      return runsCore.fetchRun(args.runId);
+    },
+    'runs:delete': async (args) => {
+      await runsCore.deleteRun(args.runId);
+      return { success: true };
+    },
+    // ── New runtime: sessions + turns ─────────────────────────
+    // Thin pass-throughs to the sessions service. sendMessage returns the
+    // turnId immediately; the turn advances in the background and the
+    // renderer reconciles via the sessions:events feed. Input-routing calls
+    // settle with that advance's outcome (the renderer fire-and-forgets).
+    'sessions:sendOrQueueMessage': async (args) => {
+      return container.resolve<ISessions>('sessions').sendOrQueueMessage(args.sessionId, args.input, args.config);
+    },
+    'sessions:editQueued': async (args) => {
+      container.resolve<ISessions>('sessions').editQueued(args.sessionId, args.queueId, args.message);
+      return { success: true };
+    },
+    'sessions:removeQueued': async (args) => {
+      const removed = container.resolve<ISessions>('sessions').removeQueued(args.sessionId, args.queueId);
+      return { removed: removed ?? null };
+    },
+    'models:test': async (args) => {
+      return await testModelConnection(args.provider, args.model);
+    },
+    'llm:generate': async (args) => {
+      console.log(`[llm:generate] requested provider=${args.provider ?? '(default)'} model=${args.model ?? '(default)'}`);
+      const result = await generateOneShot(args);
+      console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
+      return result;
+    },
+    'models:setProvider': async (args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.setProvider(args.id, args.provider);
+      return { success: true };
+    },
+    'models:removeProvider': async (args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.removeProvider(args.id);
+      return { success: true };
+    },
+    'models:updateConfig': async (args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.updateConfig(args);
+      return { success: true };
+    },
+    'granola:setConfig': async (args) => {
+      const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
+      await repo.setConfig({ enabled: args.enabled });
+
+      // Trigger sync immediately when enabled
+      if (args.enabled) {
+        triggerGranolaSync();
+      }
+
+      return { success: true };
+    },
+    // ── Caffeinate (keep system awake, like macOS `caffeinate`) ──
+    'apps:serverStatus': async () => {
+      return appsServer.getServerStatus();
+    },
+    'apps:list': async () => {
+      const status = appsServer.getServerStatus();
+      const apps = await appsIndexer.listApps();
+      // Keep bundled agents materialized (idempotent; disabled by default).
+      for (const app of apps) {
+        if (app.agentSlugs.length) await appsAgents.syncAppAgents(app);
+      }
+      // The copilot instructions embed the installed-apps list. This handler
+      // is the one place that sees every change to the app set (installs,
+      // deletes, copilot-created folders — the renderer polls it), so refresh
+      // the instructions cache when the set actually changes.
+      const fingerprint = JSON.stringify(apps.map((a) => [a.folder, a.manifest?.name, a.manifest?.description, a.hasDist]));
+      if (fingerprint !== lastAppsFingerprint) {
+        lastAppsFingerprint = fingerprint;
+        invalidateCopilotInstructionsCache();
+      }
+      // The copilot builds apps by writing the folder directly — apps:create is
+      // never on that path — so the first-app reward triggers off observed
+      // state instead: a valid non-installed app means the user built one.
+      // Cheap on repeat polls (maybeActivateCredit short-circuits once claimed).
+      if (apps.some((a) => a.kind === 'local' && a.status === 'ok')) {
+        void maybeActivateCredit('first_app_built');
+      }
+      return {
+        serverRunning: status.running,
+        ...(status.error ? { serverError: status.error } : {}),
+        apps,
+      };
+    },
+    'apps:get': async (args) => {
+      const app = await appsIndexer.getApp(args.folder);
+      if (!app) throw new Error(`no such app: ${args.folder}`);
+      const readme = await appsIndexer.readAppReadme(args.folder);
+      return {
+        app,
+        ...(readme ? { readme } : {}),
+        rollbackAvailable: await appsIndexer.rollbackAvailable(args.folder),
+      };
+    },
+    'apps:create': async (args) => {
+      const app = await appsIndexer.createApp(args);
+      capture('app_created', { folder: app.folder });
+      void maybeActivateCredit('first_app_built');
+      return { app };
+    },
+    'apps:delete': async (args) => {
+      await appsIndexer.deleteApp(args.folder);
+      // Remove app-owned bg-tasks too — orphaned app--<folder>-- tasks firing
+      // against a deleted app was a painful prototype failure mode.
+      await appsAgents.deleteAppAgents(args.folder);
+      capture('app_deleted', { folder: args.folder });
+      return { ok: true as const };
+    },
+    'apps:setTheme': async (args) => {
+      appsServer.setAppsTheme(args.theme);
+      return { ok: true as const };
+    },
+    // GitHub auth (device flow) — publishing only
+    // Catalog + install/update (spec §12–13)
+    'apps:catalogIndex': async (args) => {
+      return registryClient.refreshIndex(args.force);
+    },
+    'apps:catalogSearch': async (args) => {
+      return { records: await registryClient.search(args.query) };
+    },
+    'apps:catalogStars': async (args) => {
+      const [stars, starred] = await Promise.all([
+        appsStars.repoStars(args.repos),
+        appsStars.starredStatus(args.repos),
+      ]);
+      return { stars, starred };
+    },
+    'apps:star': async (args) => {
+      const result = await appsStars.setStar(args.repo, args.star);
+      capture('app_starred', { repo: args.repo, star: args.star });
+      return result;
+    },
+    'apps:catalogDetail': async (args) => {
+      const record = await registryClient.resolve(args.name);
+      if (!record) throw new Error(`no such app in the catalog: ${args.name}`);
+      let manifest;
+      try { manifest = await registryClient.latestManifest(record); } catch { /* best effort */ }
+      let readme: string | undefined;
+      try {
+        const res = await fetch(`https://raw.githubusercontent.com/${record.repo}/HEAD/README.md`);
+        if (res.ok) readme = await res.text();
+      } catch { /* best effort */ }
+      const installed = (await appsIndexer.listApps()).find((a) => a.install?.name === args.name);
+      return {
+        record,
+        ...(manifest ? { manifest } : {}),
+        ...(readme ? { readme } : {}),
+        ...(installed ? { installedFolder: installed.folder } : {}),
+      };
+    },
+    'apps:install': async (args) => {
+      const record = await registryClient.resolve(args.name);
+      if (!record) throw new Error(`no such app in the catalog: ${args.name}`);
+      if (!args.confirmed) {
+        const preview = await appsInstaller.previewInstall(record);
+        appInstallPreviews.set(args.name, preview);
+        return preview;
+      }
+      // D18: the confirmed phase checks the bundle against what was previewed.
+      const preview = appInstallPreviews.get(args.name) ?? await appsInstaller.previewInstall(record);
+      const result = await appsInstaller.installFromRegistry(record, preview);
+      appInstallPreviews.delete(args.name);
+      // Materialize bundled agents NOW, not on the next apps:list poll — the
+      // renderer's post-install enable dialog patches these tasks immediately.
+      if (result.app) await appsAgents.syncAppAgents(result.app);
+      capture('app_installed', { name: args.name });
+      return result;
+    },
+    'apps:installFromUrl': async (args) => {
+      if (!args.confirmed) {
+        return appsInstaller.previewUrlInstall(args.url);
+      }
+      const result = await appsInstaller.confirmUrlInstall(args.url);
+      if (result.app) await appsAgents.syncAppAgents(result.app);
+      capture('app_installed', { name: result.app.manifest?.name ?? result.app.folder });
+      return result;
+    },
+    'apps:uninstall': async (args) => {
+      await appsInstaller.uninstallApp(args.folder);
+      capture('app_uninstalled', { folder: args.folder });
+      return { ok: true as const };
+    },
+    'apps:checkUpdate': async (args) => {
+      return appsInstaller.checkUpdate(args.folder);
+    },
+    'apps:update': async (args) => {
+      const before = (await appsIndexer.getApp(args.folder))?.manifest?.version;
+      const app = await appsInstaller.updateApp(args.folder, {
+        confirmOverwriteModified: args.confirmOverwriteModified,
+        confirmNewCapabilities: args.confirmNewCapabilities,
+      });
+      capture('app_updated', { from: before, to: app.manifest?.version });
+      return { app };
+    },
+    'apps:rollback': async (args) => {
+      const app = await appsInstaller.rollbackApp(args.folder);
+      capture('app_rolled_back', { folder: args.folder });
+      return { app };
+    },
+    'apps:publishUpdate': async (args) => {
+      const result = await appsPublisher.publishUpdate(args.folder, args.increment);
+      capture('app_published', { version: result.version, firstPublish: false });
+      return result;
+    },
+    'apps:registerExisting': async (args) => {
+      return appsPublisher.registerExisting(args.name, args.repo);
+    },
+    'agent-schedule:updateAgent': async (args) => {
+      const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
+      await repo.upsert(args.agentName, args.entry);
+      // Trigger the runner to pick up the change immediately
+      triggerAgentScheduleRun();
+      return { success: true };
+    },
+    'agent-schedule:deleteAgent': async (args) => {
+      const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
+      const stateRepo = container.resolve<IAgentScheduleStateRepo>('agentScheduleStateRepo');
+      await repo.delete(args.agentName);
+      await stateRepo.deleteAgentState(args.agentName);
+      return { success: true };
+    },
+    // Shell integration handlers
+    'search:query': async (args) => {
+      await opts?.sessionsIndexReady;
+      const sessions = container.resolve<ISessions>('sessions').listSessions()
+        .map((s) => ({ sessionId: s.sessionId, title: s.title }));
+      return search(args.query, args.limit, args.types, sessions);
+    },
+    // Inline task schedule classification
+    'meeting:summarize': async (args) => {
+      const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
+      if (notes && notes.trim()) {
+        void maybeActivateCredit('first_meeting_note');
+      }
+      return { notes };
+    },
+    'inline-task:classifySchedule': async (args) => {
+      const schedule = await classifySchedule(args.instruction);
+      return { schedule };
+    },
+    'inline-task:process': async (args) => {
+      return await processRowboatInstruction(args.instruction, args.noteContent, args.notePath);
+    },
+    'voice:synthesize': async (args) => {
+      return voice.synthesizeSpeech(args.text);
+    },
+    'live-note:run': async (args) => {
+      const result = await runLiveNoteAgent(args.filePath, 'manual', args.context);
+      return {
+        success: !result.error,
+        runId: result.runId,
+        action: result.action,
+        summary: result.summary,
+        contentAfter: result.contentAfter,
+        error: result.error,
+      };
+    },
+    'live-note:set': async (args) => {
+      try {
+        await setLiveNote(args.filePath, args.live);
+        const live = await fetchLiveNote(args.filePath);
+        return { success: true, live };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'live-note:setActive': async (args) => {
+      try {
+        await setLiveNoteActive(args.filePath, args.active);
+        const live = await fetchLiveNote(args.filePath);
+        return { success: true, live };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'live-note:delete': async (args) => {
+      try {
+        await deleteLiveNote(args.filePath);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'live-note:stop': async (args) => {
+      try {
+        const live = await fetchLiveNote(args.filePath);
+        if (!live?.lastRunId) {
+          return { success: false, error: 'No active run for this note' };
+        }
+        await runsCore.stop(live.lastRunId, false);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:run': async (args) => {
+      const result = await runBackgroundTask(args.slug, 'manual', args.context);
+      return {
+        success: !result.error,
+        runId: result.runId,
+        summary: result.summary,
+        error: result.error,
+      };
+    },
+    'bg-task:patch': async (args) => {
+      try {
+        const task = await patchTask(args.slug, args.partial);
+        return { success: true, task };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:create': async (args) => {
+      try {
+        const { slug } = await createTask({
+          name: args.name,
+          instructions: args.instructions,
+          ...(args.triggers ? { triggers: args.triggers } : {}),
+          ...(args.projectId ? { projectId: args.projectId } : {}),
+          ...(args.model ? { model: args.model } : {}),
+          ...(args.provider ? { provider: args.provider } : {}),
+        });
+        void maybeActivateCredit('first_bg_agent');
+        return { success: true, slug };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:delete': async (args) => {
+      try {
+        await deleteTask(args.slug);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:stop': async (args) => {
+      try {
+        const task = await fetchTask(args.slug);
+        if (!task?.lastRunId) {
+          return { success: false, error: 'No active run for this task' };
+        }
+        await runsCore.stop(task.lastRunId, false);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+
     // Rowboat Apps handlers (spec §13)
 
   };
