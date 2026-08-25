@@ -4,6 +4,8 @@ import { initConfigs } from '@x/core/dist/config/initConfigs.js';
 import container, {
   registerBrowserControlService,
   registerNotificationService,
+  registerScreenPointerService,
+  registerTextInsertService,
 } from '@x/core/dist/di/container.js';
 import type { ISessions } from '@x/core/dist/runtime/sessions/index.js';
 import { createCoreEventSources, createCoreRpcHandlers, resolveWorkspacePath } from './core-deps.js';
@@ -39,6 +41,25 @@ async function main(): Promise<void> {
       void ctx;
       return (await broker.request('browser-control', input, { timeoutMs: 120_000 })) as never;
     },
+  });
+  registerScreenPointerService({
+    // Sync share-state can't round-trip the socket — approximate with
+    // "a pointer-capable client is connected"; point() itself reports the
+    // truthful result from the client.
+    isShareActive: () => broker.hasCapableClient('screen-pointer'),
+    point: async (target) =>
+      (await broker.request('screen-pointer', { type: 'point', target }, { timeoutMs: 15_000 })) as never,
+    hide: async () => {
+      await broker.request('screen-pointer', { type: 'hide' }, { timeoutMs: 15_000 }).catch(() => {});
+    },
+  });
+  registerTextInsertService({
+    isSupported: () => broker.hasCapableClient('text-insert'),
+    captureTarget: async () => {
+      await broker.request('text-insert', { type: 'captureTarget' }, { timeoutMs: 15_000 }).catch(() => {});
+    },
+    insert: async (text) =>
+      (await broker.request('text-insert', { type: 'insert', text }, { timeoutMs: 30_000 })) as never,
   });
   registerUrlOpener({
     open: async (url) => {

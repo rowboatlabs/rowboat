@@ -230,6 +230,10 @@ export const RPC_CHANNELS = [
   'bg-task:create',
   'bg-task:delete',
   'bg-task:stop',
+  // Phase 7b: streaming TTS runs server-side; chunks fan out on the
+  // voice:tts-chunk push channel (renderers filter by requestId).
+  'voice:synthesizeStreamStart',
+  'voice:synthesizeStreamCancel',
   // Phase 5 (SEPARATION_PLAN.md): code-mode & terminal — the PTY lives with
   // core now (RFC Q13: the terminal shows the machine core runs on).
   // codeMode:provisionEngine stays client-local (sender-scoped progress).

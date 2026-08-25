@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { app, shell } from 'electron';
 import { createEventsClient, type EventsClient } from '@x/client';
@@ -19,6 +20,8 @@ import { WorkDir } from '@x/core/dist/config/config.js';
 import { broadcastToWindows, findMainAppWindow, onWorkspaceChange, sessionsIndexReady } from './ipc.js';
 import { ElectronNotificationService } from './notification/electron-notification-service.js';
 import { ElectronBrowserControlService } from './browser/control-service.js';
+import { screenPointerService } from './screen-pointer.js';
+import { textInsertService } from './text-insert.js';
 
 // Phase 7a (SEPARATION_PLAN.md): with ROWBOAT_CHILD_SERVER=1, main does not
 // host the transport in-process — it spawns the standalone rowboat-server as
@@ -26,8 +29,12 @@ import { ElectronBrowserControlService } from './browser/control-service.js';
 // existing forwarder), a WS events bridge for pushes, and Electron-side
 // capability handlers for the server's reverse calls (notifications,
 // open-url, browser-control). Default remains in-process until 7b parity.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export function childServerMode(): boolean {
-  return process.env.ROWBOAT_CHILD_SERVER === '1';
+  const env = process.env.ROWBOAT_CHILD_SERVER;
+  if (env !== undefined) return env !== '0' && env.toLowerCase() !== 'false';
+  return true;
 }
 
 interface ChildServer {
@@ -48,13 +55,16 @@ const PUSH_CHANNELS = [
   'chatgpt:statusChanged',
   'terminal:data',
   'terminal:exit',
+  'voice:tts-chunk',
 ] as const;
 
 async function launchChild(): Promise<ChildServer> {
   const fs = await import('node:fs/promises');
   const entry =
     process.env.ROWBOAT_SERVER_ENTRY ??
-    path.resolve(app.getAppPath(), '../server/dist/standalone.js');
+    (app.isPackaged
+      ? path.join(__dirname, 'rowboat-server.cjs')
+      : path.resolve(app.getAppPath(), '../server/dist/standalone.js'));
   const child = spawn(process.execPath, [entry], {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     stdio: ['ignore', 'inherit', 'inherit'],
@@ -106,6 +116,18 @@ async function launchChild(): Promise<ChildServer> {
         return { ok: true };
       },
       'browser-control': (payload) => browserControl.execute(payload as never),
+      'screen-pointer': async (payload) => {
+        const p = payload as { type: 'point' | 'hide'; target?: never };
+        if (p.type === 'point') return screenPointerService.point(p.target as never);
+        await screenPointerService.hide();
+        return { success: true };
+      },
+      'text-insert': async (payload) => {
+        const p = payload as { type: 'captureTarget' | 'insert'; text?: string };
+        if (p.type === 'insert') return textInsertService.insert(p.text ?? '');
+        await textInsertService.captureTarget();
+        return { ok: true };
+      },
     },
   });
   for (const channel of PUSH_CHANNELS) {

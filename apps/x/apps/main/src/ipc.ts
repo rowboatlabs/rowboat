@@ -110,6 +110,7 @@ function updateSelfCaptureState() {
 }
 import * as composioHandler from '@x/core/dist/composio/flows.js';
 import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
+import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
@@ -603,6 +604,7 @@ export function startConnectorEventsWatcher(): void {
   oauthConnectBus.subscribe((event) => broadcastToWindows('oauth:didConnect', event));
   composioConnectBus.subscribe((event) => broadcastToWindows('composio:didConnect', event));
   chatgptStatusBus.subscribe((event) => broadcastToWindows('chatgpt:statusChanged', event));
+  subscribeTtsChunks((event) => broadcastToWindows('voice:tts-chunk', event));
 }
 
 async function requireCodeSession(sessionId: string): Promise<CodeSession> {

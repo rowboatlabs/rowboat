@@ -23,7 +23,8 @@ export type PushChannel =
   | 'composio:didConnect'
   | 'chatgpt:statusChanged'
   | 'terminal:data'
-  | 'terminal:exit';
+  | 'terminal:exit'
+  | 'voice:tts-chunk';
 
 const ClientMessage = z.discriminatedUnion('type', [
   z.object({
