@@ -7,7 +7,7 @@ import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
 import { ingestGeneralMessage, rememberThread, updateGeneralMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { buildThreadSeed, dayKey, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
+import { buildThreadSeed, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -96,6 +96,8 @@ export function GeneralStream({
         if (!topic) return null
         const mark = getTopicLastReadAt(org.id, space.id, topicId)
         const hasNew = !mark || topic.lastActivityAt > mark
+        // A renamed thread shows its name on the chip; auto-titled ones stay compact.
+        const named = explicitTitle(topic, threads.byTopic.get(topicId)?.firstMessage?.body)
         return {
             topicId,
             replyCount: Math.max(0, topic.messageCount - 1),
@@ -103,6 +105,7 @@ export function GeneralStream({
             // Count isn't known without the thread's messages; 1 reads as "has new" on the row.
             unreadCount: hasNew && topic.messageCount > 1 ? 1 : 0,
             workingAgents: presence.working.get(topicId) ?? [],
+            title: named ? resolveMentions(named, memberNames) : null,
         }
     }
 

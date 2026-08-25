@@ -14,7 +14,7 @@ import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/mes
 import type { SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
 import { usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { artifactsForThread, isContinuation, stripThreadMarker } from '@/lib/spaces-conventions'
+import { artifactsForThread, explicitTitle, isContinuation, stripThreadMarker } from '@/lib/spaces-conventions'
 import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -159,6 +159,17 @@ export function ThreadPane({
         }
     }
 
+    // Inline title editing (window.prompt is a no-op in Electron — the old
+    // Retitle item died silently). null = not editing.
+    const [editingTitle, setEditingTitle] = useState<string | null>(null)
+    const named = topic ? explicitTitle(topic, (threadInfo?.firstMessage ?? messages[0])?.body ?? null) : null
+    const commitTitle = async () => {
+        const title = editingTitle?.trim()
+        setEditingTitle(null)
+        if (!title || title === topic?.title) return
+        await manage({ action: 'retitle', title })
+    }
+
     const openTopicSession = async () => {
         try {
             const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, topicId })
@@ -208,7 +219,25 @@ export function ThreadPane({
                 )}
                 <span className="pl-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topic</span>
                 <span className="truncate text-xs text-muted-foreground">
-                    {isThread ? 'from a message' : <MemberText text={topic?.title ?? ''} />}{groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? 'file' : 'files'} changed` : ''}
+                    {editingTitle !== null ? (
+                        <input
+                            autoFocus
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') void commitTitle()
+                                if (e.key === 'Escape') setEditingTitle(null)
+                            }}
+                            onBlur={() => setEditingTitle(null)}
+                            placeholder="Topic name"
+                            className="w-64 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-xs text-foreground outline-none"
+                        />
+                    ) : (
+                        <>
+                            {isThread ? (named ? <MemberText text={named} /> : 'from a message') : <MemberText text={topic?.title ?? ''} />}
+                            {groups.length > 0 ? ` · ${groups.length} ${groups.length === 1 ? 'file' : 'files'} changed` : ''}
+                        </>
+                    )}
                 </span>
                 <span className="flex-1" />
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
@@ -217,13 +246,8 @@ export function ThreadPane({
                         <Button variant="ghost" size="icon" className="size-7 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                            onClick={() => {
-                                const title = window.prompt('New title', topic?.title ?? '')
-                                if (title?.trim()) void manage({ action: 'retitle', title: title.trim() })
-                            }}
-                        >
-                            <Pencil className="size-3.5 mr-2" /> Retitle
+                        <DropdownMenuItem onClick={() => setEditingTitle(named ?? topic?.title ?? '')}>
+                            <Pencil className="size-3.5 mr-2" /> Rename
                         </DropdownMenuItem>
                         {topic?.archived ? (
                             <DropdownMenuItem onClick={() => void manage({ action: 'unarchive' })}><ArchiveRestore className="size-3.5 mr-2" /> Unarchive</DropdownMenuItem>

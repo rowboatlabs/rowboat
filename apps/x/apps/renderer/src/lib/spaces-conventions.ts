@@ -67,6 +67,36 @@ export function stripThreadMarker(body: string): string {
     return body.replace(MARKER_RE, '').trimEnd()
 }
 
+/**
+ * Mirror of the server's title derivation at topic creation (service.ts
+ * deriveTitle): first non-empty line, markdown heading/bullet prefixes
+ * stripped, 256-capped. Exists so clients can tell an auto-derived title
+ * from an explicit rename — renaming never touches the first message, it
+ * only overwrites the title property, so "was it renamed?" is exactly
+ * "does the title still equal what creation would have derived?".
+ */
+export function deriveTopicTitle(body: string): string {
+    const firstLine = body
+        .split('\n')
+        .map((l) => l.trim())
+        .find((l) => l.length > 0)
+    if (!firstLine) return 'Untitled'
+    const stripped = firstLine.replace(/^#{1,6}\s+/, '').replace(/^[-*]\s+/, '').trim()
+    const title = stripped.length > 0 ? stripped : firstLine
+    return title.length > 256 ? `${title.slice(0, 255)}…` : title
+}
+
+/**
+ * The topic's explicit name — set by a human retitle or an agent's
+ * housekeeping — or null while it still wears its auto-derived title.
+ * Unnamed threads stay compact everywhere (chip shows "N replies", rail
+ * shows the seed text); a real name is worth showing in all those places.
+ */
+export function explicitTitle(topic: spaces.Topic, firstMessageBody: string | null | undefined): string | null {
+    if (!firstMessageBody) return null
+    return topic.title === deriveTopicTitle(firstMessageBody) ? null : topic.title
+}
+
 // ---------------------------------------------------------------------------
 // Artifacts — change-sets made from a topic carry its id at the end of the
 // reason. Two producers only: the Fold gesture and the topic agent's prompt.

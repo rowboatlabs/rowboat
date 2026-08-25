@@ -1,11 +1,16 @@
 import { useMemo, useRef, useState } from 'react'
-import { Bot, FileText, Folder, MessagesSquare, Pin, Plus, Search, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, FileText, Folder, MessagesSquare, MoreHorizontal, Pencil, Pin, Plus, Search, Upload } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import {
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { toast } from '@/lib/toast'
 import { FileTree } from '@/components/spaces/files-tab'
+import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
-import { isGeneralSeedMessage, stripThreadMarker, threadRefOf } from '@/lib/spaces-conventions'
+import { explicitTitle, isGeneralSeedMessage, stripThreadMarker, threadRefOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt } from '@/lib/spaces-read-state'
 import type { RailSelection } from '@/lib/spaces-selection'
@@ -46,6 +51,22 @@ export function SpaceRail({
     const [creatingFile, setCreatingFile] = useState(false)
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
+    // Row-level topic actions. Rename edits inline in the row; the topic event
+    // the server emits updates every other client, the refresh updates this one.
+    const [renaming, setRenaming] = useState<{ topicId: string; value: string } | null>(null)
+    const manageTopic = async (topicId: string, action: spaces.SpacesManageTopicAction) => {
+        try {
+            await window.ipc.invoke('spaces:manageTopic', { orgId, spaceId, topicId, action })
+            await refreshSpaceFeed(orgId, spaceId)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not update the topic', 'error')
+        }
+    }
+    const commitRename = async (topicId: string, title: string) => {
+        setRenaming(null)
+        await manageTopic(topicId, { action: 'retitle', title })
+    }
+
     const generalId = general.topic?.id ?? null
 
     const generalUnread = useMemo(() => {
@@ -81,7 +102,10 @@ export function SpaceRail({
         .filter((t) => (filter === 'unread' ? isUnread(t) : true))
         .map((t) => {
             const info = threads.byTopic.get(t.id)
-            const raw = info?.parentMessageId && info.firstMessage ? stripThreadMarker(info.firstMessage.body).split('\n')[0] ?? t.title : t.title
+            // A renamed topic shows its name; an auto-titled thread keeps
+            // showing its seed text (its derived title is a noisy quote).
+            const named = explicitTitle(t, info?.firstMessage?.body)
+            const raw = named ?? (info?.parentMessageId && info.firstMessage ? stripThreadMarker(info.firstMessage.body).split('\n')[0] ?? t.title : t.title)
             // Titles resolve before the search filter so searching a person's
             // name finds the topics that mention them.
             return { topic: t, title: resolveMentions(raw, memberNames) }
@@ -202,31 +226,75 @@ export function SpaceRail({
                                     const replies = Math.max(0, topic.messageCount - 1)
                                     const files = artifactFiles.get(topic.id)
                                     const working = (presence.working.get(topic.id) ?? []).length > 0
+                                    if (renaming?.topicId === topic.id) {
+                                        return (
+                                            <div key={topic.id} className="rounded-md px-2 py-1.5">
+                                                <input
+                                                    autoFocus
+                                                    value={renaming.value}
+                                                    onChange={(e) => setRenaming({ topicId: topic.id, value: e.target.value })}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter' && renaming.value.trim()) void commitRename(topic.id, renaming.value.trim())
+                                                        if (e.key === 'Escape') setRenaming(null)
+                                                    }}
+                                                    onBlur={() => setRenaming(null)}
+                                                    className="w-full rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-[13px] leading-snug outline-none"
+                                                    placeholder="Topic name"
+                                                />
+                                            </div>
+                                        )
+                                    }
                                     return (
-                                        <button
-                                            key={topic.id}
-                                            type="button"
-                                            onClick={() => onSelect({ kind: 'topic', topicId: topic.id })}
-                                            className={cn(
-                                                'flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left',
-                                                active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
-                                                topic.archived && 'opacity-60',
-                                            )}
-                                        >
-                                            <div className="flex items-center gap-1.5">
-                                                <span className={cn('flex-1 truncate text-[13px] leading-snug', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
-                                                {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" />}
-                                            </div>
-                                            <div className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                                                <span>{replies} {replies === 1 ? 'reply' : 'replies'}</span>
-                                                <span>· {formatFeedTime(topic.lastActivityAt)}</span>
-                                                {files && files.size > 0 && (
-                                                    <span className="inline-flex items-center gap-0.5" title={`Files changed here: ${[...files].join(', ')}`}><FileText className="size-2.5" />{files.size}</span>
+                                        <div key={topic.id} className="group/topicrow relative">
+                                            <button
+                                                type="button"
+                                                onClick={() => onSelect({ kind: 'topic', topicId: topic.id })}
+                                                className={cn(
+                                                    'flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left',
+                                                    active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
+                                                    topic.archived && 'opacity-60',
                                                 )}
-                                                {working && <Bot className="size-2.5" aria-label="a Rowboat is working here" />}
-                                                {topic.archived && <span>· archived</span>}
-                                            </div>
-                                        </button>
+                                            >
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className={cn('flex-1 truncate text-[13px] leading-snug', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
+                                                    {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" />}
+                                                </div>
+                                                <div className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                                                    <span>{replies} {replies === 1 ? 'reply' : 'replies'}</span>
+                                                    <span>· {formatFeedTime(topic.lastActivityAt)}</span>
+                                                    {files && files.size > 0 && (
+                                                        <span className="inline-flex items-center gap-0.5" title={`Files changed here: ${[...files].join(', ')}`}><FileText className="size-2.5" />{files.size}</span>
+                                                    )}
+                                                    {working && <Bot className="size-2.5" aria-label="a Rowboat is working here" />}
+                                                    {topic.archived && <span>· archived</span>}
+                                                </div>
+                                            </button>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        aria-label="Topic actions"
+                                                        className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/topicrow:inline-flex data-[state=open]:inline-flex"
+                                                    >
+                                                        <MoreHorizontal className="size-3.5" />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onClick={() => setRenaming({ topicId: topic.id, value: title })}>
+                                                        <Pencil className="size-3.5 mr-2" /> Rename
+                                                    </DropdownMenuItem>
+                                                    {topic.archived ? (
+                                                        <DropdownMenuItem onClick={() => void manageTopic(topic.id, { action: 'unarchive' })}>
+                                                            <ArchiveRestore className="size-3.5 mr-2" /> Unarchive
+                                                        </DropdownMenuItem>
+                                                    ) : (
+                                                        <DropdownMenuItem onClick={() => void manageTopic(topic.id, { action: 'archive' })}>
+                                                            <Archive className="size-3.5 mr-2" /> Archive
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
                                     )
                                 })}
                                 {topicRows.length === 0 && (
