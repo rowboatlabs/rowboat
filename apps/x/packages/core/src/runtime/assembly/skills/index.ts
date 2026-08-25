@@ -140,7 +140,13 @@ const definitions: SkillDefinition[] = [
     title: "Spaces (shared team containers)",
     summary: "Work in the team's shared spaces — read and update shared files (roadmaps, notes), push standup items, post to the team feed when asked. Use for 'push/add/update ... to <space name>' (e.g. 'push my standup to Roadboard'), 'team roadmap', 'shared doc/space'. Writes are visible to the whole team, attributed to your person.",
     content: spacesSkill,
-    tools: ["listMcpServers", "listMcpTools", "executeMcpTool"],
+    tools: [
+      "listMcpServers",
+      "listMcpTools",
+      "executeMcpTool",
+      "spaces-upload-blob",
+      "spaces-download-blob",
+    ],
   },
   {
     id: "composio-integration",

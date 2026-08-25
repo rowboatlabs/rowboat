@@ -188,6 +188,21 @@ export function spacesMcpServerNameFor(orgId: string): string | null {
   return deriveWithNames(listOrgs()).nameByOrgId[orgId] ?? null;
 }
 
+/**
+ * The inverse: which org a derived `spaces-<org>` server name addresses.
+ * The agent-facing blob tools take the server name (the only spaces handle
+ * the model ever holds) and resolve credentials through here — same
+ * whole-registry derivation, so dedup suffixes stay consistent.
+ */
+export function orgForSpacesMcpServerName(serverName: string): OrgRecord | null {
+  const orgRecords = listOrgs();
+  const { nameByOrgId } = deriveWithNames(orgRecords);
+  for (const org of orgRecords) {
+    if (nameByOrgId[org.id] === serverName) return org;
+  }
+  return null;
+}
+
 interface OrgRuntime {
   client: SpacesClient;
   live: SpacesLive;

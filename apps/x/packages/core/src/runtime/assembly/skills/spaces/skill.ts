@@ -11,7 +11,7 @@ Each org your person belongs to appears as an MCP server named \`spaces-<org>\`:
 2. \`executeMcpTool(<server>, 'list_spaces', {})\` → the member's spaces, each with \`id\`, \`name\`, \`memberCount\`, and its full file listing (\`assets\`: path + version). Resolve space names here ("Roadboard" → its \`id\`, case-insensitive). Never guess a spaceId or a file path — this call makes discovery mechanical.
 3. Every other tool takes that \`spaceId\`.
 
-The server's tools: \`list_spaces\`, \`read_topic\`, \`read_asset\`, \`propose_change\`, \`post_to_topic\`, \`search_feed\`, \`manage_topic\` (\`listMcpTools\` shows full schemas).
+The server's tools: \`list_spaces\`, \`read_topic\`, \`read_asset\`, \`propose_change\`, \`move_asset\`, \`delete_asset\`, \`post_to_topic\`, \`search_feed\`, \`manage_topic\` (\`listMcpTools\` shows full schemas). Alongside them you have two local bridge tools for binary files — \`spaces-upload-blob\` and \`spaces-download-blob\` (see "Binary files & attachments") — which take the same server name, not \`executeMcpTool\`.
 
 To answer questions about a discussion, summarise a thread, or catch up before replying: \`read_topic\` (spaceId + topicId) returns the messages with attribution. Use \`search_feed\` only to FIND a topic — never to reconstruct one you already have the id for.
 
@@ -26,6 +26,17 @@ To answer questions about a discussion, summarise a thread, or catch up before r
    - \`conflict\` — **nothing was written**; a teammate changed the *same* lines. Take \`currentContent\` from the response, fold your change into it **preserving theirs** (never simply resend your version — that would overwrite a teammate), then propose again with \`baseVersion: currentVersion\`.
 
 "Push/add X to <space>" means updating the right **file** (check \`list_spaces\` for the obvious one — e.g. a roadmap item goes in \`roadmap.md\`), not posting to the feed.
+
+## Binary files & attachments
+
+Bytes never ride the MCP tools — they carry only **references**: a binary file in \`list_spaces\`/\`read_asset\` shows a \`blob\` {hash, size, mime} instead of content, and message attachments appear in bodies as links \`https://<org>/s/<spaceId>/b/<hash>?name=<filename>\`. The two bridge tools move the actual bytes:
+
+- **Reading one** (inspect an attached image, parse a shared PDF, OCR a screenshot): \`spaces-download-blob\` with the server name plus either the \`/b/\` link exactly as it appears in the message body, or \`spaceId\` + the \`blob.hash\` from \`read_asset\`. It returns a local absolute path — feed that to \`LLMParse\`/\`parseFile\`, or copy it into the workspace if your person wants the file itself.
+- **Sharing one** (a generated image, a produced PDF, any local binary): \`spaces-upload-blob\` with the server name, spaceId, and the local path. **Upload alone publishes nothing** — it returns a \`hash\` and ready-made \`markdown\`; you must then reference it, exactly once, the way the task calls for:
+  - into the space's **files**: \`propose_change\` with \`blob: <hash>\` (baseVersion 0 to create; a one-line reason as always), or
+  - into the **feed**: include the returned \`markdown\` (\`![name](url)\` for images) in a \`post_to_topic\` body.
+
+A referenced upload is team-visible like any other write — same care, same reasons. Never fabricate a \`/b/\` link or hash: only ones returned by these tools or seen in space content exist.
 
 ## Feed etiquette
 
