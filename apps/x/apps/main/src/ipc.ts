@@ -78,7 +78,7 @@ import { HomeThreadsTracker } from '@x/core/dist/home/threads.js';
 import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
-import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
+import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal, subscribeTerminalEvents } from '@x/core/dist/terminal/terminal.js';
 import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/runtime/assembly/copilot/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
@@ -590,6 +590,13 @@ function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
 
 // Connector state pushes now originate in core (oauth-flows/composio/chatgpt
 // buses); this watcher relays them to renderer windows.
+let terminalEventsWatcher = false;
+export function startTerminalEventsWatcher(): void {
+  if (terminalEventsWatcher) return;
+  terminalEventsWatcher = true;
+  subscribeTerminalEvents((e) => broadcastToWindows(e.channel, e.payload));
+}
+
 let connectorEventsWatcher = false;
 export function startConnectorEventsWatcher(): void {
   if (connectorEventsWatcher) return;

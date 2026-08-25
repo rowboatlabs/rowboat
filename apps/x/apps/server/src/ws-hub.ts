@@ -21,7 +21,9 @@ export type PushChannel =
   | 'workspace:didChange'
   | 'oauth:didConnect'
   | 'composio:didConnect'
-  | 'chatgpt:statusChanged';
+  | 'chatgpt:statusChanged'
+  | 'terminal:data'
+  | 'terminal:exit';
 
 const ClientMessage = z.discriminatedUnion('type', [
   z.object({
