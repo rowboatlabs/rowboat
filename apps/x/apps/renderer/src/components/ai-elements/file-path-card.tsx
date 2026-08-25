@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, Download, FileIcon, FileText, Image, Maximize2, Music, Pause, Play, Video } from 'lucide-react'
+import { BookOpen, Download, FileIcon, FileSpreadsheet, FileText, Image, Maximize2, Music, Pause, Play, Video } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { ImageLightbox, ImageOverlayButton } from '@/components/image-lightbox'
@@ -13,6 +13,7 @@ const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm'])
 const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.rtf', '.csv'])
+const SPREADSHEET_EXTENSIONS = new Set(['.csv', '.tsv', '.xls', '.xlsx'])
 
 function getExtension(filePath: string): string {
   const dot = filePath.lastIndexOf('.')
@@ -222,6 +223,28 @@ function AudioFileCard({ filePath }: { filePath: string }) {
   )
 }
 
+// --- Spreadsheet File Card ---
+
+function SpreadsheetFileCard({ filePath }: { filePath: string }) {
+  const ext = getExtension(filePath)
+  const extLabel = getExtLabel(ext)
+  const handleOpen = useOpenFilePath(filePath)
+
+  return (
+    <CardShell
+      icon={<FileSpreadsheet className="h-5 w-5 text-muted-foreground" />}
+      title={getFileNameWithoutExt(filePath)}
+      subtitle={`Spreadsheet · ${extLabel}`}
+      onClick={() => { void handleOpen() }}
+      action={
+        <Button variant="outline" size="sm" className="shrink-0 text-xs h-8 rounded-lg pointer-events-none">
+          Open
+        </Button>
+      }
+    />
+  )
+}
+
 // --- System File Card ---
 
 function SystemFileCard({ filePath }: { filePath: string }) {
@@ -377,6 +400,10 @@ export function FilePathCard({ filePath }: { filePath: string }) {
   }
 
   const ext = getExtension(trimmed)
+  if (SPREADSHEET_EXTENSIONS.has(ext)) {
+    return <SpreadsheetFileCard filePath={trimmed} />
+  }
+
   if (AUDIO_EXTENSIONS.has(ext)) {
     return <AudioFileCard filePath={trimmed} />
   }

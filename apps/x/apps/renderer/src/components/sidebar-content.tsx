@@ -84,6 +84,9 @@ import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
+import { SpacesSidebarSection } from "@/components/spaces-sidebar-section"
+import { SPACES_ENABLED } from "@/lib/feature-flags"
+import type { SpaceSelection } from "@/components/spaces-view"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
@@ -194,6 +197,10 @@ type SidebarContentPanelProps = {
   onOpenApps?: () => void
   /** Open a specific app (pinned in the sidebar) inside the Apps view. */
   onOpenApp?: (folder: string) => void
+  /** Open one space (org + space) in the Spaces view. */
+  onOpenSpace?: (orgId: string, spaceId: string) => void
+  /** The space currently open, for highlighting its sidebar row. */
+  activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
@@ -210,7 +217,7 @@ type SidebarContentPanelProps = {
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'workspaces' | null
+  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -451,6 +458,8 @@ export function SidebarContentPanel({
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
+  onOpenSpace,
+  activeSpace = null,
   recentRuns = [],
   onOpenRun,
   onRenameRun,
@@ -1056,6 +1065,14 @@ export function SidebarContentPanel({
         </SidebarGroup>
 
         <div className="mx-3 border-t border-sidebar-border" />
+
+        {/* Spaces — orgs and their spaces, with unread counts */}
+        {SPACES_ENABLED && (
+          <>
+            <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
+            <div className="mx-3 border-t border-sidebar-border" />
+          </>
+        )}
 
         {/* Chats */}
         <SidebarGroup className="flex flex-col">

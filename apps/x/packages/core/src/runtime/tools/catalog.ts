@@ -28,6 +28,7 @@ import { screenPointerTools } from "./domains/screen-pointer.js";
 import { voiceTools } from "./domains/voice.js";
 import { homeTools } from "./domains/home.js";
 import { textInsertTools } from "./domains/text-insert.js";
+import { spreadsheetTools } from "./domains/spreadsheet.js";
 import { imageTools } from "./domains/image.js";
 import { BuiltinToolsSchema } from "./types.js";
 export { coalesceCodeRunEvents } from "./domains/code.js";
@@ -110,6 +111,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...voiceTools,
     ...homeTools,
     ...textInsertTools,
+    ...spreadsheetTools,
     ...imageTools,
 
     [SPAWN_AGENT_TOOL_NAME]: {

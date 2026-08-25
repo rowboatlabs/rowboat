@@ -146,6 +146,16 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 - `email_instructions_saved` — standing email-agent instructions saved
 - `email_sync_triggered` — manual refresh button
 
+**Spaces** (`components/spaces/*`, `components/spaces-view.tsx`):
+
+- `spaces_message_posted` — `{ kind: 'general' | 'topic', mentions_rowboat }` — a human posted in a space: to general, or into a topic
+- `spaces_reaction_toggled` — `{ action: 'add' | 'remove' }` — a human toggled an emoji reaction on a message
+- `spaces_topic_started` — replying to a general message created a new topic from it
+- `spaces_fold_requested` — "Fold into file…" asked the person's agent to fold a topic's decision into a file (the agent's resulting change is an `llm_usage` + a change-set on the org, not a renderer event)
+- `spaces_tab_viewed` — `{ tab: 'general' | 'topics' | 'files' }` — the segmented control inside a space
+
+The adoption metric for the chat-first spike is `spaces_message_posted` where `kind = general`, per day, vs. the team Slack channel.
+
 **Meetings** (`App.tsx`, `components/meetings-view.tsx`):
 
 - `meeting_recording_started` — `{ has_calendar_event }` — transcription actually began (all entry points: meetings view, home, sidebar, popup funnel through one call site)

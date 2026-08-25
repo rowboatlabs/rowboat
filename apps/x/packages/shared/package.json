@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@rowboat/spaces-protocol": "link:../../../harbor/packages/protocol",
     "fast-xml-parser": "^5.10.1",
     "jszip": "^3.10.1",
     "zod": "^4.2.1"

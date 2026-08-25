@@ -1,0 +1,11 @@
+{
+  "name": "both-append-at-end",
+  "description": "Both writers appended different lines at the same insertion point (end of file). Line-level three-way cannot order them; must conflict. Region uses the zero-length convention: baseStart 3, baseEnd 2 = the insertion point after base line 2.",
+  "base": "# Notes\n- alpha\n",
+  "current": "# Notes\n- alpha\n- beta (from Gagan)\n",
+  "proposed": "# Notes\n- alpha\n- gamma (from Prakhar)\n",
+  "expected": {
+    "outcome": "conflict",
+    "regions": [{ "baseStart": 3, "baseEnd": 2 }]
+  }
+}

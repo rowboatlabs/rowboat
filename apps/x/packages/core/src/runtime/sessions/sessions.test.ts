@@ -1251,11 +1251,15 @@ describe("pending queue (sendOrQueueMessage, steering, promotion)", () => {
 
     it("queues while the latest turn is non-terminal and mirrors the queue on the bus", async () => {
         const { sessions, fake, bus } = makeSessions();
+        // Hold the advance open: the turn is genuinely live (an idle log with
+        // no live advance would instead be reclaimed as crash-orphaned).
+        fake.script = () => ({
+            pending: new Promise<TurnOutcome>(() => undefined),
+        });
         const sessionId = await sessions.createSession();
-        const { turnId } = await sessions.sendMessage(sessionId, user("one"), {
+        await sessions.sendMessage(sessionId, user("one"), {
             agent: { agentId: "copilot" },
         });
-        void turnId; // default log stays idle (non-terminal)
 
         const result = await sessions.sendOrQueueMessage(sessionId, user("two"), {
             agent: { agentId: "copilot" },
@@ -1272,8 +1276,69 @@ describe("pending queue (sendOrQueueMessage, steering, promotion)", () => {
         });
     });
 
+    it("reclaims a crash-orphaned turn: cancels it and starts the new turn", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "copilot" },
+        });
+        // The advance settled without a terminal event ever landing in the
+        // log — exactly what a dead process leaves behind: an idle log and
+        // no live advance.
+        await flush();
+
+        fake.script = ({ turnId: t, input }) => {
+            if (input?.type === "cancel") {
+                fake.setLog(t, [
+                    ...turnLog(t, sessionId, "idle"),
+                    { type: "turn_cancelled", turnId: t, ts: TS, reason: input.reason, usage: {} },
+                ]);
+                return { outcome: { status: "cancelled", usage: {} } };
+            }
+            return { outcome: completedOutcome() };
+        };
+        const result = await sessions.sendOrQueueMessage(sessionId, user("two"), {
+            agent: { agentId: "copilot" },
+        });
+
+        expect(result).toMatchObject({ queued: false });
+        const cancel = fake.advanceCalls.find((c) => c.input?.type === "cancel");
+        expect(cancel).toMatchObject({
+            turnId,
+            input: { type: "cancel", reason: expect.stringContaining("interrupted") },
+        });
+        // The new turn chains onto the cancelled ghost; nothing stays queued.
+        expect(fake.createTurnInputs).toHaveLength(2);
+        expect(fake.createTurnInputs[1]).toMatchObject({
+            input: user("two"),
+            context: { previousTurnId: turnId },
+        });
+        expect(sessions.listQueued(sessionId)).toEqual([]);
+    });
+
+    it("does not reclaim a suspended turn — permission/async-tool waits still queue", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        fake.setLog(turnId, turnLog(turnId, sessionId, "suspended"));
+
+        const result = await sessions.sendOrQueueMessage(sessionId, user("two"), {
+            agent: { agentId: "copilot" },
+        });
+
+        expect(result).toMatchObject({ queued: true });
+        expect(fake.advanceCalls.filter((c) => c.input?.type === "cancel")).toHaveLength(0);
+        expect(fake.createTurnInputs).toHaveLength(1);
+    });
+
     it("hands the pending queue to every session advance as a steer source", async () => {
         const { sessions, fake } = makeSessions();
+        fake.script = () => ({
+            pending: new Promise<TurnOutcome>(() => undefined),
+        });
         const sessionId = await sessions.createSession();
         await sessions.sendMessage(sessionId, user("one"), {
             agent: { agentId: "copilot" },

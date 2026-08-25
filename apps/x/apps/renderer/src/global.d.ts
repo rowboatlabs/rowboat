@@ -37,6 +37,9 @@ declare global {
       getPathForFile: (file: File) => string;
       getZoomFactor: () => number;
     };
+    featureFlags?: {
+      spaces: boolean;
+    };
   }
 }
 

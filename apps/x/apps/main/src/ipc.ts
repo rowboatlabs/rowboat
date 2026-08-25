@@ -42,6 +42,7 @@ import {
   resizeCompanionPinned,
   setCompanionPinned,
   setPinnedCollapsed,
+  setCompanionInteractive,
   setQuickAskShortcut,
   setShortcutCaptureActive,
 } from './quick-ask.js';
@@ -375,6 +376,7 @@ function slackMessageUrl(message: Record<string, unknown>, workspaceUrl: string 
   return `${workspaceUrl.replace(/\/$/, '')}/archives/${channelId}/p${ts.replace('.', '')}`;
 }
 import { browserIpcHandlers } from './browser/ipc.js';
+import { spacesIpcHandlers } from './spaces/ipc.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -1201,6 +1203,10 @@ export function setupIpcHandlers() {
     },
     'quickAsk:setPinnedCollapsed': async (_event, args) => {
       setPinnedCollapsed(args.collapsed);
+      return {};
+    },
+    'quickAsk:setInteractive': async (_event, args) => {
+      setCompanionInteractive(args.interactive);
       return {};
     },
     'quickAsk:chatContext': async (_event, args) => {
@@ -2449,6 +2455,27 @@ export function setupIpcHandlers() {
       const mimeType = mimeMap[ext] || 'application/octet-stream';
       return { data: buffer.toString('base64'), mimeType, size: stat.size };
     },
+    'spreadsheet:load': async (_event, args) => {
+      const { loadSheetWindow } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
+      const result = await loadSheetWindow(args.path, args.sheet, args.offset, args.limit);
+      return {
+        format: result.meta.format,
+        sheets: result.meta.sheets,
+        activeSheet: result.activeSheet,
+        rows: result.rows,
+        display: result.display,
+        firstRow: result.firstRow,
+        firstRowDisplay: result.firstRowDisplay,
+        offset: result.offset,
+        totalRows: result.totalRows,
+        totalColumns: result.totalColumns,
+        etag: result.meta.etag,
+      };
+    },
+    'spreadsheet:find': async (_event, args) => {
+      const { findInSheet } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
+      return await findInSheet(args.path, args.sheet, args.query, args.maxMatches);
+    },
     'dialog:openDirectory': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);
       const defaultPath = args.defaultPath ? resolveShellPath(args.defaultPath) : os.homedir();
@@ -3178,5 +3205,6 @@ export function setupIpcHandlers() {
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,
+    ...spacesIpcHandlers,
   });
 }

@@ -56,6 +56,14 @@ export interface InstallDone {
 
 const RELEASE_MANAGED = ['rowboat-app.json', 'dist', 'agents', 'defaults'];
 
+// Losing the network mid-download used to hang the install forever: the
+// socket stays half-open, `reader.read()` never settles, and the UI sits
+// on "Installing…" with no way out. Two bounds, because one can't do both
+// jobs: a short one for the initial response, a long one for the whole
+// transfer (a large bundle on a slow link is legitimate).
+const DOWNLOAD_CONNECT_TIMEOUT_MS = 20_000;
+const DOWNLOAD_TOTAL_TIMEOUT_MS = 180_000;
+
 // ---------------------------------------------------------------------------
 // Bundle download + extraction (shared by catalog + URL installs)
 // ---------------------------------------------------------------------------
@@ -63,28 +71,48 @@ const RELEASE_MANAGED = ['rowboat-app.json', 'dist', 'agents', 'defaults'];
 async function downloadBundle(url: string, destDir: string): Promise<{ zipPath: string; sha256: string }> {
     await fsp.mkdir(destDir, { recursive: true });
     const zipPath = path.join(destDir, 'bundle.zip');
-    const res = await fetch(url, { redirect: 'follow' });
-    if (!res.ok) throw new InstallError('download_failed', `bundle download: HTTP ${res.status}`);
+    const controller = new AbortController();
+    const totalTimer = setTimeout(() => controller.abort(), DOWNLOAD_TOTAL_TIMEOUT_MS);
+    let out: fs.WriteStream | undefined;
+    try {
+        const res = await fetch(url, {
+            redirect: 'follow',
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(DOWNLOAD_CONNECT_TIMEOUT_MS)]),
+        });
+        if (!res.ok) throw new InstallError('download_failed', `bundle download: HTTP ${res.status}`);
 
-    const hash = crypto.createHash('sha256');
-    const out = fs.createWriteStream(zipPath);
-    const reader = res.body?.getReader();
-    if (!reader) throw new InstallError('download_failed', 'empty response body');
-    let received = 0;
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.byteLength;
-        if (received > MAX_BUNDLE_COMPRESSED) {
-            out.destroy();
-            await fsp.rm(zipPath, { force: true });
-            throw new InstallError('bundle_too_large', `bundle exceeds ${MAX_BUNDLE_COMPRESSED} bytes compressed`);
+        const hash = crypto.createHash('sha256');
+        out = fs.createWriteStream(zipPath);
+        const reader = res.body?.getReader();
+        if (!reader) throw new InstallError('download_failed', 'empty response body');
+        controller.signal.addEventListener('abort', () => { void reader.cancel().catch(() => {}); });
+        let received = 0;
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            received += value.byteLength;
+            if (received > MAX_BUNDLE_COMPRESSED) {
+                out.destroy();
+                await fsp.rm(zipPath, { force: true });
+                throw new InstallError('bundle_too_large', `bundle exceeds ${MAX_BUNDLE_COMPRESSED} bytes compressed`);
+            }
+            hash.update(value);
+            await new Promise<void>((resolve, reject) => out!.write(value, (e) => (e ? reject(e) : resolve())));
         }
-        hash.update(value);
-        await new Promise<void>((resolve, reject) => out.write(value, (e) => (e ? reject(e) : resolve())));
+        await new Promise<void>((resolve, reject) => out!.end((e?: Error | null) => (e ? reject(e) : resolve())));
+        return { zipPath, sha256: hash.digest('hex') };
+    } catch (err) {
+        if (err instanceof InstallError) throw err;
+        const aborted = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+        if (aborted) {
+            out?.destroy();
+            await fsp.rm(zipPath, { force: true });
+            throw new InstallError('download_failed', 'bundle download timed out — check your connection and try again');
+        }
+        throw err;
+    } finally {
+        clearTimeout(totalTimer);
     }
-    await new Promise<void>((resolve, reject) => out.end((e?: Error | null) => (e ? reject(e) : resolve())));
-    return { zipPath, sha256: hash.digest('hex') };
 }
 
 /**
