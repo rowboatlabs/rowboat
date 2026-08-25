@@ -6,14 +6,19 @@ import {
     buildFileTree,
     decorateMentions,
     encodeMentions,
+    encodeSpaceLinkTarget,
     formatBytes,
     formatFeedTime,
     initials,
     isUnreadChange,
     orgMonogram,
+    parseAssetWireUrl,
     parseBlobAppUrl,
     resolveMentions,
+    resolveSpaceLink,
     rewriteBlobLinks,
+    rewriteRelativeImages,
+    toggleTaskAt,
 } from './spaces-presentation'
 
 function cs(over: Partial<spaces.ChangeSet> & { id: string; committedAt: string }): spaces.ChangeSet {
@@ -61,6 +66,98 @@ describe('buildFileTree', () => {
         expect(tree.map((n) => n.name)).toEqual(['README.md', 'roadmap.md', 'briefs', 'decisions'])
         expect(tree[3]!.children.map((n) => n.name)).toEqual(['migration.md', 'sso.md'])
         expect(tree[3]!.children[0]!.path).toBe('decisions/migration.md')
+    })
+    it('adds draft folders as empty dirs, nested paths included, without duplicating real ones', () => {
+        const tree = buildFileTree(
+            [{ path: 'decisions/sso.md', version: 1, updatedAt: '' }],
+            ['design/screens', 'decisions'],
+        )
+        expect(tree.map((n) => n.name)).toEqual(['decisions', 'design'])
+        const design = tree[1]!
+        expect(design.children.map((n) => n.name)).toEqual(['screens'])
+        expect(design.children[0]!.kind).toBe('dir')
+        expect(design.children[0]!.children).toEqual([])
+        // "decisions" was already real — one node, file intact.
+        expect(tree[0]!.children.map((n) => n.name)).toEqual(['sso.md'])
+    })
+})
+
+describe('file links — relative markdown resolves against the tree', () => {
+    it('resolves plain, ./, ../ and root-anchored targets', () => {
+        expect(resolveSpaceLink('sso.md', 'decisions')).toBe('decisions/sso.md')
+        expect(resolveSpaceLink('./sso.md', 'decisions')).toBe('decisions/sso.md')
+        expect(resolveSpaceLink('../roadmap.md', 'decisions')).toBe('roadmap.md')
+        expect(resolveSpaceLink('/issues.md', 'decisions/deep')).toBe('issues.md')
+        expect(resolveSpaceLink('screens/home.png', '')).toBe('screens/home.png')
+    })
+    it('decodes escapes and strips query/fragment', () => {
+        expect(resolveSpaceLink('design%20notes.md', '')).toBe('design notes.md')
+        expect(resolveSpaceLink('sso.md#approval', 'decisions')).toBe('decisions/sso.md')
+        expect(resolveSpaceLink('sso.md?v=2', 'decisions')).toBe('decisions/sso.md')
+    })
+    it('leaves absolute URLs, anchors, mailto and root escapes alone', () => {
+        expect(resolveSpaceLink('https://example.com/a.md', '')).toBeNull()
+        expect(resolveSpaceLink('mailto:a@b.c', '')).toBeNull()
+        expect(resolveSpaceLink('#heading', 'decisions')).toBeNull()
+        expect(resolveSpaceLink('//cdn.example.com/x', '')).toBeNull()
+        expect(resolveSpaceLink('../../escape.md', 'decisions')).toBeNull()
+        expect(resolveSpaceLink('', 'decisions')).toBeNull()
+        expect(resolveSpaceLink('/', 'decisions')).toBeNull()
+    })
+    it('encodeSpaceLinkTarget round-trips spaces and parens through resolveSpaceLink', () => {
+        const path = 'design/screens (v2)/home page.png'
+        const target = encodeSpaceLinkTarget(path)
+        expect(target).not.toMatch(/[ ()]/)
+        expect(resolveSpaceLink(target, '')).toBe(path)
+    })
+    it('parses the canonical asset URL for this space only', () => {
+        const refs = { orgId: 'o1', orgAddress: 'rowboat.team', spaceId: '01HXAMPZESPACE00000000000A' }
+        expect(parseAssetWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/f/decisions/sso.md', refs)).toBe('decisions/sso.md')
+        expect(parseAssetWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000A/f/design%20notes.md', refs)).toBe('design notes.md')
+        expect(parseAssetWireUrl('https://other.org/s/01HXAMPZESPACE00000000000A/f/a.md', refs)).toBeNull()
+        expect(parseAssetWireUrl('https://rowboat.team/s/01HXAMPZESPACE00000000000B/f/a.md', refs)).toBeNull()
+    })
+})
+
+describe('rewriteRelativeImages', () => {
+    const srcFor = (p: string) => (p === 'screens/home.png' ? 'app://space-blob/o/s/hash' : null)
+    it('rewrites references that resolve to a real image asset', () => {
+        expect(rewriteRelativeImages('see ![home](home.png "the shot")', 'screens', srcFor))
+            .toBe('see ![home](app://space-blob/o/s/hash "the shot")')
+        expect(rewriteRelativeImages('![x](/screens/home.png)', 'docs', srcFor))
+            .toBe('![x](app://space-blob/o/s/hash)')
+    })
+    it('leaves external URLs, unknown paths, and code regions literal', () => {
+        expect(rewriteRelativeImages('![x](https://a.com/i.png)', '', srcFor)).toBe('![x](https://a.com/i.png)')
+        expect(rewriteRelativeImages('![x](missing.png)', '', srcFor)).toBe('![x](missing.png)')
+        const code = '```\n![x](home.png)\n```\nand `![x](home.png)`'
+        expect(rewriteRelativeImages(code, 'screens', srcFor)).toBe(code)
+    })
+})
+
+describe('toggleTaskAt', () => {
+    const doc = [
+        '# Plan',
+        '- [ ] first',
+        '',
+        '```md',
+        '- [ ] not a task (code)',
+        '```',
+        '- [x] second',
+        '> - [ ] quoted third',
+        '3. [ ] ordered fourth',
+    ].join('\n')
+    it('flips the Nth task in document order, skipping fenced code', () => {
+        expect(toggleTaskAt(doc, 0)!.split('\n')[1]).toBe('- [x] first')
+        expect(toggleTaskAt(doc, 1)!.split('\n')[6]).toBe('- [ ] second')
+        expect(toggleTaskAt(doc, 2)!.split('\n')[7]).toBe('> - [x] quoted third')
+        expect(toggleTaskAt(doc, 3)!.split('\n')[8]).toBe('3. [x] ordered fourth')
+        // The fenced line never changes.
+        expect(toggleTaskAt(doc, 1)!.split('\n')[4]).toBe('- [ ] not a task (code)')
+    })
+    it('returns null out of range', () => {
+        expect(toggleTaskAt(doc, 4)).toBeNull()
+        expect(toggleTaskAt('no tasks here', 0)).toBeNull()
     })
 })
 

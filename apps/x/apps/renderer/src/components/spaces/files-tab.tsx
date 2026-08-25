@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Streamdown } from 'streamdown'
 import { ArrowLeft, Check, ChevronRight, Clock, Download, FileText, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -13,7 +12,11 @@ import {
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { MemberText } from '@/components/spaces/member-text'
-import { attributionLabel, blobAppUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime, type FileTreeNode } from '@/lib/spaces-presentation'
+import {
+    attributionLabel, blobAppUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime,
+    parseAssetWireUrl, parseBlobAppUrl, resolveSpaceLink, rewriteBlobLinks, rewriteRelativeImages, toggleTaskAt,
+    type FileTreeNode,
+} from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { MemberAvatar } from '@/components/spaces/atoms'
 
@@ -27,23 +30,70 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 // Files rail — the space's tree, README first, unread dots on moved files
 // ---------------------------------------------------------------------------
 
+/** Internal drag type for moving a file between folders (never set by OS file drags). */
+const ASSET_DRAG_MIME = 'application/x-rowboat-asset-path'
+
 /** The space's file tree (README first, folders collapsible) — rendered inside the space rail. */
-export function FileTree({ orgId, spaceId, entries, selectedPath, unreadPaths, onOpenFile, creating, onCreateFile, onCancelCreate }: {
+export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedPath, unreadPaths, onOpenFile, creating, onCreateFile, onCancelCreate, onStartCreate, creatingFolder = false, onCreateFolder, onCancelCreateFolder, onRemoveFolder }: {
     orgId: string
     spaceId: string
     entries: spaces.SpacesAssetEntry[]
+    /** Local-only empty folders (they become real when their first file lands). */
+    draftFolders?: readonly string[]
     selectedPath: string | null
     /** Files with a change by someone else (or an agent) since the read mark. */
     unreadPaths: ReadonlySet<string>
     onOpenFile: (path: string) => void
-    /** When true, shows the new-file input at the bottom of the tree. */
-    creating: boolean
+    /** When set, shows the new-file input (prefilled with the prefix) at the bottom of the tree. */
+    creating: { prefix: string } | null
     onCreateFile: (path: string) => void
     onCancelCreate: () => void
+    /** A folder row's "New file" — asks the owner to open the create input with this prefix. */
+    onStartCreate?: (prefix: string) => void
+    /** When true, shows the new-folder input at the bottom of the tree. */
+    creatingFolder?: boolean
+    onCreateFolder?: (path: string) => void
+    onCancelCreateFolder?: () => void
+    /** Remove an empty (draft) folder. */
+    onRemoveFolder?: (path: string) => void
 }) {
-    const tree = useMemo(() => buildFileTree(entries), [entries])
+    const tree = useMemo(() => buildFileTree(entries, draftFolders), [entries, draftFolders])
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [newPath, setNewPath] = useState('')
+    const [newFolder, setNewFolder] = useState('')
+    // Prefill the create input whenever a new create request arrives.
+    const [lastCreating, setLastCreating] = useState<{ prefix: string } | null>(null)
+    if (creating !== lastCreating) {
+        setLastCreating(creating)
+        if (creating) setNewPath(creating.prefix)
+    }
+
+    // Drag a file onto a folder (or the tree's root) to move it there.
+    const [dropTarget, setDropTarget] = useState<string | null>(null)
+    const entryByPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries])
+    const dragHasAsset = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes(ASSET_DRAG_MIME)
+    const dropInto = (e: React.DragEvent, dir: string) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDropTarget(null)
+        const fromPath = e.dataTransfer.getData(ASSET_DRAG_MIME)
+        const entry = fromPath ? entryByPath.get(fromPath) : undefined
+        if (!entry) return
+        const name = fromPath.split('/').pop()!
+        const toPath = dir ? `${dir}/${name}` : name
+        if (toPath !== fromPath) void commitMove(entry, toPath)
+    }
+    const dirDragProps = (dir: string) => ({
+        onDragOver: (e: React.DragEvent) => {
+            if (!dragHasAsset(e)) return
+            e.preventDefault()
+            e.stopPropagation()
+            e.dataTransfer.dropEffect = 'move'
+            setDropTarget(dir)
+        },
+        onDragLeave: () => setDropTarget((t) => (t === dir ? null : t)),
+        onDrop: (e: React.DragEvent) => { if (dragHasAsset(e)) dropInto(e, dir) },
+    })
 
     // Row actions. Rename/move edits the FULL path inline (folders are key
     // prefixes — typing a new prefix moves the file); the server's change
@@ -76,18 +126,53 @@ export function FileTree({ orgId, spaceId, entries, selectedPath, unreadPaths, o
         const pad = { paddingLeft: `${8 + depth * 12}px` }
         if (node.kind === 'dir') {
             const open = !collapsed.has(node.path)
+            const empty = node.children.length === 0
             return (
                 <div key={node.path}>
-                    <button
-                        type="button"
-                        style={pad}
-                        onClick={() => toggle(node.path)}
-                        className="flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-foreground/90 hover:bg-accent/50"
-                    >
-                        <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
-                        <span className="truncate">{node.name}</span>
-                    </button>
+                    <div className="group/dirrow relative" {...dirDragProps(node.path)}>
+                        <button
+                            type="button"
+                            style={pad}
+                            onClick={() => toggle(node.path)}
+                            className={cn(
+                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-foreground/90 hover:bg-accent/50',
+                                dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
+                            )}
+                        >
+                            <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+                            <span className="truncate">{node.name}</span>
+                        </button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    aria-label="Folder actions"
+                                    className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/dirrow:inline-flex data-[state=open]:inline-flex"
+                                >
+                                    <MoreHorizontal className="size-3.5" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => onStartCreate?.(`${node.path}/`)}>
+                                    <Plus className="size-3.5 mr-2" /> New file
+                                </DropdownMenuItem>
+                                {empty && onRemoveFolder && (
+                                    <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => onRemoveFolder(node.path)}>
+                                            <Trash2 className="size-3.5 mr-2" /> Remove folder
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
                     {open && node.children.map((child) => renderNode(child, depth + 1))}
+                    {open && empty && (
+                        <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
+                            empty — files added here keep it
+                        </div>
+                    )}
                 </div>
             )
         }
@@ -118,6 +203,12 @@ export function FileTree({ orgId, spaceId, entries, selectedPath, unreadPaths, o
                 <button
                     type="button"
                     style={pad}
+                    draggable
+                    onDragStart={(e) => {
+                        e.dataTransfer.setData(ASSET_DRAG_MIME, node.path)
+                        e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragEnd={() => setDropTarget(null)}
                     onClick={() => onOpenFile(node.path)}
                     title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
                     className={cn(
@@ -159,7 +250,10 @@ export function FileTree({ orgId, spaceId, entries, selectedPath, unreadPaths, o
     }
 
     return (
-        <div className="flex flex-col">
+        <div
+            className={cn('flex flex-col rounded-md', dropTarget === '' && 'ring-1 ring-inset ring-foreground/40 bg-accent/40')}
+            {...dirDragProps('')}
+        >
             {deleting && (
                 <DeleteAssetDialog
                     orgId={orgId}
@@ -169,7 +263,7 @@ export function FileTree({ orgId, spaceId, entries, selectedPath, unreadPaths, o
                 />
             )}
             {tree.map((node) => renderNode(node, 0))}
-            {tree.length === 0 && !creating && <div className="px-2 py-1 text-xs text-muted-foreground">No files yet.</div>}
+            {tree.length === 0 && !creating && !creatingFolder && <div className="px-2 py-1 text-xs text-muted-foreground">No files yet.</div>}
             {creating && (
                 <div className="flex items-center gap-1 px-1 pt-1">
                     <Input
@@ -191,6 +285,28 @@ export function FileTree({ orgId, spaceId, entries, selectedPath, unreadPaths, o
                     </Button>
                 </div>
             )}
+            {creatingFolder && (
+                <div className="flex items-center gap-1 px-1 pt-1">
+                    <Input
+                        autoFocus
+                        value={newFolder}
+                        placeholder="folder or folder/subfolder"
+                        className="h-7 text-xs"
+                        onChange={(e) => setNewFolder(e.target.value)}
+                        onKeyDown={(e) => {
+                            const cleaned = newFolder.trim().replace(/^\/+|\/+$/g, '')
+                            if (e.key === 'Enter' && cleaned) {
+                                onCreateFolder?.(cleaned)
+                                setNewFolder('')
+                            }
+                            if (e.key === 'Escape') onCancelCreateFolder?.()
+                        }}
+                    />
+                    <Button size="icon" variant="ghost" className="size-7" onClick={onCancelCreateFolder}>
+                        <X className="size-3.5" />
+                    </Button>
+                </div>
+            )}
         </div>
     )
 }
@@ -208,10 +324,12 @@ interface DraftState {
     conflict: Extract<spaces.ProposeChangeResult, { outcome: 'conflict' }> | null
 }
 
-export function FileColumn({ org, space, path, memberNames, refreshTick, onChanged, crumb, onDismiss, onRenamed, onDeleted, onRedirect }: {
+export function FileColumn({ org, space, path, entries = [], memberNames, refreshTick, onChanged, crumb, onDismiss, onRenamed, onDeleted, onRedirect, onOpenFile }: {
     org: OrgWithSpaces
     space: spaces.Space
     path: string
+    /** The space's file list — resolves relative image links to their blobs. */
+    entries?: spaces.SpacesAssetEntry[]
     memberNames: Map<string, string>
     refreshTick: number
     onChanged: () => void
@@ -224,6 +342,8 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     onDeleted?: () => void
     /** An old link resolved to the file's current path (server redirect signal). */
     onRedirect?: (path: string) => void
+    /** A relative link in the document was clicked — open that file. */
+    onOpenFile?: (path: string) => void
 }) {
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
@@ -319,19 +439,17 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     }
 
     // One-tap micro change-set: checkbox ticks in view mode apply directly.
-    const toggleCheckbox = async (lineIndex: number) => {
+    // The viewer reports the task's index in document order; toggleTaskAt maps
+    // it back to the source line (skipping fenced code) and flips it.
+    const toggleTask = async (index: number) => {
         if (!asset) return
-        const lines = asset.content.split('\n')
-        const line = lines[lineIndex]
-        if (line === undefined) return
-        if (/\[ \]/.test(line)) lines[lineIndex] = line.replace('[ ]', '[x]')
-        else if (/\[[xX]\]/.test(line)) lines[lineIndex] = line.replace(/\[[xX]\]/, '[ ]')
-        else return
+        const next = toggleTaskAt(asset.content, index)
+        if (next === null) return
         try {
             const result = await window.ipc.invoke('spaces:proposeChange', {
                 orgId: org.id,
                 spaceId: space.id,
-                input: { assetPath: path, baseVersion: asset.version, newContent: lines.join('\n') },
+                input: { assetPath: path, baseVersion: asset.version, newContent: next },
             })
             if (result.outcome === 'conflict') toast('Someone changed this line at the same time — refresh and retry', 'error')
             else {
@@ -346,6 +464,54 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     const last = asset?.recentHistory[0]
     const fileName = path.split('/').pop() ?? path
     const blob = asset?.blob ?? null
+    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+
+    // What the viewer renders: the org's canonical blob links become app://
+    // (images show inline), and relative image references resolve against this
+    // file's folder to the blob they name. Task lines are untouched, so task
+    // indices in the rendered doc match the source (toggleTask relies on it).
+    const entryByPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries])
+    const wireRefs = useMemo(
+        () => ({ orgId: org.id, orgAddress: org.address, spaceId: space.id }),
+        [org.id, org.address, space.id],
+    )
+    const renderedContent = useMemo(() => {
+        if (!asset || asset.blob) return ''
+        const withBlobs = rewriteBlobLinks(asset.content, wireRefs)
+        return rewriteRelativeImages(withBlobs, dir, (p) => {
+            const target = entryByPath.get(p)
+            return target?.blob && isImageMime(target.blob.mime)
+                ? blobAppUrl({ orgId: org.id, spaceId: space.id }, target.blob.hash)
+                : null
+        })
+    }, [asset, wireRefs, dir, entryByPath, org.id, space.id])
+
+    // Link clicks inside the document: relative links (and the contract's
+    // canonical asset URLs) open the file in-app, GitHub-README style; blob
+    // links download; everything else keeps the default open-in-browser.
+    const openLink = (href: string): boolean => {
+        const blobRef = parseBlobAppUrl(href)
+        if (blobRef) {
+            const name = (() => {
+                try {
+                    return new URL(href).searchParams.get('name') ?? undefined
+                } catch {
+                    return undefined
+                }
+            })()
+            void window.ipc
+                .invoke('spaces:saveBlob', { ...blobRef, ...(name ? { suggestedName: name } : {}) })
+                .then((res) => { if (res.saved) toast('Saved', 'success') })
+                .catch((err: unknown) => toast(err instanceof Error ? err.message : 'Could not download', 'error'))
+            return true
+        }
+        const target = resolveSpaceLink(href, dir) ?? parseAssetWireUrl(href, wireRefs)
+        if (target && onOpenFile) {
+            onOpenFile(target)
+            return true
+        }
+        return false
+    }
 
     // Binary "edit": upload a replacement at this path against the current
     // version. A stale base is conflict-or-replace on binaries (contract) —
@@ -614,7 +780,13 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                             )}
                         </div>
                     ) : asset ? (
-                        <InteractiveMarkdown content={asset.content} onToggleCheckbox={(i) => void toggleCheckbox(i)} />
+                        <div className="px-5 py-4 max-w-3xl">
+                            <RichMarkdownViewer
+                                content={renderedContent}
+                                onToggleTask={(i) => void toggleTask(i)}
+                                onOpenLink={openLink}
+                            />
+                        </div>
                     ) : (
                         <div className="p-5 text-sm text-muted-foreground">Loading…</div>
                     )}
@@ -1008,51 +1180,4 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
     )
 }
 
-// ---------------------------------------------------------------------------
-// Markdown view with one-tap checkboxes. RichMarkdownViewer renders read-only;
-// checkbox lines get an interactive row instead.
-// ---------------------------------------------------------------------------
-
-function InteractiveMarkdown({ content, onToggleCheckbox }: {
-    content: string
-    onToggleCheckbox: (lineIndex: number) => void
-}) {
-    const lines = content.split('\n')
-    const hasCheckboxes = lines.some((l) => /- \[[ xX]\]/.test(l))
-    if (!hasCheckboxes) {
-        return (
-            <div className="px-5 py-4 max-w-2xl">
-                <RichMarkdownViewer content={content} />
-            </div>
-        )
-    }
-    return (
-        <div className="px-5 py-4 max-w-2xl space-y-0.5">
-            {lines.map((line, i) => {
-                const checkbox = line.match(/^(\s*)- \[([ xX])\] (.*)$/)
-                if (checkbox) {
-                    const checked = checkbox[2] !== ' '
-                    return (
-                        <div key={i} className="flex items-start gap-2 text-sm" style={{ paddingLeft: `${(checkbox[1]?.length ?? 0) * 8}px` }}>
-                            <input
-                                type="checkbox"
-                                checked={checked}
-                                className="mt-1 cursor-pointer"
-                                onChange={() => onToggleCheckbox(i)}
-                            />
-                            <span className={checked ? 'line-through text-muted-foreground' : ''}>{checkbox[3]}</span>
-                        </div>
-                    )
-                }
-                return line.trim() === '' ? (
-                    <div key={i} className="h-2" />
-                ) : (
-                    <div key={i} className="text-sm [&_p]:my-0">
-                        <Streamdown>{line}</Streamdown>
-                    </div>
-                )
-            })}
-        </div>
-    )
-}
 

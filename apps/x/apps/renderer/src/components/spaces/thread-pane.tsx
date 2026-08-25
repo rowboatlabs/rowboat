@@ -345,7 +345,7 @@ export function ThreadPane({
                 <div ref={bottomRef} />
             </div>
 
-            <Composer placeholder="Reply…" busy={posting} onSend={post} onType={onType} autoFocus members={members} selfMemberId={org.memberId} />
+            <Composer placeholder="Reply…" busy={posting} onSend={post} onType={onType} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />
 
         </div>
     )
