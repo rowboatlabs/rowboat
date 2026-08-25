@@ -31,18 +31,39 @@ import { textInsertService } from './text-insert.js';
 // open-url, browser-control). Default remains in-process until 7b parity.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function childServerMode(): boolean {
+// Phase 8: ROWBOAT_REMOTE_SERVER=<url> (+ ROWBOAT_REMOTE_TOKEN) points the
+// desktop at a rowboat-server on another machine — no child is spawned, no
+// core runs locally. Everything the client does (HTTP calls, WS events,
+// capability handlers, workspace file serving) rides the same paths as
+// child mode, just over the network.
+export type ServerHostMode = 'in-process' | 'child' | 'remote';
+
+export function serverHostMode(): ServerHostMode {
+  if (process.env.ROWBOAT_REMOTE_SERVER) return 'remote';
   const env = process.env.ROWBOAT_CHILD_SERVER;
-  if (env !== undefined) return env !== '0' && env.toLowerCase() !== 'false';
-  return true;
+  if (env !== undefined && (env === '0' || env.toLowerCase() === 'false')) return 'in-process';
+  return 'child';
+}
+
+/** True whenever main is a pure client (child or remote server). */
+export function childServerMode(): boolean {
+  return serverHostMode() !== 'in-process';
 }
 
 interface ChildServer {
   kind: 'child';
   child: ChildProcess;
+  baseUrl: string;
   port: number;
   key: string;
   lanEnabled: boolean;
+  events: EventsClient;
+}
+
+interface RemoteServer {
+  kind: 'remote';
+  baseUrl: string;
+  key: string;
   events: EventsClient;
 }
 
@@ -56,46 +77,17 @@ const PUSH_CHANNELS = [
   'terminal:data',
   'terminal:exit',
   'voice:tts-chunk',
+  'knowledge:didCommit',
 ] as const;
 
-async function launchChild(): Promise<ChildServer> {
-  const fs = await import('node:fs/promises');
-  const entry =
-    process.env.ROWBOAT_SERVER_ENTRY ??
-    (app.isPackaged
-      ? path.join(__dirname, 'rowboat-server.cjs')
-      : path.resolve(app.getAppPath(), '../server/dist/standalone.js'));
-  const child = spawn(process.execPath, [entry], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
-  child.on('exit', (code) => {
-    console.error(`[server-host] child rowboat-server exited (code ${code})`);
-  });
-
-  const config = await loadServerConfig(WorkDir);
-  const deadline = Date.now() + 60_000;
-  const port = config.port;
-  for (;;) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1500) });
-      const body = (await res.json()) as { name?: string };
-      if (body.name === 'rowboat-server') break;
-    } catch {
-      // not up yet
-    }
-    if (Date.now() > deadline) {
-      child.kill();
-      throw new Error('child rowboat-server did not become healthy within 60s');
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  const key = (await fs.readFile(path.join(WorkDir, 'server-key'), 'utf8')).trim();
-
+// The client half shared by child and remote modes: WS events relay to
+// renderer windows plus the Electron-side capability handlers for the
+// server's reverse calls.
+function createDesktopEventsClient(baseUrl: string, key: string): EventsClient {
   const notificationService = new ElectronNotificationService(Date.now());
   const browserControl = new ElectronBrowserControlService();
   const events = createEventsClient({
-    baseUrl: `http://127.0.0.1:${port}`,
+    baseUrl,
     token: key,
     clientName: 'electron-main',
     capabilities: {
@@ -133,7 +125,73 @@ async function launchChild(): Promise<ChildServer> {
   for (const channel of PUSH_CHANNELS) {
     events.on(channel, (payload) => broadcastToWindows(channel as ipc.SendChannels, payload as never));
   }
-  return { kind: 'child', child, port, key, lanEnabled: config.lanEnabled, events };
+  return events;
+}
+
+async function isRowboatServer(baseUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(2500) });
+    const body = (await res.json()) as { name?: string };
+    return body.name === 'rowboat-server';
+  } catch {
+    return false;
+  }
+}
+
+async function connectRemote(): Promise<RemoteServer> {
+  const baseUrl = process.env.ROWBOAT_REMOTE_SERVER!.replace(/\/+$/, '');
+  const key = (process.env.ROWBOAT_REMOTE_TOKEN ?? '').trim();
+  if (!key) {
+    throw new Error('ROWBOAT_REMOTE_SERVER is set but ROWBOAT_REMOTE_TOKEN is missing');
+  }
+  const deadline = Date.now() + 20_000;
+  while (!(await isRowboatServer(baseUrl))) {
+    if (Date.now() > deadline) {
+      throw new Error(`no rowboat-server reachable at ${baseUrl} within 20s`);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const events = createDesktopEventsClient(baseUrl, key);
+  console.log(`[server-host] connected to remote rowboat-server at ${baseUrl}`);
+  return { kind: 'remote', baseUrl, key, events };
+}
+
+async function launchChild(): Promise<ChildServer> {
+  const fs = await import('node:fs/promises');
+  const entry =
+    process.env.ROWBOAT_SERVER_ENTRY ??
+    (app.isPackaged
+      ? path.join(__dirname, 'rowboat-server.cjs')
+      : path.resolve(app.getAppPath(), '../server/dist/standalone.js'));
+  const child = spawn(process.execPath, [entry], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
+  child.on('exit', (code) => {
+    console.error(`[server-host] child rowboat-server exited (code ${code})`);
+  });
+
+  const config = await loadServerConfig(WorkDir);
+  const deadline = Date.now() + 60_000;
+  const port = config.port;
+  for (;;) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1500) });
+      const body = (await res.json()) as { name?: string };
+      if (body.name === 'rowboat-server') break;
+    } catch {
+      // not up yet
+    }
+    if (Date.now() > deadline) {
+      child.kill();
+      throw new Error('child rowboat-server did not become healthy within 60s');
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const key = (await fs.readFile(path.join(WorkDir, 'server-key'), 'utf8')).trim();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const events = createDesktopEventsClient(baseUrl, key);
+  return { kind: 'child', child, baseUrl, port, key, lanEnabled: config.lanEnabled, events };
 }
 
 // Renderer turn-delta subscriptions bridge to the child's WS feed.
@@ -158,8 +216,10 @@ export function bridgeDeltaUnsubscribe(turnId: string): void {
 // standalone entrypoint instead — this module then shrinks to lifecycle
 // management and everything else survives unchanged.
 
-let current: RowboatServer | ChildServer | null = null;
-let ready: Promise<RowboatServer | ChildServer> | null = null;
+type HostedServer = RowboatServer | ChildServer | RemoteServer;
+
+let current: HostedServer | null = null;
+let ready: Promise<HostedServer> | null = null;
 
 async function launchInProcess(): Promise<RowboatServer> {
   const server = await createRowboatServer({
@@ -179,16 +239,24 @@ async function launchInProcess(): Promise<RowboatServer> {
   return server;
 }
 
-export function startServerHost(): Promise<RowboatServer | ChildServer> {
+export function startServerHost(): Promise<HostedServer> {
   if (!ready) {
-    ready = childServerMode() ? launchChild().then((c) => (current = c)) : launchInProcess();
+    const mode = serverHostMode();
+    ready =
+      mode === 'remote'
+        ? connectRemote().then((c) => (current = c))
+        : mode === 'child'
+          ? launchChild().then((c) => (current = c))
+          : launchInProcess();
   }
   return ready;
 }
 
-/** Resolves once the transport is listening — the RPC forwarder awaits this. */
-export function whenServerReady(): Promise<{ port: number; key: string }> {
-  return startServerHost();
+/** Resolves once the transport is reachable — the RPC forwarder awaits this. */
+export async function whenServerReady(): Promise<{ baseUrl: string; key: string }> {
+  const server = await startServerHost();
+  const baseUrl = 'baseUrl' in server ? server.baseUrl : `http://127.0.0.1:${server.port}`;
+  return { baseUrl, key: server.key };
 }
 
 export async function stopServerHost(): Promise<void> {
@@ -200,7 +268,7 @@ export async function stopServerHost(): Promise<void> {
     await server.close();
   } else {
     server.events.close();
-    server.child.kill();
+    if (server.kind === 'child') server.child.kill();
   }
 }
 
@@ -214,6 +282,17 @@ export async function getPairingInfo(): Promise<{
 }> {
   if (!current) {
     return { running: false, name: os.hostname(), port: null, lanEnabled: false, urls: [], token: null };
+  }
+  if ('kind' in current && current.kind === 'remote') {
+    // Phones pair directly with the remote server, not through this client.
+    return {
+      running: true,
+      name: new URL(current.baseUrl).hostname,
+      port: Number(new URL(current.baseUrl).port) || null,
+      lanEnabled: false,
+      urls: [current.baseUrl],
+      token: current.key,
+    };
   }
   const payload = buildPairingPayload(current.port, current.lanEnabled, current.key);
   return {
@@ -229,6 +308,9 @@ export async function getPairingInfo(): Promise<{
 // Persists the toggle and rebinds the listener (127.0.0.1 ⇄ 0.0.0.0).
 // Connected clients drop and reconnect — acceptable for a settings flip.
 export async function setLanEnabled(enabled: boolean): Promise<void> {
+  if (serverHostMode() === 'remote') {
+    throw new Error('Not available while connected to a remote rowboat-server');
+  }
   const config = await loadServerConfig(WorkDir);
   await saveServerConfig(WorkDir, { ...config, lanEnabled: enabled });
   await stopServerHost();
@@ -237,6 +319,9 @@ export async function setLanEnabled(enabled: boolean): Promise<void> {
 
 /** Mints a new server key, revoking every paired client, then rebinds. */
 export async function rotateKey(): Promise<void> {
+  if (serverHostMode() === 'remote') {
+    throw new Error('Not available while connected to a remote rowboat-server');
+  }
   await stopServerHost();
   await rotateServerKey(WorkDir);
   await startServerHost();

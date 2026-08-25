@@ -88,10 +88,12 @@ describe('rowboat-server transport', () => {
   let base: string;
   const turnBus = makeEmitter<TurnBusEvent>();
   const sessionBus = makeEmitter<never>();
+  const knowledgeBus = makeEmitter<void>();
 
   const events: EventSources = {
     subscribeTurnEvents: turnBus.subscribe,
     subscribeSessionEvents: sessionBus.subscribe,
+    subscribeKnowledgeEvents: (listener) => knowledgeBus.subscribe(listener),
   };
 
   beforeAll(async () => {
@@ -228,6 +230,15 @@ describe('rowboat-server transport', () => {
     const probe = connect(`ws://127.0.0.1:${server.port}/events?token=${server.key}`, { hello: true });
     const welcome = await probe.next((m) => m.type === 'welcome');
     expect(welcome.seq).toBe(1);
+    probe.socket.close();
+  });
+
+  it('broadcasts knowledge:didCommit to authenticated clients', async () => {
+    const probe = connect(`ws://127.0.0.1:${server.port}/events`, { token: server.key, hello: true });
+    await probe.next((m) => m.type === 'welcome');
+    knowledgeBus.emit();
+    const msg = await probe.next((m) => m.channel === 'knowledge:didCommit');
+    expect(msg.type).toBe('event');
     probe.socket.close();
   });
 

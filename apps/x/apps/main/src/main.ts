@@ -37,7 +37,7 @@ import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { prepareCoreData, initCoreServices } from "@x/core/dist/boot/services.js";
-import { startServerHost, stopServerHost, childServerMode } from "./server-host.js";
+import { startServerHost, stopServerHost, childServerMode, serverHostMode, whenServerReady } from "./server-host.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
@@ -189,6 +189,15 @@ function registerAppProtocol() {
         try {
           const relPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
           if (!relPath) return new Response("Not Found", { status: 404 });
+          // Remote server: the workspace lives on the server's disk — proxy
+          // to its authenticated /workspace route instead of reading locally.
+          if (serverHostMode() === "remote") {
+            const { baseUrl, key } = await whenServerReady();
+            const headers = new Headers({ authorization: `Bearer ${key}` });
+            const range = request.headers.get("range");
+            if (range) headers.set("range", range);
+            return fetch(`${baseUrl}/workspace/${relPath.split("/").map(encodeURIComponent).join("/")}`, { headers });
+          }
           const absPath = resolveWorkspacePath(relPath);
           // Parity with the server's /workspace route: `..` is guarded above,
           // but a symlink inside the workspace can still point out of it —
@@ -646,7 +655,10 @@ app.whenReady().then(async () => {
   // - Changes made via IPC handlers (workspace:writeFile, etc.)
   // - External changes (terminal, git, other editors)
   // Only starts once (guarded in startWorkspaceWatcher)
-  startWorkspaceWatcher();
+  // In child/remote mode the watcher runs inside rowboat-server and its
+  // events arrive over the WS relay — a local watcher would double-fire
+  // (or, remote, watch the wrong machine's disk).
+  if (!childServerMode()) startWorkspaceWatcher();
 
   // start runs watcher
   startRunsWatcher();
