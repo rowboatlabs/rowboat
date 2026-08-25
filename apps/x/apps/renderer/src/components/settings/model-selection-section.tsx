@@ -12,16 +12,15 @@ import { useModels, type ModelPickerGroup } from "@/hooks/use-models"
 // model), so it's its own explicit pick — or unset, which turns image
 // generation off.
 
-// One provider in the image-model catalog (models:listImageModels).
-// `listable: false` = the flavor can't filter its list to image models;
-// the picker takes a typed id for it.
+// One provider in the image-model catalog (models:listImageModels). Every
+// image-capable provider lists its own models; a provider whose listing
+// failed arrives as status "error" and the picker offers a Retry row.
 interface ImageProviderEntry {
   id: string
   flavor: string
   status: "ok" | "error"
   error?: string
   models: string[]
-  listable: boolean
 }
 
 type TaskKey =
@@ -254,8 +253,6 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
             <ModelSelector
               variant="field"
               groups={imageGroups}
-              allowCustom
-              customHint="No listed image models — type a model id and pick “Use …”."
               inheritDefault={{ label: "None" }}
               value={imageModel}
               onChange={(selection) => void setImage(selection)}

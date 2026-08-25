@@ -889,10 +889,10 @@ const ipcSchemas = {
     }),
   },
   // The image-model catalog for the settings "Image model" picker: the
-  // connected providers that can generate images and, where a listing can
-  // be filtered to image output (the gateway's allowlist, OpenRouter's
-  // public catalog), their image models. A `listable: false` provider
-  // offers no list — the picker takes a typed model id for it.
+  // connected providers that can generate images, each with the models it
+  // lists. Every image flavor lists (see getImageModelCatalog for where
+  // each one's list comes from) — the picker only ever offers reported
+  // models, so a provider that can't list reports status 'error'.
   'models:listImageModels': {
     req: z.null(),
     res: z.object({
@@ -902,7 +902,6 @@ const ipcSchemas = {
         status: z.enum(['ok', 'error']),
         error: z.string().optional(),
         models: z.array(z.string()),
-        listable: z.boolean(),
       })),
     }),
   },

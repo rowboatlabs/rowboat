@@ -143,16 +143,9 @@ export interface ModelSelectorProps {
    * over a different model space than chat (the settings Image model
    * field lists image models per provider). Same split-view / flat
    * browsing; the app default model is NOT shown or pre-checked, since it
-   * belongs to the chat catalog, and a slash-less custom id attaches to
-   * the provider column being browsed instead of the default's provider.
+   * belongs to the chat catalog.
    */
   groups?: ModelPickerGroup[]
-  /**
-   * Shown in place of "No models reported" for an empty ok group when
-   * allowCustom is on — tells the user the list is intentionally empty and
-   * a typed id is the way in (providers whose catalog can't be filtered).
-   */
-  customHint?: string
   /**
    * Handler for an error row's Retry. Defaults to refreshing that
    * provider's chat catalog list; caller-supplied `groups` need their own.
@@ -179,9 +172,8 @@ const DEFAULT_OPTION_KEY = '__default__'
 
 // Un-scoped custom entries can't know their provider, so the rule is:
 // scoped → the scoped provider; "provider/model" → split on the FIRST
-// slash; no slash → the fallback provider — the global default's (matching
-// how the runtime pairs a provider-less model override), or for
-// caller-supplied groups the column being browsed.
+// slash; no slash → the fallback provider, i.e. the global default's
+// (matching how the runtime pairs a provider-less model override).
 function parseCustomModel(text: string, providerFilter: string | undefined, fallbackProvider: string): ModelRef {
   if (providerFilter) return { provider: providerFilter, model: text }
   const slash = text.indexOf('/')
@@ -225,7 +217,6 @@ export function ModelSelector({
   allowCustom = false,
   staticOptions,
   groups: groupsProp,
-  customHint,
   onRetry,
   triggerTitle,
   lockedModel = null,
@@ -402,9 +393,7 @@ export function ModelSelector({
   // Auto (no effort key), an effort-submenu click carries its level — so
   // switching models never drags a stale effort along.
   // Where a slash-less custom id lands (see parseCustomModel).
-  const customFallbackProvider = groupsProp
-    ? (groups.find((g) => g.id === activeProviderId) ?? groups[0])?.id ?? ''
-    : defaultModel?.provider ?? ''
+  const customFallbackProvider = defaultModel?.provider ?? ''
 
   const select = useCallback((ref: ModelRef | null, effortLevel: '' | ReasoningEffortLevel = '') => {
     if (lockedModel) return
@@ -759,7 +748,7 @@ export function ModelSelector({
                         {activeGroup.status === 'error' && renderErrorItem(activeGroup)}
                         {activeGroup.status === 'ok' && activeGroup.models.length === 0 && (
                           <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                            {allowCustom && customHint ? customHint : 'No models reported'}
+                            No models reported
                           </div>
                         )}
                       </CommandGroup>
@@ -809,10 +798,6 @@ export function ModelSelector({
                         </CommandGroup>
                       )
                     })}
-                    {!staticOptions && !queryValue && allowCustom && customHint
-                      && groups.length === 1 && groups[0].status === 'ok' && groups[0].models.length === 0 && (
-                      <div className="px-2 py-1.5 text-xs text-muted-foreground">{customHint}</div>
-                    )}
                     {queryValue && !anyModelRowVisible && (
                       allowCustom ? (
                         // Escape hatch for ids the lists don't carry (local

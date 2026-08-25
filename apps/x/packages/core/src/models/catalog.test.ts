@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   listGatewayImageModels: vi.fn(async () => ['google/gemini-2.5-flash-image']),
   listImageModelsForProvider: vi.fn<(config: unknown) => Promise<string[]>>(async () => ['google/gemini-2.5-flash-image', 'x-ai/grok-imagine-image-quality']),
   listOnboardingModels: vi.fn(async () => ({ providers: [] as Array<{ id: string; name: string; models: Array<{ id: string; name?: string; reasoning?: boolean }> }> })),
+  getImageModelIds: vi.fn<(flavor: string) => Promise<string[] | null>>(async () => ['gemini-3-pro-image', 'gemini-2.5-flash-image']),
   getDefaultModelAndProvider: vi.fn(async () => ({ provider: 'openai', model: 'gpt-5.4' })),
   getConfig: vi.fn(async (): Promise<unknown> => {
     throw new Error('no models.json');
@@ -32,7 +33,7 @@ vi.mock('../auth/chatgpt-auth.js', () => ({ getChatGPTStatus: mocks.getChatGPTSt
 vi.mock('./gateway.js', () => ({ listGatewayModels: mocks.listGatewayModels, listGatewayImageModels: mocks.listGatewayImageModels }));
 vi.mock('./codex.js', () => ({ listCodexModels: mocks.listCodexModels }));
 vi.mock('./models.js', () => ({ listModelsForProvider: mocks.listModelsForProvider, listImageModelsForProvider: mocks.listImageModelsForProvider }));
-vi.mock('./models-dev.js', () => ({ listOnboardingModels: mocks.listOnboardingModels }));
+vi.mock('./models-dev.js', () => ({ listOnboardingModels: mocks.listOnboardingModels, getImageModelIds: mocks.getImageModelIds }));
 vi.mock('./defaults.js', () => ({ getDefaultModelAndProvider: mocks.getDefaultModelAndProvider }));
 vi.mock('../di/container.js', () => ({
   default: { resolve: () => ({ getConfig: mocks.getConfig }) },
@@ -61,6 +62,10 @@ beforeEach(() => {
   mocks.isSignedIn.mockResolvedValue(false);
   mocks.getChatGPTStatus.mockResolvedValue({ signedIn: false });
   mocks.listOnboardingModels.mockResolvedValue({ providers: [] });
+  mocks.listModelsForProvider.mockResolvedValue(['live-model-1']);
+  mocks.listGatewayImageModels.mockResolvedValue(['google/gemini-2.5-flash-image']);
+  mocks.listImageModelsForProvider.mockResolvedValue(['google/gemini-2.5-flash-image', 'x-ai/grok-imagine-image-quality']);
+  mocks.getImageModelIds.mockResolvedValue(['gemini-3-pro-image', 'gemini-2.5-flash-image']);
   mocks.getDefaultModelAndProvider.mockResolvedValue({ provider: 'openai', model: 'gpt-5.4' });
   mocks.getConfig.mockRejectedValue(new Error('no models.json'));
 });
@@ -175,7 +180,7 @@ describe('getModelCatalog', () => {
 });
 
 describe('getImageModelCatalog', () => {
-  it('lists the gateway allowlist and OpenRouter, and marks unfilterable flavors as not listable', async () => {
+  it('lists every image flavor from its own source — never a typed id', async () => {
     mocks.isSignedIn.mockResolvedValue(true);
     mocks.getChatGPTStatus.mockResolvedValue({ signedIn: true });
     serveConfig({
@@ -188,13 +193,35 @@ describe('getImageModelCatalog', () => {
 
     // codex and anthropic can't generate images here — not offered at all.
     expect(catalog.providers.map((p) => p.id)).toEqual(['rowboat', 'openrouter', 'google']);
+    // Gateway allowlist.
     expect(catalog.providers[0]).toEqual({
-      id: 'rowboat', flavor: 'rowboat', status: 'ok', models: ['google/gemini-2.5-flash-image'], listable: true,
+      id: 'rowboat', flavor: 'rowboat', status: 'ok', models: ['google/gemini-2.5-flash-image'],
     });
-    expect(catalog.providers[1]).toMatchObject({ flavor: 'openrouter', status: 'ok', listable: true });
+    // OpenRouter's own output-modality-filtered catalog.
+    expect(catalog.providers[1]).toMatchObject({ flavor: 'openrouter', status: 'ok' });
     expect(catalog.providers[1].models).toContain('x-ai/grok-imagine-image-quality');
-    expect(catalog.providers[2]).toEqual({ id: 'google', flavor: 'google', status: 'ok', models: [], listable: false });
+    // google: the models.dev catalog filtered by output modality.
+    expect(catalog.providers[2]).toEqual({
+      id: 'google', flavor: 'google', status: 'ok', models: ['gemini-3-pro-image', 'gemini-2.5-flash-image'],
+    });
+    expect(mocks.getImageModelIds).toHaveBeenCalledWith('google');
     expect(mocks.listModelsForProvider).not.toHaveBeenCalled();
+  });
+
+  it('lists local flavors unfiltered — no image metadata exists to filter on', async () => {
+    serveConfig({
+      ollama: { baseURL: 'http://localhost:11434' },
+      'openai-compatible': { baseURL: 'http://localhost:1234/v1' },
+    });
+    mocks.listModelsForProvider.mockResolvedValue(['qwen3', 'gemma3']);
+
+    const catalog = await getImageModelCatalog();
+
+    expect(catalog.providers).toEqual([
+      { id: 'ollama', flavor: 'ollama', status: 'ok', models: ['qwen3', 'gemma3'] },
+      { id: 'openai-compatible', flavor: 'openai-compatible', status: 'ok', models: ['qwen3', 'gemma3'] },
+    ]);
+    expect(mocks.listImageModelsForProvider).not.toHaveBeenCalled();
   });
 
   it('reports a failed image listing as status error instead of dropping the provider', async () => {
@@ -207,7 +234,23 @@ describe('getImageModelCatalog', () => {
       status: 'error',
       error: 'Gateway /v1/models?output_modalities=image failed: 503',
       models: [],
-      listable: true,
     });
+  });
+
+  it('an Ollama that is not running is an error row (Retry), not an empty list', async () => {
+    serveConfig({ ollama: { baseURL: 'http://localhost:11434' } });
+    mocks.listModelsForProvider.mockRejectedValue(new Error('fetch failed'));
+
+    const catalog = await getImageModelCatalog();
+    expect(catalog.providers[0]).toMatchObject({ id: 'ollama', status: 'error', error: 'fetch failed', models: [] });
+  });
+
+  it('reports a missing models.dev cache as retryable rather than "no image models"', async () => {
+    serveConfig({ openai: { apiKey: 'sk-1' } });
+    mocks.getImageModelIds.mockResolvedValue(null);
+
+    const catalog = await getImageModelCatalog();
+    expect(catalog.providers[0]).toMatchObject({ id: 'openai', status: 'error', models: [] });
+    expect(catalog.providers[0].error).toMatch(/catalog unavailable/i);
   });
 });
