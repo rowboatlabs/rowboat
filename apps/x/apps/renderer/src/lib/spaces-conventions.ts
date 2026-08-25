@@ -210,3 +210,17 @@ export function formatDayLabel(iso: string, now: Date = new Date()): string {
     const sameYear = d.getFullYear() === now.getFullYear()
     return d.toLocaleDateString([], sameYear ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })
 }
+
+// ---------------------------------------------------------------------------
+// Windowed messages (listMessages returns the newest page; older pages load
+// on demand). One merge everywhere: union by id, offset order — so a resync
+// never throws away older loaded pages, and echoes dedupe against the frame
+// that eventually arrives. The incoming copy wins (fresh reads carry folded
+// reactions).
+// ---------------------------------------------------------------------------
+
+export function mergeMessages<M extends spaces.Message>(existing: readonly M[], incoming: readonly M[]): M[] {
+    const byId = new Map(existing.map((m) => [m.id, m]))
+    for (const m of incoming) byId.set(m.id, m)
+    return [...byId.values()].sort((a, b) => a.offset - b.offset)
+}

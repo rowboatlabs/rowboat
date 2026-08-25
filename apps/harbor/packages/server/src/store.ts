@@ -147,9 +147,14 @@ export interface Store {
   putTopic(topic: Topic): Promise<void>;
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;
   getMessage(spaceId: string, messageId: string): Promise<Message | undefined>;
-  /** Oldest first. */
-  listMessages(spaceId: string, topicId: string): Promise<Message[]>;
+  /**
+   * Oldest first. With opts: the NEWEST `limit` messages whose offset is
+   * below `beforeOffset` (when given) — still returned oldest first.
+   */
+  listMessages(spaceId: string, topicId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;
+  /** Each topic's first (oldest) message, keyed by topic id — listTopics decoration. */
+  getFirstMessages(spaceId: string): Promise<Map<string, Message>>;
   appendMessage(message: Message): Promise<void>;
   /**
    * Tombstone: blanks the row's body and sets deletedAt — and redacts the

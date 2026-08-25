@@ -552,12 +552,29 @@ export class PgStore implements Store {
     return rows[0] ? rowToMessage(rows[0]) : undefined;
   }
 
-  async listMessages(spaceId: string, topicId: string): Promise<Message[]> {
-    const rows = await this.sql.query<MessageRow>(
-      'select * from messages where space_id = $1 and topic_id = $2 order by stream_offset',
-      [spaceId, topicId],
-    );
+  async listMessages(spaceId: string, topicId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+    const params: unknown[] = [spaceId, topicId];
+    let where = 'space_id = $1 and topic_id = $2';
+    if (opts?.beforeOffset !== undefined) {
+      params.push(opts.beforeOffset);
+      where += ` and stream_offset < $${params.length}`;
+    }
+    // The window is the NEWEST `limit` rows; the caller gets them oldest first.
+    let sql = `select * from messages where ${where} order by stream_offset`;
+    if (opts?.limit !== undefined) {
+      params.push(opts.limit);
+      sql = `select * from (select * from messages where ${where} order by stream_offset desc limit $${params.length}) w order by stream_offset`;
+    }
+    const rows = await this.sql.query<MessageRow>(sql, params);
     return rows.map(rowToMessage);
+  }
+
+  async getFirstMessages(spaceId: string): Promise<Map<string, Message>> {
+    const rows = await this.sql.query<MessageRow>(
+      'select distinct on (topic_id) * from messages where space_id = $1 order by topic_id, stream_offset',
+      [spaceId],
+    );
+    return new Map(rows.map((r) => [r.topic_id, rowToMessage(r)]));
   }
 
   async listMessagesBySpace(spaceId: string): Promise<Message[]> {

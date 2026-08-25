@@ -3625,10 +3625,17 @@ const ipcSchemas = {
   },
   'spaces:listTopics': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), includeArchived: z.boolean().optional() }),
-    res: z.object({ topics: z.array(z.custom<SpacesTypes.Topic>()) }),
+    res: z.object({ topics: z.array(z.custom<SpacesTypes.TopicListing>()) }),
   },
   'spaces:listMessages': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), topicId: z.string() }),
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string(),
+      /** Page back: only messages below this offset. Absent = the latest page. */
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
     res: z.custom<SpacesTopicWithMessages>(),
   },
   // actingMode is set by main ('direct' — the renderer is the human surface;

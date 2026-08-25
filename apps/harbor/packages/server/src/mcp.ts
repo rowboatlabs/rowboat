@@ -137,14 +137,14 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
       };
     }
     case 'read_topic': {
-      const a = args as { spaceId: string; topicId: string; limit?: number };
-      const limit = a.limit ?? 50;
-      const { topic, messages } = await service.listMessages(ctx, a.spaceId, a.topicId);
-      return {
-        topic,
-        messages: messages.slice(-limit),
-        truncated: messages.length > limit,
-      };
+      const a = args as { spaceId: string; topicId: string; beforeOffset?: number; limit?: number };
+      const { topic, messages, hasMore } = await service.listMessages(ctx, a.spaceId, a.topicId, {
+        ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
+        limit: a.limit ?? 50,
+      });
+      // Truncation is stated, never silent: the tool description tells the
+      // agent to page back with beforeOffset before summarising a whole topic.
+      return { topic, messages, truncated: hasMore };
     }
     case 'read_asset': {
       const a = args as { spaceId: string; path: string };

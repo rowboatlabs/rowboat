@@ -18,6 +18,7 @@ import type {
   ServerFrame,
   Space,
   Topic,
+  TopicListing,
 } from '@rowboat/spaces-protocol';
 
 // Renderer-facing surface for Spaces. The wire contract's single source of
@@ -46,6 +47,7 @@ export type {
   ServerFrame,
   Space,
   Topic,
+  TopicListing,
 };
 
 /** An org this install is signed into — the renderer's view (auth details stay in core). */
@@ -75,6 +77,8 @@ export interface SpacesAssetEntry {
 export interface SpacesTopicWithMessages {
   topic: Topic;
   messages: Message[];
+  /** Older messages exist below the returned window (listMessages is windowed, newest-first). */
+  hasMore: boolean;
 }
 
 export interface SpacesPostResult {

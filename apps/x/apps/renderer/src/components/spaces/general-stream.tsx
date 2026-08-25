@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Bot, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
@@ -6,8 +6,8 @@ import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
 import {
-    buildPendingMessage, failPendingGeneralMessage, ingestGeneralMessage, removeGeneralMessage,
-    resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
+    buildPendingMessage, failPendingGeneralMessage, ingestGeneralMessage, loadOlderGeneralMessages,
+    removeGeneralMessage, resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
@@ -213,20 +213,68 @@ export function GeneralStream({
     const hiddenCount = Math.max(0, streamMessages.length - renderCap)
     const visibleMessages = hiddenCount > 0 ? streamMessages.slice(hiddenCount) : streamMessages
 
+    // "Earlier" is one gesture with two gears: locally-hidden rows reveal
+    // instantly (the render cap), and once local rows run out the page below
+    // the loaded window is fetched (the server sends only the newest page).
+    // Either way the pre-action scroll geometry is restored — no jump.
+    const pendingRestoreRef = useRef<{ height: number; top: number; oldest?: number } | null>(null)
+    const loadEarlier = () => {
+        const el = scrollRef.current
+        if (!el || pendingRestoreRef.current) return
+        if (hiddenCount > 0) {
+            pendingRestoreRef.current = { height: el.scrollHeight, top: el.scrollTop }
+            setRenderCap((c) => c + 200)
+        } else if (general.hasMore && !general.loadingOlder) {
+            const oldest = general.messages.find((m) => !m.pending && !m.failed)?.offset
+            if (oldest === undefined) return
+            pendingRestoreRef.current = { height: el.scrollHeight, top: el.scrollTop, oldest }
+            // The fetched page must also render: lift the cap along with it.
+            setRenderCap((c) => c + 200)
+            void loadOlderGeneralMessages(org.id, space.id)
+        }
+    }
+    // A reveal restores immediately — the rows are local.
+    useLayoutEffect(() => {
+        const el = scrollRef.current
+        const pending = pendingRestoreRef.current
+        if (!el || !pending || pending.oldest !== undefined) return
+        el.scrollTop = el.scrollHeight - pending.height + pending.top
+        pendingRestoreRef.current = null
+    }, [renderCap])
+    // A fetch restores once the older page actually prepended.
+    useLayoutEffect(() => {
+        const el = scrollRef.current
+        const pending = pendingRestoreRef.current
+        if (!el || !pending || pending.oldest === undefined) return
+        const oldestNow = general.messages.find((m) => !m.pending && !m.failed)?.offset
+        if (oldestNow !== undefined && oldestNow < pending.oldest) {
+            el.scrollTop = el.scrollHeight - pending.height + pending.top
+            pendingRestoreRef.current = null
+        } else if (!general.loadingOlder) {
+            // Settled without a prepend (failed, or raced empty).
+            pendingRestoreRef.current = null
+        }
+    }, [general.messages, general.loadingOlder])
+
     // Render: day dividers, compaction, the New line, thread rows.
     const rows: ReactNode[] = []
     let prev: spaces.Message | undefined
     let prevDay = ''
     let newShown = false
-    if (hiddenCount > 0) {
+    if (hiddenCount > 0 || general.hasMore) {
         rows.push(
             <div key="earlier" className="flex justify-center py-2">
                 <button
                     type="button"
-                    onClick={() => setRenderCap((c) => c + 200)}
-                    className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                    onClick={loadEarlier}
+                    disabled={general.loadingOlder}
+                    className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground disabled:opacity-60"
                 >
-                    Show earlier messages ({hiddenCount} more)
+                    {general.loadingOlder
+                        ? 'Loading earlier messages…'
+                        : hiddenCount > 0
+                          ? `Show earlier messages (${hiddenCount} more)`
+                          : 'Load earlier messages'}
                 </button>
             </div>,
         )
@@ -286,6 +334,7 @@ export function GeneralStream({
                     // At the bottom = "follow the tail"; remember that as "no saved position".
                     lastScrollTopRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 8 ? null : el.scrollTop
                     if (lastScrollTopRef.current === null) scrollMemory.delete(memoryKey)
+                    if (el.scrollTop < 80) loadEarlier()
                 }}
             >
                 {!general.ready && (

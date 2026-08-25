@@ -316,7 +316,11 @@ export function buildHttpApp(deps: {
 
   app.get('/v1/spaces/:spaceId/topics/:topicId/messages', async (c) => {
     const { spaceId, topicId } = parseWith(routes.listMessages.params, c.req.param());
-    return reply(c, routes.listMessages.response, await service.listMessages(actor(c), spaceId, topicId));
+    const q = parseWith(routes.listMessages.query, {
+      ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.listMessages.response, await service.listMessages(actor(c), spaceId, topicId, q));
   });
 
   app.post('/v1/spaces/:spaceId/messages', async (c) => {

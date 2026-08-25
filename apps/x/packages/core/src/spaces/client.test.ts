@@ -113,7 +113,32 @@ describe('SpacesClient', () => {
       title: 'Ship date',
     });
     expect(retitled.title).toBe('Ship date');
-    expect((await ramnique.listTopics(spaceId)).map((t) => t.id)).toContain(started.topic.id);
+    const listed = await ramnique.listTopics(spaceId);
+    expect(listed.map((t) => t.id)).toContain(started.topic.id);
+    // listTopics always carries the immutable first message (no per-topic fetch).
+    expect(listed.find((t) => t.id === started.topic.id)?.firstMessage?.id).toBe(started.message.id);
+  });
+
+  it('messages window newest-first and page back by offset', async () => {
+    const started = await ramnique.postMessage(spaceId, { body: 'p1', actingMode: 'direct' });
+    for (const body of ['p2', 'p3', 'p4', 'p5']) {
+      await ramnique.postMessage(spaceId, { topicId: started.topic.id, body, actingMode: 'direct' });
+    }
+    const latest = await ramnique.listMessages(spaceId, started.topic.id, { limit: 2 });
+    expect(latest.messages.map((m) => m.body)).toEqual(['p4', 'p5']);
+    expect(latest.hasMore).toBe(true);
+    const older = await ramnique.listMessages(spaceId, started.topic.id, {
+      limit: 2,
+      beforeOffset: latest.messages[0]!.offset,
+    });
+    expect(older.messages.map((m) => m.body)).toEqual(['p2', 'p3']);
+    expect(older.hasMore).toBe(true);
+    const first = await ramnique.listMessages(spaceId, started.topic.id, {
+      limit: 2,
+      beforeOffset: older.messages[0]!.offset,
+    });
+    expect(first.messages.map((m) => m.body)).toEqual(['p1']);
+    expect(first.hasMore).toBe(false);
   });
 
   it('reactions toggle and fold into message reads', async () => {

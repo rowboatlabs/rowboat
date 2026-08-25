@@ -27,7 +27,12 @@ import {
   type Space,
   type SpaceEvent,
   type Topic,
+  type TopicListing,
 } from '@rowboat/spaces-protocol';
+
+/** listMessages window bounds — the default page and the per-request cap. */
+const MESSAGES_PAGE_DEFAULT = 100;
+const MESSAGES_PAGE_MAX = 200;
 import type { z } from 'zod';
 import { blobHash, type BlobStore } from './blobs.js';
 import { HarborError } from './errors.js';
@@ -769,16 +774,33 @@ export class HarborService {
 
   // --- feed ------------------------------------------------------------------
 
-  async listTopics(ctx: ActorCtx, spaceId: string, includeArchived = false): Promise<Topic[]> {
+  async listTopics(ctx: ActorCtx, spaceId: string, includeArchived = false): Promise<TopicListing[]> {
     await this.requireMember(ctx, spaceId);
-    return this.store.listTopics(spaceId, includeArchived);
+    const topics = await this.store.listTopics(spaceId, includeArchived);
+    // Every consumer needs the first message (derived titles, thread parent
+    // cards, seed detection) — always folded in, one query for all topics.
+    const firsts = await this.store.getFirstMessages(spaceId);
+    return topics.map((t) => ({ ...t, firstMessage: firsts.get(t.id) ?? null }));
   }
 
-  async listMessages(ctx: ActorCtx, spaceId: string, topicId: string): Promise<{ topic: Topic; messages: Message[] }> {
+  async listMessages(
+    ctx: ActorCtx,
+    spaceId: string,
+    topicId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<{ topic: Topic; messages: Message[]; hasMore: boolean }> {
     await this.requireMember(ctx, spaceId);
     const topic = await this.store.getTopic(spaceId, topicId);
     if (!topic) throw new HarborError('not_found', 'no such topic');
-    const messages = await this.store.listMessages(spaceId, topicId);
+    // Newest page by default — never the full history. One extra row answers
+    // hasMore without a count query.
+    const limit = Math.min(Math.max(opts?.limit ?? MESSAGES_PAGE_DEFAULT, 1), MESSAGES_PAGE_MAX);
+    const window = await this.store.listMessages(spaceId, topicId, {
+      ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
+      limit: limit + 1,
+    });
+    const hasMore = window.length > limit;
+    const messages = hasMore ? window.slice(1) : window;
     // Fold live reaction state in — the reactions field on a stored message
     // event is its at-post snapshot (empty); reads carry the current truth.
     const byMessage = new Map<string, StoredReaction[]>();
@@ -788,6 +810,7 @@ export class HarborService {
     return {
       topic,
       messages: messages.map((m) => ({ ...m, reactions: foldReactions(byMessage.get(m.id) ?? []) })),
+      hasMore,
     };
   }
 

@@ -62,10 +62,14 @@ export const readTopic = tool({
   description:
     'Read a feed topic: its metadata and messages (each attributed to its member and acting ' +
     'mode). Use this to answer questions about a discussion, summarise a thread, or catch up ' +
-    'before replying. Returns the most recent messages up to `limit` (default 50), oldest first.',
+    'before replying. Returns the most recent messages up to `limit` (default 50), oldest first. ' +
+    'When `truncated` is true, older messages exist — pass `beforeOffset` (the oldest offset ' +
+    'you received) to page back before summarising a whole topic.',
   input: z.object({
     spaceId: SpaceId,
     topicId: TopicId,
+    /** Page back: only messages with offset below this. */
+    beforeOffset: z.number().int().positive().optional(),
     limit: z.number().int().positive().max(200).optional(),
   }),
   output: z.object({
