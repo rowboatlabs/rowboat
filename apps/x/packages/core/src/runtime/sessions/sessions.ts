@@ -37,6 +37,7 @@ import { carriesSkillsForward } from "../assembly/traits.js";
 import type { IClock } from "../turns/clock.js";
 import {
     type ISessions,
+    RECLAIMED_TURN_REASON,
     type SendMessageConfig,
     TurnNotSettledError,
 } from "./api.js";
@@ -252,10 +253,7 @@ export class SessionsImpl implements ISessions {
                 state.latestTurnId &&
                 !this.active.has(state.latestTurnId)
             ) {
-                await this.abortOrCancel(
-                    state.latestTurnId,
-                    "interrupted: the app quit or crashed while this turn was running",
-                );
+                await this.abortOrCancel(state.latestTurnId, RECLAIMED_TURN_REASON);
                 latestTurnState = await this.latestTurnState(state);
                 status = latestTurnState
                     ? deriveTurnStatus(latestTurnState)

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { ITurnEventBus } from '../runtime/turns/event-hub.js';
-import type { ISessions } from '../runtime/sessions/api.js';
+import { type ISessions, RECLAIMED_TURN_REASON } from '../runtime/sessions/api.js';
 import type { TurnBusEvent } from '@x/shared/dist/turns.js';
 import { WorkDir } from '../config/config.js';
 import { getClient, getLive, spacesMcpServerNameFor } from './orgs.js';
@@ -249,22 +249,38 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+/**
+ * The backstop receipt's wording (pure; tested). A cancelled turn is usually a
+ * person pressing Stop — except a reclaim: sendOrQueueMessage cancelling a
+ * crash-orphaned turn because a NEW mention just arrived. That one must not
+ * read as the new run failing; the new turn posts its own receipt right after.
+ */
+export function backstopBody(event: {
+  type: string;
+  error?: string;
+  reason?: string;
+  output?: unknown;
+}): string {
+  if (event.type === 'turn_failed') {
+    return `⚠️ Rowboat couldn't complete this — ${describeTurnError(event.error)}`;
+  }
+  if (event.type === 'turn_cancelled') {
+    return event.reason === RECLAIMED_TURN_REASON
+      ? '⚠️ An earlier Rowboat run here was interrupted — picking up your latest message now.'
+      : `⚠️ Rowboat's run was stopped before it finished.`;
+  }
+  const text = finalAssistantText(event.output);
+  return text
+    ? `Rowboat finished without posting a receipt. Its final note: "${truncate(text, 300)}"`
+    : 'Rowboat finished without posting a receipt or leaving a note.';
+}
+
 /** Never go dark: the turn ended without posting its receipt — post one for it. */
 async function postBackstop(
   watch: TopicWatch,
-  event: { type: string; error?: string; output?: unknown },
+  event: { type: string; error?: string; reason?: string; output?: unknown },
 ): Promise<void> {
-  let body: string;
-  if (event.type === 'turn_failed') {
-    body = `⚠️ Rowboat couldn't complete this — ${describeTurnError(event.error)}`;
-  } else if (event.type === 'turn_cancelled') {
-    body = `⚠️ Rowboat's run was stopped before it finished.`;
-  } else {
-    const text = finalAssistantText(event.output);
-    body = text
-      ? `Rowboat finished without posting a receipt. Its final note: "${truncate(text, 300)}"`
-      : 'Rowboat finished without posting a receipt or leaving a note.';
-  }
+  const body = backstopBody(event);
   await getClient(watch.orgId).postMessage(watch.spaceId, {
     topicId: watch.topicId,
     body,
