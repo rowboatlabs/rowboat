@@ -32,6 +32,9 @@ type SpacesHandlers = {
   'spaces:resolveInvite': InvokeHandler<'spaces:resolveInvite'>;
   'spaces:acceptInvite': InvokeHandler<'spaces:acceptInvite'>;
   'spaces:listAssets': InvokeHandler<'spaces:listAssets'>;
+  'spaces:moveAsset': InvokeHandler<'spaces:moveAsset'>;
+  'spaces:deleteAsset': InvokeHandler<'spaces:deleteAsset'>;
+  'spaces:restoreAsset': InvokeHandler<'spaces:restoreAsset'>;
   'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
   'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
   'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
@@ -167,8 +170,32 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:acceptInvite': async (_event, args) => orgs.getClient(args.orgId).acceptInvite(args.token),
 
   'spaces:listAssets': async (_event, args) => ({
-    entries: await orgs.getClient(args.orgId).listAssets(args.spaceId),
+    entries: await orgs.getClient(args.orgId).listAssets(args.spaceId, {
+      ...(args.includeDeleted !== undefined ? { includeDeleted: args.includeDeleted } : {}),
+    }),
   }),
+
+  // Namespace ops — the renderer is the human surface, so everything here is
+  // 'direct' (agents move/delete through the org's MCP face, attributed there).
+  'spaces:moveAsset': async (_event, args) =>
+    orgs.getClient(args.orgId).moveAsset(args.spaceId, {
+      fromPath: args.fromPath,
+      toPath: args.toPath,
+      baseVersion: args.baseVersion,
+      ...(args.reason ? { reason: args.reason } : {}),
+      actingMode: 'direct',
+    }),
+
+  'spaces:deleteAsset': async (_event, args) =>
+    orgs.getClient(args.orgId).deleteAsset(args.spaceId, {
+      path: args.path,
+      baseVersion: args.baseVersion,
+      ...(args.reason ? { reason: args.reason } : {}),
+      actingMode: 'direct',
+    }),
+
+  'spaces:restoreAsset': async (_event, args) =>
+    orgs.getClient(args.orgId).restoreAsset(args.spaceId, { path: args.path, actingMode: 'direct' }),
 
   // Upload phase 1. Pastes arrive as bytes; drag-drop / picker sends the
   // absolute path (via electronUtils.getPathForFile) so big files never cross

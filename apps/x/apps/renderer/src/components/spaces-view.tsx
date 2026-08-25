@@ -6,7 +6,7 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { AddOrgDialog, AvatarStack, OrgMonogram } from '@/components/spaces/atoms'
-import { FileColumn, UploadFilesDialog } from '@/components/spaces/files-tab'
+import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
@@ -410,6 +410,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     // Files picked (rail Upload button) or dropped on the tree, awaiting the
     // destination-folder dialog. Prefill the open file's folder when there is one.
     const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
+    const [trashOpen, setTrashOpen] = useState(false)
     const uploadDefaultFolder = centerPath?.includes('/') ? centerPath.slice(0, centerPath.lastIndexOf('/')) : ''
 
     return (
@@ -487,6 +488,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     onSelect={select}
                     onCreateFile={openFile}
                     onUploadFiles={setUploadFiles}
+                    onOpenTrash={() => setTrashOpen(true)}
                     open={railOpen}
                     pinned={railPinned}
                     hint={railPinned ? 'pinned' : railPeek ? 'sliding away' : 'hover · pin to keep'}
@@ -562,6 +564,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                                     memberNames={memberNames}
                                     refreshTick={refreshTick}
                                     onChanged={() => setRefreshTick((t) => t + 1)}
+                                    onRenamed={openFile}
+                                    onRedirect={openFile}
+                                    onDeleted={() => select({ kind: 'general' })}
                                     crumb={selection.kind === 'file' && crumbTopicId && crumbLabel ? {
                                         label: crumbLabel,
                                         // Back to the topic means back to the conversation: Talk.
@@ -581,6 +586,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     </aside>
                 )}
             </div>
+            {trashOpen && (
+                <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
+            )}
             {uploadFiles && (
                 <UploadFilesDialog
                     org={org}

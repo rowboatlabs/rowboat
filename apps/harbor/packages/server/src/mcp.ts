@@ -172,6 +172,27 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
     }
+    case 'move_asset': {
+      const a = args as { spaceId: string; fromPath: string; toPath: string; baseVersion: number; reason: string };
+      return service.moveAsset(ctx, a.spaceId, {
+        fromPath: a.fromPath,
+        toPath: a.toPath,
+        baseVersion: a.baseVersion,
+        reason: a.reason, // required on this face (CONTRACT.md decision 5)
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
+      });
+    }
+    case 'delete_asset': {
+      const a = args as { spaceId: string; path: string; baseVersion: number; reason: string };
+      return service.deleteAsset(ctx, a.spaceId, {
+        path: a.path,
+        baseVersion: a.baseVersion,
+        reason: a.reason, // required on this face (CONTRACT.md decision 5)
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
+      });
+    }
     case 'post_to_topic': {
       const a = args as { spaceId: string; topicId?: string; body: string };
       const { topic, message } = await service.postMessage(ctx, a.spaceId, {

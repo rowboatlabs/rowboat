@@ -10,7 +10,7 @@ import type {
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import type { AssetHead, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
+import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
 
 // The real Harbor's storage: mergeable text lives inline in Postgres (≤1MB,
 // riding the log rows); binary versions carry {hash, size, mime} pointing into
@@ -51,6 +51,8 @@ interface ChangeSetRow {
   reason: string | null;
   topic_id: string | null;
   blob: BlobInfo | null;
+  op: ChangeSet['op'] | null;
+  moved_from: string | null;
   committed_at: string;
   stream_offset: number;
 }
@@ -66,6 +68,8 @@ function rowToChangeSet(r: ChangeSetRow): ChangeSet {
     ...(r.reason !== null ? { reason: r.reason } : {}),
     ...(r.topic_id !== null ? { topicId: r.topic_id } : {}),
     ...(r.blob !== null && r.blob !== undefined ? { blob: r.blob } : {}),
+    ...(r.op !== null && r.op !== undefined ? { op: r.op } : {}),
+    ...(r.moved_from !== null && r.moved_from !== undefined ? { movedFrom: r.moved_from } : {}),
     committedAt: r.committed_at,
     offset: r.stream_offset,
   };
@@ -141,6 +145,15 @@ function rowToReaction(r: ReactionRow): StoredReaction {
     by: r.attribution,
     at: r.at,
   };
+}
+
+interface AssetRow {
+  id: string;
+  path: string;
+  version: number;
+  updated_at: string;
+  state: AssetRecord['state'];
+  blob: BlobInfo | null;
 }
 
 /** The implicit org of every pre-multi-org deployment (migration 003 default). */
@@ -276,59 +289,120 @@ export class PgStore implements Store {
 
   // --- assets ----------------------------------------------------------------
 
-  async listAssets(spaceId: string): Promise<AssetHead[]> {
-    // Head blob metadata rides on the head version's row (one fetch, spec §6).
-    const rows = await this.sql.query<{ path: string; version: number; updated_at: string; blob: BlobInfo | null }>(
-      `select a.path, a.version, a.updated_at, v.blob from assets a
-       join asset_versions v on v.space_id = a.space_id and v.path = a.path and v.version = a.version
-       where a.space_id = $1 order by a.path`,
-      [spaceId],
-    );
-    return rows.map((r) => ({
-      path: r.path,
-      version: r.version,
-      updatedAt: r.updated_at,
-      ...(r.blob !== null && r.blob !== undefined ? { blob: r.blob } : {}),
-    }));
-  }
-
-  async getAssetHead(spaceId: string, path: string): Promise<AssetHead | undefined> {
-    const rows = await this.sql.query<{ path: string; version: number; updated_at: string; blob: BlobInfo | null }>(
-      `select a.path, a.version, a.updated_at, v.blob from assets a
-       join asset_versions v on v.space_id = a.space_id and v.path = a.path and v.version = a.version
-       where a.space_id = $1 and a.path = $2`,
-      [spaceId, path],
-    );
-    const r = rows[0];
-    if (!r) return undefined;
+  private assetRow(r: AssetRow): AssetRecord {
     return {
+      id: r.id,
       path: r.path,
       version: r.version,
       updatedAt: r.updated_at,
+      state: r.state,
       ...(r.blob !== null && r.blob !== undefined ? { blob: r.blob } : {}),
     };
   }
 
-  async getAssetVersion(spaceId: string, path: string, version: number): Promise<AssetVersionData | undefined> {
+  private readonly assetSelect = `select a.id, a.path, a.version, a.updated_at, a.state, v.blob from assets a
+       join asset_versions v on v.space_id = a.space_id and v.asset_id = a.id and v.version = a.version`;
+
+  async listAssets(spaceId: string, includeDeleted: boolean): Promise<AssetRecord[]> {
+    // Head blob metadata rides on the head version's row (one fetch, spec §6).
+    const rows = await this.sql.query<AssetRow>(
+      `${this.assetSelect} where a.space_id = $1 ${includeDeleted ? '' : "and a.state = 'live'"} order by a.path`,
+      [spaceId],
+    );
+    return rows.map((r) => this.assetRow(r));
+  }
+
+  async getLiveAssetByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
+    const rows = await this.sql.query<AssetRow>(
+      `${this.assetSelect} where a.space_id = $1 and a.path = $2 and a.state = 'live'`,
+      [spaceId, path],
+    );
+    return rows[0] ? this.assetRow(rows[0]) : undefined;
+  }
+
+  async getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
+    const rows = await this.sql.query<AssetRow>(
+      `${this.assetSelect} where a.space_id = $1 and a.path = $2 and a.state = 'deleted'
+       order by a.updated_at desc limit 1`,
+      [spaceId, path],
+    );
+    return rows[0] ? this.assetRow(rows[0]) : undefined;
+  }
+
+  async getAssetById(spaceId: string, assetId: string): Promise<AssetRecord | undefined> {
+    const rows = await this.sql.query<AssetRow>(
+      `${this.assetSelect} where a.space_id = $1 and a.id = $2`,
+      [spaceId, assetId],
+    );
+    return rows[0] ? this.assetRow(rows[0]) : undefined;
+  }
+
+  async createAsset(spaceId: string, record: AssetRecord): Promise<void> {
+    await this.sql.query(
+      'insert into assets (space_id, id, path, version, updated_at, state) values ($1, $2, $3, $4, $5, $6)',
+      [spaceId, record.id, record.path, record.version, record.updatedAt, record.state],
+    );
+  }
+
+  async getAssetVersion(spaceId: string, assetId: string, version: number): Promise<AssetVersionData | undefined> {
     if (version === 0) return { content: '', blob: null };
     const rows = await this.sql.query<{ content: string | null; blob: BlobInfo | null }>(
-      'select content, blob from asset_versions where space_id = $1 and path = $2 and version = $3',
-      [spaceId, path, version],
+      'select content, blob from asset_versions where space_id = $1 and asset_id = $2 and version = $3',
+      [spaceId, assetId, version],
     );
     const r = rows[0];
     return r ? { content: r.content, blob: r.blob ?? null } : undefined;
   }
 
-  async putAssetVersion(spaceId: string, path: string, version: number, data: AssetVersionData, updatedAt: string): Promise<void> {
+  async putAssetVersion(spaceId: string, assetId: string, version: number, data: AssetVersionData, updatedAt: string): Promise<void> {
     await this.sql.query(
-      `insert into assets (space_id, path, version, updated_at) values ($1, $2, $3, $4)
-       on conflict (space_id, path) do update set version = excluded.version, updated_at = excluded.updated_at`,
-      [spaceId, path, version, updatedAt],
+      'update assets set version = $3, updated_at = $4 where space_id = $1 and id = $2',
+      [spaceId, assetId, version, updatedAt],
     );
     await this.sql.query(
-      'insert into asset_versions (space_id, path, version, content, blob) values ($1, $2, $3, $4, $5::jsonb)',
-      [spaceId, path, version, data.content, data.blob ? JSON.stringify(data.blob) : null],
+      'insert into asset_versions (space_id, asset_id, version, content, blob) values ($1, $2, $3, $4, $5::jsonb)',
+      [spaceId, assetId, version, data.content, data.blob ? JSON.stringify(data.blob) : null],
     );
+  }
+
+  async setAssetPath(spaceId: string, assetId: string, path: string, updatedAt: string): Promise<void> {
+    await this.sql.query('update assets set path = $3, updated_at = $4 where space_id = $1 and id = $2', [
+      spaceId,
+      assetId,
+      path,
+      updatedAt,
+    ]);
+  }
+
+  async setAssetState(spaceId: string, assetId: string, state: 'live' | 'deleted', updatedAt: string): Promise<void> {
+    await this.sql.query('update assets set state = $3, updated_at = $4 where space_id = $1 and id = $2', [
+      spaceId,
+      assetId,
+      state,
+      updatedAt,
+    ]);
+  }
+
+  // --- redirects -------------------------------------------------------------
+
+  async putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void> {
+    await this.sql.query(
+      `insert into asset_redirects (space_id, path, asset_id, moved_at) values ($1, $2, $3, $4)
+       on conflict (space_id, path) do update set asset_id = excluded.asset_id, moved_at = excluded.moved_at`,
+      [spaceId, path, assetId, movedAt],
+    );
+  }
+
+  async getRedirect(spaceId: string, path: string): Promise<string | undefined> {
+    const rows = await this.sql.query<{ asset_id: string }>(
+      'select asset_id from asset_redirects where space_id = $1 and path = $2',
+      [spaceId, path],
+    );
+    return rows[0]?.asset_id;
+  }
+
+  async deleteRedirect(spaceId: string, path: string): Promise<void> {
+    await this.sql.query('delete from asset_redirects where space_id = $1 and path = $2', [spaceId, path]);
   }
 
   // --- uploaded blobs --------------------------------------------------------
@@ -366,13 +440,14 @@ export class PgStore implements Store {
 
   // --- change log ------------------------------------------------------------
 
-  async appendChangeSet(changeSet: ChangeSet): Promise<void> {
+  async appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void> {
     await this.sql.query(
-      `insert into change_sets (id, space_id, asset_path, base_version, result_version, attribution, reason, topic_id, blob, committed_at, stream_offset)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10, $11)`,
+      `insert into change_sets (id, space_id, asset_id, asset_path, base_version, result_version, attribution, reason, topic_id, blob, op, moved_from, committed_at, stream_offset)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12, $13, $14)`,
       [
         changeSet.id,
         changeSet.spaceId,
+        assetId,
         changeSet.assetPath,
         changeSet.baseVersion,
         changeSet.resultVersion,
@@ -380,6 +455,8 @@ export class PgStore implements Store {
         changeSet.reason ?? null,
         changeSet.topicId ?? null,
         changeSet.blob ? JSON.stringify(changeSet.blob) : null,
+        changeSet.op ?? null,
+        changeSet.movedFrom ?? null,
         changeSet.committedAt,
         changeSet.offset,
       ],
@@ -396,13 +473,13 @@ export class PgStore implements Store {
 
   async listChangeSets(
     spaceId: string,
-    opts: { path?: string; beforeOffset?: number; limit: number },
+    opts: { assetId?: string; beforeOffset?: number; limit: number },
   ): Promise<ChangeSet[]> {
     const conditions = ['space_id = $1'];
     const params: unknown[] = [spaceId];
-    if (opts.path !== undefined) {
-      params.push(opts.path);
-      conditions.push(`asset_path = $${params.length}`);
+    if (opts.assetId !== undefined) {
+      params.push(opts.assetId);
+      conditions.push(`asset_id = $${params.length}`);
     }
     if (opts.beforeOffset !== undefined) {
       params.push(opts.beforeOffset);

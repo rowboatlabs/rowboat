@@ -160,6 +160,33 @@ describe('SpacesClient', () => {
     await expect(ramnique.fetchBlob(spaceId, 'f'.repeat(64))).rejects.toMatchObject({ code: 'not_found' });
   });
 
+  it('move → redirect-aware read → delete → trash listing → restore round-trip', async () => {
+    await ramnique.proposeChange(spaceId, {
+      assetPath: 'tmp/scratch.md', baseVersion: 0, newContent: 'scratch\n', actingMode: 'direct',
+    });
+    const moved = await ramnique.moveAsset(spaceId, {
+      fromPath: 'tmp/scratch.md', toPath: 'notes/scratch.md', baseVersion: 1, reason: 'tidy', actingMode: 'direct',
+    });
+    expect(moved.outcome).toBe('moved');
+    if (moved.outcome === 'moved') expect(moved.changeSet).toMatchObject({ op: 'move', movedFrom: 'tmp/scratch.md' });
+
+    // Old links answer with the file's CURRENT path — the client's redirect signal.
+    const read = await ramnique.readAsset(spaceId, 'tmp/scratch.md');
+    expect(read.path).toBe('notes/scratch.md');
+
+    const deleted = await ramnique.deleteAsset(spaceId, {
+      path: 'notes/scratch.md', baseVersion: 1, reason: 'done with it', actingMode: 'direct',
+    });
+    expect(deleted.outcome).toBe('deleted');
+    expect((await ramnique.listAssets(spaceId)).map((e) => e.path)).not.toContain('notes/scratch.md');
+    const trash = await ramnique.listAssets(spaceId, { includeDeleted: true });
+    expect(trash.find((e) => e.path === 'notes/scratch.md')?.state).toBe('deleted');
+
+    const restored = await ramnique.restoreAsset(spaceId, { path: 'notes/scratch.md', actingMode: 'direct' });
+    expect(restored.outcome).toBe('restored');
+    expect((await ramnique.readAsset(spaceId, 'notes/scratch.md')).content).toBe('scratch\n');
+  });
+
   it('errors carry the wire code', async () => {
     await expect(ramnique.readAsset(spaceId, 'ghost.md')).rejects.toMatchObject({
       code: 'not_found',

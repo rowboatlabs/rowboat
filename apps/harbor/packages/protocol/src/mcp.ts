@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
-import { ProposeChangeResult, ReadAssetResult } from './changeset.js';
+import { DeleteAssetResult, MoveAssetResult, ProposeChangeResult, ReadAssetResult } from './changeset.js';
 import { Message, Topic } from './core.js';
 import { AssetPath, AssetVersion, BlobHash, MessageId, SpaceId, TopicId } from './ids.js';
 
@@ -111,6 +111,41 @@ export const proposeChange = tool({
   output: ProposeChangeResult,
 });
 
+export const moveAsset = tool({
+  name: 'move_asset',
+  description:
+    'Move or rename a file (folders are just path prefixes — moving into a new folder creates it). ' +
+    'Content, history, and blame travel with the file; the old path keeps a redirect. Declare the ' +
+    'baseVersion you last read: outcome "conflict" means the file changed meanwhile — re-read and retry. ' +
+    'An occupied destination is refused (pick another name); this never overwrites.',
+  input: z.object({
+    spaceId: SpaceId,
+    fromPath: AssetPath,
+    toPath: AssetPath,
+    baseVersion: z.number().int().positive(),
+    /** One line: why this move. Shown in the feed and in history forever. */
+    reason: z.string().min(1).max(1_000),
+  }),
+  output: MoveAssetResult,
+});
+
+export const deleteAsset = tool({
+  name: 'delete_asset',
+  description:
+    'Delete a file from the space. Nothing is destroyed — every version and its history stay in the ' +
+    'record, humans can restore it from Trash, and the feed shows who deleted it and why. Declare the ' +
+    'baseVersion you last read; "conflict" means it changed meanwhile. Delete conservatively: prefer ' +
+    'moving files into folders over deleting when tidying.',
+  input: z.object({
+    spaceId: SpaceId,
+    path: AssetPath,
+    baseVersion: z.number().int().positive(),
+    /** One line: why this delete. Shown in the feed and in history forever. */
+    reason: z.string().min(1).max(1_000),
+  }),
+  output: DeleteAssetResult,
+});
+
 export const postToTopic = tool({
   name: 'post_to_topic',
   description:
@@ -160,4 +195,14 @@ export const manageTopic = tool({
   output: z.object({ topic: Topic }),
 });
 
-export const mcpTools = [listSpaces, readTopic, readAsset, proposeChange, postToTopic, searchFeed, manageTopic] as const;
+export const mcpTools = [
+  listSpaces,
+  readTopic,
+  readAsset,
+  proposeChange,
+  moveAsset,
+  deleteAsset,
+  postToTopic,
+  searchFeed,
+  manageTopic,
+] as const;

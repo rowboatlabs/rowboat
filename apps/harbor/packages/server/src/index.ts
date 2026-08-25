@@ -15,7 +15,7 @@ export { S3BlobStore } from './blobs-s3.js';
 export type { S3BlobStoreOptions } from './blobs-s3.js';
 export { postgresDb } from './sql.js';
 export type { SqlDb, SqlExecutor } from './sql.js';
-export type { Store, StoredEvent, StoredInvite, AssetHead } from './store.js';
+export type { Store, StoredEvent, StoredInvite, AssetRecord } from './store.js';
 export { SpaceHub } from './hub.js';
 export { merge3 } from './merge.js';
 export type { MergeResult, MergeConflictRegion } from './merge.js';

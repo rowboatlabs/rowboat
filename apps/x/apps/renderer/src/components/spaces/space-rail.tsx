@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, FileText, Folder, MessagesSquare, MoreHorizontal, Pencil, Pin, Plus, Search, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, FileText, Folder, MessagesSquare, MoreHorizontal, Pencil, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -22,7 +22,7 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // surfaces own everything else.
 
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles,
+    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash,
     open, pinned, hint, onHoverChange, onTogglePin,
 }: {
     orgId: string
@@ -40,6 +40,8 @@ export function SpaceRail({
     onCreateFile: (path: string) => void
     /** Picked or dropped files headed for the space's file tree (upload dialog opens in the pane). */
     onUploadFiles: (files: File[]) => void
+    /** Opens the space's Trash (deleted files, restorable). */
+    onOpenTrash: () => void
     open: boolean
     pinned: boolean
     hint: string
@@ -327,6 +329,14 @@ export function SpaceRail({
                             >
                                 <Plus className="size-3.5" />
                             </button>
+                            <button
+                                type="button"
+                                title="Trash — deleted files, restorable"
+                                onClick={onOpenTrash}
+                                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <Trash2 className="size-3.5" />
+                            </button>
                         </div>
                         <div
                             className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
@@ -339,6 +349,8 @@ export function SpaceRail({
                             }}
                         >
                             <FileTree
+                                orgId={orgId}
+                                spaceId={spaceId}
                                 entries={entries}
                                 selectedPath={selectedPath}
                                 unreadPaths={unreadPaths}

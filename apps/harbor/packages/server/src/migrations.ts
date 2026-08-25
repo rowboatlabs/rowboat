@@ -233,6 +233,47 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    id: '007-asset-ids',
+    statements: [
+      // The inode model (decision 2026-08-26): the PATH stays the product's
+      // identity — every wire surface is unchanged — but STORAGE keys on an
+      // internal per-asset id, so move/delete/restore are property updates
+      // and version rows never relocate. The backfill joins by path, which is
+      // unambiguous precisely because no move has ever happened before 007.
+      `alter table assets add column if not exists id text`,
+      `alter table assets add column if not exists state text not null default 'live'`,
+      `update assets set id = gen_random_uuid()::text where id is null`,
+      `alter table assets alter column id set not null`,
+      `alter table asset_versions add column if not exists asset_id text`,
+      `update asset_versions v set asset_id = a.id from assets a
+        where v.space_id = a.space_id and v.path = a.path and v.asset_id is null`,
+      `alter table asset_versions alter column asset_id set not null`,
+      `alter table change_sets add column if not exists asset_id text`,
+      `update change_sets c set asset_id = a.id from assets a
+        where c.space_id = a.space_id and c.asset_path = a.path and c.asset_id is null`,
+      // Identity swap: assets key on id; the path is a mutable property,
+      // unique only among the living (the trash never blocks a name).
+      `alter table assets drop constraint assets_pkey`,
+      `alter table assets add primary key (space_id, id)`,
+      `create unique index if not exists assets_live_path on assets (space_id, path) where state = 'live'`,
+      `alter table asset_versions drop constraint asset_versions_pkey`,
+      `alter table asset_versions add primary key (space_id, asset_id, version)`,
+      // The path column on versions is now derivable and would only go stale.
+      `alter table asset_versions drop column path`,
+      // Namespace op columns on the log (op: move|delete|restore; moved_from on moves).
+      `alter table change_sets add column if not exists op text`,
+      `alter table change_sets add column if not exists moved_from text`,
+      // Old paths forward to their asset — reads follow, proposes refuse-with-pointer.
+      `create table if not exists asset_redirects (
+        space_id text not null,
+        path text not null,
+        asset_id text not null,
+        moved_at text not null,
+        primary key (space_id, path)
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {
