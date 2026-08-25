@@ -3,6 +3,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { __resetModelsForTests } from '@/hooks/use-models'
 import { ModelSelectionSection } from './model-selection-section'
 
+// Radix popper content needs these in jsdom (opening the Image model picker).
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub
+Element.prototype.scrollIntoView = () => {}
+
 // Same preload stub pattern as use-models.test.tsx.
 let handlers: Record<string, (args: unknown) => Promise<unknown>> = {}
 let updateCalls: unknown[] = []
@@ -26,9 +35,16 @@ const EMPTY_TASKS = {
   subagent: null,
 }
 
+type ImageProvider = { id: string; flavor: string; status: 'ok' | 'error'; error?: string; models: string[]; listable: boolean }
+const GATEWAY_IMAGE_PROVIDER: ImageProvider = {
+  id: 'rowboat', flavor: 'rowboat', status: 'ok', models: ['google/gemini-2.5-flash-image'], listable: true,
+}
+
 function serve(opts: {
   assistant?: { provider: string; model: string } | null
   taskModels?: Record<string, { provider: string; model: string } | null>
+  imageModel?: { provider: string; model: string } | null
+  imageProviders?: ImageProvider[]
 }): void {
   handlers['models:list'] = async () => ({
     providers: [
@@ -39,9 +55,18 @@ function serve(opts: {
   handlers['models:getConfig'] = async () => ({
     assistantModel: opts.assistant ?? null,
     taskModels: { ...EMPTY_TASKS, ...(opts.taskModels ?? {}) },
+    imageModel: opts.imageModel ?? null,
     deferBackgroundTasks: false,
   })
+  handlers['models:listImageModels'] = async () => ({
+    providers: opts.imageProviders ?? [GATEWAY_IMAGE_PROVIDER],
+  })
   handlers['models:updateConfig'] = async () => ({ success: true })
+}
+
+async function openImagePicker(): Promise<void> {
+  fireEvent.click(screen.getByTitle('Image model'))
+  await waitFor(() => expect(document.querySelector('[cmdk-root]')).not.toBeNull())
 }
 
 beforeEach(() => {
@@ -86,5 +111,60 @@ describe('ModelSelectionSection', () => {
     ]))
     // Back to inheriting.
     await waitFor(() => expect(screen.queryByText('Use Assistant model')).toBeNull())
+  })
+
+  it('renders the Image model row; unset reads as "None" with image generation unavailable', async () => {
+    serve({ assistant: { provider: 'rowboat', model: 'google/gemini-3.5-flash' } })
+    render(<ModelSelectionSection dialogOpen />)
+
+    await waitFor(() => expect(screen.getByTitle('Image model')).toHaveTextContent('None'))
+    expect(screen.getByText('Image generation is unavailable until a model is chosen.')).toBeInTheDocument()
+    expect(updateCalls).toEqual([])
+  })
+
+  it('picking an image model from the image catalog persists the ref', async () => {
+    serve({ assistant: { provider: 'rowboat', model: 'google/gemini-3.5-flash' } })
+    render(<ModelSelectionSection dialogOpen />)
+    await waitFor(() => expect(screen.getByTitle('Image model')).toHaveTextContent('None'))
+
+    await openImagePicker()
+    // The image catalog, not the chat catalog, feeds this picker.
+    fireEvent.click(await screen.findByText('google/gemini-2.5-flash-image'))
+    await waitFor(() => expect(updateCalls).toEqual([
+      { imageModel: { provider: 'rowboat', model: 'google/gemini-2.5-flash-image' } },
+    ]))
+    await waitFor(() => expect(screen.getByTitle('Image model')).toHaveTextContent('google/gemini-2.5-flash-image'))
+    expect(screen.getByText('Currently uses Rowboat · google/gemini-2.5-flash-image')).toBeInTheDocument()
+  })
+
+  it('a set image model shows Clear, and clearing nulls the field', async () => {
+    serve({
+      assistant: { provider: 'rowboat', model: 'google/gemini-3.5-flash' },
+      imageModel: { provider: 'rowboat', model: 'google/gemini-2.5-flash-image' },
+    })
+    render(<ModelSelectionSection dialogOpen />)
+
+    await waitFor(() => expect(screen.getByTitle('Image model')).toHaveTextContent('google/gemini-2.5-flash-image'))
+    fireEvent.click(screen.getByText('Clear'))
+    await waitFor(() => expect(updateCalls).toEqual([{ imageModel: null }]))
+    await waitFor(() => expect(screen.getByTitle('Image model')).toHaveTextContent('None'))
+    expect(screen.queryByText('Clear')).toBeNull()
+  })
+
+  it('a provider without an image listing takes a typed model id', async () => {
+    serve({
+      assistant: { provider: 'google', model: 'gemini-3.5-flash' },
+      imageProviders: [{ id: 'google', flavor: 'google', status: 'ok', models: [], listable: false }],
+    })
+    render(<ModelSelectionSection dialogOpen />)
+    await waitFor(() => expect(screen.getByTitle('Image model')).toHaveTextContent('None'))
+
+    await openImagePicker()
+    await screen.findByText('No listed image models — type a model id and pick “Use …”.')
+    fireEvent.change(screen.getByPlaceholderText('Search models and providers…'), { target: { value: 'gemini-2.5-flash-image' } })
+    fireEvent.click(await screen.findByText('Use "gemini-2.5-flash-image"'))
+    await waitFor(() => expect(updateCalls).toEqual([
+      { imageModel: { provider: 'google', model: 'gemini-2.5-flash-image' } },
+    ]))
   })
 })

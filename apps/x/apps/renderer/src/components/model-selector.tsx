@@ -138,6 +138,26 @@ export interface ModelSelectorProps {
    * both the 'opus' alias and the concrete id as "Opus").
    */
   staticOptions?: Array<{ id: string; label?: string }>
+  /**
+   * Caller-supplied provider groups replacing the catalog's — for pickers
+   * over a different model space than chat (the settings Image model
+   * field lists image models per provider). Same split-view / flat
+   * browsing; the app default model is NOT shown or pre-checked, since it
+   * belongs to the chat catalog, and a slash-less custom id attaches to
+   * the provider column being browsed instead of the default's provider.
+   */
+  groups?: ModelPickerGroup[]
+  /**
+   * Shown in place of "No models reported" for an empty ok group when
+   * allowCustom is on — tells the user the list is intentionally empty and
+   * a typed id is the way in (providers whose catalog can't be filtered).
+   */
+  customHint?: string
+  /**
+   * Handler for an error row's Retry. Defaults to refreshing that
+   * provider's chat catalog list; caller-supplied `groups` need their own.
+   */
+  onRetry?: (providerId: string) => void
   /** Optional title attribute for the trigger button (header tooltips). */
   triggerTitle?: string
   /** Frozen selection: renders a static label + tooltip instead of the dropdown. */
@@ -159,15 +179,16 @@ const DEFAULT_OPTION_KEY = '__default__'
 
 // Un-scoped custom entries can't know their provider, so the rule is:
 // scoped → the scoped provider; "provider/model" → split on the FIRST
-// slash; no slash → the global default's provider (matching how the
-// runtime pairs a provider-less model override).
-function parseCustomModel(text: string, providerFilter: string | undefined, defaultModel: ModelRef | null): ModelRef {
+// slash; no slash → the fallback provider — the global default's (matching
+// how the runtime pairs a provider-less model override), or for
+// caller-supplied groups the column being browsed.
+function parseCustomModel(text: string, providerFilter: string | undefined, fallbackProvider: string): ModelRef {
   if (providerFilter) return { provider: providerFilter, model: text }
   const slash = text.indexOf('/')
   if (slash > 0 && slash < text.length - 1) {
     return { provider: text.slice(0, slash), model: text.slice(slash + 1) }
   }
-  return { provider: defaultModel?.provider ?? '', model: text }
+  return { provider: fallbackProvider, model: text }
 }
 
 // Adapters for surfaces that persist a per-item override as optional
@@ -203,11 +224,17 @@ export function ModelSelector({
   providerFilter,
   allowCustom = false,
   staticOptions,
+  groups: groupsProp,
+  customHint,
+  onRetry,
   triggerTitle,
   lockedModel = null,
   effortSelectable = false,
 }: ModelSelectorProps) {
-  const { groups: allGroups, reasoningByKey, defaultModel, catalogByProvider, refresh } = useModels()
+  const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, catalogByProvider, refresh } = useModels()
+  const allGroups = groupsProp ?? catalogGroups
+  // The chat default has no standing in a caller-supplied model space.
+  const defaultModel = groupsProp ? null : catalogDefault
 
   // inheritDefault is defaultOption with placeholder styling — one sentinel
   // code path, not two.
@@ -217,12 +244,12 @@ export function ModelSelector({
   const groups = useMemo<ModelPickerGroup[]>(() => {
     if (!providerFilter) return allGroups
     const scoped = allGroups.filter((g) => g.id === providerFilter)
-    if (scoped.length > 0) return scoped
+    if (scoped.length > 0 || groupsProp) return scoped
     const catalogModels = catalogByProvider[providerFilter] || []
     return catalogModels.length > 0
       ? [{ id: providerFilter, flavor: providerFilter, models: catalogModels, status: 'ok' }]
       : []
-  }, [allGroups, providerFilter, catalogByProvider])
+  }, [allGroups, providerFilter, catalogByProvider, groupsProp])
 
   const [open, setOpen] = useState(false)
   // cmdk's highlighted-item value, controlled: when the split view swaps the
@@ -374,6 +401,11 @@ export function ModelSelector({
   // Model and effort commit together as ONE value: a plain row click means
   // Auto (no effort key), an effort-submenu click carries its level — so
   // switching models never drags a stale effort along.
+  // Where a slash-less custom id lands (see parseCustomModel).
+  const customFallbackProvider = groupsProp
+    ? (groups.find((g) => g.id === activeProviderId) ?? groups[0])?.id ?? ''
+    : defaultModel?.provider ?? ''
+
   const select = useCallback((ref: ModelRef | null, effortLevel: '' | ReasoningEffortLevel = '') => {
     if (lockedModel) return
     setSub(null)
@@ -544,7 +576,7 @@ export function ModelSelector({
       value={`__retry__:${g.id}`}
       // Retry refreshes in place — the popover stays open and the group
       // re-renders when the store updates.
-      onSelect={() => refresh(g.id)}
+      onSelect={() => (onRetry ?? refresh)(g.id)}
       className="text-xs"
     >
       <span className="truncate text-destructive">{g.error || 'Failed to load models'}</span>
@@ -726,7 +758,9 @@ export function ModelSelector({
                         {activeGroup.models.map((m) => renderModelItem(activeGroup.id, m))}
                         {activeGroup.status === 'error' && renderErrorItem(activeGroup)}
                         {activeGroup.status === 'ok' && activeGroup.models.length === 0 && (
-                          <div className="px-2 py-1.5 text-xs text-muted-foreground">No models reported</div>
+                          <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                            {allowCustom && customHint ? customHint : 'No models reported'}
+                          </div>
                         )}
                       </CommandGroup>
                     </CommandList>
@@ -775,6 +809,10 @@ export function ModelSelector({
                         </CommandGroup>
                       )
                     })}
+                    {!staticOptions && !queryValue && allowCustom && customHint
+                      && groups.length === 1 && groups[0].status === 'ok' && groups[0].models.length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">{customHint}</div>
+                    )}
                     {queryValue && !anyModelRowVisible && (
                       allowCustom ? (
                         // Escape hatch for ids the lists don't carry (local
@@ -783,7 +821,7 @@ export function ModelSelector({
                         <CommandGroup>
                           <CommandItem
                             value="__custom__"
-                            onSelect={() => select(parseCustomModel(query.trim(), providerFilter, defaultModel))}
+                            onSelect={() => select(parseCustomModel(query.trim(), providerFilter, customFallbackProvider))}
                           >
                             <span className="truncate">Use &quot;{query.trim()}&quot;</span>
                           </CommandItem>

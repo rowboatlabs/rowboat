@@ -888,6 +888,24 @@ const ipcSchemas = {
       defaultModel: ModelSelection.nullable(),
     }),
   },
+  // The image-model catalog for the settings "Image model" picker: the
+  // connected providers that can generate images and, where a listing can
+  // be filtered to image output (the gateway's allowlist, OpenRouter's
+  // public catalog), their image models. A `listable: false` provider
+  // offers no list — the picker takes a typed model id for it.
+  'models:listImageModels': {
+    req: z.null(),
+    res: z.object({
+      providers: z.array(z.object({
+        id: z.string(),
+        flavor: z.string(),
+        status: z.enum(['ok', 'error']),
+        error: z.string().optional(),
+        models: z.array(z.string()),
+        listable: z.boolean(),
+      })),
+    }),
+  },
   'models:test': {
     req: z.object({
       provider: LlmProvider,
@@ -981,6 +999,9 @@ const ipcSchemas = {
         backgroundTask: ModelSelection.nullable(),
         subagent: ModelSelection.nullable(),
       }),
+      // The generate-image model — a bare ref (image models take no
+      // effort). Null = unset: image generation is unavailable.
+      imageModel: ModelRef.nullable(),
       deferBackgroundTasks: z.boolean(),
     }),
   },
@@ -999,6 +1020,7 @@ const ipcSchemas = {
         backgroundTask: ModelSelection.nullable().optional(),
         subagent: ModelSelection.nullable().optional(),
       }).optional(),
+      imageModel: ModelRef.nullable().optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({

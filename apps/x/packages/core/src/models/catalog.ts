@@ -4,9 +4,9 @@ import { isSignedIn } from "../account/account.js";
 import { getChatGPTStatus } from "../auth/chatgpt-auth.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "./repo.js";
-import { listGatewayModels } from "./gateway.js";
+import { listGatewayImageModels, listGatewayModels } from "./gateway.js";
 import { listCodexModels } from "./codex.js";
-import { listModelsForProvider } from "./models.js";
+import { listImageModelsForProvider, listModelsForProvider } from "./models.js";
 import { listOnboardingModels } from "./models-dev.js";
 import { getDefaultModelAndProvider } from "./defaults.js";
 
@@ -275,6 +275,68 @@ export async function getModelCatalog(options?: GetModelCatalogOptions): Promise
     }
 
     return { providers: entries, defaultModel };
+}
+
+/**
+ * One provider in the image-model catalog (the settings "Image model"
+ * picker). Same id/flavor/status contract as CatalogProviderEntry; models
+ * are bare ids (no reasoning metadata — image models take no effort).
+ */
+export interface ImageCatalogProviderEntry {
+    id: string;
+    flavor: string;
+    status: "ok" | "error";
+    error?: string;
+    models: string[];
+    /**
+     * false = this flavor's listing can't be filtered to image models, so
+     * none are offered and the picker takes a typed model id instead.
+     */
+    listable: boolean;
+}
+
+// Flavors generate-image can build an image model for (the gateway plus
+// runtime/tools/domains/image.ts makeBackend's cases).
+const IMAGE_FLAVORS = new Set(["rowboat", "openrouter", "google", "openai", "ollama", "openai-compatible"]);
+// …of which only these have a catalog filterable by output modality: the
+// gateway's allowlist and OpenRouter's public catalog.
+const IMAGE_LISTABLE_FLAVORS = new Set(["rowboat", "openrouter"]);
+
+/**
+ * The image-model catalog: the connected providers that can generate
+ * images, each with the image models it lists. Same provider discovery as
+ * the chat catalog; no cache — it's fetched when the settings surface opens
+ * and on its Retry. Failures surface as status "error" per provider, never
+ * as a throw.
+ */
+export async function getImageModelCatalog(): Promise<{ providers: ImageCatalogProviderEntry[] }> {
+    const discovered = (await discoverProviders()).filter((p) => IMAGE_FLAVORS.has(p.flavor));
+    const providers = await Promise.all(discovered.map(async (provider): Promise<ImageCatalogProviderEntry> => {
+        const base = { id: provider.id, flavor: provider.flavor };
+        if (!IMAGE_LISTABLE_FLAVORS.has(provider.flavor)) {
+            return { ...base, status: "ok", models: [], listable: false };
+        }
+        try {
+            let models: string[];
+            if (provider.id === "rowboat") {
+                models = await listGatewayImageModels();
+            } else if (!provider.config) {
+                throw new Error(`Provider '${provider.id}' has no configuration to list models with`);
+            } else {
+                models = await listImageModelsForProvider(provider.config);
+            }
+            return { ...base, status: "ok", models, listable: true };
+        } catch (err) {
+            return {
+                ...base,
+                status: "error",
+                error: err instanceof Error ? err.message : "Failed to list image models",
+                models: [],
+                listable: true,
+            };
+        }
+    }));
+    return { providers };
 }
 
 /** Test-only: reset the per-provider list cache. */

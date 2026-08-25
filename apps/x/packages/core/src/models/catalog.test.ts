@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
     providers: [{ id: 'codex', name: 'OpenAI Codex', models: [{ id: 'gpt-5.6-sol', reasoning: true }] }],
   })),
   listModelsForProvider: vi.fn<(config: unknown) => Promise<string[]>>(async () => ['live-model-1']),
+  listGatewayImageModels: vi.fn(async () => ['google/gemini-2.5-flash-image']),
+  listImageModelsForProvider: vi.fn<(config: unknown) => Promise<string[]>>(async () => ['google/gemini-2.5-flash-image', 'x-ai/grok-imagine-image-quality']),
   listOnboardingModels: vi.fn(async () => ({ providers: [] as Array<{ id: string; name: string; models: Array<{ id: string; name?: string; reasoning?: boolean }> }> })),
   getDefaultModelAndProvider: vi.fn(async () => ({ provider: 'openai', model: 'gpt-5.4' })),
   getConfig: vi.fn(async (): Promise<unknown> => {
@@ -27,16 +29,16 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../account/account.js', () => ({ isSignedIn: mocks.isSignedIn }));
 vi.mock('../auth/chatgpt-auth.js', () => ({ getChatGPTStatus: mocks.getChatGPTStatus }));
-vi.mock('./gateway.js', () => ({ listGatewayModels: mocks.listGatewayModels }));
+vi.mock('./gateway.js', () => ({ listGatewayModels: mocks.listGatewayModels, listGatewayImageModels: mocks.listGatewayImageModels }));
 vi.mock('./codex.js', () => ({ listCodexModels: mocks.listCodexModels }));
-vi.mock('./models.js', () => ({ listModelsForProvider: mocks.listModelsForProvider }));
+vi.mock('./models.js', () => ({ listModelsForProvider: mocks.listModelsForProvider, listImageModelsForProvider: mocks.listImageModelsForProvider }));
 vi.mock('./models-dev.js', () => ({ listOnboardingModels: mocks.listOnboardingModels }));
 vi.mock('./defaults.js', () => ({ getDefaultModelAndProvider: mocks.getDefaultModelAndProvider }));
 vi.mock('../di/container.js', () => ({
   default: { resolve: () => ({ getConfig: mocks.getConfig }) },
 }));
 
-import { getModelCatalog, __resetModelCatalogForTests } from './catalog.js';
+import { getImageModelCatalog, getModelCatalog, __resetModelCatalogForTests } from './catalog.js';
 
 // v2 config: providers keyed by instance id, flavor explicit inside (the
 // helper defaults flavor to the key — one instance per flavor today).
@@ -169,5 +171,43 @@ describe('getModelCatalog', () => {
     // …but an explicit refresh always retries.
     await getModelCatalog({ refreshProvider: 'ollama' });
     expect(mocks.listModelsForProvider).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('getImageModelCatalog', () => {
+  it('lists the gateway allowlist and OpenRouter, and marks unfilterable flavors as not listable', async () => {
+    mocks.isSignedIn.mockResolvedValue(true);
+    mocks.getChatGPTStatus.mockResolvedValue({ signedIn: true });
+    serveConfig({
+      openrouter: { apiKey: 'sk-1' },
+      google: { apiKey: 'g-1' },
+      anthropic: { apiKey: 'a-1' },
+    });
+
+    const catalog = await getImageModelCatalog();
+
+    // codex and anthropic can't generate images here — not offered at all.
+    expect(catalog.providers.map((p) => p.id)).toEqual(['rowboat', 'openrouter', 'google']);
+    expect(catalog.providers[0]).toEqual({
+      id: 'rowboat', flavor: 'rowboat', status: 'ok', models: ['google/gemini-2.5-flash-image'], listable: true,
+    });
+    expect(catalog.providers[1]).toMatchObject({ flavor: 'openrouter', status: 'ok', listable: true });
+    expect(catalog.providers[1].models).toContain('x-ai/grok-imagine-image-quality');
+    expect(catalog.providers[2]).toEqual({ id: 'google', flavor: 'google', status: 'ok', models: [], listable: false });
+    expect(mocks.listModelsForProvider).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed image listing as status error instead of dropping the provider', async () => {
+    mocks.isSignedIn.mockResolvedValue(true);
+    mocks.listGatewayImageModels.mockRejectedValue(new Error('Gateway /v1/models?output_modalities=image failed: 503'));
+
+    const catalog = await getImageModelCatalog();
+    expect(catalog.providers[0]).toMatchObject({
+      id: 'rowboat',
+      status: 'error',
+      error: 'Gateway /v1/models?output_modalities=image failed: 503',
+      models: [],
+      listable: true,
+    });
   });
 });

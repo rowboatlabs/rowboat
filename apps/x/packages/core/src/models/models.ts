@@ -323,6 +323,39 @@ export async function listModelsForProvider(
     }
 }
 
+/**
+ * Image-capable model ids for a BYOK provider. Only OpenRouter's catalog
+ * can be filtered by output modality (the public endpoint, no auth needed);
+ * no other flavor's listing carries a reliable image-capability signal, so
+ * the image picker takes a typed model id for those instead (see
+ * getImageModelCatalog in catalog.ts).
+ */
+export async function listImageModelsForProvider(
+    providerConfig: z.infer<typeof Provider>,
+    timeoutMs = 8000,
+): Promise<string[]> {
+    if (providerConfig.flavor !== "openrouter") {
+        throw new Error(`Provider flavor '${providerConfig.flavor}' has no image model listing`);
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch("https://openrouter.ai/api/v1/models?output_modalities=image", {
+            signal: controller.signal,
+        });
+        if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            throw new Error(`Failed to list image models (${res.status}): ${body.slice(0, 200)}`);
+        }
+        const data = await res.json() as { data?: Array<{ id?: unknown }> };
+        return (data.data ?? [])
+            .map((m) => m?.id)
+            .filter((id): id is string => typeof id === "string" && id.length > 0);
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 export interface GenerateTextOptions {
     prompt: string;
     system?: string;
