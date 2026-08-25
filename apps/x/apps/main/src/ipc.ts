@@ -93,7 +93,6 @@ import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/confi
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
 import { loadRetentionSettings, saveRetentionSettings } from '@x/core/dist/config/retention.js';
-import { runRetentionSweep } from '@x/core/dist/runtime/sessions/retention.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
@@ -757,37 +756,6 @@ export function markSessionsIndexReady(): void {
 // delayed so it never competes with startup. The first launch with retention
 // enabled only arms the one-time notice (retention:consumeFirstRunNotice) —
 // sweeping begins on the next launch, after the user has seen it.
-let retentionSweepStarted = false;
-export function startRetentionSweep(): void {
-  if (retentionSweepStarted) return;
-  retentionSweepStarted = true;
-  const sweep = async () => {
-    try {
-      const settings = await loadRetentionSettings();
-      if (!settings.enabled || !settings.noticeShown) return;
-      const result = await runRetentionSweep({
-        sessions: container.resolve<ISessions>('sessions'),
-        turnsRootDir: container.resolve<string>('turnsRootDir'),
-        settings,
-      });
-      // After the session sweep: clear code-mode residue whose chat is now
-      // gone (meta / ACP handle / workdir sidecar — worktrees stay on disk).
-      const orphaned = await container.resolve<CodeSessionService>('codeSessionService').sweepOrphanedMeta().catch(() => 0);
-      if (orphaned > 0) {
-        console.log(`[Retention] cleared code-mode meta for ${orphaned} deleted session(s)`);
-      }
-      if (result.deletedSessions > 0 || result.deletedTurnFiles > 0) {
-        console.log(
-          `[Retention] sweep: deleted ${result.deletedSessions} session(s), ${result.deletedTurnFiles} turn file(s)`,
-        );
-      }
-    } catch (error) {
-      console.error('[Retention] sweep failed:', error);
-    }
-  };
-  setTimeout(() => { void sweep(); }, 90_000);
-  setInterval(() => { void sweep(); }, 24 * 60 * 60 * 1000);
-}
 
 let servicesWatcher: (() => void) | null = null;
 export async function startServicesWatcher(): Promise<void> {

@@ -7,7 +7,7 @@ import {
   startConnectorEventsWatcher,
   startTerminalEventsWatcher,
   findMainAppWindow,
-  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady, startRetentionSweep,
+  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady,
   startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
@@ -25,27 +25,8 @@ import { disposeAllTerminals } from "@x/core/dist/terminal/terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
-import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
-import { init as initOutlookSync } from "@x/core/dist/knowledge/sync_outlook.js";
-import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
-import { init as initOutlookCalendarSync } from "@x/core/dist/knowledge/sync_outlook_calendar.js";
-import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
-import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
-import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
-import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
-import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
-import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { DEV_SERVER_URL } from "./dev-server.js";
-import { init as initChannels } from "@x/core/dist/channels/service.js";
-import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
-import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
-import { init as initMeetingPrep } from "@x/core/dist/knowledge/meeting_prep_scheduler.js";
-import { init as initLiveNoteScheduler } from "@x/core/dist/knowledge/live-note/scheduler.js";
-import { init as initEventProcessor, registerConsumer } from "@x/core/dist/events/init.js";
-import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
-import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
-import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
-import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/runtime/assembly/skills/watcher.js";
+import { stopSkillsWatcher } from "@x/core/dist/runtime/assembly/skills/watcher.js";
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
@@ -53,19 +34,17 @@ import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatg
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-providers.js";
-import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import { prepareCoreData, initCoreServices } from "@x/core/dist/boot/services.js";
 import { startServerHost, stopServerHost } from "./server-host.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
-import type { CodeSessionService } from "@x/core/dist/code-mode/sessions/service.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
@@ -80,7 +59,6 @@ import {
   extractDeepLinkFromArgv,
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
-import { disconnectGoogleIfScopesStale } from "@x/core/dist/auth/oauth-flows.js";
 import { registerUrlOpener } from "@x/core/dist/auth/url-opener.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { ensureLoginItemRegistration } from "./login_item.js";
@@ -676,33 +654,9 @@ app.whenReady().then(async () => {
   // start runs watcher
   startRunsWatcher();
 
-  // One-time: port legacy runs/*.jsonl into the new turn/session runtime.
-  // Must run BEFORE the session index is built so migrated sessions are picked
-  // up by the startup scan. Fully defensive — never blocks boot.
-  try {
-    const migration = migrateRuns();
-    if (migration.scanned > 0) {
-      console.log(
-        `[runs-migration] migrated ${migration.migratedTurns} turn(s) across ` +
-        `${migration.migratedSessions} session(s) from ${migration.scanned} run(s) ` +
-        `(${migration.skipped} skipped, ${migration.failed.length} failed)`,
-      );
-      for (const failure of migration.failed) {
-        console.warn(`[runs-migration] left in place (failed): ${failure.file} — ${failure.error}`);
-      }
-    }
-  } catch (error) {
-    console.error('[runs-migration] pass failed:', error);
-  }
-
-  // Code sessions created before code mode moved onto the turns runtime have
-  // meta files but no chat-session file — backfill them BEFORE the index scan
-  // so they open in the chat pane like any other session.
-  try {
-    await container.resolve<CodeSessionService>('codeSessionService').backfillChatSessions();
-  } catch (error) {
-    console.error('[code-sessions] backfill failed:', error);
-  }
+  // One-time data repairs (legacy runs migration, code-session chat
+  // backfill) — shared with the standalone server boot.
+  await prepareCoreData();
   // New runtime: build the in-memory session index (startup scan), then
   // forward the session bus to windows. The renderer window is already up and
   // may have called sessions:list — that handler blocks on
@@ -716,8 +670,8 @@ app.whenReady().then(async () => {
   startSessionsWatcher();
   startConnectorEventsWatcher();
   startTerminalEventsWatcher();
-  // Daily auto-delete of old chats & task transcripts (delayed first run).
-  startRetentionSweep();
+  // Daily auto-delete of old chats & task transcripts (delayed first run) —
+  // started inside initCoreServices() below.
   // Turn event spine: durable events of every turn (session, headless,
   // sub-agent) → renderer, for turnId-keyed live views.
   startTurnEventsWatcher();
@@ -730,12 +684,9 @@ app.whenReady().then(async () => {
     console.error('[server-host] failed to start rowboat-server:', error);
   });
 
-  // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
-  // start after initialize(). Failures must never block boot.
+  // Mobile channels status → renderer; the service itself starts inside
+  // initCoreServices() below.
   startChannelsWatcher();
-  initChannels().catch((error) => {
-    console.error('[Channels] Failed to start mobile channels:', error);
-  });
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
@@ -762,72 +713,10 @@ app.whenReady().then(async () => {
   // start todo event watcher (forwards bus → renderer)
   startTodoWatcher();
 
-  // seed the morning planner background task (once, best-effort)
-  void import("@x/core/dist/todo/planner-task.js").then((m) => m.ensureMorningPlannerTask());
-
-  // start live-note scheduler (cron / window)
-  initLiveNoteScheduler();
-
-  // start bg-task scheduler (cron / window)
-  initBackgroundTaskScheduler();
-
-  // start disk-skills watcher: live-reload skills dropped into
-  // ~/.rowboat/skills or ~/.agents/skills without an app restart
-  startSkillsWatcher();
-
-  // register event consumers and start the shared event processor
-  // (consumes $WorkDir/events/pending/, routes events to all consumers
-  // concurrently for Pass-1, then fires each consumer's candidates in parallel)
-  registerConsumer(liveNoteEventConsumer);
-  registerConsumer(backgroundTaskEventConsumer);
-  initEventProcessor();
-
-  // If the stored Google grant predates a scope change (only old scopes),
-  // disconnect it now so the user re-connects with the current scopes before
-  // any Google sync runs against the stale grant.
-  await disconnectGoogleIfScopesStale();
-
-  // start gmail sync
-  initGmailSync();
-
-  // start outlook sync (idles unless Microsoft is connected)
-  initOutlookSync();
-
-  // start calendar sync
-  initCalendarSync();
-
-  // start outlook calendar sync (idles unless Microsoft is connected)
-  initOutlookCalendarSync();
-
-  // start fireflies sync
-  initFirefliesSync();
-
-  // start granola sync
-  initGranolaSync();
-
-  // start knowledge graph builder
-  initGraphBuilder();
-
-  // start note tagging service
-  initNoteTagging();
-
-  // start inline task service (@rowboat: mentions)
-  initInlineTasks();
-
-  // start background agent runner (scheduled agents)
-  initAgentRunner();
-
-  // start agent notes learning service
-  initAgentNotes();
-
-  // start calendar meeting notification service (fires 1-minute warnings)
-  initCalendarNotifications();
-
-  // start meeting prep scheduler (generates prep notes ~6h before a meeting)
-  void initMeetingPrep();
-
-  // start chrome extension sync server
-  initChromeSync();
+  // Schedulers, sync services, event processor, background agents — the
+  // headless-safe half of boot, shared with the standalone rowboat-server
+  // (Phase 6, SEPARATION_PLAN.md).
+  await initCoreServices();
 
   app.on("activate", () => {
     // Reveal the hidden/closed main window (login launches start hidden).
