@@ -83,13 +83,13 @@ export interface FileTreeNode {
     entry?: spaces.SpacesAssetEntry
 }
 
-export function buildFileTree(entries: spaces.SpacesAssetEntry[]): FileTreeNode[] {
+export function buildFileTree(entries: spaces.SpacesAssetEntry[], draftFolders: readonly string[] = []): FileTreeNode[] {
     const root: FileTreeNode = { name: '', path: '', kind: 'dir', children: [] }
-    for (const entry of entries) {
-        const parts = entry.path.split('/').filter(Boolean)
+    const addPath = (fullPath: string, entry?: spaces.SpacesAssetEntry) => {
+        const parts = fullPath.split('/').filter(Boolean)
         let cursor = root
         parts.forEach((part, i) => {
-            const isLeaf = i === parts.length - 1
+            const isLeaf = entry !== undefined && i === parts.length - 1
             const path = parts.slice(0, i + 1).join('/')
             let node = cursor.children.find((c) => c.name === part && c.kind === (isLeaf ? 'file' : 'dir'))
             if (!node) {
@@ -100,6 +100,10 @@ export function buildFileTree(entries: spaces.SpacesAssetEntry[]): FileTreeNode[
             cursor = node
         })
     }
+    for (const entry of entries) addPath(entry.path, entry)
+    // Draft folders: local-only empty folders (folders are key prefixes, so a
+    // folder with no files exists only in the creator's view until one lands).
+    for (const folder of draftFolders) addPath(folder)
     const sort = (nodes: FileTreeNode[]): FileTreeNode[] => {
         nodes.sort((a, b) => {
             // README first, then files, then folders — each alphabetical.
@@ -234,4 +238,149 @@ export function encodeMentions(body: string, members: readonly { id: string; dis
             return out
         })
         .join('')
+}
+
+// ---------------------------------------------------------------------------
+// File links — plain relative markdown links resolve against the space's file
+// tree (GitHub README semantics): in a file, against the file's own folder; in
+// a message, against the space root. Leading "/" always means the root. The
+// wire form is just standard markdown — nothing special for agents to learn.
+// ---------------------------------------------------------------------------
+
+const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/
+
+/**
+ * A markdown href → the asset path it points at, or null when the link is not
+ * ours (absolute URL, mailto:, in-page #anchor, or a ".." walk past the root).
+ */
+export function resolveSpaceLink(raw: string, baseDir: string): string | null {
+    if (!raw || raw.startsWith('#') || raw.startsWith('//') || SCHEME_RE.test(raw)) return null
+    let target = raw.split('#')[0]!.split('?')[0]!
+    try {
+        target = decodeURIComponent(target)
+    } catch {
+        // malformed escapes — treat the text literally
+    }
+    if (!target.replace(/\//g, '')) return null
+    const segments = target.startsWith('/') ? [] : baseDir.split('/').filter(Boolean)
+    for (const seg of target.split('/')) {
+        if (!seg || seg === '.') continue
+        if (seg === '..') {
+            if (segments.length === 0) return null
+            segments.pop()
+            continue
+        }
+        segments.push(seg)
+    }
+    return segments.length > 0 ? segments.join('/') : null
+}
+
+/** An asset path → a markdown link target that survives spaces and parens. */
+export function encodeSpaceLinkTarget(path: string): string {
+    return path
+        .split('/')
+        .map((seg) => encodeURIComponent(seg).replace(/[()]/g, (ch) => (ch === '(' ? '%28' : '%29')))
+        .join('/')
+}
+
+/** The contract's canonical asset link (…/s/<spaceId>/f/<path>) → its path, for THIS space. */
+export function parseAssetWireUrl(url: string, refs: SpaceRefs): string | null {
+    const prefix = `https://${refs.orgAddress}/s/${refs.spaceId}/f/`
+    if (!url.startsWith(prefix)) return null
+    const rest = url.slice(prefix.length).split('#')[0]!.split('?')[0]!
+    return resolveSpaceLink(`/${rest}`, '')
+}
+
+/**
+ * The renderable form of a file link — a render-time-only internal URL (never
+ * persisted). Chat markdown goes through Streamdown, whose harden pass strips
+ * relative hrefs (a bare `a/b.md` isn't parseable as a URL) but passes custom
+ * protocols untouched — so relative links rewrite to this before parsing, and
+ * the anchor component maps it back to the path.
+ */
+export function spaceFileAppUrl(refs: { orgId: string; spaceId: string }, path: string): string {
+    return `app://space-file/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${encodeSpaceLinkTarget(path)}`
+}
+
+const SPACE_FILE_APP_URL_RE = /^app:\/\/space-file\/([^/]+)\/([^/]+)\/(.+)$/
+
+export function parseSpaceFileAppUrl(url: string): { orgId: string; spaceId: string; path: string } | null {
+    const m = SPACE_FILE_APP_URL_RE.exec(url)
+    if (!m) return null
+    const path = resolveSpaceLink(`/${m[3]!}`, '')
+    if (!path) return null
+    return { orgId: decodeURIComponent(m[1]!), spaceId: decodeURIComponent(m[2]!), path }
+}
+
+/**
+ * Rewrite relative markdown LINKS (not images) in a message body to their
+ * app://space-file form so they survive Streamdown's URL hardening. Code
+ * regions are cites; absolute URLs and in-page anchors stay literal.
+ */
+export function rewriteFileLinks(body: string, refs: { orgId: string; spaceId: string }): string {
+    const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    return parts
+        .map((part, i) => {
+            if (i % 2 === 1) return part
+            return part.replace(/(!?)\[([^\]]*)\]\(([^()\s]+)(\s+"[^"]*")?\)/g, (m, bang: string, text: string, target: string, title?: string) => {
+                if (bang) return m
+                const path = resolveSpaceLink(target, '')
+                return path ? `[${text}](${spaceFileAppUrl(refs, path)}${title ?? ''})` : m
+            })
+        })
+        .join('')
+}
+
+/**
+ * Rewrite relative image references in a markdown body to renderable URLs
+ * (app://space-blob through srcFor). Only references that resolve to a real
+ * image asset change; everything else — external URLs, text files, broken
+ * paths — stays literal. Code regions are cites, never rewritten.
+ */
+export function rewriteRelativeImages(body: string, baseDir: string, srcFor: (path: string) => string | null): string {
+    const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    return parts
+        .map((part, i) => {
+            if (i % 2 === 1) return part
+            return part.replace(/!\[([^\]]*)\]\(([^()\s]+)(\s+"[^"]*")?\)/g, (m, alt: string, target: string, title?: string) => {
+                const path = resolveSpaceLink(target, baseDir)
+                const src = path ? srcFor(path) : null
+                return src ? `![${alt}](${src}${title ?? ''})` : m
+            })
+        })
+        .join('')
+}
+
+// ---------------------------------------------------------------------------
+// Tasks — the file view renders checkboxes live; a tap flips the Nth task
+// line and proposes the edit. The index counts rendered task items in
+// document order, so the scan must skip fenced code (not a task, not a node).
+// ---------------------------------------------------------------------------
+
+const TASK_LINE_RE = /^(\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+\[)( |x|X)(\]\s)/
+
+/** Flip the checkbox on the index-th task line (document order); null when out of range. */
+export function toggleTaskAt(content: string, index: number): string | null {
+    const lines = content.split('\n')
+    let fence: string | null = null
+    let seen = 0
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i]!
+        const fenceMark = line.match(/^\s*(```+|~~~+)/)?.[1]
+        if (fenceMark) {
+            if (fence === null) fence = fenceMark[0]!
+            else if (fenceMark[0] === fence) fence = null
+            continue
+        }
+        if (fence !== null) continue
+        const m = line.match(TASK_LINE_RE)
+        if (!m) continue
+        if (seen === index) {
+            lines[i] = line.replace(TASK_LINE_RE, (_all, pre: string, state: string, post: string) =>
+                `${pre}${state === ' ' ? 'x' : ' '}${post}`)
+            return lines.join('\n')
+        }
+        seen += 1
+    }
+    return null
 }

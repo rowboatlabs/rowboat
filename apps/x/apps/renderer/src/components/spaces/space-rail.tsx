@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, FileText, Folder, MessagesSquare, MoreHorizontal, Pencil, Pin, Plus, Search, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessagesSquare, MoreHorizontal, Pencil, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -22,7 +22,7 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // surfaces own everything else.
 
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles,
+    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, pinned, hint, onHoverChange, onTogglePin,
 }: {
     orgId: string
@@ -33,6 +33,8 @@ export function SpaceRail({
     threads: ThreadIndex
     changeSets: spaces.ChangeSet[]
     entries: spaces.SpacesAssetEntry[]
+    /** Local-only empty folders — see SpacePane. */
+    draftFolders: readonly string[]
     presence: SpacePresence
     unreadPaths: ReadonlySet<string>
     selection: RailSelection
@@ -40,6 +42,10 @@ export function SpaceRail({
     onCreateFile: (path: string) => void
     /** Picked or dropped files headed for the space's file tree (upload dialog opens in the pane). */
     onUploadFiles: (files: File[]) => void
+    /** Opens the space's Trash (deleted files, restorable). */
+    onOpenTrash: () => void
+    onAddFolder: (path: string) => void
+    onRemoveFolder: (path: string) => void
     open: boolean
     pinned: boolean
     hint: string
@@ -48,7 +54,8 @@ export function SpaceRail({
 }) {
     const [query, setQuery] = useState('')
     const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all')
-    const [creatingFile, setCreatingFile] = useState(false)
+    const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
+    const [creatingFolder, setCreatingFolder] = useState(false)
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
     // Row-level topic actions. Rename edits inline in the row; the topic event
@@ -322,10 +329,26 @@ export function SpaceRail({
                             <button
                                 type="button"
                                 title="New file"
-                                onClick={() => setCreatingFile(true)}
+                                onClick={() => setCreatingFile({ prefix: '' })}
                                 className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                             >
                                 <Plus className="size-3.5" />
+                            </button>
+                            <button
+                                type="button"
+                                title="New folder (folders are path prefixes — it becomes real when a file lands in it)"
+                                onClick={() => setCreatingFolder(true)}
+                                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <FolderPlus className="size-3.5" />
+                            </button>
+                            <button
+                                type="button"
+                                title="Trash — deleted files, restorable"
+                                onClick={onOpenTrash}
+                                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <Trash2 className="size-3.5" />
                             </button>
                         </div>
                         <div
@@ -339,16 +362,27 @@ export function SpaceRail({
                             }}
                         >
                             <FileTree
+                                orgId={orgId}
+                                spaceId={spaceId}
                                 entries={entries}
+                                draftFolders={draftFolders}
                                 selectedPath={selectedPath}
                                 unreadPaths={unreadPaths}
                                 onOpenFile={(path) => onSelect({ kind: 'file', path })}
                                 creating={creatingFile}
                                 onCreateFile={(path) => {
-                                    setCreatingFile(false)
+                                    setCreatingFile(null)
                                     onCreateFile(path)
                                 }}
-                                onCancelCreate={() => setCreatingFile(false)}
+                                onCancelCreate={() => setCreatingFile(null)}
+                                onStartCreate={(prefix) => setCreatingFile({ prefix })}
+                                creatingFolder={creatingFolder}
+                                onCreateFolder={(path) => {
+                                    setCreatingFolder(false)
+                                    onAddFolder(path)
+                                }}
+                                onCancelCreateFolder={() => setCreatingFolder(false)}
+                                onRemoveFolder={onRemoveFolder}
                             />
                         </div>
                     </div>

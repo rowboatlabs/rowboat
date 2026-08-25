@@ -94,6 +94,13 @@ export const LlmModelConfig = z.object({
   // provider connect.
   assistantModel: ModelSelection.optional(),
   taskModels: TaskModels.optional(),
+  // The image-generation model (the generate-image tool). Its own slot
+  // rather than a taskModels override because it cannot inherit the
+  // assistant — that is a text model — and a bare ref rather than a
+  // ModelSelection because image models take no reasoning effort. Seeded
+  // with the gateway's image model on Rowboat sign-in; while absent the
+  // tool is unavailable until one is picked in model settings.
+  imageModel: ModelRef.optional(),
   // When true, background agent runs (knowledge pipeline, live notes,
   // background tasks) wait until no chat turn is running before starting.
   // Surfaced as a settings checkbox; recommended for local models, where a

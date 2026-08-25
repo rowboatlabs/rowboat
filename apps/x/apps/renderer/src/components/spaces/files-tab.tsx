@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Streamdown } from 'streamdown'
-import { ArrowLeft, Check, ChevronRight, Clock, Download, FileText, History, Image as ImageIcon, Loader2, Pencil, Plus, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronRight, Clock, Download, FileText, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { MemberText } from '@/components/spaces/member-text'
-import { attributionLabel, blobAppUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime, type FileTreeNode } from '@/lib/spaces-presentation'
+import {
+    attributionLabel, blobAppUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime,
+    parseAssetWireUrl, parseBlobAppUrl, resolveSpaceLink, rewriteBlobLinks, rewriteRelativeImages, toggleTaskAt,
+    type FileTreeNode,
+} from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { MemberAvatar } from '@/components/spaces/atoms'
 
@@ -24,21 +30,89 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 // Files rail — the space's tree, README first, unread dots on moved files
 // ---------------------------------------------------------------------------
 
+/** Internal drag type for moving a file between folders (never set by OS file drags). */
+const ASSET_DRAG_MIME = 'application/x-rowboat-asset-path'
+
 /** The space's file tree (README first, folders collapsible) — rendered inside the space rail. */
-export function FileTree({ entries, selectedPath, unreadPaths, onOpenFile, creating, onCreateFile, onCancelCreate }: {
+export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedPath, unreadPaths, onOpenFile, creating, onCreateFile, onCancelCreate, onStartCreate, creatingFolder = false, onCreateFolder, onCancelCreateFolder, onRemoveFolder }: {
+    orgId: string
+    spaceId: string
     entries: spaces.SpacesAssetEntry[]
+    /** Local-only empty folders (they become real when their first file lands). */
+    draftFolders?: readonly string[]
     selectedPath: string | null
     /** Files with a change by someone else (or an agent) since the read mark. */
     unreadPaths: ReadonlySet<string>
     onOpenFile: (path: string) => void
-    /** When true, shows the new-file input at the bottom of the tree. */
-    creating: boolean
+    /** When set, shows the new-file input (prefilled with the prefix) at the bottom of the tree. */
+    creating: { prefix: string } | null
     onCreateFile: (path: string) => void
     onCancelCreate: () => void
+    /** A folder row's "New file" — asks the owner to open the create input with this prefix. */
+    onStartCreate?: (prefix: string) => void
+    /** When true, shows the new-folder input at the bottom of the tree. */
+    creatingFolder?: boolean
+    onCreateFolder?: (path: string) => void
+    onCancelCreateFolder?: () => void
+    /** Remove an empty (draft) folder. */
+    onRemoveFolder?: (path: string) => void
 }) {
-    const tree = useMemo(() => buildFileTree(entries), [entries])
+    const tree = useMemo(() => buildFileTree(entries, draftFolders), [entries, draftFolders])
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [newPath, setNewPath] = useState('')
+    const [newFolder, setNewFolder] = useState('')
+    // Prefill the create input whenever a new create request arrives.
+    const [lastCreating, setLastCreating] = useState<{ prefix: string } | null>(null)
+    if (creating !== lastCreating) {
+        setLastCreating(creating)
+        if (creating) setNewPath(creating.prefix)
+    }
+
+    // Drag a file onto a folder (or the tree's root) to move it there.
+    const [dropTarget, setDropTarget] = useState<string | null>(null)
+    const entryByPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries])
+    const dragHasAsset = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes(ASSET_DRAG_MIME)
+    const dropInto = (e: React.DragEvent, dir: string) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDropTarget(null)
+        const fromPath = e.dataTransfer.getData(ASSET_DRAG_MIME)
+        const entry = fromPath ? entryByPath.get(fromPath) : undefined
+        if (!entry) return
+        const name = fromPath.split('/').pop()!
+        const toPath = dir ? `${dir}/${name}` : name
+        if (toPath !== fromPath) void commitMove(entry, toPath)
+    }
+    const dirDragProps = (dir: string) => ({
+        onDragOver: (e: React.DragEvent) => {
+            if (!dragHasAsset(e)) return
+            e.preventDefault()
+            e.stopPropagation()
+            e.dataTransfer.dropEffect = 'move'
+            setDropTarget(dir)
+        },
+        onDragLeave: () => setDropTarget((t) => (t === dir ? null : t)),
+        onDrop: (e: React.DragEvent) => { if (dragHasAsset(e)) dropInto(e, dir) },
+    })
+
+    // Row actions. Rename/move edits the FULL path inline (folders are key
+    // prefixes — typing a new prefix moves the file); the server's change
+    // event refreshes every pane. Delete asks for an optional reason.
+    const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
+    const [deleting, setDeleting] = useState<spaces.SpacesAssetEntry | null>(null)
+    const commitMove = async (entry: spaces.SpacesAssetEntry, toPath: string) => {
+        setRenaming(null)
+        if (!toPath || toPath === entry.path) return
+        try {
+            const res = await window.ipc.invoke('spaces:moveAsset', {
+                orgId, spaceId, fromPath: entry.path, toPath, baseVersion: entry.version,
+            })
+            if (res.outcome === 'conflict') toast(`${entry.path} changed meanwhile — try again`, 'error')
+            else toast(`Moved to ${toPath}`, 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not move', 'error')
+        }
+    }
 
     const toggle = (path: string) =>
         setCollapsed((prev) => {
@@ -52,50 +126,144 @@ export function FileTree({ entries, selectedPath, unreadPaths, onOpenFile, creat
         const pad = { paddingLeft: `${8 + depth * 12}px` }
         if (node.kind === 'dir') {
             const open = !collapsed.has(node.path)
+            const empty = node.children.length === 0
             return (
                 <div key={node.path}>
-                    <button
-                        type="button"
-                        style={pad}
-                        onClick={() => toggle(node.path)}
-                        className="flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-foreground/90 hover:bg-accent/50"
-                    >
-                        <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
-                        <span className="truncate">{node.name}</span>
-                    </button>
+                    <div className="group/dirrow relative" {...dirDragProps(node.path)}>
+                        <button
+                            type="button"
+                            style={pad}
+                            onClick={() => toggle(node.path)}
+                            className={cn(
+                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-foreground/90 hover:bg-accent/50',
+                                dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
+                            )}
+                        >
+                            <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+                            <span className="truncate">{node.name}</span>
+                        </button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    aria-label="Folder actions"
+                                    className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/dirrow:inline-flex data-[state=open]:inline-flex"
+                                >
+                                    <MoreHorizontal className="size-3.5" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => onStartCreate?.(`${node.path}/`)}>
+                                    <Plus className="size-3.5 mr-2" /> New file
+                                </DropdownMenuItem>
+                                {empty && onRemoveFolder && (
+                                    <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => onRemoveFolder(node.path)}>
+                                            <Trash2 className="size-3.5 mr-2" /> Remove folder
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
                     {open && node.children.map((child) => renderNode(child, depth + 1))}
+                    {open && empty && (
+                        <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
+                            empty — files added here keep it
+                        </div>
+                    )}
                 </div>
             )
         }
         const active = node.path === selectedPath
         const unread = unreadPaths.has(node.path)
         const blob = node.entry?.blob
+        if (renaming?.path === node.path && node.entry) {
+            const entry = node.entry
+            return (
+                <div key={node.path} style={pad} className="py-0.5 pr-2">
+                    <input
+                        autoFocus
+                        value={renaming.value}
+                        onChange={(e) => setRenaming({ path: node.path, value: e.target.value })}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') void commitMove(entry, renaming.value.trim())
+                            if (e.key === 'Escape') setRenaming(null)
+                        }}
+                        onBlur={() => setRenaming(null)}
+                        placeholder="path/to/file.md"
+                        className="w-full rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 font-mono text-xs outline-none"
+                    />
+                </div>
+            )
+        }
         return (
-            <button
-                key={node.path}
-                type="button"
-                style={pad}
-                onClick={() => onOpenFile(node.path)}
-                title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
-                className={cn(
-                    'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
-                    active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+            <div key={node.path} className="group/filerow relative">
+                <button
+                    type="button"
+                    style={pad}
+                    draggable
+                    onDragStart={(e) => {
+                        e.dataTransfer.setData(ASSET_DRAG_MIME, node.path)
+                        e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragEnd={() => setDropTarget(null)}
+                    onClick={() => onOpenFile(node.path)}
+                    title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
+                    className={cn(
+                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
+                        active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                    )}
+                >
+                    <span className="w-3 shrink-0" />
+                    {blob && (isImageMime(blob.mime)
+                        ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
+                        : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
+                    <span className="truncate flex-1">{node.name}</span>
+                    {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
+                </button>
+                {node.entry && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                type="button"
+                                aria-label="File actions"
+                                className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/filerow:inline-flex data-[state=open]:inline-flex"
+                            >
+                                <MoreHorizontal className="size-3.5" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setRenaming({ path: node.path, value: node.path })}>
+                                <Pencil className="size-3.5 mr-2" /> Rename / move
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => setDeleting(node.entry!)}>
+                                <Trash2 className="size-3.5 mr-2" /> Delete…
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 )}
-            >
-                <span className="w-3 shrink-0" />
-                {blob && (isImageMime(blob.mime)
-                    ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
-                    : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
-                <span className="truncate flex-1">{node.name}</span>
-                {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
-            </button>
+            </div>
         )
     }
 
     return (
-        <div className="flex flex-col">
+        <div
+            className={cn('flex flex-col rounded-md', dropTarget === '' && 'ring-1 ring-inset ring-foreground/40 bg-accent/40')}
+            {...dirDragProps('')}
+        >
+            {deleting && (
+                <DeleteAssetDialog
+                    orgId={orgId}
+                    spaceId={spaceId}
+                    entry={deleting}
+                    onClose={() => setDeleting(null)}
+                />
+            )}
             {tree.map((node) => renderNode(node, 0))}
-            {tree.length === 0 && !creating && <div className="px-2 py-1 text-xs text-muted-foreground">No files yet.</div>}
+            {tree.length === 0 && !creating && !creatingFolder && <div className="px-2 py-1 text-xs text-muted-foreground">No files yet.</div>}
             {creating && (
                 <div className="flex items-center gap-1 px-1 pt-1">
                     <Input
@@ -117,6 +285,28 @@ export function FileTree({ entries, selectedPath, unreadPaths, onOpenFile, creat
                     </Button>
                 </div>
             )}
+            {creatingFolder && (
+                <div className="flex items-center gap-1 px-1 pt-1">
+                    <Input
+                        autoFocus
+                        value={newFolder}
+                        placeholder="folder or folder/subfolder"
+                        className="h-7 text-xs"
+                        onChange={(e) => setNewFolder(e.target.value)}
+                        onKeyDown={(e) => {
+                            const cleaned = newFolder.trim().replace(/^\/+|\/+$/g, '')
+                            if (e.key === 'Enter' && cleaned) {
+                                onCreateFolder?.(cleaned)
+                                setNewFolder('')
+                            }
+                            if (e.key === 'Escape') onCancelCreateFolder?.()
+                        }}
+                    />
+                    <Button size="icon" variant="ghost" className="size-7" onClick={onCancelCreateFolder}>
+                        <X className="size-3.5" />
+                    </Button>
+                </div>
+            )}
         </div>
     )
 }
@@ -134,10 +324,12 @@ interface DraftState {
     conflict: Extract<spaces.ProposeChangeResult, { outcome: 'conflict' }> | null
 }
 
-export function FileColumn({ org, space, path, memberNames, refreshTick, onChanged, crumb, onDismiss }: {
+export function FileColumn({ org, space, path, entries = [], memberNames, refreshTick, onChanged, crumb, onDismiss, onRenamed, onDeleted, onRedirect, onOpenFile }: {
     org: OrgWithSpaces
     space: spaces.Space
     path: string
+    /** The space's file list — resolves relative image links to their blobs. */
+    entries?: spaces.SpacesAssetEntry[]
     memberNames: Map<string, string>
     refreshTick: number
     onChanged: () => void
@@ -145,6 +337,13 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     crumb?: { label: string; onBack: () => void } | null
     /** Split only: renders an × that closes the document and returns to Talk. */
     onDismiss?: (() => void) | null
+    /** The file moved (a rename here, or a followed redirect) — re-point the selection. */
+    onRenamed?: (path: string) => void
+    onDeleted?: () => void
+    /** An old link resolved to the file's current path (server redirect signal). */
+    onRedirect?: (path: string) => void
+    /** A relative link in the document was clicked — open that file. */
+    onOpenFile?: (path: string) => void
 }) {
     const [asset, setAsset] = useState<spaces.ReadAssetResult | null>(null)
     const [missing, setMissing] = useState(false)
@@ -156,12 +355,18 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     const load = useCallback(async () => {
         try {
             const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, path })
+            if (res.path !== path) {
+                // The server followed a redirect: this file lives elsewhere now.
+                onRedirect?.(res.path)
+                return
+            }
             setAsset(res)
             setMissing(false)
         } catch {
             setAsset(null)
             setMissing(true)
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [org.id, space.id, path])
 
     useEffect(() => {
@@ -234,19 +439,17 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     }
 
     // One-tap micro change-set: checkbox ticks in view mode apply directly.
-    const toggleCheckbox = async (lineIndex: number) => {
+    // The viewer reports the task's index in document order; toggleTaskAt maps
+    // it back to the source line (skipping fenced code) and flips it.
+    const toggleTask = async (index: number) => {
         if (!asset) return
-        const lines = asset.content.split('\n')
-        const line = lines[lineIndex]
-        if (line === undefined) return
-        if (/\[ \]/.test(line)) lines[lineIndex] = line.replace('[ ]', '[x]')
-        else if (/\[[xX]\]/.test(line)) lines[lineIndex] = line.replace(/\[[xX]\]/, '[ ]')
-        else return
+        const next = toggleTaskAt(asset.content, index)
+        if (next === null) return
         try {
             const result = await window.ipc.invoke('spaces:proposeChange', {
                 orgId: org.id,
                 spaceId: space.id,
-                input: { assetPath: path, baseVersion: asset.version, newContent: lines.join('\n') },
+                input: { assetPath: path, baseVersion: asset.version, newContent: next },
             })
             if (result.outcome === 'conflict') toast('Someone changed this line at the same time — refresh and retry', 'error')
             else {
@@ -261,6 +464,54 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
     const last = asset?.recentHistory[0]
     const fileName = path.split('/').pop() ?? path
     const blob = asset?.blob ?? null
+    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+
+    // What the viewer renders: the org's canonical blob links become app://
+    // (images show inline), and relative image references resolve against this
+    // file's folder to the blob they name. Task lines are untouched, so task
+    // indices in the rendered doc match the source (toggleTask relies on it).
+    const entryByPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries])
+    const wireRefs = useMemo(
+        () => ({ orgId: org.id, orgAddress: org.address, spaceId: space.id }),
+        [org.id, org.address, space.id],
+    )
+    const renderedContent = useMemo(() => {
+        if (!asset || asset.blob) return ''
+        const withBlobs = rewriteBlobLinks(asset.content, wireRefs)
+        return rewriteRelativeImages(withBlobs, dir, (p) => {
+            const target = entryByPath.get(p)
+            return target?.blob && isImageMime(target.blob.mime)
+                ? blobAppUrl({ orgId: org.id, spaceId: space.id }, target.blob.hash)
+                : null
+        })
+    }, [asset, wireRefs, dir, entryByPath, org.id, space.id])
+
+    // Link clicks inside the document: relative links (and the contract's
+    // canonical asset URLs) open the file in-app, GitHub-README style; blob
+    // links download; everything else keeps the default open-in-browser.
+    const openLink = (href: string): boolean => {
+        const blobRef = parseBlobAppUrl(href)
+        if (blobRef) {
+            const name = (() => {
+                try {
+                    return new URL(href).searchParams.get('name') ?? undefined
+                } catch {
+                    return undefined
+                }
+            })()
+            void window.ipc
+                .invoke('spaces:saveBlob', { ...blobRef, ...(name ? { suggestedName: name } : {}) })
+                .then((res) => { if (res.saved) toast('Saved', 'success') })
+                .catch((err: unknown) => toast(err instanceof Error ? err.message : 'Could not download', 'error'))
+            return true
+        }
+        const target = resolveSpaceLink(href, dir) ?? parseAssetWireUrl(href, wireRefs)
+        if (target && onOpenFile) {
+            onOpenFile(target)
+            return true
+        }
+        return false
+    }
 
     // Binary "edit": upload a replacement at this path against the current
     // version. A stale base is conflict-or-replace on binaries (contract) —
@@ -313,6 +564,30 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
         }
     }
 
+    // Rename/move edits the full path inline where the filename sits.
+    const [editingPath, setEditingPath] = useState<string | null>(null)
+    const [deleteOpen, setDeleteOpen] = useState(false)
+    const commitMove = async () => {
+        const toPath = editingPath?.trim()
+        setEditingPath(null)
+        if (!asset || !toPath || toPath === path) return
+        try {
+            const res = await window.ipc.invoke('spaces:moveAsset', {
+                orgId: org.id, spaceId: space.id, fromPath: path, toPath, baseVersion: asset.version,
+            })
+            if (res.outcome === 'conflict') {
+                toast('The file changed meanwhile — it reloaded, try again', 'error')
+                await load()
+            } else {
+                toast(`Moved to ${toPath}`, 'success')
+                onChanged()
+                onRenamed?.(toPath)
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not move', 'error')
+        }
+    }
+
     if (missing && !draft) {
         return (
             <section className="flex-1 min-w-0 flex flex-col">
@@ -337,7 +612,22 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                         <ArrowLeft className="size-3 shrink-0" /> <span className="truncate">{crumb.label}</span>
                     </button>
                 )}
-                <code className="font-mono text-[11.5px] text-foreground/80 truncate" title={path}>{fileName}</code>
+                {editingPath !== null ? (
+                    <input
+                        autoFocus
+                        value={editingPath}
+                        onChange={(e) => setEditingPath(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') void commitMove()
+                            if (e.key === 'Escape') setEditingPath(null)
+                        }}
+                        onBlur={() => setEditingPath(null)}
+                        placeholder="path/to/file.md"
+                        className="w-72 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 font-mono text-[11.5px] outline-none"
+                    />
+                ) : (
+                    <code className="font-mono text-[11.5px] text-foreground/80 truncate" title={path}>{fileName}</code>
+                )}
                 {blob && <span className="shrink-0">· {blob.mime} · {formatBytes(blob.size)}</span>}
                 {!draft && last && (
                     <span className="truncate">
@@ -384,7 +674,35 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                         >
                             <History className="size-3" /> History
                         </button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button type="button" aria-label="File actions" className="hover:text-foreground flex items-center">
+                                    <MoreHorizontal className="size-3.5" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => setEditingPath(path)}>
+                                    <Pencil className="size-3.5 mr-2" /> Rename / move
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => setDeleteOpen(true)}>
+                                    <Trash2 className="size-3.5 mr-2" /> Delete…
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </>
+                )}
+                {deleteOpen && asset && (
+                    <DeleteAssetDialog
+                        orgId={org.id}
+                        spaceId={space.id}
+                        entry={{ path, version: asset.version, updatedAt: '' }}
+                        onClose={() => setDeleteOpen(false)}
+                        onDeleted={() => {
+                            onChanged()
+                            onDeleted?.()
+                        }}
+                    />
                 )}
                 {draft && (
                     <>
@@ -462,7 +780,13 @@ export function FileColumn({ org, space, path, memberNames, refreshTick, onChang
                             )}
                         </div>
                     ) : asset ? (
-                        <InteractiveMarkdown content={asset.content} onToggleCheckbox={(i) => void toggleCheckbox(i)} />
+                        <div className="px-5 py-4 max-w-3xl">
+                            <RichMarkdownViewer
+                                content={renderedContent}
+                                onToggleTask={(i) => void toggleTask(i)}
+                                onOpenLink={openLink}
+                            />
+                        </div>
                     ) : (
                         <div className="p-5 text-sm text-muted-foreground">Loading…</div>
                     )}
@@ -572,6 +896,11 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
                             <MemberAvatar id={cs.attribution.memberId} name={memberNames.get(cs.attribution.memberId) ?? cs.attribution.memberId} size="sm" />
                             <div className="text-xs font-medium truncate">{attributionLabel(cs.attribution, memberNames)}</div>
                         </div>
+                        {cs.op && (
+                            <div className="mt-1 pl-7 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground">
+                                {cs.op === 'move' ? `moved from ${cs.movedFrom ?? '…'}` : cs.op === 'delete' ? 'deleted' : 'restored'}
+                            </div>
+                        )}
                         {cs.reason && <div className="text-xs text-muted-foreground mt-1 pl-7">&ldquo;<MemberText text={cs.reason} />&rdquo;</div>}
                         <div className="text-[10.5px] text-muted-foreground mt-1 pl-7 flex items-center gap-1">
                             <Clock className="size-2.5" /> {formatFeedTime(cs.committedAt)} · v{cs.resultVersion}
@@ -581,6 +910,144 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
                 {changeSets.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No history yet.</div>}
             </div>
         </aside>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Delete → trash. Nothing is destroyed: the file freezes with its history and
+// shows up in Trash, restorable while its path stays free.
+// ---------------------------------------------------------------------------
+
+export function DeleteAssetDialog({ orgId, spaceId, entry, onClose, onDeleted }: {
+    orgId: string
+    spaceId: string
+    entry: spaces.SpacesAssetEntry
+    onClose: () => void
+    onDeleted?: () => void
+}) {
+    const [reason, setReason] = useState('')
+    const [busy, setBusy] = useState(false)
+    const confirm = async () => {
+        setBusy(true)
+        try {
+            const res = await window.ipc.invoke('spaces:deleteAsset', {
+                orgId, spaceId, path: entry.path, baseVersion: entry.version,
+                ...(reason.trim() ? { reason: reason.trim() } : {}),
+            })
+            if (res.outcome === 'conflict') {
+                toast(`${entry.path} changed meanwhile — review and try again`, 'error')
+            } else {
+                toast(`Moved to Trash — restorable any time`, 'success')
+                onDeleted?.()
+            }
+            onClose()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not delete', 'error')
+        } finally {
+            setBusy(false)
+        }
+    }
+    return (
+        <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+            <DialogContent className="max-w-sm">
+                <DialogHeader>
+                    <DialogTitle className="text-sm">Delete <code className="font-mono text-[12px]">{entry.path}</code>?</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                        It moves to Trash — history stays, and anyone can restore it. The feed will show who deleted it and why.
+                    </p>
+                    <Input
+                        value={reason}
+                        placeholder="Why? (optional — shows in the feed and history)"
+                        className="h-7 text-xs"
+                        disabled={busy}
+                        onChange={(e) => setReason(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void confirm() }}
+                    />
+                    <div className="flex justify-end gap-2">
+                        <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={busy} onClick={onClose}>Cancel</Button>
+                        <Button variant="destructive" size="sm" className="h-7 text-xs" disabled={busy} onClick={() => void confirm()}>
+                            {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Trash2 className="size-3 mr-1" />} Delete
+                        </Button>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Trash — deleted files, restorable in place while their path is free.
+// ---------------------------------------------------------------------------
+
+export function TrashDialog({ org, space, onClose }: {
+    org: OrgWithSpaces
+    space: spaces.Space
+    onClose: () => void
+}) {
+    const [entries, setEntries] = useState<spaces.SpacesAssetEntry[] | null>(null)
+    const [restoring, setRestoring] = useState<string | null>(null)
+
+    const load = useCallback(async () => {
+        try {
+            const res = await window.ipc.invoke('spaces:listAssets', { orgId: org.id, spaceId: space.id, includeDeleted: true })
+            setEntries(res.entries.filter((e) => e.state === 'deleted'))
+        } catch {
+            setEntries([])
+        }
+    }, [org.id, space.id])
+
+    useEffect(() => {
+        void load()
+    }, [load])
+
+    const restore = async (path: string) => {
+        setRestoring(path)
+        try {
+            await window.ipc.invoke('spaces:restoreAsset', { orgId: org.id, spaceId: space.id, path })
+            toast(`Restored ${path}`, 'success')
+            await load()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not restore', 'error')
+        } finally {
+            setRestoring(null)
+        }
+    }
+
+    return (
+        <Dialog open onOpenChange={(open) => !open && onClose()}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle className="text-sm flex items-center gap-1.5"><Trash2 className="size-3.5" /> Trash</DialogTitle>
+                </DialogHeader>
+                <div className="max-h-72 space-y-1 overflow-y-auto">
+                    {entries === null && <div className="py-2 text-xs text-muted-foreground">Loading…</div>}
+                    {entries?.length === 0 && <div className="py-2 text-xs text-muted-foreground">Nothing here — deleted files land in this list, restorable any time.</div>}
+                    {entries?.map((e) => (
+                        <div key={e.path} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs">
+                            {e.blob && isImageMime(e.blob.mime)
+                                ? <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                                : <FileText className="size-3.5 shrink-0 text-muted-foreground" />}
+                            <span className="min-w-0 flex-1">
+                                <span className="block truncate font-mono">{e.path}</span>
+                                <span className="block text-[10.5px] text-muted-foreground">deleted {formatFeedTime(e.updatedAt)}{e.blob ? ` · ${formatBytes(e.blob.size)}` : ''}</span>
+                            </span>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 shrink-0 text-xs"
+                                disabled={restoring !== null}
+                                onClick={() => void restore(e.path)}
+                            >
+                                {restoring === e.path ? <Loader2 className="size-3 mr-1 animate-spin" /> : <RotateCcw className="size-3 mr-1" />}
+                                Restore
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+            </DialogContent>
+        </Dialog>
     )
 }
 
@@ -713,51 +1180,4 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
     )
 }
 
-// ---------------------------------------------------------------------------
-// Markdown view with one-tap checkboxes. RichMarkdownViewer renders read-only;
-// checkbox lines get an interactive row instead.
-// ---------------------------------------------------------------------------
-
-function InteractiveMarkdown({ content, onToggleCheckbox }: {
-    content: string
-    onToggleCheckbox: (lineIndex: number) => void
-}) {
-    const lines = content.split('\n')
-    const hasCheckboxes = lines.some((l) => /- \[[ xX]\]/.test(l))
-    if (!hasCheckboxes) {
-        return (
-            <div className="px-5 py-4 max-w-2xl">
-                <RichMarkdownViewer content={content} />
-            </div>
-        )
-    }
-    return (
-        <div className="px-5 py-4 max-w-2xl space-y-0.5">
-            {lines.map((line, i) => {
-                const checkbox = line.match(/^(\s*)- \[([ xX])\] (.*)$/)
-                if (checkbox) {
-                    const checked = checkbox[2] !== ' '
-                    return (
-                        <div key={i} className="flex items-start gap-2 text-sm" style={{ paddingLeft: `${(checkbox[1]?.length ?? 0) * 8}px` }}>
-                            <input
-                                type="checkbox"
-                                checked={checked}
-                                className="mt-1 cursor-pointer"
-                                onChange={() => onToggleCheckbox(i)}
-                            />
-                            <span className={checked ? 'line-through text-muted-foreground' : ''}>{checkbox[3]}</span>
-                        </div>
-                    )
-                }
-                return line.trim() === '' ? (
-                    <div key={i} className="h-2" />
-                ) : (
-                    <div key={i} className="text-sm [&_p]:my-0">
-                        <Streamdown>{line}</Streamdown>
-                    </div>
-                )
-            })}
-        </div>
-    )
-}
 

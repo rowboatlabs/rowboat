@@ -888,6 +888,23 @@ const ipcSchemas = {
       defaultModel: ModelSelection.nullable(),
     }),
   },
+  // The image-model catalog for the settings "Image model" picker: the
+  // connected providers that can generate images, each with the models it
+  // lists. Every image flavor lists (see getImageModelCatalog for where
+  // each one's list comes from) — the picker only ever offers reported
+  // models, so a provider that can't list reports status 'error'.
+  'models:listImageModels': {
+    req: z.null(),
+    res: z.object({
+      providers: z.array(z.object({
+        id: z.string(),
+        flavor: z.string(),
+        status: z.enum(['ok', 'error']),
+        error: z.string().optional(),
+        models: z.array(z.string()),
+      })),
+    }),
+  },
   'models:test': {
     req: z.object({
       provider: LlmProvider,
@@ -981,6 +998,9 @@ const ipcSchemas = {
         backgroundTask: ModelSelection.nullable(),
         subagent: ModelSelection.nullable(),
       }),
+      // The generate-image model — a bare ref (image models take no
+      // effort). Null = unset: image generation is unavailable.
+      imageModel: ModelRef.nullable(),
       deferBackgroundTasks: z.boolean(),
     }),
   },
@@ -999,6 +1019,7 @@ const ipcSchemas = {
         backgroundTask: ModelSelection.nullable().optional(),
         subagent: ModelSelection.nullable().optional(),
       }).optional(),
+      imageModel: ModelRef.nullable().optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({
@@ -3537,8 +3558,35 @@ const ipcSchemas = {
     res: z.custom<SpacesTypes.AcceptInviteResult>(),
   },
   'spaces:listAssets': {
-    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    req: z.object({ orgId: z.string(), spaceId: z.string(), includeDeleted: z.boolean().optional() }),
     res: z.object({ entries: z.array(z.custom<SpacesAssetEntry>()) }),
+  },
+  // Namespace ops (inode model server-side): move/rename, delete-to-trash,
+  // restore. Conflict outcomes return as values, same as proposeChange.
+  'spaces:moveAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      fromPath: z.string(),
+      toPath: z.string(),
+      baseVersion: z.number(),
+      reason: z.string().optional(),
+    }),
+    res: z.custom<SpacesTypes.MoveAssetResult>(),
+  },
+  'spaces:deleteAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      baseVersion: z.number(),
+      reason: z.string().optional(),
+    }),
+    res: z.custom<SpacesTypes.DeleteAssetResult>(),
+  },
+  'spaces:restoreAsset': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), path: z.string() }),
+    res: z.custom<SpacesTypes.RestoreAssetResult>(),
   },
   'spaces:readAsset': {
     req: z.object({

@@ -8,12 +8,13 @@ import type { ModelSelection } from '@/hooks/use-models'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { useSpaceRefs } from '@/components/spaces/space-markdown'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
-import { blobAppUrl, blobWireUrl, encodeMentions, formatBytes, isImageMime } from '@/lib/spaces-presentation'
+import { blobAppUrl, blobWireUrl, encodeMentions, encodeSpaceLinkTarget, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
 // line — with two things layered on: `@` autocompletes members, @here (notify
-// everyone online) and @rowboat,
+// everyone online), @rowboat, and — once a query exists — space files (picked
+// files land as plain markdown links),
 // and the moment the draft addresses @rowboat, a strip of agent options
 // (model · permissions · search · terminal) appears; they ride along with the
 // invocation for that one turn. The message itself always goes to the team.
@@ -54,11 +55,14 @@ interface MentionCandidate {
     hint?: string
     isAgent?: boolean
     isBroadcast?: boolean
+    /** A file suggestion — picking it inserts a plain markdown link to the path. */
+    filePath?: string
 }
 
-const MENTION_RE = /(^|[\s([{])@([\w.-]*)$/
+// "/" so typing into a folder ("@design/sc…") keeps the file query alive.
+const MENTION_RE = /(^|[\s([{])@([\w./-]*)$/
 
-export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, members = [], selfMemberId }: {
+export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId }: {
     placeholder: string
     onSend: (body: string, agent?: AgentOptions) => Promise<void>
     busy: boolean
@@ -69,6 +73,8 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     seed?: { text: string; nonce: number } | null
     /** Space members, for @ autocomplete. */
     members?: spaces.Member[]
+    /** Space files — the same @ autocomplete offers them; picking one links it. */
+    entries?: spaces.SpacesAssetEntry[]
     selfMemberId?: string
 }) {
     const [draft, setDraft] = useState('')
@@ -196,15 +202,28 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     const candidates = useMemo<MentionCandidate[]>(() => {
         if (!mentionMatch) return []
         const q = mentionMatch.query
-        const list: MentionCandidate[] = []
-        if ('rowboat'.startsWith(q)) list.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
-        if ('here'.startsWith(q)) list.push({ id: 'here', label: 'here', hint: 'notify everyone online', isBroadcast: true })
+        const people: MentionCandidate[] = []
+        if ('rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
+        if ('here'.startsWith(q)) people.push({ id: 'here', label: 'here', hint: 'notify everyone online', isBroadcast: true })
         for (const m of members) {
             const hay = `${m.id} ${m.displayName}`.toLowerCase()
-            if (!q || hay.includes(q)) list.push({ id: m.id, label: m.displayName, ...(m.id === selfMemberId ? { hint: 'you' } : {}) })
+            if (!q || hay.includes(q)) people.push({ id: m.id, label: m.displayName, ...(m.id === selfMemberId ? { hint: 'you' } : {}) })
         }
-        return list.slice(0, 8)
-    }, [mentionMatch, members, selfMemberId])
+        // Files join once a query exists (a bare "@" is a people gesture);
+        // picking one inserts a markdown link, not a mention.
+        const files: MentionCandidate[] = q
+            ? entries
+                  .filter((e) => e.state !== 'deleted' && e.path.toLowerCase().includes(q))
+                  .slice(0, 4)
+                  .map((e) => ({
+                      id: `file:${e.path}`,
+                      label: e.path.split('/').pop() ?? e.path,
+                      ...(e.path.includes('/') ? { hint: e.path } : {}),
+                      filePath: e.path,
+                  }))
+            : []
+        return [...people.slice(0, 8 - files.length), ...files]
+    }, [mentionMatch, members, entries, selfMemberId])
     // Reset the highlighted row whenever the query changes (adjust-on-change, not an effect).
     const mentionQuery = mentionMatch?.query ?? null
     const [lastQuery, setLastQuery] = useState<string | null>(null)
@@ -229,9 +248,12 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     }
     // The draft shows the person's name; send() encodes it back to the wire
     // address @<memberId> (what notifications and agent invocation scan for).
+    // A file inserts a plain markdown link — relative links in messages mean
+    // space files, standard syntax on the wire.
     const pickCandidate = (c: MentionCandidate) => {
         if (!mentionMatch) return
-        insertAt(mentionMatch.start, caret, `@${c.label} `)
+        if (c.filePath) insertAt(mentionMatch.start, caret, `[${c.filePath}](${encodeSpaceLinkTarget(c.filePath)}) `)
+        else insertAt(mentionMatch.start, caret, `@${c.label} `)
     }
 
     const insertRowboatChip = () => {
@@ -308,6 +330,8 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                                     <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><Bot className="size-3.5" /></span>
                                 ) : c.isBroadcast ? (
                                     <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Megaphone className="size-3.5" /></span>
+                                ) : c.filePath ? (
+                                    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><FileText className="size-3.5" /></span>
                                 ) : (
                                     <MemberAvatar id={c.id} name={c.label} size="sm" className="size-6 text-[10px]" />
                                 )}

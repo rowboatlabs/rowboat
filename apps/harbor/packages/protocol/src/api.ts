@@ -1,6 +1,14 @@
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
-import { ChangeSet, ProposeChange, ProposeChangeResult, ReadAssetResult } from './changeset.js';
+import {
+  ChangeSet,
+  DeleteAssetResult,
+  MoveAssetResult,
+  ProposeChange,
+  ProposeChangeResult,
+  ReadAssetResult,
+  RestoreAssetResult,
+} from './changeset.js';
 import { ActingMode, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
 import { AssetPath, AssetVersion, BlobHash, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
@@ -92,6 +100,8 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces/:spaceId/assets',
     params: z.object({ spaceId: SpaceId }),
+    /** Default = live files only (today's shape, unchanged). includeDeleted adds the trash. */
+    query: z.object({ includeDeleted: z.coerce.boolean().optional() }),
     response: z.object({
       entries: z.array(
         z.object({
@@ -100,9 +110,65 @@ export const routes = {
           updatedAt: z.iso.datetime(),
           /** Present when the head version is binary. Folders are display: clients group paths on `/`. */
           blob: BlobInfo.optional(),
+          /** Present only on trash entries (includeDeleted); absent = live. */
+          state: z.literal('deleted').optional(),
         }),
       ),
     }),
+  },
+  /**
+   * Namespace ops (2026-08-26): the path is the product's identity, but
+   * storage keys on an internal per-asset id (the inode model), so these are
+   * property updates — history and bytes never move. Only content edits bump
+   * versions; each op appends one attributed change-set (op: move|delete|
+   * restore) and its feed event. Old paths keep a redirect: reads follow it
+   * (the result's `path` says where the file lives now); proposes refuse with
+   * a pointer. Deleted files freeze in place, listable via includeDeleted,
+   * restorable while their path is free; a fresh create over a deleted path
+   * starts a new lineage and never blocks.
+   */
+  moveAsset: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/assets/move',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      fromPath: AssetPath,
+      toPath: AssetPath,
+      /** Version of fromPath you last read — stale = conflict, same discipline as propose. */
+      baseVersion: z.number().int().positive(),
+      reason: z.string().max(1_000).optional(),
+      topicId: TopicId.optional(),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: MoveAssetResult, // 200 for both outcomes; occupied destination = invalid_request
+  },
+  deleteAsset: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/assets/delete',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      path: AssetPath,
+      baseVersion: z.number().int().positive(),
+      reason: z.string().max(1_000).optional(),
+      topicId: TopicId.optional(),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: DeleteAssetResult,
+  },
+  restoreAsset: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/assets/restore',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      /** The trash entry's path (most recently deleted wins if several share it). */
+      path: AssetPath,
+      reason: z.string().max(1_000).optional(),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: RestoreAssetResult, // occupied path = invalid_request ("move the current file first")
   },
   readAsset: {
     method: 'GET',

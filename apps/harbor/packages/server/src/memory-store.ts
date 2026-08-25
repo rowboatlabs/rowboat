@@ -6,13 +6,15 @@ import type {
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
-import type { AssetHead, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
+import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
 
 interface SpaceState {
   space: Space;
   memberships: Map<string, Membership>;
-  assetHeads: Map<string, AssetHead>;
-  assetVersions: Map<string, AssetVersionData>; // `${path}@${version}`
+  assets: Map<string, AssetRecord>; // assetId → record (inode model; path is a property)
+  assetVersions: Map<string, AssetVersionData>; // `${assetId}@${version}`
+  redirects: Map<string, { assetId: string; movedAt: string }>; // old path → asset
+  changeSetAsset: Map<string, string>; // changeSetId → assetId (internal lineage key)
   blobs: Map<string, StoredSpaceBlob>; // hash → registration (first write wins)
   changeSets: ChangeSet[]; // append order == offset order
   changeSetsById: Map<string, ChangeSet>;
@@ -65,8 +67,10 @@ export class MemoryStore implements Store {
     this.spaces.set(space.id, {
       space,
       memberships: new Map(),
-      assetHeads: new Map(),
+      assets: new Map(),
       assetVersions: new Map(),
+      redirects: new Map(),
+      changeSetAsset: new Map(),
       blobs: new Map(),
       changeSets: [],
       changeSetsById: new Map(),
@@ -107,29 +111,82 @@ export class MemoryStore implements Store {
     this.must(spaceId).memberships.delete(memberId);
   }
 
-  async listAssets(spaceId: string): Promise<AssetHead[]> {
-    return [...this.must(spaceId).assetHeads.values()].sort((a, b) => a.path.localeCompare(b.path));
+  async listAssets(spaceId: string, includeDeleted: boolean): Promise<AssetRecord[]> {
+    return [...this.must(spaceId).assets.values()]
+      .filter((a) => includeDeleted || a.state === 'live')
+      .map((a) => ({ ...a }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  async getAssetHead(spaceId: string, path: string): Promise<AssetHead | undefined> {
-    return this.state(spaceId)?.assetHeads.get(path);
+  async getLiveAssetByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
+    const found = [...this.must(spaceId).assets.values()].find((a) => a.state === 'live' && a.path === path);
+    return found ? { ...found } : undefined;
   }
 
-  async getAssetVersion(spaceId: string, path: string, version: number): Promise<AssetVersionData | undefined> {
+  async getLatestDeletedByPath(spaceId: string, path: string): Promise<AssetRecord | undefined> {
+    const dead = [...this.must(spaceId).assets.values()]
+      .filter((a) => a.state === 'deleted' && a.path === path)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return dead[0] ? { ...dead[0] } : undefined;
+  }
+
+  async getAssetById(spaceId: string, assetId: string): Promise<AssetRecord | undefined> {
+    const found = this.state(spaceId)?.assets.get(assetId);
+    return found ? { ...found } : undefined;
+  }
+
+  async createAsset(spaceId: string, record: AssetRecord): Promise<void> {
+    this.must(spaceId).assets.set(record.id, { ...record });
+  }
+
+  async getAssetVersion(spaceId: string, assetId: string, version: number): Promise<AssetVersionData | undefined> {
     if (version === 0) return { content: '', blob: null };
-    return this.state(spaceId)?.assetVersions.get(`${path}@${version}`);
+    return this.state(spaceId)?.assetVersions.get(`${assetId}@${version}`);
   }
 
   async putAssetVersion(
     spaceId: string,
-    path: string,
+    assetId: string,
     version: number,
     data: AssetVersionData,
     updatedAt: string,
   ): Promise<void> {
     const s = this.must(spaceId);
-    s.assetHeads.set(path, { path, version, updatedAt, ...(data.blob ? { blob: data.blob } : {}) });
-    s.assetVersions.set(`${path}@${version}`, data);
+    const asset = s.assets.get(assetId);
+    if (!asset) throw new Error(`unknown asset ${assetId}`);
+    s.assets.set(assetId, {
+      ...asset,
+      version,
+      updatedAt,
+      ...(data.blob ? { blob: data.blob } : { blob: undefined }),
+    });
+    s.assetVersions.set(`${assetId}@${version}`, data);
+  }
+
+  async setAssetPath(spaceId: string, assetId: string, path: string, updatedAt: string): Promise<void> {
+    const s = this.must(spaceId);
+    const asset = s.assets.get(assetId);
+    if (!asset) throw new Error(`unknown asset ${assetId}`);
+    s.assets.set(assetId, { ...asset, path, updatedAt });
+  }
+
+  async setAssetState(spaceId: string, assetId: string, state: 'live' | 'deleted', updatedAt: string): Promise<void> {
+    const s = this.must(spaceId);
+    const asset = s.assets.get(assetId);
+    if (!asset) throw new Error(`unknown asset ${assetId}`);
+    s.assets.set(assetId, { ...asset, state, updatedAt });
+  }
+
+  async putRedirect(spaceId: string, path: string, assetId: string, movedAt: string): Promise<void> {
+    this.must(spaceId).redirects.set(path, { assetId, movedAt });
+  }
+
+  async getRedirect(spaceId: string, path: string): Promise<string | undefined> {
+    return this.state(spaceId)?.redirects.get(path)?.assetId;
+  }
+
+  async deleteRedirect(spaceId: string, path: string): Promise<void> {
+    this.must(spaceId).redirects.delete(path);
   }
 
   async putSpaceBlob(blob: StoredSpaceBlob): Promise<void> {
@@ -141,10 +198,11 @@ export class MemoryStore implements Store {
     return this.state(spaceId)?.blobs.get(hash);
   }
 
-  async appendChangeSet(changeSet: ChangeSet): Promise<void> {
+  async appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void> {
     const s = this.must(changeSet.spaceId);
     s.changeSets.push(changeSet);
     s.changeSetsById.set(changeSet.id, changeSet);
+    s.changeSetAsset.set(changeSet.id, assetId);
   }
 
   async getChangeSet(spaceId: string, id: string): Promise<ChangeSet | undefined> {
@@ -153,13 +211,13 @@ export class MemoryStore implements Store {
 
   async listChangeSets(
     spaceId: string,
-    opts: { path?: string; beforeOffset?: number; limit: number },
+    opts: { assetId?: string; beforeOffset?: number; limit: number },
   ): Promise<ChangeSet[]> {
     const out: ChangeSet[] = [];
-    const all = this.must(spaceId).changeSets;
-    for (let i = all.length - 1; i >= 0 && out.length < opts.limit; i--) {
-      const cs = all[i]!;
-      if (opts.path !== undefined && cs.assetPath !== opts.path) continue;
+    const s = this.must(spaceId);
+    for (let i = s.changeSets.length - 1; i >= 0 && out.length < opts.limit; i--) {
+      const cs = s.changeSets[i]!;
+      if (opts.assetId !== undefined && s.changeSetAsset.get(cs.id) !== opts.assetId) continue;
       if (opts.beforeOffset !== undefined && cs.offset >= opts.beforeOffset) continue;
       out.push(cs);
     }

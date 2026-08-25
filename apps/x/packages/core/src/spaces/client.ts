@@ -4,13 +4,16 @@ import {
   type AcceptInviteResult,
   type BlobInfo,
   type ChangeSet,
+  type DeleteAssetResult,
   type CreateInviteResult,
   type Member,
   type Message,
+  type MoveAssetResult,
   type ProposeChange,
   type ProposeChangeResult,
   type ReadAssetResult,
   type ResolveInviteResult,
+  type RestoreAssetResult,
   type Routes,
   type Space,
   type Topic,
@@ -178,8 +181,24 @@ export class SpacesClient {
 
   async listAssets(
     spaceId: string,
-  ): Promise<Array<{ path: string; version: number; updatedAt: string; blob?: BlobInfo }>> {
-    return (await this.request('GET', this.space(spaceId, '/assets'), routes.listAssets.response)).entries;
+    opts: { includeDeleted?: boolean } = {},
+  ): Promise<Array<{ path: string; version: number; updatedAt: string; blob?: BlobInfo; state?: 'deleted' }>> {
+    const qs = opts.includeDeleted ? '?includeDeleted=true' : '';
+    return (await this.request('GET', this.space(spaceId, `/assets${qs}`), routes.listAssets.response)).entries;
+  }
+
+  /** Move or rename. Conflict comes back as a value (the file changed meanwhile). */
+  async moveAsset(spaceId: string, input: z.infer<Routes['moveAsset']['request']>): Promise<MoveAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets/move'), routes.moveAsset.response, input);
+  }
+
+  /** Delete to trash — nothing is destroyed; restore undoes it. */
+  async deleteAsset(spaceId: string, input: z.infer<Routes['deleteAsset']['request']>): Promise<DeleteAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets/delete'), routes.deleteAsset.response, input);
+  }
+
+  async restoreAsset(spaceId: string, input: z.infer<Routes['restoreAsset']['request']>): Promise<RestoreAssetResult> {
+    return this.request('POST', this.space(spaceId, '/assets/restore'), routes.restoreAsset.response, input);
   }
 
   async readAsset(spaceId: string, path: string, version?: number): Promise<ReadAssetResult> {

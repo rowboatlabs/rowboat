@@ -61,6 +61,17 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
     }
   }
 */
+// What a model takes in and puts out ("text", "image", "pdf", …). Only
+// `output` is read today (image-model discovery), but both are parsed so
+// the shape is documented where it's used. Every level catches back to
+// undefined = unknown: a model whose `modalities` is missing or oddly
+// shaped must still parse, or one bad entry upstream would fail the whole
+// catalog parse and blank every chat list too.
+const ModelsDevModalities = z.object({
+  input: z.array(z.string()).optional().catch(undefined),
+  output: z.array(z.string()).optional().catch(undefined),
+}).passthrough();
+
 const ModelsDevModel = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
@@ -68,6 +79,7 @@ const ModelsDevModel = z.object({
   tool_call: z.boolean().optional(),
   reasoning: z.boolean().optional(),
   status: z.enum(["alpha", "beta", "deprecated"]).optional(),
+  modalities: ModelsDevModalities.optional().catch(undefined),
 }).passthrough();
 
 const ModelsDevProvider = z.object({
@@ -76,7 +88,8 @@ const ModelsDevProvider = z.object({
   models: z.record(z.string(), ModelsDevModel),
 }).passthrough();
 
-const ModelsDevResponse = z.record(z.string(), ModelsDevProvider);
+/** Exported for tests — the defensive parse is part of the contract. */
+export const ModelsDevResponse = z.record(z.string(), ModelsDevProvider);
 
 type ProviderSummary = {
   id: string;
@@ -407,5 +420,56 @@ export async function getChatModelIds(
     return ids;
   } catch {
     return new Set();
+  }
+}
+
+// A model whose output modalities include "image" generates images
+// (gpt-image-*, gemini-*-image). Case-folded; anything else — absent,
+// non-array, unparsed — reads as "not an image model".
+function producesImages(model: z.infer<typeof ModelsDevModel>): boolean {
+  const output = model.modalities?.output;
+  return Array.isArray(output) && output.some((m) => m.toLowerCase() === "image");
+}
+
+/**
+ * Image-generating model ids for a vendor, newest first. Pure — takes a
+ * parsed catalog. Deprecated/alpha/beta entries are dropped, but tool
+ * calling is NOT required (image models don't call tools), which is why
+ * this can't reuse the chat filter. null = the vendor isn't in this
+ * catalog at all, as distinct from [] = it lists no image models.
+ */
+export function pickImageModelIds(
+  data: z.infer<typeof ModelsDevResponse>,
+  flavor: "openai" | "google",
+): string[] | null {
+  const provider = pickProvider(data, flavor);
+  if (!provider) return null;
+  return Object.entries(provider.models)
+    .filter(([, model]) => isStableModel(model) && producesImages(model))
+    .map(([key, model]) => ({ id: model.id ?? key, release_date: model.release_date }))
+    .sort((a, b) => {
+      const aDate = a.release_date ? Date.parse(a.release_date) : 0;
+      const bDate = b.release_date ? Date.parse(b.release_date) : 0;
+      return bDate - aDate;
+    })
+    .map(({ id }) => id);
+}
+
+/**
+ * Image-generating model ids for a vendor, from the on-disk models.dev
+ * cache — the image picker's list for the openai/google flavors, whose own
+ * /models endpoints carry no image-capability signal. null = no usable
+ * catalog (fresh install, models.dev unreachable): the caller reports that
+ * as a retryable error rather than as "this provider has no image models".
+ */
+export async function getImageModelIds(
+  flavor: "openai" | "google",
+): Promise<string[] | null> {
+  try {
+    const catalog = await getModelsDevData();
+    if (!catalog) return null;
+    return pickImageModelIds(catalog.data, flavor);
+  } catch {
+    return null;
   }
 }
