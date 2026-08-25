@@ -322,7 +322,9 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                       : `[${a.name}](${blobWireUrl(refs, a.hash!, a.name)})`
               })
             : []
-        const body = [text, ...attachmentLines].filter(Boolean).join('\n')
+        // Attachments form their own paragraph (blank line): tiles render as a
+        // row under the text instead of flowing inline after it.
+        const body = [text, attachmentLines.join('\n')].filter(Boolean).join('\n\n')
         if (!body) return
         const agent: AgentOptions | undefined = mentioned
             ? {
