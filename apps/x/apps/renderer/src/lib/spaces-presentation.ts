@@ -292,6 +292,46 @@ export function parseAssetWireUrl(url: string, refs: SpaceRefs): string | null {
 }
 
 /**
+ * The renderable form of a file link — a render-time-only internal URL (never
+ * persisted). Chat markdown goes through Streamdown, whose harden pass strips
+ * relative hrefs (a bare `a/b.md` isn't parseable as a URL) but passes custom
+ * protocols untouched — so relative links rewrite to this before parsing, and
+ * the anchor component maps it back to the path.
+ */
+export function spaceFileAppUrl(refs: { orgId: string; spaceId: string }, path: string): string {
+    return `app://space-file/${encodeURIComponent(refs.orgId)}/${encodeURIComponent(refs.spaceId)}/${encodeSpaceLinkTarget(path)}`
+}
+
+const SPACE_FILE_APP_URL_RE = /^app:\/\/space-file\/([^/]+)\/([^/]+)\/(.+)$/
+
+export function parseSpaceFileAppUrl(url: string): { orgId: string; spaceId: string; path: string } | null {
+    const m = SPACE_FILE_APP_URL_RE.exec(url)
+    if (!m) return null
+    const path = resolveSpaceLink(`/${m[3]!}`, '')
+    if (!path) return null
+    return { orgId: decodeURIComponent(m[1]!), spaceId: decodeURIComponent(m[2]!), path }
+}
+
+/**
+ * Rewrite relative markdown LINKS (not images) in a message body to their
+ * app://space-file form so they survive Streamdown's URL hardening. Code
+ * regions are cites; absolute URLs and in-page anchors stay literal.
+ */
+export function rewriteFileLinks(body: string, refs: { orgId: string; spaceId: string }): string {
+    const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+    return parts
+        .map((part, i) => {
+            if (i % 2 === 1) return part
+            return part.replace(/(!?)\[([^\]]*)\]\(([^()\s]+)(\s+"[^"]*")?\)/g, (m, bang: string, text: string, target: string, title?: string) => {
+                if (bang) return m
+                const path = resolveSpaceLink(target, '')
+                return path ? `[${text}](${spaceFileAppUrl(refs, path)}${title ?? ''})` : m
+            })
+        })
+        .join('')
+}
+
+/**
  * Rewrite relative image references in a markdown body to renderable URLs
  * (app://space-blob through srcFor). Only references that resolve to a real
  * image asset change; everything else — external URLs, text files, broken

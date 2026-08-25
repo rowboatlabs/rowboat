@@ -14,10 +14,13 @@ import {
     orgMonogram,
     parseAssetWireUrl,
     parseBlobAppUrl,
+    parseSpaceFileAppUrl,
     resolveMentions,
     resolveSpaceLink,
     rewriteBlobLinks,
+    rewriteFileLinks,
     rewriteRelativeImages,
+    spaceFileAppUrl,
     toggleTaskAt,
 } from './spaces-presentation'
 
@@ -109,6 +112,30 @@ describe('file links — relative markdown resolves against the tree', () => {
         const target = encodeSpaceLinkTarget(path)
         expect(target).not.toMatch(/[ ()]/)
         expect(resolveSpaceLink(target, '')).toBe(path)
+    })
+    it('space-file app URLs round-trip (the render form that survives Streamdown hardening)', () => {
+        const refs = { orgId: 'o1', spaceId: 's1' }
+        const url = spaceFileAppUrl(refs, 'design/notes (v2).md')
+        expect(url.startsWith('app://space-file/o1/s1/')).toBe(true)
+        expect(url).not.toMatch(/[ ()]/)
+        expect(parseSpaceFileAppUrl(url)).toEqual({ orgId: 'o1', spaceId: 's1', path: 'design/notes (v2).md' })
+        expect(parseSpaceFileAppUrl('app://space-blob/o1/s1/abc')).toBeNull()
+        expect(parseSpaceFileAppUrl('https://x.com/a')).toBeNull()
+    })
+    it('rewriteFileLinks: relative links become app://space-file; images, absolute URLs, code stay', () => {
+        const refs = { orgId: 'o1', spaceId: 's1' }
+        expect(rewriteFileLinks('see [sso](decisions/sso.md)', refs))
+            .toBe('see [sso](app://space-file/o1/s1/decisions/sso.md)')
+        expect(rewriteFileLinks('see [n](design%20notes.md)', refs))
+            .toBe('see [n](app://space-file/o1/s1/design%20notes.md)')
+        const untouched = [
+            '![img](shot.png)',
+            '[ext](https://example.com/a)',
+            '[m](mailto:a@b.c)',
+            '`[c](a.md)`',
+            '```\n[c](a.md)\n```',
+        ]
+        for (const body of untouched) expect(rewriteFileLinks(body, refs)).toBe(body)
     })
     it('parses the canonical asset URL for this space only', () => {
         const refs = { orgId: 'o1', orgAddress: 'rowboat.team', spaceId: '01HXAMPZESPACE00000000000A' }
