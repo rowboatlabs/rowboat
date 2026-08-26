@@ -147,6 +147,16 @@ team and a Roadboard space (`src/main.ts`).
   `lastActivityAt` and emits no topic event. Re-deleting is an idempotent 200
   no-op. Tombstones take no new reactions (`invalid_request`); removes still
   work so cleanup stays possible. Render-face only, like reactions.
+- **Message editing is an author-only in-place rewrite** (`editMessage` route +
+  the `message_edited` event, 2026-08-26): editor == author, exactly deletion's
+  posture. The new body replaces the old everywhere it lives — messages row AND
+  the stored `message` event (the second sanctioned in-place log rewrite, same
+  reasoning as deletion: the superseded text must not resurface through
+  replay). `Message` carries `editedAt`; clients render an "(edited)" mark.
+  Tombstones refuse (`invalid_request`); an identical body is an idempotent
+  200 no-op — no write, no event. Editing bumps neither `lastActivityAt` nor
+  `messageCount` and emits no topic event. Render-face only, like reactions
+  and deletion — an agent's correction is a new message.
 - **Unknown invite tokens are 404**; `expired`/`revoked` are resolvable states.
 - **MCP face attribution**: acting mode defaults to `agent`; automations
   declare `x-acting-mode: scheduled`; `x-agent-name` carries the display label.

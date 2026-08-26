@@ -272,6 +272,26 @@ export class MemoryStore implements Store {
     s.messages.set(message.topicId, list);
   }
 
+  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void> {
+    const s = this.must(spaceId);
+    for (const [topicId, list] of s.messages) {
+      const idx = list.findIndex((m) => m.id === messageId);
+      if (idx === -1) continue;
+      const next = [...list];
+      next[idx] = { ...next[idx]!, body, editedAt };
+      s.messages.set(topicId, next);
+      break;
+    }
+    // Rewrite the stored message event too — replay must serve the edit.
+    for (let i = 0; i < s.events.length; i++) {
+      const e = s.events[i]!;
+      if (e.event.type === 'message' && e.event.message.id === messageId) {
+        s.events[i] = { ...e, event: { type: 'message', message: { ...e.event.message, body, editedAt } } };
+        break;
+      }
+    }
+  }
+
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     const s = this.must(spaceId);
     for (const [topicId, list] of s.messages) {

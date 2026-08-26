@@ -166,6 +166,7 @@ export interface Store {
    * included. The message_deleted event itself is appended by the service.
    */
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
+  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void>;
   /** merge_into support: repoints messages; returns how many moved. */
   reassignMessages(spaceId: string, fromTopicId: string, toTopicId: string): Promise<number>;
 

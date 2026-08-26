@@ -294,6 +294,14 @@ export const MIGRATIONS: Migration[] = [
       `alter table space_blobs add column if not exists height int`,
     ],
   },
+  {
+    id: '010-message-editing',
+    statements: [
+      // Author-only body rewrites: edited_at is the marker; the body column
+      // and the stored message event are rewritten in place (see editMessage).
+      `alter table messages add column if not exists edited_at text`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

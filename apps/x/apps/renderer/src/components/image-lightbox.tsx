@@ -1,5 +1,114 @@
+import { useRef, useState } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { Download, ExternalLink, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+const ZOOM_MAX = 8
+/** What a click on the fitted image zooms to. */
+const CLICK_ZOOM = 2.5
+
+/** Translate clamp: the scaled image must always overlap its fitted box. */
+function clampPan(value: number, extent: number, scale: number) {
+  const max = ((scale - 1) * extent) / 2
+  return Math.min(max, Math.max(-max, value))
+}
+
+/**
+ * Zoomable image for lightboxes: scroll (or pinch) zooms toward the cursor,
+ * click toggles fit ⇄ 2.5×, drag pans while zoomed. State lives here, so
+ * closing the viewer (which unmounts it) resets the zoom.
+ */
+export function ZoomableImage({ src, alt, className, onError }: {
+  src: string
+  alt: string
+  className?: string
+  onError?: () => void
+}) {
+  const ref = useRef<HTMLImageElement | null>(null)
+  const [zoom, setZoom] = useState({ s: 1, x: 0, y: 0 })
+  const drag = useRef<{ id: number; startX: number; startY: number; x: number; y: number; moved: boolean } | null>(null)
+  // A drag that actually moved must not fire the click toggle on release.
+  const suppressClick = useRef(false)
+  const [dragging, setDragging] = useState(false)
+
+  /** Rescale around the cursor: the image point under it stays put. */
+  const rescale = (z: { s: number; x: number; y: number }, nextScale: number, clientX: number, clientY: number) => {
+    const s = Math.min(ZOOM_MAX, Math.max(1, nextScale))
+    if (s === 1) return { s: 1, x: 0, y: 0 }
+    const el = ref.current
+    if (!el) return { ...z, s }
+    const r = el.getBoundingClientRect()
+    // Scaling is centre-origin, so the transformed rect's centre is the
+    // untransformed centre + the translate.
+    const px = clientX - (r.left + r.width / 2 - z.x)
+    const py = clientY - (r.top + r.height / 2 - z.y)
+    const k = s / z.s
+    const w = r.width / z.s
+    const h = r.height / z.s
+    return { s, x: clampPan(px - k * (px - z.x), w, s), y: clampPan(py - k * (py - z.y), h, s) }
+  }
+
+  const onWheel = (e: React.WheelEvent) => {
+    const factor = Math.exp(-e.deltaY * 0.002)
+    setZoom((z) => rescale(z, z.s * factor, e.clientX, e.clientY))
+  }
+  const onClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (suppressClick.current) {
+      suppressClick.current = false
+      return
+    }
+    setZoom((z) => rescale(z, z.s > 1 ? 1 : CLICK_ZOOM, e.clientX, e.clientY))
+  }
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (zoom.s <= 1 || e.button !== 0) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drag.current = { id: e.pointerId, startX: e.clientX, startY: e.clientY, x: zoom.x, y: zoom.y, moved: false }
+    setDragging(true)
+  }
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.id) return
+    const dx = e.clientX - d.startX
+    const dy = e.clientY - d.startY
+    if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true
+    setZoom((z) => {
+      const el = ref.current
+      if (!el) return z
+      const r = el.getBoundingClientRect()
+      return { ...z, x: clampPan(d.x + dx, r.width / z.s, z.s), y: clampPan(d.y + dy, r.height / z.s, z.s) }
+    })
+  }
+  const onPointerEnd = (e: React.PointerEvent) => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.id) return
+    suppressClick.current = d.moved
+    drag.current = null
+    setDragging(false)
+  }
+
+  return (
+    <img
+      ref={ref}
+      src={src}
+      alt={alt}
+      draggable={false}
+      onError={onError}
+      onWheel={onWheel}
+      onClick={onClick}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      style={{ transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})`, willChange: 'transform' }}
+      className={cn(
+        'touch-none select-none',
+        zoom.s === 1 ? 'cursor-zoom-in' : dragging ? 'cursor-grabbing' : 'cursor-grab',
+        className,
+      )}
+    />
+  )
+}
 
 /** Semi-transparent control overlaid on an image (inline hover row, lightbox). */
 export function ImageOverlayButton({
@@ -58,10 +167,9 @@ export function ImageLightbox({
           className="fixed inset-0 z-50 flex items-center justify-center outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
         >
           <DialogPrimitive.Title className="sr-only">{name}</DialogPrimitive.Title>
-          <img
+          <ZoomableImage
             src={src}
             alt={name}
-            onClick={(e) => e.stopPropagation()}
             onError={onError}
             className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain"
           />

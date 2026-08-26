@@ -122,6 +122,17 @@ export const MessageDeletion = z.object({
 });
 export type MessageDeletion = z.infer<typeof MessageDeletion>;
 
+/** An author's in-place rewrite of a message body — the payload of `message_edited`. */
+export const MessageEdit = z.object({
+  spaceId: SpaceId,
+  topicId: TopicId,
+  messageId: MessageId,
+  body: z.string().min(1).max(65_536),
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type MessageEdit = z.infer<typeof MessageEdit>;
+
 export const Message = z.object({
   id: MessageId,
   topicId: TopicId,
@@ -138,6 +149,8 @@ export const Message = z.object({
   offset: StreamOffset,
   /** Set when the author deleted the message (deleter == author, so no separate attribution). */
   deletedAt: z.iso.datetime().optional(),
+  /** Set when the author last edited the body (editor == author, like deletion). */
+  editedAt: z.iso.datetime().optional(),
   /**
    * Folded reactions, groups in first-reacted order. The default keeps pre-
    * reaction payloads (older servers, stored message events) parseable; reads

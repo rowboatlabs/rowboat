@@ -8,6 +8,7 @@ import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
+import { fetchLinkPreview } from './link-preview.js';
 
 type IPCChannels = ipc.IPCChannels;
 
@@ -38,6 +39,7 @@ type SpacesHandlers = {
   'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
   'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
   'spaces:saveImageUrl': InvokeHandler<'spaces:saveImageUrl'>;
+  'spaces:linkPreview': InvokeHandler<'spaces:linkPreview'>;
   'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
   'spaces:proposeChange': InvokeHandler<'spaces:proposeChange'>;
   'spaces:assetHistory': InvokeHandler<'spaces:assetHistory'>;
@@ -48,6 +50,7 @@ type SpacesHandlers = {
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
   'spaces:deleteMessage': InvokeHandler<'spaces:deleteMessage'>;
+  'spaces:editMessage': InvokeHandler<'spaces:editMessage'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
@@ -236,6 +239,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
     return { saved: true, path: result.filePath };
   },
 
+  'spaces:linkPreview': async (_event, args) => ({ preview: await fetchLinkPreview(args.url) }),
+
   'spaces:readAsset': async (_event, args) =>
     orgs.getClient(args.orgId).readAsset(args.spaceId, args.path, args.version),
 
@@ -294,6 +299,13 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:deleteMessage': async (_event, args) => ({
     message: await orgs.getClient(args.orgId).deleteMessage(args.spaceId, args.messageId, {
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:editMessage': async (_event, args) => ({
+    message: await orgs.getClient(args.orgId).editMessage(args.spaceId, args.messageId, {
+      body: args.body,
       actingMode: 'direct',
     }),
   }),

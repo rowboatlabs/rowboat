@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Membership, Message, MessageDeletion, Reaction, Topic } from './core.js';
+import { Membership, Message, MessageDeletion, MessageEdit, Reaction, Topic } from './core.js';
 import { MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
@@ -35,6 +35,16 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('message_deleted'),
     deletion: MessageDeletion,
+  }),
+  /**
+   * A message body rewritten by its author. The stored `message` event is
+   * rewritten in place (body + editedAt) — same posture as deletion: the old
+   * text must be unrecoverable, replay included. Live/folding clients apply
+   * this event; an identical-body edit emits nothing.
+   */
+  z.object({
+    type: z.literal('message_edited'),
+    edit: MessageEdit,
   }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;

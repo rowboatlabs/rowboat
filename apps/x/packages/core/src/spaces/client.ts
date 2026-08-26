@@ -64,6 +64,7 @@ type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
+type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 
 export class SpacesClient {
   private readonly baseUrl: string;
@@ -335,6 +336,18 @@ export class SpacesClient {
         'POST',
         this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/delete`),
         routes.deleteMessage.response,
+        input,
+      )
+    ).message;
+  }
+
+  /** Author-only body rewrite (identical body = no-op). Returns the edited message. */
+  async editMessage(spaceId: string, messageId: string, input: EditMessageInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/edit`),
+        routes.editMessage.response,
         input,
       )
     ).message;

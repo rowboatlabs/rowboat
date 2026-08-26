@@ -113,6 +113,7 @@ interface MessageRow {
   body: string;
   posted_at: string;
   deleted_at: string | null;
+  edited_at: string | null;
   stream_offset: number;
 }
 
@@ -126,6 +127,7 @@ function rowToMessage(r: MessageRow): Message {
     postedAt: r.posted_at,
     offset: r.stream_offset,
     ...(r.deleted_at !== null ? { deletedAt: r.deleted_at } : {}),
+    ...(r.edited_at !== null ? { editedAt: r.edited_at } : {}),
     // Live reaction state is folded in by the service on reads; rows carry none.
     reactions: [],
   };
@@ -593,6 +595,19 @@ export class PgStore implements Store {
       `insert into messages (id, space_id, topic_id, author, body, posted_at, stream_offset)
        values ($1, $2, $3, $4::jsonb, $5, $6, $7)`,
       [message.id, message.spaceId, message.topicId, JSON.stringify(message.author), message.body, message.postedAt, message.offset],
+    );
+  }
+
+  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void> {
+    await this.sql.query(
+      `update messages set body = $3, edited_at = $4 where space_id = $1 and id = $2`,
+      [spaceId, messageId, body, editedAt],
+    );
+    // Rewrite the stored message event too — replay must serve the edit.
+    await this.sql.query(
+      `update events set event = jsonb_set(jsonb_set(event, '{message,body}', to_jsonb($3::text)), '{message,editedAt}', to_jsonb($4::text))
+       where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
+      [spaceId, messageId, body, editedAt],
     );
   }
 

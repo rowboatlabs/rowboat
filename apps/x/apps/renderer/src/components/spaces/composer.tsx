@@ -65,7 +65,24 @@ interface MentionCandidate {
 // "/" so typing into a folder ("@design/sc…") keeps the file query alive.
 const MENTION_RE = /(^|[\s([{])@([\w./-]*)$/
 
-export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId }: {
+/** A pane-provided slash command; `args` absent = picking it runs immediately. */
+export interface SlashCommand {
+    name: string
+    /** Argument placeholder shown in the menu, e.g. '<file>'. */
+    args?: string
+    hint: string
+    run: (args: string) => void | Promise<void>
+}
+
+type CommandEntry = Omit<SlashCommand, 'run'> & { run?: SlashCommand['run'] }
+
+/** Built into the composer itself: /ask rewrites to an @rowboat message and sends. */
+const ASK_COMMAND: CommandEntry = { name: 'ask', args: '<question>', hint: 'Ask your Rowboat — same as @rowboat' }
+
+/** A draft that IS a command: "/name" or "/name args". */
+const COMMAND_RE = /^\/([a-zA-Z]+)(?:\s+([\s\S]*))?$/
+
+export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey, commands = [] }: {
     placeholder: string
     onSend: (body: string, agent?: AgentOptions) => Promise<void>
     busy: boolean
@@ -79,8 +96,25 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     /** Space files — the same @ autocomplete offers them; picking one links it. */
     entries?: spaces.SpacesAssetEntry[]
     selfMemberId?: string
+    /**
+     * Persist the unsent text under this key (per install, like read marks) —
+     * switching spaces or restarting the app hands the draft back. Sending
+     * clears it. Attachments are not persisted; they re-upload on return.
+     */
+    draftKey?: string
+    /** Surface-specific slash commands (a "/" draft opens the menu; /ask is built in). */
+    commands?: SlashCommand[]
 }) {
-    const [draft, setDraft] = useState('')
+    const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(`spaces:draft:${draftKey}`) ?? '' : ''))
+    useEffect(() => {
+        if (!draftKey) return
+        try {
+            if (draft) window.localStorage.setItem(`spaces:draft:${draftKey}`, draft)
+            else window.localStorage.removeItem(`spaces:draft:${draftKey}`)
+        } catch {
+            // Quota/private mode: the draft just doesn't persist.
+        }
+    }, [draftKey, draft])
     const [appliedSeed, setAppliedSeed] = useState<number | null>(null)
     const ref = useRef<HTMLTextAreaElement | null>(null)
 
@@ -267,6 +301,45 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     }
     const showMentions = mentionOpen && !!mentionMatch && candidates.length > 0
 
+    // --- slash commands ------------------------------------------------------
+    // "/name" (no space yet) filters the menu; "/name args" pins the matched
+    // command's usage hint above the box; Enter runs it via send().
+    const allCommands: CommandEntry[] = [ASK_COMMAND, ...commands]
+    const cmdMenuMatch = /^\/([a-zA-Z]*)$/.exec(draft)
+    const cmdQuery = cmdMenuMatch?.[1]?.toLowerCase() ?? null
+    const cmdCandidates = cmdQuery !== null ? allCommands.filter((c) => c.name.startsWith(cmdQuery)) : []
+    const [cmdIndex, setCmdIndex] = useState(0)
+    const [cmdDismissed, setCmdDismissed] = useState(false)
+    const [lastCmdQuery, setLastCmdQuery] = useState<string | null>(null)
+    if (cmdQuery !== lastCmdQuery) {
+        setLastCmdQuery(cmdQuery)
+        setCmdIndex(0)
+        setCmdDismissed(false)
+    }
+    const showCommands = !showMentions && !cmdDismissed && cmdCandidates.length > 0
+    const activeCommand = (() => {
+        const m = /^\/([a-zA-Z]+)\s/.exec(draft)
+        return m ? allCommands.find((c) => c.name === m[1]!.toLowerCase()) ?? null : null
+    })()
+
+    const pickCommand = (c: CommandEntry) => {
+        if (c.args) {
+            // Complete to "/name " — the person types the argument, Enter runs.
+            const next = `/${c.name} `
+            setDraft(next)
+            requestAnimationFrame(() => {
+                const el = ref.current
+                if (!el) return
+                el.focus()
+                el.setSelectionRange(next.length, next.length)
+                setCaret(next.length)
+            })
+        } else {
+            setDraft('')
+            if (c.run) void c.run('')
+        }
+    }
+
     const insertAt = (start: number, end: number, text: string) => {
         const next = `${draft.slice(0, start)}${text}${draft.slice(end)}`
         setDraft(next)
@@ -290,6 +363,36 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
         else insertAt(mentionMatch.start, caret, `@${c.label} `)
     }
 
+    // Markdown formatting shortcuts (⌘B bold, ⌘I italic, ⌘E code, ⌘⇧X
+    // strikethrough): wrap the selection — or an empty caret — in the marker;
+    // fired again on an already-wrapped selection, unwrap (toggle).
+    const wrapSelection = (marker: string) => {
+        const el = ref.current
+        if (!el) return
+        const start = el.selectionStart ?? 0
+        const end = el.selectionEnd ?? start
+        const selected = draft.slice(start, end)
+        const before = draft.slice(0, start)
+        const after = draft.slice(end)
+        const place = (next: string, selStart: number, selEnd: number) => {
+            setDraft(next)
+            requestAnimationFrame(() => {
+                el.focus()
+                el.setSelectionRange(selStart, selEnd)
+                setCaret(selEnd)
+            })
+        }
+        if (before.endsWith(marker) && after.startsWith(marker)) {
+            place(`${before.slice(0, -marker.length)}${selected}${after.slice(marker.length)}`, start - marker.length, end - marker.length)
+        } else if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2) {
+            const inner = selected.slice(marker.length, selected.length - marker.length)
+            place(`${before}${inner}${after}`, start, start + inner.length)
+        } else {
+            // Empty caret lands between the markers, ready to type.
+            place(`${before}${marker}${selected}${marker}${after}`, start + marker.length, end + marker.length)
+        }
+    }
+
     const insertRowboatChip = () => {
         const el = ref.current
         const mention = '@rowboat '
@@ -306,10 +409,32 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
 
     // --- send ----------------------------------------------------------------
     const mentioned = containsRowboatAddress(draft)
-    const send = async () => {
+    const send = async (textOverride?: string) => {
         if (busy || uploading) return
+        const raw = (textOverride ?? draft).trim()
+        // A command draft executes instead of posting. Unknown names fall
+        // through and send as literal text — "/shrug" is somebody's message.
+        if (textOverride === undefined) {
+            const m = COMMAND_RE.exec(raw)
+            const found = m ? allCommands.find((c) => c.name === m[1]!.toLowerCase()) : undefined
+            if (m && found) {
+                const args = (m[2] ?? '').trim()
+                if (!args && found.args) {
+                    toast(`Usage: /${found.name} ${found.args}`, 'info')
+                    return
+                }
+                if (found.run) {
+                    setDraft('')
+                    await found.run(args)
+                    return
+                }
+                // Built-in /ask: rewrite and send through the normal path.
+                await send(`@rowboat ${args}`)
+                return
+            }
+        }
         const ready = attachments.filter((a) => a.status === 'done' && a.hash)
-        const text = encodeMentions(draft.trim(), members)
+        const text = encodeMentions(raw, members)
         // Each attachment lands on the wire as a canonical blob link: images as
         // markdown images (renderers show them inline), the rest as plain links
         // (rendered as download cards). ?name= keeps the display filename;
@@ -326,7 +451,9 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
         // row under the text instead of flowing inline after it.
         const body = [text, attachmentLines.join('\n')].filter(Boolean).join('\n\n')
         if (!body) return
-        const agent: AgentOptions | undefined = mentioned
+        // From the text actually going out — an /ask rewrite mentions @rowboat
+        // even though the draft it came from didn't.
+        const agent: AgentOptions | undefined = containsRowboatAddress(raw)
             ? {
                   ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
                   permissionMode,
@@ -352,6 +479,30 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                 {dragOver && (
                     <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-foreground/40 bg-background/90 text-sm text-muted-foreground">
                         Drop to attach
+                    </div>
+                )}
+                {showCommands && (
+                    <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 overflow-hidden rounded-xl border border-border bg-background p-1.5 shadow-sm">
+                        {cmdCandidates.map((c, i) => (
+                            <button
+                                key={c.name}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => pickCommand(c)}
+                                className={cn('flex w-full items-baseline gap-2.5 rounded-lg px-3 py-2 text-left', i === cmdIndex ? 'bg-accent' : 'hover:bg-accent/60')}
+                            >
+                                <span className="shrink-0 font-mono text-sm font-medium">/{c.name}</span>
+                                {c.args && <span className="shrink-0 font-mono text-xs text-muted-foreground">{c.args}</span>}
+                                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.hint}</span>
+                            </button>
+                        ))}
+                        <div className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
+                    </div>
+                )}
+                {!showCommands && activeCommand && !showMentions && (
+                    <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 rounded-xl border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm">
+                        <span className="font-mono text-sm font-medium text-foreground">/{activeCommand.name}</span>
+                        {activeCommand.args && <span className="font-mono text-sm"> {activeCommand.args}</span>} — {activeCommand.hint} · ↵ to run
                     </div>
                 )}
                 {showMentions && (
@@ -432,6 +583,29 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                     }}
                     onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
                     onKeyDown={(e) => {
+                        if (showCommands) {
+                            if (e.key === 'ArrowDown') {
+                                e.preventDefault()
+                                setCmdIndex((i) => (i + 1) % cmdCandidates.length)
+                                return
+                            }
+                            if (e.key === 'ArrowUp') {
+                                e.preventDefault()
+                                setCmdIndex((i) => (i - 1 + cmdCandidates.length) % cmdCandidates.length)
+                                return
+                            }
+                            if (e.key === 'Enter' || e.key === 'Tab') {
+                                e.preventDefault()
+                                const c = cmdCandidates[cmdIndex]
+                                if (c) pickCommand(c)
+                                return
+                            }
+                            if (e.key === 'Escape') {
+                                e.preventDefault()
+                                setCmdDismissed(true)
+                                return
+                            }
+                        }
                         if (showMentions) {
                             if (e.key === 'ArrowDown') {
                                 e.preventDefault()
@@ -452,6 +626,17 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                             if (e.key === 'Escape') {
                                 e.preventDefault()
                                 setMentionOpen(false)
+                                return
+                            }
+                        }
+                        if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+                            const key = e.key.toLowerCase()
+                            const marker = e.shiftKey
+                                ? key === 'x' ? '~~' : null
+                                : key === 'b' ? '**' : key === 'i' ? '*' : key === 'e' ? '`' : null
+                            if (marker) {
+                                e.preventDefault()
+                                wrapSelection(marker)
                                 return
                             }
                         }

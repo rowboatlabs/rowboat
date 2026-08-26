@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, Bot, Loader2, MoreHorizontal, Pencil, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, Bot, Loader2, MoreHorizontal, Pencil, ShieldAlert, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,8 +13,9 @@ import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
 import type { ChatMessage, SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
 import { buildPendingMessage, rememberThread, usePresenceSender } from '@/hooks/use-space-chat'
+import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, mergeMessages, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
+import { applyReaction, artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, mergeMessages, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
 import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -26,9 +27,14 @@ import { containsRowboatAddress } from '@/lib/spaces-mentions'
 // the replies, a reply composer. In general it sits on the right; on the
 // Topics tab it is the centre column and the artifacts expand into a rail.
 
+/** How long the New line lingers once the reader has caught up with it. */
+const NEW_LINGER_MS = 5_000
+/** Clear delay after the fade starts — must outlast the divider's duration-700. */
+const NEW_FADE_MS = 800
+
 export function ThreadPane({
     org, space, topicId, threadInfo, topic: topicFromList, changeSets, entries, presence, members, memberNames, refreshTick,
-    anchorChange, showBack, onBack, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding,
+    anchorChange, showBack, onBack, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -52,6 +58,8 @@ export function ThreadPane({
     onToggleArtifactsRail: () => void
     /** Lets a parent (the rail) share the fold-busy state. */
     onFolding?: (busy: boolean) => void
+    /** False while kept mounted but off screen (read mode, hidden Spaces view) — no presence, no read marks. */
+    visible?: boolean
 }) {
     const [topic, setTopic] = useState<spaces.Topic | null>(topicFromList ?? null)
     const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -63,9 +71,39 @@ export function ThreadPane({
     const oldestLoadedRef = useRef<number | null>(null)
     const [folding, setFolding] = useState(false)
     const bottomRef = useRef<HTMLDivElement | null>(null)
-    const { onType } = usePresenceSender(org.id, space.id, topicId)
+    const { onType } = usePresenceSender(org.id, space.id, topicId, visible)
+    // A ref, not an effect dep: visibility flips must not refetch the thread.
+    const visibleRef = useRef(visible)
+    visibleRef.current = visible
 
-    const [newSince] = useState<string | null>(() => getTopicLastReadAt(org.id, space.id, topicId))
+    // Esc goes back to Messages. Not from a field (typing must keep its Esc
+    // semantics — and a drafted reply must not vanish), and not when an
+    // overlay already claimed the key (Radix prevents default on those).
+    useEffect(() => {
+        if (!visible) return
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape' || e.defaultPrevented) return
+            const t = e.target as HTMLElement | null
+            if (t?.closest('input, textarea, [contenteditable="true"], [role="dialog"], [role="menu"]')) return
+            onBack()
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [visible, onBack])
+
+    const [newSince, setNewSince] = useState<string | null>(() => getTopicLastReadAt(org.id, space.id, topicId))
+    const [newFading, setNewFading] = useState(false)
+    // Each return to the topic re-arms the line at the catch-up point: the
+    // read mark as it stood while hidden. Declared BEFORE the visible
+    // mark-read effect below — same flip, and the snapshot must win the race.
+    const newArmedVisibleRef = useRef(visible)
+    useEffect(() => {
+        const was = newArmedVisibleRef.current
+        newArmedVisibleRef.current = visible
+        if (!visible || was) return
+        setNewFading(false)
+        setNewSince(getTopicLastReadAt(org.id, space.id, topicId))
+    }, [visible, org.id, space.id, topicId])
 
     useEffect(() => {
         let cancelled = false
@@ -89,13 +127,18 @@ export function ThreadPane({
                     setHasMore(res.hasMore)
                 }
                 setLoaded(true)
-                markTopicRead(org.id, space.id, topicId)
+                if (visibleRef.current) markTopicRead(org.id, space.id, topicId)
             })
             .catch(() => {})
         return () => {
             cancelled = true
         }
     }, [org.id, space.id, topicId, refreshTick])
+    // Refetches that landed while hidden left the topic unread on purpose —
+    // becoming visible again is the moment the reader actually sees them.
+    useEffect(() => {
+        if (visible && loaded) markTopicRead(org.id, space.id, topicId)
+    }, [visible, loaded, org.id, space.id, topicId])
 
     const loadOlderReplies = async () => {
         const oldest = messages.find((m) => !m.pending && !m.failed)
@@ -116,9 +159,14 @@ export function ThreadPane({
     }
 
     const workingAgents = presence.working.get(topicId) ?? []
+    // Your own agent, blocked mid-turn on a tool permission: surface it here
+    // instead of letting it idle behind a "working…" spinner (or silence).
+    const permissionWait = useTopicAgentPermissionWait(org.id, space.id, topicId, visible)
+    // While blocked, the amber pill replaces the own-agent spinner.
+    const spinningAgents = permissionWait.length > 0 ? workingAgents.filter((id) => id !== org.memberId) : workingAgents
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ block: 'end' })
-    }, [messages.length, workingAgents.length])
+    }, [messages.length, workingAgents.length, permissionWait.length])
 
     const groups = useMemo(() => artifactsForThread(changeSets, topicId), [changeSets, topicId])
 
@@ -130,6 +178,23 @@ export function ThreadPane({
     // Display metadata (who said the parent, when) rides in the seed's marker.
     const marker = threadInfo?.marker ?? (parent ? parseThreadMarker(parent.body) : null)
     const replies = messages.filter((m) => m.id !== parent?.id)
+
+    // Once the reader has caught up (this pane pins to the bottom, so visible
+    // = with the new messages) the line lingers a beat, fades, drops.
+    const hasNewLine = !!newSince && replies.some((m) => !m.deletedAt && m.postedAt > newSince && m.author.memberId !== org.memberId)
+    useEffect(() => {
+        if (!visible || !loaded || !hasNewLine || newFading) return
+        const t = window.setTimeout(() => setNewFading(true), NEW_LINGER_MS)
+        return () => window.clearTimeout(t)
+    }, [visible, loaded, hasNewLine, newFading])
+    useEffect(() => {
+        if (!newFading) return
+        const t = window.setTimeout(() => {
+            setNewSince(null)
+            setNewFading(false)
+        }, NEW_FADE_MS)
+        return () => window.clearTimeout(t)
+    }, [newFading])
 
     // Echo a just-posted reply into the pane — the live event that would
     // otherwise render it may be seconds away, or never come at all when the
@@ -187,9 +252,13 @@ export function ThreadPane({
     }
 
     // Toggle: add when the viewer isn't in the group yet, remove when they are.
+    // Optimistic like general's — the chip moves on click, the org reconciles.
     const toggleReaction = async (message: spaces.Message, emoji: string) => {
         const mine = (message.reactions ?? []).find((g) => g.emoji === emoji)?.memberIds.includes(org.memberId)
         const action = mine ? 'remove' : 'add'
+        setMessages((prev) => prev.map((m) => (
+            m.id === message.id ? { ...m, reactions: applyReaction(m.reactions, { emoji, memberId: org.memberId, action: action === 'add' ? 'added' : 'removed' }) } : m
+        )))
         try {
             const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
@@ -197,7 +266,22 @@ export function ThreadPane({
             setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
             analytics.spacesReactionToggled({ action })
         } catch (err) {
+            setMessages((prev) => prev.map((m) => (m.id === message.id ? message : m)))
             toast(err instanceof Error ? err.message : 'Could not react', 'error')
+        }
+    }
+
+    // Optimistic rewrite, mirroring general's.
+    const editMessage = async (message: spaces.Message, body: string) => {
+        setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, body, editedAt: new Date().toISOString() } : m)))
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:editMessage', {
+                orgId: org.id, spaceId: space.id, messageId: message.id, body,
+            })
+            setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+        } catch (err) {
+            setMessages((prev) => prev.map((m) => (m.id === message.id ? message : m)))
+            toast(err instanceof Error ? err.message : 'Could not edit', 'error')
         }
     }
 
@@ -252,7 +336,7 @@ export function ThreadPane({
     let newShown = false
     for (const message of visibleReplies) {
         if (!newShown && newSince && message.postedAt > newSince && message.author.memberId !== org.memberId) {
-            rows.push(<NewDivider key="new" />)
+            rows.push(<NewDivider key="new" fading={newFading} />)
             newShown = true
             prev = undefined
         }
@@ -265,6 +349,7 @@ export function ThreadPane({
                 selfMemberId={org.memberId}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
+                onEdit={(m, body) => void editMessage(m, body)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
                 dense
@@ -282,9 +367,12 @@ export function ThreadPane({
         <div className="flex h-full min-h-0 flex-col bg-background">
             <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-2 pr-2">
                 {showBack && (
-                    <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={onBack} aria-label="Back to messages">
-                        <ArrowLeft className="size-4" />
-                    </Button>
+                    <>
+                        <Button variant="ghost" size="xs" className="gap-1 bg-primary/10 px-2 font-semibold text-primary hover:bg-primary/15 hover:text-primary" onClick={onBack} title="Back to Messages (Esc)" aria-label="Back to messages">
+                            <ArrowLeft className="size-3.5" /> Messages
+                        </Button>
+                        <span className="h-4 w-px shrink-0 bg-border" />
+                    </>
                 )}
                 <span className="pl-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topic</span>
                 <span className="truncate text-xs text-muted-foreground">
@@ -406,10 +494,25 @@ export function ThreadPane({
                 </div>
                 {rows}
 
-                {/* Typing-indicator position: below the last message, where eyes rest. */}
-                {workingAgents.length > 0 && (
+                {/* Your agent is stopped, not working — it wants an answer. */}
+                {permissionWait.length > 0 && (
                     <div className="flex flex-wrap items-center gap-2 pl-10 pt-1">
-                        {workingAgents.map((memberId) => {
+                        <button
+                            type="button"
+                            onClick={() => void openTopicSession()}
+                            title="Open the agent session to review the request"
+                            className="flex items-center gap-1.5 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+                        >
+                            <ShieldAlert className="size-3" />
+                            Your Rowboat needs permission — {permissionWait[0]}
+                            {permissionWait.length > 1 ? ` +${permissionWait.length - 1} more` : ''} · Review
+                        </button>
+                    </div>
+                )}
+                {/* Typing-indicator position: below the last message, where eyes rest. */}
+                {spinningAgents.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 pl-10 pt-1">
+                        {spinningAgents.map((memberId) => {
                             const own = memberId === org.memberId
                             const label = own ? 'Your Rowboat is working…' : <><MemberName id={memberId} />’s Rowboat is working…</>
                             return own ? (
@@ -426,7 +529,47 @@ export function ThreadPane({
                 <div ref={bottomRef} />
             </div>
 
-            <Composer placeholder="Reply…" busy={false} onSend={post} onType={onType} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />
+            <Composer
+                placeholder="Reply…"
+                busy={false}
+                onSend={post}
+                onType={onType}
+                autoFocus
+                members={members}
+                entries={entries}
+                selfMemberId={org.memberId}
+                draftKey={`${org.id}/${space.id}/${topicId}`}
+                commands={[
+                    {
+                        name: 'fold',
+                        args: '<file>',
+                        hint: 'Ask your Rowboat to fold this topic into a file',
+                        run: (args) => void fold(args),
+                    },
+                    {
+                        name: 'rename',
+                        args: '<title>',
+                        hint: 'Rename this topic',
+                        run: (args) => void manage({ action: 'retitle', title: args }),
+                    },
+                    topic?.archived
+                        ? { name: 'unarchive', hint: 'Unarchive this topic', run: () => void manage({ action: 'unarchive' }) }
+                        : { name: 'archive', hint: 'Archive this topic — it leaves the rail until unarchived', run: () => void manage({ action: 'archive' }) },
+                    {
+                        name: 'invite',
+                        hint: 'Copy an invite link to this space',
+                        run: async () => {
+                            try {
+                                const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                await navigator.clipboard.writeText(result.link)
+                                toast('Invite link copied to clipboard', 'success')
+                            } catch (err) {
+                                toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')
+                            }
+                        },
+                    },
+                ]}
+            />
 
         </div>
     )
@@ -487,9 +630,10 @@ export function DraftThreadPane({ org, space, parent, members, memberNames, entr
     return (
         <div className="flex h-full min-h-0 flex-col bg-background">
             <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-2 pr-2">
-                <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={onBack} aria-label="Back to messages">
-                    <ArrowLeft className="size-4" />
+                <Button variant="ghost" size="xs" className="gap-1 bg-primary/10 px-2 font-semibold text-primary hover:bg-primary/15 hover:text-primary" onClick={onBack} title="Back to Messages" aria-label="Back to messages">
+                    <ArrowLeft className="size-3.5" /> Messages
                 </Button>
+                <span className="h-4 w-px shrink-0 bg-border" />
                 <span className="pl-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topic</span>
                 <span className="truncate text-xs text-muted-foreground">new — created when you send</span>
                 <span className="flex-1" />
@@ -515,7 +659,7 @@ export function DraftThreadPane({ org, space, parent, members, memberNames, entr
                     Nothing here yet — sending a reply is what starts the topic for everyone.
                 </div>
             </div>
-            <Composer placeholder="Reply…" busy={posting} onSend={post} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />
+            <Composer placeholder="Reply…" busy={posting} onSend={post} autoFocus members={members} entries={entries} selfMemberId={org.memberId} draftKey={`${org.id}/${space.id}/draft:${parent.id}`} />
         </div>
     )
 }

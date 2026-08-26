@@ -3683,6 +3683,17 @@ const ipcSchemas = {
     }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
   },
+  // Author-only body rewrite — the org enforces caller == author; identical
+  // bodies no-op. Returns the message with editedAt set.
+  'spaces:editMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      body: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
   // @rowboat in a topic (spec §8): the renderer detected an addressed message
   // it just posted; main routes it into the topic's session (creating one on
   // first use — the queue/steer machinery handles the rest). messageId is the
@@ -3748,6 +3759,23 @@ const ipcSchemas = {
   'spaces:saveImageUrl': {
     req: z.object({ url: z.string() }),
     res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
+  // OpenGraph metadata for a link card. Main fetches the page — the renderer
+  // can't (CORS) — with a size cap and timeout. null preview = nothing
+  // usable (not html, too slow, no tags). https only.
+  'spaces:linkPreview': {
+    req: z.object({ url: z.string() }),
+    res: z.object({
+      preview: z
+        .object({
+          url: z.string(),
+          title: z.string().optional(),
+          description: z.string().optional(),
+          imageUrl: z.string().optional(),
+          siteName: z.string().optional(),
+        })
+        .nullable(),
+    }),
   },
   // Live: renderer subscribes per space; frames arrive on 'spaces:events'
   // wrapped with their orgId. Offset resume mirrors the turn-event spine.
