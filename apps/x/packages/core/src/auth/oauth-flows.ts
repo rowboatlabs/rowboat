@@ -1,5 +1,4 @@
-import type { Server } from 'http';
-import { createAuthServer } from './loopback-server.js';
+import { openLoopback, type LoopbackHandle } from './loopback-server.js';
 import { DEFAULT_CALLBACK_PORT } from '../auth/client-repo.js';
 import * as oauthClient from '../auth/oauth-client.js';
 import type { Configuration } from '../auth/oauth-client.js';
@@ -92,7 +91,7 @@ const activeFlows = new Map<string, {
 interface ActiveOAuthFlow {
   provider: string;
   state: string;
-  server: Server;
+  server: LoopbackHandle;
   cleanupTimeout: NodeJS.Timeout;
 }
 
@@ -243,8 +242,8 @@ export async function resolveStartPort(
   const registeredPort = await clientRepo.getRegisteredPort(provider);
   try {
     // Probe — fixed-port (no fallback) so we know whether the exact registered port is free
-    const probe = await createAuthServer(registeredPort, () => { /* probe */ });
-    probe.server.close();
+    const probe = await openLoopback(registeredPort, () => { /* probe */ });
+    await probe.close();
     console.log(`[OAuth] ${provider}: registered port ${registeredPort} still available`);
     return registeredPort;
   } catch {
@@ -319,7 +318,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
     let state = '';
     let callbackHandled = false;
 
-    const { server, port: boundPort } = await createAuthServer(
+    const server = await openLoopback(
       startPort,
       async (callbackUrl) => {
         // Guard against duplicate callbacks (browser may send multiple
@@ -467,6 +466,8 @@ export async function connectProvider(provider: string, credentials?: { clientId
         },
       },
     );
+
+    const boundPort = server.port;
 
     // Server is bound. Any throw between here and `activeFlow = ...` would
     // leak the port — `cancelActiveFlow` only closes it once activeFlow is set.

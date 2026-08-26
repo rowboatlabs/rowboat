@@ -14,6 +14,10 @@ import { prepareCoreData, initCoreServices } from '@x/core/dist/boot/services.js
 import { createRowboatServer } from './server.js';
 import { capabilityBroker } from './capabilities.js';
 import { registerUrlOpener } from '@x/core/dist/auth/url-opener.js';
+import { installLoopbackRelay } from './loopback-relay.js';
+import { createFileCipher } from './file-cipher.js';
+import { setTokenCipher as setChatGPTTokenCipher } from '@x/core/dist/auth/chatgpt-auth.js';
+import { setTokenCipher as setGithubTokenCipher } from '@x/core/dist/apps/github-auth.js';
 
 // Headless rowboat-server: the RFC's end-state entrypoint, where main spawns
 // this as a child process (or it runs on a remote box) and core lives here.
@@ -68,6 +72,15 @@ async function main(): Promise<void> {
     },
     focusClient: () => broker.broadcast('focus-client', {}),
   });
+  // OAuth loopback listeners are hosted by the loopback-capable client (the
+  // machine whose browser gets the redirect); falls back to local binds when
+  // none is connected (Phase 8b).
+  installLoopbackRelay(broker);
+  // Token-at-rest encryption: no OS keychain here — a workdir key file
+  // (cipher-key, 0600) backs AES-256-GCM for the github/chatgpt token stores.
+  const cipher = await createFileCipher(WorkDir);
+  setChatGPTTokenCipher(cipher);
+  setGithubTokenCipher(cipher);
 
   await prepareCoreData();
   const sessions = container.resolve<ISessions>('sessions');

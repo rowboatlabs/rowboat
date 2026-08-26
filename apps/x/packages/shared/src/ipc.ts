@@ -3418,6 +3418,20 @@ export const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  // OAuth loopback relay (Phase 8b): a loopback-capable client hosting the
+  // 127.0.0.1 callback listener for a remote server ships each callback hit
+  // here; the response says which page to render in the browser tab. Called
+  // by the client's relay listener, never by the renderer.
+  'oauth:deliverLoopbackCallback': {
+    req: z.object({
+      bindingId: z.string(),
+      url: z.string(),
+    }),
+    res: z.object({
+      accepted: z.boolean(),
+      message: z.string().optional(),
+    }),
+  },
 } as const;
 
 // ============================================================================

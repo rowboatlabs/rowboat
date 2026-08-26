@@ -260,6 +260,9 @@ export const RPC_CHANNELS = [
   'terminal:input',
   'terminal:resize',
   'terminal:dispose',
+
+  // Phase 8b: the loopback-capable client relays OAuth callback hits here.
+  'oauth:deliverLoopbackCallback',
 ] as const satisfies readonly ipc.InvokeChannels[];
 
 export type RpcChannel = (typeof RPC_CHANNELS)[number];

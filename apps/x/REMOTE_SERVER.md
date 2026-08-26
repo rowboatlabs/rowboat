@@ -94,16 +94,19 @@ box (same schema as the desktop writes). Easiest bootstrap: copy your local
 `~/.rowboat/config/models.json` to the box once — or edit models in the
 desktop settings UI while connected remotely; the writes land on the server.
 
-## Known gaps (Phase 8b)
+## Security model (Phase 8b)
 
-- **Token encryption at rest**: headless has no OS keychain — connector
-  tokens fall back to plaintext files in `~/.rowboat`. Mitigate with disk
-  encryption + locked-down box until the file-key cipher lands.
-- **OAuth connect flows**: the loopback redirect lands on the *server's*
-  localhost. Connecting a new provider remotely needs the claim flow (8b);
-  until then, connect providers while running locally, or complete the OAuth
-  redirect in a browser on the server (e.g. via SSH port-forward:
-  `ssh -L <port>:127.0.0.1:<port>` during the flow).
-- **Security model**: bearer token over plain HTTP inside the tailnet.
-  Tailscale encrypts on the wire (WireGuard); do not run this over untrusted
-  networks without it (or a TLS reverse proxy).
+- **Token encryption at rest**: the headless server has no OS keychain, so
+  GitHub/ChatGPT tokens are encrypted with AES-256-GCM under a random key at
+  `~/.rowboat/cipher-key` (0600). Key and data sit on the same disk — an
+  attacker with full workdir access gets both; keep the box locked down and
+  the disk encrypted. Tokens stored earlier by the Electron app (keychain-
+  encrypted) can't be read here — sign in again on the remote server.
+- **OAuth connect flows** work remotely: the server asks the connected
+  desktop (over the WS reverse-call channel) to host the `127.0.0.1`
+  callback listener, so the browser redirect lands on *your* machine and is
+  relayed back to the server. No SSH port-forwarding needed. With no desktop
+  connected, flows fall back to a listener on the server itself.
+- **Transport**: bearer token over plain HTTP inside the tailnet. Tailscale
+  encrypts on the wire (WireGuard); do not run this over untrusted networks
+  without it (or a TLS reverse proxy).

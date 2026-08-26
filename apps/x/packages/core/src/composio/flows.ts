@@ -1,6 +1,6 @@
 import { openExternalUrl } from '../auth/url-opener.js';
 import { composioConnectBus } from '../auth/connector-events.js';
-import { createAuthServer } from '../auth/loopback-server.js';
+import { openLoopback } from '../auth/loopback-server.js';
 import * as composioClient from '../composio/client.js';
 import { composioAccountsRepo } from '../composio/repo.js';
 import { invalidateCopilotInstructionsCache } from '../runtime/assembly/copilot/instructions.js';
@@ -16,7 +16,7 @@ const activeFlows = new Map<string, {
     toolkitSlug: string;
     connectedAccountId: string;
     authConfigId: string;
-    server: import('http').Server;
+    server: import('../auth/loopback-server.js').LoopbackHandle;
     timeout: NodeJS.Timeout;
 }>();
 
@@ -145,7 +145,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         // Set up callback server
         const timeoutRef: { current: NodeJS.Timeout | null } = { current: null };
         let callbackHandled = false;
-        const { server } = await createAuthServer(8081, async () => {
+        const server = await openLoopback(8081, async () => {
             // Guard against duplicate callbacks (browser may send multiple requests)
             if (callbackHandled) return;
             callbackHandled = true;
