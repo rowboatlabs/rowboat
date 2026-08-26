@@ -193,7 +193,10 @@ export function refreshSpaceFeed(orgId: string, spaceId: string): Promise<void> 
     const promise = (async () => {
         try {
             const [topicsRes, historyRes] = await Promise.all([
-                window.ipc.invoke('spaces:listTopics', { orgId, spaceId }),
+                // Archived topics ride along: the rail's Archived tab and the
+                // thread chip under a parent message both need them; every
+                // other consumer filters on t.archived itself.
+                window.ipc.invoke('spaces:listTopics', { orgId, spaceId, includeArchived: true }),
                 window.ipc.invoke('spaces:assetHistory', { orgId, spaceId, limit: 60 }),
             ])
             const next = new Map(feedState)
