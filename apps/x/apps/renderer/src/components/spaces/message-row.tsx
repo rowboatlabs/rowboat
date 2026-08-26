@@ -135,6 +135,7 @@ const MESSAGE_PROSE = 'text-sm leading-relaxed [&_p]:my-0.5 [&_h1]:text-base [&_
 
 export interface ThreadRowData {
     topicId: string
+    archived: boolean
     replyCount: number
     lastActivityAt: string
     unreadCount: number
@@ -293,7 +294,10 @@ function MessageRowImpl({
                     <button
                         type="button"
                         onClick={() => onOpenThread(thread.topicId)}
-                        className="group/thread mt-1.5 flex w-full max-w-2xl items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-left text-xs transition-colors hover:border-foreground/30 hover:bg-accent/40"
+                        className={cn(
+                            'group/thread mt-1.5 flex w-full max-w-2xl items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-left text-xs transition-colors hover:border-foreground/30 hover:bg-accent/40',
+                            thread.archived && 'opacity-60',
+                        )}
                     >
                         <MessageSquare className="size-3 text-muted-foreground" />
                         {thread.title && <span className="max-w-48 truncate font-semibold">{thread.title}</span>}
@@ -302,6 +306,7 @@ function MessageRowImpl({
                         </span>
                         {thread.unreadCount > 0 && <span className="font-semibold text-orange-600">{thread.unreadCount} new</span>}
                         <span title={formatFullTimestamp(thread.lastActivityAt)} className="text-muted-foreground">{formatFeedTime(thread.lastActivityAt)}</span>
+                        {thread.archived && <span className="text-muted-foreground">archived</span>}
                         {thread.workingAgents.length > 0 && (
                             <span className="inline-flex items-center gap-1 text-muted-foreground">
                                 <Bot className="size-3" />

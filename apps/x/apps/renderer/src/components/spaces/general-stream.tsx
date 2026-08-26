@@ -188,13 +188,16 @@ export function GeneralStream({
         const topic = topicsById.get(topicId)
         if (!topic) return null
         const mark = getTopicLastReadAt(org.id, space.id, topicId)
-        const hasNew = !mark || topic.lastActivityAt > mark
+        // Archived threads never read as unread — consistent with the rail
+        // badge and countSpaceUnread, which both skip archived topics.
+        const hasNew = !topic.archived && (!mark || topic.lastActivityAt > mark)
         // A renamed thread shows its name on the chip; auto-titled ones stay
         // compact. Without the seed prefetch the parent message stands in —
         // the seed's first line IS the parent's, so the comparison holds.
         const named = explicitTitle(topic, threads.byTopic.get(topicId)?.firstMessage?.body ?? message.body)
         return {
             topicId,
+            archived: topic.archived,
             replyCount: Math.max(0, topic.messageCount - 1),
             lastActivityAt: topic.lastActivityAt,
             // Count isn't known without the thread's messages; 1 reads as "has new" on the row.
