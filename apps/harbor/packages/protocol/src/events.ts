@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Membership, Message, MessageDeletion, Reaction, Topic } from './core.js';
+import { Label, Membership, Message, MessageDeletion, MessageLabel, Reaction, Topic } from './core.js';
 import { MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
@@ -36,6 +36,14 @@ export const SpaceEvent = z.discriminatedUnion('type', [
     type: z.literal('message_deleted'),
     deletion: MessageDeletion,
   }),
+  /** Emitted on create and on any update (rename, archive, unarchive); carries the full label. */
+  z.object({ type: z.literal('label'), label: Label }),
+  /**
+   * A label set on (or cleared from — labelId null) a message. Setting what
+   * is already set / clearing what isn't is an idempotent no-op and emits
+   * nothing, like reaction toggles.
+   */
+  z.object({ type: z.literal('message_label'), assignment: MessageLabel }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 

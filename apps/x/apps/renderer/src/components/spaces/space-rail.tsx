@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessagesSquare, MoreHorizontal, Pencil, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Folder, FolderPlus, MessagesSquare, MoreHorizontal, Pencil, Pin, Plus, Search, Tag, Trash2, Upload } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -8,30 +8,29 @@ import {
 import { toast } from '@/lib/toast'
 import { FileTree } from '@/components/spaces/files-tab'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
-import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
-import { useMemberNames } from '@/components/spaces/member-text'
-import { explicitTitle, isGeneralSeedMessage, stripThreadMarker, threadRefOf } from '@/lib/spaces-conventions'
-import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
+import type { GeneralState, SpacePresence } from '@/hooks/use-space-chat'
+import { isGeneralSeedMessage } from '@/lib/spaces-conventions'
+import { formatFeedTime } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt } from '@/lib/spaces-read-state'
 import type { RailSelection } from '@/lib/spaces-selection'
 
 // The space's edge rail: one collapsible strip carrying the same sidebar on
-// every surface — Messages + topics on top, the file tree below. Collapsed it
-// is a 28px edge; it pushes open to 280px on hover (never floats over
-// content), peeks briefly to teach the gesture, and can be pinned. The
-// surfaces own everything else.
+// every surface — Messages + Topics on top, the file tree below. Topics here
+// are the explicit labels members created (threads stay in the stream, on
+// their reply chips — never listed here). Collapsed it is a 28px edge; it
+// pushes open to 280px on hover (never floats over content), peeks briefly
+// to teach the gesture, and can be pinned. The surfaces own everything else.
 
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    orgId, spaceId, selfMemberId, general, labels, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, pinned, hint, onHoverChange, onTogglePin,
 }: {
     orgId: string
     spaceId: string
     selfMemberId: string
     general: GeneralState
-    topics: spaces.Topic[]
-    threads: ThreadIndex
-    changeSets: spaces.ChangeSet[]
+    /** Explicit topics (labels on the wire), listed here; threads are not. */
+    labels: spaces.LabelListing[]
     entries: spaces.SpacesAssetEntry[]
     /** Local-only empty folders — see SpacePane. */
     draftFolders: readonly string[]
@@ -53,25 +52,36 @@ export function SpaceRail({
     onTogglePin: () => void
 }) {
     const [query, setQuery] = useState('')
-    const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all')
+    const [filter, setFilter] = useState<'all' | 'archived'>('all')
     const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
     const [creatingFolder, setCreatingFolder] = useState(false)
+    const [creatingLabel, setCreatingLabel] = useState(false)
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
-    // Row-level topic actions. Rename edits inline in the row; the topic event
-    // the server emits updates every other client, the refresh updates this one.
-    const [renaming, setRenaming] = useState<{ topicId: string; value: string } | null>(null)
-    const manageTopic = async (topicId: string, action: spaces.SpacesManageTopicAction) => {
+    // Row-level topic (label) actions. Rename edits inline in the row; the
+    // label event the org emits updates every other client, the refresh this one.
+    const [renaming, setRenaming] = useState<{ labelId: string; value: string } | null>(null)
+    const manageLabel = async (labelId: string, action: spaces.SpacesManageLabelAction) => {
         try {
-            await window.ipc.invoke('spaces:manageTopic', { orgId, spaceId, topicId, action })
+            await window.ipc.invoke('spaces:manageLabel', { orgId, spaceId, labelId, action })
             await refreshSpaceFeed(orgId, spaceId)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not update the topic', 'error')
         }
     }
-    const commitRename = async (topicId: string, title: string) => {
+    const commitRename = async (labelId: string, name: string) => {
         setRenaming(null)
-        await manageTopic(topicId, { action: 'retitle', title })
+        await manageLabel(labelId, { action: 'rename', name })
+    }
+    const createLabel = async (name: string) => {
+        setCreatingLabel(false)
+        try {
+            const { label } = await window.ipc.invoke('spaces:createLabel', { orgId, spaceId, name })
+            await refreshSpaceFeed(orgId, spaceId)
+            onSelect({ kind: 'label', labelId: label.id })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not create the topic', 'error')
+        }
     }
 
     const generalId = general.topic?.id ?? null
@@ -83,52 +93,17 @@ export function SpaceRail({
         return general.messages.filter((m, i) => !isGeneralSeedMessage(g, m, i) && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
     }, [general, orgId, spaceId, selfMemberId])
 
-    const artifactFiles = useMemo(() => {
-        const counts = new Map<string, Set<string>>()
-        for (const cs of changeSets) {
-            const ref = cs.topicId ?? threadRefOf(cs.reason)
-            if (!ref) continue
-            const set = counts.get(ref) ?? new Set<string>()
-            set.add(cs.assetPath)
-            counts.set(ref, set)
-        }
-        return counts
-    }, [changeSets])
-
-    const isUnread = (t: spaces.Topic) => {
-        const mark = getTopicLastReadAt(orgId, spaceId, t.id)
-        if (mark && t.lastActivityAt <= mark) return false
-        return t.messageCount > 1 || t.createdBy.memberId !== selfMemberId
-    }
-
-    const memberNames = useMemberNames()
     const q = query.trim().toLowerCase()
-    const topicRows = topics
-        .filter((t) => t.id !== generalId)
-        .filter((t) => (filter === 'archived' ? t.archived : !t.archived))
-        .filter((t) => (filter === 'unread' ? isUnread(t) : true))
-        .map((t) => {
-            const info = threads.byTopic.get(t.id)
-            // A renamed topic shows its name; an auto-titled thread keeps
-            // showing its seed text (its derived title is a noisy quote).
-            // Without the seed prefetch the PARENT message (already loaded in
-            // general) stands in — the seed's first line is the parent's.
-            const parentBody = info?.parentMessageId ? general.messages.find((m) => m.id === info.parentMessageId)?.body : undefined
-            const seedBody = info?.firstMessage ? stripThreadMarker(info.firstMessage.body) : parentBody
-            const named = explicitTitle(t, seedBody)
-            const raw = named ?? (info?.parentMessageId && seedBody ? seedBody.split('\n')[0] ?? t.title : t.title)
-            // Titles resolve before the search filter so searching a person's
-            // name finds the topics that mention them.
-            return { topic: t, title: resolveMentions(raw, memberNames) }
-        })
-        .filter((x) => (q ? x.title.toLowerCase().includes(q) : true))
-        .sort((a, b) => b.topic.lastActivityAt.localeCompare(a.topic.lastActivityAt))
+    const labelRows = labels
+        .filter((l) => (filter === 'archived' ? l.archived : !l.archived))
+        .filter((l) => (q ? l.name.toLowerCase().includes(q) : true))
+        .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
 
-    const selectedTopicId = selection.kind === 'topic' ? selection.topicId : null
+    const selectedLabelId = selection.kind === 'label' ? selection.labelId : null
     const selectedPath = selection.kind === 'file' ? selection.path : null
 
-    const unreadTopics = topics.filter((t) => t.id !== generalId && !t.archived && isUnread(t)).length + (generalUnread > 0 ? 1 : 0)
-    const badge = unreadTopics + unreadPaths.size
+    // Threads left the rail, so the collapsed badge is the stream + files.
+    const badge = (generalUnread > 0 ? 1 : 0) + unreadPaths.size
 
     return (
         <aside
@@ -205,10 +180,18 @@ export function SpaceRail({
 
                         <div className="mt-3 flex items-center gap-2 px-3 pr-2">
                             <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topics</span>
-                            <span className="text-[11px] text-muted-foreground/70">{topicRows.length}</span>
+                            <span className="text-[11px] text-muted-foreground/70">{labelRows.length}</span>
                             <span className="flex-1" />
+                            <button
+                                type="button"
+                                title="New topic"
+                                onClick={() => setCreatingLabel(true)}
+                                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <Plus className="size-3.5" />
+                            </button>
                             <div className="inline-flex items-center rounded-md bg-muted p-0.5 text-[10.5px]">
-                                {(['all', 'unread', 'archived'] as const).map((f) => (
+                                {(['all', 'archived'] as const).map((f) => (
                                     <button
                                         key={f}
                                         type="button"
@@ -231,21 +214,31 @@ export function SpaceRail({
                         </label>
                         <div className="mt-1 flex-1 min-h-0 overflow-y-auto px-2 pb-2">
                             <div className="flex flex-col gap-0.5">
-                                {topicRows.map(({ topic, title }) => {
-                                    const active = topic.id === selectedTopicId
-                                    const unread = isUnread(topic)
-                                    const replies = Math.max(0, topic.messageCount - 1)
-                                    const files = artifactFiles.get(topic.id)
-                                    const working = (presence.working.get(topic.id) ?? []).length > 0
-                                    if (renaming?.topicId === topic.id) {
+                                {creatingLabel && (
+                                    <div className="rounded-md px-2 py-1.5">
+                                        <input
+                                            autoFocus
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && e.currentTarget.value.trim()) void createLabel(e.currentTarget.value.trim())
+                                                if (e.key === 'Escape') setCreatingLabel(false)
+                                            }}
+                                            onBlur={() => setCreatingLabel(false)}
+                                            className="w-full rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-[13px] leading-snug outline-none"
+                                            placeholder="Topic name"
+                                        />
+                                    </div>
+                                )}
+                                {labelRows.map((label) => {
+                                    const active = label.id === selectedLabelId
+                                    if (renaming?.labelId === label.id) {
                                         return (
-                                            <div key={topic.id} className="rounded-md px-2 py-1.5">
+                                            <div key={label.id} className="rounded-md px-2 py-1.5">
                                                 <input
                                                     autoFocus
                                                     value={renaming.value}
-                                                    onChange={(e) => setRenaming({ topicId: topic.id, value: e.target.value })}
+                                                    onChange={(e) => setRenaming({ labelId: label.id, value: e.target.value })}
                                                     onKeyDown={(e) => {
-                                                        if (e.key === 'Enter' && renaming.value.trim()) void commitRename(topic.id, renaming.value.trim())
+                                                        if (e.key === 'Enter' && renaming.value.trim()) void commitRename(label.id, renaming.value.trim())
                                                         if (e.key === 'Escape') setRenaming(null)
                                                     }}
                                                     onBlur={() => setRenaming(null)}
@@ -256,28 +249,24 @@ export function SpaceRail({
                                         )
                                     }
                                     return (
-                                        <div key={topic.id} className="group/topicrow relative">
+                                        <div key={label.id} className="group/topicrow relative">
                                             <button
                                                 type="button"
-                                                onClick={() => onSelect({ kind: 'topic', topicId: topic.id })}
+                                                onClick={() => onSelect({ kind: 'label', labelId: label.id })}
                                                 className={cn(
                                                     'flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left',
                                                     active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
-                                                    topic.archived && 'opacity-60',
+                                                    label.archived && 'opacity-60',
                                                 )}
                                             >
                                                 <div className="flex items-center gap-1.5">
-                                                    <span className={cn('flex-1 truncate text-[13px] leading-snug', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
-                                                    {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" />}
+                                                    <Tag className="size-3 shrink-0 text-muted-foreground" />
+                                                    <span className="flex-1 truncate text-[13px] font-normal leading-snug">{label.name}</span>
                                                 </div>
-                                                <div className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                                                    <span>{replies} {replies === 1 ? 'reply' : 'replies'}</span>
-                                                    <span>· {formatFeedTime(topic.lastActivityAt)}</span>
-                                                    {files && files.size > 0 && (
-                                                        <span className="inline-flex items-center gap-0.5" title={`Files changed here: ${[...files].join(', ')}`}><FileText className="size-2.5" />{files.size}</span>
-                                                    )}
-                                                    {working && <Bot className="size-2.5" aria-label="a Rowboat is working here" />}
-                                                    {topic.archived && <span>· archived</span>}
+                                                <div className="flex items-center gap-1.5 truncate pl-[18px] text-[11px] text-muted-foreground">
+                                                    <span>{label.messageCount} {label.messageCount === 1 ? 'message' : 'messages'}</span>
+                                                    <span>· {formatFeedTime(label.lastActivityAt)}</span>
+                                                    {label.archived && <span>· archived</span>}
                                                 </div>
                                             </button>
                                             <DropdownMenu>
@@ -291,15 +280,15 @@ export function SpaceRail({
                                                     </button>
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align="end">
-                                                    <DropdownMenuItem onClick={() => setRenaming({ topicId: topic.id, value: title })}>
+                                                    <DropdownMenuItem onClick={() => setRenaming({ labelId: label.id, value: label.name })}>
                                                         <Pencil className="size-3.5 mr-2" /> Rename
                                                     </DropdownMenuItem>
-                                                    {topic.archived ? (
-                                                        <DropdownMenuItem onClick={() => void manageTopic(topic.id, { action: 'unarchive' })}>
+                                                    {label.archived ? (
+                                                        <DropdownMenuItem onClick={() => void manageLabel(label.id, { action: 'unarchive' })}>
                                                             <ArchiveRestore className="size-3.5 mr-2" /> Unarchive
                                                         </DropdownMenuItem>
                                                     ) : (
-                                                        <DropdownMenuItem onClick={() => void manageTopic(topic.id, { action: 'archive' })}>
+                                                        <DropdownMenuItem onClick={() => void manageLabel(label.id, { action: 'archive' })}>
                                                             <Archive className="size-3.5 mr-2" /> Archive
                                                         </DropdownMenuItem>
                                                     )}
@@ -308,9 +297,9 @@ export function SpaceRail({
                                         </div>
                                     )
                                 })}
-                                {topicRows.length === 0 && (
+                                {labelRows.length === 0 && !creatingLabel && (
                                     <div className="px-2 py-2 text-xs text-muted-foreground">
-                                        {q ? 'No topics match.' : filter === 'unread' ? 'Nothing unread.' : filter === 'archived' ? 'No archived topics.' : 'No topics yet — reply to a message to start one.'}
+                                        {q ? 'No topics match.' : filter === 'archived' ? 'No archived topics.' : 'No topics yet — add one to a message in the stream, or create one here.'}
                                     </div>
                                 )}
                             </div>

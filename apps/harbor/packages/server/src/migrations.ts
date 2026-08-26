@@ -294,6 +294,28 @@ export const MIGRATIONS: Migration[] = [
       `alter table space_blobs add column if not exists height int`,
     ],
   },
+  {
+    id: '010-labels',
+    statements: [
+      // Labels ("topics" in the UI): explicit member-created groupings, one
+      // per message, assignment on the messages row. `created_by` mirrors the
+      // jsonb Attribution pattern. Live names are unique per space (case-
+      // insensitive) — archiving frees the name; unarchiving into a taken
+      // name is refused in the service, this index is the belt.
+      `create table if not exists labels (
+        id text primary key,
+        space_id text not null,
+        name text not null,
+        created_by jsonb not null,
+        created_at text not null,
+        archived boolean not null
+      )`,
+      `create index if not exists labels_space on labels (space_id)`,
+      `create unique index if not exists labels_live_name on labels (space_id, lower(name)) where archived = false`,
+      `alter table messages add column if not exists label_id text`,
+      `create index if not exists messages_label on messages (space_id, label_id) where label_id is not null`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

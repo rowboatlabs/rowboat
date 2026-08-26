@@ -8,8 +8,11 @@ import type {
   RestoreAssetResult,
   ConflictRegion,
   CreateInviteResult,
+  Label,
+  LabelListing,
   Member,
   Message,
+  MessageLabel,
   ProposeChangeResult,
   Reaction,
   ReactionGroup,
@@ -37,8 +40,11 @@ export type {
   RestoreAssetResult,
   ConflictRegion,
   CreateInviteResult,
+  Label,
+  LabelListing,
   Member,
   Message,
+  MessageLabel,
   ProposeChangeResult,
   Reaction,
   ReactionGroup,
@@ -91,6 +97,18 @@ export type SpacesManageTopicAction =
   | { action: 'archive' }
   | { action: 'unarchive' }
   | { action: 'merge_into'; targetTopicId: string };
+
+export type SpacesManageLabelAction =
+  | { action: 'rename'; name: string }
+  | { action: 'archive' }
+  | { action: 'unarchive' };
+
+/** listLabelMessages result — a label's tagged messages, windowed like listMessages. */
+export interface SpacesLabelMessages {
+  label: Label;
+  messages: Message[];
+  hasMore: boolean;
+}
 
 /**
  * What the renderer may propose. actingMode is deliberately absent: everything

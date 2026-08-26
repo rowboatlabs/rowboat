@@ -15,6 +15,9 @@ export type TopicId = z.infer<typeof TopicId>;
 export const MessageId = Ulid;
 export type MessageId = z.infer<typeof MessageId>;
 
+export const LabelId = Ulid;
+export type LabelId = z.infer<typeof LabelId>;
+
 export const ChangeSetId = Ulid;
 export type ChangeSetId = z.infer<typeof ChangeSetId>;
 

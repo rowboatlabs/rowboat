@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   BlobInfo,
   ChangeSet,
+  Label,
   Member,
   Membership,
   Message,
@@ -113,6 +114,7 @@ interface MessageRow {
   body: string;
   posted_at: string;
   deleted_at: string | null;
+  label_id: string | null;
   stream_offset: number;
 }
 
@@ -126,8 +128,29 @@ function rowToMessage(r: MessageRow): Message {
     postedAt: r.posted_at,
     offset: r.stream_offset,
     ...(r.deleted_at !== null ? { deletedAt: r.deleted_at } : {}),
+    ...(r.label_id !== null ? { labelId: r.label_id } : {}),
     // Live reaction state is folded in by the service on reads; rows carry none.
     reactions: [],
+  };
+}
+
+interface LabelRow {
+  id: string;
+  space_id: string;
+  name: string;
+  created_by: Label['createdBy'];
+  created_at: string;
+  archived: boolean;
+}
+
+function rowToLabel(r: LabelRow): Label {
+  return {
+    id: r.id,
+    spaceId: r.space_id,
+    name: r.name,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    archived: r.archived,
   };
 }
 
@@ -615,6 +638,85 @@ export class PgStore implements Store {
       [spaceId, fromTopicId, toTopicId],
     );
     return rows.length;
+  }
+
+  // --- labels ----------------------------------------------------------------
+
+  async getLabel(spaceId: string, labelId: string): Promise<Label | undefined> {
+    const rows = await this.sql.query<LabelRow>('select * from labels where space_id = $1 and id = $2', [
+      spaceId,
+      labelId,
+    ]);
+    return rows[0] ? rowToLabel(rows[0]) : undefined;
+  }
+
+  async getLiveLabelByName(spaceId: string, name: string): Promise<Label | undefined> {
+    const rows = await this.sql.query<LabelRow>(
+      'select * from labels where space_id = $1 and archived = false and lower(name) = lower($2)',
+      [spaceId, name.trim()],
+    );
+    return rows[0] ? rowToLabel(rows[0]) : undefined;
+  }
+
+  async putLabel(label: Label): Promise<void> {
+    await this.sql.query(
+      `insert into labels (id, space_id, name, created_by, created_at, archived)
+       values ($1, $2, $3, $4::jsonb, $5, $6)
+       on conflict (id) do update set name = excluded.name, archived = excluded.archived`,
+      [label.id, label.spaceId, label.name, JSON.stringify(label.createdBy), label.createdAt, label.archived],
+    );
+  }
+
+  async listLabels(spaceId: string, includeArchived: boolean): Promise<Label[]> {
+    const rows = await this.sql.query<LabelRow>(
+      `select * from labels where space_id = $1 ${includeArchived ? '' : 'and archived = false'}
+       order by created_at, id`,
+      [spaceId],
+    );
+    return rows.map(rowToLabel);
+  }
+
+  async labelStats(spaceId: string): Promise<Map<string, { messageCount: number; lastActivityAt: string }>> {
+    // Activity = the tagged message's post, or its anchored thread's
+    // lastActivityAt when that is newer (threads inherit their anchor's label).
+    const rows = await this.sql.query<{ label_id: string; message_count: number; last_activity_at: string }>(
+      `select m.label_id, count(*)::int as message_count,
+              max(greatest(m.posted_at, coalesce(t.last_activity_at, m.posted_at))) as last_activity_at
+       from messages m
+       left join topics t on t.space_id = m.space_id and t.anchor_message_id = m.id
+       where m.space_id = $1 and m.label_id is not null and m.deleted_at is null
+       group by m.label_id`,
+      [spaceId],
+    );
+    return new Map(rows.map((r) => [r.label_id, { messageCount: r.message_count, lastActivityAt: r.last_activity_at }]));
+  }
+
+  async setMessageLabel(spaceId: string, messageId: string, labelId: string | null): Promise<void> {
+    await this.sql.query('update messages set label_id = $3 where space_id = $1 and id = $2', [
+      spaceId,
+      messageId,
+      labelId,
+    ]);
+  }
+
+  async listMessagesByLabel(
+    spaceId: string,
+    labelId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<Message[]> {
+    const params: unknown[] = [spaceId, labelId];
+    let where = 'space_id = $1 and label_id = $2';
+    if (opts?.beforeOffset !== undefined) {
+      params.push(opts.beforeOffset);
+      where += ` and stream_offset < $${params.length}`;
+    }
+    let sql = `select * from messages where ${where} order by stream_offset`;
+    if (opts?.limit !== undefined) {
+      params.push(opts.limit);
+      sql = `select * from (select * from messages where ${where} order by stream_offset desc limit $${params.length}) w order by stream_offset`;
+    }
+    const rows = await this.sql.query<MessageRow>(sql, params);
+    return rows.map(rowToMessage);
   }
 
   // --- reactions -------------------------------------------------------------

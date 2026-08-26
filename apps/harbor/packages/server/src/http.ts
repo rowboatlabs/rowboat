@@ -350,5 +350,47 @@ export function buildHttpApp(deps: {
     return reply(c, routes.manageTopic.response, { topic });
   });
 
+  // --- labels ("topics" in the UI) -------------------------------------------
+
+  app.get('/v1/spaces/:spaceId/labels', async (c) => {
+    const { spaceId } = parseWith(routes.listLabels.params, c.req.param());
+    // Same presence-means-true note as listTopics' includeArchived.
+    const q = parseWith(routes.listLabels.query, {
+      ...(c.req.query('includeArchived') !== undefined ? { includeArchived: c.req.query('includeArchived') } : {}),
+    });
+    const labels = await service.listLabels(actor(c), spaceId, q.includeArchived ?? false);
+    return reply(c, routes.listLabels.response, { labels });
+  });
+
+  app.post('/v1/spaces/:spaceId/labels', async (c) => {
+    const { spaceId } = parseWith(routes.createLabel.params, c.req.param());
+    const input = await body(c, routes.createLabel.request);
+    const label = await service.createLabel(actor(c), spaceId, input);
+    return reply(c, routes.createLabel.response, { label });
+  });
+
+  app.post('/v1/spaces/:spaceId/labels/:labelId', async (c) => {
+    const { spaceId, labelId } = parseWith(routes.manageLabel.params, c.req.param());
+    const input = await body(c, routes.manageLabel.request);
+    const label = await service.manageLabel(actor(c), spaceId, labelId, input);
+    return reply(c, routes.manageLabel.response, { label });
+  });
+
+  app.post('/v1/spaces/:spaceId/messages/:messageId/label', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.setMessageLabel.params, c.req.param());
+    const input = await body(c, routes.setMessageLabel.request);
+    const message = await service.setMessageLabel(actor(c), spaceId, messageId, input);
+    return reply(c, routes.setMessageLabel.response, { message });
+  });
+
+  app.get('/v1/spaces/:spaceId/labels/:labelId/messages', async (c) => {
+    const { spaceId, labelId } = parseWith(routes.listLabelMessages.params, c.req.param());
+    const q = parseWith(routes.listLabelMessages.query, {
+      ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.listLabelMessages.response, await service.listLabelMessages(actor(c), spaceId, labelId, q));
+  });
+
   return app;
 }

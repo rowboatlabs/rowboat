@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { AddOrgDialog, AvatarStack, MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
+import { LabelPane } from '@/components/spaces/label-pane'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { DraftThreadPane, ThreadPane } from '@/components/spaces/thread-pane'
@@ -325,7 +326,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
         analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : 'topics')
         setRailHover(false)
         setRailPeek(false)
-        if ((next.kind === 'topic' || next.kind === 'draft') && mode === 'read') setMode('split')
+        if ((next.kind === 'topic' || next.kind === 'draft' || next.kind === 'label') && mode === 'read') setMode('split')
         else if (next.kind === 'general' && mode === 'read') setMode('talk')
         else if (next.kind === 'file') {
             // A file opened while talking keeps the conversation beside it:
@@ -401,7 +402,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     // last chat selection sticks until the user picks another.
     const chatContextRef = useRef<string | null>(null)
     if (selection.kind === 'topic') chatContextRef.current = selection.topicId
-    else if (selection.kind === 'general' || selection.kind === 'draft') chatContextRef.current = null
+    else if (selection.kind === 'general' || selection.kind === 'draft' || selection.kind === 'label') chatContextRef.current = null
     else if (selection.kind === 'file' && selection.fromTopicId) chatContextRef.current = selection.fromTopicId
     const chatTopicId = chatContextRef.current
 
@@ -441,7 +442,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
         ? crumbInfo?.parentMessageId && crumbInfo.firstMessage
             ? stripThreadMarker(crumbInfo.firstMessage.body).split('\n')[0] ?? crumbTopic.title
             : crumbTopic.title
-        : crumbTopicId ? 'Back to topic' : null
+        : crumbTopicId ? 'Back to thread' : null
     const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames)
 
     // Files picked (rail Upload button) or dropped on the tree, awaiting the
@@ -555,9 +556,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     spaceId={space.id}
                     selfMemberId={org.memberId}
                     general={general}
-                    topics={feed.topics}
-                    threads={threads}
-                    changeSets={feed.changeSets}
+                    labels={feed.labels}
                     entries={entries}
                     draftFolders={draftFolders}
                     presence={presence}
@@ -579,7 +578,23 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     the document; Split shows both around a draggable divider. */}
                 {effMode !== 'read' && (
                     <div className="flex-1 min-w-0 min-h-0 flex">
-                        {draftParent ? (
+                        {selection.kind === 'label' ? (
+                            <LabelPane
+                                key={selection.labelId}
+                                org={org}
+                                space={space}
+                                labelId={selection.labelId}
+                                labels={feed.labels}
+                                threads={threads}
+                                topics={feed.topics}
+                                presence={presence}
+                                memberNames={memberNames}
+                                refreshTick={refreshTick}
+                                onBack={() => select({ kind: 'general' })}
+                                onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
+                                onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
+                            />
+                        ) : draftParent ? (
                             <section className="flex-1 min-w-0 min-h-0 flex flex-col">
                                 <DraftThreadPane
                                     key={draftParent.id}
@@ -625,12 +640,14 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                                 general={general}
                                 threads={threads}
                                 topics={feed.topics}
+                                labels={feed.labels}
                                 presence={presence}
                                 members={members}
                                 memberNames={memberNames}
                                 entries={entries}
                                 onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
                                 onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
+                                onOpenLabel={(id) => select({ kind: 'label', labelId: id })}
                                 onOpenSession={onOpenSession}
                             />
                         )}

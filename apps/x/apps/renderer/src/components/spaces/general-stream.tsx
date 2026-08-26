@@ -9,7 +9,7 @@ import {
     buildPendingMessage, failPendingGeneralMessage, ingestGeneralMessage, loadOlderGeneralMessages,
     removeGeneralMessage, resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
-import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { refreshSpaceFeed, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
@@ -19,7 +19,8 @@ import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 
 // Messages — the space's open stream. What people say, in order; a message
-// that gets replies becomes a topic (shown as a row under it here).
+// that gets replies grows a thread (shown as a row under it here), and a
+// message given a topic groups under it in the rail (the label chip).
 
 /** Scroll position per space, so coming back (a topic, a file, the top ‹ ›) lands where you were. */
 const scrollMemory = new Map<string, number>()
@@ -28,13 +29,15 @@ const scrollMemory = new Map<string, number>()
 const RENDER_CAP = 100
 
 export function GeneralStream({
-    org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onStartThread, onOpenSession,
+    org, space, general, threads, topics, labels, presence, members, memberNames, entries = [], onOpenThread, onStartThread, onOpenLabel, onOpenSession,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
     general: GeneralState
     threads: ThreadIndex
     topics: spaces.Topic[]
+    /** Explicit topics (labels on the wire) — the picker's options and the chips' names. */
+    labels: spaces.LabelListing[]
     presence: SpacePresence
     members: spaces.Member[]
     memberNames: Map<string, string>
@@ -43,6 +46,8 @@ export function GeneralStream({
     onOpenThread: (topicId: string) => void
     /** Reply on a message with no thread yet — open a draft pane (no topic until first send). */
     onStartThread: (parent: spaces.Message) => void
+    /** Open a topic's grouped view (the rail's Topics). */
+    onOpenLabel: (labelId: string) => void
     onOpenSession?: (sessionId: string) => void
 }) {
     const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null)
@@ -102,6 +107,39 @@ export function GeneralStream({
     }, [memoryKey])
 
     const topicsById = useMemo(() => new Map(topics.map((t) => [t.id, t])), [topics])
+    const labelsById = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
+    const labelChipFor = (message: spaces.Message) => {
+        if (!message.labelId) return null
+        const l = labelsById.get(message.labelId)
+        return l ? { id: l.id, name: l.name } : null
+    }
+
+    // The topic gesture: set/clear rides the message (the org validates), a
+    // new name is get-or-create on the org so concurrent typers converge.
+    const setLabel = async (message: spaces.Message, labelId: string | null) => {
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:setMessageLabel', {
+                orgId: org.id, spaceId: space.id, messageId: message.id, labelId,
+            })
+            updateGeneralMessage(org.id, space.id, updated)
+            await refreshSpaceFeed(org.id, space.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not set the topic', 'error')
+        }
+    }
+    const createLabelAndSet = async (message: spaces.Message, name: string) => {
+        try {
+            const { label } = await window.ipc.invoke('spaces:createLabel', { orgId: org.id, spaceId: space.id, name })
+            await setLabel(message, label.id)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not create the topic', 'error')
+        }
+    }
+    const labeling = {
+        options: labels.filter((l) => !l.archived).map((l) => ({ id: l.id, name: l.name })),
+        onSet: (message: spaces.Message, labelId: string | null) => void setLabel(message, labelId),
+        onCreate: (message: spaces.Message, name: string) => void createLabelAndSet(message, name),
+    }
 
     const threadRowFor = (message: spaces.Message): ThreadRowData | null => {
         const topicId = threads.byParent.get(message.id)
@@ -329,6 +367,9 @@ export function GeneralStream({
                 memberNames={memberNames}
                 continuation={isContinuation(prev, message)}
                 thread={thread}
+                label={labelChipFor(message)}
+                onOpenLabel={onOpenLabel}
+                labeling={labeling}
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
                 onReplyInThread={replyInThread}
@@ -349,7 +390,7 @@ export function GeneralStream({
         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
             <div className="flex items-center gap-2.5 px-5 h-9 shrink-0">
                 <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Messages</span>
-                <span className="text-xs text-muted-foreground truncate">What the team says, in order. Reply to one to start a topic.</span>
+                <span className="text-xs text-muted-foreground truncate">What the team says, in order. Reply to start a thread; add a topic to group things.</span>
                 <span className="flex-1" />
                 {general.error && <span className="text-xs text-destructive truncate" title={general.error}>messages unavailable</span>}
             </div>
