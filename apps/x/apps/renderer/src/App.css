@@ -1249,15 +1249,202 @@
   background: var(--background);
 }
 
-.rowboat-sidebar [data-sidebar="sidebar"] {
-  background: var(--sidebar);
-  border-right: 1px solid var(--sidebar-border);
+/* ---- Dock sidebar (design: "Rowboat Dock Sidebar" handoff) ---- */
+
+.rowboat-dock {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  box-sizing: border-box;
+  border-radius: 22px;
+  background: rgba(250, 250, 252, 0.6);
+  backdrop-filter: blur(28px) saturate(1.8);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  outline: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
+  overflow: visible;
 }
 
-.rowboat-sidebar [data-sidebar="header"] {
-  gap: 0.625rem;
-  border-bottom: 1px solid color-mix(in oklab, var(--sidebar-border) 76%, transparent);
-  background: var(--sidebar);
+.dark .rowboat-dock {
+  background: rgba(38, 38, 42, 0.55);
+  border-color: rgba(255, 255, 255, 0.14);
+  outline-color: rgba(0, 0, 0, 0.4);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+}
+
+.rowboat-dock-tile {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.rowboat-dock-sep {
+  width: 70%;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.14);
+  margin: 0 auto;
+}
+
+.dark .rowboat-dock-sep {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.rowboat-dock-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 8px;
+  background: #e14b41;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3.5px;
+  border: 1.5px solid #fff;
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+.rowboat-dock-expand {
+  height: 18px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: rgba(0, 0, 0, 0.4);
+  transition: color 0.15s, background 0.15s;
+}
+
+.rowboat-dock-expand:hover {
+  color: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.dark .rowboat-dock-expand {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.dark .rowboat-dock-expand:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .rowboat-dock-badge {
+  border-color: rgba(30, 30, 34, 0.9);
+}
+
+.rowboat-dock-badge-amber {
+  background: #d97706;
+}
+
+.rowboat-dock-dot {
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.dark .rowboat-dock-dot {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.rowboat-dock-tip {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(28, 28, 30, 0.88);
+  color: #fff;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  z-index: 40;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rowboat-dock-tip-status {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+}
+
+.rowboat-dock-tip-status-alert {
+  color: #ff9d94;
+}
+
+.rowboat-dock-flyout {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 296px;
+  max-height: 70%;
+  overflow: auto;
+  background: rgba(252, 252, 253, 0.82);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  padding: 12px;
+  z-index: 35;
+  animation: rowboat-dock-flyin 0.18s ease-out;
+}
+
+.dark .rowboat-dock-flyout {
+  background: rgba(34, 34, 38, 0.85);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+@keyframes rowboat-dock-flyin {
+  from {
+    opacity: 0;
+    transform: translateX(-14px) translateY(-50%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(-50%);
+  }
+}
+
+.rowboat-dock-switcher {
+  display: flex;
+  gap: 4px;
+  padding: 14px;
+  background: rgba(248, 248, 250, 0.78);
+  backdrop-filter: blur(30px) saturate(1.8);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  outline: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+}
+
+.dark .rowboat-dock-switcher {
+  background: rgba(38, 38, 42, 0.78);
+  border-color: rgba(255, 255, 255, 0.14);
+  outline-color: rgba(0, 0, 0, 0.4);
 }
 
 .rowboat-section-switcher {

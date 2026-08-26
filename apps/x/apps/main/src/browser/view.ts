@@ -417,6 +417,32 @@ export class BrowserViewManager extends EventEmitter {
     const { id: tabId, view } = tab;
     const wc = view.webContents;
 
+    // The app's ⌥/⌃+Tab section switcher must keep working while this tab
+    // holds keyboard focus — guest keystrokes never reach the app renderer's
+    // listeners. Intercept the chord before the page can consume Tab and
+    // forward it to the app window (the dock's switcher listens for these).
+    wc.on('before-input-event', (event, input) => {
+      const host = this.window?.webContents;
+      if (!host || host.isDestroyed()) return;
+      const isCycleKey = input.key === 'Tab' || input.code === 'Backquote';
+      const modifier = input.alt || input.control;
+      const payload = {
+        key: input.key,
+        code: input.code ?? '',
+        alt: !!input.alt,
+        control: !!input.control,
+        shift: !!input.shift,
+      };
+      if (input.type === 'keyDown' && modifier && isCycleKey) {
+        event.preventDefault();
+        host.send('shortcuts:switcherKey', { type: 'keyDown', ...payload });
+      } else if (input.type === 'keyUp' && (input.key === 'Alt' || input.key === 'Control')) {
+        host.send('shortcuts:switcherKey', { type: 'keyUp', ...payload });
+      } else if (input.type === 'keyDown' && input.key === 'Escape') {
+        host.send('shortcuts:switcherKey', { type: 'keyDown', ...payload });
+      }
+    });
+
     const reapplyBounds = () => {
       if (
         this.attachedTabId === tabId &&
