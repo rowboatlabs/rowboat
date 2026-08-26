@@ -9,7 +9,8 @@ import { pgliteDb } from './pglite.js';
 // runner implicitly via PgStore.init().
 
 describe('schema migrations', () => {
-  it('applies all migrations to a fresh database and records them', async () => {
+  // The full ladder on PGlite takes seconds; the default 5s got too snug.
+  it('applies all migrations to a fresh database and records them', { timeout: 20_000 }, async () => {
     const db = await pgliteDb();
     await migrate(db);
     const applied = await db.query<{ id: string }>('select id from schema_migrations order by id');

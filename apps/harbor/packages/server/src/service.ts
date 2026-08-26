@@ -75,6 +75,7 @@ type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
+type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 
 export interface OrgInfo {
   name: string;
@@ -974,6 +975,51 @@ export class HarborService {
         deletion: { spaceId, topicId: message.topicId, messageId, by, at },
       });
       return withReactions({ ...message, body: '', deletedAt: at });
+    });
+  }
+
+  /**
+   * Author-only body rewrite (spec §4 posture shared with deletion: the
+   * content plane is role-flat, so editor == author). The body is replaced
+   * everywhere it lives — message row and stored message event — and a
+   * message_edited event narrates. Tombstones refuse; an identical body is
+   * an idempotent 200 no-op with no event. Activity is not bumped.
+   */
+  async editMessage(
+    ctx: ActorCtx,
+    spaceId: string,
+    messageId: string,
+    input: EditMessageInput,
+  ): Promise<Message> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const message = await this.store.getMessage(spaceId, messageId);
+      if (!message) throw new HarborError('not_found', 'no such message');
+      if (message.author.memberId !== ctx.memberId) {
+        throw new HarborError('forbidden', 'only the author can edit a message');
+      }
+      if (message.deletedAt) throw new HarborError('invalid_request', 'cannot edit a deleted message');
+      const withReactions = async (m: Message): Promise<Message> => ({
+        ...m,
+        reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, messageId)),
+      });
+      if (message.body === input.body) return withReactions(message);
+
+      const at = this.now();
+      await this.store.markMessageEdited(spaceId, messageId, input.body, at);
+      const offset = (await this.store.head(spaceId)) + 1;
+      await this.append(spaceId, offset, at, {
+        type: 'message_edited',
+        edit: { spaceId, topicId: message.topicId, messageId, body: input.body, by, at },
+      });
+      return withReactions({ ...message, body: input.body, editedAt: at });
     });
   }
 

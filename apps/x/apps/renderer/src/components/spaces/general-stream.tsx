@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Bot, Loader2 } from 'lucide-react'
+import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ArrowDown, Bot, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { MemberName } from '@/components/spaces/member-text'
@@ -10,7 +10,7 @@ import {
     removeGeneralMessage, resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
+import { applyReaction, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -21,14 +21,14 @@ import { containsRowboatAddress } from '@/lib/spaces-mentions'
 // Messages — the space's open stream. What people say, in order; a message
 // that gets replies becomes a topic (shown as a row under it here).
 
-/** Scroll position per space, so coming back (a topic, a file, the top ‹ ›) lands where you were. */
-const scrollMemory = new Map<string, number>()
+/** The first frame renders a short tail — markdown is the paint cost; the full window follows right after. */
+const FIRST_PAINT_CAP = 16
 
-/** How many messages render at first; the data is local, so expanding is instant. */
+/** The steady-state window; the data is local, so expanding is instant. */
 const RENDER_CAP = 100
 
 export function GeneralStream({
-    org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onStartThread, onOpenSession,
+    org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onStartThread, onOpenSession, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -44,12 +44,18 @@ export function GeneralStream({
     /** Reply on a message with no thread yet — open a draft pane (no topic until first send). */
     onStartThread: (parent: spaces.Message) => void
     onOpenSession?: (sessionId: string) => void
+    /**
+     * The keep-alive flag: the stream stays MOUNTED while a topic, a file, or
+     * another app section covers it, and this goes false. Hidden means no
+     * presence lease, no read marks — the reader isn't actually looking.
+     */
+    visible?: boolean
 }) {
     const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const generalId = general.topic?.id ?? null
-    const { onType } = usePresenceSender(org.id, space.id, generalId ?? undefined)
+    const { onType } = usePresenceSender(org.id, space.id, generalId ?? undefined, visible)
 
     // Agents invoked straight from the stream hold their working lease on the
     // stream's own topic — surface it here, typing-indicator position.
@@ -65,41 +71,74 @@ export function GeneralStream({
         }
     }
 
-    // "New" divider: snapshot the read mark when general opens; mark read from then on.
+    // "New" divider: snapshot the read mark when general opens; mark read from
+    // then on — but only while actually on screen. A kept-alive hidden stream
+    // must not mark messages read as they arrive; the flip back to visible
+    // re-runs this and marks the catch-up read.
     const [newSince] = useState<string | null>(() => (generalId ? getTopicLastReadAt(org.id, space.id, generalId) : null))
     useEffect(() => {
-        if (!generalId || !general.ready) return
+        if (!visible || !generalId || !general.ready) return
         markTopicRead(org.id, space.id, generalId)
-    }, [org.id, space.id, generalId, general.ready, general.messages.length])
+    }, [org.id, space.id, generalId, general.ready, general.messages.length, visible])
 
-    // First paint: restore the remembered position (or start at the bottom).
-    // After that: keep the tail in view when new messages land, unless the
-    // reader scrolled up. Remember the position on the way out.
+    // First paint: start at the bottom — the newest messages, always. After
+    // that: keep the tail in view when new messages land, unless the reader
+    // scrolled up.
     const memoryKey = `${org.id}/${space.id}`
     const restoredRef = useRef(false)
     const lastScrollTopRef = useRef<number | null>(null)
+    // Only a scroll the READER made may turn follow-mode off. The browser
+    // fires scroll events of its own: scroll anchoring compensates when a
+    // lazy image finishes and its tile row wraps taller, and that event lands
+    // mid-stream — indistinguishable from a reader scroll by position alone.
+    // So track intent: wheel/touch stamps a time, a pointer held down (the
+    // scrollbar, a text-selection drag) counts for as long as it's down.
+    const userScrollAtRef = useRef(0)
+    const pointerDownRef = useRef(false)
+    useEffect(() => {
+        const up = () => {
+            pointerDownRef.current = false
+        }
+        window.addEventListener('pointerup', up)
+        window.addEventListener('pointercancel', up)
+        return () => {
+            window.removeEventListener('pointerup', up)
+            window.removeEventListener('pointercancel', up)
+        }
+    }, [])
     // Layout effect: the anchor lands before paint — no flash of the top.
     useLayoutEffect(() => {
         const el = scrollRef.current
         if (!el || !general.ready) return
         if (!restoredRef.current) {
             restoredRef.current = true
-            const saved = scrollMemory.get(memoryKey)
-            // A saved position is never the bottom (bottom deletes it) — mark
-            // follow-mode off NOW, before the scroll event lands, so the tail
-            // pin can't yank a restored position down meanwhile.
-            if (saved !== undefined) lastScrollTopRef.current = saved
-            el.scrollTop = saved ?? el.scrollHeight
+            el.scrollTop = el.scrollHeight
             return
         }
         const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
         if (nearBottom) bottomRef.current?.scrollIntoView({ block: 'end' })
-    }, [general.ready, general.messages.length, presence.typing, workingHere.length, memoryKey])
-    useEffect(() => {
-        return () => {
-            if (lastScrollTopRef.current !== null) scrollMemory.set(memoryKey, lastScrollTopRef.current)
-        }
-    }, [memoryKey])
+    }, [general.ready, general.messages.length, presence.typing, workingHere.length])
+    // The "jump to latest" pill: shown once the reader is meaningfully away
+    // from the tail, with a count of messages that arrived below since they
+    // left it. lastSeen tracks the newest offset that was ever on screen at
+    // the bottom (updated by the scroll events the pins fire).
+    const [awayFromBottom, setAwayFromBottom] = useState(false)
+    const lastSeenOffsetRef = useRef(-1)
+    const jumpToLatest = () => {
+        const el = scrollRef.current
+        if (el) el.scrollTop = el.scrollHeight
+    }
+    // Coming back from hidden (keep-alive): display:none dropped the scroll
+    // geometry, so put it back before paint — the remembered spot if the
+    // reader had scrolled up, else the bottom (following).
+    const wasVisibleRef = useRef(visible)
+    useLayoutEffect(() => {
+        const was = wasVisibleRef.current
+        wasVisibleRef.current = visible
+        const el = scrollRef.current
+        if (!el || !visible || was || !restoredRef.current) return
+        el.scrollTop = lastScrollTopRef.current ?? el.scrollHeight
+    }, [visible])
 
     const topicsById = useMemo(() => new Map(topics.map((t) => [t.id, t])), [topics])
 
@@ -170,9 +209,15 @@ export function GeneralStream({
     }
 
     // Toggle: add when the viewer isn't in the group yet, remove when they are.
+    // Optimistic — the chip moves the instant it's clicked; the org's answer
+    // replaces it right behind, and a failure puts the old state back.
     const toggleReaction = async (message: spaces.Message, emoji: string) => {
         const mine = (message.reactions ?? []).find((g) => g.emoji === emoji)?.memberIds.includes(org.memberId)
         const action = mine ? 'remove' : 'add'
+        updateGeneralMessage(org.id, space.id, {
+            ...message,
+            reactions: applyReaction(message.reactions, { emoji, memberId: org.memberId, action: action === 'add' ? 'added' : 'removed' }),
+        })
         try {
             const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
@@ -180,6 +225,7 @@ export function GeneralStream({
             updateGeneralMessage(org.id, space.id, updated)
             analytics.spacesReactionToggled({ action })
         } catch (err) {
+            updateGeneralMessage(org.id, space.id, message)
             toast(err instanceof Error ? err.message : 'Could not react', 'error')
         }
     }
@@ -190,6 +236,21 @@ export function GeneralStream({
             toast('Link copied', 'success')
         } catch {
             toast('Could not copy the link', 'error')
+        }
+    }
+
+    // Optimistic rewrite, same shape as reactions: the new body renders on
+    // save; the org's answer (or a failure revert) reconciles right behind.
+    const editMessage = async (message: spaces.Message, body: string) => {
+        updateGeneralMessage(org.id, space.id, { ...message, body, editedAt: new Date().toISOString() })
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:editMessage', {
+                orgId: org.id, spaceId: space.id, messageId: message.id, body,
+            })
+            updateGeneralMessage(org.id, space.id, updated)
+        } catch (err) {
+            updateGeneralMessage(org.id, space.id, message)
+            toast(err instanceof Error ? err.message : 'Could not edit', 'error')
         }
     }
 
@@ -213,8 +274,20 @@ export function GeneralStream({
         () => general.messages.filter((m, i) => !(general.topic && isGeneralSeedMessage(general.topic, m, i))),
         [general.messages, general.topic],
     )
-    const [renderCap, setRenderCap] = useState(RENDER_CAP)
-    useEffect(() => setRenderCap(RENDER_CAP), [memoryKey])
+    const [renderCap, setRenderCap] = useState(FIRST_PAINT_CAP)
+    useEffect(() => setRenderCap(FIRST_PAINT_CAP), [memoryKey])
+    // The short tail is on screen — widen to the full window right after, as
+    // a TRANSITION: React time-slices the ~70 extra markdown rows instead of
+    // blocking input for one long commit. The rows prepend above the
+    // viewport; the tail pin below keeps the bottom in view, so the reader
+    // never sees the reflow.
+    useEffect(() => {
+        if (!general.ready) return
+        const raf = requestAnimationFrame(() => {
+            startTransition(() => setRenderCap((c) => Math.max(c, RENDER_CAP)))
+        })
+        return () => cancelAnimationFrame(raf)
+    }, [general.ready, memoryKey])
     const hiddenCount = Math.max(0, streamMessages.length - renderCap)
     const visibleMessages = hiddenCount > 0 ? streamMessages.slice(hiddenCount) : streamMessages
 
@@ -336,6 +409,7 @@ export function GeneralStream({
                 onCopyLink={(m) => void copyLink(m)}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
+                onEdit={(m, body) => void editMessage(m, body)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
             />,
@@ -353,15 +427,47 @@ export function GeneralStream({
                 <span className="flex-1" />
                 {general.error && <span className="text-xs text-destructive truncate" title={general.error}>messages unavailable</span>}
             </div>
+            <div className="relative flex-1 min-h-0 flex flex-col">
             <div
                 ref={scrollRef}
                 className="flex-1 min-h-0 overflow-y-auto px-3 pb-1"
+                onWheel={() => {
+                    userScrollAtRef.current = performance.now()
+                }}
+                onTouchMove={() => {
+                    userScrollAtRef.current = performance.now()
+                }}
+                onPointerDown={() => {
+                    pointerDownRef.current = true
+                }}
                 onScroll={(e) => {
                     const el = e.currentTarget
-                    // At the bottom = "follow the tail"; remember that as "no saved position".
-                    lastScrollTopRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 8 ? null : el.scrollTop
-                    if (lastScrollTopRef.current === null) scrollMemory.delete(memoryKey)
-                    if (el.scrollTop < 80) loadEarlier()
+                    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+                    const userScroll = pointerDownRef.current || performance.now() - userScrollAtRef.current < 250
+                    setAwayFromBottom(fromBottom > 200)
+                    if (fromBottom < 8) {
+                        // At the bottom = "follow the tail" — and everything
+                        // settled so far counts as seen.
+                        for (let i = general.messages.length - 1; i >= 0; i--) {
+                            const m = general.messages[i]!
+                            if (m.pending || m.failed) continue
+                            lastSeenOffsetRef.current = Math.max(lastSeenOffsetRef.current, m.offset)
+                            break
+                        }
+                        lastScrollTopRef.current = null
+                    } else if (userScroll || lastScrollTopRef.current !== null) {
+                        lastScrollTopRef.current = el.scrollTop
+                    } else if (!pendingRestoreRef.current) {
+                        // A scroll the reader didn't make, while following the
+                        // tail — anchoring's compensation for a late layout.
+                        // Re-pin the bottom; never let it unfollow.
+                        el.scrollTop = el.scrollHeight
+                    }
+                    // No auto-backfill off the first short-tail frame: on a tall
+                    // viewport its initial bottom pin can land under the 80px
+                    // line and this would fire before the cap lifts to the full
+                    // window — wait for that lift instead.
+                    if (el.scrollTop < 80 && renderCap >= RENDER_CAP) loadEarlier()
                 }}
             >
                 {/* One measurable child — the tail pin observes its size. */}
@@ -392,9 +498,26 @@ export function GeneralStream({
                 <div ref={bottomRef} />
                 </div>
             </div>
+            {awayFromBottom && (() => {
+                const unseen = streamMessages.filter(
+                    (m) => m.offset > lastSeenOffsetRef.current && !m.pending && !m.failed && m.author.memberId !== org.memberId,
+                ).length
+                return (
+                    <button
+                        type="button"
+                        onClick={jumpToLatest}
+                        className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border border-border bg-background/95 px-3 py-1 text-xs font-medium shadow-md hover:bg-accent"
+                    >
+                        {unseen > 0 ? `${unseen} new ${unseen === 1 ? 'message' : 'messages'}` : 'Latest'}
+                        <ArrowDown className="size-3" />
+                    </button>
+                )
+            })()}
+            </div>
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
                 busy={!generalId}
+                draftKey={memoryKey}
                 onSend={post}
                 onType={onType}
                 seed={seed}

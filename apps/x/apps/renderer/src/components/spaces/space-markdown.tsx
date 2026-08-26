@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
+import { createContext, memo, useContext, useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { Streamdown } from 'streamdown'
 import { FileDown, FileText, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -314,7 +314,10 @@ function SpaceAnchor({ href, children, ...rest }: ComponentProps<'a'>) {
     )
 }
 
-export function SpaceMarkdown({ body, className }: { body: string; className?: string }) {
+// Memoized: a stream re-renders on every presence/typing frame, and markdown
+// is by far the heaviest thing in a row — same body, same refs, same names
+// (both contexts still cut through the memo) means the row's markdown stands.
+export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { body: string; className?: string }) {
     const refs = useContext(SpaceRefsContext)
     const memberNames = useMemberNames()
     const text = useMemo(() => {
@@ -329,4 +332,4 @@ export function SpaceMarkdown({ body, className }: { body: string; className?: s
             <Streamdown components={spaceComponents}>{text}</Streamdown>
         </div>
     )
-}
+})

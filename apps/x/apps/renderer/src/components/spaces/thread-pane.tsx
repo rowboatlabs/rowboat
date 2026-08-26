@@ -14,7 +14,7 @@ import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/mes
 import type { ChatMessage, SpacePresence, ThreadInfo } from '@/hooks/use-space-chat'
 import { buildPendingMessage, rememberThread, usePresenceSender } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, mergeMessages, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
+import { applyReaction, artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, mergeMessages, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
 import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
@@ -28,7 +28,7 @@ import { containsRowboatAddress } from '@/lib/spaces-mentions'
 
 export function ThreadPane({
     org, space, topicId, threadInfo, topic: topicFromList, changeSets, entries, presence, members, memberNames, refreshTick,
-    anchorChange, showBack, onBack, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding,
+    anchorChange, showBack, onBack, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -52,6 +52,8 @@ export function ThreadPane({
     onToggleArtifactsRail: () => void
     /** Lets a parent (the rail) share the fold-busy state. */
     onFolding?: (busy: boolean) => void
+    /** False while kept mounted but off screen (read mode, hidden Spaces view) — no presence, no read marks. */
+    visible?: boolean
 }) {
     const [topic, setTopic] = useState<spaces.Topic | null>(topicFromList ?? null)
     const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -63,7 +65,25 @@ export function ThreadPane({
     const oldestLoadedRef = useRef<number | null>(null)
     const [folding, setFolding] = useState(false)
     const bottomRef = useRef<HTMLDivElement | null>(null)
-    const { onType } = usePresenceSender(org.id, space.id, topicId)
+    const { onType } = usePresenceSender(org.id, space.id, topicId, visible)
+    // A ref, not an effect dep: visibility flips must not refetch the thread.
+    const visibleRef = useRef(visible)
+    visibleRef.current = visible
+
+    // Esc goes back to Messages. Not from a field (typing must keep its Esc
+    // semantics — and a drafted reply must not vanish), and not when an
+    // overlay already claimed the key (Radix prevents default on those).
+    useEffect(() => {
+        if (!visible) return
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape' || e.defaultPrevented) return
+            const t = e.target as HTMLElement | null
+            if (t?.closest('input, textarea, [contenteditable="true"], [role="dialog"], [role="menu"]')) return
+            onBack()
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [visible, onBack])
 
     const [newSince] = useState<string | null>(() => getTopicLastReadAt(org.id, space.id, topicId))
 
@@ -89,13 +109,18 @@ export function ThreadPane({
                     setHasMore(res.hasMore)
                 }
                 setLoaded(true)
-                markTopicRead(org.id, space.id, topicId)
+                if (visibleRef.current) markTopicRead(org.id, space.id, topicId)
             })
             .catch(() => {})
         return () => {
             cancelled = true
         }
     }, [org.id, space.id, topicId, refreshTick])
+    // Refetches that landed while hidden left the topic unread on purpose —
+    // becoming visible again is the moment the reader actually sees them.
+    useEffect(() => {
+        if (visible && loaded) markTopicRead(org.id, space.id, topicId)
+    }, [visible, loaded, org.id, space.id, topicId])
 
     const loadOlderReplies = async () => {
         const oldest = messages.find((m) => !m.pending && !m.failed)
@@ -187,9 +212,13 @@ export function ThreadPane({
     }
 
     // Toggle: add when the viewer isn't in the group yet, remove when they are.
+    // Optimistic like general's — the chip moves on click, the org reconciles.
     const toggleReaction = async (message: spaces.Message, emoji: string) => {
         const mine = (message.reactions ?? []).find((g) => g.emoji === emoji)?.memberIds.includes(org.memberId)
         const action = mine ? 'remove' : 'add'
+        setMessages((prev) => prev.map((m) => (
+            m.id === message.id ? { ...m, reactions: applyReaction(m.reactions, { emoji, memberId: org.memberId, action: action === 'add' ? 'added' : 'removed' }) } : m
+        )))
         try {
             const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
@@ -197,7 +226,22 @@ export function ThreadPane({
             setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
             analytics.spacesReactionToggled({ action })
         } catch (err) {
+            setMessages((prev) => prev.map((m) => (m.id === message.id ? message : m)))
             toast(err instanceof Error ? err.message : 'Could not react', 'error')
+        }
+    }
+
+    // Optimistic rewrite, mirroring general's.
+    const editMessage = async (message: spaces.Message, body: string) => {
+        setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, body, editedAt: new Date().toISOString() } : m)))
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:editMessage', {
+                orgId: org.id, spaceId: space.id, messageId: message.id, body,
+            })
+            setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+        } catch (err) {
+            setMessages((prev) => prev.map((m) => (m.id === message.id ? message : m)))
+            toast(err instanceof Error ? err.message : 'Could not edit', 'error')
         }
     }
 
@@ -265,6 +309,7 @@ export function ThreadPane({
                 selfMemberId={org.memberId}
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
+                onEdit={(m, body) => void editMessage(m, body)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
                 dense
@@ -426,7 +471,7 @@ export function ThreadPane({
                 <div ref={bottomRef} />
             </div>
 
-            <Composer placeholder="Reply…" busy={false} onSend={post} onType={onType} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />
+            <Composer placeholder="Reply…" busy={false} onSend={post} onType={onType} autoFocus members={members} entries={entries} selfMemberId={org.memberId} draftKey={`${org.id}/${space.id}/${topicId}`} />
 
         </div>
     )
@@ -515,7 +560,7 @@ export function DraftThreadPane({ org, space, parent, members, memberNames, entr
                     Nothing here yet — sending a reply is what starts the topic for everyone.
                 </div>
             </div>
-            <Composer placeholder="Reply…" busy={posting} onSend={post} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />
+            <Composer placeholder="Reply…" busy={posting} onSend={post} autoFocus members={members} entries={entries} selfMemberId={org.memberId} draftKey={`${org.id}/${space.id}/draft:${parent.id}`} />
         </div>
     )
 }

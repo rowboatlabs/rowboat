@@ -336,6 +336,13 @@ export function buildHttpApp(deps: {
     return reply(c, routes.deleteMessage.response, { message });
   });
 
+  app.post('/v1/spaces/:spaceId/messages/:messageId/edit', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.editMessage.params, c.req.param());
+    const input = await body(c, routes.editMessage.request);
+    const message = await service.editMessage(actor(c), spaceId, messageId, input);
+    return reply(c, routes.editMessage.response, { message });
+  });
+
   app.post('/v1/spaces/:spaceId/messages/:messageId/reactions', async (c) => {
     const { spaceId, messageId } = parseWith(routes.reactToMessage.params, c.req.param());
     const input = await body(c, routes.reactToMessage.request);

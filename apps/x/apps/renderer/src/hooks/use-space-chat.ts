@@ -75,7 +75,88 @@ function setGeneral(k: string, patch: Partial<GeneralState>): void {
     const next = new Map(generalState)
     next.set(k, { ...(generalState.get(k) ?? EMPTY_GENERAL), ...patch })
     generalState = next
+    persistGeneral(k)
     emitGeneral()
+}
+
+// ---------------------------------------------------------------------------
+// Cold-open cache — the tail of general, persisted per install (localStorage,
+// like the read marks). Opening a space paints the cached tail immediately;
+// the network fetch still runs and merges over it, so the paint is stale for
+// a round trip at most.
+// ---------------------------------------------------------------------------
+
+const CACHE_VERSION = 1
+/** Enough settled rows to fill the first screen well past the render cap. */
+const CACHE_TAIL = 60
+
+function cacheKey(k: string): string {
+    return `spaces:general:${k}`
+}
+
+interface GeneralCache {
+    v: number
+    topic: spaces.Topic
+    messages: spaces.Message[]
+    hasMore: boolean
+}
+
+function persistGeneral(k: string): void {
+    const state = generalState.get(k)
+    if (!state?.ready || !state.topic || state.error) return
+    const settled = state.messages.filter((m) => !m.pending && !m.failed)
+    if (settled.length === 0) return
+    const tail = settled.slice(-CACHE_TAIL)
+    const payload: GeneralCache = { v: CACHE_VERSION, topic: state.topic, messages: tail, hasMore: state.hasMore || tail.length < settled.length }
+    try {
+        window.localStorage.setItem(cacheKey(k), JSON.stringify(payload))
+    } catch {
+        // Best-effort (quota, private mode) — cold opens just fetch.
+    }
+}
+
+/** Keys painted from the cache and not yet confirmed by the org. */
+const generalCacheOnly = new Set<string>()
+
+/**
+ * Seed module state from the persisted cache. Render-safe on purpose: it
+ * swaps the snapshot WITHOUT notifying listeners, so useGeneral can call it
+ * during render and the space's very first frame already holds messages —
+ * no loading commit at all. Already-mounted subscribers catch up on the next
+ * emit (the network fetch right behind it). Idempotent once state exists.
+ */
+function hydrateGeneral(k: string): void {
+    if (generalState.has(k)) return
+    try {
+        const raw = window.localStorage.getItem(cacheKey(k))
+        if (!raw) return
+        const cached = JSON.parse(raw) as GeneralCache
+        if (cached.v !== CACHE_VERSION || !cached.topic || !Array.isArray(cached.messages)) return
+        generalCacheOnly.add(k)
+        const next = new Map(generalState)
+        next.set(k, { ...EMPTY_GENERAL, topic: cached.topic, messages: cached.messages, hasMore: cached.hasMore, ready: true })
+        generalState = next
+    } catch {
+        // A corrupt entry paints nothing; the fetch rebuilds it.
+    }
+}
+
+/**
+ * Warm a space's chat before it opens (the sidebar calls this on hover):
+ * hydrate the cached tail into module state and start the network refresh,
+ * so the click that follows finds everything already in. Never seeds — a
+ * hover must not post anything; seeding stays with the real open.
+ */
+export function prefetchGeneral(orgId: string, spaceId: string): void {
+    const k = key(orgId, spaceId)
+    hydrateGeneral(k)
+    const feed = getSpaceFeed(orgId, spaceId)
+    if (!feed.loaded) return
+    const found = findGeneralTopic(feed.topics)
+    const current = generalState.get(k)
+    if (found && (current?.topic?.id !== found.id || !current.ready || generalCacheOnly.has(k))) {
+        void loadGeneralMessages(orgId, spaceId, found)
+    }
 }
 
 async function loadGeneralMessages(orgId: string, spaceId: string, topic: spaces.Topic): Promise<void> {
@@ -95,13 +176,19 @@ async function loadGeneralMessages(orgId: string, spaceId: string, topic: spaces
             (m) => (m.pending || m.failed) && !res.messages.some((r) => r.author.memberId === m.author.memberId && r.body === m.body),
         )
         const reachesDeeper = (settled[0]?.offset ?? Infinity) < (res.messages[0]?.offset ?? Infinity)
+        generalCacheOnly.delete(k)
         setGeneral(k, {
             topic: res.topic,
             messages: [...mergeMessages(settled, res.messages), ...carried],
             hasMore: reachesDeeper && sameTopic ? prev.hasMore : res.hasMore,
             ready: true,
+            // A fresh page clears an old failure (the merge would keep it).
+            error: undefined,
         })
     } catch (err) {
+        // The attempt settled either way — a cached paint with an error badge
+        // behaves like today's error state; the reconnect resync retries.
+        generalCacheOnly.delete(k)
         setGeneral(k, { topic, ready: true, error: err instanceof Error ? err.message : String(err) })
     } finally {
         generalLoading.delete(k)
@@ -196,12 +283,15 @@ export function removeGeneralMessage(orgId: string, spaceId: string, messageId: 
 /** Find general in the feed store's topics; seed it when the space has none. */
 async function ensureGeneral(orgId: string, spaceId: string): Promise<void> {
     const k = key(orgId, spaceId)
+    // Paint the cached tail first — it needs no feed, so a cold open shows
+    // messages while topics are still on the wire.
+    hydrateGeneral(k)
     const feed = getSpaceFeed(orgId, spaceId)
     if (!feed.loaded) return
     const found = findGeneralTopic(feed.topics)
     const current = generalState.get(k)
     if (found) {
-        if (current?.topic?.id !== found.id || !current.ready) await loadGeneralMessages(orgId, spaceId, found)
+        if (current?.topic?.id !== found.id || !current.ready || generalCacheOnly.has(k)) await loadGeneralMessages(orgId, spaceId, found)
         else if (current.topic && (current.topic.title !== found.title || current.topic.archived !== found.archived)) setGeneral(k, { topic: found })
         return
     }
@@ -255,14 +345,30 @@ function wireBus(): void {
             }
         } else if (frame.event.type === 'reaction') {
             // Fold the toggle into the message in place (thread panes refetch on
-            // their own tick; general keeps its messages live here).
+            // their own tick; general keeps its messages live here). The
+            // viewer's own toggles are EXCLUDED: those reconcile through their
+            // HTTP response, and this echo can arrive seconds later — folding
+            // it would resurrect a reaction the optimistic remove just cleared.
             const { reaction, action } = frame.event
+            const selfId = getSpacesOrgs().find((o) => o.id === event.orgId)?.memberId
+            if (reaction.by.memberId === selfId) return
             if (state?.topic && state.messages.some((m) => m.id === reaction.messageId)) {
                 setGeneral(k, {
                     messages: state.messages.map((m) =>
                         m.id === reaction.messageId
                             ? { ...m, reactions: applyReaction(m.reactions, { emoji: reaction.emoji, memberId: reaction.by.memberId, action }) }
                             : m,
+                    ),
+                })
+            }
+        } else if (frame.event.type === 'message_edited') {
+            // Rewrite in place. Own edits are NOT excluded (unlike reactions):
+            // the fold is idempotent — re-applying the same body is harmless.
+            const { edit } = frame.event
+            if (state?.topic && state.messages.some((m) => m.id === edit.messageId)) {
+                setGeneral(k, {
+                    messages: state.messages.map((m) =>
+                        m.id === edit.messageId ? { ...m, body: edit.body, editedAt: edit.at } : m,
                     ),
                 })
             }
@@ -294,6 +400,10 @@ const watched = new Set<string>()
 /** General for one space: its topic and live messages. Seeds general on first open. */
 export function useGeneral(orgId: string, spaceId: string): GeneralState {
     const feed = useSpaceFeed(orgId, spaceId)
+    // Before the snapshot read, not in an effect: a space with a persisted
+    // tail must paint messages in its FIRST frame (the Slack feel). The call
+    // is idempotent and never emits, so it is safe during render.
+    hydrateGeneral(key(orgId, spaceId))
     const state = useSyncExternalStore(
         (l) => {
             generalListeners.add(l)
@@ -512,11 +622,12 @@ export function useSpacePresence(orgId: string, spaceId: string, selfMemberId: s
 }
 
 /**
- * Human presence sender: `viewing` while mounted (renewed every 20s), `typing`
- * at most every 4s while `onType()` keeps being called, `idle` on unmount or
+ * Human presence sender: `viewing` while mounted AND active (renewed every
+ * 20s), `typing` at most every 4s while `onType()` keeps being called, `idle`
+ * on unmount, on going inactive (a kept-alive pane hidden off screen), or
  * after 6s without typing (falls back to viewing).
  */
-export function usePresenceSender(orgId: string, spaceId: string, topicId?: string): { onType: () => void } {
+export function usePresenceSender(orgId: string, spaceId: string, topicId?: string, active = true): { onType: () => void } {
     const lastTypingRef = useRef(0)
     const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -528,6 +639,7 @@ export function usePresenceSender(orgId: string, spaceId: string, topicId?: stri
     )
 
     useEffect(() => {
+        if (!active) return
         send('viewing')
         const timer = setInterval(() => send('viewing'), 20_000)
         return () => {
@@ -535,7 +647,7 @@ export function usePresenceSender(orgId: string, spaceId: string, topicId?: stri
             if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
             send('idle')
         }
-    }, [send])
+    }, [send, active])
 
     const onType = useCallback(() => {
         const now = Date.now()

@@ -8,7 +8,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { AddOrgDialog, OrgMonogram, type SpaceSelection } from '@/components/spaces-view'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { useSpacesUnreadCounts } from '@/hooks/use-space-chat'
+import { prefetchGeneral, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import { toast } from '@/lib/toast'
 
 // The sidebar's SPACES section (design: "App shell scope planning"): every
@@ -179,7 +179,14 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
                 const count = unread.get(`${org.id}/${space.id}`) ?? 0
                 return (
                     <SidebarMenuItem key={space.id}>
-                        <SidebarMenuButton isActive={active} onClick={() => onOpenSpace(org.id, space.id)} className="pl-4">
+                        <SidebarMenuButton
+                            isActive={active}
+                            onClick={() => onOpenSpace(org.id, space.id)}
+                            // Hover = intent: warm the cached tail + start the
+                            // refresh, so the click paints instantly.
+                            onMouseEnter={() => prefetchGeneral(org.id, space.id)}
+                            className="pl-4"
+                        >
                             <span className={cn('flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
                             {count > 0 && (
                                 <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>

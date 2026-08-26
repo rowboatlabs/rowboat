@@ -832,6 +832,12 @@ function App() {
   const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
   const [isSpacesOpen, setIsSpacesOpen] = useState(false)
+  // Spaces keeps its view mounted after the first open (hidden, not torn
+  // down) — reopening must be instant, not a full remount of the pane.
+  const [spacesEverOpened, setSpacesEverOpened] = useState(false)
+  useEffect(() => {
+    if (isSpacesOpen) setSpacesEverOpened(true)
+  }, [isSpacesOpen])
   // The space open in the Spaces view (org + space); the sidebar highlights it.
   const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(null)
   // What's selected inside the open space (general / topic / file) — part of the history.
@@ -6847,6 +6853,26 @@ function App() {
                 })()}
               </ContentHeader>
 
+              {/* Spaces stays mounted once opened (Slack-style keep-alive):
+                  hiding instead of unmounting makes reopening instant. The
+                  active flag gates presence + read marks while hidden. */}
+              {(isSpacesOpen || spacesEverOpened) && (
+                <div className={isSpacesOpen && !isBrowserOpen ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'hidden'}>
+                  <SpacesView
+                    active={isSpacesOpen && !isBrowserOpen}
+                    selection={spaceSelection}
+                    onSelect={setSpaceSelection}
+                    railSelection={railSelection}
+                    onRailSelect={(rail) => {
+                      // In-space navigation is real navigation: each selection is a history entry,
+                      // so the top ‹ › retrace general → topic → file.
+                      if (spaceSelection) void navigateToView({ type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail })
+                      else setRailSelection(rail)
+                    }}
+                    onOpenSession={(sessionId) => void navigateToView({ type: 'chat', runId: sessionId })}
+                  />
+                </div>
+              )}
               {isBrowserOpen ? (
                 <BrowserPane
                   onClose={handleCloseBrowser}
@@ -7027,20 +7053,8 @@ function App() {
                   />
                 </div>
               ) : isSpacesOpen ? (
-                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <SpacesView
-                    selection={spaceSelection}
-                    onSelect={setSpaceSelection}
-                    railSelection={railSelection}
-                    onRailSelect={(rail) => {
-                      // In-space navigation is real navigation: each selection is a history entry,
-                      // so the top ‹ › retrace general → topic → file.
-                      if (spaceSelection) void navigateToView({ type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail })
-                      else setRailSelection(rail)
-                    }}
-                    onOpenSession={(sessionId) => void navigateToView({ type: 'chat', runId: sessionId })}
-                  />
-                </div>
+                // Rendered by the keep-alive container above the chain.
+                null
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} onOpenNote={openNoteFromEmail} />

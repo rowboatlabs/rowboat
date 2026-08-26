@@ -306,6 +306,25 @@ export const routes = {
     response: z.object({ message: Message }),
   },
   /**
+   * Author-only body rewrite (editor == author, exactly deletion's posture).
+   * The body is replaced everywhere it lives (message row AND the stored
+   * message event — an edit's point is that the old text is gone, replay
+   * included) and a message_edited event goes on the log. Tombstones refuse
+   * (invalid_request); an identical body is a 200 no-op with no event.
+   * Activity is not bumped — editing must not resurface a quiet topic.
+   */
+  editMessage: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/messages/:messageId/edit',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    request: z.object({
+      body: z.string().min(1).max(65_536),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ message: Message }),
+  },
+  /**
    * Toggle a reaction (Slack semantics: any member, any message, one per
    * member+emoji). Idempotent — re-adding or re-removing is a 200 no-op with
    * no event. The response carries the message with reactions folded in, so

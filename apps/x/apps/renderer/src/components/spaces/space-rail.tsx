@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessagesSquare, MoreHorizontal, Pencil, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -16,14 +16,15 @@ import { getTopicLastReadAt } from '@/lib/spaces-read-state'
 import type { RailSelection } from '@/lib/spaces-selection'
 
 // The space's edge rail: one collapsible strip carrying the same sidebar on
-// every surface — Messages + topics on top, the file tree below. Collapsed it
-// is a 28px edge; it pushes open to 280px on hover (never floats over
-// content), peeks briefly to teach the gesture, and can be pinned. The
-// surfaces own everything else.
+// every surface — Messages + topics on top, the file tree below. Two modes:
+// PINNED (default) it is a plain 280px sidebar; unpinned it is a 28px edge
+// that opens on hover and lingers a few seconds after the cursor leaves
+// (instant close was too twitchy). The header button flips the mode; a click
+// on the closed edge pins it back open. The surfaces own everything else.
 
 export function SpaceRail({
     orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
-    open, pinned, hint, onHoverChange, onTogglePin,
+    open, pinned, onHoverChange, onTogglePin,
 }: {
     orgId: string
     spaceId: string
@@ -48,7 +49,6 @@ export function SpaceRail({
     onRemoveFolder: (path: string) => void
     open: boolean
     pinned: boolean
-    hint: string
     onHoverChange: (hovering: boolean) => void
     onTogglePin: () => void
 }) {
@@ -140,9 +140,9 @@ export function SpaceRail({
                 open ? 'bg-muted/20' : 'bg-background',
             )}
         >
-            {/* Always mounted: the rail collapses on mouse-leave while the native
-                file picker is open (the pointer is in the OS dialog), and an input
-                unmounted mid-pick never delivers its change event. */}
+            {/* Always mounted: an input unmounted mid-pick (the rail toggled
+                closed while the OS file dialog is up) never delivers its
+                change event. */}
             <input
                 ref={uploadInputRef}
                 type="file"
@@ -155,8 +155,14 @@ export function SpaceRail({
                 }}
             />
             {!open ? (
-                // The closed edge: what lives here (topics + files), and how much is unread.
-                <div className="flex flex-1 flex-col items-center gap-2.5 py-3.5">
+                // The closed edge: hovering opens the rail; a click pins it
+                // (the strong signal — and the only path on touch screens).
+                <button
+                    type="button"
+                    onClick={onTogglePin}
+                    title="Show topics & files"
+                    className="flex flex-1 flex-col items-center gap-2.5 py-3.5 hover:bg-accent/50"
+                >
                     <MessagesSquare className="size-[15px] text-muted-foreground" />
                     <Folder className="size-[15px] text-muted-foreground" />
                     <div className="w-px flex-1 bg-border/70" />
@@ -165,22 +171,24 @@ export function SpaceRail({
                             {badge}
                         </span>
                     )}
-                </div>
+                </button>
             ) : (
                 // Inner content is fixed at the open width so text doesn't reflow mid-slide.
                 <div className="flex h-full w-[280px] flex-col">
                     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1.5">
-                        <span className="min-w-0 flex-1 truncate text-right text-[10px] text-muted-foreground/70">{hint}</span>
+                        <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topics &amp; files</span>
                         <button
                             type="button"
                             onClick={onTogglePin}
-                            title={pinned ? 'Unpin — collapse when the mouse leaves' : 'Pin this rail open'}
+                            title={pinned ? 'Auto-hide — opens on hover, slides away a moment after the cursor leaves' : 'Keep open'}
                             className={cn(
-                                'flex size-6 shrink-0 items-center justify-center rounded-md border disabled:opacity-40',
-                                pinned ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-muted-foreground hover:text-foreground',
+                                'flex size-6 shrink-0 items-center justify-center rounded-md',
+                                pinned
+                                    ? 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                                    : 'border border-border bg-background text-muted-foreground hover:text-foreground',
                             )}
                         >
-                            <Pin className="size-3" />
+                            {pinned ? <PanelLeftClose className="size-3.5" /> : <Pin className="size-3" />}
                         </button>
                     </div>
 

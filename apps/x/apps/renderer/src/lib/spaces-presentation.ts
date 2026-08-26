@@ -59,16 +59,53 @@ export function attributionLabel(a: Attribution, members: Map<string, string>): 
 // Time — the feed shows clock time for today, "Yesterday 17:20", else "Aug 12"
 // ---------------------------------------------------------------------------
 
+// toLocale*String builds a fresh Intl.DateTimeFormat on every call — the
+// single hottest thing in a feed render (every row, every commit). Build the
+// two formats once; cache results per (timestamp, current day) since the
+// label only changes when the calendar day rolls over.
+const CLOCK_FORMAT = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
+const DAY_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+const feedTimeCache = new Map<string, string>()
+
 export function formatFeedTime(iso: string, now: Date = new Date()): string {
+    const nowDay = now.toDateString()
+    const cacheKey = `${iso}|${nowDay}`
+    const hit = feedTimeCache.get(cacheKey)
+    if (hit !== undefined) return hit
     const date = new Date(iso)
     if (Number.isNaN(date.getTime())) return ''
-    const clock = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-    if (date.toDateString() === now.toDateString()) return clock
-    const yesterday = new Date(now)
-    yesterday.setDate(now.getDate() - 1)
-    if (date.toDateString() === yesterday.toDateString()) return `Yesterday ${clock}`
-    const day = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-    return date.getFullYear() === now.getFullYear() ? day : `${day}, ${date.getFullYear()}`
+    const clock = CLOCK_FORMAT.format(date)
+    let label: string
+    if (date.toDateString() === nowDay) {
+        label = clock
+    } else {
+        const yesterday = new Date(now)
+        yesterday.setDate(now.getDate() - 1)
+        if (date.toDateString() === yesterday.toDateString()) {
+            label = `Yesterday ${clock}`
+        } else {
+            const day = DAY_FORMAT.format(date)
+            label = date.getFullYear() === now.getFullYear() ? day : `${day}, ${date.getFullYear()}`
+        }
+    }
+    if (feedTimeCache.size > 4096) feedTimeCache.clear()
+    feedTimeCache.set(cacheKey, label)
+    return label
+}
+
+/** The hover tooltip behind a compact feed time: the full date and clock. */
+const FULL_TIME_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' })
+const fullTimeCache = new Map<string, string>()
+
+export function formatFullTimestamp(iso: string): string {
+    const hit = fullTimeCache.get(iso)
+    if (hit !== undefined) return hit
+    const date = new Date(iso)
+    if (Number.isNaN(date.getTime())) return ''
+    const label = FULL_TIME_FORMAT.format(date)
+    if (fullTimeCache.size > 4096) fullTimeCache.clear()
+    fullTimeCache.set(iso, label)
+    return label
 }
 
 // ---------------------------------------------------------------------------

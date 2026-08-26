@@ -65,7 +65,7 @@ interface MentionCandidate {
 // "/" so typing into a folder ("@design/sc…") keeps the file query alive.
 const MENTION_RE = /(^|[\s([{])@([\w./-]*)$/
 
-export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId }: {
+export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey }: {
     placeholder: string
     onSend: (body: string, agent?: AgentOptions) => Promise<void>
     busy: boolean
@@ -79,8 +79,23 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     /** Space files — the same @ autocomplete offers them; picking one links it. */
     entries?: spaces.SpacesAssetEntry[]
     selfMemberId?: string
+    /**
+     * Persist the unsent text under this key (per install, like read marks) —
+     * switching spaces or restarting the app hands the draft back. Sending
+     * clears it. Attachments are not persisted; they re-upload on return.
+     */
+    draftKey?: string
 }) {
-    const [draft, setDraft] = useState('')
+    const [draft, setDraft] = useState(() => (draftKey ? window.localStorage.getItem(`spaces:draft:${draftKey}`) ?? '' : ''))
+    useEffect(() => {
+        if (!draftKey) return
+        try {
+            if (draft) window.localStorage.setItem(`spaces:draft:${draftKey}`, draft)
+            else window.localStorage.removeItem(`spaces:draft:${draftKey}`)
+        } catch {
+            // Quota/private mode: the draft just doesn't persist.
+        }
+    }, [draftKey, draft])
     const [appliedSeed, setAppliedSeed] = useState<number | null>(null)
     const ref = useRef<HTMLTextAreaElement | null>(null)
 

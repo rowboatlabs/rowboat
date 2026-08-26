@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Bot, ChevronRight, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, SmilePlus, Trash2 } from 'lucide-react'
+import { memo, useState } from 'react'
+import { Bot, ChevronRight, Copy, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Pencil, SmilePlus, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -11,9 +11,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Textarea } from '@/components/ui/textarea'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
-import { formatFeedTime } from '@/lib/spaces-presentation'
+import { formatFeedTime, formatFullTimestamp, resolveMentions } from '@/lib/spaces-presentation'
+import { toast } from '@/lib/toast'
 
 // One message in a stream (general or a thread). Consecutive messages by the
 // same author compact to a time gutter; hover reveals the action bar.
@@ -44,7 +46,7 @@ function ReactionPicker({ onPick, onOpenChange, children }: {
                                 setBoth(false)
                                 onPick(emoji)
                             }}
-                            className="inline-flex size-7 items-center justify-center rounded-md text-base hover:bg-accent"
+                            className="inline-flex size-7 items-center justify-center rounded-md text-base transition-transform duration-100 hover:bg-accent hover:scale-125 active:scale-95"
                         >
                             {emoji}
                         </button>
@@ -80,15 +82,17 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
                 return (
                     <HoverCard key={group.emoji} openDelay={250} closeDelay={100}>
                         <HoverCardTrigger asChild>
+                            {/* The chip zooms in when the group appears; the emoji
+                                re-pops (keyed remount) every time the count moves. */}
                             <button
                                 type="button"
                                 onClick={() => onReact(message, group.emoji)}
                                 className={cn(
-                                    'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5',
+                                    'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 transition-all duration-150 animate-in fade-in-0 zoom-in-50 active:scale-90',
                                     mine ? 'border-foreground/40 bg-accent' : 'border-border bg-background hover:border-foreground/30',
                                 )}
                             >
-                                <span className="text-[13px] leading-none">{group.emoji}</span>
+                                <span key={group.memberIds.length} className="text-[13px] leading-none animate-in zoom-in-50 duration-300">{group.emoji}</span>
                                 <span className="text-[11px] font-medium leading-none tabular-nums text-muted-foreground">{group.memberIds.length}</span>
                             </button>
                         </HoverCardTrigger>
@@ -138,8 +142,8 @@ export interface ThreadRowData {
     title?: string | null
 }
 
-export function MessageRow({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onRetryFailed, onDiscardFailed, dense, selfMemberId,
+function MessageRowImpl({
+    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onRetryFailed, onDiscardFailed, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
@@ -156,6 +160,8 @@ export function MessageRow({
     onReact?: (message: spaces.Message, emoji: string) => void
     /** Deletes the message — only offered on the viewer's own (the org enforces it too). */
     onDelete?: (message: spaces.Message) => void
+    /** Rewrites the body — only offered on the viewer's own text messages. */
+    onEdit?: (message: spaces.Message, body: string) => void
     /** A failed optimistic send: try it again / drop the row. */
     onRetryFailed?: (message: spaces.Message) => void
     onDiscardFailed?: (message: spaces.Message) => void
@@ -173,6 +179,14 @@ export function MessageRow({
     // can act on them either.
     const unconfirmed = !!message.pending || !!message.failed
     const canDelete = !!onDelete && !deleted && !unconfirmed && selfMemberId === message.author.memberId
+    const canEdit = !!onEdit && !deleted && !unconfirmed && selfMemberId === message.author.memberId
+    // The inline editor: null = not editing; a string = the draft body.
+    const [editDraft, setEditDraft] = useState<string | null>(null)
+    const commitEdit = () => {
+        const text = (editDraft ?? '').trim()
+        setEditDraft(null)
+        if (text && text !== message.body) onEdit!(message, text)
+    }
     const showActions = !deleted && !unconfirmed && !!(onReplyInThread || onAskRowboat || onCopyLink || onReact || canDelete)
     // While the emoji picker or the ⋯ menu is open the hover-revealed chrome
     // must stay put — unmounting it collapses the popper anchor and the menu
@@ -180,10 +194,23 @@ export function MessageRow({
     const [pickerOpen, setPickerOpen] = useState(false)
     const [menuOpen, setMenuOpen] = useState(false)
 
+    // What "Copy message" copies: mentions resolved to names, image embeds
+    // dropped — their app:// addresses mean nothing outside the app. Empty
+    // (image-only message, tombstone) hides the item.
+    const messageText = deleted || unconfirmed ? '' : resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+    // The selection as it stood when the context menu opened (opening keeps it).
+    const [selectionText, setSelectionText] = useState('')
+    const copyToClipboard = (text: string) => {
+        void navigator.clipboard.writeText(text).then(
+            () => toast('Copied', 'success'),
+            () => toast('Could not copy', 'error'),
+        )
+    }
+
     const row = (
         <div className={cn('group/msg relative flex items-start gap-2.5 rounded-lg px-2 hover:bg-accent/40', continuation ? 'py-0.5' : 'py-1.5')}>
             {continuation ? (
-                <span className={cn('shrink-0 pt-1 text-right text-[10px] leading-5 text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
+                <span title={formatFullTimestamp(message.postedAt)} className={cn('shrink-0 pt-1 text-right text-[10px] leading-5 text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
                     {formatFeedTime(message.postedAt).replace(/^Yesterday /, '')}
                 </span>
             ) : (
@@ -198,14 +225,39 @@ export function MessageRow({
                                 via {message.author.agentName ?? 'agent'}{message.author.actingMode === 'scheduled' ? ', scheduled' : ''}
                             </span>
                         )}
-                        <span className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
+                        <span title={formatFullTimestamp(message.postedAt)} className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
                     </div>
                 )}
-                {deleted ? (
+                {editDraft !== null ? (
+                    <div className="mt-1">
+                        <Textarea
+                            autoFocus
+                            value={editDraft}
+                            onChange={(e) => setEditDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault()
+                                    commitEdit()
+                                } else if (e.key === 'Escape') {
+                                    setEditDraft(null)
+                                }
+                            }}
+                            className="min-h-16 text-sm"
+                        />
+                        <div className="mt-1 flex items-center gap-2 text-xs">
+                            <button type="button" onClick={commitEdit} className="rounded-md bg-foreground px-2 py-0.5 font-medium text-background hover:opacity-90">Save</button>
+                            <button type="button" onClick={() => setEditDraft(null)} className="text-muted-foreground hover:text-foreground">Cancel</button>
+                            <span className="text-muted-foreground/70">Enter to save · Esc to cancel</span>
+                        </div>
+                    </div>
+                ) : deleted ? (
                     <div className="text-sm italic leading-relaxed text-muted-foreground">This message was deleted</div>
                 ) : (
                     <div className={cn(MESSAGE_PROSE, message.pending && 'opacity-60')}>
                         <SpaceMarkdown body={message.body} />
+                        {message.editedAt && (
+                            <span title={formatFullTimestamp(message.editedAt)} className="text-[10.5px] text-muted-foreground/70">(edited)</span>
+                        )}
                     </div>
                 )}
                 {message.failed && (
@@ -233,10 +285,13 @@ export function MessageRow({
                     />
                 )}
                 {thread && thread.replyCount > 0 && onOpenThread && (
+                    // A full-width row, not a snug chip: opening the thread is
+                    // the most common follow-up and deserves a target the size
+                    // of the message itself.
                     <button
                         type="button"
                         onClick={() => onOpenThread(thread.topicId)}
-                        className="mt-1.5 inline-flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs hover:border-foreground/30"
+                        className="group/thread mt-1.5 flex w-full max-w-2xl items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-left text-xs transition-colors hover:border-foreground/30 hover:bg-accent/40"
                     >
                         <MessageSquare className="size-3 text-muted-foreground" />
                         {thread.title && <span className="max-w-48 truncate font-semibold">{thread.title}</span>}
@@ -244,7 +299,7 @@ export function MessageRow({
                             {thread.replyCount} {thread.replyCount === 1 ? 'reply' : 'replies'}
                         </span>
                         {thread.unreadCount > 0 && <span className="font-semibold text-orange-600">{thread.unreadCount} new</span>}
-                        <span className="text-muted-foreground">{formatFeedTime(thread.lastActivityAt)}</span>
+                        <span title={formatFullTimestamp(thread.lastActivityAt)} className="text-muted-foreground">{formatFeedTime(thread.lastActivityAt)}</span>
                         {thread.workingAgents.length > 0 && (
                             <span className="inline-flex items-center gap-1 text-muted-foreground">
                                 <Bot className="size-3" />
@@ -255,7 +310,12 @@ export function MessageRow({
                                     : `${thread.workingAgents.length} agents working…`}
                             </span>
                         )}
-                        {thread.unreadCount > 0 ? <span className="size-1.5 rounded-full bg-foreground" /> : <ChevronRight className="size-3 text-muted-foreground" />}
+                        <span className="flex-1" />
+                        {thread.unreadCount > 0 ? (
+                            <span className="size-1.5 rounded-full bg-foreground" />
+                        ) : (
+                            <ChevronRight className="size-3 text-muted-foreground transition-transform group-hover/thread:translate-x-0.5" />
+                        )}
                     </button>
                 )}
                 {thread && thread.replyCount === 0 && thread.workingAgents.length > 0 && onOpenThread && (
@@ -282,13 +342,16 @@ export function MessageRow({
                         </ReactionPicker>
                     )}
                     {onReplyInThread && (
+                        // Labelled, not icon-only: replying is THE core action
+                        // and a bare glyph made people hunt for it.
                         <button
                             type="button"
                             title={thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
                             onClick={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
-                            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
                         >
                             <MessageSquare className="size-3.5" />
+                            {thread && thread.replyCount > 0 ? 'Open' : 'Reply'}
                         </button>
                     )}
                     {onAskRowboat && (
@@ -301,7 +364,7 @@ export function MessageRow({
                             <Bot className="size-3.5" />
                         </button>
                     )}
-                    {(onCopyLink || canDelete) && (
+                    {(onCopyLink || canDelete || canEdit) && (
                         <DropdownMenu onOpenChange={setMenuOpen}>
                             <DropdownMenuTrigger asChild>
                                 <button type="button" title="More" className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
@@ -309,6 +372,16 @@ export function MessageRow({
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                                {canEdit && (
+                                    <DropdownMenuItem onClick={() => setEditDraft(message.body)}>
+                                        <Pencil className="size-3.5 mr-2" /> Edit message
+                                    </DropdownMenuItem>
+                                )}
+                                {messageText && (
+                                    <DropdownMenuItem onClick={() => copyToClipboard(messageText)}>
+                                        <Copy className="size-3.5 mr-2" /> Copy message
+                                    </DropdownMenuItem>
+                                )}
                                 {onCopyLink && (
                                     <DropdownMenuItem onClick={() => onCopyLink(message)}>
                                         <LinkIcon className="size-3.5 mr-2" /> Copy link
@@ -332,11 +405,16 @@ export function MessageRow({
     // under it kept catching accidental clicks. Tombstones and action-less
     // rows get the plain row.
     if (!showActions) return row
-    const hasTopItems = !!(onReact || onReplyInThread || onAskRowboat || onCopyLink)
+    const hasTopItems = !!(onReact || onReplyInThread || onAskRowboat || onCopyLink || messageText)
     return (
-        <ContextMenu>
+        <ContextMenu onOpenChange={(open) => { if (open) setSelectionText(window.getSelection()?.toString().trim() ?? '') }}>
             <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
             <ContextMenuContent className="w-56">
+                {selectionText && (
+                    <ContextMenuItem onSelect={() => copyToClipboard(selectionText)}>
+                        <Copy className="size-3.5 mr-2" /> Copy
+                    </ContextMenuItem>
+                )}
                 {onReact && (
                     <ContextMenuSub>
                         <ContextMenuSubTrigger>
@@ -369,6 +447,16 @@ export function MessageRow({
                         <Bot className="size-3.5 mr-2" /> Ask @rowboat about this
                     </ContextMenuItem>
                 )}
+                {canEdit && (
+                    <ContextMenuItem onSelect={() => setEditDraft(message.body)}>
+                        <Pencil className="size-3.5 mr-2" /> Edit message
+                    </ContextMenuItem>
+                )}
+                {messageText && (
+                    <ContextMenuItem onSelect={() => copyToClipboard(messageText)}>
+                        <Copy className="size-3.5 mr-2" /> Copy message
+                    </ContextMenuItem>
+                )}
                 {onCopyLink && (
                     <ContextMenuItem onSelect={() => onCopyLink(message)}>
                         <LinkIcon className="size-3.5 mr-2" /> Copy link
@@ -386,6 +474,38 @@ export function MessageRow({
         </ContextMenu>
     )
 }
+
+type MessageRowProps = Parameters<typeof MessageRowImpl>[0]
+
+function threadRowEqual(a: ThreadRowData | null | undefined, b: ThreadRowData | null | undefined): boolean {
+    if (!a || !b) return !a === !b
+    return (
+        a.topicId === b.topicId &&
+        a.replyCount === b.replyCount &&
+        a.lastActivityAt === b.lastActivityAt &&
+        a.unreadCount === b.unreadCount &&
+        a.title === b.title &&
+        a.workingAgents.length === b.workingAgents.length &&
+        a.workingAgents.every((id, i) => id === b.workingAgents[i])
+    )
+}
+
+/**
+ * Memoized by DATA, deliberately ignoring the handler props: the stream
+ * recreates its closures every render (presence frames, visibility flips),
+ * and comparing them would make the memo worthless. Safe because everything
+ * a handler reads is either per-pane-stable (org, space) or flows through a
+ * compared prop — a thread index change reaches the row as a new `thread`
+ * object, which re-renders it with fresh closures.
+ */
+export const MessageRow = memo(MessageRowImpl, (prev: MessageRowProps, next: MessageRowProps) =>
+    prev.message === next.message &&
+    prev.continuation === next.continuation &&
+    prev.selfMemberId === next.selfMemberId &&
+    prev.dense === next.dense &&
+    prev.memberNames === next.memberNames &&
+    threadRowEqual(prev.thread, next.thread),
+)
 
 export function DayDivider({ label }: { label: string }) {
     return (

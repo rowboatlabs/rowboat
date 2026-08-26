@@ -640,6 +640,89 @@ describe('message deletion', () => {
   });
 });
 
+describe('message editing', () => {
+  let spaceId: string;
+  let topicId: string;
+
+  const edit = (who: ReturnType<typeof api>, messageId: string, body: string) =>
+    who.post(`/v1/spaces/${spaceId}/messages/${messageId}/edit`, { body, actingMode: 'direct' });
+
+  beforeAll(async () => {
+    const r = await ramnique.post('/v1/spaces', { name: 'Editing' });
+    spaceId = r.body.space.id;
+    const inv = await ramnique.post('/v1/invites', { spaceId });
+    await gagan.post('/v1/invites/accept', { token: inv.body.token });
+  });
+
+  it('the author rewrites a body; reads and replay serve the new text', async () => {
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      body: 'teh quick fix',
+      actingMode: 'direct',
+    });
+    const messageId = posted.body.message.id;
+    topicId = posted.body.topic.id;
+
+    const r = await edit(ramnique, messageId, 'the quick fix');
+    expect(r.status).toBe(200);
+    expect(r.body.message.body).toBe('the quick fix');
+    expect(r.body.message.editedAt).toBeTruthy();
+
+    // Reads carry the rewrite; counts and activity are untouched.
+    const msgs = await gagan.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
+    const m = msgs.body.messages.find((x: any) => x.id === messageId);
+    expect(m.body).toBe('the quick fix');
+    expect(m.editedAt).toBe(r.body.message.editedAt);
+
+    // Replay rewrite: catch-up gets the REWRITTEN message event plus the edit event.
+    const live = await liveClient(harbor, 'dev-gagan');
+    live.send({ kind: 'subscribe', spaceId, afterOffset: 0 });
+    await live.until(
+      (frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'message_edited'),
+      'replayed edit',
+    );
+    const replayed = live.events().find((f) => f.event.type === 'message' && f.event.message.id === messageId)!;
+    expect(replayed.event).toMatchObject({
+      type: 'message',
+      message: { id: messageId, body: 'the quick fix', editedAt: r.body.message.editedAt },
+    });
+    expect(live.events().find((f) => f.event.type === 'message_edited')!.event).toMatchObject({
+      type: 'message_edited',
+      edit: { messageId, topicId, body: 'the quick fix', by: { memberId: 'ramnique', actingMode: 'direct' } },
+    });
+    live.close();
+  });
+
+  it('only the author edits; tombstones and unknown messages refuse', async () => {
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'mine', actingMode: 'direct' });
+    const messageId = posted.body.message.id;
+    expect((await edit(gagan, messageId, 'hijack')).status).toBe(403);
+    expect((await edit(ramnique, '01ARZ3NDEKTSV4RRFFQ69G5FAV', 'ghost')).status).toBe(404);
+    await ramnique.post(`/v1/spaces/${spaceId}/messages/${messageId}/delete`, { actingMode: 'direct' });
+    expect((await edit(ramnique, messageId, 'necromancy')).status).toBe(400);
+  });
+
+  it('an identical body is an idempotent no-op: no event', async () => {
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'stable', actingMode: 'direct' });
+    const messageId = posted.body.message.id;
+
+    const live = await liveClient(harbor, 'dev-ramnique');
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
+
+    const same = await edit(ramnique, messageId, 'stable');
+    expect(same.status).toBe(200);
+    expect(same.body.message.editedAt).toBeUndefined();
+
+    await edit(ramnique, messageId, 'stable, now edited');
+    await live.until(
+      (frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'message_edited'),
+      'edit event',
+    );
+    expect(live.events().filter((f) => f.event.type === 'message_edited')).toHaveLength(1);
+    live.close();
+  });
+});
+
 describe('read-only limit (spec §4: never lockout)', () => {
   it('writes pause, reads keep working', async () => {
     const r = await ramnique.post('/v1/spaces', { name: 'Limits' });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { AddOrgDialog, AvatarStack, MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
+import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { DraftThreadPane, ThreadPane } from '@/components/spaces/thread-pane'
@@ -61,13 +62,19 @@ const MODES: { k: SpaceMode; label: string; Icon: typeof MessageSquare; kb: stri
 // Root view: the selected space (the org/space list lives in the app sidebar)
 // ---------------------------------------------------------------------------
 
-export function SpacesView({ selection, onSelect, railSelection, onRailSelect, onOpenSession }: {
+export function SpacesView({ selection, onSelect, railSelection, onRailSelect, onOpenSession, active = true }: {
     selection: SpaceSelection
     onSelect: (selection: SpaceSelection) => void
     /** What's selected inside the space (general / a topic / a file) — part of the app's history. */
     railSelection: RailSelection
     onRailSelect: (selection: RailSelection) => void
     onOpenSession?: (sessionId: string) => void
+    /**
+     * False while the view is kept mounted but hidden (the app shows another
+     * section). Gates presence and read marks — a hidden pane must not report
+     * "viewing" or mark arriving messages read.
+     */
+    active?: boolean
 }) {
     const { orgs, loading, refresh } = useSpacesOrgs()
     const [addOrgOpen, setAddOrgOpen] = useState(false)
@@ -105,6 +112,7 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                 selection={railSelection}
                 onSelect={onRailSelect}
                 onOpenSession={onOpenSession}
+                active={active}
             />
         )
     }
@@ -146,12 +154,14 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
+function SpacePane({ org, space, selection, onSelect, onOpenSession, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     onOpenSession?: (sessionId: string) => void
+    /** False while the Spaces view is kept mounted but hidden. */
+    active?: boolean
 }) {
     const [members, setMembers] = useState<spaces.Member[]>([])
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
@@ -243,10 +253,14 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     // (600px document + 480px chat + the 28px rail edge).
     // ------------------------------------------------------------------
     const [mode, setMode] = useState<SpaceMode>(() => (selection.kind === 'file' ? 'read' : 'talk'))
+    // The topics/files rail has two modes, persisted: PINNED (default) — a
+    // plain sidebar, always open; or AUTO-HIDE — a collapsed edge that opens
+    // on hover and lingers a few seconds after the cursor leaves, so moving
+    // to the stream and back doesn't slam it shut mid-thought. (The first
+    // design closed the instant the cursor left — too twitchy to use.)
+    const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railOpen') !== '0')
     const [railHover, setRailHover] = useState(false)
-    const [railPeek, setRailPeek] = useState(false)
-    const peekTimer = useRef<number | null>(null)
-    const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railPin') === '1')
+    const railCloseTimer = useRef<number | null>(null)
 
     // Width of the pane drives the Split floor and pinnability.
     const paneRef = useRef<HTMLDivElement | null>(null)
@@ -258,24 +272,6 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
         ro.observe(el)
         setPaneWidth(el.clientWidth)
         return () => ro.disconnect()
-    }, [])
-
-    // The teach-peek: push the rail open, hold a beat, release — the same
-    // motion the cursor makes at the edge. Once the user has hovered or
-    // pinned that list themselves, it has done its job and stays quiet.
-    const peekRail = useCallback(() => {
-        if (localStorage.getItem('spaces:railTaught') === '1') return
-        if (peekTimer.current) window.clearTimeout(peekTimer.current)
-        setRailPeek(true)
-        peekTimer.current = window.setTimeout(() => setRailPeek(false), 1900)
-    }, [])
-    useEffect(() => () => {
-        if (peekTimer.current) window.clearTimeout(peekTimer.current)
-    }, [])
-    useEffect(() => {
-        peekRail()
-        // Landing peek only — once per space open.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     // Stable listener; requestMode itself re-derives per render (splitFits).
@@ -295,7 +291,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     // What actually renders: a Split that doesn't fit falls back to the one
     // surface the selection needs.
     const effMode: SpaceMode = mode === 'split' && !splitFits ? (selection.kind === 'file' ? 'read' : 'talk') : mode
-    const railOpen = railPeek || railHover || railPinned
+    const railOpen = railPinned || railHover
 
     /** The header buttons and ⌘1/2/3: say why when Split can't render. */
     const requestMode = (next: SpaceMode) => {
@@ -304,27 +300,39 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
     }
     requestModeRef.current = requestMode
 
+    /** Auto-hide grace: how long the rail lingers after the cursor leaves. */
+    const RAIL_LINGER_MS = 3_500
+    const clearRailTimer = () => {
+        if (railCloseTimer.current) {
+            window.clearTimeout(railCloseTimer.current)
+            railCloseTimer.current = null
+        }
+    }
+    useEffect(() => clearRailTimer, [])
     const onRailHover = (hovering: boolean) => {
-        setRailHover(hovering)
-        if (hovering) localStorage.setItem('spaces:railTaught', '1')
+        clearRailTimer()
+        if (hovering) setRailHover(true)
+        else railCloseTimer.current = window.setTimeout(() => setRailHover(false), RAIL_LINGER_MS)
     }
     const toggleRailPin = () => {
-        localStorage.setItem('spaces:railTaught', '1')
-        setRailPinned((p) => {
-            localStorage.setItem('spaces:railPin', p ? '0' : '1')
-            return !p
-        })
+        const pin = !railPinned
+        localStorage.setItem('spaces:railOpen', pin ? '1' : '0')
+        setRailPinned(pin)
+        // Unpinning closes NOW (the cursor is on the button, inside the rail —
+        // without this the hover hold keeps it open and the click reads as dead).
+        if (!pin) {
+            clearRailTimer()
+            setRailHover(false)
+        }
     }
 
     // Selecting is also choreography: a topic opened from Read grows into
     // Split; a file opened from Talk (or from a topic's artifact link) opens
-    // beside the conversation in Split. The rail slides away once it has
-    // been used.
+    // beside the conversation in Split. The rail stays where it is — it is a
+    // sidebar, not a flyout.
     const select = (next: RailSelection) => {
         onSelect(next)
         analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : 'topics')
-        setRailHover(false)
-        setRailPeek(false)
         if ((next.kind === 'topic' || next.kind === 'draft') && mode === 'read') setMode('split')
         else if (next.kind === 'general' && mode === 'read') setMode('talk')
         else if (next.kind === 'file') {
@@ -455,6 +463,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
         <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
         <SpaceNavProvider onOpenFile={openFile}>
         <div className="flex-1 min-h-0 flex flex-col">
+            {/* One per pane — covers the stream and thread panes alike. */}
+            {active && <SelectionCopy />}
             <header className="flex items-center gap-3 px-4 h-12 shrink-0 border-b border-border">
                 <OrgMonogram org={org} />
                 <h1 className="text-[15px] font-semibold truncate">{space.name}</h1>
@@ -571,71 +581,74 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession }: {
                     onRemoveFolder={removeFolder}
                     open={railOpen}
                     pinned={railPinned}
-                    hint={railPinned ? 'pinned' : railPeek ? 'sliding away' : 'hover · pin to keep'}
                     onHoverChange={onRailHover}
                     onTogglePin={toggleRailPin}
                 />
                 {/* The surfaces. Talk = the stream or an open topic; Read =
-                    the document; Split shows both around a draggable divider. */}
-                {effMode !== 'read' && (
-                    <div className="flex-1 min-w-0 min-h-0 flex">
-                        {draftParent ? (
-                            <section className="flex-1 min-w-0 min-h-0 flex flex-col">
-                                <DraftThreadPane
-                                    key={draftParent.id}
-                                    org={org}
-                                    space={space}
-                                    parent={draftParent}
-                                    members={members}
-                                    memberNames={memberNames}
-                                    entries={entries}
-                                    onBack={() => select({ kind: 'general' })}
-                                    onCreated={(topicId) => select({ kind: 'topic', topicId })}
-                                />
-                            </section>
-                        ) : chatTopicId ? (
-                            <section className="flex-1 min-w-0 min-h-0 flex flex-col">
-                                <ThreadPane
-                                    key={chatTopicId}
-                                    org={org}
-                                    space={space}
-                                    topicId={chatTopicId}
-                                    threadInfo={selectedInfo}
-                                    topic={selectedTopic}
-                                    changeSets={feed.changeSets}
-                                    entries={entries}
-                                    presence={presence}
-                                    members={members}
-                                    memberNames={memberNames}
-                                    refreshTick={refreshTick}
-                                    anchorChange={selectedAnchor}
-                                    showBack
-                                    onBack={() => select({ kind: 'general' })}
-                                    onOpenFile={openFileFromTopic(chatTopicId)}
-                                    onOpenSession={onOpenSession}
-                                    artifactsRailOpen={artifactsRailOpen}
-                                    onToggleArtifactsRail={toggleArtifactsRail}
-                                    onFolding={setFolding}
-                                />
-                            </section>
-                        ) : (
-                            <GeneralStream
+                    the document; Split shows both around a draggable divider.
+                    The stream is the expensive surface, so it never unmounts
+                    while the space is open — a topic, a draft, or read mode
+                    HIDE it (keep-alive), and closing them is instant. */}
+                <div className={cn('flex-1 min-w-0 min-h-0', effMode === 'read' ? 'hidden' : 'flex')}>
+                    {draftParent ? (
+                        <section className="flex-1 min-w-0 min-h-0 flex flex-col">
+                            <DraftThreadPane
+                                key={draftParent.id}
                                 org={org}
                                 space={space}
-                                general={general}
-                                threads={threads}
-                                topics={feed.topics}
-                                presence={presence}
+                                parent={draftParent}
                                 members={members}
                                 memberNames={memberNames}
                                 entries={entries}
-                                onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
-                                onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
-                                onOpenSession={onOpenSession}
+                                onBack={() => select({ kind: 'general' })}
+                                onCreated={(topicId) => select({ kind: 'topic', topicId })}
                             />
-                        )}
+                        </section>
+                    ) : chatTopicId ? (
+                        <section className="flex-1 min-w-0 min-h-0 flex flex-col">
+                            <ThreadPane
+                                key={chatTopicId}
+                                org={org}
+                                space={space}
+                                topicId={chatTopicId}
+                                threadInfo={selectedInfo}
+                                topic={selectedTopic}
+                                changeSets={feed.changeSets}
+                                entries={entries}
+                                presence={presence}
+                                members={members}
+                                memberNames={memberNames}
+                                refreshTick={refreshTick}
+                                anchorChange={selectedAnchor}
+                                showBack
+                                onBack={() => select({ kind: 'general' })}
+                                onOpenFile={openFileFromTopic(chatTopicId)}
+                                onOpenSession={onOpenSession}
+                                artifactsRailOpen={artifactsRailOpen}
+                                onToggleArtifactsRail={toggleArtifactsRail}
+                                onFolding={setFolding}
+                                visible={active && effMode !== 'read'}
+                            />
+                        </section>
+                    ) : null}
+                    <div className={cn('flex-1 min-w-0 min-h-0', draftParent || chatTopicId ? 'hidden' : 'flex')}>
+                        <GeneralStream
+                            org={org}
+                            space={space}
+                            general={general}
+                            threads={threads}
+                            topics={feed.topics}
+                            presence={presence}
+                            members={members}
+                            memberNames={memberNames}
+                            entries={entries}
+                            onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
+                            onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
+                            onOpenSession={onOpenSession}
+                            visible={active && effMode !== 'read' && !draftParent && !chatTopicId}
+                        />
                     </div>
-                )}
+                </div>
                 {effMode === 'split' && (
                     <div
                         onMouseDown={startDocResize}
