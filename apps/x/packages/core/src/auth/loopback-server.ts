@@ -257,6 +257,7 @@ export async function createAuthServer(
     callbackPath: opts.callbackPath ?? OAUTH_CALLBACK_PATH,
     onError: opts.onError,
     validateCallback: opts.validateCallback,
+    relay: opts.relay,
   };
   const limit = fallback ? port + PORT_RANGE_SIZE - 1 : port;
 
