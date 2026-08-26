@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bot, ChevronRight, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, SmilePlus, Trash2 } from 'lucide-react'
+import { Bot, ChevronRight, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, SmilePlus, Tag, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -7,7 +7,8 @@ import {
     ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub,
+    DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -126,6 +127,44 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
     )
 }
 
+/** The topic gesture (labels on the wire): what a surface passes to offer it. */
+export interface MessageLabeling {
+    /** Live labels for the picker, rail order. */
+    options: { id: string; name: string }[]
+    /** Set (labelId) or clear (null) the message's topic. */
+    onSet: (message: spaces.Message, labelId: string | null) => void
+    /** Create-or-get a topic by name and set it on the message. */
+    onCreate: (message: spaces.Message, name: string) => void
+}
+
+/**
+ * The "New topic…" input inside a menu. Printable keys must not reach the
+ * menu (Radix typeahead would steal them); Enter submits and then closes the
+ * menu by letting a synthetic Escape bubble to the menu content.
+ */
+function NewLabelInput({ onSubmit }: { onSubmit: (name: string) => void }) {
+    const [value, setValue] = useState('')
+    return (
+        <input
+            autoFocus
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+                if (e.key === 'Escape') return
+                e.stopPropagation()
+                if (e.key === 'Enter' && value.trim()) {
+                    const name = value.trim()
+                    setValue('')
+                    onSubmit(name)
+                    e.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+                }
+            }}
+            placeholder="New topic…"
+            className="mb-0.5 w-full rounded border border-border bg-background px-1.5 py-1 text-xs outline-none placeholder:text-muted-foreground focus:border-foreground/30"
+        />
+    )
+}
+
 const MESSAGE_PROSE = 'text-sm leading-relaxed [&_p]:my-0.5 [&_h1]:text-base [&_h2]:text-[15px] [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-2 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_ul]:my-1 [&_ol]:my-1'
 
 export interface ThreadRowData {
@@ -139,7 +178,7 @@ export interface ThreadRowData {
 }
 
 export function MessageRow({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onRetryFailed, onDiscardFailed, dense, selfMemberId,
+    message, memberNames, continuation, thread, label, onOpenLabel, labeling, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onRetryFailed, onDiscardFailed, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
@@ -148,6 +187,12 @@ export function MessageRow({
     continuation: boolean
     /** Present when a topic was started from this message (general only). */
     thread?: ThreadRowData | null
+    /** The message's topic (a label on the wire), resolved for display; absent = none. */
+    label?: { id: string; name: string } | null
+    /** Open the topic's grouped view. */
+    onOpenLabel?: (labelId: string) => void
+    /** Present = the set/change/remove-topic gesture is offered here. */
+    labeling?: MessageLabeling
     onOpenThread?: (topicId: string) => void
     onReplyInThread?: (message: spaces.Message) => void
     onAskRowboat?: (message: spaces.Message) => void
@@ -173,7 +218,7 @@ export function MessageRow({
     // can act on them either.
     const unconfirmed = !!message.pending || !!message.failed
     const canDelete = !!onDelete && !deleted && !unconfirmed && selfMemberId === message.author.memberId
-    const showActions = !deleted && !unconfirmed && !!(onReplyInThread || onAskRowboat || onCopyLink || onReact || canDelete)
+    const showActions = !deleted && !unconfirmed && !!(onReplyInThread || onAskRowboat || onCopyLink || onReact || labeling || canDelete)
     // While the emoji picker or the ⋯ menu is open the hover-revealed chrome
     // must stay put — unmounting it collapses the popper anchor and the menu
     // would jump to the viewport edge.
@@ -232,6 +277,17 @@ export function MessageRow({
                         onPickerOpenChange={setPickerOpen}
                     />
                 )}
+                {!deleted && !unconfirmed && label && (
+                    <button
+                        type="button"
+                        title={`In topic: ${label.name}`}
+                        onClick={() => onOpenLabel?.(label.id)}
+                        className="mr-1.5 mt-1.5 inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                    >
+                        <Tag className="size-3" />
+                        <span className="max-w-40 truncate font-medium">{label.name}</span>
+                    </button>
+                )}
                 {thread && thread.replyCount > 0 && onOpenThread && (
                     <button
                         type="button"
@@ -284,7 +340,7 @@ export function MessageRow({
                     {onReplyInThread && (
                         <button
                             type="button"
-                            title={thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
+                            title={thread && thread.replyCount > 0 ? 'Open thread' : 'Reply — starts a thread'}
                             onClick={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
                             className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                         >
@@ -301,7 +357,7 @@ export function MessageRow({
                             <Bot className="size-3.5" />
                         </button>
                     )}
-                    {(onCopyLink || canDelete) && (
+                    {(onCopyLink || labeling || canDelete) && (
                         <DropdownMenu onOpenChange={setMenuOpen}>
                             <DropdownMenuTrigger asChild>
                                 <button type="button" title="More" className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
@@ -309,6 +365,31 @@ export function MessageRow({
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                                {labeling && (
+                                    <DropdownMenuSub>
+                                        <DropdownMenuSubTrigger>
+                                            <Tag className="size-3.5 mr-2" /> {label ? 'Change topic' : 'Add topic'}
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuSubContent className="w-52 p-1.5">
+                                            <NewLabelInput onSubmit={(name) => labeling.onCreate(message, name)} />
+                                            {labeling.options.map((option) => (
+                                                <DropdownMenuItem
+                                                    key={option.id}
+                                                    onClick={() => labeling.onSet(message, option.id)}
+                                                    className={cn(option.id === label?.id && 'bg-accent')}
+                                                >
+                                                    <Tag className="size-3 mr-2 text-muted-foreground" />
+                                                    <span className="truncate">{option.name}</span>
+                                                </DropdownMenuItem>
+                                            ))}
+                                            {label && (
+                                                <DropdownMenuItem onClick={() => labeling.onSet(message, null)}>
+                                                    Remove from “{label.name}”
+                                                </DropdownMenuItem>
+                                            )}
+                                        </DropdownMenuSubContent>
+                                    </DropdownMenuSub>
+                                )}
                                 {onCopyLink && (
                                     <DropdownMenuItem onClick={() => onCopyLink(message)}>
                                         <LinkIcon className="size-3.5 mr-2" /> Copy link
@@ -332,7 +413,7 @@ export function MessageRow({
     // under it kept catching accidental clicks. Tombstones and action-less
     // rows get the plain row.
     if (!showActions) return row
-    const hasTopItems = !!(onReact || onReplyInThread || onAskRowboat || onCopyLink)
+    const hasTopItems = !!(onReact || onReplyInThread || onAskRowboat || onCopyLink || labeling)
     return (
         <ContextMenu>
             <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
@@ -361,13 +442,38 @@ export function MessageRow({
                     <ContextMenuItem
                         onSelect={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
                     >
-                        <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
+                        <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open thread' : 'Reply — starts a thread'}
                     </ContextMenuItem>
                 )}
                 {onAskRowboat && (
                     <ContextMenuItem onSelect={() => onAskRowboat(message)}>
                         <Bot className="size-3.5 mr-2" /> Ask @rowboat about this
                     </ContextMenuItem>
+                )}
+                {labeling && (
+                    <ContextMenuSub>
+                        <ContextMenuSubTrigger>
+                            <Tag className="size-3.5 mr-2" /> {label ? 'Change topic' : 'Add topic'}
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="w-52 p-1.5">
+                            <NewLabelInput onSubmit={(name) => labeling.onCreate(message, name)} />
+                            {labeling.options.map((option) => (
+                                <ContextMenuItem
+                                    key={option.id}
+                                    onSelect={() => labeling.onSet(message, option.id)}
+                                    className={cn(option.id === label?.id && 'bg-accent')}
+                                >
+                                    <Tag className="size-3 mr-2 text-muted-foreground" />
+                                    <span className="truncate">{option.name}</span>
+                                </ContextMenuItem>
+                            ))}
+                            {label && (
+                                <ContextMenuItem onSelect={() => labeling.onSet(message, null)}>
+                                    Remove from “{label.name}”
+                                </ContextMenuItem>
+                            )}
+                        </ContextMenuSubContent>
+                    </ContextMenuSub>
                 )}
                 {onCopyLink && (
                     <ContextMenuItem onSelect={() => onCopyLink(message)}>

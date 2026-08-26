@@ -6,6 +6,8 @@ import {
   type ChangeSet,
   type DeleteAssetResult,
   type CreateInviteResult,
+  type Label,
+  type LabelListing,
   type Member,
   type Message,
   type MoveAssetResult,
@@ -64,6 +66,9 @@ type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
+type CreateLabelInput = z.infer<Routes['createLabel']['request']>;
+type ManageLabelAction = z.infer<Routes['manageLabel']['request']>;
+type SetMessageLabelInput = z.infer<Routes['setMessageLabel']['request']>;
 
 export class SpacesClient {
   private readonly baseUrl: string;
@@ -361,5 +366,57 @@ export class SpacesClient {
         action,
       )
     ).topic;
+  }
+
+  // --- labels ("topics" in the UI) ------------------------------------------
+
+  async listLabels(spaceId: string, includeArchived = false): Promise<LabelListing[]> {
+    const qs = includeArchived ? '?includeArchived=true' : '';
+    return (await this.request('GET', this.space(spaceId, `/labels${qs}`), routes.listLabels.response)).labels;
+  }
+
+  /** Get-or-create by name — the org dedupes case-insensitively among live labels. */
+  async createLabel(spaceId: string, input: CreateLabelInput): Promise<Label> {
+    return (await this.request('POST', this.space(spaceId, '/labels'), routes.createLabel.response, input)).label;
+  }
+
+  async manageLabel(spaceId: string, labelId: string, action: ManageLabelAction): Promise<Label> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/labels/${encodeURIComponent(labelId)}`),
+        routes.manageLabel.response,
+        action,
+      )
+    ).label;
+  }
+
+  /** Set (or clear — labelId null) the one label on a message. Idempotent. */
+  async setMessageLabel(spaceId: string, messageId: string, input: SetMessageLabelInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/label`),
+        routes.setMessageLabel.response,
+        input,
+      )
+    ).message;
+  }
+
+  /** A label's tagged messages, windowed newest-first like listMessages. */
+  async listLabelMessages(
+    spaceId: string,
+    labelId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<{ label: Label; messages: Message[]; hasMore: boolean }> {
+    const q = new URLSearchParams();
+    if (opts?.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
+    if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
+    const qs = q.size > 0 ? `?${q.toString()}` : '';
+    return this.request(
+      'GET',
+      this.space(spaceId, `/labels/${encodeURIComponent(labelId)}/messages${qs}`),
+      routes.listLabelMessages.response,
+    );
   }
 }

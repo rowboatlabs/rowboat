@@ -266,6 +266,22 @@ function wireBus(): void {
                     ),
                 })
             }
+        } else if (frame.event.type === 'message_label') {
+            // Fold the topic assignment into the message in place (the feed
+            // store refreshes label counts off the same event on its own tick).
+            const { assignment } = frame.event
+            if (state?.topic && state.messages.some((m) => m.id === assignment.messageId)) {
+                setGeneral(k, {
+                    messages: state.messages.map((m) => {
+                        if (m.id !== assignment.messageId) return m
+                        if (assignment.labelId === null) {
+                            const { labelId: _cleared, ...rest } = m
+                            return rest
+                        }
+                        return { ...m, labelId: assignment.labelId }
+                    }),
+                })
+            }
         } else if (frame.event.type === 'message_deleted') {
             // Tombstone in place — the row stays (threads may anchor to it), the
             // body is gone. Thread panes pick theirs up on the feed-refresh tick.

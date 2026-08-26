@@ -147,6 +147,27 @@ team and a Roadboard space (`src/main.ts`).
   `lastActivityAt` and emits no topic event. Re-deleting is an idempotent 200
   no-op. Tombstones take no new reactions (`invalid_request`); removes still
   work so cleanup stays possible. Render-face only, like reactions.
+- **Labels are curation; topics are structure** (2026-08-25, `Label` in
+  `core.ts`): a label — presented as a "Topic" in the UI, deliberately NOT the
+  wire word "topic", which already means the thread container — exists only
+  because a member created one, never derived. One label per message
+  (`Message.labelId`, current truth on reads; the copy in a stored `message`
+  event is the at-post snapshot, the reactions pattern); any number of
+  messages across the space may share a label; a thread (the topic anchored
+  on a message) inherits its anchor's label by client-side derivation —
+  nothing is stamped on topics. Five routes: `listLabels` (decorated
+  `LabelListing`: messageCount over live tagged messages + lastActivityAt
+  folding anchored threads' activity in), `createLabel` (get-or-create by
+  case-insensitive name among live labels — concurrent same-name creates land
+  on one label; only real creation emits), `manageLabel`
+  (rename/archive/unarchive; renaming or unarchiving into a live name is
+  `invalid_request`), `setMessageLabel` (any member, set-or-clear, idempotent
+  no-ops; tombstones take no label but clears work; setting an archived label
+  revives it — the archived-topic-reply rule), `listLabelMessages` (the
+  listMessages window semantics, across topics). Two event kinds: `label`
+  (create + any update, full label) and `message_label` (the assignment act,
+  `labelId` null = cleared). Render-face only for now, like reactions — the
+  six MCP tools don't manage labels. Harbor migration 010.
 - **Unknown invite tokens are 404**; `expired`/`revoked` are resolvable states.
 - **MCP face attribution**: acting mode defaults to `agent`; automations
   declare `x-acting-mode: scheduled`; `x-agent-name` carries the display label.

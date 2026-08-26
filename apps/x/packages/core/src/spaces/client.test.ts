@@ -119,6 +119,27 @@ describe('SpacesClient', () => {
     expect(listed.find((t) => t.id === started.topic.id)?.firstMessage?.id).toBe(started.message.id);
   });
 
+  it('label round-trip: create (get-or-create), set on a message, list, clear', async () => {
+    const label = await ramnique.createLabel(spaceId, { name: 'Launch', actingMode: 'direct' });
+    expect((await gagan.createLabel(spaceId, { name: 'launch', actingMode: 'direct' })).id).toBe(label.id);
+
+    const posted = await ramnique.postMessage(spaceId, { body: 'tag me', actingMode: 'direct' });
+    const tagged = await gagan.setMessageLabel(spaceId, posted.message.id, { labelId: label.id, actingMode: 'direct' });
+    expect(tagged.labelId).toBe(label.id);
+
+    const listed = await ramnique.listLabels(spaceId);
+    expect(listed.find((l) => l.id === label.id)?.messageCount).toBe(1);
+    const grouped = await ramnique.listLabelMessages(spaceId, label.id);
+    expect(grouped.messages.map((m) => m.id)).toEqual([posted.message.id]);
+
+    const renamed = await ramnique.manageLabel(spaceId, label.id, { action: 'rename', name: 'Launch week' });
+    expect(renamed.name).toBe('Launch week');
+
+    const cleared = await ramnique.setMessageLabel(spaceId, posted.message.id, { labelId: null, actingMode: 'direct' });
+    expect(cleared.labelId).toBeUndefined();
+    expect((await ramnique.listLabelMessages(spaceId, label.id)).messages).toEqual([]);
+  });
+
   it('messages window newest-first and page back by offset', async () => {
     const started = await ramnique.postMessage(spaceId, { body: 'p1', actingMode: 'direct' });
     for (const body of ['p2', 'p3', 'p4', 'p5']) {

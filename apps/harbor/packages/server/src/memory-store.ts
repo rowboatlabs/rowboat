@@ -1,5 +1,6 @@
 import type {
   ChangeSet,
+  Label,
   Member,
   Membership,
   Message,
@@ -19,6 +20,7 @@ interface SpaceState {
   changeSets: ChangeSet[]; // append order == offset order
   changeSetsById: Map<string, ChangeSet>;
   topics: Map<string, Topic>;
+  labels: Map<string, Label>; // labelId → label
   messages: Map<string, Message[]>; // topicId → oldest first
   reactions: Map<string, StoredReaction[]>; // messageId → oldest first
   events: StoredEvent[]; // offsets start at 1; events[i].offset === i + 1
@@ -75,6 +77,7 @@ export class MemoryStore implements Store {
       changeSets: [],
       changeSetsById: new Map(),
       topics: new Map(),
+      labels: new Map(),
       messages: new Map(),
       reactions: new Map(),
       events: [],
@@ -301,6 +304,74 @@ export class MemoryStore implements Store {
     s.messages.set(toTopicId, combined);
     s.messages.delete(fromTopicId);
     return moving.length;
+  }
+
+  async getLabel(spaceId: string, labelId: string): Promise<Label | undefined> {
+    return this.state(spaceId)?.labels.get(labelId);
+  }
+
+  async getLiveLabelByName(spaceId: string, name: string): Promise<Label | undefined> {
+    const wanted = name.trim().toLowerCase();
+    return [...this.must(spaceId).labels.values()].find(
+      (l) => !l.archived && l.name.trim().toLowerCase() === wanted,
+    );
+  }
+
+  async putLabel(label: Label): Promise<void> {
+    this.must(label.spaceId).labels.set(label.id, label);
+  }
+
+  async listLabels(spaceId: string, includeArchived: boolean): Promise<Label[]> {
+    return [...this.must(spaceId).labels.values()]
+      .filter((l) => includeArchived || !l.archived)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  }
+
+  async labelStats(spaceId: string): Promise<Map<string, { messageCount: number; lastActivityAt: string }>> {
+    const s = this.must(spaceId);
+    const anchoredActivity = new Map<string, string>(); // anchorMessageId → topic lastActivityAt
+    for (const t of s.topics.values()) {
+      if (t.anchorMessageId) anchoredActivity.set(t.anchorMessageId, t.lastActivityAt);
+    }
+    const stats = new Map<string, { messageCount: number; lastActivityAt: string }>();
+    for (const m of [...s.messages.values()].flat()) {
+      if (!m.labelId || m.deletedAt) continue;
+      const threadActivity = anchoredActivity.get(m.id);
+      const activity = threadActivity && threadActivity > m.postedAt ? threadActivity : m.postedAt;
+      const cur = stats.get(m.labelId);
+      stats.set(m.labelId, {
+        messageCount: (cur?.messageCount ?? 0) + 1,
+        lastActivityAt: cur && cur.lastActivityAt > activity ? cur.lastActivityAt : activity,
+      });
+    }
+    return stats;
+  }
+
+  async setMessageLabel(spaceId: string, messageId: string, labelId: string | null): Promise<void> {
+    const s = this.must(spaceId);
+    for (const [topicId, list] of s.messages) {
+      const idx = list.findIndex((m) => m.id === messageId);
+      if (idx === -1) continue;
+      const next = [...list];
+      const { labelId: _dropped, ...rest } = next[idx]!;
+      next[idx] = labelId === null ? rest : { ...rest, labelId };
+      s.messages.set(topicId, next);
+      return;
+    }
+  }
+
+  async listMessagesByLabel(
+    spaceId: string,
+    labelId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<Message[]> {
+    let list = [...this.must(spaceId).messages.values()]
+      .flat()
+      .filter((m) => m.labelId === labelId)
+      .sort((a, b) => a.offset - b.offset);
+    if (opts?.beforeOffset !== undefined) list = list.filter((m) => m.offset < opts.beforeOffset!);
+    if (opts?.limit !== undefined) list = list.slice(-opts.limit);
+    return list;
   }
 
   async getReaction(

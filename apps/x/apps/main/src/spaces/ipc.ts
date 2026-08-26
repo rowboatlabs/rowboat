@@ -46,6 +46,11 @@ type SpacesHandlers = {
   'spaces:listMessages': InvokeHandler<'spaces:listMessages'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
+  'spaces:listLabels': InvokeHandler<'spaces:listLabels'>;
+  'spaces:createLabel': InvokeHandler<'spaces:createLabel'>;
+  'spaces:manageLabel': InvokeHandler<'spaces:manageLabel'>;
+  'spaces:setMessageLabel': InvokeHandler<'spaces:setMessageLabel'>;
+  'spaces:listLabelMessages': InvokeHandler<'spaces:listLabelMessages'>;
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
   'spaces:deleteMessage': InvokeHandler<'spaces:deleteMessage'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
@@ -283,6 +288,31 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:manageTopic': async (_event, args) => ({
     topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, args.action),
   }),
+
+  'spaces:listLabels': async (_event, args) => ({
+    labels: await orgs.getClient(args.orgId).listLabels(args.spaceId, args.includeArchived ?? false),
+  }),
+
+  'spaces:createLabel': async (_event, args) => ({
+    label: await orgs.getClient(args.orgId).createLabel(args.spaceId, { name: args.name, actingMode: 'direct' }),
+  }),
+
+  'spaces:manageLabel': async (_event, args) => ({
+    label: await orgs.getClient(args.orgId).manageLabel(args.spaceId, args.labelId, args.action),
+  }),
+
+  'spaces:setMessageLabel': async (_event, args) => ({
+    message: await orgs.getClient(args.orgId).setMessageLabel(args.spaceId, args.messageId, {
+      labelId: args.labelId,
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:listLabelMessages': async (_event, args) =>
+    orgs.getClient(args.orgId).listLabelMessages(args.spaceId, args.labelId, {
+      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    }),
 
   'spaces:reactToMessage': async (_event, args) => ({
     message: await orgs.getClient(args.orgId).reactToMessage(args.spaceId, args.messageId, {

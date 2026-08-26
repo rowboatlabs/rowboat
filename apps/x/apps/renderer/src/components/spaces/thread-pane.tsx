@@ -238,7 +238,7 @@ export function ThreadPane({
         try {
             const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, topicId })
             if (sessionId && onOpenSession) onOpenSession(sessionId)
-            else if (!sessionId) toast('No agent session for this topic yet', 'info')
+            else if (!sessionId) toast('No agent session for this thread yet', 'info')
         } catch {
             toast('Could not open the agent session', 'error')
         }
@@ -413,7 +413,7 @@ export function ThreadPane({
                             const own = memberId === org.memberId
                             const label = own ? 'Your Rowboat is working…' : <><MemberName id={memberId} />’s Rowboat is working…</>
                             return own ? (
-                                <button key={memberId} className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent session for this topic" onClick={() => void openTopicSession()}>
+                                <button key={memberId} className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent session for this thread" onClick={() => void openTopicSession()}>
                                     <Loader2 className="size-3 animate-spin" />{label}
                                 </button>
                             ) : (
@@ -512,7 +512,7 @@ export function DraftThreadPane({ org, space, parent, members, memberNames, entr
                     <span className="h-px flex-1 bg-border" />
                 </div>
                 <div className="px-2 py-2 text-xs text-muted-foreground">
-                    Nothing here yet — sending a reply is what starts the topic for everyone.
+                    Nothing here yet — sending a reply is what starts the thread for everyone.
                 </div>
             </div>
             <Composer placeholder="Reply…" busy={posting} onSend={post} autoFocus members={members} entries={entries} selfMemberId={org.memberId} />

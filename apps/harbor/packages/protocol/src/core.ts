@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { ChangeSetId, LabelId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Core objects shared by both faces. Every act in a space belongs to a member
 // (spec §2, principle 4); attribution carries the acting mode, never a separate
@@ -75,6 +75,43 @@ export const Topic = z.object({
 });
 export type Topic = z.infer<typeof Topic>;
 
+/**
+ * A label (2026-08-25, "topics" in the UI): an explicit, member-created
+ * grouping that messages are assigned to — curation, where Topic is
+ * structure. A label exists only because someone made one (never derived),
+ * any number of messages across the space may carry the same label, and a
+ * thread (the Topic anchored on a message) inherits its anchor's label by
+ * derivation — nothing is stamped on topics. One label per message.
+ *
+ * Deliberately NOT a Topic: the wire name "topic" already means the thread
+ * container. Clients present labels as "Topics" and topics as threads.
+ */
+export const Label = z.object({
+  id: LabelId,
+  spaceId: SpaceId,
+  name: z.string().min(1).max(64),
+  createdBy: Attribution,
+  createdAt: z.iso.datetime(),
+  /** Archived labels keep their assignments but leave the sidebar; assigning one revives it. */
+  archived: z.boolean(),
+});
+export type Label = z.infer<typeof Label>;
+
+/**
+ * One assignment act: a member setting (or clearing — labelId null) the label
+ * on a message. Like Reaction, `topicId` is where the message lived when it
+ * happened; the assignment follows the message by id.
+ */
+export const MessageLabel = z.object({
+  spaceId: SpaceId,
+  topicId: TopicId,
+  messageId: MessageId,
+  labelId: LabelId.nullable(),
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type MessageLabel = z.infer<typeof MessageLabel>;
+
 /** The emoji itself ("👍", ZWJ sequences included), rendered verbatim — never a :name:. */
 export const ReactionEmoji = z
   .string()
@@ -138,6 +175,12 @@ export const Message = z.object({
   offset: StreamOffset,
   /** Set when the author deleted the message (deleter == author, so no separate attribution). */
   deletedAt: z.iso.datetime().optional(),
+  /**
+   * The message's label ("topic" in the UI), current truth on reads. The copy
+   * inside a stored `message` event is its at-post snapshot — clients fold
+   * `message_label` events or refetch, the reactions pattern.
+   */
+  labelId: LabelId.optional(),
   /**
    * Folded reactions, groups in first-reacted order. The default keeps pre-
    * reaction payloads (older servers, stored message events) parseable; reads

@@ -2,6 +2,7 @@ import type {
   Attribution,
   BlobInfo,
   ChangeSet,
+  Label,
   Member,
   Membership,
   Message,
@@ -168,6 +169,24 @@ export interface Store {
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
   /** merge_into support: repoints messages; returns how many moved. */
   reassignMessages(spaceId: string, fromTopicId: string, toTopicId: string): Promise<number>;
+
+  // labels ("topics" in the UI) — explicit groupings; assignment lives on the
+  // messages row (label_id), current truth on reads like reactions.
+  getLabel(spaceId: string, labelId: string): Promise<Label | undefined>;
+  /** Case-insensitive name match among live (non-archived) labels. */
+  getLiveLabelByName(spaceId: string, name: string): Promise<Label | undefined>;
+  putLabel(label: Label): Promise<void>;
+  listLabels(spaceId: string, includeArchived: boolean): Promise<Label[]>;
+  /**
+   * Per-label sidebar stats over live (non-deleted) tagged messages:
+   * messageCount, and the newest activity among tagged messages' postedAt and
+   * the lastActivityAt of topics anchored on them (threads inherit their
+   * anchor's label). Labels with no tagged messages are absent.
+   */
+  labelStats(spaceId: string): Promise<Map<string, { messageCount: number; lastActivityAt: string }>>;
+  setMessageLabel(spaceId: string, messageId: string, labelId: string | null): Promise<void>;
+  /** Same window semantics as listMessages, across topics: oldest first, newest `limit` below `beforeOffset`. */
+  listMessagesByLabel(spaceId: string, labelId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
 
   // reactions — per-(member, emoji) toggles on messages
   getReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<StoredReaction | undefined>;

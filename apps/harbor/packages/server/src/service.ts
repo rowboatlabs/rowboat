@@ -12,6 +12,8 @@ import {
   type ConflictRegion,
   type CreateInviteResult,
   type DeleteAssetResult,
+  type Label,
+  type LabelListing,
   type Member,
   type Membership,
   type Message,
@@ -75,6 +77,9 @@ type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
+type CreateLabelInput = z.infer<Routes['createLabel']['request']>;
+type ManageLabelAction = z.infer<Routes['manageLabel']['request']>;
+type SetMessageLabelInput = z.infer<Routes['setMessageLabel']['request']>;
 
 export interface OrgInfo {
   name: string;
@@ -1078,6 +1083,180 @@ export class HarborService {
         }
       }
     });
+  }
+
+  // --- labels ("topics" in the UI) -------------------------------------------
+
+  async listLabels(ctx: ActorCtx, spaceId: string, includeArchived = false): Promise<LabelListing[]> {
+    await this.requireMember(ctx, spaceId);
+    const labels = await this.store.listLabels(spaceId, includeArchived);
+    const stats = await this.store.labelStats(spaceId);
+    return labels.map((label) => {
+      const s = stats.get(label.id);
+      return {
+        ...label,
+        messageCount: s?.messageCount ?? 0,
+        lastActivityAt: s && s.lastActivityAt > label.createdAt ? s.lastActivityAt : label.createdAt,
+      };
+    });
+  }
+
+  /**
+   * Get-or-create by name (case-insensitive, live labels only): concurrent
+   * "Launch" typers land on one label. Only an actual creation writes and
+   * emits a label event — the get path is a pure read.
+   */
+  async createLabel(ctx: ActorCtx, spaceId: string, input: CreateLabelInput): Promise<Label> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    const name = input.name.trim();
+    if (!name) throw new HarborError('invalid_request', 'a label needs a name');
+    const createdBy: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const existing = await this.store.getLiveLabelByName(spaceId, name);
+      if (existing) return existing;
+      const at = this.now();
+      const label: Label = { id: this.ulid(), spaceId, name, createdBy, createdAt: at, archived: false };
+      await this.store.putLabel(label);
+      const offset = (await this.store.head(spaceId)) + 1;
+      await this.append(spaceId, offset, at, { type: 'label', label });
+      return label;
+    });
+  }
+
+  async manageLabel(ctx: ActorCtx, spaceId: string, labelId: string, action: ManageLabelAction): Promise<Label> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const label = await this.store.getLabel(spaceId, labelId);
+      if (!label) throw new HarborError('not_found', 'no such label');
+      const at = this.now();
+
+      switch (action.action) {
+        case 'rename': {
+          const name = action.name.trim();
+          if (!name) throw new HarborError('invalid_request', 'a label needs a name');
+          if (name === label.name) return label; // idempotent, no event
+          const taken = await this.store.getLiveLabelByName(spaceId, name);
+          if (taken && taken.id !== label.id) {
+            throw new HarborError('invalid_request', `a label named "${taken.name}" already exists`);
+          }
+          const updated: Label = { ...label, name };
+          await this.store.putLabel(updated);
+          const offset = (await this.store.head(spaceId)) + 1;
+          await this.append(spaceId, offset, at, { type: 'label', label: updated });
+          return updated;
+        }
+        case 'archive':
+        case 'unarchive': {
+          const archived = action.action === 'archive';
+          if (label.archived === archived) return label; // idempotent, no event
+          if (!archived) {
+            // Archiving freed the name; a live label may hold it now.
+            const taken = await this.store.getLiveLabelByName(spaceId, label.name);
+            if (taken) throw new HarborError('invalid_request', `a label named "${taken.name}" already exists`);
+          }
+          const updated: Label = { ...label, archived };
+          await this.store.putLabel(updated);
+          const offset = (await this.store.head(spaceId)) + 1;
+          await this.append(spaceId, offset, at, { type: 'label', label: updated });
+          return updated;
+        }
+      }
+    });
+  }
+
+  /**
+   * Set (or clear — null) the one label on a message: any member, any message
+   * (the content plane is role-flat, the reactions posture). Setting an
+   * archived label revives it — the archived-topic-reply rule — unless a live
+   * label took the name meanwhile. Idempotent no-ops write and emit nothing.
+   */
+  async setMessageLabel(
+    ctx: ActorCtx,
+    spaceId: string,
+    messageId: string,
+    input: SetMessageLabelInput,
+  ): Promise<Message> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const message = await this.store.getMessage(spaceId, messageId);
+      if (!message) throw new HarborError('not_found', 'no such message');
+      if (message.deletedAt && input.labelId !== null) {
+        // Clears stay legal so cleanup stays possible, the tombstone-reaction rule.
+        throw new HarborError('invalid_request', 'cannot label a deleted message');
+      }
+      const withFolds = async (m: Message): Promise<Message> => ({
+        ...m,
+        reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, messageId)),
+      });
+      if ((message.labelId ?? null) === input.labelId) return withFolds(message);
+
+      const at = this.now();
+      let offset = (await this.store.head(spaceId)) + 1;
+      if (input.labelId !== null) {
+        const label = await this.store.getLabel(spaceId, input.labelId);
+        if (!label) throw new HarborError('not_found', 'no such label');
+        if (label.archived) {
+          const taken = await this.store.getLiveLabelByName(spaceId, label.name);
+          if (taken) {
+            throw new HarborError('invalid_request', `this label is archived and "${taken.name}" now names a live one`);
+          }
+          const revived: Label = { ...label, archived: false };
+          await this.store.putLabel(revived);
+          await this.append(spaceId, offset, at, { type: 'label', label: revived });
+          offset += 1;
+        }
+      }
+      await this.store.setMessageLabel(spaceId, messageId, input.labelId);
+      await this.append(spaceId, offset, at, {
+        type: 'message_label',
+        assignment: { spaceId, topicId: message.topicId, messageId, labelId: input.labelId, by, at },
+      });
+      const { labelId: _cleared, ...bare } = message;
+      return withFolds(input.labelId === null ? bare : { ...message, labelId: input.labelId });
+    });
+  }
+
+  async listLabelMessages(
+    ctx: ActorCtx,
+    spaceId: string,
+    labelId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<{ label: Label; messages: Message[]; hasMore: boolean }> {
+    await this.requireMember(ctx, spaceId);
+    const label = await this.store.getLabel(spaceId, labelId);
+    if (!label) throw new HarborError('not_found', 'no such label');
+    const limit = Math.min(Math.max(opts?.limit ?? MESSAGES_PAGE_DEFAULT, 1), MESSAGES_PAGE_MAX);
+    const window = await this.store.listMessagesByLabel(spaceId, labelId, {
+      ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
+      limit: limit + 1,
+    });
+    const hasMore = window.length > limit;
+    const messages = hasMore ? window.slice(1) : window;
+    return {
+      label,
+      messages: await Promise.all(
+        messages.map(async (m) => ({
+          ...m,
+          reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, m.id)),
+        })),
+      ),
+      hasMore,
+    };
   }
 
   async searchFeed(

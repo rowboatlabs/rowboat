@@ -9,8 +9,8 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { ActingMode, Label, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
+import { AssetPath, AssetVersion, BlobHash, LabelId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
   AcceptInviteResult,
@@ -52,6 +52,20 @@ const NewTopicMessage = z.object({
  */
 export const TopicListing = Topic.extend({ firstMessage: Message.nullable() });
 export type TopicListing = z.infer<typeof TopicListing>;
+
+/**
+ * A listLabels entry: the label plus what a sidebar needs without loading any
+ * messages — how many live messages carry it, and when something under it
+ * last moved (the newest of: the label's creation, a tagged message's post,
+ * and the lastActivityAt of any thread anchored on a tagged message —
+ * threads inherit their anchor's label, so their replies count as activity).
+ * Listing decoration only: Label objects inside events stay lean.
+ */
+export const LabelListing = Label.extend({
+  messageCount: z.number().int().nonnegative(),
+  lastActivityAt: z.iso.datetime(),
+});
+export type LabelListing = z.infer<typeof LabelListing>;
 
 export const routes = {
   // --- identity ------------------------------------------------------------
@@ -335,6 +349,83 @@ export const routes = {
       z.object({ action: z.literal('merge_into'), targetTopicId: TopicId }),
     ]),
     response: z.object({ topic: Topic }),
+  },
+
+  // --- labels ("topics" in the UI — see Label in core.ts) -------------------
+  listLabels: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/labels',
+    params: z.object({ spaceId: SpaceId }),
+    query: z.object({ includeArchived: z.coerce.boolean().optional() }),
+    response: z.object({ labels: z.array(LabelListing) }),
+  },
+  /**
+   * Get-or-create by name, case-insensitively, among live labels — two people
+   * typing "Launch" concurrently land on ONE label (a create event fires only
+   * when a label is actually made). An archived label never matches; a fresh
+   * one takes the name.
+   */
+  createLabel: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/labels',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      name: z.string().min(1).max(64),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ label: Label }),
+  },
+  /**
+   * rename/archive/unarchive. Renaming (and unarchiving) into a name a live
+   * label already holds is invalid_request — merge by re-assigning messages
+   * instead. Archive/unarchive are idempotent 200 no-ops with no event.
+   */
+  manageLabel: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/labels/:labelId',
+    params: z.object({ spaceId: SpaceId, labelId: LabelId }),
+    request: z.discriminatedUnion('action', [
+      z.object({ action: z.literal('rename'), name: z.string().min(1).max(64) }),
+      z.object({ action: z.literal('archive') }),
+      z.object({ action: z.literal('unarchive') }),
+    ]),
+    response: z.object({ label: Label }),
+  },
+  /**
+   * Set (or clear — labelId null) the label on a message: any member, any
+   * message, one label per message (a set replaces). Setting an archived
+   * label revives it (a label event narrates), the archived-topic-reply rule.
+   * Idempotent — re-setting what is set / clearing what isn't is a 200 no-op
+   * with no event. Tombstones take no label (clears still work). Returns the
+   * message with the current labelId (and reactions) folded.
+   */
+  setMessageLabel: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/messages/:messageId/label',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    request: z.object({
+      labelId: LabelId.nullable(),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ message: Message }),
+  },
+  /**
+   * Every message carrying this label, windowed newest-first exactly like
+   * listMessages (offsets ride the space's one sequence and are the cursor).
+   * The messages span topics — each is rendered where it lives; a thread
+   * anchored on one inherits the label by derivation, client-side.
+   */
+  listLabelMessages: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/labels/:labelId/messages',
+    params: z.object({ spaceId: SpaceId, labelId: LabelId }),
+    query: z.object({
+      beforeOffset: z.coerce.number().int().positive().optional(),
+      limit: z.coerce.number().int().positive().max(200).optional(),
+    }),
+    response: z.object({ label: Label, messages: z.array(Message), hasMore: z.boolean() }),
   },
 
   // --- live ----------------------------------------------------------------

@@ -153,11 +153,13 @@ export function useSpaceLive(
 export interface SpaceFeedData {
     /** Listing entries — each topic carries its immutable first message. */
     topics: spaces.TopicListing[]
+    /** Explicit labels — the "Topics" the rail shows (wire topics are threads). */
+    labels: spaces.LabelListing[]
     changeSets: spaces.ChangeSet[]
     loaded: boolean
 }
 
-const EMPTY_FEED: SpaceFeedData = { topics: [], changeSets: [], loaded: false }
+const EMPTY_FEED: SpaceFeedData = { topics: [], labels: [], changeSets: [], loaded: false }
 
 let feedState: ReadonlyMap<string, SpaceFeedData> = new Map()
 const feedListeners = new Set<() => void>()
@@ -192,12 +194,15 @@ export function refreshSpaceFeed(orgId: string, spaceId: string): Promise<void> 
     }
     const promise = (async () => {
         try {
-            const [topicsRes, historyRes] = await Promise.all([
+            const [topicsRes, labelsRes, historyRes] = await Promise.all([
                 window.ipc.invoke('spaces:listTopics', { orgId, spaceId }),
+                // A pre-labels org (teammate's stale local Harbor) has no route
+                // — the rail just shows no topics rather than killing the feed.
+                window.ipc.invoke('spaces:listLabels', { orgId, spaceId }).catch(() => ({ labels: [] })),
                 window.ipc.invoke('spaces:assetHistory', { orgId, spaceId, limit: 60 }),
             ])
             const next = new Map(feedState)
-            next.set(key, { topics: topicsRes.topics, changeSets: historyRes.changeSets, loaded: true })
+            next.set(key, { topics: topicsRes.topics, labels: labelsRes.labels, changeSets: historyRes.changeSets, loaded: true })
             feedState = next
             feedRefreshedAt.set(key, Date.now())
             emitFeed()

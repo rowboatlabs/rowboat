@@ -37,6 +37,8 @@ import {
     SpacesOrgSummary,
     type SpacesAssetEntry,
     type SpacesBusEvent,
+    type SpacesLabelMessages,
+    type SpacesManageLabelAction,
     type SpacesManageTopicAction,
     type SpacesPostResult,
     type SpacesProposeInput,
@@ -3659,6 +3661,48 @@ const ipcSchemas = {
       action: z.custom<SpacesManageTopicAction>(),
     }),
     res: z.object({ topic: z.custom<SpacesTypes.Topic>() }),
+  },
+  // Labels — "Topics" in the UI (curation), distinct from wire topics
+  // (threads). One label per message; any member sets or clears; actingMode
+  // is stamped 'direct' by main like postMessage.
+  'spaces:listLabels': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), includeArchived: z.boolean().optional() }),
+    res: z.object({ labels: z.array(z.custom<SpacesTypes.LabelListing>()) }),
+  },
+  // Get-or-create by name (case-insensitive among live labels) — the org
+  // dedupes concurrent same-name creates.
+  'spaces:createLabel': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
+    res: z.object({ label: z.custom<SpacesTypes.Label>() }),
+  },
+  'spaces:manageLabel': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      labelId: z.string(),
+      action: z.custom<SpacesManageLabelAction>(),
+    }),
+    res: z.object({ label: z.custom<SpacesTypes.Label>() }),
+  },
+  // labelId null clears. Returns the message with the current labelId folded.
+  'spaces:setMessageLabel': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      labelId: z.string().nullable(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  'spaces:listLabelMessages': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      labelId: z.string(),
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.custom<SpacesLabelMessages>(),
   },
   // Slack-style reaction toggle — any member, any message. Idempotent on the
   // org (re-add / re-remove is a no-op); actingMode is stamped 'direct' by
