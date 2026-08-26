@@ -1,6 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
-import fsPromises from "node:fs/promises";
 import os from "node:os";
 import {
   setupIpcHandlers,
@@ -40,7 +39,7 @@ import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { prepareCoreData, initCoreServices } from "@x/core/dist/boot/services.js";
 import { startServerHost, stopServerHost, childServerMode, serverHostMode, whenServerReady } from "./server-host.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
-import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
+import { resolveExistingWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -205,16 +204,8 @@ function registerAppProtocol() {
             if (range) headers.set("range", range);
             return fetch(`${baseUrl}/workspace/${relPath.split("/").map(encodeURIComponent).join("/")}`, { headers });
           }
-          const absPath = resolveWorkspacePath(relPath);
-          // Parity with the server's /workspace route: `..` is guarded above,
-          // but a symlink inside the workspace can still point out of it —
-          // realpath both sides and require containment.
-          const realRoot = await fsPromises.realpath(resolveWorkspacePath(""));
-          const realTarget = await fsPromises.realpath(absPath);
-          if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) {
-            return new Response("Forbidden", { status: 403 });
-          }
-          return net.fetch(pathToFileURL(realTarget).toString());
+          const absPath = await resolveExistingWorkspacePath(relPath);
+          return net.fetch(pathToFileURL(absPath).toString());
         } catch {
           return new Response("Forbidden", { status: 403 });
         }
