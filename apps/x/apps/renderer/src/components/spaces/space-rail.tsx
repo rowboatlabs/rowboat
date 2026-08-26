@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { toast } from '@/lib/toast'
 import { FileTree } from '@/components/spaces/files-tab'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
@@ -21,6 +22,11 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // that opens on hover and lingers a few seconds after the cursor leaves
 // (instant close was too twitchy). The header button flips the mode; a click
 // on the closed edge pins it back open. The surfaces own everything else.
+
+/** Resizable Files section: never shorter than this (header + a couple of rows). */
+const FILES_MIN = 96
+/** Dragging the Files divider always leaves this much for Messages + topics. */
+const TOPICS_FLOOR = 160
 
 export function SpaceRail({
     orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
@@ -57,6 +63,42 @@ export function SpaceRail({
     const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
     const [creatingFolder, setCreatingFolder] = useState(false)
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
+
+    // Resizable Files section: null = natural height (grows with the tree,
+    // capped at 40% of the rail) until the divider is dragged; then the
+    // chosen height sticks, persisted like the Split doc width.
+    const [filesHeight, setFilesHeight] = useState<number | null>(() => {
+        const stored = Number(localStorage.getItem('spaces:filesHeight'))
+        return Number.isFinite(stored) && stored >= FILES_MIN ? stored : null
+    })
+    const [resizingFiles, setResizingFiles] = useState(false)
+    const filesDrag = useRef<{ y: number; height: number } | null>(null)
+    const railBodyRef = useRef<HTMLDivElement | null>(null)
+    const filesRef = useRef<HTMLDivElement | null>(null)
+    const startFilesResize = (e: React.MouseEvent) => {
+        e.preventDefault()
+        filesDrag.current = { y: e.clientY, height: filesRef.current?.clientHeight ?? 0 }
+        setResizingFiles(true)
+        const onMove = (ev: MouseEvent) => {
+            if (!filesDrag.current) return
+            // Files sit at the bottom: dragging the divider up grows them.
+            const next = filesDrag.current.height + (filesDrag.current.y - ev.clientY)
+            const railHeight = railBodyRef.current?.clientHeight ?? window.innerHeight
+            setFilesHeight(Math.min(Math.max(next, FILES_MIN), Math.max(FILES_MIN, railHeight - TOPICS_FLOOR)))
+        }
+        const onUp = () => {
+            window.removeEventListener('mousemove', onMove)
+            window.removeEventListener('mouseup', onUp)
+            filesDrag.current = null
+            setResizingFiles(false)
+            setFilesHeight((h) => {
+                if (h !== null) localStorage.setItem('spaces:filesHeight', String(h))
+                return h
+            })
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+    }
 
     // Row-level topic actions. Rename edits inline in the row; the topic event
     // the server emits updates every other client, the refresh updates this one.
@@ -174,7 +216,7 @@ export function SpaceRail({
                 </button>
             ) : (
                 // Inner content is fixed at the open width so text doesn't reflow mid-slide.
-                <div className="flex h-full w-[280px] flex-col">
+                <div ref={railBodyRef} className="flex h-full w-[280px] flex-col">
                     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1.5">
                         <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topics &amp; files</span>
                         <button
@@ -265,29 +307,51 @@ export function SpaceRail({
                                     }
                                     return (
                                         <div key={topic.id} className="group/topicrow relative">
-                                            <button
-                                                type="button"
-                                                onClick={() => onSelect({ kind: 'topic', topicId: topic.id })}
-                                                className={cn(
-                                                    'flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left',
-                                                    active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
-                                                    topic.archived && 'opacity-60',
-                                                )}
-                                            >
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className={cn('flex-1 truncate text-[13px] leading-snug', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
-                                                    {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" />}
-                                                </div>
-                                                <div className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                                                    <span>{replies} {replies === 1 ? 'reply' : 'replies'}</span>
-                                                    <span>· {formatFeedTime(topic.lastActivityAt)}</span>
-                                                    {files && files.size > 0 && (
-                                                        <span className="inline-flex items-center gap-0.5" title={`Files changed here: ${[...files].join(', ')}`}><FileText className="size-2.5" />{files.size}</span>
+                                            <ContextMenu>
+                                                <ContextMenuTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onSelect({ kind: 'topic', topicId: topic.id })}
+                                                        className={cn(
+                                                            'flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left',
+                                                            active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
+                                                            topic.archived && 'opacity-60',
+                                                        )}
+                                                    >
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className={cn('flex-1 truncate text-[13px] leading-snug', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
+                                                            {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" />}
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                                                            <span>{replies} {replies === 1 ? 'reply' : 'replies'}</span>
+                                                            <span>· {formatFeedTime(topic.lastActivityAt)}</span>
+                                                            {files && files.size > 0 && (
+                                                                <span className="inline-flex items-center gap-0.5" title={`Files changed here: ${[...files].join(', ')}`}><FileText className="size-2.5" />{files.size}</span>
+                                                            )}
+                                                            {working && <Bot className="size-2.5" aria-label="a Rowboat is working here" />}
+                                                            {topic.archived && <span>· archived</span>}
+                                                        </div>
+                                                    </button>
+                                                </ContextMenuTrigger>
+                                                <ContextMenuContent>
+                                                    <ContextMenuItem onSelect={() => onSelect({ kind: 'topic', topicId: topic.id })}>
+                                                        <MessagesSquare className="size-3.5 mr-2" /> Open
+                                                    </ContextMenuItem>
+                                                    <ContextMenuItem onSelect={() => setRenaming({ topicId: topic.id, value: title })}>
+                                                        <Pencil className="size-3.5 mr-2" /> Rename
+                                                    </ContextMenuItem>
+                                                    <ContextMenuSeparator />
+                                                    {topic.archived ? (
+                                                        <ContextMenuItem onSelect={() => void manageTopic(topic.id, { action: 'unarchive' })}>
+                                                            <ArchiveRestore className="size-3.5 mr-2" /> Unarchive
+                                                        </ContextMenuItem>
+                                                    ) : (
+                                                        <ContextMenuItem onSelect={() => void manageTopic(topic.id, { action: 'archive' })}>
+                                                            <Archive className="size-3.5 mr-2" /> Archive
+                                                        </ContextMenuItem>
                                                     )}
-                                                    {working && <Bot className="size-2.5" aria-label="a Rowboat is working here" />}
-                                                    {topic.archived && <span>· archived</span>}
-                                                </div>
-                                            </button>
+                                                </ContextMenuContent>
+                                            </ContextMenu>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
@@ -325,7 +389,20 @@ export function SpaceRail({
                         </div>
                     </div>
 
-                    <div className="flex max-h-[40%] shrink-0 flex-col border-t border-border">
+                    <div
+                        ref={filesRef}
+                        // maxHeight backstops a persisted height against a shorter window.
+                        style={filesHeight !== null ? { height: filesHeight, maxHeight: '75%' } : undefined}
+                        className={cn('flex shrink-0 flex-col', filesHeight === null && 'max-h-[40%]')}
+                    >
+                        <div
+                            onMouseDown={startFilesResize}
+                            title="Drag to resize the files pane"
+                            className={cn(
+                                'h-1.5 shrink-0 cursor-row-resize border-t border-border transition-colors hover:bg-primary/20',
+                                resizingFiles && 'bg-primary/30',
+                            )}
+                        />
                         <div className="flex h-8 shrink-0 items-center gap-2 px-3 pr-2 pt-1">
                             <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
                             <span className="text-[11px] text-muted-foreground/70">{entries.length}</span>

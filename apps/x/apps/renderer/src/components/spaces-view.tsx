@@ -354,10 +354,14 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         else if (selection.kind !== 'file' && mode === 'read') setMode('talk')
     }, [selKey, selection.kind, mode])
 
-    // The document pane: an explicitly opened file, else the space's front
-    // page (README.md), else the first file there is.
+    // The last dismissed file — Read/Split and the header chip reopen it.
+    const [lastDoc, setLastDoc] = useState<{ path: string; fromTopicId?: string } | null>(null)
+
+    // The document pane: an explicitly opened file, else the one that was
+    // just dismissed, else the space's front page (README.md), else the
+    // first file there is.
     const defaultDocPath = entries.some((e) => e.path === 'README.md') ? 'README.md' : (entries[0]?.path ?? null)
-    const centerPath = selection.kind === 'file' ? selection.path : defaultDocPath
+    const centerPath = selection.kind === 'file' ? selection.path : (lastDoc?.path ?? defaultDocPath)
 
     // Resizable Split divider: drag it; the document width persists.
     const [docWidth, setDocWidth] = useState<number>(() => {
@@ -435,10 +439,18 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     }
 
     // Split: dismissing the document closes it and returns to Talk, landing
-    // on the conversation that was beside it.
+    // on the conversation that was beside it. The dismissed file is remembered
+    // (lastDoc) so it can be reopened — from the header chip, or by
+    // re-entering Read/Split (which prefer it over the README default).
     const dismissFile = () => {
-        if (selection.kind === 'file') onSelect(chatTopicId ? { kind: 'topic', topicId: chatTopicId } : { kind: 'general' })
+        if (selection.kind === 'file') {
+            setLastDoc({ path: selection.path, fromTopicId: selection.fromTopicId })
+            onSelect(chatTopicId ? { kind: 'topic', topicId: chatTopicId } : { kind: 'general' })
+        }
         setMode('talk')
+    }
+    const reopenDoc = () => {
+        if (lastDoc) select({ kind: 'file', path: lastDoc.path, fromTopicId: lastDoc.fromTopicId })
     }
 
     // Crumb for a file opened from a topic.
@@ -527,6 +539,18 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     </span>
                 )}
                 <div className="flex-1" />
+                {effMode === 'talk' && selection.kind !== 'file' && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
+                    <button
+                        type="button"
+                        onClick={reopenDoc}
+                        title={`Reopen ${lastDoc.path} beside the conversation`}
+                        className="inline-flex h-6 max-w-[14rem] items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    >
+                        <FileText className="size-3 shrink-0" />
+                        <span className="truncate font-mono text-[11px]">{lastDoc.path.split('/').pop()}</span>
+                        <Columns2 className="size-3 shrink-0" />
+                    </button>
+                )}
                 <div className="inline-flex items-center rounded-md bg-muted p-0.5">
                     {MODES.map(({ k, label, Icon, kb }) => (
                         <button

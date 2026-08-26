@@ -1,10 +1,11 @@
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, Bot, Loader2 } from 'lucide-react'
+import { ArrowDown, Bot, Loader2, ShieldAlert } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
+import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
 import {
     buildPendingMessage, failPendingGeneralMessage, ingestGeneralMessage, loadOlderGeneralMessages,
     removeGeneralMessage, resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
@@ -12,7 +13,7 @@ import {
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { applyReaction, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
-import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
+import { getTopicLastReadAt, markRead, markTopicRead } from '@/lib/spaces-read-state'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
@@ -26,6 +27,11 @@ const FIRST_PAINT_CAP = 16
 
 /** The steady-state window; the data is local, so expanding is instant. */
 const RENDER_CAP = 100
+
+/** How long the New line lingers once the reader has caught up with it. */
+const NEW_LINGER_MS = 5_000
+/** Clear delay after the fade starts — must outlast the divider's duration-700. */
+const NEW_FADE_MS = 800
 
 export function GeneralStream({
     org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onStartThread, onOpenSession, visible = true,
@@ -60,6 +66,11 @@ export function GeneralStream({
     // Agents invoked straight from the stream hold their working lease on the
     // stream's own topic — surface it here, typing-indicator position.
     const workingHere = presence.working.get(generalId ?? '') ?? []
+    // Your own agent, blocked mid-turn on a tool permission: surface it here
+    // instead of letting it idle behind a "working…" spinner (or silence).
+    const permissionWait = useTopicAgentPermissionWait(org.id, space.id, generalId, visible)
+    // While blocked, the amber pill replaces the own-agent spinner.
+    const spinningHere = permissionWait.length > 0 ? workingHere.filter((id) => id !== org.memberId) : workingHere
     const openStreamSession = async () => {
         if (!generalId) return
         try {
@@ -75,7 +86,19 @@ export function GeneralStream({
     // then on — but only while actually on screen. A kept-alive hidden stream
     // must not mark messages read as they arrive; the flip back to visible
     // re-runs this and marks the catch-up read.
-    const [newSince] = useState<string | null>(() => (generalId ? getTopicLastReadAt(org.id, space.id, generalId) : null))
+    const [newSince, setNewSince] = useState<string | null>(() => (generalId ? getTopicLastReadAt(org.id, space.id, generalId) : null))
+    const [newFading, setNewFading] = useState(false)
+    // Each return to the stream re-arms the line at the catch-up point: the
+    // read mark as it stood while hidden. Declared BEFORE the mark-read
+    // effect below — same flip, and the snapshot must win the race.
+    const newArmedVisibleRef = useRef(visible)
+    useEffect(() => {
+        const was = newArmedVisibleRef.current
+        newArmedVisibleRef.current = visible
+        if (!visible || was || !generalId) return
+        setNewFading(false)
+        setNewSince(getTopicLastReadAt(org.id, space.id, generalId))
+    }, [visible, org.id, space.id, generalId])
     useEffect(() => {
         if (!visible || !generalId || !general.ready) return
         markTopicRead(org.id, space.id, generalId)
@@ -117,7 +140,7 @@ export function GeneralStream({
         }
         const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
         if (nearBottom) bottomRef.current?.scrollIntoView({ block: 'end' })
-    }, [general.ready, general.messages.length, presence.typing, workingHere.length])
+    }, [general.ready, general.messages.length, presence.typing, workingHere.length, permissionWait.length])
     // The "jump to latest" pill: shown once the reader is meaningfully away
     // from the tail, with a count of messages that arrived below since they
     // left it. lastSeen tracks the newest offset that was ever on screen at
@@ -128,6 +151,23 @@ export function GeneralStream({
         const el = scrollRef.current
         if (el) el.scrollTop = el.scrollHeight
     }
+    // Once the reader is with the new messages (on screen, at the tail) the
+    // line has done its job: linger a beat, fade, drop. Keep-alive means no
+    // remount ever resets it — without this it would sit in history forever.
+    const hasNewLine = !!newSince && general.messages.some((m) => m.postedAt > newSince && m.author.memberId !== org.memberId)
+    useEffect(() => {
+        if (!visible || !general.ready || awayFromBottom || !hasNewLine || newFading) return
+        const t = window.setTimeout(() => setNewFading(true), NEW_LINGER_MS)
+        return () => window.clearTimeout(t)
+    }, [visible, general.ready, awayFromBottom, hasNewLine, newFading])
+    useEffect(() => {
+        if (!newFading) return
+        const t = window.setTimeout(() => {
+            setNewSince(null)
+            setNewFading(false)
+        }, NEW_FADE_MS)
+        return () => window.clearTimeout(t)
+    }, [newFading])
     // Coming back from hidden (keep-alive): display:none dropped the scroll
     // geometry, so put it back before paint — the remembered spot if the
     // reader had scrolled up, else the bottom (following).
@@ -391,7 +431,7 @@ export function GeneralStream({
             prev = undefined
         }
         if (!newShown && newSince && message.postedAt > newSince && message.author.memberId !== org.memberId) {
-            rows.push(<NewDivider key="new" />)
+            rows.push(<NewDivider key="new" fading={newFading} />)
             newShown = true
             prev = undefined
         }
@@ -479,9 +519,24 @@ export function GeneralStream({
                     <div className="px-2 py-6 text-sm text-muted-foreground">Nothing here yet — say hello, or @rowboat to ask your agent.</div>
                 )}
                 {rows}
-                {workingHere.length > 0 && (
+                {/* Your agent is stopped, not working — it wants an answer. */}
+                {permissionWait.length > 0 && (
                     <div className="flex flex-wrap items-center gap-2 pl-10 pt-1">
-                        {workingHere.map((memberId) => {
+                        <button
+                            type="button"
+                            onClick={() => void openStreamSession()}
+                            title="Open the agent session to review the request"
+                            className="flex items-center gap-1.5 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+                        >
+                            <ShieldAlert className="size-3" />
+                            Your Rowboat needs permission — {permissionWait[0]}
+                            {permissionWait.length > 1 ? ` +${permissionWait.length - 1} more` : ''} · Review
+                        </button>
+                    </div>
+                )}
+                {spinningHere.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 pl-10 pt-1">
+                        {spinningHere.map((memberId) => {
                             const own = memberId === org.memberId
                             const label = own ? 'Your Rowboat is working…' : <><MemberName id={memberId} />’s Rowboat is working…</>
                             return own ? (
@@ -524,6 +579,31 @@ export function GeneralStream({
                 members={members}
                 entries={entries}
                 selfMemberId={org.memberId}
+                commands={[
+                    {
+                        name: 'invite',
+                        hint: 'Copy an invite link to this space',
+                        run: async () => {
+                            try {
+                                const result = await window.ipc.invoke('spaces:createInvite', { orgId: org.id, spaceId: space.id })
+                                await navigator.clipboard.writeText(result.link)
+                                toast('Invite link copied to clipboard', 'success')
+                            } catch (err) {
+                                toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')
+                            }
+                        },
+                    },
+                    {
+                        name: 'read',
+                        hint: 'Mark everything in this space read',
+                        run: () => {
+                            markRead(org.id, space.id)
+                            if (general.topic) markTopicRead(org.id, space.id, general.topic.id)
+                            for (const t of topics) markTopicRead(org.id, space.id, t.id)
+                            toast('Marked read', 'success')
+                        },
+                    },
+                ]}
             />
         </section>
     )

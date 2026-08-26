@@ -8,6 +8,7 @@ import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
+import { fetchLinkPreview } from './link-preview.js';
 
 type IPCChannels = ipc.IPCChannels;
 
@@ -38,6 +39,7 @@ type SpacesHandlers = {
   'spaces:uploadBlob': InvokeHandler<'spaces:uploadBlob'>;
   'spaces:saveBlob': InvokeHandler<'spaces:saveBlob'>;
   'spaces:saveImageUrl': InvokeHandler<'spaces:saveImageUrl'>;
+  'spaces:linkPreview': InvokeHandler<'spaces:linkPreview'>;
   'spaces:readAsset': InvokeHandler<'spaces:readAsset'>;
   'spaces:proposeChange': InvokeHandler<'spaces:proposeChange'>;
   'spaces:assetHistory': InvokeHandler<'spaces:assetHistory'>;
@@ -236,6 +238,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
     await fs.writeFile(result.filePath, Buffer.from(await res.arrayBuffer()));
     return { saved: true, path: result.filePath };
   },
+
+  'spaces:linkPreview': async (_event, args) => ({ preview: await fetchLinkPreview(args.url) }),
 
   'spaces:readAsset': async (_event, args) =>
     orgs.getClient(args.orgId).readAsset(args.spaceId, args.path, args.version),

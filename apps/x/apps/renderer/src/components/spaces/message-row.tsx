@@ -13,6 +13,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import { MemberAvatar } from '@/components/spaces/atoms'
+import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { formatFeedTime, formatFullTimestamp, resolveMentions } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -258,6 +259,7 @@ function MessageRowImpl({
                         {message.editedAt && (
                             <span title={formatFullTimestamp(message.editedAt)} className="text-[10.5px] text-muted-foreground/70">(edited)</span>
                         )}
+                        <MessageLinkPreview body={message.body} />
                     </div>
                 )}
                 {message.failed && (
@@ -517,9 +519,10 @@ export function DayDivider({ label }: { label: string }) {
     )
 }
 
-export function NewDivider() {
+/** The line has been seen: fade over 700ms; the pane drops it after. */
+export function NewDivider({ fading = false }: { fading?: boolean }) {
     return (
-        <div className="flex items-center gap-2.5 px-2 py-1">
+        <div className={cn('flex items-center gap-2.5 px-2 py-1 transition-opacity duration-700', fading && 'opacity-0')}>
             <span className="h-px flex-1 bg-orange-500" />
             <span className="text-[10.5px] font-semibold uppercase tracking-wider text-orange-600">New</span>
         </div>

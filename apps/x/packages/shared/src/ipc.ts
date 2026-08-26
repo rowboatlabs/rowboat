@@ -3760,6 +3760,23 @@ const ipcSchemas = {
     req: z.object({ url: z.string() }),
     res: z.object({ saved: z.boolean(), path: z.string().optional() }),
   },
+  // OpenGraph metadata for a link card. Main fetches the page — the renderer
+  // can't (CORS) — with a size cap and timeout. null preview = nothing
+  // usable (not html, too slow, no tags). https only.
+  'spaces:linkPreview': {
+    req: z.object({ url: z.string() }),
+    res: z.object({
+      preview: z
+        .object({
+          url: z.string(),
+          title: z.string().optional(),
+          description: z.string().optional(),
+          imageUrl: z.string().optional(),
+          siteName: z.string().optional(),
+        })
+        .nullable(),
+    }),
+  },
   // Live: renderer subscribes per space; frames arrive on 'spaces:events'
   // wrapped with their orgId. Offset resume mirrors the turn-event spine.
   'spaces:subscribeSpace': {

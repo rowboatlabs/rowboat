@@ -1,8 +1,12 @@
 import { createContext, memo, useContext, useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { Streamdown } from 'streamdown'
-import { FileDown, FileText, Loader2 } from 'lucide-react'
+import { Eye, FileDown, FilePlus2, FileText, Loader2 } from 'lucide-react'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { ZoomableImage } from '@/components/image-lightbox'
+import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
 import { toast } from '@/lib/toast'
 import { useMemberNames } from '@/components/spaces/member-text'
 import {
@@ -94,8 +98,9 @@ function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }
 
 /**
  * Discord-style viewer: the image large on a dimmed backdrop. Esc or a click
- * outside closes; the row under the image carries the source-specific action
- * (download for blobs, open-original for external links).
+ * outside closes; scroll zooms, click toggles fit ⇄ zoomed, drag pans. The
+ * row under the image carries the source-specific action (download for
+ * blobs, open-original for external links).
  */
 function ImageLightbox({ src, alt, open, onOpenChange, children }: {
     src: string
@@ -111,7 +116,7 @@ function ImageLightbox({ src, alt, open, onOpenChange, children }: {
                 className="flex w-auto max-w-[92vw] flex-col items-center border-none bg-transparent p-0 shadow-none outline-none sm:max-w-[92vw]"
             >
                 <DialogTitle className="sr-only">{alt || 'Image'}</DialogTitle>
-                <img src={src} alt={alt} className="max-h-[82vh] max-w-[92vw] rounded-lg object-contain" />
+                <ZoomableImage src={src} alt={alt} className="max-h-[82vh] max-w-[92vw] rounded-lg object-contain" />
                 {children && <div className="flex items-center gap-3 self-start text-xs">{children}</div>}
             </DialogContent>
         </Dialog>
@@ -137,8 +142,73 @@ function tileStyle(dims: { width: number; height: number } | null): CSSPropertie
     return { width: Math.round(Math.min(TILE_MAX_W, (TILE_H * dims.width) / dims.height)), height: TILE_H }
 }
 
+/**
+ * Promote a chat image into the space's files — the record. The bytes are
+ * already in the org's blob store; saving is one proposeChange referencing
+ * the hash. baseVersion 0 = create: an occupied path fails with the server's
+ * conflict error rather than silently overwriting someone's file.
+ */
+function SaveToSpaceDialog({ src, onClose }: { src: string; onClose: () => void }) {
+    const parsed = parseBlobAppUrl(src)
+    const suggested = (() => {
+        try {
+            return new URL(src).searchParams.get('name') ?? ''
+        } catch {
+            return ''
+        }
+    })()
+    const [path, setPath] = useState(suggested || (parsed ? `image-${parsed.hash.slice(0, 8)}.png` : ''))
+    const [saving, setSaving] = useState(false)
+    if (!parsed) return null
+    const save = async () => {
+        const cleaned = path.split('/').filter((s) => s && s !== '.' && s !== '..').join('/')
+        if (!cleaned || saving) return
+        setSaving(true)
+        try {
+            await window.ipc.invoke('spaces:proposeChange', {
+                orgId: parsed.orgId,
+                spaceId: parsed.spaceId,
+                input: { assetPath: cleaned, baseVersion: 0, blob: parsed.hash, reason: 'saved from chat' },
+            })
+            toast('Saved to space files', 'success')
+            onClose()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not save to space files', 'error')
+        } finally {
+            setSaving(false)
+        }
+    }
+    return (
+        <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+            <DialogContent className="sm:max-w-md">
+                <DialogTitle>Save to space files</DialogTitle>
+                <div className="text-sm text-muted-foreground">
+                    The image becomes a file in this space — in the file tree for everyone, versioned like any other file.
+                </div>
+                <input
+                    autoFocus
+                    value={path}
+                    onChange={(e) => setPath(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') void save()
+                    }}
+                    placeholder="folder/name.png"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs outline-none focus:border-foreground/30"
+                />
+                <div className="flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+                    <Button size="sm" disabled={saving} onClick={() => void save()}>
+                        {saving ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null} Save
+                    </Button>
+                </div>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
 export function BlobImage({ src, alt }: { src: string; alt: string }) {
     const [open, setOpen] = useState(false)
+    const [saveOpen, setSaveOpen] = useState(false)
     const [saving, setSaving] = useState(false)
     const [loaded, setLoaded] = useState(false)
     const parsed = parseBlobAppUrl(src)
@@ -174,22 +244,49 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
     }
     return (
         <>
-            <img
-                src={src}
-                alt={alt}
-                loading="lazy"
-                onClick={() => setOpen(true)}
-                onLoad={() => setLoaded(true)}
-                style={style}
-                className={cn(TILE_CLASS, !style && 'h-60 max-w-[360px]', dims && !loaded && 'animate-pulse')}
-            />
+            <ContextMenu>
+                <ContextMenuTrigger asChild>
+                    <img
+                        src={src}
+                        alt={alt}
+                        loading="lazy"
+                        onClick={() => setOpen(true)}
+                        // The row has its own context menu — the image's wins here.
+                        onContextMenu={(e) => e.stopPropagation()}
+                        onLoad={() => setLoaded(true)}
+                        style={style}
+                        className={cn(TILE_CLASS, !style && 'h-60 max-w-[360px]', dims && !loaded && 'animate-pulse')}
+                    />
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => setOpen(true)}>
+                        <Eye className="size-3.5 mr-2" /> View
+                    </ContextMenuItem>
+                    {parsed && (
+                        <>
+                            <ContextMenuItem onSelect={() => setSaveOpen(true)}>
+                                <FilePlus2 className="size-3.5 mr-2" /> Save to space files…
+                            </ContextMenuItem>
+                            <ContextMenuItem onSelect={() => void save()}>
+                                <FileDown className="size-3.5 mr-2" /> Download…
+                            </ContextMenuItem>
+                        </>
+                    )}
+                </ContextMenuContent>
+            </ContextMenu>
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
                 {parsed && (
-                    <button type="button" onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">
-                        {saving ? 'Saving…' : 'Download'}
-                    </button>
+                    <>
+                        <button type="button" onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">
+                            {saving ? 'Saving…' : 'Download'}
+                        </button>
+                        <button type="button" onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">
+                            Save to space files
+                        </button>
+                    </>
                 )}
             </ImageLightbox>
+            {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
         </>
     )
 }
@@ -232,11 +329,7 @@ function ExternalImage({ src, alt }: { src: string; alt: string }) {
         }
     }
     if (failed) {
-        return (
-            <a href={src} target="_blank" rel="noreferrer">
-                {alt || src}
-            </a>
-        )
+        return <ExternalLink href={src}>{alt || src}</ExternalLink>
     }
     return (
         <>
@@ -261,6 +354,54 @@ function ExternalImage({ src, alt }: { src: string; alt: string }) {
     )
 }
 
+/**
+ * An external link: blue, clickable — and gated. The first click on a domain
+ * shows the full destination and offers to trust the domain (stored locally);
+ * links to trusted domains open straight in the system browser.
+ */
+function ExternalLink({ href, children }: { href: string; children?: ReactNode }) {
+    const [confirming, setConfirming] = useState(false)
+    const domain = linkDomain(href)
+    // Only http(s) leaves the app; anything else renders inert.
+    if (!domain) return <span>{children}</span>
+    const open = () => window.open(href) // main routes this to the system browser
+    return (
+        <>
+            <a
+                href={href}
+                title={href}
+                onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (isTrustedDomain(domain)) open()
+                    else setConfirming(true)
+                }}
+                className="cursor-pointer break-words text-blue-600 underline underline-offset-2 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+            >
+                {children}
+            </a>
+            {confirming && (
+                <Dialog open onOpenChange={(o) => { if (!o) setConfirming(false) }}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogTitle>Leaving Rowboat</DialogTitle>
+                        <div className="text-sm text-muted-foreground">
+                            This link opens in your browser:
+                            <div className="mt-2 max-h-24 overflow-y-auto break-all rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-foreground">{href}</div>
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
+                            <Button variant="outline" size="sm" onClick={() => { trustDomain(domain); setConfirming(false); open() }}>
+                                Trust {domain}
+                            </Button>
+                            <Button size="sm" onClick={() => { setConfirming(false); open() }}>Open link</Button>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+            )}
+        </>
+    )
+}
+
 type StreamdownComponents = NonNullable<ComponentProps<typeof Streamdown>['components']>
 
 const spaceComponents: StreamdownComponents = {
@@ -274,7 +415,7 @@ const spaceComponents: StreamdownComponents = {
     a: SpaceAnchor,
 }
 
-function SpaceAnchor({ href, children, ...rest }: ComponentProps<'a'>) {
+function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
     const openFile = useContext(SpaceNavContext)
     const url = typeof href === 'string' ? href : ''
@@ -307,11 +448,7 @@ function SpaceAnchor({ href, children, ...rest }: ComponentProps<'a'>) {
             </button>
         )
     }
-    return (
-        <a href={url} target="_blank" rel="noreferrer" {...rest}>
-            {children}
-        </a>
-    )
+    return <ExternalLink href={url}>{children}</ExternalLink>
 }
 
 // Memoized: a stream re-renders on every presence/typing frame, and markdown

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, ChevronRight, Clock, Download, FileText, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronRight, Clock, Download, Eye, FileText, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -130,18 +131,35 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
             return (
                 <div key={node.path}>
                     <div className="group/dirrow relative" {...dirDragProps(node.path)}>
-                        <button
-                            type="button"
-                            style={pad}
-                            onClick={() => toggle(node.path)}
-                            className={cn(
-                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-foreground/90 hover:bg-accent/50',
-                                dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
-                            )}
-                        >
-                            <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
-                            <span className="truncate">{node.name}</span>
-                        </button>
+                        <ContextMenu>
+                            <ContextMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    style={pad}
+                                    onClick={() => toggle(node.path)}
+                                    className={cn(
+                                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-foreground/90 hover:bg-accent/50',
+                                        dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
+                                    )}
+                                >
+                                    <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+                                    <span className="truncate">{node.name}</span>
+                                </button>
+                            </ContextMenuTrigger>
+                            <ContextMenuContent>
+                                <ContextMenuItem onSelect={() => onStartCreate?.(`${node.path}/`)}>
+                                    <Plus className="size-3.5 mr-2" /> New file
+                                </ContextMenuItem>
+                                {empty && onRemoveFolder && (
+                                    <>
+                                        <ContextMenuSeparator />
+                                        <ContextMenuItem onSelect={() => onRemoveFolder(node.path)}>
+                                            <Trash2 className="size-3.5 mr-2" /> Remove folder
+                                        </ContextMenuItem>
+                                    </>
+                                )}
+                            </ContextMenuContent>
+                        </ContextMenu>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <button
@@ -200,29 +218,49 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
         }
         return (
             <div key={node.path} className="group/filerow relative">
-                <button
-                    type="button"
-                    style={pad}
-                    draggable
-                    onDragStart={(e) => {
-                        e.dataTransfer.setData(ASSET_DRAG_MIME, node.path)
-                        e.dataTransfer.effectAllowed = 'move'
-                    }}
-                    onDragEnd={() => setDropTarget(null)}
-                    onClick={() => onOpenFile(node.path)}
-                    title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
-                    className={cn(
-                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
-                        active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
-                    )}
-                >
-                    <span className="w-3 shrink-0" />
-                    {blob && (isImageMime(blob.mime)
-                        ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
-                        : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
-                    <span className="truncate flex-1">{node.name}</span>
-                    {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
-                </button>
+                <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                        <button
+                            type="button"
+                            style={pad}
+                            draggable
+                            onDragStart={(e) => {
+                                e.dataTransfer.setData(ASSET_DRAG_MIME, node.path)
+                                e.dataTransfer.effectAllowed = 'move'
+                            }}
+                            onDragEnd={() => setDropTarget(null)}
+                            onClick={() => onOpenFile(node.path)}
+                            title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
+                            className={cn(
+                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
+                                active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                            )}
+                        >
+                            <span className="w-3 shrink-0" />
+                            {blob && (isImageMime(blob.mime)
+                                ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
+                                : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
+                            <span className="truncate flex-1">{node.name}</span>
+                            {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
+                        </button>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                        <ContextMenuItem onSelect={() => onOpenFile(node.path)}>
+                            <Eye className="size-3.5 mr-2" /> Open
+                        </ContextMenuItem>
+                        {node.entry && (
+                            <>
+                                <ContextMenuItem onSelect={() => setRenaming({ path: node.path, value: node.path })}>
+                                    <Pencil className="size-3.5 mr-2" /> Rename / move
+                                </ContextMenuItem>
+                                <ContextMenuSeparator />
+                                <ContextMenuItem onSelect={() => setDeleting(node.entry!)}>
+                                    <Trash2 className="size-3.5 mr-2" /> Delete…
+                                </ContextMenuItem>
+                            </>
+                        )}
+                    </ContextMenuContent>
+                </ContextMenu>
                 {node.entry && (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
