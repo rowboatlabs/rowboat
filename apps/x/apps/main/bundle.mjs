@@ -166,8 +166,14 @@ await esbuild.build({
   entryPoints: ['../server/dist/standalone.js'],
   bundle: true,
   platform: 'node',
+  target: 'node20',
   format: 'cjs',
   outfile: './.package/dist/rowboat-server.cjs',
+  // Same import.meta.url polyfill as main.cjs — core modules resolve asset
+  // paths through it at module init; without the define the CJS bundle sees
+  // undefined and crashes before the server can boot.
+  banner: { js: cjsBanner },
+  define: { 'import.meta.url': '__import_meta_url' },
   external: ['electron', 'node-pty', 'uiohook-napi', 'bun:sqlite'],
 });
 console.log('✅ rowboat-server bundled to .package/dist/rowboat-server.cjs');
