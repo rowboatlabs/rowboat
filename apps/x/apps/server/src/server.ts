@@ -206,7 +206,14 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
     close: async () => {
       for (const unsub of unsubscribers) unsub?.();
       hub.close();
-      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+      // close() alone waits for keep-alive sockets that may never end (the
+      // forwarder's fetch pool, idle browser preconnects) — destroy them so
+      // shutdown resolves promptly instead of hanging the process.
+      await new Promise<void>((resolve) => {
+        httpServer.close(() => resolve());
+        httpServer.closeIdleConnections();
+        httpServer.closeAllConnections();
+      });
       await releaseLock();
     },
   };
