@@ -5,6 +5,7 @@ import { gmail_v1 as gmail } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { gmailRateLimitCooldownMs } from './gmail-rate-limit.js';
 import { getUserEmail } from './classify_thread.js';
 import { isAutomatedAddress } from './contact_filters.js';
 
@@ -302,6 +303,8 @@ async function performSync(): Promise<void> {
 
 function ensureFresh(): void {
     if (pendingSync) return;
+    // Don't spend quota on a background refresh during a rate-limit lockout.
+    if (gmailRateLimitCooldownMs() > 0) return;
     if (Date.now() - lastRefreshAt < REFRESH_INTERVAL_MS) return;
     pendingSync = performSync()
         .catch((err) => {
