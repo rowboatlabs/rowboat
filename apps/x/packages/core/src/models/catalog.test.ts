@@ -212,6 +212,7 @@ describe('getImageModelCatalog', () => {
     serveConfig({
       ollama: { baseURL: 'http://localhost:11434' },
       'openai-compatible': { baseURL: 'http://localhost:1234/v1' },
+      orcarouter: { apiKey: 'sk-orca' },
     });
     mocks.listModelsForProvider.mockResolvedValue(['qwen3', 'gemma3']);
 
@@ -220,6 +221,7 @@ describe('getImageModelCatalog', () => {
     expect(catalog.providers).toEqual([
       { id: 'ollama', flavor: 'ollama', status: 'ok', models: ['qwen3', 'gemma3'] },
       { id: 'openai-compatible', flavor: 'openai-compatible', status: 'ok', models: ['qwen3', 'gemma3'] },
+      { id: 'orcarouter', flavor: 'orcarouter', status: 'ok', models: ['qwen3', 'gemma3'] },
     ]);
     expect(mocks.listImageModelsForProvider).not.toHaveBeenCalled();
   });

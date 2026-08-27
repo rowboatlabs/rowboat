@@ -21,6 +21,7 @@ describe("isAnthropicModel", () => {
     it("matches aggregator ids by prefix or claude name", () => {
         expect(isAnthropicModel("rowboat", "anthropic/claude-opus-4.8")).toBe(true);
         expect(isAnthropicModel("openrouter", "anthropic/claude-3.5-sonnet")).toBe(true);
+        expect(isAnthropicModel("orcarouter", "anthropic/claude-3.5-sonnet")).toBe(true);
         expect(isAnthropicModel("aigateway", "claude-sonnet-5")).toBe(true);
     });
 

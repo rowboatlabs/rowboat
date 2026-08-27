@@ -126,6 +126,7 @@ export function mapReasoningEffort(
             return undefined;
         }
         case "openrouter":
+        case "orcarouter":
         case "rowboat": {
             if (supportsReasoning === false) return undefined;
             return { providerOptions: { openrouter: { reasoning: { effort } } } };

@@ -19,6 +19,7 @@ export const Flavor = z.enum([
     "openai",
     "openai-compatible",
     "openrouter",
+    "orcarouter",
 ]);
 
 export const Provider = z.object({
@@ -109,6 +110,18 @@ export async function getProvider(name: string = ""): Promise<ProviderV2> {
             providerMap[name] = createOpenRouter({
                 apiKey,
                 baseURL,
+                headers
+            });
+            break;
+        case "orcarouter":
+            // OrcaRouter is an OpenAI-compatible gateway with an
+            // OpenRouter-shaped model namespace; the OpenRouter AI SDK
+            // provider works against its endpoint directly. The service
+            // baseURL is defaulted here because the SDK's own default
+            // points at openrouter.ai, which rejects foreign keys.
+            providerMap[name] = createOpenRouter({
+                apiKey,
+                baseURL: baseURL || "https://api.orcarouter.ai/v1",
                 headers
             });
             break;
