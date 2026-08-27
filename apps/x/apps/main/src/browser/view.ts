@@ -435,6 +435,12 @@ export class BrowserViewManager extends EventEmitter {
       };
       if (input.type === 'keyDown' && modifier && isCycleKey) {
         event.preventDefault();
+        // Hand keyboard focus to the app window NOW: the switcher overlay is
+        // about to hide (detach) this view, and the rest of the chord — more
+        // Tabs, the modifier release that commits, Escape — must land in the
+        // app's listeners. A detached view's focus goes nowhere, which left
+        // the switcher stuck open on the first use.
+        host.focus();
         host.send('shortcuts:switcherKey', { type: 'keyDown', ...payload });
       } else if (input.type === 'keyUp' && (input.key === 'Alt' || input.key === 'Control')) {
         host.send('shortcuts:switcherKey', { type: 'keyUp', ...payload });
@@ -849,6 +855,18 @@ export class BrowserViewManager extends EventEmitter {
     this.visible = visible;
     if (visible) {
       this.ensureInitialTab();
+    } else {
+      // Hiding detaches the active view. If the page held keyboard focus,
+      // hand it back to the app window first — a detached view's focus is
+      // stranded (no key events reach anyone), which read as a stuck UI.
+      const attached = this.getTab(this.attachedTabId);
+      if (
+        attached?.view.webContents.isFocused() &&
+        this.window &&
+        !this.window.webContents.isDestroyed()
+      ) {
+        this.window.webContents.focus();
+      }
     }
     this.syncAttachedView();
   }
