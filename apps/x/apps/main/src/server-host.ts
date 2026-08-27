@@ -207,7 +207,7 @@ async function launchChild(): Promise<ChildServer> {
       ? path.join(__dirname, 'rowboat-server.cjs')
       : path.resolve(app.getAppPath(), '../server/dist/standalone.js'));
   const child = spawn(process.execPath, [entry], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ROWBOAT_PARENT_PID: String(process.pid) },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   child.on('exit', (code) => {

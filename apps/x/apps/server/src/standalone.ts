@@ -107,11 +107,27 @@ async function main(): Promise<void> {
   console.log(`[server] rowboat-server listening on http://${server.host}:${server.port} (workdir: ${WorkDir})`);
 
   const shutdown = async () => {
+    // Never let a stuck teardown keep the process alive — exit regardless.
+    setTimeout(() => process.exit(0), 5000).unref();
     await server.close();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
+
+  // Child mode: if the parent Electron app dies without managing to kill us
+  // (crash, force-quit), exit rather than run orphaned against its workdir.
+  const parentPid = Number(process.env.ROWBOAT_PARENT_PID ?? '');
+  if (parentPid > 0) {
+    setInterval(() => {
+      try {
+        process.kill(parentPid, 0);
+      } catch {
+        console.error('[server] parent process gone — shutting down');
+        void shutdown();
+      }
+    }, 5000).unref();
+  }
 }
 
 main().catch((err) => {
