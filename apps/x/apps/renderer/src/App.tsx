@@ -731,13 +731,14 @@ function parseDeepLink(input: string): ViewState | null {
   }
 }
 
-/** Collapse button (fixed position, top-left over the expanded panel). */
+/** Sidebar toggle (fixed position, top-left) — one persistent control that
+    swaps between the expanded panel and the dock, in both directions. */
 function FixedSidebarToggle({
   leftInsetPx,
 }: {
   leftInsetPx: number
 }) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, state } = useSidebar()
   return (
     <div className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
@@ -746,8 +747,8 @@ function FixedSidebarToggle({
         onClick={toggleSidebar}
         className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
-        aria-label="Collapse sidebar to dock"
-        title="Collapse to dock"
+        aria-label="Toggle sidebar"
+        title={state === 'collapsed' ? 'Expand sidebar' : 'Collapse to dock'}
       >
         <PanelLeftIcon className="size-5" />
       </button>
@@ -763,19 +764,23 @@ function ContentHeader({
   onNavigateForward,
   canNavigateBack,
   canNavigateForward,
+  collapsedLeftPaddingPx,
 }: {
   children: React.ReactNode
   onNavigateBack?: () => void
   onNavigateForward?: () => void
   canNavigateBack?: boolean
   canNavigateForward?: boolean
+  collapsedLeftPaddingPx?: number
 }) {
+  const { state } = useSidebar()
   return (
     <header
       className="rowboat-titlebar titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar overflow-hidden"
       style={{
-        paddingLeft: 12,
+        paddingLeft: state === 'collapsed' ? (collapsedLeftPaddingPx ?? 12) : 12,
         paddingRight: 12,
+        transition: 'padding-left 200ms linear',
       }}
     >
       {onNavigateBack && onNavigateForward ? (
@@ -901,9 +906,14 @@ function App() {
   const [liveNotePanelPath, setLiveNotePanelPath] = useState<string | null>(null)
   const [, setActiveShortcutPane] = useState<ShortcutPane>('left')
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
-  // Panes start right of the panel or the dock gutter (both hold the traffic
-  // lights), so maximized-pane headers only need ordinary padding.
-  const collapsedLeftPaddingPx = 12
+  // In dock mode the fixed toggle button overhangs the pane's left edge
+  // (the gutter is narrower than traffic lights + toggle), so top bars pad
+  // past it; the expanded panel absorbs the toggle, so ordinary padding.
+  const collapsedLeftPaddingPx = Math.max(
+    12,
+    (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) +
+      TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 32 + 8 - DOCK_GUTTER_PX,
+  )
   // Expanded panel vs. collapsed dock — the collapse button swaps between
   // them; the choice persists per machine.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -6790,7 +6800,6 @@ function App() {
               {...sidebarNavProps}
               browserOpen={isBrowserOpen}
               switcherOnly={sidebarOpen}
-              onExpand={() => handleSidebarOpenChange(true)}
             />
             <SidebarInset
               className={cn(
@@ -6810,6 +6819,7 @@ function App() {
                 onNavigateForward={() => { void navigateForward() }}
                 canNavigateBack={canNavigateBack}
                 canNavigateForward={canNavigateForward}
+                collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
                 {isFullScreenChat ? (
                   <ChatHeader
@@ -7733,21 +7743,20 @@ function App() {
                 getLevel={tts.getLevel}
               />
             )}
-            {sidebarOpen ? (
-              /* Collapse button — rendered last so its no-drag region paints
-                 over the panel's titlebar drag region. */
-              <FixedSidebarToggle
-                leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
-              />
-            ) : (
-              /* Top-left dock gutter strip: keeps the traffic-light corner
-                 draggable while no panel covers it. */
+            {/* Top-left dock gutter strip: keeps the traffic-light corner
+                draggable while no panel covers it. */}
+            {!sidebarOpen && (
               <div
                 aria-hidden="true"
                 className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
                 style={{ width: DOCK_GUTTER_PX }}
               />
             )}
+            {/* Sidebar toggle — always present (both directions), rendered
+                last so its no-drag region paints over the drag regions. */}
+            <FixedSidebarToggle
+              leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
+            />
           </SidebarProvider>
         </div>
         <CommandPalette

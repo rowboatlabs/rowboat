@@ -1283,7 +1283,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  /* Off-white faces need definition the old saturated tiles didn't: a soft
+     drop, a bright inner top edge, and a hairline border. */
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 .rowboat-dock-sep {
@@ -1315,31 +1319,6 @@
   border: 1.5px solid #fff;
   z-index: 2;
   box-sizing: border-box;
-}
-
-.rowboat-dock-expand {
-  height: 18px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  color: rgba(0, 0, 0, 0.4);
-  transition: color 0.15s, background 0.15s;
-}
-
-.rowboat-dock-expand:hover {
-  color: rgba(0, 0, 0, 0.75);
-  background: rgba(0, 0, 0, 0.06);
-}
-
-.dark .rowboat-dock-expand {
-  color: rgba(255, 255, 255, 0.45);
-}
-
-.dark .rowboat-dock-expand:hover {
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.1);
 }
 
 .dark .rowboat-dock-badge {

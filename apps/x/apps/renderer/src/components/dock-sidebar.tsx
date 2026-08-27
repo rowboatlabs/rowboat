@@ -21,13 +21,13 @@ import {
   Mic,
   MoreVertical,
   PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   Pin,
   Plug,
   Plus,
   Settings,
   Square,
+  Sparkles,
   SquarePen,
   Trash2,
   Video,
@@ -111,33 +111,44 @@ export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
 /** Where flyout panels (Chats / Spaces) sit, just right of the tray. */
 const DOCK_FLYOUT_LEFT_PX = DOCK_EDGE_PX + DOCK_ICON_MAX + DOCK_PAD * 2 + 20
 
-// Tile gradients (145deg), per the design handoff.
-const GRADIENTS: Record<string, [string, string]> = {
-  home: ["#2dd4bf", "#0f766e"],
-  email: ["#60a5fa", "#1d4ed8"],
-  code: ["#475569", "#0f172a"],
-  meetings: ["#f87171", "#c2352b"],
-  brain: ["#fbbf24", "#c2740a"],
-  apps: ["#a78bfa", "#6d28d9"],
-  agents: ["#64748b", "#334155"],
-  workspaces: ["#38bdf8", "#0369a1"],
-  browser: ["#d946ef", "#86198f"],
-  spaces: ["#818cf8", "#4338ca"],
-  chats: ["#4ade80", "#15803d"],
-  settings: ["#9ca3af", "#4b5563"],
-}
+// Light tile faces, each carrying a faint tint of its own glyph color
+// (9% -> 18% of the hue mixed into white, top to bottom); the color proper
+// lives in the glyph. The hues are the dark stops of the original palette.
+const tileFace = (glyphColor: string): string =>
+  `linear-gradient(145deg, color-mix(in oklab, ${glyphColor} 9%, white), color-mix(in oklab, ${glyphColor} 18%, white))`
 
-// Pinned apps get a stable gradient hashed from their folder name (distinct
-// from the fixed section gradients above), with a monogram for the glyph.
-const APP_TILE_GRADIENTS: [string, string][] = [
-  ["#f472b6", "#be185d"], // pink
-  ["#fb7185", "#be123c"], // rose
-  ["#fb923c", "#c2410c"], // orange
-  ["#22d3ee", "#0e7490"], // cyan
-  ["#a3e635", "#4d7c0f"], // lime
-  ["#e879f9", "#a21caf"], // fuchsia
-  ["#2dd4bf", "#115e59"], // teal
-  ["#93c5fd", "#1e40af"], // periwinkle
+// The Assistant tile stays untinted — a plain white face sets it apart
+// from the tinted destination tiles.
+const ASSISTANT_FACE = "linear-gradient(145deg, #ffffff, #f0f3f2)"
+const GLYPH_COLORS: Record<string, string> = {
+  assistant: "#0f766e",
+  home: "#0f766e",
+  email: "#1d4ed8",
+  code: "#0f172a",
+  meetings: "#c2352b",
+  brain: "#c2740a",
+  apps: "#6d28d9",
+  agents: "#334155",
+  workspaces: "#0369a1",
+  browser: "#86198f",
+  spaces: "#4338ca",
+  chats: "#15803d",
+  settings: "#4b5563",
+}
+const DEFAULT_GLYPH_COLOR = "#4b5563"
+
+
+// Pinned apps get a stable glyph color hashed from their folder name, with a
+// monogram for the drawing.
+const APP_GLYPH_COLORS: string[] = [
+  "#be185d", // pink
+  "#be123c", // rose
+  "#c2410c", // orange
+  "#0e7490", // cyan
+  "#4d7c0f", // lime
+  "#a21caf", // fuchsia
+  "#115e59", // teal
+  "#1e40af", // periwinkle
 ]
 
 function hashString(s: string): number {
@@ -146,8 +157,8 @@ function hashString(s: string): number {
   return Math.abs(h)
 }
 
-const appTileGradient = (folder: string): [string, string] =>
-  APP_TILE_GRADIENTS[hashString(folder) % APP_TILE_GRADIENTS.length]
+const appGlyphColor = (folder: string): string =>
+  APP_GLYPH_COLORS[hashString(folder) % APP_GLYPH_COLORS.length]
 
 const appMonogram = (name: string): string => [...name.trim()][0]?.toUpperCase() ?? "A"
 
@@ -207,8 +218,6 @@ export type DockSidebarProps = {
   onToggleBrowser?: () => void
   /** Whether the browser overlay is up, for the Browser tile's running dot. */
   browserOpen?: boolean
-  /** Expands back to the panel sidebar (shows an expand button atop the tray). */
-  onExpand?: () => void
   /** Render only the ⌥/⌃+Tab app switcher — no tray, no flyouts. Used while
       the panel sidebar is expanded, so the switcher works in both modes (and
       its most-recently-used order survives collapsing/expanding). */
@@ -559,8 +568,10 @@ type DockItemDef = {
   key: string
   label: string
   icon: LucideIcon
-  /** Overrides the GRADIENTS lookup (pinned-app tiles). */
-  gradient?: [string, string]
+  /** Overrides the GLYPH_COLORS lookup (pinned-app tiles). */
+  glyphColor?: string
+  /** Shorter name for the ⌥Tab switcher cell, when the full label truncates. */
+  switcherLabel?: string
   /** Letter rendered instead of the icon (pinned-app tiles). */
   monogram?: string
   tourId?: string
@@ -606,7 +617,6 @@ export function DockSidebar({
   onNewChat,
   onToggleBrowser,
   browserOpen = false,
-  onExpand,
   switcherOnly = false,
   onStartTour,
   activeNav,
@@ -986,19 +996,35 @@ export function DockSidebar({
           : (currentBillingPlan?.displayName ?? syncStatusLabel)
   const settingsAlert = outOfCredits || hasOauthError || (!isSyncing && hasServiceErrors)
 
+  // The most recently touched chat, for the Assistant tile (recency only —
+  // pinning shouldn't hijack "continue where I left off").
+  const lastChat = useMemo(() => {
+    const recency = (r: { createdAt: string; modifiedAt?: string }) => {
+      const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
+      return Number.isFinite(ms) ? ms : 0
+    }
+    return [...recentRuns].sort((a, b) => recency(b) - recency(a))[0] ?? null
+  }, [recentRuns])
+
   // ----- the item list -----
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
-      {
-        item: {
-          key: 'home', label: 'Home', icon: Home, tourId: 'nav-home',
-          running: activeNav === 'home',
-          onClick: () => { closeFlyouts(); onOpenHome?.() },
+      // The top section: Assistant (resumes the most recent chat, falling
+      // back to a fresh one — white tile, absent from the ⌥Tab switcher)
+      // with Spaces right under it, then a divider before the destinations.
+      ...(onOpenRun || onNewChat ? [
+        {
+          item: {
+            key: 'assistant', label: 'Assistant', icon: Sparkles,
+            status: 'Rowboat assistant',
+            onClick: () => {
+              closeFlyouts()
+              if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+              else onNewChat?.()
+            },
+          },
         },
-      },
-      // Click and ⌥Tab both land on the last-opened space directly; the
-      // flyout only appears when there is no space to land on. Right-click
-      // lists every space (hidden in switcher-only mode with nothing to open).
+      ] : []),
       ...(SPACES_ENABLED && (!switcherOnly || totalSpaces > 0) ? [{
         item: {
           key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
@@ -1021,6 +1047,14 @@ export function DockSidebar({
           },
         },
       }] : []),
+      { sep: true as const },
+      {
+        item: {
+          key: 'home', label: 'Home', icon: Home, tourId: 'nav-home',
+          running: activeNav === 'home',
+          onClick: () => { closeFlyouts(); onOpenHome?.() },
+        },
+      },
       {
         item: {
           key: 'email', label: 'Email', icon: Mail, tourId: 'nav-email',
@@ -1063,19 +1097,19 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenApps?.() },
         },
       },
-      // Apps pinned from the Apps view get their own tile: a monogram on a
-      // gradient hashed from the folder, right-click to remove.
+      // Apps pinned from the Apps view get their own tile: a monogram in a
+      // color hashed from the folder, right-click to remove.
       ...pinnedApps.map(({ folder, name }) => ({
         item: {
           key: `app:${folder}`, label: name, icon: AppWindow,
-          gradient: appTileGradient(folder),
+          glyphColor: appGlyphColor(folder),
           monogram: appMonogram(name),
           onClick: () => { closeFlyouts(); onOpenApp?.(folder) },
         },
       })),
       {
         item: {
-          key: 'agents', label: 'Background agents', icon: Bot, tourId: 'nav-agents',
+          key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
           badge: bgAgentsFailed ? '!' : undefined,
           status: bgAgentsLabel ?? undefined,
           statusAlert: bgAgentsFailed,
@@ -1126,6 +1160,7 @@ export function DockSidebar({
     knowledgeUpdatedLabel, knowledgeActions, onOpenApps, pinnedApps, onOpenApp,
     bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
     switcherOnly, openLastSpace, onOpenChatHistory,
+    onNewChat, lastChat, onOpenRun,
     onOpenBgTasks, workspaceCount, totalSpacesUnread, totalSpaces, spacesOpen, chatsOpen,
     outOfCredits, hasOauthError, settingsStatus, settingsAlert,
   ])
@@ -1137,21 +1172,20 @@ export function DockSidebar({
     DOCK_ICON_MIN,
     Math.min(
       DOCK_ICON_MAX,
-      Math.floor((winH - 96 - (onExpand ? 24 : 0) - DOCK_PAD * 2 - sepCount * DOCK_SEP_H - (rows.length - 1) * DOCK_GAP) / iconCount),
+      Math.floor((winH - 96 - DOCK_PAD * 2 - sepCount * DOCK_SEP_H - (rows.length - 1) * DOCK_GAP) / iconCount),
     ),
   )
 
-  // Row centers at rest, for the magnification falloff. The expand button
-  // (when present) occupies the first ~18px of the column plus a gap.
+  // Row centers at rest, for the magnification falloff.
   const centers = useMemo(() => {
-    let y = DOCK_PAD + (onExpand ? 18 + DOCK_GAP : 0)
+    let y = DOCK_PAD
     return rows.map((r) => {
       const h = r.sep ? DOCK_SEP_H : base
       const c = y + h / 2
       y += h + DOCK_GAP
       return c
     })
-  }, [rows, base, onExpand])
+  }, [rows, base])
 
   const moving = mouseY != null
   const sizeFor = (i: number) => {
@@ -1173,8 +1207,11 @@ export function DockSidebar({
   }, [activeNav])
 
   // Never-visited items keep their dock order at the end (stable sort).
+  // Assistant is an action tile — it doesn't cycle in the switcher.
   const switcherItems = useMemo(() => {
-    const items = rows.filter((r): r is { item: DockItemDef } => !r.sep).map((r) => r.item)
+    const items = rows
+      .filter((r): r is { item: DockItemDef } => !r.sep && r.item.key !== 'assistant')
+      .map((r) => r.item)
     const rank = (key: string) => {
       const i = mruKeys.indexOf(key)
       return i === -1 ? mruKeys.length : i
@@ -1374,26 +1411,10 @@ export function DockSidebar({
         style={{ left: DOCK_EDGE_PX, width: base + DOCK_PAD * 2, gap: DOCK_GAP, padding: DOCK_PAD }}
         onMouseMove={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
-          const y = e.clientY - r.top
-          // No magnification while aiming at the expand strip — growth is
-          // center-anchored, so it would shift the strip out from under the
-          // pointer mid-click.
-          setMouseY(onExpand && y < DOCK_PAD + 18 + DOCK_GAP ? null : y)
+          setMouseY(e.clientY - r.top)
         }}
         onMouseLeave={() => { setMouseY(null); setHoverIndex(null) }}
       >
-        {onExpand && (
-          <button
-            type="button"
-            aria-label="Expand sidebar"
-            title="Expand sidebar"
-            onClick={onExpand}
-            className="rowboat-dock-expand"
-            style={{ width: base }}
-          >
-            <PanelLeftOpen size={13} strokeWidth={1.8} />
-          </button>
-        )}
         {rows.map((row, i) => {
           if (row.sep) {
             return (
@@ -1405,7 +1426,7 @@ export function DockSidebar({
           const item = row.item
           const s = sizeFor(i)
           const Icon = item.icon
-          const [g0, g1] = item.gradient ?? GRADIENTS[item.key] ?? GRADIENTS.settings
+          const glyphColor = item.glyphColor ?? GLYPH_COLORS[item.key] ?? DEFAULT_GLYPH_COLOR
           // No tooltip while the switcher, or this tile's own flyout, is up.
           const flyoutOpen = (item.key === 'chats' && chatsOpen) || (item.key === 'spaces' && spacesOpen)
           const showTip = hoverIndex === i && !switcherOpen && !flyoutOpen
@@ -1428,14 +1449,14 @@ export function DockSidebar({
             >
               <div
                 className="rowboat-dock-tile"
-                style={{ borderRadius: Math.round(s * 0.24), background: `linear-gradient(145deg, ${g0}, ${g1})` }}
+                style={{ borderRadius: Math.round(s * 0.24), background: item.key === 'assistant' ? ASSISTANT_FACE : tileFace(glyphColor) }}
               >
                 {item.monogram ? (
-                  <span className="font-bold text-white" style={{ fontSize: Math.round(s * 0.44), lineHeight: 1 }}>
+                  <span className="font-bold" style={{ fontSize: Math.round(s * 0.44), lineHeight: 1, color: glyphColor }}>
                     {item.monogram}
                   </span>
                 ) : (
-                  <Icon size={Math.round(s * 0.56)} strokeWidth={1.7} className="text-white" />
+                  <Icon size={Math.round(s * 0.56)} strokeWidth={2} style={{ color: glyphColor }} />
                 )}
               </div>
               {item.badge && (
@@ -1519,7 +1540,7 @@ export function DockSidebar({
             <div className="rowboat-dock-switcher">
               {switcherItems.map((item, i) => {
                 const Icon = item.icon
-                const [g0, g1] = item.gradient ?? GRADIENTS[item.key] ?? GRADIENTS.settings
+                const glyphColor = item.glyphColor ?? GLYPH_COLORS[item.key] ?? DEFAULT_GLYPH_COLOR
                 const selected = i === switcherIndex
                 return (
                   <div
@@ -1532,12 +1553,12 @@ export function DockSidebar({
                   >
                     <div
                       className="rowboat-dock-tile"
-                      style={{ width: 72, height: 72, borderRadius: 17, background: `linear-gradient(145deg, ${g0}, ${g1})` }}
+                      style={{ width: 72, height: 72, borderRadius: 17, background: tileFace(glyphColor) }}
                     >
                       {item.monogram ? (
-                        <span className="font-bold text-white" style={{ fontSize: 32, lineHeight: 1 }}>{item.monogram}</span>
+                        <span className="font-bold" style={{ fontSize: 32, lineHeight: 1, color: glyphColor }}>{item.monogram}</span>
                       ) : (
-                        <Icon size={40} strokeWidth={1.7} className="text-white" />
+                        <Icon size={40} strokeWidth={2} style={{ color: glyphColor }} />
                       )}
                     </div>
                     <span
@@ -1546,7 +1567,7 @@ export function DockSidebar({
                         selected ? 'font-bold text-foreground' : 'font-medium text-muted-foreground',
                       )}
                     >
-                      {item.label}
+                      {item.switcherLabel ?? item.label}
                     </span>
                   </div>
                 )
