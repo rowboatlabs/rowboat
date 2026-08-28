@@ -16,13 +16,15 @@ describe('canOpenInApp', () => {
       'reports/summary.pdf',
       'exports/report.html',
       'knowledge/People/Sarah Chen.md',
+      'sheets/rows.csv',
+      'sheets/budget.xlsx',
     ]) {
       expect(canOpenInApp(path), path).toBe(true)
     }
   })
 
   it('leaves types with no in-app viewer to the OS', () => {
-    for (const path of ['archives/data.zip', 'notes.txt', 'rows.csv', 'app.dmg', 'README']) {
+    for (const path of ['archives/data.zip', 'notes.txt', 'app.dmg', 'README']) {
       expect(canOpenInApp(path), path).toBe(false)
     }
   })

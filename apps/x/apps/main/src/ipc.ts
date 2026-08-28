@@ -42,6 +42,7 @@ import {
   resizeCompanionPinned,
   setCompanionPinned,
   setPinnedCollapsed,
+  setCompanionInteractive,
   setQuickAskShortcut,
   setShortcutCaptureActive,
 } from './quick-ask.js';
@@ -56,7 +57,7 @@ import container from '@x/core/dist/di/container.js';
 import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';
 import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled, bridgeDeltaSubscribe, bridgeDeltaUnsubscribe, childServerMode, getConnectionInfo, connectRemoteServer, disconnectRemoteServer } from './server-host.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
-import { getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { getImageModelCatalog, getModelCatalog } from '@x/core/dist/models/catalog.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
@@ -244,6 +245,7 @@ import {
   type SlackHomeMessage,
 } from '@x/core/dist/slack/home-parse.js';
 import { browserIpcHandlers } from './browser/ipc.js';
+import { spacesIpcHandlers } from './spaces/ipc.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -1073,6 +1075,10 @@ export function setupIpcHandlers() {
       setPinnedCollapsed(args.collapsed);
       return {};
     },
+    'quickAsk:setInteractive': async (_event, args) => {
+      setCompanionInteractive(args.interactive);
+      return {};
+    },
     'quickAsk:chatContext': async (_event, args) => {
       pushChatContext(args);
       return {};
@@ -1528,6 +1534,9 @@ export function setupIpcHandlers() {
     'models:list': async (_event, args) => {
       return await getModelCatalog({ refreshProvider: args?.refreshProvider });
     },
+    'models:listImageModels': async () => {
+      return await getImageModelCatalog();
+    },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
     },
@@ -1570,6 +1579,7 @@ export function setupIpcHandlers() {
           backgroundTask: tasks.backgroundTask ?? null,
           subagent: tasks.subagent ?? null,
         },
+        imageModel: cfg?.imageModel ?? null,
         deferBackgroundTasks: cfg?.deferBackgroundTasks === true,
       };
     },
@@ -2322,6 +2332,27 @@ export function setupIpcHandlers() {
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
       return { data: buffer.toString('base64'), mimeType, size: stat.size };
+    },
+    'spreadsheet:load': async (_event, args) => {
+      const { loadSheetWindow } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
+      const result = await loadSheetWindow(args.path, args.sheet, args.offset, args.limit);
+      return {
+        format: result.meta.format,
+        sheets: result.meta.sheets,
+        activeSheet: result.activeSheet,
+        rows: result.rows,
+        display: result.display,
+        firstRow: result.firstRow,
+        firstRowDisplay: result.firstRowDisplay,
+        offset: result.offset,
+        totalRows: result.totalRows,
+        totalColumns: result.totalColumns,
+        etag: result.meta.etag,
+      };
+    },
+    'spreadsheet:find': async (_event, args) => {
+      const { findInSheet } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
+      return await findInSheet(args.path, args.sheet, args.query, args.maxMatches);
     },
     'dialog:openDirectory': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);
@@ -3085,5 +3116,6 @@ export function setupIpcHandlers() {
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,
+    ...spacesIpcHandlers,
   });
 }

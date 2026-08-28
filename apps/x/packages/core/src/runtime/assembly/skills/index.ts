@@ -9,6 +9,7 @@ import {
   isCodeModeAvailable,
   isComposioAvailable,
   isSlackAvailable,
+  isSpacesAvailable,
 } from "../connections.js";
 import { loadDiskSkills } from "./disk-loader.js";
 import builtinToolsSkill from "./builtin-tools/skill.js";
@@ -30,6 +31,7 @@ import backgroundTaskSkill from "./background-task/skill.js";
 import notifyUserSkill from "./notify-user/skill.js";
 import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
+import spacesSkill from "./spaces/skill.js";
 import chartsSkill from "./charts/skill.js";
 import voiceSkill from "./voice/skill.js";
 
@@ -131,6 +133,20 @@ const definitions: SkillDefinition[] = [
     summary: "Discovering, executing, and integrating MCP tools. Use this to check what external capabilities are available and execute MCP tools on behalf of users.",
     content: mcpIntegrationSkill,
     tools: ["addMcpServer", "listMcpServers", "listMcpTools", "executeMcpTool"],
+  },
+  {
+    id: "spaces",
+    availability: isSpacesAvailable,
+    title: "Spaces (shared team containers)",
+    summary: "Work in the team's shared spaces — read and update shared files (roadmaps, notes), push standup items, post to the team feed when asked. Use for 'push/add/update ... to <space name>' (e.g. 'push my standup to Roadboard'), 'team roadmap', 'shared doc/space'. Writes are visible to the whole team, attributed to your person.",
+    content: spacesSkill,
+    tools: [
+      "listMcpServers",
+      "listMcpTools",
+      "executeMcpTool",
+      "spaces-upload-blob",
+      "spaces-download-blob",
+    ],
   },
   {
     id: "composio-integration",

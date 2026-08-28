@@ -203,6 +203,9 @@ export function QuickAskBar() {
   const surface = role?.surface ?? 'card'
   // The Skipper's text panel is open (mascot + card, the default landing).
   const callCard = pinned && !collapsed && surface === 'card'
+  // The frame is mostly transparent stage — hand the clicks that land on it
+  // back to whatever the user has underneath.
+  useClickThrough(pinned)
 
   // Mirrors callState.speakerMuted for the fold callback below (which is
   // deliberately dependency-free).
@@ -228,6 +231,10 @@ export function QuickAskBar() {
   // stage. Tuck-on-stage-click only counts near the card — clicks in
   // visually-empty space must not steal the panel.
   const cardRef = useRef<HTMLDivElement | null>(null)
+  // Reached only where the window is still SOLID, i.e. the grace ring just
+  // outside the card (useClickThrough) — further out the click belongs to
+  // whatever is behind us. The band stays generous so the gesture never
+  // depends on the ring's exact width.
   const TUCK_BAND_PX = 80
   const stageTuck = useCallback((e: React.MouseEvent) => {
     const card = cardRef.current?.getBoundingClientRect()
@@ -575,15 +582,20 @@ export function QuickAskBar() {
   // is open or folded, so fold/unfold only adds/removes the card beside it
   // and the mascot never moves, resizes, or replays its entry animation.
   return (
-    <div className="flex h-screen w-screen select-none flex-col overflow-hidden">
-      {/* The invisible stage: popovers open into this zone. With the text
-          open, only clicks NEAR the visible card tuck the panel (stageTuck
-          hit-test) — the rest of the invisible frame is inert, so clicking
-          what looks like empty desktop never steals the panel. Folded, the
-          stage is a drag area, part of "carry it around". */}
+    <div data-qa-passthrough className="flex h-screen w-screen select-none flex-col overflow-hidden">
+      {/* The invisible stage: popovers open into this zone. It is marked
+          passthrough, so clicks that land on it go to whatever the user has
+          BEHIND this window (useClickThrough) instead of being swallowed by
+          a transparent rectangle. The only gesture it still carries is
+          tucking the panel, and only NEAR the visible card (stageTuck
+          hit-test) — reachable because the grace ring keeps the window
+          solid just outside the card's edge. (It used to be a drag region
+          when folded; the mascot column is the drag handle in both states,
+          and a screen-sized invisible drag area is exactly how a click on
+          empty desktop ended up moving the Skipper.) */}
       <div
+        data-qa-passthrough
         className="min-h-0 flex-1"
-        style={collapsed ? dragRegion : undefined}
         onMouseDown={collapsed ? undefined : stageTuck}
       />
 
@@ -593,9 +605,9 @@ export function QuickAskBar() {
           a grey rectangle around the card). The paddings are IDENTICAL in
           both states — with the corner-anchored window, that pins the
           mascot to the exact same screen pixels across fold/unfold. */}
-      <div className="flex shrink-0 items-end justify-end gap-1 px-6 pb-5">
+      <div data-qa-passthrough className="flex shrink-0 items-end justify-end gap-1 px-6 pb-5">
       {!collapsed && (
-      <div className="relative min-w-0 flex-1">
+      <div data-qa-passthrough className="relative min-w-0 flex-1">
       {/* Light skin (#810): near-white card, hairline dark border, dark
           text. The window's native shadow is off (it would outline the
           whole transparent frame) — the card draws its own. */}
@@ -856,7 +868,10 @@ export function QuickAskBar() {
           bottom-right corner — which the corner-anchored window keeps fixed
           on screen, so fold/unfold moves NOTHING here; only the card beside
           it comes and goes. It is the control surface AND the drag
-          handle. */}
+          handle — which is why the column is deliberately NOT marked
+          passthrough (useClickThrough): the whole 132px footprint stays
+          solid so the Skipper can be grabbed anywhere on it, exactly as
+          before, instead of only where the artwork happens to paint. */}
       <div
         className="relative flex w-[132px] shrink-0 cursor-grab select-none flex-col items-center"
         style={dragRegion}
@@ -936,6 +951,98 @@ const STATUS_DISPLAY: Record<NonNullable<CallState['status']>, { label: string; 
   listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
+}
+
+/**
+ * Marks a container that only ever covers EMPTY space — the transparent
+ * frame's own scaffolding. See `useClickThrough`.
+ */
+const PASSTHROUGH_ATTR = 'data-qa-passthrough'
+
+/**
+ * Per-region click-through for the transparent frame.
+ *
+ * The window is far bigger than anything it paints: a tall invisible stage
+ * sits above the card so popovers can open upward without resizing, and the
+ * tucked Skipper is just the mascot in that same frame. But a transparent
+ * pixel is still a CLICKABLE pixel — macOS routes a click to the topmost
+ * window by its RECT, not by alpha — so that stage used to swallow every
+ * click that landed on it: a ~500px square of dead desktop.
+ *
+ * Main therefore keeps the window click-through and this hook flips it solid
+ * while the cursor is over something actually drawn.
+ *
+ * The cursor position comes from MAIN (`quick-ask:cursor`, polled from the
+ * OS), not from mouse events. Events cannot be trusted for this: on macOS a
+ * `-webkit-app-region: drag` area is a native view layered over the page, so
+ * moves across it never reach us — and the mascot is exactly that area. Off
+ * events alone it stayed click-through, so the Skipper could be neither
+ * clicked nor dragged. Local mousemoves are still handled, purely because
+ * they arrive sooner than the next poll where they do arrive at all.
+ *
+ * The test is INVERTED on purpose: only the frame's own containers are
+ * marked passthrough, so anything else under the cursor — including menus
+ * portaled to <body>, and anything added later — counts as solid and stays
+ * clickable by default. Getting it wrong that way costs a dead pixel;
+ * getting it wrong the other way costs an unclickable control.
+ */
+function useClickThrough(active: boolean) {
+  useEffect(() => {
+    if (!active) return
+    let sent: boolean | null = null
+    const push = (interactive: boolean) => {
+      if (interactive === sent) return
+      sent = interactive
+      void window.ipc.invoke('quickAsk:setInteractive', { interactive }).catch(() => {})
+    }
+    const solidAt = (x: number, y: number) => {
+      const el = document.elementFromPoint(x, y)
+      if (!el || el === document.documentElement || el === document.body) return false
+      if (el.id === 'root') return false
+      return !el.hasAttribute(PASSTHROUGH_ATTR)
+    }
+    // The flip is an IPC round-trip, so turn solid slightly BEFORE the
+    // cursor reaches paint: a fast move landing straight on a control must
+    // not have its click fall through the window.
+    const GRACE = 12
+    // A menu, picker or dialog is open somewhere: stay solid wherever the
+    // cursor is, or the click that should DISMISS it would land in the app
+    // behind us and leave it open. Tooltips are excluded — they carry no
+    // dismiss gesture, and they are on screen exactly while the cursor is
+    // already over a control.
+    const dismissableOpen = () =>
+      Array.from(document.querySelectorAll('[data-radix-popper-content-wrapper]')).some(
+        (wrapper) => !wrapper.querySelector('[role="tooltip"]'),
+      )
+    const evaluate = (x: number, y: number) => {
+      // The cursor left the frame (main pushes one out-of-viewport point as
+      // it goes): hand the mouse straight back. Checked before anything
+      // else so the grace ring can't hold the window solid on the way out.
+      if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
+        push(false)
+        return
+      }
+      if (dismissableOpen()) {
+        push(true)
+        return
+      }
+      push(
+        solidAt(x, y) ||
+          solidAt(x - GRACE, y) ||
+          solidAt(x + GRACE, y) ||
+          solidAt(x, y - GRACE) ||
+          solidAt(x, y + GRACE),
+      )
+    }
+    const onMove = (e: MouseEvent) => evaluate(e.clientX, e.clientY)
+    const offCursor = window.ipc.on('quick-ask:cursor', (p) => evaluate(p.x, p.y))
+    document.addEventListener('mousemove', onMove, true)
+    return () => {
+      offCursor()
+      document.removeEventListener('mousemove', onMove, true)
+      push(false)
+    }
+  }, [active])
 }
 
 const dragRegion = { WebkitAppRegion: 'drag' } as React.CSSProperties
@@ -1564,6 +1671,7 @@ function TuckedMascot({
 
   return (
     <div
+      data-qa-passthrough
       className="group relative flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden pb-2"
       style={dragRegion}
     >
@@ -1616,13 +1724,13 @@ function TuckedMascot({
       </div>
 
       {/* Caption + status chip, readable over any desktop. */}
-      <div className="flex h-4 max-w-full items-center px-2">
+      <div data-qa-passthrough className="flex h-4 max-w-full items-center px-2">
         {caption && (
           <span className="truncate rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{caption}</span>
         )}
       </div>
       {/* Pure status line — the CONTROLS are the pins. */}
-      <div className="flex h-6 items-center">
+      <div data-qa-passthrough className="flex h-6 items-center">
         <SkipperStatusChip state={state} activity={activity} />
       </div>
     </div>

@@ -236,6 +236,7 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
           backgroundTask: tasks.backgroundTask ?? null,
           subagent: tasks.subagent ?? null,
         },
+        imageModel: cfg?.imageModel ?? null,
         deferBackgroundTasks: cfg?.deferBackgroundTasks === true,
       };
     },

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, protocol, net, shell, session, safeStorage, type Session } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
 import os from "node:os";
@@ -22,6 +22,7 @@ import {
   stopWorkspaceWatcher
 } from "./ipc.js";
 import { disposeAllTerminals } from "@x/core/dist/terminal/terminal.js";
+import * as spaceBlobCache from "./spaces/blob-cache.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
@@ -44,6 +45,9 @@ import started from "electron-squirrel-startup";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
+import { startSpaceMentionWatch } from "@x/core/dist/spaces/mention-watch.js";
+import { bounceAllLive } from "@x/core/dist/spaces/orgs.js";
+import { flags } from "@x/shared";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
@@ -178,9 +182,13 @@ console.log("rendererPath", rendererPath);
 // AND for serving local workspace files to the renderer (images, PDFs, video).
 //
 //   app://workspace/<rel-path>  → workspace file (path-traversal guarded)
+//   app://space-blob/<orgId>/<spaceId>/<hash>[?thumb=<w>] → space upload,
+//     via the authed org client + content-addressed disk cache (blob-cache.ts).
+//     This is how <img> tags in space messages render: the renderer holds no
+//     org tokens, so blob bytes must resolve in main.
 //   app://<anything-else>/...   → renderer SPA (existing behavior)
 function registerAppProtocol() {
-  protocol.handle("app", (request) => {
+  protocol.handle("app", async (request) => {
     const url = new URL(request.url);
 
     // Workspace files: app://workspace/<rel-path>
@@ -212,6 +220,32 @@ function registerAppProtocol() {
           return new Response("Forbidden", { status: 403 });
         }
       })();
+    }
+
+    // Space blobs: app://space-blob/<orgId>/<spaceId>/<hash>
+    if (url.host === "space-blob") {
+      try {
+        const [orgId, spaceId, hash] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        if (!orgId || !spaceId || !hash) return new Response("Not Found", { status: 404 });
+        const thumb = url.searchParams.get("thumb");
+        const headers = {
+          // Content-addressed → immutable; let Chromium keep it forever.
+          "cache-control": "private, max-age=31536000, immutable",
+          "x-content-type-options": "nosniff",
+        };
+        if (thumb) {
+          const png = await spaceBlobCache.getThumbnail(orgId, spaceId, hash, Number(thumb));
+          if (png) {
+            return new Response(new Uint8Array(png), { headers: { ...headers, "content-type": "image/png" } });
+          }
+          // Not an image — fall through to the full blob.
+        }
+        const blob = await spaceBlobCache.getBlob(orgId, spaceId, hash);
+        return new Response(new Uint8Array(blob.bytes), { headers: { ...headers, "content-type": blob.mime } });
+      } catch (err) {
+        console.error("[space-blob] failed to serve", request.url, err);
+        return new Response("Not Found", { status: 404 });
+      }
     }
 
     // Renderer SPA — existing logic
@@ -548,6 +582,17 @@ app.whenReady().then(async () => {
   registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
   registerScreenPointerService(screenPointerService);
   registerTextInsertService(textInsertService);
+
+  // Space mentions: watch every space of every org and notify on @<me>
+  // while the app is unfocused (offset resume covers time away). Gated with
+  // the rest of the Spaces UI — no OS notifications for a feature the user
+  // can't open (the same flag hides the renderer surfaces via the preload).
+  if (flags.spacesEnabled(process.env)) startSpaceMentionWatch();
+
+  // Sleep leaves spaces WebSockets half-open (no close ever fires; see
+  // SpacesLive's liveness notes). Bounce them on wake so every stream
+  // reconnects and replays immediately instead of waiting out the watchdog.
+  powerMonitor.on("resume", () => bounceAllLive());
 
   setupIpcHandlers();
   setupBrowserEventForwarding();

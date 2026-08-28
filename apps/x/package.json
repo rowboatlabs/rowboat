@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "npm run deps && concurrently -k \"npm:renderer\" \"npm:main\"",
     "renderer": "cd apps/renderer && npm run dev",
-    "shared": "cd packages/shared && npm run build",
+    "protocol": "cd ../harbor && pnpm install --filter @rowboat/spaces-protocol && cd packages/protocol && npm run build",
+    "shared": "npm run protocol && cd packages/shared && npm run build",
     "core": "cd packages/core && npm run build",
     "server": "cd apps/server && npm run build",
     "client": "cd packages/client && npm run build",

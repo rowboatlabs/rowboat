@@ -9,25 +9,54 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import {
     connectionState,
     ListToolsResponse,
+    McpServerConfig,
     McpServerList,
 } from "@x/shared/dist/mcp.js";
+import { spacesMcpServers } from "../spaces/orgs.js";
 
 type mcpState = {
     state: z.infer<typeof connectionState>,
     client: Client | null,
     error: string | null,
+    /** Config snapshot the client connected with — a change forces a reconnect. */
+    configKey?: string,
 };
 const clients: Record<string, mcpState> = {};
 
-async function getClient(serverName: string): Promise<Client> {
-    if (clients[serverName] && clients[serverName].state === "connected") {
-        return clients[serverName].client!;
-    }
+/**
+ * The server list every consumer sees: mcp.json entries merged with entries
+ * DERIVED from the spaces org registry (spaces_orgs.json) at read time. The
+ * registry is the single source of truth for orgs — nothing spaces-related is
+ * ever written to mcp.json, so the two can't drift. Derived entries win on a
+ * name collision: a stale file entry must never shadow the live registry
+ * (an old token would silently act as the wrong member).
+ */
+async function effectiveServers(): Promise<z.infer<typeof McpServerConfig>["mcpServers"]> {
     const repo = container.resolve<IMcpConfigRepo>('mcpConfigRepo');
     const { mcpServers } = await repo.getConfig();
+    return { ...mcpServers, ...spacesMcpServers() };
+}
+
+async function getClient(serverName: string): Promise<Client> {
+    const mcpServers = await effectiveServers();
     const config = mcpServers[serverName];
     if (!config) {
         throw new Error(`MCP server ${serverName} not found`);
+    }
+    const configKey = JSON.stringify(config);
+    const cached = clients[serverName];
+    if (cached && cached.state === "connected" && cached.configKey === configKey) {
+        return cached.client!;
+    }
+    if (cached?.client) {
+        // Config changed since this client connected (token rotated, org
+        // re-added, mcp.json edited) — drop it and reconnect fresh.
+        try {
+            await cached.client.close();
+        } catch {
+            // stale client; ignore
+        }
+        delete clients[serverName];
     }
     let transport: Transport | undefined = undefined;
     try {
@@ -72,6 +101,7 @@ async function getClient(serverName: string): Promise<Client> {
             state: "connected",
             client,
             error: null,
+            configKey,
         };
         return client;
     } catch (error) {
@@ -110,8 +140,7 @@ export async function forceCloseAllMcpClients(): Promise<void> {
 }
 
 export async function listServers(): Promise<z.infer<typeof McpServerList>> {
-    const repo = container.resolve<IMcpConfigRepo>('mcpConfigRepo');
-    const { mcpServers } = await repo.getConfig();
+    const mcpServers = await effectiveServers();
     const result: z.infer<typeof McpServerList> = {
         mcpServers: {},
     };

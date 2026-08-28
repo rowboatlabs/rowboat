@@ -33,6 +33,16 @@ import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
 import { CodeProject, CodeSession, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
+import {
+    SpacesOrgSummary,
+    type SpacesAssetEntry,
+    type SpacesBusEvent,
+    type SpacesManageTopicAction,
+    type SpacesPostResult,
+    type SpacesProposeInput,
+    type SpacesTopicWithMessages,
+} from './spaces.js';
+import type * as SpacesTypes from './spaces.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -878,6 +888,23 @@ export const ipcSchemas = {
       defaultModel: ModelSelection.nullable(),
     }),
   },
+  // The image-model catalog for the settings "Image model" picker: the
+  // connected providers that can generate images, each with the models it
+  // lists. Every image flavor lists (see getImageModelCatalog for where
+  // each one's list comes from) — the picker only ever offers reported
+  // models, so a provider that can't list reports status 'error'.
+  'models:listImageModels': {
+    req: z.null(),
+    res: z.object({
+      providers: z.array(z.object({
+        id: z.string(),
+        flavor: z.string(),
+        status: z.enum(['ok', 'error']),
+        error: z.string().optional(),
+        models: z.array(z.string()),
+      })),
+    }),
+  },
   'models:test': {
     req: z.object({
       provider: LlmProvider,
@@ -971,6 +998,9 @@ export const ipcSchemas = {
         backgroundTask: ModelSelection.nullable(),
         subagent: ModelSelection.nullable(),
       }),
+      // The generate-image model — a bare ref (image models take no
+      // effort). Null = unset: image generation is unavailable.
+      imageModel: ModelRef.nullable(),
       deferBackgroundTasks: z.boolean(),
     }),
   },
@@ -989,6 +1019,7 @@ export const ipcSchemas = {
         backgroundTask: ModelSelection.nullable().optional(),
         subagent: ModelSelection.nullable().optional(),
       }).optional(),
+      imageModel: ModelRef.nullable().optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({
@@ -1391,6 +1422,27 @@ export const ipcSchemas = {
   'quickAsk:setPinnedCollapsed': {
     req: z.object({ collapsed: z.boolean() }),
     res: z.object({}),
+  },
+  // Companion → main: per-region click-through. The companion frame is far
+  // bigger than anything it paints (a tall transparent stage above the card
+  // so popovers can open upward), and transparency is only PAINT — the OS
+  // routes a click by the window rect — so the window is click-through by
+  // default and the renderer flips it solid while the cursor is actually
+  // over painted UI. Without this the invisible stage swallowed every click
+  // that landed on it.
+  'quickAsk:setInteractive': {
+    req: z.object({ interactive: z.boolean() }),
+    res: z.object({}),
+  },
+  // Main → companion: where the cursor is, in the window's own CSS pixels.
+  // Main polls it from the OS because mouse events are NOT a reliable
+  // witness here: macOS drag regions (the mascot IS one — it's the drag
+  // handle) are native views layered over the page, so moves across them
+  // never reach the renderer at all. The renderer hit-tests this point and
+  // answers on quickAsk:setInteractive.
+  'quick-ask:cursor': {
+    req: z.object({ x: z.number(), y: z.number() }),
+    res: z.null(),
   },
   // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
   // whether a reply is SPOKEN now follows the question's modality — spoken
@@ -2263,6 +2315,48 @@ export const ipcSchemas = {
   'shell:readFileBase64': {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
+  },
+  // Spreadsheet viewer: windowed read of a local .xlsx/.xls/.csv/.tsv file
+  'spreadsheet:load': {
+    req: z.object({
+      path: z.string(),
+      sheet: z.string().optional(),
+      offset: z.number().int().min(0),
+      limit: z.number().int().min(1).max(1000),
+    }),
+    res: z.object({
+      format: z.enum(['xlsx', 'xls', 'csv', 'tsv']),
+      sheets: z.array(z.object({
+        name: z.string(),
+        rowCount: z.number(),
+        columnCount: z.number(),
+      })),
+      activeSheet: z.string(),
+      rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+      // Formatted text per cell (dates/currency/percent as Excel shows them)
+      display: z.array(z.array(z.string().nullable())),
+      // Row 1 of the sheet, for the viewer's pinned-header mode
+      firstRow: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])).nullable(),
+      firstRowDisplay: z.array(z.string().nullable()).nullable(),
+      offset: z.number(),
+      totalRows: z.number(),
+      totalColumns: z.number(),
+      etag: z.string(),
+    }),
+  },
+  // Spreadsheet viewer: locate cells matching a query in one sheet
+  'spreadsheet:find': {
+    req: z.object({
+      path: z.string(),
+      sheet: z.string().optional(),
+      query: z.string(),
+      maxMatches: z.number().int().min(1).max(5000).optional(),
+    }),
+    res: z.object({
+      activeSheet: z.string(),
+      matches: z.array(z.object({ row: z.number(), col: z.number() })),
+      total: z.number(),
+    }),
   },
   // Native dialog channels
   'dialog:openDirectory': {
@@ -3450,6 +3544,326 @@ export const ipcSchemas = {
       accepted: z.boolean(),
       message: z.string().optional(),
     }),
+  },
+
+  // ==========================================================================
+  // Spaces — shared containers on orgs speaking the spaces protocol.
+  // Wire contract: @rowboat/spaces-protocol (apps/harbor/CONTRACT.md).
+  // Protocol-shaped payloads cross as z.custom<T>() (see spaces.ts header).
+  // ==========================================================================
+  'spaces:listOrgs': {
+    req: z.null(),
+    res: z.object({ orgs: z.array(SpacesOrgSummary) }),
+  },
+  // Dev auth (stub Harbor / Tailscale dogfood): base URL + member id.
+  'spaces:addOrg': {
+    req: z.object({ baseUrl: z.string(), memberId: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // The OAuth journey (spec §4). Paste an invite link → resolve pre-auth →
+  // join (system-browser dance if this install has no auth on the org, then
+  // the server-side bind ceremony). signInOrg reruns the dance for a
+  // needs-relogin org. policy_refused / not_a_member surface as error
+  // messages verbatim — they are the honest states.
+  'spaces:resolveInviteLink': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ baseUrl: z.string(), resolved: z.custom<SpacesTypes.ResolveInviteResult>() }),
+  },
+  'spaces:joinInvite': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:signInOrg': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // Self-serve org creation on the managed deployment's apex (free for now —
+  // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
+  // caller is the org's first admin at <slug>.spaces.rowboatlabs.com.
+  'spaces:createOrg': {
+    req: z.object({ name: z.string(), slug: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // Where the Create button makes orgs (from /v1/config via core). null =
+  // no spaces fleet for this environment; the dialog says so honestly.
+  'spaces:apexInfo': {
+    req: z.null(),
+    res: z.object({ apexDomain: z.string().nullable() }),
+  },
+  'spaces:removeOrg': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:listSpaces': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
+  },
+  'spaces:createSpace': {
+    req: z.object({ orgId: z.string(), name: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:listMembers': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+  },
+  'spaces:createInvite': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), expiresInHours: z.number().optional() }),
+    res: z.custom<SpacesTypes.CreateInviteResult>(),
+  },
+  // Pre-auth by design (spec §4): resolvable before the org has been added,
+  // so the app can show what's being joined. baseUrl, not orgId.
+  'spaces:resolveInvite': {
+    req: z.object({ baseUrl: z.string(), token: z.string() }),
+    res: z.custom<SpacesTypes.ResolveInviteResult>(),
+  },
+  'spaces:acceptInvite': {
+    req: z.object({ orgId: z.string(), token: z.string() }),
+    res: z.custom<SpacesTypes.AcceptInviteResult>(),
+  },
+  'spaces:listAssets': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), includeDeleted: z.boolean().optional() }),
+    res: z.object({ entries: z.array(z.custom<SpacesAssetEntry>()) }),
+  },
+  // Namespace ops (inode model server-side): move/rename, delete-to-trash,
+  // restore. Conflict outcomes return as values, same as proposeChange.
+  'spaces:moveAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      fromPath: z.string(),
+      toPath: z.string(),
+      baseVersion: z.number(),
+      reason: z.string().optional(),
+    }),
+    res: z.custom<SpacesTypes.MoveAssetResult>(),
+  },
+  'spaces:deleteAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      baseVersion: z.number(),
+      reason: z.string().optional(),
+    }),
+    res: z.custom<SpacesTypes.DeleteAssetResult>(),
+  },
+  'spaces:restoreAsset': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), path: z.string() }),
+    res: z.custom<SpacesTypes.RestoreAssetResult>(),
+  },
+  'spaces:readAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      version: z.number().optional(),
+    }),
+    res: z.custom<SpacesTypes.ReadAssetResult>(),
+  },
+  // All three outcomes (applied | merged | conflict) return as values — a
+  // conflict is a normal result of merge-then-correct, not an error.
+  'spaces:proposeChange': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), input: z.custom<SpacesProposeInput>() }),
+    res: z.custom<SpacesTypes.ProposeChangeResult>(),
+  },
+  'spaces:assetHistory': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string().optional(),
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.object({ changeSets: z.array(z.custom<SpacesTypes.ChangeSet>()) }),
+  },
+  'spaces:diff': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      from: z.number(),
+      to: z.number(),
+    }),
+    res: z.object({ unified: z.string() }),
+  },
+  'spaces:listTopics': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), includeArchived: z.boolean().optional() }),
+    res: z.object({ topics: z.array(z.custom<SpacesTypes.TopicListing>()) }),
+  },
+  'spaces:listMessages': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string(),
+      /** Page back: only messages below this offset. Absent = the latest page. */
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.custom<SpacesTopicWithMessages>(),
+  },
+  // actingMode is set by main ('direct' — the renderer is the human surface;
+  // agents write through the org's MCP face, never through IPC).
+  'spaces:postMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string().optional(),
+      anchorChangeSetId: z.string().optional(),
+      anchorMessageId: z.string().optional(),
+      body: z.string(),
+    }),
+    res: z.custom<SpacesPostResult>(),
+  },
+  'spaces:manageTopic': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string(),
+      action: z.custom<SpacesManageTopicAction>(),
+    }),
+    res: z.object({ topic: z.custom<SpacesTypes.Topic>() }),
+  },
+  // Slack-style reaction toggle — any member, any message. Idempotent on the
+  // org (re-add / re-remove is a no-op); actingMode is stamped 'direct' by
+  // main like postMessage. Returns the message with reactions folded.
+  'spaces:reactToMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      emoji: z.string(),
+      action: z.enum(['add', 'remove']),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // Author-only tombstone — the org enforces caller == author; actingMode is
+  // stamped 'direct' by main. Returns the tombstone (body '', deletedAt set).
+  'spaces:deleteMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // Author-only body rewrite — the org enforces caller == author; identical
+  // bodies no-op. Returns the message with editedAt set.
+  'spaces:editMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      body: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // @rowboat in a topic (spec §8): the renderer detected an addressed message
+  // it just posted; main routes it into the topic's session (creating one on
+  // first use — the queue/steer machinery handles the rest). messageId is the
+  // posted feed message, stamped into the turn input as provenance.
+  'spaces:invokeRowboat': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string(),
+      topicTitle: z.string(),
+      spaceName: z.string(),
+      messageId: z.string(),
+      body: z.string(),
+      // Per-turn agent options from the space composer's agent strip (shown
+      // when the draft addresses @rowboat). Absent = the assistant's defaults.
+      options: z
+        .object({
+          model: z.object({ provider: z.string(), model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() }).optional(),
+          permissionMode: z.enum(['auto', 'manual']).optional(),
+          searchEnabled: z.boolean().optional(),
+          codeMode: z.enum(['claude', 'codex']).optional(),
+        })
+        .optional(),
+    }),
+    res: z.object({ sessionId: z.string(), queued: z.boolean() }),
+  },
+  // The topic's session, if any — powers the invoker-only "open the turn"
+  // affordance on the presence chip.
+  'spaces:topicSession': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), topicId: z.string() }),
+    res: z.object({ sessionId: z.string().nullable() }),
+  },
+  // Upload phase 1 (spec §6): bytes in, {hash, size, mime} out. Bytes travel
+  // either inline (clipboard pastes — ArrayBuffer over structured clone) or as
+  // an absolute file path (drag-drop / picker via electronUtils.getPathForFile)
+  // so a 100MB file never crosses IPC — main reads it from disk.
+  'spaces:uploadBlob': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      bytes: z.custom<ArrayBuffer>().optional(),
+      filePath: z.string().optional(),
+      /** Display filename (drives the markdown label / mime fallback); never storage. */
+      name: z.string(),
+      mime: z.string().optional(),
+    }),
+    res: z.object({ blob: z.custom<SpacesTypes.BlobInfo>() }),
+  },
+  // Explicit download: main pulls through the content-addressed cache and
+  // shows the save dialog. saved:false = the person cancelled.
+  'spaces:saveBlob': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      hash: z.string(),
+      suggestedName: z.string().optional(),
+    }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
+  // Save an external image (a pasted GIF/image link) to disk. Main fetches
+  // the URL — the renderer can't (CORS) — after the save dialog, so a
+  // cancel never downloads. https only. saved:false = the person cancelled.
+  'spaces:saveImageUrl': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
+  // OpenGraph metadata for a link card. Main fetches the page — the renderer
+  // can't (CORS) — with a size cap and timeout. null preview = nothing
+  // usable (not html, too slow, no tags). https only.
+  'spaces:linkPreview': {
+    req: z.object({ url: z.string() }),
+    res: z.object({
+      preview: z
+        .object({
+          url: z.string(),
+          title: z.string().optional(),
+          description: z.string().optional(),
+          imageUrl: z.string().optional(),
+          siteName: z.string().optional(),
+        })
+        .nullable(),
+    }),
+  },
+  // Live: renderer subscribes per space; frames arrive on 'spaces:events'
+  // wrapped with their orgId. Offset resume mirrors the turn-event spine.
+  'spaces:subscribeSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), afterOffset: z.number().optional() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:unsubscribeSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Ephemeral presence from the human surface (viewing / typing / idle), scoped
+  // to a topic when set. agent_working is only ever sent by the topic agent.
+  'spaces:presence': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      state: z.enum(['viewing', 'typing', 'idle']),
+      topicId: z.string().optional(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:events': {
+    req: z.custom<SpacesBusEvent>(),
+    res: z.null(),
   },
 } as const;
 

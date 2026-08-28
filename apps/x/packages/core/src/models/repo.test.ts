@@ -90,3 +90,30 @@ describe('FSModelConfigRepo data safety', () => {
         expect(JSON.parse(await fs.readFile(configPath, 'utf8')).providers.openai.apiKey).toBe('sk-a');
     });
 });
+
+describe('FSModelConfigRepo imageModel', () => {
+    it('round-trips through updateConfig and is dropped with its provider', async () => {
+        const repo = new FSModelConfigRepo();
+        await repo.ensureConfig();
+        await repo.setProvider('openrouter', { flavor: 'openrouter', apiKey: 'sk-or' });
+        await repo.updateConfig({ imageModel: { provider: 'openrouter', model: 'google/gemini-2.5-flash-image' } });
+        expect((await repo.getConfig()).imageModel).toEqual({ provider: 'openrouter', model: 'google/gemini-2.5-flash-image' });
+
+        // Same dangling-ref cleanup as assistantModel / task overrides.
+        await repo.removeProvider('openrouter');
+        expect((await repo.getConfig()).imageModel).toBeUndefined();
+        expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).not.toHaveProperty('imageModel');
+    });
+
+    it('null clears it; the rowboat provider (no providers-map entry) clears via removeProvider too', async () => {
+        const repo = new FSModelConfigRepo();
+        await repo.ensureConfig();
+        await repo.updateConfig({ imageModel: { provider: 'rowboat', model: 'google/gemini-2.5-flash-image' } });
+        await repo.removeProvider('rowboat');
+        expect((await repo.getConfig()).imageModel).toBeUndefined();
+
+        await repo.updateConfig({ imageModel: { provider: 'rowboat', model: 'google/gemini-2.5-flash-image' } });
+        await repo.updateConfig({ imageModel: null });
+        expect((await repo.getConfig()).imageModel).toBeUndefined();
+    });
+});

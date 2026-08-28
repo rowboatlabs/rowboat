@@ -216,6 +216,11 @@ const HISTORICAL_KEY_ORDER = [
     "transcribe-audio",
     "home-status",
     "paste-at-cursor",
+    "spreadsheet-create",
+    "spreadsheet-edit",
+    "generate-image",
+    "spaces-upload-blob",
+    "spaces-download-blob",
     "spawn-agent",
 ];
 
@@ -288,6 +293,8 @@ describe("BuiltinTools permission audit", () => {
             "deck-restructure": "file-boundary",
             "deck-restyle": "file-boundary",
             "deck-review": "file-boundary",
+            "spreadsheet-create": "file-boundary",
+            "spreadsheet-edit": "file-boundary",
             executeCommand: "command-allowlist",
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
@@ -297,6 +304,11 @@ describe("BuiltinTools permission audit", () => {
             // Ghostwriter: types into ANOTHER app at the user's cursor —
             // always gated (the auto judge keeps voice flow smooth).
             "paste-at-cursor": "prompt",
+            // Spaces blob bridge: upload pushes local bytes toward a
+            // team-visible org, so it's gated (the auto judge decides);
+            // download is deliberately "none" — a member-readable fetch into
+            // the app-owned cache.
+            "spaces-upload-blob": "prompt",
         });
     });
 });

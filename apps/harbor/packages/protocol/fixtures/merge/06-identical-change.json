@@ -1,0 +1,11 @@
+{
+  "name": "identical-change",
+  "description": "Both writers made the same edit (the second standup pusher, spec §11 beat 4). Three-way treats identical changes as clean; must merge to that content once, not conflict.",
+  "base": "# Roadmap\n- [ ] SSO\n",
+  "current": "# Roadmap\n- [x] SSO\n",
+  "proposed": "# Roadmap\n- [x] SSO\n",
+  "expected": {
+    "outcome": "merged",
+    "content": "# Roadmap\n- [x] SSO\n"
+  }
+}

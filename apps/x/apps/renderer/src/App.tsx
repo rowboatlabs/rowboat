@@ -7,6 +7,7 @@ import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
+import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
@@ -22,6 +23,7 @@ import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
 import { DocxFileViewer } from '@/components/docx-file-viewer';
+import { SpreadsheetFileViewer } from '@/components/spreadsheet-file-viewer';
 import { PptxEditor } from '@/components/pptx-editor';
 import { PersistentViewerCache } from '@/components/persistent-viewer-cache';
 import { UnsupportedFileViewer } from '@/components/unsupported-file-viewer';
@@ -36,6 +38,9 @@ import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
+import { SpacesView, type SpaceSelection } from '@/components/spaces-view';
+import { railKey, type RailSelection } from '@/lib/spaces-selection';
+import { useSpacesOrgs } from '@/hooks/use-spaces';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
@@ -621,6 +626,7 @@ type ViewState =
   | { type: 'code' }
   | { type: 'bg-tasks' }
   | { type: 'apps' }
+  | { type: 'spaces'; orgId?: string; spaceId?: string; rail?: RailSelection }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -630,6 +636,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
   if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '') && (a.mode ?? '') === (b.mode ?? '')
   if (a.type === 'email' && b.type === 'email') return (a.threadId ?? '') === (b.threadId ?? '') && (a.searchQuery ?? '') === (b.searchQuery ?? '')
+  if (a.type === 'spaces' && b.type === 'spaces') return (a.orgId ?? '') === (b.orgId ?? '') && (a.spaceId ?? '') === (b.spaceId ?? '') && railKey(a.rail) === railKey(b.rail)
   return true // both graph
 }
 
@@ -701,6 +708,13 @@ function parseDeepLink(input: string): ViewState | null {
       return { type: 'bg-tasks' }
     case 'apps':
       return { type: 'apps' }
+    case 'spaces': {
+      const orgId = params.get('orgId')
+      const spaceId = params.get('spaceId')
+      if (!orgId || !spaceId) return { type: 'spaces' }
+      const topicId = params.get('topicId')
+      return { type: 'spaces', orgId, spaceId, ...(topicId ? { rail: { kind: 'topic' as const, topicId } } : {}) }
+    }
     default:
       return null
   }
@@ -817,6 +831,17 @@ function App() {
   const [isLiveNotesOpen, setIsLiveNotesOpen] = useState(false)
   const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
+  const [isSpacesOpen, setIsSpacesOpen] = useState(false)
+  // Spaces keeps its view mounted after the first open (hidden, not torn
+  // down) — reopening must be instant, not a full remount of the pane.
+  const [spacesEverOpened, setSpacesEverOpened] = useState(false)
+  useEffect(() => {
+    if (isSpacesOpen) setSpacesEverOpened(true)
+  }, [isSpacesOpen])
+  // The space open in the Spaces view (org + space); the sidebar highlights it.
+  const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(null)
+  // What's selected inside the open space (general / topic / file) — part of the history.
+  const [railSelection, setRailSelection] = useState<RailSelection>({ kind: 'general' })
   const [isEmailOpen, setIsEmailOpen] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
@@ -4186,12 +4211,19 @@ function App() {
         const contentParts: ContentPart[] = []
 
         if (mentions && mentions.length > 0) {
+          const mentionMimeTypes: Record<string, string> = {
+            xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            xls: 'application/vnd.ms-excel',
+            csv: 'text/csv',
+            tsv: 'text/tab-separated-values',
+          }
           for (const mention of mentions) {
+            const ext = mention.path.split('.').pop()?.toLowerCase() ?? ''
             contentParts.push({
               type: 'attachment',
               path: mention.path,
               filename: mention.displayName || mention.path.split('/').pop() || mention.path,
-              mimeType: 'text/markdown',
+              mimeType: mentionMimeTypes[ext] ?? 'text/markdown',
               ...(mention.lineNumber !== undefined ? { lineNumber: mention.lineNumber } : {}),
             })
           }
@@ -4557,10 +4589,11 @@ function App() {
     if (isCodeOpen) return { type: 'code' }
     if (isBgTasksOpen) return { type: 'bg-tasks' }
     if (isAppsOpen) return { type: 'apps' }
+    if (isSpacesOpen) return spaceSelection ? { type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail: railSelection } : { type: 'spaces' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSpacesOpen, spaceSelection, railSelection, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
   // applyViewState is declared further down (it needs the chat-binding
   // helpers); handlers above it reach it through this render-filled ref.
@@ -4568,6 +4601,7 @@ function App() {
 
   // Header title for the current view (the tab strip is gone — the header
   // names where you are instead).
+  const { orgs: spacesOrgs } = useSpacesOrgs()
   const currentViewTitle = React.useMemo(() => {
     switch (currentViewState.type) {
       case 'home': return 'Home'
@@ -4578,7 +4612,11 @@ function App() {
       case 'meetings': return 'Meetings'
       case 'live-notes': return 'Live notes'
       case 'bg-tasks': return 'Background tasks'
-      case 'apps': return 'Mini Apps'
+      case 'apps': return 'Apps'
+      case 'spaces': {
+        const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
+        return org?.spaces.find((sp) => sp.id === currentViewState.spaceId)?.name ?? 'Spaces'
+      }
       case 'workspace': return 'Workspace'
       case 'knowledge-view': return 'Brain'
       case 'graph': return 'Graph View'
@@ -4591,7 +4629,7 @@ function App() {
         return path.split('/').pop()?.replace(/\.md$/i, '') || path
       }
     }
-  }, [currentViewState])
+  }, [currentViewState, spacesOrgs])
 
   // Close every section flag — THE single place a section switch resets the
   // rest of the world. Every navigation path funnels through this (via
@@ -4606,6 +4644,7 @@ function App() {
     setIsLiveNotesOpen(false)
     setIsBgTasksOpen(false)
     setIsAppsOpen(false)
+    setIsSpacesOpen(false)
     setIsEmailOpen(false)
     setIsWorkspaceOpen(false)
     setIsKnowledgeViewOpen(false)
@@ -5005,6 +5044,9 @@ function App() {
   // which used to live outside this system as a sentinel tab), applying a
   // view can never strand a stale section on screen.
   const applyViewState = useCallback(async (view: ViewState) => {
+    // Whether this navigation ENTERS Spaces (vs a click within it) — read
+    // before closeAllSections resets the flag.
+    const wasSpacesOpen = isSpacesOpen
     closeAllSections()
     switch (view.type) {
       case 'file':
@@ -5066,6 +5108,20 @@ function App() {
       case 'apps':
         setIsAppsOpen(true)
         return
+      case 'spaces':
+        // Feature-flag gate: every route into Spaces (sidebar, palette, deep
+        // links, notification clicks, history, relaunch restore) funnels
+        // through here. With the flag off, closeAllSections has already run,
+        // so the app lands on the default full-screen chat.
+        if (!SPACES_ENABLED) return
+        if (view.orgId && view.spaceId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId })
+        setRailSelection(view.rail ?? { kind: 'general' })
+        // Spaces carries its own conversation surface, so entering it
+        // collapses the assistant chat pane by default; in-space navigation
+        // (topics, files, history within Spaces) leaves it as the user set it.
+        if (!wasSpacesOpen) setIsChatSidebarOpen(false)
+        setIsSpacesOpen(true)
+        return
       case 'chat':
         if (view.runId) {
           bindChatToRun(view.runId)
@@ -5074,7 +5130,7 @@ function App() {
         }
         return
     }
-  }, [closeAllSections, bindChatToRun, handleNewChat])
+  }, [closeAllSections, bindChatToRun, handleNewChat, isSpacesOpen])
   applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
@@ -5121,6 +5177,20 @@ function App() {
 
   const openAppsView = useCallback(() => {
     void navigateToView({ type: 'apps' })
+  }, [navigateToView])
+
+  // navigateToView early-returns when the apps view is already showing, so
+  // `openAppsView` alone is a no-op while an app is open — the sidebar "Apps"
+  // item did nothing. Bumping the version with a null folder tells AppsView to
+  // drop its selection (mirrors onOpenBgTasks).
+  const openAppsGrid = useCallback(() => {
+    setAppInitialId(null)
+    setAppIdVersion((v) => v + 1)
+    openAppsView()
+  }, [openAppsView])
+
+  const openSpace = useCallback((orgId: string, spaceId: string) => {
+    void navigateToView({ type: 'spaces', orgId, spaceId })
   }, [navigateToView])
 
   const openMeetingsView = useCallback(() => {
@@ -5411,7 +5481,8 @@ function App() {
         case 'knowledge': void navigateToView({ type: 'knowledge-view' }); break
         case 'workspace': void navigateToView({ type: 'workspace' }); break
         case 'code': void navigateToView({ type: 'code' }); break
-        case 'apps': openAppsView(); break
+        case 'apps': openAppsGrid(); break
+        case 'spaces': void navigateToView({ type: 'spaces' }); break
       }
     }
 
@@ -5535,7 +5606,7 @@ function App() {
         break
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigateToFile, navigateToView, selectedPath])
+  }, [navigateToFile, navigateToView, openAppsGrid, selectedPath])
 
   // Legacy runs:events path: handleRunEvent stashes the result in a ref;
   // polled every render (the triggering event always causes one).
@@ -5610,6 +5681,43 @@ function App() {
     }
   }, [sessionChat.chatState?.conversation, runId, navigateToView])
 
+  // Spreadsheet auto-open / refresh: when the assistant writes a spreadsheet
+  // inside the workspace, open the viewer on a brand-new file
+  // (spreadsheet-create) and tell an already-open viewer the file changed
+  // underneath it. Same seeding semantics as app-navigation above: transcript
+  // entries present on session switch are marked processed without replaying.
+  const processedSpreadsheetToolsRef = useRef<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() })
+  useEffect(() => {
+    const conversation = sessionChat.chatState?.conversation
+    if (!conversation) return
+    const completed = conversation.filter(
+      (item): item is ToolCall =>
+        isToolCall(item) &&
+        (item.name === 'spreadsheet-create' || item.name === 'spreadsheet-edit') &&
+        item.status === 'completed'
+    )
+    if (processedSpreadsheetToolsRef.current.key !== runId) {
+      processedSpreadsheetToolsRef.current = { key: runId, ids: new Set(completed.map((t) => t.id)) }
+      return
+    }
+    for (const tool of completed) {
+      if (processedSpreadsheetToolsRef.current.ids.has(tool.id)) continue
+      processedSpreadsheetToolsRef.current.ids.add(tool.id)
+      const result = tool.result as Record<string, unknown> | undefined
+      if (result && result.success && typeof result.workspaceRelPath === 'string') {
+        // Only a brand-new spreadsheet steals the view; edits to an existing
+        // one must not yank the user away from what they are doing.
+        if (tool.name === 'spreadsheet-create') {
+          void navigateToView({ type: 'file', path: result.workspaceRelPath })
+        }
+        // If the viewer is already open on this file the navigation is a
+        // no-op, and the workspace watcher only covers allowlisted roots —
+        // so tell the viewer directly that the file changed.
+        window.dispatchEvent(new CustomEvent('rowboat:spreadsheet-touched', { detail: { path: result.workspaceRelPath } }))
+      }
+    }
+  }, [sessionChat.chatState?.conversation, runId, navigateToView])
+
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
     if (currentViewState.type !== 'chat') {
@@ -5669,7 +5777,7 @@ function App() {
     && hoverRunId != null
     && chatTabs.find((t) => t.id === activeChatTabId)?.runId === hoverRunId
 
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isAppsOpen && !isSpacesOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -5794,6 +5902,15 @@ function App() {
     const files = collectFilePaths(tree).filter((path) => path.endsWith('.md'))
     return Array.from(new Set(files.map(stripKnowledgePrefix)))
   }, [tree])
+  // Chat @-mention candidates: notes plus spreadsheets (the assistant reads
+  // workbooks via its spreadsheet/parse tools). Wiki links and the graph stay
+  // markdown-only via knowledgeFiles above.
+  const mentionableFiles = React.useMemo(() => {
+    const files = collectFilePaths(tree).filter(
+      (path) => path.endsWith('.md') || getViewerType(path) === 'spreadsheet',
+    )
+    return Array.from(new Set(files.map(stripKnowledgePrefix)))
+  }, [tree])
   const knowledgeFilePaths = React.useMemo(() => (
     knowledgeFiles.reduce<string[]>((acc, filePath) => {
       const resolved = toKnowledgePath(filePath)
@@ -5817,14 +5934,14 @@ function App() {
       return true
     }
 
-    for (const file of knowledgeFiles) {
+    for (const file of mentionableFiles) {
       const fullPath = toKnowledgePath(file)
       if (fullPath && isPathVisible(fullPath)) {
         visible.push(file)
       }
     }
     return visible
-  }, [knowledgeFiles, expandedPaths])
+  }, [mentionableFiles, expandedPaths])
 
   // Load workspace root on mount
   useEffect(() => {
@@ -6073,13 +6190,13 @@ function App() {
         openBgTasksView()
         break
       case 'apps':
-        openAppsView()
+        openAppsGrid()
         break
       case 'workspaces':
         knowledgeActions.openWorkspaceAt()
         break
     }
-  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsView])
+  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsGrid])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
@@ -6499,7 +6616,7 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || isBrowserOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isSpacesOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
@@ -6561,6 +6678,7 @@ function App() {
                 : (isKnowledgeViewOpen || isGraphOpen || (selectedPath != null && selectedPath.startsWith('knowledge/'))) ? 'knowledge'
                 : isBgTasksOpen ? 'agents'
                 : isAppsOpen ? 'apps'
+                : isSpacesOpen ? 'spaces'
                 : isWorkspaceOpen ? 'workspaces'
                 : null
               }
@@ -6568,8 +6686,10 @@ function App() {
               onOpenCode={openCodeView}
               onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-              onOpenApps={openAppsView}
+              onOpenApps={openAppsGrid}
               onOpenApp={(folder) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() }}
+              onOpenSpace={openSpace}
+              activeSpace={isSpacesOpen ? spaceSelection : null}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
               onRenameRun={(rid, title) => {
@@ -6733,6 +6853,26 @@ function App() {
                 })()}
               </ContentHeader>
 
+              {/* Spaces stays mounted once opened (Slack-style keep-alive):
+                  hiding instead of unmounting makes reopening instant. The
+                  active flag gates presence + read marks while hidden. */}
+              {(isSpacesOpen || spacesEverOpened) && (
+                <div className={isSpacesOpen && !isBrowserOpen ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'hidden'}>
+                  <SpacesView
+                    active={isSpacesOpen && !isBrowserOpen}
+                    selection={spaceSelection}
+                    onSelect={setSpaceSelection}
+                    railSelection={railSelection}
+                    onRailSelect={(rail) => {
+                      // In-space navigation is real navigation: each selection is a history entry,
+                      // so the top ‹ › retrace general → topic → file.
+                      if (spaceSelection) void navigateToView({ type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail })
+                      else setRailSelection(rail)
+                    }}
+                    onOpenSession={(sessionId) => void navigateToView({ type: 'chat', runId: sessionId })}
+                  />
+                </div>
+              )}
               {isBrowserOpen ? (
                 <BrowserPane
                   onClose={handleCloseBrowser}
@@ -6779,7 +6919,7 @@ function App() {
                             </div>
                           )}
                           <ChatInputWithMentions
-                          knowledgeFiles={knowledgeFiles}
+                          knowledgeFiles={mentionableFiles}
                           recentFiles={recentWikiFiles}
                           visibleFiles={visibleKnowledgeFiles}
                           onSubmit={handleHomeComposerSubmit}
@@ -6912,6 +7052,9 @@ function App() {
                     onNewApp={() => prefillChat('Build me an app that ')}
                   />
                 </div>
+              ) : isSpacesOpen ? (
+                // Rendered by the keep-alive container above the chain.
+                null
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} onOpenNote={openNoteFromEmail} />
@@ -7188,6 +7331,10 @@ function App() {
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <DocxFileViewer path={selectedPath} />
                   </div>
+                ) : selectedPath && getViewerType(selectedPath) === 'spreadsheet' ? (
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <SpreadsheetFileViewer path={selectedPath} />
+                  </div>
                 ) : selectedPath && getViewerType(selectedPath) === 'pptx' ? (
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <PptxEditor
@@ -7264,7 +7411,7 @@ function App() {
                           tab={tab}
                           isActive={isActive}
                           tabState={getChatTabStateForRender(tab.id)}
-                          knowledgeFiles={knowledgeFiles}
+                          knowledgeFiles={mentionableFiles}
                           recentFiles={recentWikiFiles}
                           visibleFiles={visibleKnowledgeFiles}
                           onSubmit={handlePromptSubmit}
@@ -7363,7 +7510,7 @@ function App() {
                 }
                 onRemoveQueued={handleRemoveQueued}
                 onPullQueued={handlePullQueued}
-                knowledgeFiles={knowledgeFiles}
+                knowledgeFiles={mentionableFiles}
                 recentFiles={recentWikiFiles}
                 visibleFiles={visibleKnowledgeFiles}
                 runId={runId}
