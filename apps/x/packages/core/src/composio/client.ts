@@ -13,6 +13,8 @@ import {
     ZErrorResponse,
     ZExecuteActionRequest,
     ZExecuteActionResponse,
+    ZLinkConnectedAccountRequest,
+    ZLinkConnectedAccountResponse,
     ZListResponse,
     ZSearchResultTool,
     ZToolkit,
@@ -148,6 +150,36 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
         }
 
         if (!response.ok) {
+            // Proxy 404 fallback: if we were routing through the Rowboat proxy and the
+            // path isn't forwarded yet (e.g. /connected_accounts/link), retry the same
+            // request directly against Composio using the local API key.
+            if (response.status === 404 && await isSignedIn()) {
+                const localKey = getApiKey();
+                if (localKey) {
+                    console.warn(`[Composio] Proxy returned 404 for ${url.pathname}; falling back to direct Composio API with local key`);
+                    const directUrl = new URL(`${COMPOSIO_BASE_URL}${path}`);
+                    Object.entries(params).forEach(([key, value]) => directUrl.searchParams.set(key, value));
+                    const directResponse = await fetch(directUrl, {
+                        ...options,
+                        headers: {
+                            ...options.headers,
+                            'x-api-key': localKey,
+                            ...(options.method === 'POST' ? { "Content-Type": "application/json" } : {}),
+                        },
+                    });
+                    const directContentType = directResponse.headers.get('content-type') || '';
+                    const directRawText = await directResponse.text();
+                    if (directResponse.ok && directContentType.includes('application/json')) {
+                        const directData = JSON.parse(directRawText);
+                        return schema.parse(directData);
+                    }
+                    console.error(`[Composio] Direct fallback also failed:`, {
+                        status: directResponse.status,
+                        preview: directRawText.slice(0, 200),
+                    });
+                }
+            }
+
             // Try to extract a human-readable message from the JSON body
             let detail = '';
             try {
@@ -242,6 +274,21 @@ export async function createConnectedAccount(
     request: z.infer<typeof ZCreateConnectedAccountRequest>
 ): Promise<z.infer<typeof ZCreateConnectedAccountResponse>> {
     return composioApiCall(ZCreateConnectedAccountResponse, "/connected_accounts", {}, {
+        method: 'POST',
+        body: JSON.stringify(request),
+    });
+}
+
+/**
+ * Link (initiate) a connected account for managed OAuth — Composio v3.
+ * Uses POST /connected_accounts/link with a flat request body.
+ * Prefer this over createConnectedAccount for managed-OAuth toolkits;
+ * the older POST /connected_accounts endpoint was retired by Composio.
+ */
+export async function linkConnectedAccount(
+    request: z.infer<typeof ZLinkConnectedAccountRequest>
+): Promise<z.infer<typeof ZLinkConnectedAccountResponse>> {
+    return composioApiCall(ZLinkConnectedAccountResponse, "/connected_accounts/link", {}, {
         method: 'POST',
         body: JSON.stringify(request),
     });
