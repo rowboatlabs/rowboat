@@ -166,6 +166,24 @@ export const ZErrorResponse = z.object({
 });
 
 /**
+ * Link connected account request (POST /connected_accounts/link — Composio v3)
+ * Flat body shape that replaced the nested POST /connected_accounts for managed OAuth.
+ */
+export const ZLinkConnectedAccountRequest = z.object({
+    auth_config_id: z.string(),
+    user_id: z.string().optional(),
+    callback_url: z.string().optional(),
+});
+
+/**
+ * Link connected account response (POST /connected_accounts/link — Composio v3)
+ */
+export const ZLinkConnectedAccountResponse = z.object({
+    connected_account_id: z.string(),
+    redirect_url: z.string().optional(),
+}).passthrough();
+
+/**
  * Delete operation response
  */
 export const ZDeleteOperationResponse = z.object({
