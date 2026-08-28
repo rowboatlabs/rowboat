@@ -154,7 +154,7 @@ const ASR_PARAMS = new URLSearchParams({
     model: 'nova-3',
     smart_format: 'true',
     punctuate: 'true',
-    language: 'en',
+    language: 'multi',
 });
 
 const ASR_WS_CHUNK_BYTES = 32 * 1024;
