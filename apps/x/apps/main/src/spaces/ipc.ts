@@ -56,6 +56,7 @@ type SpacesHandlers = {
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
   'spaces:unsubscribeSpace': InvokeHandler<'spaces:unsubscribeSpace'>;
   'spaces:presence': InvokeHandler<'spaces:presence'>;
+  'spaces:bounceLive': InvokeHandler<'spaces:bounceLive'>;
 };
 
 function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
@@ -338,6 +339,13 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:presence': async (_event, args) => {
     orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.topicId);
+    return { success: true };
+  },
+
+  // In-process (kill-switch) parity for the wake bounce; in child/remote
+  // mode this channel forwards to the server, which owns the sockets.
+  'spaces:bounceLive': async () => {
+    orgs.bounceAllLive();
     return { success: true };
   },
 };

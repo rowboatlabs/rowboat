@@ -263,6 +263,46 @@ export const RPC_CHANNELS = [
 
   // Phase 8b: the loopback-capable client relays OAuth callback hits here.
   'oauth:deliverLoopbackCallback',
+
+  // Phase 9: Spaces (landed on main mid-separation) — core-coupled, so it
+  // runs server-side. Client-local pieces (save dialogs, link previews,
+  // blob thumbnails) stay in the Electron app.
+  'spaces:listOrgs',
+  'spaces:addOrg',
+  'spaces:resolveInviteLink',
+  'spaces:joinInvite',
+  'spaces:signInOrg',
+  'spaces:createOrg',
+  'spaces:apexInfo',
+  'spaces:removeOrg',
+  'spaces:listSpaces',
+  'spaces:createSpace',
+  'spaces:listMembers',
+  'spaces:createInvite',
+  'spaces:resolveInvite',
+  'spaces:acceptInvite',
+  'spaces:listAssets',
+  'spaces:moveAsset',
+  'spaces:deleteAsset',
+  'spaces:restoreAsset',
+  'spaces:uploadBlob',
+  'spaces:readAsset',
+  'spaces:proposeChange',
+  'spaces:assetHistory',
+  'spaces:diff',
+  'spaces:listTopics',
+  'spaces:listMessages',
+  'spaces:postMessage',
+  'spaces:manageTopic',
+  'spaces:reactToMessage',
+  'spaces:deleteMessage',
+  'spaces:editMessage',
+  'spaces:invokeRowboat',
+  'spaces:topicSession',
+  'spaces:subscribeSpace',
+  'spaces:unsubscribeSpace',
+  'spaces:presence',
+  'spaces:bounceLive',
 ] as const satisfies readonly ipc.InvokeChannels[];
 
 export type RpcChannel = (typeof RPC_CHANNELS)[number];

@@ -45,9 +45,8 @@ import started from "electron-squirrel-startup";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
-import { startSpaceMentionWatch } from "@x/core/dist/spaces/mention-watch.js";
+import { forwardRpc } from "./rpc-forwarder.js";
 import { bounceAllLive } from "@x/core/dist/spaces/orgs.js";
-import { flags } from "@x/shared";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
@@ -583,16 +582,21 @@ app.whenReady().then(async () => {
   registerScreenPointerService(screenPointerService);
   registerTextInsertService(textInsertService);
 
-  // Space mentions: watch every space of every org and notify on @<me>
-  // while the app is unfocused (offset resume covers time away). Gated with
-  // the rest of the Spaces UI — no OS notifications for a feature the user
-  // can't open (the same flag hides the renderer surfaces via the preload).
-  if (flags.spacesEnabled(process.env)) startSpaceMentionWatch();
+  // Space mentions now start with the rest of core services (boot/services.ts)
+  // — in-process or inside the child/remote server, wherever core runs.
 
   // Sleep leaves spaces WebSockets half-open (no close ever fires; see
   // SpacesLive's liveness notes). Bounce them on wake so every stream
   // reconnects and replays immediately instead of waiting out the watchdog.
-  powerMonitor.on("resume", () => bounceAllLive());
+  // The sockets live where core runs — bounce through the transport when
+  // that's the child/remote server.
+  powerMonitor.on("resume", () => {
+    if (childServerMode()) {
+      forwardRpc('spaces:bounceLive', null).catch(() => {});
+    } else {
+      bounceAllLive();
+    }
+  });
 
   setupIpcHandlers();
   setupBrowserEventForwarding();

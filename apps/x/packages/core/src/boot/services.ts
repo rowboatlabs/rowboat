@@ -29,6 +29,9 @@ import { migrateRuns } from '../migrations/runs/migrate.js';
 import { startModelsDevRefresh } from '../models/models-dev.js';
 import { init as initAppsServer } from '../apps/server.js';
 import { registerAppsHostApi } from '../apps/host-api.js';
+import { cleanInstallTmp } from '../apps/installer.js';
+import { startSpaceMentionWatch } from '../spaces/mention-watch.js';
+import { flags } from '@x/shared';
 
 // The headless-safe half of Rowboat's boot: everything that runs schedulers,
 // sync services, and background agents against the workdir. Extracted from
@@ -104,9 +107,21 @@ export async function initCoreServices(): Promise<void> {
 
   // Rowboat Apps server (per-app origins on 127.0.0.1:3210).
   registerAppsHostApi();
+  // Startup hygiene: drop leftover install/update stagings. A cancelled URL
+  // preview retains its staging by design and a failed download leaves a
+  // partial bundle.zip; nothing else ever removes them, so they accumulate
+  // across launches. Fire-and-forget — never block or fail startup on it.
+  cleanInstallTmp().catch((error) => {
+    console.error('[Apps] Failed to clear install stagings:', error);
+  });
   initAppsServer().catch((error) => {
     console.error('[Apps] Failed to start:', error);
   });
+
+  // Space mentions: watch every space of every org and notify on @<me> (over
+  // the notification service seam — OS notifications in-process, the WS
+  // reverse call from the standalone server). Gated with the Spaces UI flag.
+  if (flags.spacesEnabled(process.env)) startSpaceMentionWatch();
 
   initChannels().catch((error) => {
     console.error('[Channels] Failed to start mobile channels:', error);

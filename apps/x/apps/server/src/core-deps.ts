@@ -1,5 +1,6 @@
 import container from '@x/core/dist/di/container.js';
 import { deliverLoopbackCallback } from './loopback-relay.js';
+import { spacesRpcHandlers, subscribeSpacesEvents } from './spaces-deps.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import * as workspaceCore from '@x/core/dist/workspace/workspace.js';
@@ -1514,6 +1515,9 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     // with the page to render.
     'oauth:deliverLoopbackCallback': async (args) => deliverLoopbackCallback(args),
 
+    // Phase 9: Spaces (see spaces-deps.ts).
+    ...spacesRpcHandlers,
+
 
     // Rowboat Apps handlers (spec §13)
 
@@ -1534,6 +1538,7 @@ export function createCoreEventSources(): EventSources {
     subscribeChatgptEvents: (listener) => chatgptStatusBus.subscribe(listener),
     subscribeTerminalEvents: (listener) => subscribeTerminalEvents(listener),
     subscribeTtsChunks: (listener) => subscribeTtsChunks(listener),
+    subscribeSpacesEvents: (listener) => subscribeSpacesEvents(listener),
   };
 }
 

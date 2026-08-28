@@ -3852,6 +3852,12 @@ export const ipcSchemas = {
   },
   // Ephemeral presence from the human surface (viewing / typing / idle), scoped
   // to a topic when set. agent_working is only ever sent by the topic agent.
+  // Client wake signal: sleep leaves spaces WebSockets half-open; the desktop
+  // calls this on powerMonitor resume so the server bounces every stream.
+  'spaces:bounceLive': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
   'spaces:presence': {
     req: z.object({
       orgId: z.string(),

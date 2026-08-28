@@ -19,7 +19,8 @@ export type PushChannel =
   | 'terminal:data'
   | 'terminal:exit'
   | 'voice:tts-chunk'
-  | 'knowledge:didCommit';
+  | 'knowledge:didCommit'
+  | 'spaces:events';
 
 interface ServerMessage {
   seq: number;

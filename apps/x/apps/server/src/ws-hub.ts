@@ -25,7 +25,8 @@ export type PushChannel =
   | 'chatgpt:statusChanged'
   | 'terminal:data'
   | 'terminal:exit'
-  | 'voice:tts-chunk';
+  | 'voice:tts-chunk'
+  | 'spaces:events';
 
 const ClientMessage = z.discriminatedUnion('type', [
   z.object({

@@ -119,6 +119,7 @@ const PUSH_CHANNELS = [
   'terminal:exit',
   'voice:tts-chunk',
   'knowledge:didCommit',
+  'spaces:events',
 ] as const;
 
 // OAuth loopback listeners this client hosts on the server's behalf (Phase
