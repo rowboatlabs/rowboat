@@ -3418,6 +3418,25 @@ export const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  // Remote-server connection (client-local, never forwarded): where this
+  // desktop's client points — the local child by default, or a remote
+  // rowboat-server saved from Settings. Env vars override and lock the UI.
+  'server:getConnection': {
+    req: z.null(),
+    res: z.object({
+      mode: z.enum(['in-process', 'child', 'remote']),
+      url: z.string().nullable(),
+      fromEnv: z.boolean(),
+    }),
+  },
+  'server:connectRemote': {
+    req: z.object({ url: z.string(), token: z.string() }),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
+  'server:disconnectRemote': {
+    req: z.null(),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
   // OAuth loopback relay (Phase 8b): a loopback-capable client hosting the
   // 127.0.0.1 callback listener for a remote server ships each callback hit
   // here; the response says which page to render in the browser tab. Called

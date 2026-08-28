@@ -29,6 +29,7 @@ import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import { PhonePairingSettings } from "@/components/settings/phone-pairing-settings"
+import { RemoteServerSettings } from "@/components/settings/remote-server-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
@@ -2104,7 +2105,14 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
               ) : activeTab === "mobile" ? (
                 <MobileChannelsSettings dialogOpen={open} />
               ) : activeTab === "phone" ? (
-                <PhonePairingSettings dialogOpen={open} />
+                <div className="space-y-6">
+                  <PhonePairingSettings dialogOpen={open} />
+                  <Separator />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Connect to a server</h4>
+                    <RemoteServerSettings dialogOpen={open} />
+                  </div>
+                </div>
               ) : activeTab === "models" ? (
                 // ONE model-selection surface for signed-in and BYOK alike:
                 // the Assistant model + per-task overrides, then provider

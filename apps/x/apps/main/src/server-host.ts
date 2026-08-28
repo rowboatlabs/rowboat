@@ -1,5 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
+import fsSync from 'node:fs';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { app, shell } from 'electron';
@@ -40,8 +42,45 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // child mode, just over the network.
 export type ServerHostMode = 'in-process' | 'child' | 'remote';
 
+// A remote connection saved from the Settings UI. Env vars stay the
+// power-user override and always win; the saved config makes remote mode
+// reachable without a terminal. Read synchronously once — serverHostMode()
+// gates decisions during main's boot, before any async init has run.
+const clientConfigPath = path.join(WorkDir, 'config', 'client.json');
+let savedRemote: { url: string; token: string } | null | undefined;
+
+function loadSavedRemote(): { url: string; token: string } | null {
+  if (savedRemote !== undefined) return savedRemote;
+  savedRemote = null;
+  try {
+    const raw = JSON.parse(fsSync.readFileSync(clientConfigPath, 'utf8')) as {
+      remoteServer?: { url?: string; token?: string };
+    };
+    if (raw.remoteServer?.url && raw.remoteServer.token) {
+      savedRemote = { url: raw.remoteServer.url, token: raw.remoteServer.token };
+    }
+  } catch {
+    // no config yet — local mode
+  }
+  return savedRemote;
+}
+
+/** Where the client should connect, or null for a local child. */
+function remoteTarget(): { baseUrl: string; key: string; fromEnv: boolean } | null {
+  if (process.env.ROWBOAT_REMOTE_SERVER) {
+    return {
+      baseUrl: process.env.ROWBOAT_REMOTE_SERVER.replace(/\/+$/, ''),
+      key: (process.env.ROWBOAT_REMOTE_TOKEN ?? '').trim(),
+      fromEnv: true,
+    };
+  }
+  const saved = loadSavedRemote();
+  if (saved) return { baseUrl: saved.url, key: saved.token, fromEnv: false };
+  return null;
+}
+
 export function serverHostMode(): ServerHostMode {
-  if (process.env.ROWBOAT_REMOTE_SERVER) return 'remote';
+  if (remoteTarget()) return 'remote';
   const env = process.env.ROWBOAT_CHILD_SERVER;
   if (env !== undefined && (env === '0' || env.toLowerCase() === 'false')) return 'in-process';
   return 'child';
@@ -182,10 +221,11 @@ async function isRowboatServer(baseUrl: string): Promise<boolean> {
 }
 
 async function connectRemote(): Promise<RemoteServer> {
-  const baseUrl = process.env.ROWBOAT_REMOTE_SERVER!.replace(/\/+$/, '');
-  const key = (process.env.ROWBOAT_REMOTE_TOKEN ?? '').trim();
+  const target = remoteTarget();
+  if (!target) throw new Error('no remote server configured');
+  const { baseUrl, key } = target;
   if (!key) {
-    throw new Error('ROWBOAT_REMOTE_SERVER is set but ROWBOAT_REMOTE_TOKEN is missing');
+    throw new Error('remote server configured without an access token');
   }
   const deadline = Date.now() + 20_000;
   while (!(await isRowboatServer(baseUrl))) {
@@ -359,6 +399,83 @@ export async function setLanEnabled(enabled: boolean): Promise<void> {
   await saveServerConfig(WorkDir, { ...config, lanEnabled: enabled });
   await stopServerHost();
   await startServerHost();
+}
+
+// ============================================================================
+// Remote connection management (Settings → Connect to server)
+// ============================================================================
+
+export function getConnectionInfo(): { mode: ServerHostMode; url: string | null; fromEnv: boolean } {
+  const target = remoteTarget();
+  return {
+    mode: serverHostMode(),
+    url: target?.baseUrl ?? null,
+    fromEnv: target?.fromEnv ?? false,
+  };
+}
+
+async function saveClientConfig(remote: { url: string; token: string } | null): Promise<void> {
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(await fs.readFile(clientConfigPath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    // fresh file
+  }
+  if (remote) existing.remoteServer = remote;
+  else delete existing.remoteServer;
+  await fs.mkdir(path.dirname(clientConfigPath), { recursive: true });
+  await fs.writeFile(clientConfigPath, JSON.stringify(existing, null, 2) + '\n', { mode: 0o600 });
+}
+
+/**
+ * Validate the address + token against a live server, persist them, and
+ * switch the running app over (the local child, if any, is stopped).
+ */
+export async function connectRemoteServer(url: string, token: string): Promise<{ success: boolean; error?: string }> {
+  if (process.env.ROWBOAT_REMOTE_SERVER) {
+    return { success: false, error: 'The server address is set by environment variables — unset them to manage it here.' };
+  }
+  if (serverHostMode() === 'in-process') {
+    return { success: false, error: 'Not available while ROWBOAT_CHILD_SERVER=0 is set.' };
+  }
+  const baseUrl = url.trim().replace(/\/+$/, '');
+  const key = token.trim();
+  if (!/^https?:\/\//.test(baseUrl)) {
+    return { success: false, error: 'Enter a full address like http://100.x.y.z:3220' };
+  }
+  if (!key) return { success: false, error: 'Enter the server’s access code' };
+  if (!(await isRowboatServer(baseUrl))) {
+    return { success: false, error: 'No Rowboat server answered at that address' };
+  }
+  try {
+    const res = await fetch(`${baseUrl}/rpc/sessions:list`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.status === 401) return { success: false, error: 'The server rejected that access code' };
+    if (!res.ok) return { success: false, error: `The server answered with an error (${res.status})` };
+  } catch {
+    return { success: false, error: 'Could not reach the server to verify the access code' };
+  }
+  await saveClientConfig({ url: baseUrl, token: key });
+  savedRemote = { url: baseUrl, token: key };
+  await stopServerHost();
+  await startServerHost();
+  return { success: true };
+}
+
+/** Back to local: forget the saved server and spawn the local child again. */
+export async function disconnectRemoteServer(): Promise<{ success: boolean; error?: string }> {
+  if (process.env.ROWBOAT_REMOTE_SERVER) {
+    return { success: false, error: 'The server address is set by environment variables — unset them to manage it here.' };
+  }
+  await saveClientConfig(null);
+  savedRemote = null;
+  await stopServerHost();
+  await startServerHost();
+  return { success: true };
 }
 
 /** Mints a new server key, revoking every paired client, then rebinds. */

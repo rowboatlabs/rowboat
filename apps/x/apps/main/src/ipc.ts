@@ -54,7 +54,7 @@ import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';
-import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled, bridgeDeltaSubscribe, bridgeDeltaUnsubscribe, childServerMode } from './server-host.js';
+import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled, bridgeDeltaSubscribe, bridgeDeltaUnsubscribe, childServerMode, getConnectionInfo, connectRemoteServer, disconnectRemoteServer } from './server-host.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
 import { getModelCatalog } from '@x/core/dist/models/catalog.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
@@ -577,6 +577,13 @@ export function broadcastToWindows(channel: string, payload: unknown): void {
     if (!win.isDestroyed() && win.webContents) {
       win.webContents.send(channel, payload);
     }
+  }
+}
+
+/** Reload every window — used after switching servers, so all renderer state refetches. */
+export function broadcastReload(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents) win.webContents.reload();
   }
 }
 
@@ -3055,6 +3062,19 @@ export function setupIpcHandlers() {
     'server:rotateKey': async () => {
       await rotateServerKey();
       return { success: true };
+    },
+    'server:getConnection': async () => getConnectionInfo(),
+    'server:connectRemote': async (_event, args) => {
+      const result = await connectRemoteServer(args.url, args.token);
+      // The renderer's caches all describe the old server — reload every
+      // window once the reply has been delivered.
+      if (result.success) setTimeout(() => broadcastReload(), 400);
+      return result;
+    },
+    'server:disconnectRemote': async () => {
+      const result = await disconnectRemoteServer();
+      if (result.success) setTimeout(() => broadcastReload(), 400);
+      return result;
     },
     // Server-only channel: the client's relay listener calls it over HTTP
     // (see server-host.ts) — it always forwards, this local stub is
