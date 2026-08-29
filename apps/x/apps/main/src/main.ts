@@ -272,27 +272,65 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
+// Granted to the app's own surfaces, which are trusted Rowboat UI: meeting
+// notes and calls need the mic/camera, and screen capture.
+const APP_SESSION_PERMISSIONS: ReadonlySet<string> = new Set([
+  "media",
+  "display-capture",
+  "clipboard-read",
+  "clipboard-sanitized-write",
+]);
 
-// Granted to the embedded browser partition on top of the base set.
+// The embedded browser partition loads arbitrary http(s) pages, so it gets its
+// own set rather than inheriting the app session's — a page that happens to be
+// open must never reach the mic or camera on its own.
 // `notifications` lets sites (WhatsApp Web, Gmail, Slack, ...) show native OS
 // notifications via the HTML5 Notification API — Electron renders these
 // through the system notification center once the permission resolves to
 // granted. Background Web Push is still unavailable (Electron has no FCM),
 // so notifications only fire while the site is loaded in a tab. The app's
-// own renderer keeps the base set; it notifies through the main-process
+// own renderer keeps its own set; it notifies through the main-process
 // notification service instead.
-const BROWSER_EXTRA_PERMISSIONS = ["notifications"] as const;
+// `media` is deliberately absent: that is Chromium's permission for
+// microphone and camera capture via getUserMedia (#507).
+const BROWSER_SESSION_PERMISSIONS: ReadonlySet<string> = new Set([
+  "clipboard-read",
+  "clipboard-sanitized-write",
+  "notifications",
+]);
 
-function configureSessionPermissions(targetSession: Session, extraPermissions: readonly string[] = []): void {
-  const allowed = new Set([...ALLOWED_SESSION_PERMISSIONS, ...extraPermissions]);
+// getDisplayMedia() reaches the permission handler as a `media` request too,
+// but with an empty `mediaTypes` — getUserMedia always names 'audio' and/or
+// 'video'. Screen sharing from a page is gated by the pane's own source picker
+// (BrowserViewManager), which is where the user actually consents, and the
+// request has to survive this handler to get there: denying it here makes
+// Electron reject getDisplayMedia() outright and the picker never opens.
+// Requires an explicitly empty array, so anything that doesn't match the shape
+// we recognize is refused rather than waved through.
+function isDisplayMediaRequest(
+  permission: string,
+  details: Electron.PermissionRequest | Electron.FilesystemPermissionRequest | Electron.MediaAccessPermissionRequest | Electron.OpenExternalPermissionRequest | undefined,
+): boolean {
+  if (permission !== "media") return false;
+  const mediaTypes = (details as Electron.MediaAccessPermissionRequest | undefined)?.mediaTypes;
+  return Array.isArray(mediaTypes) && mediaTypes.length === 0;
+}
 
+function configureSessionPermissions(
+  targetSession: Session,
+  allowedPermissions: ReadonlySet<string>,
+  { allowDisplayMediaRequests = false }: { allowDisplayMediaRequests?: boolean } = {},
+): void {
   targetSession.setPermissionCheckHandler((_webContents, permission) => {
-    return allowed.has(permission);
+    return allowedPermissions.has(permission);
   });
 
-  targetSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(allowed.has(permission));
+  targetSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    if (allowedPermissions.has(permission)) {
+      callback(true);
+      return;
+    }
+    callback(allowDisplayMediaRequests && isDisplayMediaRequest(permission, details));
   });
 }
 
@@ -442,9 +480,13 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     },
   });
 
-  configureSessionPermissions(session.defaultSession);
+  configureSessionPermissions(session.defaultSession, APP_SESSION_PERMISSIONS);
   configureAppDisplayMediaHandler(session.defaultSession);
-  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION), BROWSER_EXTRA_PERMISSIONS);
+  // The browser partition's own getDisplayMedia handler (a user-facing source
+  // picker) lives in BrowserViewManager; let those requests through to it.
+  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION), BROWSER_SESSION_PERMISSIONS, {
+    allowDisplayMediaRequests: true,
+  });
 
   mainWindow = win;
   setMainWindowForDeepLinks(win);
