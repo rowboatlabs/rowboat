@@ -3,6 +3,7 @@ import { IProjectsRepository } from "../../repositories/projects.repository.inte
 import { IProjectActionAuthorizationPolicy } from "../../policies/project-action-authorization.policy";
 import { IUsageQuotaPolicy } from "../../policies/usage-quota.policy.interface";
 import { CustomMcpServer } from "@/src/entities/models/project";
+import { validateUrlAgainstSSRF } from "@/app/lib/ssrf-protection";
 
 export const InputSchema = z.object({
     caller: z.enum(["user", "api"]),
@@ -17,11 +18,13 @@ export interface IAddCustomMcpServerUseCase {
     execute(request: z.infer<typeof InputSchema>): Promise<void>;
 }
 
-function validateHttpHttpsUrl(url: string): string {
+async function validateHttpHttpsUrl(url: string): Promise<string> {
     const parsedUrl = new URL(url);
     if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
         throw new Error('Invalid protocol');
     }
+    // SSRF protection: reject URLs that resolve to private/internal IPs
+    await validateUrlAgainstSSRF(parsedUrl.toString());
     return parsedUrl.toString();
 }
 
@@ -50,8 +53,8 @@ export class AddCustomMcpServerUseCase implements IAddCustomMcpServerUseCase {
         await this.projectActionAuthorizationPolicy.authorize({ caller, userId, apiKey, projectId });
         await this.usageQuotaPolicy.assertAndConsumeProjectAction(projectId);
 
-        // Validate server URL
-        const serverUrl = validateHttpHttpsUrl(request.server.serverUrl);
+        // Validate server URL (includes SSRF protection)
+        const serverUrl = await validateHttpHttpsUrl(request.server.serverUrl);
 
         await this.projectsRepository.addCustomMcpServer(projectId, {
             name,
