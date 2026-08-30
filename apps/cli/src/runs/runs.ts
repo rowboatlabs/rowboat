@@ -20,8 +20,9 @@ export const AskHumanResponsePayload = AskHumanResponseEvent.pick({
 
 export const Run = z.object({
     id: z.string(),
-    createdAt: z.iso.datetime(),
+    createdAt: z.string().datetime(),
     agentId: z.string(),
+    turnCount: z.number().optional(),
     log: z.array(RunEvent),
 });
 
