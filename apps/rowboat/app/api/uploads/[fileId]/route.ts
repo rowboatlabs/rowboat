@@ -9,6 +9,26 @@ const UPLOADS_DIR = process.env.RAG_UPLOADS_DIR || '/uploads';
 
 const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
 
+/**
+ * Resolve a user-supplied file identifier to an absolute path constrained to
+ * UPLOADS_DIR. Returns null if the resulting path would escape the uploads
+ * directory (e.g. via `..` traversal or an absolute path).
+ */
+function resolveUploadPath(fileId: string): string | null {
+    // Reject path separators and NUL bytes outright — fileIds are meant to be
+    // opaque single-segment identifiers.
+    if (!fileId || fileId.includes('\0') || fileId.includes('/') || fileId.includes('\\')) {
+        return null;
+    }
+    const uploadsRoot = path.resolve(UPLOADS_DIR);
+    const resolved = path.resolve(uploadsRoot, fileId);
+    // Ensure the resolved path is strictly contained within uploadsRoot.
+    if (resolved !== uploadsRoot && !resolved.startsWith(uploadsRoot + path.sep)) {
+        return null;
+    }
+    return resolved;
+}
+
 // PUT endpoint to handle file uploads
 export async function PUT(request: NextRequest, props: { params: Promise<{ fileId: string }> }) {
     const params = await props.params;
@@ -17,7 +37,10 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ fileI
         return NextResponse.json({ error: 'Missing file ID' }, { status: 400 });
     }
 
-    const filePath = path.join(UPLOADS_DIR, fileId);
+    const filePath = resolveUploadPath(fileId);
+    if (!filePath) {
+        return NextResponse.json({ error: 'Invalid file ID' }, { status: 400 });
+    }
 
     try {
         const data = await request.arrayBuffer();
@@ -54,8 +77,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ fileI
     const fileName = doc.data.name;
 
     try {
-        // strip uploads dir from path
-        const filePath = path.join(UPLOADS_DIR, doc.data.path.split('/api/uploads/')[1]);
+        // strip uploads dir from path and validate containment
+        const rawSegment = doc.data.path.split('/api/uploads/')[1];
+        const filePath = rawSegment ? resolveUploadPath(rawSegment) : null;
+        if (!filePath) {
+            return NextResponse.json({ error: 'File not found' }, { status: 404 });
+        }
 
         // Check if file exists
         await fs.access(filePath);
