@@ -122,6 +122,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     /** fileId → space-blob mapping we know (uploaded ourselves or learned from peers). */
     const knownFilesRef = useRef(new Map<string, { hash: string; mime: string }>())
     const uploadingFilesRef = useRef(new Set<string>())
+    const lastFileCountRef = useRef(0)
     const collaboratorsRef = useRef(new Map<string, { collab: Collaborator; lastSeen: number }>())
     /** Blocks onChange broadcasts until the initial scene is seeded into the version gates. */
     const savingGateRef = useRef<'loading' | 'ready'>('loading')
@@ -301,6 +302,14 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     const onChange = () => {
         const api = apiRef.current
         if (!api || savingGateRef.current !== 'ready') return
+        // Debug trace for the image pipeline: fires the moment a pasted /
+        // dropped / picked image lands in the editor's file store — if this
+        // never logs, the image never reached Excalidraw at all.
+        const fileCount = Object.keys(api.getFiles()).length
+        if (fileCount !== lastFileCountRef.current) {
+            console.log(`[whiteboard] editor file store: ${fileCount} file(s)`)
+            lastFileCountRef.current = fileCount
+        }
         const elements = api.getSceneElementsIncludingDeleted()
         const sceneVersion = getSceneVersion(elements)
         if (sceneVersion <= lastSceneVersionRef.current) return
@@ -334,6 +343,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
             try {
                 const comma = file.dataURL.indexOf(',')
                 if (comma < 0) continue
+                console.log(`[whiteboard] uploading image ${fileId} (${file.mimeType}, ~${Math.round((file.dataURL.length - comma) * 0.75 / 1024)}KB)`)
                 const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
                     orgId: org.id,
                     spaceId: space.id,
@@ -357,6 +367,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 const entry = { hash: uploaded.blob.hash, mime: file.mimeType }
                 knownFilesRef.current.set(fileId, entry)
                 announced[fileId] = entry
+                console.log(`[whiteboard] image filed at ${spaces.whiteboardImagePath(fileId)}`)
             } catch (err) {
                 console.warn('[whiteboard] image upload failed', fileId, err)
                 toast(err instanceof Error ? `Could not upload the image: ${err.message}` : 'Could not upload the image', 'error')
