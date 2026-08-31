@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, Bot, Loader2, MoreHorizontal, Pencil, ShieldAlert, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MoreHorizontal, Pencil, ShieldAlert, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ArtifactsSummary } from '@/components/spaces/artifacts'
-import { MemberAvatar } from '@/components/spaces/atoms'
+import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
+import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { MemberName, MemberText } from '@/components/spaces/member-text'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
@@ -15,9 +16,14 @@ import type { ChatMessage, SpacePresence, ThreadInfo } from '@/hooks/use-space-c
 import { buildPendingMessage, rememberThread, usePresenceSender } from '@/hooks/use-space-chat'
 import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, mergeMessages, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
-import { attributionLabel, formatFeedTime, shortId } from '@/lib/spaces-presentation'
+import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
+import { parsePollArgs, postPoll } from '@/lib/spaces-poll'
+import { attributionLabel, formatFeedTime, resolveMentions, shortId } from '@/lib/spaces-presentation'
+import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
+import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
@@ -71,7 +77,16 @@ export function ThreadPane({
     const oldestLoadedRef = useRef<number | null>(null)
     const [folding, setFolding] = useState(false)
     const bottomRef = useRef<HTMLDivElement | null>(null)
+    const scrollRef = useRef<HTMLDivElement | null>(null)
+    /** Composer prefill (quote-reply, mention-from-profile); a new nonce re-applies it. */
+    const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, topicId, visible)
+
+    // The profile popover's "Mention" lands in whichever composer is visible.
+    useEffect(() => {
+        if (!visible) return
+        return subscribeComposeInsert((insert) => setSeed({ text: insert.text, nonce: Date.now(), append: true }))
+    }, [visible])
     // A ref, not an effect dep: visibility flips must not refetch the thread.
     const visibleRef = useRef(visible)
     visibleRef.current = visible
@@ -164,7 +179,38 @@ export function ThreadPane({
     const permissionWait = useTopicAgentPermissionWait(org.id, space.id, topicId, visible)
     // While blocked, the amber pill replaces the own-agent spinner.
     const spinningAgents = permissionWait.length > 0 ? workingAgents.filter((id) => id !== org.memberId) : workingAgents
+
+    // Jump-to-message (search, pinned, saved): a pending jump wins over the
+    // bottom pin for the commit it lands in — the pin effect checks the ref,
+    // which clears a tick later (after that commit's effects ran).
+    const pendingJumpRef = useRef<string | null>(null)
+    const [jumpNonce, setJumpNonce] = useState(0)
     useEffect(() => {
+        if (!visible) return
+        const attempt = () => {
+            const mid = consumeJump(topicId)
+            if (!mid) return
+            pendingJumpRef.current = mid
+            setJumpNonce((n) => n + 1)
+        }
+        attempt()
+        return subscribeJump(attempt)
+    }, [visible, topicId])
+    useLayoutEffect(() => {
+        const mid = pendingJumpRef.current
+        if (!mid) return
+        const el = scrollRef.current
+        if (!el) return
+        if (scrollToMessage(el, mid) || loaded) {
+            // Landed — or the window is loaded and the row just isn't in it.
+            setTimeout(() => {
+                pendingJumpRef.current = null
+            }, 0)
+        }
+    }, [jumpNonce, loaded, messages.length])
+
+    useEffect(() => {
+        if (pendingJumpRef.current) return
         bottomRef.current?.scrollIntoView({ block: 'end' })
     }, [messages.length, workingAgents.length, permissionWait.length])
 
@@ -182,6 +228,22 @@ export function ThreadPane({
     // Once the reader has caught up (this pane pins to the bottom, so visible
     // = with the new messages) the line lingers a beat, fades, drops.
     const hasNewLine = !!newSince && replies.some((m) => !m.deletedAt && m.postedAt > newSince && m.author.memberId !== org.memberId)
+    // Jump-to-unread: the pane opens at the bottom; when the New line sits
+    // above the fold a pill scrolls to it. Dismissed by use; re-arms with the
+    // divider (adjust-on-change).
+    const newCount = newSince
+        ? replies.filter((m) => !m.deletedAt && m.postedAt > newSince && m.author.memberId !== org.memberId).length
+        : 0
+    const [newJumped, setNewJumped] = useState(false)
+    const [lastNewSince, setLastNewSince] = useState(newSince)
+    if (newSince !== lastNewSince) {
+        setLastNewSince(newSince)
+        setNewJumped(false)
+    }
+    const jumpToNew = () => {
+        setNewJumped(true)
+        scrollRef.current?.querySelector<HTMLElement>('[data-new-divider]')?.scrollIntoView({ block: 'center' })
+    }
     useEffect(() => {
         if (!visible || !loaded || !hasNewLine || newFading) return
         const t = window.setTimeout(() => setNewFading(true), NEW_LINGER_MS)
@@ -271,6 +333,27 @@ export function ThreadPane({
         }
     }
 
+    // Quote-reply, mirroring the stream's: the quoted copy seeds the reply
+    // composer — plain markdown on the wire; image embeds drop, names not ids.
+    const quoteReply = (message: spaces.Message) => {
+        const name = memberNames.get(message.author.memberId) ?? message.author.memberId
+        const text = resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+        if (!text) return
+        const quote = text.split('\n').map((l) => `> ${l}`).join('\n')
+        setSeed({ text: `${quote}\n> — ${name}\n\n`, nonce: Date.now() })
+    }
+
+    // Saved-for-later: personal, local; the row menu needs the membership.
+    const savedList = useSaved(org.id, space.id)
+    const savedIds = useMemo(() => new Set(savedList.map((s) => s.messageId)), [savedList])
+    const toggleSave = (message: spaces.Message) => {
+        const nowSaved = toggleSaved(org.id, space.id, message)
+        toast(nowSaved ? 'Saved for later' : 'Removed from saved', 'success')
+    }
+
+    /** The message being forwarded — non-null renders the destination dialog. */
+    const [forwarding, setForwarding] = useState<spaces.Message | null>(null)
+
     // Optimistic rewrite, mirroring general's.
     const editMessage = async (message: spaces.Message, body: string) => {
         setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, body, editedAt: new Date().toISOString() } : m)))
@@ -350,6 +433,10 @@ export function ThreadPane({
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
                 onEdit={(m, body) => void editMessage(m, body)}
+                onQuoteReply={quoteReply}
+                onForward={setForwarding}
+                onToggleSave={toggleSave}
+                saved={savedIds.has(message.id)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
                 dense
@@ -426,7 +513,8 @@ export function ThreadPane({
                 )}
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+            <div className="relative flex-1 min-h-0 flex flex-col">
+            <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
                 {!loaded && !parent && <div className="px-2 py-2 text-sm text-muted-foreground">Loading…</div>}
 
                 {/* Opener: the message this topic grew from, or the topic's first message / anchor change. */}
@@ -450,10 +538,22 @@ export function ThreadPane({
                 )}
                 {parent && (
                     <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2">
-                        {parentAuthorId && <MemberAvatar id={parentAuthorId} name={parentName} size="md" className="mt-0.5" />}
+                        {parentAuthorId && (
+                            <MemberProfilePopover id={parentAuthorId}>
+                                <button type="button" aria-label={`${parentName}’s profile`} className="mt-0.5 shrink-0 cursor-pointer rounded-full">
+                                    <MemberAvatar id={parentAuthorId} name={parentName} size="md" />
+                                </button>
+                            </MemberProfilePopover>
+                        )}
                         <div className="min-w-0 flex-1">
                             <div className="flex items-baseline gap-1.5 text-xs">
-                                <span className="font-semibold">{parentName}</span>
+                                {parentAuthorId ? (
+                                    <MemberProfilePopover id={parentAuthorId}>
+                                        <button type="button" className="cursor-pointer font-semibold hover:underline">{parentName}</button>
+                                    </MemberProfilePopover>
+                                ) : (
+                                    <span className="font-semibold">{parentName}</span>
+                                )}
                                 {!isThread && parent.author.actingMode !== 'direct' && (
                                     <span className="text-muted-foreground">via {parent.author.agentName ?? 'agent'}</span>
                                 )}
@@ -528,12 +628,33 @@ export function ThreadPane({
                 <TypingIndicator names={typingNames} />
                 <div ref={bottomRef} />
             </div>
+            {hasNewLine && newCount > 0 && !newJumped && (
+                <button
+                    type="button"
+                    onClick={jumpToNew}
+                    className="absolute top-2 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-top-2 items-center gap-1.5 rounded-full border border-orange-500/40 bg-background/95 px-3 py-1 text-xs font-medium text-orange-600 shadow-md hover:bg-accent"
+                >
+                    <ArrowUp className="size-3" />
+                    {newCount} new — jump to unread
+                </button>
+            )}
+            </div>
 
+            {forwarding && (
+                <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
+            )}
             <Composer
                 placeholder="Reply…"
                 busy={false}
                 onSend={post}
+                onSchedule={async (body, at) => {
+                    await window.ipc.invoke('spaces:schedule', {
+                        orgId: org.id, spaceId: space.id, topicId, body, at: at.toISOString(), kind: 'message',
+                    })
+                    toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
+                }}
                 onType={onType}
+                seed={seed}
                 autoFocus
                 members={members}
                 entries={entries}
@@ -552,9 +673,49 @@ export function ThreadPane({
                         hint: 'Rename this topic',
                         run: (args) => void manage({ action: 'retitle', title: args }),
                     },
+                    {
+                        name: 'poll',
+                        args: '<question> | <option> | <option>',
+                        hint: 'Post a poll — tap a number to vote',
+                        run: async (args) => {
+                            const input = parsePollArgs(args)
+                            if (typeof input === 'string') {
+                                toast(input, 'info')
+                                return
+                            }
+                            try {
+                                const { posted, final } = await postPoll({ orgId: org.id, spaceId: space.id, topicId, input })
+                                echo(posted)
+                                setMessages((prev) => prev.map((m) => (m.id === final.id ? final : m)))
+                                markTopicRead(org.id, space.id, topicId)
+                            } catch (err) {
+                                toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
+                            }
+                        },
+                    },
                     topic?.archived
                         ? { name: 'unarchive', hint: 'Unarchive this topic', run: () => void manage({ action: 'unarchive' }) }
                         : { name: 'archive', hint: 'Archive this topic — it leaves the rail until unarchived', run: () => void manage({ action: 'archive' }) },
+                    {
+                        name: 'remind',
+                        args: '<when> <text>',
+                        hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
+                        run: async (args) => {
+                            const parsed = parseRemindArgs(args)
+                            if (typeof parsed === 'string') {
+                                toast(parsed, 'info')
+                                return
+                            }
+                            try {
+                                await window.ipc.invoke('spaces:schedule', {
+                                    orgId: org.id, spaceId: space.id, topicId, body: parsed.text, at: parsed.at.toISOString(), kind: 'reminder',
+                                })
+                                toast(`Reminder set for ${formatScheduleTime(parsed.at)}`, 'success')
+                            } catch (err) {
+                                toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
+                            }
+                        },
+                    },
                     {
                         name: 'invite',
                         hint: 'Copy an invite link to this space',
@@ -640,10 +801,16 @@ export function DraftThreadPane({ org, space, parent, members, memberNames, entr
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
                 <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2">
-                    <MemberAvatar id={parent.author.memberId} name={authorName} size="md" className="mt-0.5" />
+                    <MemberProfilePopover id={parent.author.memberId}>
+                        <button type="button" aria-label={`${authorName}’s profile`} className="mt-0.5 shrink-0 cursor-pointer rounded-full">
+                            <MemberAvatar id={parent.author.memberId} name={authorName} size="md" />
+                        </button>
+                    </MemberProfilePopover>
                     <div className="min-w-0 flex-1">
                         <div className="flex items-baseline gap-1.5 text-xs">
-                            <span className="font-semibold">{authorName}</span>
+                            <MemberProfilePopover id={parent.author.memberId}>
+                                <button type="button" className="cursor-pointer font-semibold hover:underline">{authorName}</button>
+                            </MemberProfilePopover>
                             <span className="text-muted-foreground">{formatFeedTime(parent.postedAt)} · in Messages</span>
                         </div>
                         <div className="text-sm leading-relaxed [&_p]:my-0.5">

@@ -3787,6 +3787,71 @@ const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
+  // Notification levels for the mention watcher: a space-wide level plus
+  // per-topic overrides. null = inherit (topic → space → the 'mentions'
+  // default). Stored main-side (the watcher runs there, screen or no screen).
+  'spaces:getNotifyPrefs': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({
+      spaceLevel: z.enum(['all', 'mentions', 'mute']).nullable(),
+      topics: z.record(z.string(), z.enum(['all', 'mentions', 'mute'])),
+    }),
+  },
+  'spaces:setNotifyPref': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      /** Absent = set the space-wide level. */
+      topicId: z.string().optional(),
+      /** null clears the override back to inherit. */
+      level: z.enum(['all', 'mentions', 'mute']).nullable(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Scheduled sends and reminders — the main-side queue (core scheduler).
+  // 'message' posts to the topic at `at`; 'reminder' notifies the member.
+  'spaces:schedule': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string(),
+      body: z.string(),
+      /** ISO instant to fire at. */
+      at: z.string(),
+      kind: z.enum(['message', 'reminder']),
+    }),
+    res: z.object({ id: z.string() }),
+  },
+  'spaces:listScheduled': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({
+      items: z.array(
+        z.object({
+          id: z.string(),
+          kind: z.enum(['message', 'reminder']),
+          orgId: z.string(),
+          spaceId: z.string(),
+          topicId: z.string(),
+          body: z.string(),
+          at: z.string(),
+          createdAt: z.string(),
+        }),
+      ),
+    }),
+  },
+  'spaces:cancelScheduled': {
+    req: z.object({ id: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Do-not-disturb: one global until-instant gating the mention watcher.
+  'spaces:getDnd': {
+    req: z.null(),
+    res: z.object({ until: z.string().nullable() }),
+  },
+  'spaces:setDnd': {
+    req: z.object({ until: z.string().nullable() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   // Ephemeral presence from the human surface (viewing / typing / idle), scoped
   // to a topic when set. agent_working is only ever sent by the topic agent.
   'spaces:presence': {

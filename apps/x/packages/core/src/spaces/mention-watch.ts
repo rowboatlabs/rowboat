@@ -5,6 +5,7 @@ import type { Member, ServerFrame } from '@rowboat/spaces-protocol';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import type { NotifyInput } from '../application/notification/service.js';
 import { WorkDir } from '../config/config.js';
+import { dndActive, notifyLevelFor } from './notify-prefs.js';
 import { getClient, getLive, listOrgs } from './orgs.js';
 
 // Space mention notifications: main-side watcher that subscribes to EVERY
@@ -42,8 +43,12 @@ export interface MentionHit {
   topicId: string;
   authorName: string;
   body: string;
-  /** 'you' = addressed me by name/id; 'here' = @here, addressed everyone online. */
-  kind: 'you' | 'here';
+  /**
+   * 'you' = addressed me by name/id; 'here' = @here, addressed everyone
+   * online; 'message' = no mention — sent only when the destination's notify
+   * level is 'all'.
+   */
+  kind: 'you' | 'here' | 'message';
 }
 
 export function isMissedArrival(postedAt: string, now: number = Date.now()): boolean {
@@ -68,8 +73,12 @@ export function mentionExcerpt(body: string, max = 140): string {
 }
 
 export function buildMentionNotify(hit: MentionHit): NotifyInput {
+  const title =
+    hit.kind === 'message'
+      ? `${hit.authorName} · ${hit.spaceName}`
+      : `${hit.authorName} ${hit.kind === 'here' ? 'mentioned everyone' : 'mentioned you'} · ${hit.spaceName}`;
   return {
-    title: `${hit.authorName} ${hit.kind === 'here' ? 'mentioned everyone' : 'mentioned you'} · ${hit.spaceName}`,
+    title,
     message: mentionExcerpt(hit.body),
     link: mentionLink(hit.orgId, hit.spaceId, hit.topicId),
     onlyWhenBackground: true,
@@ -205,17 +214,27 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
     if (frame.event.type !== 'message') return;
     const message = frame.event.message;
     if (message.author.memberId === me.id) return;
+    // Do-not-disturb drops everything, mentions included — and nothing is
+    // summarised after it lifts (Slack's posture: DND is silence, not a queue).
+    if (dndActive()) return;
+    // The per-destination level: 'mute' silences even direct mentions; 'all'
+    // notifies on plain messages too (fresh ones — replayed history never
+    // floods, only real mentions fold into the away summary).
+    const level = notifyLevelFor(orgId, spaceId, message.topicId);
+    if (level === 'mute') return;
     // People type the NAME (ids are opaque); agent-written mentions may carry
     // the id. A direct mention outranks @here when both appear.
     const kind: MentionHit['kind'] | null = mentionsMember(message.body, me)
       ? 'you'
       : containsHereAddress(message.body)
         ? 'here'
-        : null;
+        : level === 'all'
+          ? 'message'
+          : null;
     if (!kind) return;
 
     if (isMissedArrival(message.postedAt)) {
-      queueMissed(k, orgId, spaceId, spaceName, message.topicId, kind);
+      if (kind !== 'message') queueMissed(k, orgId, spaceId, spaceName, message.topicId, kind);
       return;
     }
     const cooldownKey = `${k}/${message.topicId}`;

@@ -1,21 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
+import { Bell, BellOff, Check, ChevronDown, Clock, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Plus, Search } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent,
+    DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { AddOrgDialog, AvatarStack, MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
+import { AddOrgDialog, AvatarStack, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
+import { QuickSwitcher } from '@/components/spaces/quick-switcher'
+import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { DraftThreadPane, ThreadPane } from '@/components/spaces/thread-pane'
 import { useGeneral, useSpacePresence, useThreadIndex } from '@/hooks/use-space-chat'
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { SpaceMembersProvider } from '@/components/spaces/member-text'
+import { useSpaceNotifyPrefs, type NotifyLevel } from '@/hooks/use-spaces-notify'
+import { requestJump } from '@/lib/spaces-jump'
+import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
 import { SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, stripThreadMarker } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
@@ -111,6 +117,11 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                 space={selectedSpace}
                 selection={railSelection}
                 onSelect={onRailSelect}
+                onSwitchSpace={(orgId, spaceId) => {
+                    onSelect({ orgId, spaceId })
+                    // The old space's rail selection means nothing over there.
+                    onRailSelect({ kind: 'general' })
+                }}
                 onOpenSession={onOpenSession}
                 active={active}
             />
@@ -154,11 +165,13 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onOpenSession, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
+    /** The quick switcher can land on another space entirely. */
+    onSwitchSpace: (orgId: string, spaceId: string) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
@@ -236,6 +249,56 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         }
     }
 
+    // The quick switcher (⌘K): topics, messages, spaces. Capture phase so the
+    // app's global ⌘K search palette yields inside a space — the Slack
+    // gesture. While the switcher is open its own input handles ⌘K (so the
+    // close animates); this listener only opens.
+    const [switcherOpen, setSwitcherOpen] = useState(false)
+    useEffect(() => {
+        if (!active || switcherOpen) return
+        const onKey = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+                e.preventDefault()
+                e.stopPropagation()
+                setSwitcherOpen(true)
+            }
+        }
+        window.addEventListener('keydown', onKey, true)
+        return () => window.removeEventListener('keydown', onKey, true)
+    }, [active, switcherOpen])
+
+    // Space-wide notification level ('mentions' is the default; topics
+    // override per-row from the rail's menus).
+    const notify = useSpaceNotifyPrefs(org.id, space.id)
+    const notifyChoices: { level: NotifyLevel; label: string }[] = [
+        { level: 'all', label: 'All messages' },
+        { level: 'mentions', label: 'Mentions only' },
+        { level: 'mute', label: 'Muted' },
+    ]
+
+    // Do-not-disturb — one global until-instant; the mention watcher (main)
+    // drops everything while it holds. The bell shows the state.
+    const [dndUntil, setDndUntilState] = useState<string | null>(null)
+    useEffect(() => {
+        void window.ipc.invoke('spaces:getDnd', null).then((r) => setDndUntilState(r.until)).catch(() => {})
+    }, [])
+    const dndActive = !!dndUntil && new Date(dndUntil).getTime() > Date.now()
+    const setDnd = (minutes: number | null) => {
+        const until = minutes === null ? null : new Date(Date.now() + minutes * 60_000).toISOString()
+        setDndUntilState(until)
+        void window.ipc.invoke('spaces:setDnd', { until }).catch(() => {})
+    }
+    const setDndUntilTomorrow = () => {
+        const t = new Date()
+        t.setDate(t.getDate() + 1)
+        t.setHours(9, 0, 0, 0)
+        setDndUntilState(t.toISOString())
+        void window.ipc.invoke('spaces:setDnd', { until: t.toISOString() }).catch(() => {})
+    }
+
+    // The scheduled sends/reminders list (⋯ menu).
+    const [scheduledOpen, setScheduledOpen] = useState(false)
+
     const markAllRead = () => {
         markRead(org.id, space.id)
         if (general.topic) markTopicRead(org.id, space.id, general.topic.id)
@@ -260,6 +323,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // design closed the instant the cursor left — too twitchy to use.)
     const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railOpen') !== '0')
     const [railHover, setRailHover] = useState(false)
+    // An open row menu (context or ⋯) pins the rail for its lifetime — the
+    // short hover linger must not slide the rail out from under a menu.
+    const [railMenuOpen, setRailMenuOpen] = useState(false)
     const railCloseTimer = useRef<number | null>(null)
 
     // Width of the pane drives the Split floor and pinnability.
@@ -291,7 +357,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // What actually renders: a Split that doesn't fit falls back to the one
     // surface the selection needs.
     const effMode: SpaceMode = mode === 'split' && !splitFits ? (selection.kind === 'file' ? 'read' : 'talk') : mode
-    const railOpen = railPinned || railHover
+    const railOpen = railPinned || railHover || railMenuOpen
 
     /** The header buttons and ⌘1/2/3: say why when Split can't render. */
     const requestMode = (next: SpaceMode) => {
@@ -300,8 +366,11 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     }
     requestModeRef.current = requestMode
 
-    /** Auto-hide grace: how long the rail lingers after the cursor leaves. */
-    const RAIL_LINGER_MS = 3_500
+    /**
+     * Auto-hide grace: just enough to survive the cursor clipping the border
+     * on its way somewhere else — the rail otherwise closes as you leave.
+     */
+    const RAIL_LINGER_MS = 250
     const clearRailTimer = () => {
         if (railCloseTimer.current) {
             window.clearTimeout(railCloseTimer.current)
@@ -342,6 +411,13 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         }
     }
     const openFile = (path: string) => select({ kind: 'file', path })
+
+    /** Search / pinned / saved landings: open the surface, then scroll + flash. */
+    const navigateToMessage = (topicId: string, messageId: string) => {
+        requestJump({ topicId, messageId })
+        if (general.topic && topicId === general.topic.id) select({ kind: 'general' })
+        else select({ kind: 'topic', topicId })
+    }
 
     // Selection can also change under us (history ‹ ›, deep links). Only
     // reconcile when the current mode cannot show what arrived.
@@ -472,11 +548,24 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
 
     return (
         <SpaceMembersProvider members={memberNames}>
+        <SpaceProfilesProvider members={members} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
         <SpaceNavProvider onOpenFile={openFile}>
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="relative flex-1 min-h-0 flex flex-col">
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
+            <QuickSwitcher
+                orgId={org.id}
+                spaceId={space.id}
+                topics={feed.topics}
+                generalId={general.topic?.id ?? null}
+                open={switcherOpen}
+                onClose={() => setSwitcherOpen(false)}
+                onOpenGeneral={() => select({ kind: 'general' })}
+                onOpenTopic={(topicId) => select({ kind: 'topic', topicId })}
+                onOpenMessage={navigateToMessage}
+                onSwitchSpace={onSwitchSpace}
+            />
             <header className="flex items-center gap-3 px-4 h-12 shrink-0 border-b border-border">
                 <OrgMonogram org={org} />
                 <h1 className="text-[15px] font-semibold truncate">{space.name}</h1>
@@ -505,20 +594,22 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             {roster.map((m) => {
                                 const isHere = hereSet.has(m.id)
                                 return (
-                                    <div key={m.id} className="flex items-center gap-2 rounded-md px-2 py-1.5">
-                                        <span className="relative shrink-0">
-                                            <MemberAvatar id={m.id} name={m.displayName} size="md" />
-                                            {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-popover" />}
-                                        </span>
-                                        <span className="min-w-0 flex-1 truncate text-sm">
-                                            {m.displayName}
-                                            {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
-                                        </span>
-                                        {m.role === 'admin' && (
-                                            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
-                                        )}
-                                        {isHere && <span className="shrink-0 text-[10.5px] text-emerald-600">here</span>}
-                                    </div>
+                                    <MemberProfilePopover key={m.id} id={m.id}>
+                                        <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
+                                            <span className="relative shrink-0">
+                                                <MemberAvatar id={m.id} name={m.displayName} size="md" />
+                                                {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-popover" />}
+                                            </span>
+                                            <span className="min-w-0 flex-1 truncate text-sm">
+                                                {m.displayName}
+                                                {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
+                                            </span>
+                                            {m.role === 'admin' && (
+                                                <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
+                                            )}
+                                            {isHere && <span className="shrink-0 text-[10.5px] text-emerald-600">here</span>}
+                                        </button>
+                                    </MemberProfilePopover>
                                 )
                             })}
                         </div>
@@ -539,6 +630,46 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     </span>
                 )}
                 <div className="flex-1" />
+                <button
+                    type="button"
+                    title="Search this space (⌘K)"
+                    onClick={() => setSwitcherOpen(true)}
+                    className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                    <Search className="size-4" />
+                </button>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            title={dndActive ? `Do not disturb until ${new Date(dndUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Do not disturb'}
+                            className={cn(
+                                'inline-flex size-7 items-center justify-center rounded-md hover:bg-accent',
+                                dndActive ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground hover:text-foreground',
+                            )}
+                        >
+                            {dndActive ? <BellOff className="size-4" /> : <Bell className="size-4" />}
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        {dndActive && (
+                            <DropdownMenuItem onClick={() => setDnd(null)}>
+                                <Bell className="size-3.5 mr-2" /> Turn off do not disturb
+                            </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onClick={() => setDnd(30)}>For 30 minutes</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setDnd(60)}>For 1 hour</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setDnd(120)}>For 2 hours</DropdownMenuItem>
+                        <DropdownMenuItem onClick={setDndUntilTomorrow}>Until tomorrow 9:00</DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+                <BookmarksPopover
+                    orgId={org.id}
+                    spaceId={space.id}
+                    generalId={general.topic?.id ?? null}
+                    topics={feed.topics}
+                    onNavigate={navigateToMessage}
+                />
                 {effMode === 'talk' && selection.kind !== 'file' && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
                     <button
                         type="button"
@@ -579,6 +710,21 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         <DropdownMenuItem onClick={markAllRead}>
                             <Check className="size-3.5 mr-2" /> Mark all read
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setScheduledOpen(true)}>
+                            <Clock className="size-3.5 mr-2" /> Scheduled
+                        </DropdownMenuItem>
+                        <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                                <Bell className="size-3.5 mr-2" /> Notifications
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                                {notifyChoices.map((c) => (
+                                    <DropdownMenuItem key={c.level} onClick={() => notify.setSpaceLevel(c.level)}>
+                                        <Check className={cn('size-3.5 mr-2', (notify.spaceLevel ?? 'mentions') !== c.level && 'opacity-0')} /> {c.label}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuSubContent>
+                        </DropdownMenuSub>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </header>
@@ -596,6 +742,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     draftFolders={draftFolders}
                     presence={presence}
                     unreadPaths={unreadPaths}
+                    notify={notify}
+                    onMenuOpenChange={setRailMenuOpen}
                     selection={selection}
                     onSelect={select}
                     onCreateFile={openFile}
@@ -721,6 +869,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     </aside>
                 )}
             </div>
+            {scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
             {trashOpen && (
                 <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
             )}
@@ -738,6 +887,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         </div>
         </SpaceNavProvider>
         </SpaceRefsProvider>
+        </SpaceProfilesProvider>
         </SpaceMembersProvider>
     )
 }

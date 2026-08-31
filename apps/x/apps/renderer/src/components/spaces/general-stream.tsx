@@ -1,7 +1,8 @@
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, Bot, Loader2, ShieldAlert } from 'lucide-react'
+import { ArrowDown, ArrowUp, Bot, Loader2, ShieldAlert } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
+import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { MemberName } from '@/components/spaces/member-text'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
@@ -11,9 +12,14 @@ import {
     removeGeneralMessage, resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
+import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
+import { parsePollArgs, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
+import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markRead, markTopicRead } from '@/lib/spaces-read-state'
+import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
@@ -57,7 +63,7 @@ export function GeneralStream({
      */
     visible?: boolean
 }) {
-    const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null)
+    const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const generalId = general.topic?.id ?? null
@@ -251,6 +257,35 @@ export function GeneralStream({
         setSeed({ text: `@rowboat \n\n${quote}\n— ${name}`, nonce: Date.now() })
     }
 
+    // Quote-reply (the Discord gesture): the quoted copy seeds the composer,
+    // the reply lands in the stream beside it — plain markdown on the wire.
+    // Image embeds drop (a quote is text); names, not wire ids, like askRowboat.
+    const quoteReply = (message: spaces.Message) => {
+        const name = memberNames.get(message.author.memberId) ?? message.author.memberId
+        const text = resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+        if (!text) return
+        const quote = text.split('\n').map((l) => `> ${l}`).join('\n')
+        setSeed({ text: `${quote}\n> — ${name}\n\n`, nonce: Date.now() })
+    }
+
+    // The profile popover's "Mention" lands in whichever composer is visible.
+    useEffect(() => {
+        if (!visible) return
+        return subscribeComposeInsert((insert) => setSeed({ text: insert.text, nonce: Date.now(), append: true }))
+    }, [visible])
+
+    // Saved-for-later is personal and local; the row's menu label needs to
+    // know which messages are in it.
+    const savedList = useSaved(org.id, space.id)
+    const savedIds = useMemo(() => new Set(savedList.map((s) => s.messageId)), [savedList])
+    const toggleSave = (message: spaces.Message) => {
+        const nowSaved = toggleSaved(org.id, space.id, message)
+        toast(nowSaved ? 'Saved for later' : 'Removed from saved', 'success')
+    }
+
+    /** The message being forwarded — non-null renders the destination dialog. */
+    const [forwarding, setForwarding] = useState<spaces.Message | null>(null)
+
     // Toggle: add when the viewer isn't in the group yet, remove when they are.
     // Optimistic — the chip moves the instant it's clicked; the org's answer
     // replaces it right behind, and a failure puts the old state back.
@@ -379,6 +414,64 @@ export function GeneralStream({
         }
     }, [general.messages, general.loadingOlder])
 
+    // Jump-to-message (search, pinned, saved): consume the pending jump once
+    // visible, lift the render cap so the row is in the DOM, then scroll +
+    // flash. The landing position counts as a reader scroll (tail pin lets go).
+    const [jumpMid, setJumpMid] = useState<string | null>(null)
+    useEffect(() => {
+        if (!visible || !generalId) return
+        const attempt = () => {
+            const mid = consumeJump(generalId)
+            if (mid) setJumpMid(mid)
+        }
+        attempt()
+        return subscribeJump(attempt)
+    }, [visible, generalId])
+    useLayoutEffect(() => {
+        if (!jumpMid) return
+        const el = scrollRef.current
+        if (!el) return
+        if (scrollToMessage(el, jumpMid)) {
+            lastScrollTopRef.current = el.scrollTop
+            setJumpMid(null)
+            return
+        }
+        // Row not in the DOM: a cap hiding settled rows lifts and retries on
+        // the next commit; a fully-rendered window without the row is a real
+        // miss (the corpus only holds loaded pages) — give up, don't spin.
+        if (streamMessages.length > renderCap) setRenderCap(streamMessages.length + 10)
+        else if (general.ready) setJumpMid(null)
+    }, [jumpMid, renderCap, general.ready, streamMessages.length])
+
+    // Jump-to-unread: the stream always opens at the bottom, so when the New
+    // line sits above the fold a pill at the top scrolls to it. Dismissed by
+    // use; re-arms whenever the divider re-arms (adjust-on-change).
+    const [newJumpNonce, setNewJumpNonce] = useState(0)
+    const [newJumped, setNewJumped] = useState(false)
+    const [lastNewSince, setLastNewSince] = useState(newSince)
+    if (newSince !== lastNewSince) {
+        setLastNewSince(newSince)
+        setNewJumped(false)
+    }
+    const newCount = newSince
+        ? general.messages.filter((m) => !m.deletedAt && !m.pending && !m.failed && m.postedAt > newSince && m.author.memberId !== org.memberId).length
+        : 0
+    const jumpToNew = () => {
+        setRenderCap((c) => Math.max(c, general.messages.length + 10))
+        setNewJumped(true)
+        setNewJumpNonce((n) => n + 1)
+    }
+    useLayoutEffect(() => {
+        if (newJumpNonce === 0) return
+        const el = scrollRef.current
+        if (!el) return
+        const divider = el.querySelector<HTMLElement>('[data-new-divider]')
+        if (divider) {
+            divider.scrollIntoView({ block: 'center' })
+            lastScrollTopRef.current = el.scrollTop
+        }
+    }, [newJumpNonce])
+
     // The bottom anchor is not one-shot: message bodies keep growing after
     // first layout (lazy images have no reserved height, code highlighting and
     // mermaid render async), and every late growth ABOVE the viewport shoves a
@@ -453,6 +546,10 @@ export function GeneralStream({
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
                 onEdit={(m, body) => void editMessage(m, body)}
+                onQuoteReply={quoteReply}
+                onForward={setForwarding}
+                onToggleSave={toggleSave}
+                saved={savedIds.has(message.id)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
             />,
@@ -556,6 +653,16 @@ export function GeneralStream({
                 <div ref={bottomRef} />
                 </div>
             </div>
+            {hasNewLine && newCount > 0 && !newJumped && (
+                <button
+                    type="button"
+                    onClick={jumpToNew}
+                    className="absolute top-2 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-top-2 items-center gap-1.5 rounded-full border border-orange-500/40 bg-background/95 px-3 py-1 text-xs font-medium text-orange-600 shadow-md hover:bg-accent"
+                >
+                    <ArrowUp className="size-3" />
+                    {newCount} new — jump to unread
+                </button>
+            )}
             {awayFromBottom && (() => {
                 const unseen = streamMessages.filter(
                     (m) => m.offset > lastSeenOffsetRef.current && !m.pending && !m.failed && m.author.memberId !== org.memberId,
@@ -572,11 +679,21 @@ export function GeneralStream({
                 )
             })()}
             </div>
+            {forwarding && (
+                <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
+            )}
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
                 busy={!generalId}
                 draftKey={memoryKey}
                 onSend={post}
+                onSchedule={async (body, at) => {
+                    if (!generalId) return
+                    await window.ipc.invoke('spaces:schedule', {
+                        orgId: org.id, spaceId: space.id, topicId: generalId, body, at: at.toISOString(), kind: 'message',
+                    })
+                    toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
+                }}
                 onType={onType}
                 seed={seed}
                 members={members}
@@ -593,6 +710,48 @@ export function GeneralStream({
                                 toast('Invite link copied to clipboard', 'success')
                             } catch (err) {
                                 toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')
+                            }
+                        },
+                    },
+                    {
+                        name: 'poll',
+                        args: '<question> | <option> | <option>',
+                        hint: 'Post a poll — tap a number to vote',
+                        run: async (args) => {
+                            if (!generalId) return
+                            const input = parsePollArgs(args)
+                            if (typeof input === 'string') {
+                                toast(input, 'info')
+                                return
+                            }
+                            try {
+                                const { posted, final } = await postPoll({ orgId: org.id, spaceId: space.id, topicId: generalId, input })
+                                ingestGeneralMessage(org.id, space.id, posted)
+                                updateGeneralMessage(org.id, space.id, final)
+                                markTopicRead(org.id, space.id, generalId)
+                            } catch (err) {
+                                toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
+                            }
+                        },
+                    },
+                    {
+                        name: 'remind',
+                        args: '<when> <text>',
+                        hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
+                        run: async (args) => {
+                            const parsed = parseRemindArgs(args)
+                            if (typeof parsed === 'string') {
+                                toast(parsed, 'info')
+                                return
+                            }
+                            if (!generalId) return
+                            try {
+                                await window.ipc.invoke('spaces:schedule', {
+                                    orgId: org.id, spaceId: space.id, topicId: generalId, body: parsed.text, at: parsed.at.toISOString(), kind: 'reminder',
+                                })
+                                toast(`Reminder set for ${formatScheduleTime(parsed.at)}`, 'success')
+                            } catch (err) {
+                                toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
                             }
                         },
                     },

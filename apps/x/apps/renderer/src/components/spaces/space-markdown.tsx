@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ZoomableImage } from '@/components/image-lightbox'
 import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
 import { toast } from '@/lib/toast'
+import { MemberProfilePopover } from '@/components/spaces/atoms'
 import { useMemberNames } from '@/components/spaces/member-text'
 import {
     decorateMentions,
@@ -308,6 +309,34 @@ function plainLabel(children: ReactNode): string | null {
     return null
 }
 
+const MENTION_PILL_CLASS = 'rounded bg-indigo-500/15 px-1 py-px font-semibold text-indigo-600 dark:bg-indigo-400/25 dark:text-indigo-300'
+
+/**
+ * A mention pill. A real member's pill opens their profile on click — the
+ * label carries the display name (decorateMentions), so the id comes from a
+ * reverse lookup over the roster; @here, @rowboat, and a name the roster no
+ * longer carries stay inert.
+ */
+function MentionPill({ label }: { label: string }) {
+    const names = useMemberNames()
+    const name = label.slice(1)
+    let memberId: string | null = null
+    for (const [id, display] of names) {
+        if (display === name) {
+            memberId = id
+            break
+        }
+    }
+    if (!memberId) return <span className={MENTION_PILL_CLASS}>{label}</span>
+    return (
+        <MemberProfilePopover id={memberId}>
+            <button type="button" className={cn(MENTION_PILL_CLASS, 'cursor-pointer hover:bg-indigo-500/25 dark:hover:bg-indigo-400/35')}>
+                {label}
+            </button>
+        </MemberProfilePopover>
+    )
+}
+
 /**
  * An external image (a pasted GIF link, a markdown image). Same frame as blob
  * images; a URL that never loads falls back to the plain link it came from.
@@ -413,6 +442,14 @@ const spaceComponents: StreamdownComponents = {
         return <ExternalImage src={url} alt={alt ?? ''} />
     },
     a: SpaceAnchor,
+    // Mentions arrive as **@Name** (decorateMentions): a strong that IS an
+    // @-handle renders as a Discord-style pill (click = the member's
+    // profile); any other bold stays bold.
+    strong: ({ children }) => {
+        const label = plainLabel(children)
+        if (label?.startsWith('@')) return <MentionPill label={label} />
+        return <strong>{children}</strong>
+    },
 }
 
 function SpaceAnchor({ href, children }: ComponentProps<'a'>) {

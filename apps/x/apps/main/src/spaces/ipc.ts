@@ -6,6 +6,8 @@ import * as orgs from '@x/core/dist/spaces/orgs.js';
 import * as blobCache from './blob-cache.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
+import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
+import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { fetchLinkPreview } from './link-preview.js';
@@ -53,6 +55,13 @@ type SpacesHandlers = {
   'spaces:editMessage': InvokeHandler<'spaces:editMessage'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
+  'spaces:getNotifyPrefs': InvokeHandler<'spaces:getNotifyPrefs'>;
+  'spaces:setNotifyPref': InvokeHandler<'spaces:setNotifyPref'>;
+  'spaces:schedule': InvokeHandler<'spaces:schedule'>;
+  'spaces:listScheduled': InvokeHandler<'spaces:listScheduled'>;
+  'spaces:cancelScheduled': InvokeHandler<'spaces:cancelScheduled'>;
+  'spaces:getDnd': InvokeHandler<'spaces:getDnd'>;
+  'spaces:setDnd': InvokeHandler<'spaces:setDnd'>;
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
   'spaces:unsubscribeSpace': InvokeHandler<'spaces:unsubscribeSpace'>;
   'spaces:presence': InvokeHandler<'spaces:presence'>;
@@ -315,6 +324,38 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:topicSession': async (_event, args) => ({
     sessionId: topicSessionId(args.orgId, args.spaceId, args.topicId),
   }),
+
+  'spaces:getNotifyPrefs': async (_event, args) => getNotifyPrefs(args.orgId, args.spaceId),
+
+  'spaces:setNotifyPref': async (_event, args) => {
+    setNotifyPref(args.orgId, args.spaceId, args.topicId, args.level);
+    return { success: true };
+  },
+
+  'spaces:schedule': async (_event, args) => ({
+    id: scheduleItem({
+      kind: args.kind,
+      orgId: args.orgId,
+      spaceId: args.spaceId,
+      topicId: args.topicId,
+      body: args.body,
+      at: args.at,
+    }).id,
+  }),
+
+  'spaces:listScheduled': async (_event, args) => ({ items: listScheduled(args.orgId, args.spaceId) }),
+
+  'spaces:cancelScheduled': async (_event, args) => {
+    cancelScheduled(args.id);
+    return { success: true };
+  },
+
+  'spaces:getDnd': async () => ({ until: getDndUntil() }),
+
+  'spaces:setDnd': async (_event, args) => {
+    setDndUntil(args.until);
+    return { success: true };
+  },
 
   'spaces:subscribeSpace': async (_event, args) => {
     const key = `${args.orgId}/${args.spaceId}`;

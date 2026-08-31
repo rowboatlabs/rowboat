@@ -62,6 +62,7 @@ import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import { startSpaceMentionWatch } from "@x/core/dist/spaces/mention-watch.js";
+import { startSpacesScheduler } from "@x/core/dist/spaces/scheduler.js";
 import { bounceAllLive } from "@x/core/dist/spaces/orgs.js";
 import { flags } from "@x/shared";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
@@ -573,7 +574,11 @@ app.whenReady().then(async () => {
   // while the app is unfocused (offset resume covers time away). Gated with
   // the rest of the Spaces UI — no OS notifications for a feature the user
   // can't open (the same flag hides the renderer surfaces via the preload).
-  if (flags.spacesEnabled(process.env)) startSpaceMentionWatch();
+  if (flags.spacesEnabled(process.env)) {
+    startSpaceMentionWatch();
+    // Scheduled sends + reminders ride the same gate — both are Spaces UI.
+    startSpacesScheduler();
+  }
 
   // Sleep leaves spaces WebSockets half-open (no close ever fires; see
   // SpacesLive's liveness notes). Bounce them on wake so every stream

@@ -5,6 +5,7 @@ import {
     GENERAL_SEED_BODY, applyReaction, findGeneralTopic, isGeneralSeedMessage, mergeMessages, parseThreadMarker, type ThreadMarker,
 } from '@/lib/spaces-conventions'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceFeed, useSpaceLive } from '@/hooks/use-spaces'
+import { effectiveNotifyLevel, ensureNotifyPrefs, subscribeNotifyPrefs } from '@/hooks/use-spaces-notify'
 import { getTopicLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
 
 // Chat-first stores for one space (push-1 spike, see the daily-chat plan):
@@ -681,15 +682,20 @@ function wireUnread(): void {
     subscribeSpaceFeedStore(bumpUnread)
     subscribeReadState(bumpUnread)
     subscribeOrgs(bumpUnread)
+    subscribeNotifyPrefs(bumpUnread)
     generalListeners.add(bumpUnread)
 }
 
 export function countSpaceUnread(orgId: string, spaceId: string, selfMemberId: string): number {
     const feed = getSpaceFeed(orgId, spaceId)
     if (!feed.loaded) return 0
+    // Muted destinations don't badge (the Slack posture) — the messages stay
+    // unread in the pane, they just don't count here.
+    ensureNotifyPrefs(orgId, spaceId)
+    const muted = (topicId: string) => effectiveNotifyLevel(orgId, spaceId, topicId) === 'mute'
     const general = findGeneralTopic(feed.topics)
     let count = 0
-    if (general) {
+    if (general && !muted(general.id)) {
         const mark = getTopicLastReadAt(orgId, spaceId, general.id)
         const state = generalState.get(key(orgId, spaceId))
         if (state?.ready && state.topic?.id === general.id) {
@@ -699,7 +705,7 @@ export function countSpaceUnread(orgId: string, spaceId: string, selfMemberId: s
         }
     }
     for (const t of feed.topics) {
-        if (t.archived || t.id === general?.id) continue
+        if (t.archived || t.id === general?.id || muted(t.id)) continue
         const mark = getTopicLastReadAt(orgId, spaceId, t.id)
         if (mark && t.lastActivityAt <= mark) continue
         if (t.messageCount > 1 || t.createdBy.memberId !== selfMemberId) count += 1

@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { Bot, ChevronRight, Copy, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Pencil, SmilePlus, Trash2 } from 'lucide-react'
+import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, Forward, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -10,53 +10,21 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
-import { MemberAvatar } from '@/components/spaces/atoms'
+import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { EmojiPickerPopover } from '@/components/spaces/emoji-picker'
 import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
+import { frequentEmoji, noteEmojiUsed } from '@/lib/emoji-data'
+import { PIN_EMOJI } from '@/lib/spaces-corpus'
 import { formatFeedTime, formatFullTimestamp, resolveMentions } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
 // One message in a stream (general or a thread). Consecutive messages by the
 // same author compact to a time gutter; hover reveals the action bar.
 
-/** The quick palette (Slack's defaults plus the team's usual suspects). */
-const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '🎉', '😂', '🚀', '🙏', '💯', '🔥', '😮', '👎']
-
-function ReactionPicker({ onPick, onOpenChange, children }: {
-    onPick: (emoji: string) => void
-    onOpenChange?: (open: boolean) => void
-    children: React.ReactNode
-}) {
-    const [open, setOpen] = useState(false)
-    const setBoth = (next: boolean) => {
-        setOpen(next)
-        onOpenChange?.(next)
-    }
-    return (
-        <Popover open={open} onOpenChange={setBoth}>
-            <PopoverTrigger asChild>{children}</PopoverTrigger>
-            <PopoverContent align="end" className="w-auto p-1.5">
-                <div className="grid grid-cols-6 gap-0.5">
-                    {REACTION_PALETTE.map((emoji) => (
-                        <button
-                            key={emoji}
-                            type="button"
-                            onClick={() => {
-                                setBoth(false)
-                                onPick(emoji)
-                            }}
-                            className="inline-flex size-7 items-center justify-center rounded-md text-base transition-transform duration-100 hover:bg-accent hover:scale-125 active:scale-95"
-                        >
-                            {emoji}
-                        </button>
-                    ))}
-                </div>
-            </PopoverContent>
-        </Popover>
-    )
-}
+/** The full searchable picker; kept under the old name for the two call sites here. */
+const ReactionPicker = EmojiPickerPopover
 
 function joinNames(names: string[]): string {
     if (names.length <= 1) return names[0] ?? ''
@@ -145,7 +113,7 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onRetryFailed, onDiscardFailed, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
@@ -164,6 +132,14 @@ function MessageRowImpl({
     onDelete?: (message: spaces.Message) => void
     /** Rewrites the body — only offered on the viewer's own text messages. */
     onEdit?: (message: spaces.Message, body: string) => void
+    /** Seeds the composer with a quoted copy of this message. */
+    onQuoteReply?: (message: spaces.Message) => void
+    /** Opens the forward-to-destination dialog. */
+    onForward?: (message: spaces.Message) => void
+    /** Toggles the personal saved-for-later bookmark. */
+    onToggleSave?: (message: spaces.Message) => void
+    /** Whether this message sits in the viewer's saved list. */
+    saved?: boolean
     /** A failed optimistic send: try it again / drop the row. */
     onRetryFailed?: (message: spaces.Message) => void
     onDiscardFailed?: (message: spaces.Message) => void
@@ -209,19 +185,48 @@ function MessageRowImpl({
         )
     }
 
+    // Pin state rides the reactions (the 📌 group): pinned = anyone's 📌,
+    // "Unpin" removes the viewer's own. Shared with zero wire change.
+    const pinnedByMe = !!selfMemberId && !!(message.reactions ?? []).find((g) => g.emoji === PIN_EMOJI)?.memberIds.includes(selfMemberId)
+    const canPin = !!onReact && !deleted && !unconfirmed
+    const canSave = !!onToggleSave && !deleted && !unconfirmed
+    const canQuote = !!onQuoteReply && !deleted && !unconfirmed && !!messageText
+    const canForward = !!onForward && !deleted && !unconfirmed
+
+    // A ping: the wire body addresses you (@<yourId>) or everyone (@here).
+    // Discord treatment — amber wash + left accent bar, no layout shift.
+    const pingsMe =
+        !deleted &&
+        !!selfMemberId &&
+        message.author.memberId !== selfMemberId &&
+        new RegExp(`@(?:${selfMemberId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|here)(?![\\w.-])`).test(message.body)
+
     const row = (
-        <div className={cn('group/msg relative flex items-start gap-2.5 rounded-lg px-2 hover:bg-accent/40', continuation ? 'py-0.5' : 'py-1.5')}>
+        <div
+            data-mid={message.id}
+            className={cn(
+                'group/msg relative flex items-start gap-2.5 rounded-lg px-2 hover:bg-accent/40',
+                continuation ? 'py-0.5' : 'py-1.5',
+                pingsMe && 'bg-yellow-400/10 shadow-[inset_3px_0_0] shadow-yellow-500/80 hover:bg-yellow-400/15 dark:bg-yellow-400/[0.07] dark:hover:bg-yellow-400/10',
+            )}
+        >
             {continuation ? (
                 <span title={formatFullTimestamp(message.postedAt)} className={cn('shrink-0 pt-1 text-right text-[10px] leading-5 text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
                     {formatFeedTime(message.postedAt).replace(/^Yesterday /, '')}
                 </span>
             ) : (
-                <MemberAvatar id={message.author.memberId} name={name} size={avatarSize} className="mt-0.5" />
+                <MemberProfilePopover id={message.author.memberId}>
+                    <button type="button" aria-label={`${name}’s profile`} className="mt-0.5 shrink-0 cursor-pointer rounded-full">
+                        <MemberAvatar id={message.author.memberId} name={name} size={avatarSize} />
+                    </button>
+                </MemberProfilePopover>
             )}
             <div className="min-w-0 flex-1">
                 {!continuation && (
                     <div className="flex items-baseline gap-1.5 text-xs">
-                        <span className="font-semibold text-foreground">{name}</span>
+                        <MemberProfilePopover id={message.author.memberId}>
+                            <button type="button" className="cursor-pointer font-semibold text-foreground hover:underline">{name}</button>
+                        </MemberProfilePopover>
                         {viaAgent && (
                             <span className="text-muted-foreground">
                                 via {message.author.agentName ?? 'agent'}{message.author.actingMode === 'scheduled' ? ', scheduled' : ''}
@@ -371,7 +376,7 @@ function MessageRowImpl({
                             <Bot className="size-3.5" />
                         </button>
                     )}
-                    {(onCopyLink || canDelete || canEdit) && (
+                    {(onCopyLink || canDelete || canEdit || canQuote || canForward || canPin || canSave) && (
                         <DropdownMenu onOpenChange={setMenuOpen}>
                             <DropdownMenuTrigger asChild>
                                 <button type="button" title="More" className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
@@ -379,6 +384,28 @@ function MessageRowImpl({
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                                {canQuote && (
+                                    <DropdownMenuItem onClick={() => onQuoteReply!(message)}>
+                                        <Quote className="size-3.5 mr-2" /> Quote reply
+                                    </DropdownMenuItem>
+                                )}
+                                {canForward && (
+                                    <DropdownMenuItem onClick={() => onForward!(message)}>
+                                        <Forward className="size-3.5 mr-2" /> Forward message
+                                    </DropdownMenuItem>
+                                )}
+                                {canPin && (
+                                    <DropdownMenuItem onClick={() => onReact!(message, PIN_EMOJI)}>
+                                        {pinnedByMe ? <PinOff className="size-3.5 mr-2" /> : <Pin className="size-3.5 mr-2" />}
+                                        {pinnedByMe ? 'Unpin message' : 'Pin message'}
+                                    </DropdownMenuItem>
+                                )}
+                                {canSave && (
+                                    <DropdownMenuItem onClick={() => onToggleSave!(message)}>
+                                        {saved ? <BookmarkCheck className="size-3.5 mr-2" /> : <Bookmark className="size-3.5 mr-2" />}
+                                        {saved ? 'Remove from saved' : 'Save for later'}
+                                    </DropdownMenuItem>
+                                )}
                                 {canEdit && (
                                     <DropdownMenuItem onClick={() => setEditDraft(message.body)}>
                                         <Pencil className="size-3.5 mr-2" /> Edit message
@@ -429,10 +456,13 @@ function MessageRowImpl({
                         </ContextMenuSubTrigger>
                         <ContextMenuSubContent className="w-auto p-1.5">
                             <div className="grid grid-cols-6 gap-0.5">
-                                {REACTION_PALETTE.map((emoji) => (
+                                {frequentEmoji(12).map((emoji) => (
                                     <ContextMenuItem
                                         key={emoji}
-                                        onSelect={() => onReact(message, emoji)}
+                                        onSelect={() => {
+                                            noteEmojiUsed(emoji)
+                                            onReact(message, emoji)
+                                        }}
                                         className="size-7 justify-center p-0 text-base"
                                     >
                                         {emoji}
@@ -447,6 +477,16 @@ function MessageRowImpl({
                         onSelect={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
                     >
                         <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
+                    </ContextMenuItem>
+                )}
+                {canQuote && (
+                    <ContextMenuItem onSelect={() => onQuoteReply!(message)}>
+                        <Quote className="size-3.5 mr-2" /> Quote reply
+                    </ContextMenuItem>
+                )}
+                {canForward && (
+                    <ContextMenuItem onSelect={() => onForward!(message)}>
+                        <Forward className="size-3.5 mr-2" /> Forward message
                     </ContextMenuItem>
                 )}
                 {onAskRowboat && (
@@ -467,6 +507,18 @@ function MessageRowImpl({
                 {onCopyLink && (
                     <ContextMenuItem onSelect={() => onCopyLink(message)}>
                         <LinkIcon className="size-3.5 mr-2" /> Copy link
+                    </ContextMenuItem>
+                )}
+                {canPin && (
+                    <ContextMenuItem onSelect={() => onReact!(message, PIN_EMOJI)}>
+                        {pinnedByMe ? <PinOff className="size-3.5 mr-2" /> : <Pin className="size-3.5 mr-2" />}
+                        {pinnedByMe ? 'Unpin message' : 'Pin message'}
+                    </ContextMenuItem>
+                )}
+                {canSave && (
+                    <ContextMenuItem onSelect={() => onToggleSave!(message)}>
+                        {saved ? <BookmarkCheck className="size-3.5 mr-2" /> : <Bookmark className="size-3.5 mr-2" />}
+                        {saved ? 'Remove from saved' : 'Save for later'}
                     </ContextMenuItem>
                 )}
                 {canDelete && (
@@ -510,6 +562,7 @@ export const MessageRow = memo(MessageRowImpl, (prev: MessageRowProps, next: Mes
     prev.continuation === next.continuation &&
     prev.selfMemberId === next.selfMemberId &&
     prev.dense === next.dense &&
+    prev.saved === next.saved &&
     prev.memberNames === next.memberNames &&
     threadRowEqual(prev.thread, next.thread),
 )
@@ -527,7 +580,8 @@ export function DayDivider({ label }: { label: string }) {
 /** The line has been seen: fade over 700ms; the pane drops it after. */
 export function NewDivider({ fading = false }: { fading?: boolean }) {
     return (
-        <div className={cn('flex items-center gap-2.5 px-2 py-1 transition-opacity duration-700', fading && 'opacity-0')}>
+        // data-new-divider: the jump-to-unread pill scrolls to this element.
+        <div data-new-divider className={cn('flex items-center gap-2.5 px-2 py-1 transition-opacity duration-700', fading && 'opacity-0')}>
             <span className="h-px flex-1 bg-orange-500" />
             <span className="text-[10.5px] font-semibold uppercase tracking-wider text-orange-600">New</span>
         </div>

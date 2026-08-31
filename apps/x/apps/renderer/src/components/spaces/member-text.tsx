@@ -1,4 +1,5 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import type { spaces } from '@x/shared'
 import { resolveMentions } from '@/lib/spaces-presentation'
 
 // One place where member ids become people. SpacePane provides the space's
@@ -31,4 +32,35 @@ export function MemberName({ id }: { id: string }) {
 export function MemberText({ text }: { text: string }) {
     const names = useMemberNames()
     return <>{resolveMentions(text, names)}</>
+}
+
+// Full member records + presence, for profile surfaces (the click-a-face
+// popover). Separate from the names map above: most consumers only need
+// names, and the roster's shape (roles, presence, self) shouldn't ride
+// along with every markdown render.
+
+export interface SpaceProfiles {
+    byId: ReadonlyMap<string, spaces.Member>
+    /** Members present right now (already filtered to known members). */
+    here: ReadonlySet<string>
+    selfId: string | null
+}
+
+const SpaceProfilesContext = createContext<SpaceProfiles>({ byId: new Map(), here: new Set(), selfId: null })
+
+export function SpaceProfilesProvider({ members, here, selfId, children }: {
+    members: readonly spaces.Member[]
+    here: ReadonlySet<string>
+    selfId: string | null
+    children: ReactNode
+}) {
+    const value = useMemo<SpaceProfiles>(
+        () => ({ byId: new Map(members.map((m) => [m.id, m])), here, selfId }),
+        [members, here, selfId],
+    )
+    return <SpaceProfilesContext.Provider value={value}>{children}</SpaceProfilesContext.Provider>
+}
+
+export function useSpaceProfiles(): SpaceProfiles {
+    return useContext(SpaceProfilesContext)
 }
