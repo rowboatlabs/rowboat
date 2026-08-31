@@ -1,12 +1,13 @@
-import { shell, BrowserWindow } from 'electron';
-import { createAuthServer } from './auth-server.js';
-import * as composioClient from '@x/core/dist/composio/client.js';
-import { composioAccountsRepo } from '@x/core/dist/composio/repo.js';
-import { invalidateCopilotInstructionsCache } from '@x/core/dist/runtime/assembly/copilot/instructions.js';
+import { openExternalUrl } from '../auth/url-opener.js';
+import { composioConnectBus } from '../auth/connector-events.js';
+import { openLoopback } from '../auth/loopback-server.js';
+import * as composioClient from '../composio/client.js';
+import { composioAccountsRepo } from '../composio/repo.js';
+import { invalidateCopilotInstructionsCache } from '../runtime/assembly/copilot/instructions.js';
 import { CURATED_TOOLKIT_SLUGS } from '@x/shared/dist/composio.js';
-import type { LocalConnectedAccount, Toolkit } from '@x/core/dist/composio/types.js';
-import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
-import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
+import type { LocalConnectedAccount, Toolkit } from '../composio/types.js';
+import { triggerSync as triggerGmailSync } from '../knowledge/sync_gmail.js';
+import { triggerSync as triggerCalendarSync } from '../knowledge/sync_calendar.js';
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
@@ -15,20 +16,12 @@ const activeFlows = new Map<string, {
     toolkitSlug: string;
     connectedAccountId: string;
     authConfigId: string;
-    server: import('http').Server;
+    server: import('../auth/loopback-server.js').LoopbackHandle;
     timeout: NodeJS.Timeout;
 }>();
 
-/**
- * Emit Composio connection event to all renderer windows
- */
-export function emitComposioEvent(event: { toolkitSlug: string; success: boolean; error?: string }): void {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-        if (!win.isDestroyed() && win.webContents) {
-            win.webContents.send('composio:didConnect', event);
-        }
-    }
+function emitComposioEvent(event: { toolkitSlug: string; success: boolean; error?: string }): void {
+    composioConnectBus.publish(event);
 }
 
 /**
@@ -152,7 +145,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         // Set up callback server
         const timeoutRef: { current: NodeJS.Timeout | null } = { current: null };
         let callbackHandled = false;
-        const { server } = await createAuthServer(8081, async () => {
+        const server = await openLoopback(8081, async () => {
             // Guard against duplicate callbacks (browser may send multiple requests)
             if (callbackHandled) return;
             callbackHandled = true;
@@ -217,7 +210,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         });
 
         // Open browser for OAuth
-        shell.openExternal(redirectUrl);
+        void openExternalUrl(redirectUrl);
 
         return {
             success: true,

@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Rowboat",
+    "slug": "rowboat-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "rowboat",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.rowboat.app.mobile",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "The camera is used to scan the pairing code shown in Rowboat on your Mac.",
+        "NSMicrophoneUsageDescription": "The microphone is used to talk to your Rowboat agents with voice.",
+        "NSLocalNetworkUsageDescription": "Rowboat connects to the Rowboat app on your Mac over your local network.",
+        "NSBonjourServices": ["_http._tcp"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#208AEF",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

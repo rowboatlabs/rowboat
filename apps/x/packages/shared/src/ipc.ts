@@ -136,7 +136,7 @@ const UpdaterStatusSchema = z.object({
   lastCheckedAt: z.number().optional(),
 });
 
-const ipcSchemas = {
+export const ipcSchemas = {
   'app:getVersions': {
     req: z.null(),
     res: z.object({
@@ -3482,6 +3482,69 @@ const ipcSchemas = {
       chatDays: z.number().nullable(),
     }),
   },
+  // Rowboat server (phone pairing) channels — client-local: answered by main,
+  // which hosts the HTTP/WS transport for external clients.
+  'server:getPairingInfo': {
+    req: z.null(),
+    res: z.object({
+      running: z.boolean(),
+      // Hostname shown on the phone during pairing.
+      name: z.string(),
+      port: z.number().nullable(),
+      lanEnabled: z.boolean(),
+      // Reachable base URLs, loopback first; LAN/Tailscale entries only when
+      // lanEnabled.
+      urls: z.array(z.string()),
+      token: z.string().nullable(),
+    }),
+  },
+  'server:setLanEnabled': {
+    req: z.object({ enabled: z.boolean() }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Mints a new server key and rebinds — every paired phone is revoked and
+  // must re-pair. This is the recovery path for a leaked QR/token.
+  'server:rotateKey': {
+    req: z.null(),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Remote-server connection (client-local, never forwarded): where this
+  // desktop's client points — the local child by default, or a remote
+  // rowboat-server saved from Settings. Env vars override and lock the UI.
+  'server:getConnection': {
+    req: z.null(),
+    res: z.object({
+      mode: z.enum(['in-process', 'child', 'remote']),
+      url: z.string().nullable(),
+      fromEnv: z.boolean(),
+    }),
+  },
+  'server:connectRemote': {
+    req: z.object({ url: z.string(), token: z.string() }),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
+  'server:disconnectRemote': {
+    req: z.null(),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
+  // OAuth loopback relay (Phase 8b): a loopback-capable client hosting the
+  // 127.0.0.1 callback listener for a remote server ships each callback hit
+  // here; the response says which page to render in the browser tab. Called
+  // by the client's relay listener, never by the renderer.
+  'oauth:deliverLoopbackCallback': {
+    req: z.object({
+      bindingId: z.string(),
+      url: z.string(),
+    }),
+    res: z.object({
+      accepted: z.boolean(),
+      message: z.string().optional(),
+    }),
+  },
 
   // ==========================================================================
   // Spaces — shared containers on orgs speaking the spaces protocol.
@@ -3734,7 +3797,9 @@ const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      bytes: z.custom<ArrayBuffer>().optional(),
+      // Base64 — bytes must survive the JSON /rpc hop to the server (a raw
+      // ArrayBuffer stringifies to '{}' and uploads an empty blob).
+      bytes: z.string().optional(),
       filePath: z.string().optional(),
       /** Display filename (drives the markdown label / mime fallback); never storage. */
       name: z.string(),
@@ -3789,6 +3854,12 @@ const ipcSchemas = {
   },
   // Ephemeral presence from the human surface (viewing / typing / idle), scoped
   // to a topic when set. agent_working is only ever sent by the topic agent.
+  // Client wake signal: sleep leaves spaces WebSockets half-open; the desktop
+  // calls this on powerMonitor resume so the server bounces every stream.
+  'spaces:bounceLive': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
   'spaces:presence': {
     req: z.object({
       orgId: z.string(),
@@ -3851,4 +3922,12 @@ export function validateResponse<K extends keyof IPCChannels>(
 ): IPCChannels[K]['res'] {
   const schema = ipcSchemas[channel].res;
   return schema.parse(data) as IPCChannels[K]['res'];
+}
+
+/**
+ * Push channels (res schema is z.null()) flow server→client and map to the
+ * WebSocket event feed; invoke channels map to POST /rpc/{channel}.
+ */
+export function isPushChannel(channel: keyof IPCChannels): boolean {
+  return ipcSchemas[channel].res instanceof z.ZodNull;
 }

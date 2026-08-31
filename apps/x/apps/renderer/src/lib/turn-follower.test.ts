@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { TurnBusEvent, TurnState } from '@x/shared/src/turns.js'
-import { followTurn, type TurnFollowerDeps } from './turn-follower'
+import { followTurn, type TurnFollowerDeps } from '@x/shared/src/turn-follower.js'
 import {
   completed,
   created,
@@ -74,7 +74,7 @@ describe('followTurn', () => {
   it('publishes the snapshot, then extends it with contiguous feed events', async () => {
     const full = log()
     const h = harness([full.slice(0, 2)])
-    const detach = followTurn(TURN, h.deps)
+    const { stop: detach } = followTurn(TURN, h.deps)
     await flush()
 
     expect(h.states).toHaveLength(1)
@@ -93,7 +93,7 @@ describe('followTurn', () => {
   it('discards feed events already covered by the snapshot', async () => {
     const full = log()
     const h = harness([full])
-    const detach = followTurn(TURN, h.deps)
+    const { stop: detach } = followTurn(TURN, h.deps)
     await flush()
 
     // Replays of already-snapshotted lines must not corrupt the reduction.
@@ -116,7 +116,7 @@ describe('followTurn', () => {
       await gate
       return { events: full.slice(0, 3) }
     })
-    const detach = followTurn(TURN, h.deps)
+    const { stop: detach } = followTurn(TURN, h.deps)
 
     h.emit(bus(full[3], 4)) // arrives mid-fetch
     release()
@@ -130,7 +130,7 @@ describe('followTurn', () => {
   it('refetches the snapshot on a contiguity gap', async () => {
     const full = log()
     const h = harness([full.slice(0, 2), full])
-    const detach = followTurn(TURN, h.deps)
+    const { stop: detach } = followTurn(TURN, h.deps)
     await flush()
 
     // Offset 4 while the local log has 2 entries: events were missed.
@@ -146,7 +146,7 @@ describe('followTurn', () => {
   it('recovers from a failed snapshot when a feed event arrives', async () => {
     const full = log()
     const h = harness([new Error('turn file not created yet'), full])
-    const detach = followTurn(TURN, h.deps)
+    const { stop: detach } = followTurn(TURN, h.deps)
     await flush()
 
     expect(h.states).toHaveLength(0)
@@ -160,7 +160,7 @@ describe('followTurn', () => {
 
   it('reports snapshot failure once retries are exhausted', async () => {
     const h = harness([new Error('turn not found: legacy run id')])
-    const detach = followTurn(TURN, h.deps)
+    const { stop: detach } = followTurn(TURN, h.deps)
     await flush()
 
     // maxRetries 0: the first failure is definitive (legacy-run fallback
@@ -170,10 +170,29 @@ describe('followTurn', () => {
     detach()
   })
 
+  it('refetch() re-converges a turn that finished while the feed was down', async () => {
+    const full = log()
+    // Snapshot lands mid-stream; the terminal events happened during a feed
+    // outage, so no bus event for this turn ever arrives again — the offset
+    // gap detection can never fire. refetch() is the reconnect escape hatch.
+    const h = harness([full.slice(0, 2), full])
+    const follower = followTurn(TURN, h.deps)
+    await flush()
+    expect(h.states[h.states.length - 1].terminal).toBeUndefined()
+
+    follower.refetch()
+    await flush()
+
+    expect(h.fetchTurn).toHaveBeenCalledTimes(2)
+    expect(h.states[h.states.length - 1].terminal?.type).toBe('turn_completed')
+    expect(h.errors).toEqual([])
+    follower.stop()
+  })
+
   it('stops delivering after detach and unsubscribes from the feed', async () => {
     const full = log()
     const h = harness([full.slice(0, 2)])
-    const detach = followTurn(TURN, h.deps)
+    const { stop: detach } = followTurn(TURN, h.deps)
     await flush()
     expect(h.states).toHaveLength(1)
 

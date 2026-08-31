@@ -43,6 +43,7 @@
     "isomorphic-git": "^1.29.0",
     "mammoth": "^1.11.0",
     "node-html-markdown": "^2.0.0",
+    "node-pty": "^1.1.0",
     "ollama-ai-provider-v2": "^4.0.1",
     "openid-client": "^6.8.1",
     "papaparse": "^5.5.3",

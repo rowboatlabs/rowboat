@@ -1,4 +1,3 @@
-import { BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -21,12 +20,21 @@ interface TerminalEntry {
 
 const terminals = new Map<string, TerminalEntry>();
 
+// PTY output fan-out is host-agnostic: Electron main relays to its windows,
+// rowboat-server relays to WS clients (broadcast-to-all, per RFC Q12/Q13).
+export type TerminalEvent =
+  | { channel: 'terminal:data'; payload: { id: string; data: string } }
+  | { channel: 'terminal:exit'; payload: { id: string; exitCode: number } };
+
+const terminalListeners = new Set<(e: TerminalEvent) => void>();
+export function subscribeTerminalEvents(listener: (e: TerminalEvent) => void): () => void {
+  terminalListeners.add(listener);
+  return () => terminalListeners.delete(listener);
+}
+
 function broadcast(channel: 'terminal:data' | 'terminal:exit', payload: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send(channel, payload);
-    }
-  }
+  const event = { channel, payload } as TerminalEvent;
+  for (const l of terminalListeners) l(event);
 }
 
 // pnpm extracts node-pty's prebuilt macOS spawn-helper without its executable

@@ -1,9 +1,8 @@
-import { shell } from 'electron';
-import type { Server } from 'http';
-import { createAuthServer } from './auth-server.js';
-import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
-import { exchangeChatGPTCode, getChatGPTStatus } from '@x/core/dist/auth/chatgpt-auth.js';
-import { applyCodexInitialSelection } from '@x/core/dist/models/chatgpt-selection.js';
+import { openExternalUrl } from './url-opener.js';
+import { openLoopback, type LoopbackHandle } from './loopback-server.js';
+import * as oauthClient from '../auth/oauth-client.js';
+import { exchangeChatGPTCode, getChatGPTStatus } from '../auth/chatgpt-auth.js';
+import { applyCodexInitialSelection } from '../models/chatgpt-selection.js';
 import {
   CHATGPT_AUTHORIZE_URL,
   CHATGPT_CALLBACK_PATH,
@@ -12,7 +11,7 @@ import {
   CHATGPT_EXTRA_AUTHORIZE_PARAMS,
   CHATGPT_REDIRECT_URI,
   CHATGPT_SCOPES,
-} from '@x/core/dist/auth/chatgpt-constants.js';
+} from '../auth/chatgpt-constants.js';
 
 // Interactive "Sign in with ChatGPT" flow (OAuth 2.0 + PKCE, Codex CLI client
 // — see chatgpt-constants.ts). Orchestration only: PKCE/state generation and
@@ -103,7 +102,7 @@ function startAttempt(): ActiveAttempt {
   });
 
   let settled = false;
-  let server: Server | null = null;
+  let server: LoopbackHandle | null = null;
   let timeoutHandle: NodeJS.Timeout | null = null;
   let serverClosed: Promise<void> | null = null;
 
@@ -118,16 +117,9 @@ function startAttempt(): ActiveAttempt {
     if (serverClosed) return serverClosed;
     const s = server;
     server = null;
-    serverClosed = !s
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          s.close(() => resolve());
-          s.closeIdleConnections();
-          // Preconnect sockets that never carried a request survive
-          // closeIdleConnections; destroy stragglers once the in-flight
-          // response has flushed.
-          setTimeout(() => s.closeAllConnections(), 5000).unref();
-        });
+    // Idle-connection cleanup and delayed straggler destruction live inside
+    // the handle's close() (loopback-server's patched close).
+    serverClosed = !s ? Promise.resolve() : Promise.resolve(s.close()).then(() => undefined);
     return serverClosed;
   };
 
@@ -185,9 +177,9 @@ function startAttempt(): ActiveAttempt {
       // Bind the loopback server FIRST so a busy port fails fast, before any
       // browser tab opens. Fixed port — createAuthServer's no-fallback error
       // message tells the user to free the port.
-      let boundServer: Server;
+      let boundServer: LoopbackHandle;
       try {
-        ({ server: boundServer } = await createAuthServer(CHATGPT_CALLBACK_PORT, onCallback, {
+        boundServer = await openLoopback(CHATGPT_CALLBACK_PORT, onCallback, {
           callbackPath: CHATGPT_CALLBACK_PATH,
           onError: (error) => {
             void finish({
@@ -210,7 +202,7 @@ function startAttempt(): ActiveAttempt {
             }
             return null;
           },
-        }));
+        });
       } catch (error) {
         void finish({
           signedIn: false,
@@ -222,8 +214,7 @@ function startAttempt(): ActiveAttempt {
       if (settled) {
         // Cancelled while the bind was in flight — release the port we just
         // grabbed (finish() already ran with no server to close).
-        boundServer.closeAllConnections();
-        boundServer.close();
+        void boundServer.close();
         return;
       }
       server = boundServer;
@@ -246,7 +237,7 @@ function startAttempt(): ActiveAttempt {
 
       try {
         // System browser: shares the user's existing ChatGPT session cookies.
-        await shell.openExternal(authUrl.toString());
+        await openExternalUrl(authUrl.toString());
       } catch (error) {
         void finish({
           signedIn: false,

@@ -20,6 +20,7 @@ import {
 } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 import { MemberAvatar } from '@/components/spaces/atoms'
+import { uploadInputFor } from '@/lib/spaces-upload'
 
 // Files: the tree (README first) and the file column — rendered file
 // with one-tap checkboxes, Edit → draft→apply (merged / conflict handled),
@@ -560,11 +561,10 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
         if (!asset) return
         setReplacing(true)
         try {
-            const filePath = window.electronUtils?.getPathForFile?.(file)
             const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
                 orgId: org.id,
                 spaceId: space.id,
-                ...(filePath ? { filePath } : { bytes: await file.arrayBuffer() }),
+                ...(await uploadInputFor(file)),
                 name: file.name,
                 ...(file.type ? { mime: file.type } : {}),
             })
@@ -1132,11 +1132,10 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
             if (row.status === 'done') continue
             setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'uploading' } : r)))
             try {
-                const filePath = window.electronUtils?.getPathForFile?.(row.file)
                 const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
                     orgId: org.id,
                     spaceId: space.id,
-                    ...(filePath ? { filePath } : { bytes: await row.file.arrayBuffer() }),
+                    ...(await uploadInputFor(row.file)),
                     name: row.name,
                     ...(row.file.type ? { mime: row.file.type } : {}),
                 })
