@@ -60,6 +60,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
     anthropic: "Anthropic",
     google: "Gemini",
     openrouter: "OpenRouter",
+    orcarouter: "OrcaRouter",
     aigateway: "AI Gateway",
     ollama: "Ollama",
     "openai-compatible": "OpenAI-Compatible",
@@ -80,8 +81,12 @@ export function providerDisplayName(flavor: string): string {
 const MODELS_DEV_FLAVORS = new Set(["openai", "anthropic", "google"]);
 
 // listModelsForProvider builds aigateway's URL from baseURL; apply the
-// service default here so a keyed-but-URL-less config still lists.
+// service default here so a keyed-but-URL-less config still lists. The same
+// applies to orcarouter, whose OpenRouter-shaped SDK provider needs an
+// explicit baseURL to send its key anywhere (it defaults to openrouter.ai
+// otherwise, which rejects foreign keys).
 const AIGATEWAY_DEFAULT_BASE_URL = "https://ai-gateway.vercel.sh/v1";
+const ORCAROUTER_DEFAULT_BASE_URL = "https://api.orcarouter.ai/v1";
 
 // Successful lists are cached until the provider's credentials change or an
 // explicit refresh; failures retry after a short TTL so a temporarily-down
@@ -150,6 +155,9 @@ async function discoverProviders(): Promise<DiscoveredProvider[]> {
         const config = { ...entry };
         if (config.flavor === "aigateway" && !config.baseURL) {
             config.baseURL = AIGATEWAY_DEFAULT_BASE_URL;
+        }
+        if (config.flavor === "orcarouter" && !config.baseURL) {
+            config.baseURL = ORCAROUTER_DEFAULT_BASE_URL;
         }
         discovered.push({ id, flavor: entry.flavor, config });
     }
@@ -293,13 +301,14 @@ export interface ImageCatalogProviderEntry {
 // Flavors generate-image can build an image model for (the gateway plus
 // runtime/tools/domains/image.ts makeBackend's cases). Every one of them
 // lists — the picker only ever offers models a provider reported.
-const IMAGE_FLAVORS = new Set(["rowboat", "openrouter", "google", "openai", "ollama", "openai-compatible"]);
-// …of which these two carry no image-capability metadata anywhere in their
-// listing (Ollama's /api/tags and an OpenAI-compatible /models are bare id
-// lists), so they offer their FULL model list. Picking a non-image model
-// there surfaces the runtime's own readable error — a worse pick than a
-// filtered list, a better one than a free-typed id nothing can check.
-const IMAGE_UNFILTERABLE_FLAVORS = new Set(["ollama", "openai-compatible"]);
+const IMAGE_FLAVORS = new Set(["rowboat", "openrouter", "orcarouter", "google", "openai", "ollama", "openai-compatible"]);
+// …of which these three carry no image-capability metadata anywhere in their
+// listing (Ollama's /api/tags, an OpenAI-compatible /models, and OrcaRouter's
+// /models are bare id lists), so they offer their FULL model list. Picking a
+// non-image model there surfaces the runtime's own readable error — a worse
+// pick than a filtered list, a better one than a free-typed id nothing can
+// check.
+const IMAGE_UNFILTERABLE_FLAVORS = new Set(["ollama", "openai-compatible", "orcarouter"]);
 // Vendors whose image models come from the models.dev catalog's output
 // modalities; their own /models endpoints don't say who generates images.
 const IMAGE_MODELS_DEV_FLAVORS = new Set(["openai", "google"]);

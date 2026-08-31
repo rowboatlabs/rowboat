@@ -48,6 +48,20 @@ export function OpenRouterIcon({ className }: IconProps) {
   )
 }
 
+export function OrcaRouterIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={cn("size-5", className)}>
+      <path d="M12 4a8 8 0 0 0-8 8c0 3.3 2 6.1 4.9 7.2" />
+      <path d="M12 4a8 8 0 0 1 8 8c0 3.3-2 6.1-4.9 7.2" />
+      <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="4" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="20" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="20" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 export function VercelIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={cn("size-5", className)}>

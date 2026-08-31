@@ -26,7 +26,7 @@ import type { ToolContext } from "../exec-tool.js";
 // BYOK flavors that can build an AI SDK image model. "rowboat" (the
 // signed-in gateway) is the credential-less sixth path; anthropic /
 // aigateway / codex have no image surface here.
-type ImageFlavor = "openrouter" | "google" | "openai" | "ollama" | "openai-compatible" | "rowboat";
+type ImageFlavor = "openrouter" | "orcarouter" | "google" | "openai" | "ollama" | "openai-compatible" | "rowboat";
 
 interface ImageBackend {
     flavor: ImageFlavor;
@@ -54,6 +54,15 @@ function makeBackend(config: z.infer<typeof LlmProvider>): ImageBackend | null {
             return {
                 flavor: "openrouter",
                 makeImageModel: (id) => createOpenRouter({ apiKey, baseURL, headers }).imageModel(id),
+            };
+        case "orcarouter":
+            // Same OpenAI-compatible image surface as OpenRouter (the
+            // gateway fronts an OpenRouter-shaped model namespace). The
+            // SDK's own baseURL default points at openrouter.ai, which
+            // rejects foreign keys — default the service endpoint here.
+            return {
+                flavor: "orcarouter",
+                makeImageModel: (id) => createOpenRouter({ apiKey, baseURL: baseURL || "https://api.orcarouter.ai/v1", headers }).imageModel(id),
             };
         case "google":
             return {
@@ -90,7 +99,7 @@ function makeBackend(config: z.infer<typeof LlmProvider>): ImageBackend | null {
     }
 }
 
-const NO_IMAGE_MODEL_ERROR = "No image model configured. Pick one under model settings → Image model: signed-in users can use the Rowboat gateway; otherwise choose an OpenRouter, Google, OpenAI, Ollama, or OpenAI-compatible provider and one of its image models.";
+const NO_IMAGE_MODEL_ERROR = "No image model configured. Pick one under model settings → Image model: signed-in users can use the Rowboat gateway; otherwise choose an OpenRouter, OrcaRouter, Google, OpenAI, Ollama, or OpenAI-compatible provider and one of its image models.";
 
 type ImageResolution =
     | { ok: true; backend: ImageBackend; model: string }
@@ -135,7 +144,7 @@ async function resolveImageBackend(): Promise<ImageResolution> {
     if (!backend) {
         return {
             ok: false,
-            error: `The configured image model's provider '${selection.provider}' (${entry.flavor}) does not support image generation. Pick an OpenRouter, Google, OpenAI, Ollama, or OpenAI-compatible provider in model settings.`,
+            error: `The configured image model's provider '${selection.provider}' (${entry.flavor}) does not support image generation. Pick an OpenRouter, OrcaRouter, Google, OpenAI, Ollama, or OpenAI-compatible provider in model settings.`,
         };
     }
     return { ok: true, backend, model: selection.model };

@@ -20,6 +20,7 @@ import {
   OllamaIcon,
   OpenAIIcon,
   OpenRouterIcon,
+  OrcaRouterIcon,
   VercelIcon,
 } from "@/components/onboarding/provider-icons"
 
@@ -29,7 +30,7 @@ import {
 // Providers manage CREDENTIALS only — model choices live in
 // ModelSelectionSection above this section.
 
-type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "orcarouter" | "aigateway" | "ollama" | "openai-compatible"
 
 interface ProviderMeta {
   id: string
@@ -59,6 +60,7 @@ const BYOK_CATALOG: Array<{ flavor: ByokFlavor; name: string; tagline: string; i
   { flavor: "google", name: "Gemini", tagline: "Google AI Studio", icon: GoogleIcon, needsKey: true, needsEndpoint: false },
   { flavor: "ollama", name: "Ollama", tagline: "Run models locally", icon: OllamaIcon, needsKey: false, needsEndpoint: true },
   { flavor: "openrouter", name: "OpenRouter", tagline: "One key, many models", icon: OpenRouterIcon, needsKey: true, needsEndpoint: false },
+  { flavor: "orcarouter", name: "OrcaRouter", tagline: "AI gateway for models & agents", icon: OrcaRouterIcon, needsKey: true, needsEndpoint: false },
   { flavor: "aigateway", name: "AI Gateway (Vercel)", tagline: "Vercel's AI Gateway", icon: VercelIcon, needsKey: true, needsEndpoint: false },
   { flavor: "openai-compatible", name: "OpenAI-Compatible", tagline: "Custom OpenAI-compatible endpoint", icon: GenericApiIcon, needsKey: true, optionalKey: true, needsEndpoint: true, manualModel: true },
 ]
@@ -67,6 +69,7 @@ const DEFAULT_BASE_URLS: Partial<Record<ByokFlavor, string>> = {
   ollama: "http://localhost:11434",
   "openai-compatible": "http://localhost:1234/v1",
   aigateway: "https://ai-gateway.vercel.sh/v1",
+  orcarouter: "https://api.orcarouter.ai/v1",
 }
 
 function flavorMeta(flavor: string) {

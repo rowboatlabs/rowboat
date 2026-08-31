@@ -65,6 +65,9 @@ describe("mapReasoningEffort", () => {
         expect(mapReasoningEffort("openrouter", "openai/o4-mini", "low", true)).toEqual({
             providerOptions: { openrouter: { reasoning: { effort: "low" } } },
         });
+        expect(mapReasoningEffort("orcarouter", "openai/o4-mini", "low", true)).toEqual({
+            providerOptions: { openrouter: { reasoning: { effort: "low" } } },
+        });
         expect(mapReasoningEffort("rowboat", "x/y", "high", false)).toBeUndefined();
     });
 

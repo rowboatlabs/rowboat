@@ -26,6 +26,7 @@ export const providerDisplayNames: Record<string, string> = {
   google: 'Gemini',
   ollama: 'Ollama',
   openrouter: 'OpenRouter',
+  orcarouter: 'OrcaRouter',
   aigateway: 'AI Gateway',
   'openai-compatible': 'OpenAI-Compatible',
   rowboat: 'Rowboat',

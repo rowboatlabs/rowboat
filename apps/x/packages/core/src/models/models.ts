@@ -23,6 +23,11 @@ import {
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
 
+// OrcaRouter's API base URL. Defaulted for keyed-but-URL-less configs in
+// createProvider and listModelsForProvider (the OpenRouter SDK provider
+// defaults to openrouter.ai, which rejects foreign keys).
+const ORCAROUTER_DEFAULT_BASE_URL = "https://api.orcarouter.ai/v1";
+
 export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
     const { apiKey, baseURL, headers } = config;
     switch (config.flavor) {
@@ -78,6 +83,20 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
             return createOpenRouter({
                 apiKey,
                 baseURL,
+                headers,
+            }) as unknown as ProviderV4;
+        case "orcarouter":
+            // OrcaRouter is an OpenAI-compatible gateway with an
+            // OpenRouter-shaped model namespace; the OpenRouter AI SDK
+            // provider (which routes reasoning/prompt-caching via the same
+            // openrouter providerOptions namespace) works against its
+            // endpoint directly. The service baseURL is defaulted here so a
+            // keyed-but-URL-less config still reaches the right host — the
+            // SDK's own default points at openrouter.ai, which rejects
+            // foreign keys.
+            return createOpenRouter({
+                apiKey,
+                baseURL: baseURL || ORCAROUTER_DEFAULT_BASE_URL,
                 headers,
             }) as unknown as ProviderV4;
         case "rowboat":
@@ -276,6 +295,14 @@ export async function listModelsForProvider(
                 } else {
                     url = "https://openrouter.ai/api/v1/models";
                 }
+                break;
+            case "orcarouter":
+                // Same shape as OpenRouter: the public catalog lists models
+                // even without a key (a false "Connected"), so send the key
+                // when present so a bad key 401s here and the shared throw
+                // below surfaces it. Same OpenAI-shaped { data:[{id}] } list.
+                url = "https://api.orcarouter.ai/v1/models";
+                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
                 break;
             case "ollama":
                 url = `${(baseURL ?? "http://localhost:11434").replace(/\/$/, "")}/api/tags`;
