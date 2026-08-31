@@ -4,6 +4,7 @@ import {
     CaptureUpdateAction,
     Excalidraw,
     getSceneVersion,
+    MainMenu,
     reconcileElements,
     restoreElements,
 } from '@excalidraw/excalidraw'
@@ -20,6 +21,7 @@ import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconc
 import { spaces } from '@x/shared'
 import { useTheme } from '@/contexts/theme-context'
 import { useSpaceLive, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { toast } from '@/lib/toast'
 
 // A shared board (Excalidraw), synced Excalidraw's own way on top of the
 // spaces live channel: per-element last-writer-wins. Every element carries
@@ -224,15 +226,17 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         try {
             const elements = api.getSceneElementsIncludingDeleted()
             const savedSceneVersion = getSceneVersion(elements)
-            // Standard .excalidraw JSON, images embedded — the asset stands on
-            // its own for agents, exports, and cold loads.
+            // Standard .excalidraw JSON with `files` deliberately empty:
+            // image bytes live as assets at whiteboards/images/<fileId>
+            // (deterministic from each image element), which keeps every
+            // snapshot small enough to stay an agent-readable TEXT asset.
             const json = JSON.stringify({
                 type: 'excalidraw',
                 version: 2,
                 source: 'rowboat',
                 elements,
                 appState: {},
-                files: api.getFiles(),
+                files: {},
             })
             const encoded = new TextEncoder().encode(json)
             let input: spaces.SpacesProposeInput
@@ -312,7 +316,13 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         void syncNewFiles()
     }
 
-    /** Upload files the editor holds that no blob backs yet, then announce the mapping. */
+    /**
+     * Persist files the editor holds that no asset backs yet: bytes upload as
+     * a blob, then a proposeChange files them at whiteboards/images/<fileId>
+     * — a normal space asset, visible in the file tree, and resolvable by
+     * anyone (peers, cold loads, agents) from the deterministic path alone.
+     * The {t:'files'} announce is just the fast path for open panes.
+     */
     const syncNewFiles = async () => {
         const api = apiRef.current
         if (!api) return
@@ -331,11 +341,25 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                     name: fileId,
                     mime: file.mimeType,
                 })
+                // A conflict here means another client filed the same image
+                // first — the bytes are content-addressed, so theirs IS ours
+                // and every outcome leaves the asset in place.
+                await window.ipc.invoke('spaces:proposeChange', {
+                    orgId: org.id,
+                    spaceId: space.id,
+                    input: {
+                        assetPath: spaces.whiteboardImagePath(fileId),
+                        baseVersion: 0,
+                        blob: uploaded.blob.hash,
+                        reason: 'whiteboard image',
+                    },
+                })
                 const entry = { hash: uploaded.blob.hash, mime: file.mimeType }
                 knownFilesRef.current.set(fileId, entry)
                 announced[fileId] = entry
-            } catch {
-                // retried on the next onChange pass
+            } catch (err) {
+                console.warn('[whiteboard] image upload failed', fileId, err)
+                toast(err instanceof Error ? `Could not upload the image: ${err.message}` : 'Could not upload the image', 'error')
             } finally {
                 uploadingFilesRef.current.delete(fileId)
             }
@@ -382,7 +406,12 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         void fetchMissingFiles()
     }
 
-    /** Pull blob bytes for image elements whose file we don't hold yet. */
+    /**
+     * Pull bytes for image elements whose file we don't hold yet. The fast
+     * path is the {t:'files'} announce from an open peer; the durable path is
+     * the image's own asset at whiteboards/images/<fileId> — deterministic
+     * from the element alone, so cold loads and agent-added images resolve too.
+     */
     const fetchMissingFiles = async () => {
         const api = apiRef.current
         if (!api) return
@@ -391,8 +420,19 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         for (const el of api.getSceneElementsIncludingDeleted()) {
             const fileId = el.type === 'image' ? (el as { fileId?: string | null }).fileId : null
             if (!fileId || have[fileId as keyof typeof have]) continue
-            const known = knownFilesRef.current.get(fileId)
-            if (!known) continue // the mapping frame or a snapshot will bring it
+            let known = knownFilesRef.current.get(fileId)
+            if (!known) {
+                try {
+                    const res = await window.ipc.invoke('spaces:readAsset', {
+                        orgId: org.id, spaceId: space.id, path: spaces.whiteboardImagePath(fileId),
+                    })
+                    if (!res.blob) continue
+                    known = { hash: res.blob.hash, mime: res.blob.mime }
+                    knownFilesRef.current.set(fileId, known)
+                } catch {
+                    continue // not filed yet — the uploader's announce or a later pass brings it
+                }
+            }
             try {
                 const resp = await fetch(blobUrl(org.id, space.id, known.hash))
                 if (!resp.ok) continue
@@ -509,6 +549,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         // Ask whoever is already drawing for the scene state newer than our snapshot.
         send({ t: 'scene_request', clientId: clientIdRef.current })
         send({ t: 'idle', clientId: clientIdRef.current, state: activeRef.current ? 'active' : 'idle' })
+        // Snapshots don't embed image bytes — resolve them from their assets.
+        void fetchMissingFiles()
     }
 
     useEffect(() => {
@@ -584,7 +626,16 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 theme={resolvedTheme}
                 isCollaborating
                 autoFocus
-            />
+            >
+                {/* Our menu, not the stock one: the default carries Excalidraw's
+                    socials/help links — this is Rowboat's canvas, so only the
+                    canvas actions stay. Theme follows the app; save is automatic. */}
+                <MainMenu>
+                    <MainMenu.DefaultItems.SaveAsImage />
+                    <MainMenu.DefaultItems.ClearCanvas />
+                    <MainMenu.DefaultItems.ChangeCanvasBackground />
+                </MainMenu>
+            </Excalidraw>
         </div>
     )
 }

@@ -305,7 +305,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     const requestMode = (next: SpaceMode) => {
         if (next === 'split' && !splitFits) toast('Window is too narrow for Split — it will appear when you widen it')
         // Picking a surface while a board is open leaves the board.
-        if (selection.kind === 'whiteboard') onSelect({ kind: 'general' })
+        if (selection.kind === 'whiteboard' || (selection.kind === 'file' && spaces.isWhiteboardPath(selection.path))) onSelect({ kind: 'general' })
         setMode(next)
     }
     requestModeRef.current = requestMode
@@ -315,10 +315,16 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // ⌘4) opens the space's most recent board — created on its first save
     // when none exists yet; the rail lists and creates named boards.
     // ------------------------------------------------------------------
-    const isWhiteboard = selection.kind === 'whiteboard'
+    // A board reached through any file-shaped path (artifact link, deep link,
+    // history) is still a board — it must never render as raw JSON in the
+    // document pane.
+    const boardPath = selection.kind === 'whiteboard' ? selection.path
+        : selection.kind === 'file' && spaces.isWhiteboardPath(selection.path) ? selection.path
+        : null
+    const isWhiteboard = boardPath !== null
     const boards = entries.filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
     const toggleWhiteboard = () => {
-        if (selection.kind === 'whiteboard') {
+        if (isWhiteboard) {
             onSelect({ kind: 'general' })
         } else {
             const recent = [...boards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
@@ -388,9 +394,11 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
 
     // The document pane: an explicitly opened file, else the one that was
     // just dismissed, else the space's front page (README.md), else the
-    // first file there is.
-    const defaultDocPath = entries.some((e) => e.path === 'README.md') ? 'README.md' : (entries[0]?.path ?? null)
-    const centerPath = selection.kind === 'file' ? selection.path : (lastDoc?.path ?? defaultDocPath)
+    // first file there is. Boards never qualify — their JSON is not a
+    // document, and they have their own surface.
+    const docEntries = entries.filter((e) => !spaces.isWhiteboardPath(e.path))
+    const defaultDocPath = docEntries.some((e) => e.path === 'README.md') ? 'README.md' : (docEntries[0]?.path ?? null)
+    const centerPath = selection.kind === 'file' && !spaces.isWhiteboardPath(selection.path) ? selection.path : (lastDoc?.path ?? defaultDocPath)
 
     // Resizable Split divider: drag it; the document width persists.
     const [docWidth, setDocWidth] = useState<number>(() => {
@@ -660,7 +668,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     surfaces below stay mounted-but-hidden (keep-alive), same
                     as Read mode. Keyed by path so switching boards remounts a
                     fresh collab session. */}
-                {isWhiteboard && selection.kind === 'whiteboard' && (
+                {boardPath && (
                     <Suspense
                         fallback={
                             <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -669,10 +677,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         }
                     >
                         <WhiteboardPane
-                            key={selection.path}
+                            key={boardPath}
                             org={org}
                             space={space}
-                            boardId={selection.path}
+                            boardId={boardPath}
                             memberNames={memberNames}
                             active={active}
                         />
