@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Button, StyleSheet, Text, TextInput, View, useColorScheme } from 'react-native';
-import Markdown from 'react-native-markdown-display';
+import { Button, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ChatMarkdown } from './markdown';
 import type { message as messageShared, turns } from '@x/shared';
 import type { z } from 'zod';
 
@@ -98,9 +98,6 @@ export interface TurnViewProps {
 }
 
 export function TurnView({ state, liveText, streaming, onPermission, onAskHuman }: TurnViewProps) {
-  const scheme = useColorScheme();
-  const textColor = scheme === 'dark' ? '#fff' : '#000';
-
   const suspended = state.terminal ? undefined : state.suspension;
   const askHumanCalls = state.toolCalls.filter(
     (tc) => tc.toolName === 'ask-human' && !tc.result,
@@ -117,9 +114,7 @@ export function TurnView({ state, liveText, streaming, onPermission, onAskHuman 
         const answer = call.response ? assistantText(call.response) : '';
         return (
           <View key={call.index} style={styles.assistantBlock}>
-            {answer.length > 0 && (
-              <Markdown style={{ body: { color: textColor, fontSize: 15 } }}>{answer}</Markdown>
-            )}
+            {answer.length > 0 && <ChatMarkdown>{answer}</ChatMarkdown>}
             {call.error && <Text style={styles.error}>{call.error}</Text>}
             {tools.length > 0 && (
               <View style={styles.chips}>
@@ -132,9 +127,7 @@ export function TurnView({ state, liveText, streaming, onPermission, onAskHuman 
         );
       })}
 
-      {liveText ? (
-        <Markdown style={{ body: { color: textColor, fontSize: 15 } }}>{liveText}</Markdown>
-      ) : null}
+      {liveText ? <ChatMarkdown>{liveText}</ChatMarkdown> : null}
       {streaming && !liveText && !state.terminal && !suspended && (
         <Text style={styles.thinking}>Thinking…</Text>
       )}

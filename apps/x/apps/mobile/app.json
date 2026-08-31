@@ -15,7 +15,9 @@
         "NSCameraUsageDescription": "The camera is used to scan the pairing code shown in Rowboat on your Mac.",
         "NSMicrophoneUsageDescription": "The microphone is used to talk to your Rowboat agents with voice.",
         "NSLocalNetworkUsageDescription": "Rowboat connects to the Rowboat app on your Mac over your local network.",
-        "NSBonjourServices": ["_http._tcp"]
+        "NSBonjourServices": [
+          "_http._tcp"
+        ]
       }
     },
     "android": {
@@ -41,7 +43,8 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,

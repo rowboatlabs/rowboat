@@ -31,7 +31,7 @@ export default function PairDevScreen() {
       }
       await pair({ url: healthy, token });
       analytics.mobilePaired('dev-link');
-      router.replace('/sessions');
+      router.replace('/');
     })();
   }, [url, token, pair]);
 
