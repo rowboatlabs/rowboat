@@ -1,8 +1,73 @@
-import { useMemo } from 'react';
-import { Platform } from 'react-native';
-import Markdown from 'react-native-markdown-display';
+import { Component, memo, useMemo, type ReactNode } from 'react';
+import { Platform, ScrollView, Text, View } from 'react-native';
+import Markdown, { MarkdownIt } from 'react-native-markdown-display';
+// @ts-expect-error no types shipped
+import texmath from 'markdown-it-texmath';
+import MathJaxSvg from 'react-native-mathjax-svg';
 
 import { useColors } from '@/theme/colors';
+
+// Math pipeline (the ChatterUI recipe): texmath tokenizes $…$/$$…$$ and
+// \(…\)/\[…\] into math_* tokens; MathJax→SVG typesets them natively (no
+// WebView, Expo Go safe). The stub engine stops texmath require()-ing katex —
+// markdown-display walks tokens itself and never calls md.renderer.
+const markdownIt = MarkdownIt({ typographer: true }).use(texmath, {
+  delimiters: ['dollars', 'brackets'],
+  engine: { renderToString: () => '' },
+});
+
+// The renderer has a known crash on pathological TeX — fail soft to raw text.
+class MathBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+// Typesetting is CPU-heavy — memo on the TeX string so streaming re-renders
+// don't re-typeset every earlier equation.
+const MathSegment = memo(function MathSegment({ tex, fontSize, color, block }: {
+  tex: string;
+  fontSize: number;
+  color: string;
+  block?: boolean;
+}) {
+  const fallback = (
+    <Text selectable style={{ fontFamily: MONO, fontSize: 13.5, color }}>
+      {tex}
+    </Text>
+  );
+  const svg = (
+    <MathBoundary fallback={fallback}>
+      <MathJaxSvg fontSize={fontSize} color={color}>
+        {tex}
+      </MathJaxSvg>
+    </MathBoundary>
+  );
+  if (!block) return svg;
+  // Wide equations scroll sideways instead of clipping at the screen edge.
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      // width 100% claims a full row inside a wrapping paragraph, so promoted
+      // inline math never shares a line (and never overlaps) with prose.
+      style={{ marginVertical: 10, width: '100%' }}
+      contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingHorizontal: 2 }}
+    >
+      {svg}
+    </ScrollView>
+  );
+});
+
+// Tall constructs (fractions, big operators, matrices) can't sit inside a
+// text line without colliding with neighbors — promote them to display math,
+// like the big chat apps do.
+const TALL_TEX = /\\frac|\\dfrac|\\sum|\\prod|\\int|\\begin\{|\\over(?![a-z])|\\stackrel|\\substack|\\binom/;
+
 
 // Chat markdown, tuned to read like the top chat apps: comfortable body
 // leading, quiet mono code surfaces, restrained headings, minimal quote bar.
@@ -15,7 +80,11 @@ export function ChatMarkdown({ children }: { children: string }) {
   const styles = useMemo(
     () => ({
       body: { color: colors.label, fontSize: 16, lineHeight: 24 },
-      paragraph: { marginTop: 0, marginBottom: 10 },
+      // row+wrap so inline math SVGs sit inside the text line (plain
+      // paragraphs have a single Text child and are unaffected).
+      // flex-end (not center) — centering tall children makes wrapped rows
+      // overlay their neighbors.
+      paragraph: { marginTop: 0, marginBottom: 10, flexDirection: 'row' as const, flexWrap: 'wrap' as const, alignItems: 'flex-end' as const },
       heading1: { fontSize: 22, fontWeight: '700' as const, lineHeight: 28, marginTop: 18, marginBottom: 8, color: colors.label },
       heading2: { fontSize: 19, fontWeight: '700' as const, lineHeight: 25, marginTop: 16, marginBottom: 6, color: colors.label },
       heading3: { fontSize: 17, fontWeight: '600' as const, lineHeight: 23, marginTop: 14, marginBottom: 4, color: colors.label },
@@ -62,6 +131,31 @@ export function ChatMarkdown({ children }: { children: string }) {
     }),
     [colors],
   );
-  // react-native-markdown-display's style typing is looser than ours.
-  return <Markdown style={styles as never}>{children}</Markdown>;
+  const rules = useMemo(() => {
+    const inline = (node: { key: string; content: string }) =>
+      TALL_TEX.test(node.content) ? (
+        <MathSegment key={node.key} tex={node.content} fontSize={15} color={colors.label} block />
+      ) : (
+        <MathSegment key={node.key} tex={node.content} fontSize={15} color={colors.label} />
+      );
+    const block = (node: { key: string; content: string }) => (
+      <MathSegment key={node.key} tex={node.content} fontSize={16} color={colors.label} block />
+    );
+    // All four texmath token types — an unregistered type renders as NOTHING
+    // (markdown-display's `unknown` rule returns null), which silently eats
+    // chat content.
+    return {
+      math_inline: inline,
+      math_inline_double: block,
+      math_block: block,
+      math_block_eqno: block,
+    };
+  }, [colors]);
+
+  // react-native-markdown-display's style/rule typings are looser than ours.
+  return (
+    <Markdown markdownit={markdownIt} rules={rules as never} style={styles as never}>
+      {children}
+    </Markdown>
+  );
 }
