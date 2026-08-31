@@ -75,7 +75,11 @@ const TALL_TEX = /\\frac|\\dfrac|\\sum|\\prod|\\int|\\begin\{|\\over(?![a-z])|\\
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
-export function ChatMarkdown({ children }: { children: string }) {
+export function ChatMarkdown({ children, extraRules }: {
+  children: string;
+  /** Screen-specific render-rule overrides (e.g. authed images in notes). */
+  extraRules?: Record<string, unknown>;
+}) {
   const colors = useColors();
   const styles = useMemo(
     () => ({
@@ -154,7 +158,7 @@ export function ChatMarkdown({ children }: { children: string }) {
 
   // react-native-markdown-display's style/rule typings are looser than ours.
   return (
-    <Markdown markdownit={markdownIt} rules={rules as never} style={styles as never}>
+    <Markdown markdownit={markdownIt} rules={{ ...rules, ...extraRules } as never} style={styles as never}>
       {children}
     </Markdown>
   );

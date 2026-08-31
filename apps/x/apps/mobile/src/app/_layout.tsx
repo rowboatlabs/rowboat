@@ -1,9 +1,9 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import Drawer from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
-import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
-import { Pressable, useColorScheme } from 'react-native';
+import { useColorScheme } from 'react-native';
+
+import { GlassHamburger } from '@/components/glass-hamburger';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { DrawerContent } from '@/components/drawer-content';
@@ -36,32 +36,11 @@ export default function RootLayout() {
                 title: 'Rowboat',
                 headerTitle: '',
                 headerTransparent: true,
-                headerLeft: () => (
-                  <Pressable onPress={() => navigation.openDrawer()} hitSlop={8} style={{ marginLeft: 14 }}>
-                    <BlurView
-                      intensity={40}
-                      tint={colorScheme === 'dark' ? 'dark' : 'light'}
-                      style={{
-                        width: 44, height: 44, borderRadius: 22,
-                        overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
-                        borderWidth: 0.5,
-                        borderColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
-                        backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
-                      }}
-                    >
-                      <Image
-                        source="sf:line.3.horizontal"
-                        style={{ width: 22, height: 22 }}
-                        tintColor={colorScheme === 'dark' ? '#ffffff' : '#000000'}
-                      />
-                    </BlurView>
-                  </Pressable>
-                ),
+                headerLeft: () => <GlassHamburger onPress={() => navigation.openDrawer()} />,
               })}
             />
             <Drawer.Screen name="pairing" options={{ title: 'Pair with your Mac', swipeEnabled: false, headerShown: true }} />
-            <Drawer.Screen name="notes/index" options={{ title: 'Brain' }} />
-            <Drawer.Screen name="notes/view" options={{ title: 'Note' }} />
+            <Drawer.Screen name="notes" options={{ title: 'Brain', headerShown: false }} />
             <Drawer.Screen name="pair-dev" options={{ title: 'Dev pairing', headerShown: false }} />
           </Drawer>
         </ConnectionProvider>
