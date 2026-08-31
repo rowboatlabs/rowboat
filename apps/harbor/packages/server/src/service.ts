@@ -1181,6 +1181,24 @@ export class HarborService {
     });
   }
 
+  /**
+   * Relay one ephemeral whiteboard frame to the space's subscribers. The
+   * payload stays opaque (content-blind, like presence): membership is the
+   * only check, nothing is stored, nothing is replayed. Durable board state
+   * arrives separately as blob snapshots via proposeChange.
+   */
+  async publishWhiteboard(ctx: ActorCtx, spaceId: string, boardId: string, payload: unknown): Promise<void> {
+    await this.requireMember(ctx, spaceId);
+    this.hub.publish(spaceId, {
+      kind: 'whiteboard',
+      spaceId,
+      boardId,
+      memberId: ctx.memberId,
+      at: this.now(),
+      payload,
+    });
+  }
+
   async eventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]> {
     return this.store.listEventsAfter(spaceId, afterOffset);
   }

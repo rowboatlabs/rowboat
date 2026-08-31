@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
 import { Membership, Message, MessageDeletion, MessageEdit, Reaction, Topic } from './core.js';
-import { MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetPath, MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
 // offset-based catch-up. Subscribing with `afterOffset` replays durable events
@@ -100,6 +100,25 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * kinds by contract, so this is a v0-legal addition.
    */
   z.object({ kind: z.literal('ping'), at: z.iso.datetime() }),
+  /**
+   * Ephemeral whiteboard collaboration traffic (scene diffs, cursors, idle
+   * state), fanned out to the space's subscribers. The payload is opaque to
+   * the org on purpose — the same content-blind posture as the relay servers
+   * whiteboard tools ship: membership is checked, bytes are relayed, nothing
+   * is inspected. Never persisted, never replayed, no offset; durable board
+   * state travels the normal asset path as blob snapshots, so a dropped frame
+   * costs smoothness, not data. Pre-whiteboard clients ignore unknown frame
+   * kinds by contract.
+   */
+  z.object({
+    kind: z.literal('whiteboard'),
+    spaceId: SpaceId,
+    /** The board's asset path (its identity — a board IS an asset). */
+    boardId: AssetPath,
+    memberId: MemberId,
+    at: z.iso.datetime(),
+    payload: z.unknown(),
+  }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 
@@ -117,6 +136,13 @@ export const ClientFrame = z.discriminatedUnion('kind', [
     spaceId: SpaceId,
     state: PresenceState,
     topicId: TopicId.optional(),
+  }),
+  /** Ephemeral whiteboard traffic; relayed to the space's subscribers with the sender stamped on. */
+  z.object({
+    kind: z.literal('whiteboard'),
+    spaceId: SpaceId,
+    boardId: AssetPath,
+    payload: z.unknown(),
   }),
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;

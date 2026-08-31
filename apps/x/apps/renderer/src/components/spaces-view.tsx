@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
-import type { spaces } from '@x/shared'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, PenTool, Plus } from 'lucide-react'
+import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -56,6 +56,10 @@ const MODES: { k: SpaceMode; label: string; Icon: typeof MessageSquare; kb: stri
     { k: 'read', label: 'Read', Icon: FileText, kb: '⌘2' },
     { k: 'split', label: 'Split', Icon: Columns2, kb: '⌘3' },
 ]
+
+// The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
+// the first time a board opens, never inflating the main renderer bundle.
+const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 
 
 // ---------------------------------------------------------------------------
@@ -243,7 +247,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     }
 
     const unreadPaths = useMemo(
-        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, lastReadAt, org.memberId)).map((c) => c.assetPath)),
+        // Boards are excluded: their saves are throttled snapshots, not reading
+        // material — the boards rail is their surface, not the files tree.
+        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, lastReadAt, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetPath)),
         [feed.changeSets, lastReadAt, org.memberId],
     )
 
@@ -276,12 +282,14 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
 
     // Stable listener; requestMode itself re-derives per render (splitFits).
     const requestModeRef = useRef<(next: SpaceMode) => void>(() => {})
+    const toggleWhiteboardRef = useRef<() => void>(() => {})
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if ((!e.metaKey && !e.ctrlKey) || e.altKey || e.shiftKey) return
             if (e.key === '1') { e.preventDefault(); requestModeRef.current('talk') }
             else if (e.key === '2') { e.preventDefault(); requestModeRef.current('read') }
             else if (e.key === '3') { e.preventDefault(); requestModeRef.current('split') }
+            else if (e.key === '4') { e.preventDefault(); toggleWhiteboardRef.current() }
         }
         window.addEventListener('keydown', onKey)
         return () => window.removeEventListener('keydown', onKey)
@@ -296,9 +304,29 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     /** The header buttons and ⌘1/2/3: say why when Split can't render. */
     const requestMode = (next: SpaceMode) => {
         if (next === 'split' && !splitFits) toast('Window is too narrow for Split — it will appear when you widen it')
+        // Picking a surface while a board is open leaves the board.
+        if (selection.kind === 'whiteboard') onSelect({ kind: 'general' })
         setMode(next)
     }
     requestModeRef.current = requestMode
+
+    // ------------------------------------------------------------------
+    // Whiteboard: a full-bleed surface of its own. The header button (and
+    // ⌘4) opens the space's most recent board — created on its first save
+    // when none exists yet; the rail lists and creates named boards.
+    // ------------------------------------------------------------------
+    const isWhiteboard = selection.kind === 'whiteboard'
+    const boards = entries.filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
+    const toggleWhiteboard = () => {
+        if (selection.kind === 'whiteboard') {
+            onSelect({ kind: 'general' })
+        } else {
+            const recent = [...boards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+            onSelect({ kind: 'whiteboard', path: recent?.path ?? spaces.DEFAULT_WHITEBOARD_PATH })
+            analytics.spacesTabViewed('whiteboard')
+        }
+    }
+    toggleWhiteboardRef.current = toggleWhiteboard
 
     /** Auto-hide grace: how long the rail lingers after the cursor leaves. */
     const RAIL_LINGER_MS = 3_500
@@ -332,7 +360,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // sidebar, not a flyout.
     const select = (next: RailSelection) => {
         onSelect(next)
-        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : 'topics')
+        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
+        if (next.kind === 'whiteboard') return // full-bleed surface; mode is untouched and resumes on the way back
         if ((next.kind === 'topic' || next.kind === 'draft') && mode === 'read') setMode('split')
         else if (next.kind === 'general' && mode === 'read') setMode('talk')
         else if (next.kind === 'file') {
@@ -539,7 +568,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     </span>
                 )}
                 <div className="flex-1" />
-                {effMode === 'talk' && selection.kind !== 'file' && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
+                {effMode === 'talk' && !isWhiteboard && selection.kind !== 'file' && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
                     <button
                         type="button"
                         onClick={reopenDoc}
@@ -551,6 +580,20 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         <Columns2 className="size-3 shrink-0" />
                     </button>
                 )}
+                <button
+                    type="button"
+                    title={isWhiteboard ? 'Back to the conversation ⌘4' : 'Whiteboard — draw together, live ⌘4'}
+                    onClick={toggleWhiteboard}
+                    className={cn(
+                        'inline-flex h-6 items-center gap-1.5 rounded-md border px-2 text-xs',
+                        isWhiteboard
+                            ? 'border-primary/40 bg-primary/10 text-foreground'
+                            : 'border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                    )}
+                >
+                    <PenTool className="size-3.5" />
+                    <span className="hidden lg:inline">Board</span>
+                </button>
                 <div className="inline-flex items-center rounded-md bg-muted p-0.5">
                     {MODES.map(({ k, label, Icon, kb }) => (
                         <button
@@ -560,7 +603,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             onClick={() => requestMode(k)}
                             className={cn(
                                 'inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs',
-                                mode === k ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                                mode === k && !isWhiteboard ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                             )}
                         >
                             <Icon className="size-3.5" />
@@ -613,7 +656,29 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     The stream is the expensive surface, so it never unmounts
                     while the space is open — a topic, a draft, or read mode
                     HIDE it (keep-alive), and closing them is instant. */}
-                <div className={cn('flex-1 min-w-0 min-h-0', effMode === 'read' ? 'hidden' : 'flex')}>
+                {/* Whiteboard: a full-bleed surface beside the rail; the chat
+                    surfaces below stay mounted-but-hidden (keep-alive), same
+                    as Read mode. Keyed by path so switching boards remounts a
+                    fresh collab session. */}
+                {isWhiteboard && selection.kind === 'whiteboard' && (
+                    <Suspense
+                        fallback={
+                            <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                                <Loader2 className="size-3.5 animate-spin" /> Opening board…
+                            </div>
+                        }
+                    >
+                        <WhiteboardPane
+                            key={selection.path}
+                            org={org}
+                            space={space}
+                            boardId={selection.path}
+                            memberNames={memberNames}
+                            active={active}
+                        />
+                    </Suspense>
+                )}
+                <div className={cn('flex-1 min-w-0 min-h-0', effMode === 'read' || isWhiteboard ? 'hidden' : 'flex')}>
                     {draftParent ? (
                         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
                             <DraftThreadPane
@@ -651,7 +716,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
-                                visible={active && effMode !== 'read'}
+                                visible={active && effMode !== 'read' && !isWhiteboard}
                             />
                         </section>
                     ) : null}
@@ -669,11 +734,11 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
                             onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
                             onOpenSession={onOpenSession}
-                            visible={active && effMode !== 'read' && !draftParent && !chatTopicId}
+                            visible={active && effMode !== 'read' && !isWhiteboard && !draftParent && !chatTopicId}
                         />
                     </div>
                 </div>
-                {effMode === 'split' && (
+                {effMode === 'split' && !isWhiteboard && (
                     <div
                         onMouseDown={startDocResize}
                         className={cn(
@@ -682,7 +747,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         )}
                     />
                 )}
-                {effMode !== 'talk' && (
+                {effMode !== 'talk' && !isWhiteboard && (
                     <aside
                         style={effMode === 'split' ? { width: docWidthEff } : undefined}
                         className={cn('min-w-0 min-h-0 flex', effMode === 'split' ? 'shrink-0' : 'flex-1 justify-center')}

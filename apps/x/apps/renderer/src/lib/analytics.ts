@@ -226,7 +226,7 @@ export function spacesFoldRequested() {
   posthog.capture('spaces_fold_requested')
 }
 
-export function spacesTabViewed(tab: 'general' | 'topics' | 'files') {
+export function spacesTabViewed(tab: 'general' | 'topics' | 'files' | 'whiteboard') {
   posthog.capture('spaces_tab_viewed', { tab })
 }
 

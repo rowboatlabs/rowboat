@@ -277,6 +277,33 @@ describe('SpacesLive', () => {
 
     live.close();
   });
+
+  it('whiteboard frames round-trip: opaque payload out, sender-stamped frame in', async () => {
+    const space = await ramnique.createSpace('Board Space');
+    const invite = await ramnique.createInvite(space.id);
+    await gagan.acceptInvite(invite.token);
+
+    const watcher = new SpacesLive({ baseUrl: harbor.url, token: 'dev-ramnique' });
+    const frames: Array<{ boardId: string; memberId: string; payload: unknown }> = [];
+    watcher.subscribe(space.id, (frame) => {
+      if (frame.kind === 'whiteboard') frames.push({ boardId: frame.boardId, memberId: frame.memberId, payload: frame.payload });
+    });
+    await waitFor(() => watcher.status === 'open', 'watcher socket open');
+
+    const drawer = new SpacesLive({ baseUrl: harbor.url, token: 'dev-gagan' });
+    drawer.subscribe(space.id, () => {});
+    await waitFor(() => drawer.status === 'open', 'drawer socket open');
+
+    // The payload is app vocabulary the org must relay untouched.
+    const payload = { t: 'scene', clientId: 'pane-1', syncAll: false, elements: [{ id: 'rect', version: 2 }] };
+    drawer.whiteboard(space.id, 'whiteboards/board.excalidraw', payload);
+
+    await waitFor(() => frames.length >= 1, 'whiteboard frame');
+    expect(frames[0]).toEqual({ boardId: 'whiteboards/board.excalidraw', memberId: 'gagan', payload });
+
+    watcher.close();
+    drawer.close();
+  });
 });
 
 describe('SpacesLive liveness', () => {

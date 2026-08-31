@@ -3869,6 +3869,22 @@ export const ipcSchemas = {
     }),
     res: z.object({ success: z.literal(true) }),
   },
+  // Ephemeral whiteboard traffic (scene diffs, cursors, idle) — fire-and-forget
+  // like presence: a frame sent while the org socket is down is silently
+  // dropped, and the collab loop's periodic full-scene rebroadcast heals the
+  // gap. The payload is opaque to the org (contract amendment 2026-08-31);
+  // its app-side vocabulary lives in shared/spaces.ts. Incoming whiteboard
+  // frames arrive on 'spaces:events' like every other live frame.
+  'spaces:whiteboard': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      /** The board's asset path — a board IS an asset (whiteboards/<name>.excalidraw). */
+      boardId: z.string(),
+      payload: z.custom<SpacesTypes.SpacesWhiteboardPayload>(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'spaces:events': {
     req: z.custom<SpacesBusEvent>(),
     res: z.null(),

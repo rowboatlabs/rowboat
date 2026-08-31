@@ -165,6 +165,35 @@ describe('live face', () => {
     typer.close();
   });
 
+  it('whiteboard frames relay the payload verbatim to space subscribers, stamped with the sender', async () => {
+    const watcher = await connect('dev-ramnique');
+    watcher.send({ kind: 'subscribe', spaceId });
+    await watcher.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'watcher subscribed');
+
+    const drawer = await connect('dev-gagan');
+    // The payload is opaque to the org — this shape is app-side vocabulary the
+    // server must relay untouched, unknown keys and all.
+    const payload = { t: 'SCENE_UPDATE', clientId: 'pane-1', elements: [{ id: 'rect-1', version: 3 }] };
+    drawer.send({ kind: 'whiteboard', spaceId, boardId: 'whiteboards/roadmap.excalidraw', payload });
+    await watcher.until((fs) => fs.some((f) => f.kind === 'whiteboard'), 'whiteboard frame');
+    const frame = watcher.frames.find((f) => f.kind === 'whiteboard') as Extract<ServerFrame, { kind: 'whiteboard' }>;
+    expect(frame).toMatchObject({ spaceId, boardId: 'whiteboards/roadmap.excalidraw', memberId: 'gagan' });
+    expect(frame.payload).toEqual(payload);
+    expect('offset' in frame).toBe(false); // ephemeral: no offset, never replayed
+    watcher.close();
+    drawer.close();
+  });
+
+  it('whiteboard frames to a space you are not in yield a forbidden error', async () => {
+    const other = await harbor.service.createSpace({ memberId: 'ramnique' }, 'Private board');
+    const client = await connect('dev-gagan');
+    client.send({ kind: 'whiteboard', spaceId: other.id, boardId: 'whiteboards/x.excalidraw', payload: {} });
+    await client.until((fs) => fs.some((f) => f.kind === 'error'), 'error frame');
+    const err = client.frames.find((f) => f.kind === 'error') as Extract<ServerFrame, { kind: 'error' }>;
+    expect(err.code).toBe('forbidden');
+    client.close();
+  });
+
   it('malformed frames get an error frame, not a dropped socket', async () => {
     const client = await connect('dev-ramnique');
     client.send({ kind: 'subscribe' }); // missing spaceId

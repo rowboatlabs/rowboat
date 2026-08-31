@@ -56,6 +56,7 @@ type SpacesHandlers = {
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
   'spaces:unsubscribeSpace': InvokeHandler<'spaces:unsubscribeSpace'>;
   'spaces:presence': InvokeHandler<'spaces:presence'>;
+  'spaces:whiteboard': InvokeHandler<'spaces:whiteboard'>;
   'spaces:bounceLive': InvokeHandler<'spaces:bounceLive'>;
 };
 
@@ -339,6 +340,13 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:presence': async (_event, args) => {
     orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.topicId);
+    return { success: true };
+  },
+
+  // Fire-and-forget like presence; incoming whiteboard frames ride the same
+  // per-space live subscription and reach the renderer on 'spaces:events'.
+  'spaces:whiteboard': async (_event, args) => {
+    orgs.getLive(args.orgId).whiteboard(args.spaceId, args.boardId, args.payload);
     return { success: true };
   },
 

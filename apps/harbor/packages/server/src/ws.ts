@@ -189,6 +189,10 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
             await deps.service.publishPresence({ memberId }, frame.spaceId, frame.state, frame.topicId);
             break;
           }
+          case 'whiteboard': {
+            await deps.service.publishWhiteboard({ memberId }, frame.spaceId, frame.boardId, frame.payload);
+            break;
+          }
         }
       } catch (err) {
         if (err instanceof HarborError) sendError(err.code, err.message, frame.spaceId);
