@@ -129,7 +129,7 @@ Each board is an **asset** (e.g. `whiteboards/roadmap.excalidraw`) whose version
 - Only these throttled snapshots touch the durable log — so the board appears in Files/activity as a normal versioned asset (history, trash, provenance for free), without flooding the log.
 - Nice side effect: offline edits mostly survive. On reconnect, reconcile local scene vs. latest snapshot — higher local element versions win (modulo the 24 h tombstone window).
 
-**Images in scenes:** pasted/dropped images upload as regular space blobs; map Excalidraw `fileId` → blob sha256, and resolve reads through the existing `app://space-blob/` protocol (the renderer holds no credentials, so Excalidraw's file-loading callbacks must return `app://` URLs, never org URLs).
+**Images in scenes** (revised after first dogfood, 2026-08-31): pasted/dropped images persist as regular space **assets** at `whiteboards/images/<fileId>` (blob upload + proposeChange), so they're visible in the file tree and — crucially — resolvable by anyone from the deterministic path alone: peers, cold loads, and agents via plain `read_asset`. Bytes are fetched through the existing `app://space-blob/` protocol (the renderer holds no credentials); a `{t:'files'}` frame remains as the fast path between open panes. Snapshot JSON keeps `files` empty, which keeps boards under the 1MB text cap and agent-readable even with images on them.
 
 ### 4.4 UI placement
 
@@ -200,7 +200,7 @@ apps/x is mid-way through a client–server separation (`SEPARATION_PLAN.md`, la
 
 Everything in §4/§5 landed, with two deviations that improved on the plan:
 
-1. **Snapshots are text-first, not blob-first.** A scene serializes to standard single-line `.excalidraw` JSON; below ~900KB it stores as a **text asset** (so agents read and draw boards through the plain `read_asset`/`propose_change` MCP tools — no MCP surface changes were needed for decision #2), falling back to a blob version only when embedded images push it past the 1MB text cap. The single-line shape is load-bearing: Harbor's line-merge can never produce a mangled "merged" body for it — non-identical concurrent saves always conflict (fixture 02 semantics), which the reconcile-and-retry loop handles, and identical saves merge as identical bytes (fixture 06).
+1. **Snapshots are text-first, not blob-first.** A scene serializes to standard single-line `.excalidraw` JSON with `files` empty (image bytes live as their own assets at `whiteboards/images/<fileId>` — see §4.3); below ~900KB it stores as a **text asset** (so agents read and draw boards through the plain `read_asset`/`propose_change` MCP tools — no MCP surface changes were needed for decision #2), with a blob-version fallback that the empty-`files` shape makes rare. The single-line shape is load-bearing: Harbor's line-merge can never produce a mangled "merged" body for it — non-identical concurrent saves always conflict (fixture 02 semantics), which the reconcile-and-retry loop handles, and identical saves merge as identical bytes (fixture 06).
 2. **Remote mode needed no bespoke event relay.** `spaces:events` was already in the shared `PUSH_CHANNELS` whitelist and the desktop's events client relays those payload-generically, so incoming whiteboard frames flow through child/remote server mode untouched. Only the send channel (`spaces:whiteboard`) needed the dual-surface treatment.
 
 **File map:**
