@@ -156,7 +156,7 @@ async function dispatchOAuthCompletion(url: string): Promise<void> {
 
     // Lazy-import to keep deeplink.ts free of OAuth deps and avoid a
     // potential circular dep with oauth-handler.ts.
-    const { completeRowboatGoogleConnect } = await import("./oauth-handler.js");
+    const { completeRowboatGoogleConnect } = await import("@x/core/dist/auth/oauth-flows.js");
     await completeRowboatGoogleConnect(parsed.state);
 }
 
@@ -191,7 +191,7 @@ async function dispatchPickerCompletion(url: string): Promise<void> {
     if (win && !win.isDestroyed()) focusWindow(win);
 
     // Lazy-import to keep deeplink.ts free of the picker's OAuth/knowledge deps.
-    const { completeManagedGooglePick } = await import("./google-picker-managed.js");
+    const { completeManagedGooglePick } = await import("@x/core/dist/knowledge/google-picker-managed.js");
     await completeManagedGooglePick(parsed.state);
 }
 

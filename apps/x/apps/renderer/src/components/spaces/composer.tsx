@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { uploadInputFor } from '@/lib/spaces-upload'
 import { ArrowUp, Bot, Clock, FileText, Globe, Loader2, Megaphone, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -42,12 +43,6 @@ interface AttachmentState {
     error?: string
 }
 
-/** Paste gives bytes; drag-drop and the picker give a real path (main reads from disk). */
-async function uploadInputFor(file: File): Promise<{ bytes?: ArrayBuffer; filePath?: string }> {
-    const filePath = window.electronUtils?.getPathForFile?.(file)
-    if (filePath) return { filePath }
-    return { bytes: await file.arrayBuffer() }
-}
 
 /** Per-turn agent options, sent with the invocation when the draft addresses @rowboat. */
 export interface AgentOptions {

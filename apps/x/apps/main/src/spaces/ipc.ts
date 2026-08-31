@@ -65,6 +65,7 @@ type SpacesHandlers = {
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
   'spaces:unsubscribeSpace': InvokeHandler<'spaces:unsubscribeSpace'>;
   'spaces:presence': InvokeHandler<'spaces:presence'>;
+  'spaces:bounceLive': InvokeHandler<'spaces:bounceLive'>;
 };
 
 function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
@@ -216,7 +217,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   // IPC — main reads them from disk. mime falls back to the filename extension
   // server-side sniffing has the final word anyway.
   'spaces:uploadBlob': async (_event, args) => {
-    const bytes = args.bytes !== undefined ? new Uint8Array(args.bytes) : await fs.readFile(args.filePath!);
+    const bytes = args.bytes !== undefined ? new Uint8Array(Buffer.from(args.bytes, 'base64')) : await fs.readFile(args.filePath!);
     const blob = await orgs.getClient(args.orgId).uploadBlob(args.spaceId, bytes, {
       ...(args.mime ? { declaredMime: args.mime } : {}),
     });
@@ -379,6 +380,13 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:presence': async (_event, args) => {
     orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.topicId);
+    return { success: true };
+  },
+
+  // In-process (kill-switch) parity for the wake bounce; in child/remote
+  // mode this channel forwards to the server, which owns the sockets.
+  'spaces:bounceLive': async () => {
+    orgs.bounceAllLive();
     return { success: true };
   },
 };
