@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { app, shell } from 'electron';
 import { createEventsClient, type EventsClient } from '@x/client';
-import { ipc } from '@x/shared';
+import { ipc, pushChannels } from '@x/shared';
 import {
   buildPairingPayload,
   createCoreEventSources,
@@ -108,19 +108,7 @@ interface RemoteServer {
   events: EventsClient;
 }
 
-const PUSH_CHANNELS = [
-  'turns:events',
-  'sessions:events',
-  'workspace:didChange',
-  'oauth:didConnect',
-  'composio:didConnect',
-  'chatgpt:statusChanged',
-  'terminal:data',
-  'terminal:exit',
-  'voice:tts-chunk',
-  'knowledge:didCommit',
-  'spaces:events',
-] as const;
+const PUSH_CHANNELS = pushChannels.PUSH_CHANNELS;
 
 // OAuth loopback listeners this client hosts on the server's behalf (Phase
 // 8b): the server's `loopback-bind` reverse call binds a local 127.0.0.1

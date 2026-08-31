@@ -3797,7 +3797,9 @@ export const ipcSchemas = {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      bytes: z.custom<ArrayBuffer>().optional(),
+      // Base64 — bytes must survive the JSON /rpc hop to the server (a raw
+      // ArrayBuffer stringifies to '{}' and uploads an empty blob).
+      bytes: z.string().optional(),
       filePath: z.string().optional(),
       /** Display filename (drives the markdown label / mime fallback); never storage. */
       name: z.string(),

@@ -180,7 +180,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   // machine core runs on — same-machine in child mode; with a remote server,
   // path uploads need the bytes variant (client-local file pickers gap).
   'spaces:uploadBlob': async (args) => {
-    const bytes = args.bytes !== undefined ? new Uint8Array(args.bytes) : await fs.readFile(args.filePath!);
+    const bytes = args.bytes !== undefined ? new Uint8Array(Buffer.from(args.bytes, 'base64')) : await fs.readFile(args.filePath!);
     const blob = await orgs.getClient(args.orgId).uploadBlob(args.spaceId, bytes, {
       ...(args.mime ? { declaredMime: args.mime } : {}),
     });

@@ -208,7 +208,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   // IPC — main reads them from disk. mime falls back to the filename extension
   // server-side sniffing has the final word anyway.
   'spaces:uploadBlob': async (_event, args) => {
-    const bytes = args.bytes !== undefined ? new Uint8Array(args.bytes) : await fs.readFile(args.filePath!);
+    const bytes = args.bytes !== undefined ? new Uint8Array(Buffer.from(args.bytes, 'base64')) : await fs.readFile(args.filePath!);
     const blob = await orgs.getClient(args.orgId).uploadBlob(args.spaceId, bytes, {
       ...(args.mime ? { declaredMime: args.mime } : {}),
     });

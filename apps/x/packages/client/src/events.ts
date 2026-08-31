@@ -9,18 +9,8 @@ import type { turns } from '@x/shared';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
-export type PushChannel =
-  | 'turns:events'
-  | 'sessions:events'
-  | 'workspace:didChange'
-  | 'oauth:didConnect'
-  | 'composio:didConnect'
-  | 'chatgpt:statusChanged'
-  | 'terminal:data'
-  | 'terminal:exit'
-  | 'voice:tts-chunk'
-  | 'knowledge:didCommit'
-  | 'spaces:events';
+export type { PushChannel } from '@x/shared/dist/push-channels.js';
+import type { PushChannel } from '@x/shared/dist/push-channels.js';
 
 interface ServerMessage {
   seq: number;

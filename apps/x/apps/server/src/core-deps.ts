@@ -1,6 +1,13 @@
 import container from '@x/core/dist/di/container.js';
 import { deliverLoopbackCallback } from './loopback-relay.js';
 import { spacesRpcHandlers, subscribeSpacesEvents } from './spaces-deps.js';
+import { bus as legacyRunsBus } from '@x/core/dist/runtime/legacy/bus.js';
+import { serviceBus } from '@x/core/dist/services/service_bus.js';
+import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
+import { backgroundTaskBus } from '@x/core/dist/background-tasks/bus.js';
+import { subscribeChannelsStatus } from '@x/core/dist/channels/service.js';
+import { subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
+import type { CodeRunFeed } from '@x/core/dist/code-mode/feed.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import * as workspaceCore from '@x/core/dist/workspace/workspace.js';
@@ -1539,6 +1546,43 @@ export function createCoreEventSources(): EventSources {
     subscribeTerminalEvents: (listener) => subscribeTerminalEvents(listener),
     subscribeTtsChunks: (listener) => subscribeTtsChunks(listener),
     subscribeSpacesEvents: (listener) => subscribeSpacesEvents(listener),
+    subscribeFeedEvents: (listener) => subscribeFeedEvents(listener),
+  };
+}
+
+// The remaining renderer push feeds, multiplexed as {channel, payload} — one
+// source instead of ten EventSources members. These buses/trackers live where
+// core runs; the Electron client's old watchers subscribe its own (silent)
+// module instances and relay these from the WS instead. The two trackers
+// (code-session status, home threads) are started here — this is the only
+// server-side consumer that needs them running.
+type FeedEvent = { channel: FeedChannel; payload: unknown };
+type FeedChannel =
+  | 'todo:events' | 'runs:events' | 'codeRun:events' | 'codeSession:status'
+  | 'home:threadsChanged' | 'services:events' | 'live-note-agent:events'
+  | 'bg-task-agent:events' | 'channels:status' | 'credits:didActivate';
+
+function subscribeFeedEvents(listener: (e: FeedEvent) => void): () => void {
+  const emit = (channel: FeedChannel) => (payload: unknown) => listener({ channel, payload });
+  const unsubs: Array<(() => void) | undefined> = [];
+  unsubs.push(todoBus.subscribe(emit('todo:events')));
+  unsubs.push(liveNoteBus.subscribe(emit('live-note-agent:events')));
+  unsubs.push(backgroundTaskBus.subscribe(emit('bg-task-agent:events')));
+  unsubs.push(subscribeChannelsStatus(emit('channels:status')));
+  unsubs.push(subscribeCreditActivations(emit('credits:didActivate')));
+  unsubs.push(container.resolve<CodeRunFeed>('codeRunFeed').subscribe(emit('codeRun:events')));
+  void serviceBus.subscribe(async (event) => listener({ channel: 'services:events', payload: event })).then((u) => unsubs.push(u));
+  void legacyRunsBus.subscribe('*', async (event) => listener({ channel: 'runs:events', payload: event })).then((u) => unsubs.push(u));
+  const statusTracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
+  void statusTracker.start().then(() => {
+    unsubs.push(statusTracker.onTransition((sessionId, status) =>
+      listener({ channel: 'codeSession:status', payload: { sessionId, status } })));
+  });
+  const homeThreads = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+  homeThreads.start();
+  unsubs.push(homeThreads.onChange(() => listener({ channel: 'home:threadsChanged', payload: {} })));
+  return () => {
+    for (const unsub of unsubs) unsub?.();
   };
 }
 

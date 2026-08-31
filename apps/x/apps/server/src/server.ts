@@ -12,7 +12,7 @@ import { loadServerConfig } from './config.js';
 import { acquireWorkdirLock } from './lock.js';
 import { createRpcRoutes } from './router.js';
 import { createWorkspaceRoutes } from './workspace-route.js';
-import { createWsHub, type WsHub } from './ws-hub.js';
+import { createWsHub, type WsHub, type PushChannel } from './ws-hub.js';
 import { setCapabilityTransport } from './capabilities.js';
 
 // Assembles the transport: HTTP router + workspace files + WS event hub on
@@ -32,6 +32,8 @@ export interface EventSources {
   subscribeTerminalEvents?(listener: (e: { channel: 'terminal:data' | 'terminal:exit'; payload: unknown }) => void): () => void;
   subscribeTtsChunks?(listener: (e: unknown) => void): () => void;
   subscribeSpacesEvents?(listener: (e: unknown) => void): () => void;
+  /** Multiplexed renderer feeds (todo, runs, code runs, trackers, …). */
+  subscribeFeedEvents?(listener: (e: { channel: PushChannel; payload: unknown }) => void): () => void;
 }
 
 export interface RowboatServerOptions {
@@ -192,6 +194,7 @@ export async function createRowboatServer(opts: RowboatServerOptions): Promise<R
     opts.events.subscribeWorkspaceEvents?.((e) => hub.broadcast('workspace:didChange', e)),
     opts.events.subscribeKnowledgeEvents?.(() => hub.broadcast('knowledge:didCommit', {})),
     opts.events.subscribeSpacesEvents?.((e) => hub.broadcast('spaces:events', e)),
+    opts.events.subscribeFeedEvents?.((e) => hub.broadcast(e.channel, e.payload)),
     opts.events.subscribeOAuthEvents?.((e) => hub.broadcast('oauth:didConnect', e)),
     opts.events.subscribeComposioEvents?.((e) => hub.broadcast('composio:didConnect', e)),
     opts.events.subscribeChatgptEvents?.((e) => hub.broadcast('chatgpt:statusChanged', e)),
