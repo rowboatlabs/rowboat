@@ -1,4 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
+import fs from "node:fs";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
 import os from "node:os";
@@ -98,6 +99,15 @@ process.on('uncaughtException', (err) => {
 
 // run this as early in the main process as possible
 if (started) app.quit();
+
+// Squirrel creates Windows shortcuts with this AppUserModelID shape. The
+// running Electron process must use the exact same ID or Windows can split the
+// shortcut and window into different taskbar groups and fall back to a generic
+// icon. Keep this in sync with the maker-squirrel `name` in forge.config.cjs.
+const WINDOWS_APP_USER_MODEL_ID = `com.squirrel.Rowboat-win32-${process.arch}.rowboat`;
+if (process.platform === "win32" && app.isPackaged) {
+  app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
+}
 
 // Single-instance lock: route a second launch (e.g. clicking a rowboat:// link)
 // back into the existing process via the 'second-instance' event.
@@ -442,6 +452,24 @@ function createWindow(options: { startHidden?: boolean } = {}) {
       plugins: true,
     },
   });
+
+  if (process.platform === "win32" && app.isPackaged) {
+    // Use Squirrel's stable install-root launcher and icon rather than the
+    // versioned app-* executable. That keeps a user-created taskbar pin valid
+    // after an in-place Rowboat update.
+    const squirrelInstallRoot = path.resolve(path.dirname(process.execPath), "..");
+    const installedLauncher = path.join(squirrelInstallRoot, "rowboat.exe");
+    const installedIcon = path.join(squirrelInstallRoot, "app.ico");
+    const relaunchExecutable = fs.existsSync(installedLauncher) ? installedLauncher : process.execPath;
+    const relaunchIcon = fs.existsSync(installedIcon) ? installedIcon : process.execPath;
+    win.setAppDetails({
+      appId: WINDOWS_APP_USER_MODEL_ID,
+      relaunchCommand: `"${relaunchExecutable}"`,
+      relaunchDisplayName: "Rowboat",
+      appIconPath: relaunchIcon,
+      appIconIndex: 0,
+    });
+  }
 
   configureSessionPermissions(session.defaultSession);
   configureAppDisplayMediaHandler(session.defaultSession);
