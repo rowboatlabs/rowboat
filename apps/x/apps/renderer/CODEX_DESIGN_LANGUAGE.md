@@ -193,6 +193,56 @@ Page title Display, 32px below. Section subhead Headline with 12px below. Group 
 
 Rail `bg/sidebar`, no visible border to canvas (the value shift is the border). Traffic lights inset `16px`. App wordmark row: 15/600 + chevron, trailing icon buttons. Nav rows per §3 metrics. Footer row: avatar + name UI/500 + trailing help icon, pinned with 12px padding.
 
+### Spaces — the multiplayer stream
+
+The assistant chat is a dialogue, so it gets bubbles. A space is a record of
+many voices, so it borrows Slack's anatomy instead — while staying inside the
+same tokens and type ramp. Where the two differ:
+
+| | Assistant chat | Spaces stream |
+|---|---|---|
+| Message shape | User bubble / assistant prose | Full-width attributed rows, no bubbles |
+| Identity | Implicit (you vs. the agent) | 36px avatar + name 15/600 + timestamp 12 tertiary |
+| Avatars | Circles | **Rounded squares (radius 8) for people; circles stay reserved for AI** — @rowboat renders with the round `bg/bubble` avatar |
+| Density | Body 15/26, gap 28 | Body 15/22, grouped rows |
+| Actions | Icon row under last message | Floating hover toolbar, top-right of the row |
+
+Anatomy rules:
+
+- **Row**: 8px vertical padding, full-bleed `bg/hover` wash on hover. Gutter =
+  36px avatar + 12px gap; text column aligns to the name.
+- **Grouping**: consecutive messages from the same author within 5 min drop
+  the avatar/name; the gutter shows the timestamp (11 tertiary, tabular) on
+  hover only.
+- **Mentions**: `@name` is a chip — `accent/blue` text on an 10% accent wash,
+  radius 6, padding 1px 4px, weight 500. Broadcasts (`@here`) and mentions of
+  *you* use the amber "needs you" wash instead. Mentions are references, not
+  links — no underline ever.
+- **Links**: `accent/blue`, no underline, hover underline (same as everywhere).
+- **Hover toolbar**: `bg/raised` + ring-in-shadow (`shadow-soft`), radius 10,
+  28px icon buttons, 16px icons at `ink/secondary` — react, reply in thread,
+  share, more. Appears on row hover, floats at the row's top-right.
+- **Reactions**: pills under the text — h-24px, radius full, `bg/inset`,
+  emoji 14 + count 12 tabular `ink/secondary`, 4px gaps. *You reacted* is a
+  toggle-on state, so it may take blue: 10% accent wash + `accent/blue` count.
+  Trailing ghost add-reaction button appears on row hover.
+- **Thread summary**: mini avatar stack (20px) + "N replies" `accent/blue`
+  13/500 + "Last reply …" 13 tertiary. Hover raises it: `bg/raised`,
+  hairline, radius 8, and the meta swaps to "View thread".
+- **Day divider**: hairline rule with a centered date chip — `bg/canvas`,
+  hairline border, radius full, 12/500. (The assistant chat centers plain
+  text; streams need the stronger break.)
+- **Unread marker**: `semantic/danger` hairline + "New" 11/500 in the same
+  red, right-aligned.
+- **States**: edited = "(edited)" 12 tertiary suffix; sending = 60% opacity;
+  failed = danger icon + retry ghost. Presence stays the `semantic/success`
+  dot on the avatar corner; typing = 3-dot pulse at `ink/tertiary`.
+- **Files/images**: hairline card radius 10 — filetype badge (as §5), name
+  14/500, meta 13 tertiary. Images clip to radius 10 with a hairline ring.
+- **The agent in the room**: @rowboat keeps the assistant identity — round
+  ink-dark avatar, `semantic/git` activity glyph beside the name while
+  running. Its prose renders like any member's; no bubble.
+
 ---
 
 ## 7. Motion
