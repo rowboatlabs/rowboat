@@ -5391,6 +5391,7 @@ function App() {
         htmlLink?: string
         hangoutLink?: string
         conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
+        attendees?: Array<{ displayName?: string; email?: string }>
       }
       if (!e || typeof e !== 'object') return
       const conferenceLink = extractConferenceLink(e as Record<string, unknown>)
@@ -5399,6 +5400,11 @@ function App() {
       } else if (openMeeting) {
         console.warn('[take-meeting-notes] openMeeting requested but event has no conference link', e)
       }
+      // This flow gets the full event object, not a calendar_sync path — pass
+      // the attendee list along directly so the note can stamp it.
+      const attendees = (e.attendees ?? [])
+        .map(a => (a.displayName && a.email ? `${a.displayName} <${a.email}>` : (a.displayName || a.email)))
+        .filter((a): a is string => Boolean(a))
       window.__pendingCalendarEvent = {
         summary: e.summary,
         start: e.start,
@@ -5407,6 +5413,7 @@ function App() {
         htmlLink: e.htmlLink,
         conferenceLink,
         source: source ?? 'calendar-sync',
+        ...(attendees.length > 0 ? { attendees } : {}),
       }
       window.dispatchEvent(new Event('calendar-block:join-meeting'))
     })
@@ -6359,6 +6366,7 @@ function App() {
           htmlLink: pending.htmlLink,
           conferenceLink: pending.conferenceLink,
           source: pending.source,
+          attendees: pending.attendees,
         }
       }
       // Use the same toggle flow — it will pick up pendingCalendarEventRef
