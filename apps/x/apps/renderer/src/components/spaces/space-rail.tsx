@@ -179,9 +179,8 @@ export function SpaceRail({
     const fileEntries = entries.filter((e) => !spaces.isWhiteboardPath(e.path))
     const createBoard = (name: string) => {
         setCreatingBoard(false)
-        const cleaned = name.trim().replace(/\//g, '-').replace(/\.excalidraw$/i, '')
-        if (!cleaned) return
-        onCreateBoard(`${spaces.WHITEBOARD_DIR}/${cleaned}${spaces.WHITEBOARD_EXT}`)
+        const path = spaces.whiteboardPathForName(name)
+        if (path) onCreateBoard(path)
     }
 
     const unreadTopics = topics.filter((t) => t.id !== generalId && !t.archived && isUnread(t)).length + (generalUnread > 0 ? 1 : 0)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, PenTool } from 'lucide-react'
+import { Check, ChevronDown, Loader2, PenTool } from 'lucide-react'
 import {
     CaptureUpdateAction,
     Excalidraw,
@@ -20,6 +20,8 @@ import type {
 import type { OrderedExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconcile'
 import { spaces } from '@x/shared'
+import { cn } from '@/lib/utils'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useTheme } from '@/contexts/theme-context'
 import { useSpaceLive, type OrgWithSpaces } from '@/hooks/use-spaces'
 
@@ -104,7 +106,7 @@ function initials(name: string | null | undefined): string {
     return ((parts[0][0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase()
 }
 
-export default function WhiteboardPane({ org, space, boardId, memberNames, active }: {
+export default function WhiteboardPane({ org, space, boardId, memberNames, active, boards, onSelectBoard, onCreateBoard }: {
     org: OrgWithSpaces
     space: spaces.Space
     /** The board's asset path (whiteboards/<name>.excalidraw). */
@@ -112,12 +114,30 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     memberNames: ReadonlyMap<string, string>
     /** False while the pane is on screen but the app shows another section. */
     active: boolean
+    /** Every board in the space (asset paths) — the name chip's switcher list. */
+    boards: string[]
+    onSelectBoard: (path: string) => void
+    /** Create-or-open by path (SpacePane owns the empty-snapshot propose). */
+    onCreateBoard: (path: string) => void
 }) {
     const { resolvedTheme } = useTheme()
     const [load, setLoad] = useState<LoadState>({ phase: 'loading' })
     const [retryTick, setRetryTick] = useState(0)
     /** Render mirror of collaboratorsRef — drives the top-right avatar stack. */
     const [liveCollabs, setLiveCollabs] = useState<Collaborator[]>([])
+    const [switcherOpen, setSwitcherOpen] = useState(false)
+
+    // The chip's list: every board plus this one (a just-created board can
+    // beat the entries refresh), by display name.
+    const allBoards = [...(boards.includes(boardId) ? boards : [boardId, ...boards])]
+        .sort((a, b) => spaces.whiteboardDisplayName(a).localeCompare(spaces.whiteboardDisplayName(b)))
+
+    const submitNewBoard = (name: string) => {
+        const path = spaces.whiteboardPathForName(name)
+        if (!path) return
+        setSwitcherOpen(false)
+        if (path !== boardId) onCreateBoard(path) // create-or-open; a taken name just opens
+    }
 
     const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
     /** Per-pane identity: the relay echoes our own frames back; this is how we drop them. */
@@ -542,30 +562,76 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                     // follows the app, so the editor's own toggle is off too.
                     canvasActions: { loadScene: false, saveToActiveFile: false, toggleTheme: false },
                 }}
-                // Live collaborator avatars sit where the Library button was
-                // (hidden in whiteboard.css) — same hue as each cursor.
-                renderTopRightUI={() => {
-                    if (liveCollabs.length === 0) return null
-                    return (
-                        <div className="flex items-center -space-x-1.5 px-0.5">
-                            {liveCollabs.slice(0, 5).map((c) => (
-                                <div
-                                    key={String(c.socketId)}
-                                    title={c.username ?? undefined}
-                                    className="flex size-[1.6rem] items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2 ring-background"
-                                    style={{ background: c.color?.background, opacity: c.userState === 'idle' ? 0.55 : 1 }}
+                // The top-right slot (Library button hidden in whiteboard.css):
+                // the board's name chip — which board this is, and the quick
+                // switcher — then live collaborator avatars, same hue as each
+                // person's cursor.
+                renderTopRightUI={() => (
+                    <div className="flex items-center gap-2">
+                        <Popover open={switcherOpen} onOpenChange={setSwitcherOpen}>
+                            <PopoverTrigger asChild>
+                                <button
+                                    type="button"
+                                    title="Switch board"
+                                    className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-popover px-2.5 text-[13px] font-medium text-foreground shadow-sm hover:bg-accent/50"
                                 >
-                                    {initials(c.username)}
+                                    <PenTool className="size-3.5 text-muted-foreground" />
+                                    <span className="max-w-40 truncate">{spaces.whiteboardDisplayName(boardId)}</span>
+                                    <ChevronDown className="size-3 text-muted-foreground" />
+                                </button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" sideOffset={6} className="w-60 p-1">
+                                <div className="max-h-64 overflow-y-auto">
+                                    {allBoards.map((path) => (
+                                        <button
+                                            key={path}
+                                            type="button"
+                                            onClick={() => {
+                                                setSwitcherOpen(false)
+                                                if (path !== boardId) onSelectBoard(path)
+                                            }}
+                                            className={cn(
+                                                'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px]',
+                                                path === boardId ? 'font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                                            )}
+                                        >
+                                            <span className="flex-1 truncate">{spaces.whiteboardDisplayName(path)}</span>
+                                            {path === boardId && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
+                                        </button>
+                                    ))}
                                 </div>
-                            ))}
-                            {liveCollabs.length > 5 && (
-                                <div className="flex size-[1.6rem] items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground ring-2 ring-background">
-                                    +{liveCollabs.length - 5}
+                                <div className="mt-1 border-t border-border pt-1">
+                                    <input
+                                        placeholder="New board…"
+                                        className="h-8 w-full rounded-md bg-transparent px-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:bg-accent/30"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') submitNewBoard(e.currentTarget.value)
+                                        }}
+                                    />
                                 </div>
-                            )}
-                        </div>
-                    )
-                }}
+                            </PopoverContent>
+                        </Popover>
+                        {liveCollabs.length > 0 && (
+                            <div className="flex items-center -space-x-1.5 px-0.5">
+                                {liveCollabs.slice(0, 5).map((c) => (
+                                    <div
+                                        key={String(c.socketId)}
+                                        title={c.username ?? undefined}
+                                        className="flex size-[1.6rem] items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2 ring-background"
+                                        style={{ background: c.color?.background, opacity: c.userState === 'idle' ? 0.55 : 1 }}
+                                    >
+                                        {initials(c.username)}
+                                    </div>
+                                ))}
+                                {liveCollabs.length > 5 && (
+                                    <div className="flex size-[1.6rem] items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground ring-2 ring-background">
+                                        +{liveCollabs.length - 5}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
             >
                 {/* Our menu, not the stock one: the default carries Excalidraw's
                     socials/help links — this is Rowboat's canvas, so only the

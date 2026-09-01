@@ -179,6 +179,12 @@ export function whiteboardDisplayName(path: string): string {
   return base.endsWith(WHITEBOARD_EXT) ? base.slice(0, -WHITEBOARD_EXT.length) : base;
 }
 
+/** A typed board name → its asset path; null when nothing usable remains. One cleaner for every create surface. */
+export function whiteboardPathForName(name: string): string | null {
+  const cleaned = name.trim().replace(/\//g, '-').replace(/\.excalidraw$/i, '').trim();
+  return cleaned ? `${WHITEBOARD_DIR}/${cleaned}${WHITEBOARD_EXT}` : null;
+}
+
 // ---------------------------------------------------------------------------
 // Mention scanning — one implementation for the renderer (composer highlight,
 // @rowboat trigger) and main (mention notifications).

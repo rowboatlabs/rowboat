@@ -623,10 +623,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     )}
                 >
                     <PenTool className="size-3.5" />
-                    {/* Which board is open — the confirmation that creating/switching worked. */}
-                    <span className="hidden lg:inline max-w-32 truncate">
-                        {boardPath ? spaces.whiteboardDisplayName(boardPath) : 'Board'}
-                    </span>
+                    {/* Stable identity on purpose: always "Board", active state via the
+                        highlight — the board's NAME lives in the chip on the canvas. */}
+                    <span className="hidden lg:inline">Board</span>
                 </button>
                 <div className="inline-flex items-center rounded-md bg-muted p-0.5">
                     {MODES.map(({ k, label, Icon, kb }) => (
@@ -717,6 +716,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                 boardId={boardPath}
                                 memberNames={memberNames}
                                 active={active}
+                                boards={boards.map((b) => b.path)}
+                                onSelectBoard={(path) => select({ kind: 'whiteboard', path })}
+                                onCreateBoard={createBoard}
                             />
                         </Suspense>
                     </div>
