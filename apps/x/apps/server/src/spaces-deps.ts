@@ -56,7 +56,8 @@ type SpacesRpcChannel =
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
   | 'spaces:listMessages' | 'spaces:postMessage' | 'spaces:manageTopic' | 'spaces:reactToMessage'
-  | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:invokeRowboat' | 'spaces:topicSession'
+  | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
+  | 'spaces:invokeRowboat' | 'spaces:topicSession'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:bounceLive';
 
 type SpacesHandlers = {
@@ -228,6 +229,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
       ...(args.anchorMessageId ? { anchorMessageId: args.anchorMessageId } : {}),
       body: args.body,
+      ...(args.poll ? { poll: args.poll } : {}),
       actingMode: 'direct',
     }),
 
@@ -252,6 +254,20 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:editMessage': async (args) => ({
     message: await orgs.getClient(args.orgId).editMessage(args.spaceId, args.messageId, {
       body: args.body,
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:votePoll': async (args) => ({
+    message: await orgs.getClient(args.orgId).votePoll(args.spaceId, args.messageId, {
+      answerId: args.answerId,
+      action: args.action,
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:endPoll': async (args) => ({
+    message: await orgs.getClient(args.orgId).endPoll(args.spaceId, args.messageId, {
       actingMode: 'direct',
     }),
   }),

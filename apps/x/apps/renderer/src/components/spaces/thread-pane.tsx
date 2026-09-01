@@ -19,7 +19,8 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, mergeMessages, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
 import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
-import { parsePollArgs, postPoll } from '@/lib/spaces-poll'
+import { PollDialog } from '@/components/spaces/poll-dialog'
+import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { attributionLabel, formatFeedTime, resolveMentions, shortId } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
@@ -354,6 +355,83 @@ export function ThreadPane({
     /** The message being forwarded — non-null renders the destination dialog. */
     const [forwarding, setForwarding] = useState<spaces.Message | null>(null)
 
+    /** Poll creation — true renders the dialog. */
+    const [pollOpen, setPollOpen] = useState(false)
+    const createPoll = async (input: spaces.SpacesNewPollInput) => {
+        try {
+            const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, topicId, input })
+            echo(posted)
+            markTopicRead(org.id, space.id, topicId)
+            analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: false })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
+            throw err
+        }
+    }
+
+    /** Replace one message in place (the folded result of a poll call). */
+    const reconcile = (updated: spaces.Message) =>
+        setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+
+    // Poll votes, mirroring general's: optimistic fold, confirm, revert on failure.
+    const votePoll = async (message: spaces.Message, answerIds: number[]) => {
+        if (!message.poll || answerIds.length === 0) return
+        let optimistic = message.poll
+        for (const answerId of answerIds) {
+            optimistic = applyPollVote(optimistic, { answerId, memberId: org.memberId, action: 'added' })
+        }
+        reconcile({ ...message, poll: optimistic })
+        try {
+            let updated: spaces.Message | undefined
+            for (const answerId of answerIds) {
+                const res = await window.ipc.invoke('spaces:votePoll', {
+                    orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'add',
+                })
+                updated = res.message
+            }
+            if (updated) reconcile(updated)
+        } catch (err) {
+            reconcile(message)
+            toast(err instanceof Error ? err.message : 'Could not vote', 'error')
+        }
+    }
+
+    const removePollVote = async (message: spaces.Message) => {
+        if (!message.poll) return
+        const mine = myPollVotes(message.poll, org.memberId)
+        if (mine.length === 0) return
+        let optimistic = message.poll
+        for (const answerId of mine) {
+            optimistic = applyPollVote(optimistic, { answerId, memberId: org.memberId, action: 'removed' })
+        }
+        reconcile({ ...message, poll: optimistic })
+        try {
+            let updated: spaces.Message | undefined
+            for (const answerId of mine) {
+                const res = await window.ipc.invoke('spaces:votePoll', {
+                    orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'remove',
+                })
+                updated = res.message
+            }
+            if (updated) reconcile(updated)
+        } catch (err) {
+            reconcile(message)
+            toast(err instanceof Error ? err.message : 'Could not remove the vote', 'error')
+        }
+    }
+
+    const endPoll = async (message: spaces.Message) => {
+        if (!window.confirm('End this poll now? Voting stops immediately.')) return
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:endPoll', {
+                orgId: org.id, spaceId: space.id, messageId: message.id,
+            })
+            reconcile(updated)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not end the poll', 'error')
+        }
+    }
+
     // Optimistic rewrite, mirroring general's.
     const editMessage = async (message: spaces.Message, body: string) => {
         setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, body, editedAt: new Date().toISOString() } : m)))
@@ -439,6 +517,9 @@ export function ThreadPane({
                 saved={savedIds.has(message.id)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
+                onVotePoll={(m, answerIds) => void votePoll(m, answerIds)}
+                onRemovePollVote={(m) => void removePollVote(m)}
+                onEndPoll={(m) => void endPoll(m)}
                 dense
             />,
         )
@@ -643,6 +724,9 @@ export function ThreadPane({
             {forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
+            {pollOpen && (
+                <PollDialog onClose={() => setPollOpen(false)} onSubmit={createPoll} />
+            )}
             <Composer
                 placeholder="Reply…"
                 busy={false}
@@ -653,6 +737,7 @@ export function ThreadPane({
                     })
                     toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
                 }}
+                onCreatePoll={() => setPollOpen(true)}
                 onType={onType}
                 seed={seed}
                 autoFocus
@@ -675,23 +760,8 @@ export function ThreadPane({
                     },
                     {
                         name: 'poll',
-                        args: '<question> | <option> | <option>',
-                        hint: 'Post a poll — tap a number to vote',
-                        run: async (args) => {
-                            const input = parsePollArgs(args)
-                            if (typeof input === 'string') {
-                                toast(input, 'info')
-                                return
-                            }
-                            try {
-                                const { posted, final } = await postPoll({ orgId: org.id, spaceId: space.id, topicId, input })
-                                echo(posted)
-                                setMessages((prev) => prev.map((m) => (m.id === final.id ? final : m)))
-                                markTopicRead(org.id, space.id, topicId)
-                            } catch (err) {
-                                toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
-                            }
-                        },
+                        hint: 'Create a poll — pick answers, votes tally live',
+                        run: () => setPollOpen(true),
                     },
                     topic?.archived
                         ? { name: 'unarchive', hint: 'Unarchive this topic', run: () => void manage({ action: 'unarchive' }) }

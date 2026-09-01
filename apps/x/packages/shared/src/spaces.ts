@@ -10,6 +10,11 @@ import type {
   CreateInviteResult,
   Member,
   Message,
+  Poll,
+  PollAnswer,
+  PollEnd,
+  PollVote,
+  PollVoteGroup,
   ProposeChangeResult,
   Reaction,
   ReactionGroup,
@@ -39,6 +44,11 @@ export type {
   CreateInviteResult,
   Member,
   Message,
+  Poll,
+  PollAnswer,
+  PollEnd,
+  PollVote,
+  PollVoteGroup,
   ProposeChangeResult,
   Reaction,
   ReactionGroup,
@@ -49,6 +59,20 @@ export type {
   Topic,
   TopicListing,
 };
+
+/**
+ * Poll creation as the renderer sends it (the wire's `NewPoll` block on
+ * postMessage): the org assigns answer ids and turns the duration into an
+ * expiry. Mirrored here as a plain interface — protocol-shaped payloads
+ * cross IPC via z.custom<T>() like everything else in this file.
+ */
+export interface SpacesNewPollInput {
+  question: string;
+  answers: Array<{ text: string; emoji?: string }>;
+  /** Hours until the poll closes. Default 24, max 768 (32 days). */
+  durationHours?: number;
+  allowMultiselect?: boolean;
+}
 
 /** An org this install is signed into — the renderer's view (auth details stay in core). */
 export const SpacesOrgSummary = z.object({

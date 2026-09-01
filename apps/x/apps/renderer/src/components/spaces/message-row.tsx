@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
 import { EmojiPickerPopover } from '@/components/spaces/emoji-picker'
 import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
+import { PollCard } from '@/components/spaces/poll-card'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { frequentEmoji, noteEmojiUsed } from '@/lib/emoji-data'
 import { PIN_EMOJI } from '@/lib/spaces-corpus'
@@ -113,7 +114,7 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
@@ -143,6 +144,12 @@ function MessageRowImpl({
     /** A failed optimistic send: try it again / drop the row. */
     onRetryFailed?: (message: spaces.Message) => void
     onDiscardFailed?: (message: spaces.Message) => void
+    /** Submits the poll selection (one answer, or several on multiselect). */
+    onVotePoll?: (message: spaces.Message, answerIds: number[]) => void
+    /** Withdraws all of the viewer's poll votes. */
+    onRemovePollVote?: (message: spaces.Message) => void
+    /** Ends the poll early — only offered on the author's own, open polls. */
+    onEndPoll?: (message: spaces.Message) => void
     /** Thread panes use the smaller avatar. */
     dense?: boolean
 }) {
@@ -157,7 +164,8 @@ function MessageRowImpl({
     // can act on them either.
     const unconfirmed = !!message.pending || !!message.failed
     const canDelete = !!onDelete && !deleted && !unconfirmed && selfMemberId === message.author.memberId
-    const canEdit = !!onEdit && !deleted && !unconfirmed && selfMemberId === message.author.memberId
+    // Poll messages are immutable once posted (the org refuses too).
+    const canEdit = !!onEdit && !deleted && !unconfirmed && !message.poll && selfMemberId === message.author.memberId
     // The inline editor: null = not editing; a string = the draft body.
     const [editDraft, setEditDraft] = useState<string | null>(null)
     const commitEdit = () => {
@@ -259,6 +267,18 @@ function MessageRowImpl({
                     </div>
                 ) : deleted ? (
                     <div className="text-sm italic leading-relaxed text-muted-foreground">This message was deleted</div>
+                ) : message.poll ? (
+                    // The card replaces the body — the body is the poll's
+                    // markdown fallback for poll-blind clients, not content.
+                    <PollCard
+                        message={message}
+                        poll={message.poll}
+                        selfMemberId={selfMemberId}
+                        memberNames={memberNames}
+                        onVote={onVotePoll}
+                        onRemoveVote={onRemovePollVote}
+                        onEndPoll={onEndPoll}
+                    />
                 ) : (
                     <div className={cn(MESSAGE_PROSE, message.pending && 'opacity-60')}>
                         <SpaceMarkdown body={message.body} />

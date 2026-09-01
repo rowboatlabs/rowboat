@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Membership, Message, MessageDeletion, MessageEdit, Reaction, Topic } from './core.js';
+import { Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Topic } from './core.js';
 import { MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
@@ -45,6 +45,26 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('message_edited'),
     edit: MessageEdit,
+  }),
+  /**
+   * A vote toggled on or off a poll answer — reaction semantics (idempotent
+   * re-adds/re-removes emit nothing). On single-select polls a vote move is
+   * two events (removed, then added) appended under one space lock.
+   */
+  z.object({
+    type: z.literal('poll_vote'),
+    vote: PollVote,
+    action: z.enum(['added', 'removed']),
+  }),
+  /**
+   * The author ended a poll early. Natural expiry emits NO event — a poll is
+   * closed the moment `expiresAt` passes, computed from data already on the
+   * wire (lazy expiry, no server job). The stored `message` event keeps its
+   * at-post poll; folding clients apply this to set `endedAt`.
+   */
+  z.object({
+    type: z.literal('poll_ended'),
+    end: PollEnd,
   }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;

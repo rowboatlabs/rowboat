@@ -302,6 +302,26 @@ export const MIGRATIONS: Migration[] = [
       `alter table messages add column if not exists edited_at text`,
     ],
   },
+  {
+    id: '011-polls',
+    statements: [
+      // Discord-model polls: the poll definition (question, answers, expiry,
+      // multiselect, endedAt) rides the message row as jsonb — immutable
+      // content except endedAt. Votes mirror reactions: one row per
+      // (message, answer, member) — the primary key IS the toggle invariant.
+      `alter table messages add column if not exists poll jsonb`,
+      `create table if not exists poll_votes (
+        space_id text not null,
+        message_id text not null,
+        answer_id int not null,
+        member_id text not null,
+        attribution jsonb not null,
+        at text not null,
+        primary key (space_id, message_id, answer_id, member_id)
+      )`,
+      `create index if not exists poll_votes_space_message on poll_votes (space_id, message_id)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

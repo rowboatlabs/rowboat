@@ -26,6 +26,24 @@ import {
 // fields keep their meaning. The admin surface (/internal/*) is deliberately
 // NOT in this package — it is control-plane-facing (spec §4).
 
+/**
+ * Poll creation (the Discord create-request asymmetry: a duration in, an
+ * expiry out — the org stamps `expiresAt` from its own clock). Answer ids are
+ * server-assigned. The message's `body` must carry a plain-markdown fallback
+ * rendering of the poll (question + numbered options) so poll-blind clients
+ * still show it; poll-aware clients render the card instead.
+ */
+const NewPoll = z.object({
+  question: z.string().min(1).max(300),
+  answers: z
+    .array(z.object({ text: z.string().min(1).max(55), emoji: ReactionEmoji.optional() }))
+    .min(2)
+    .max(10),
+  /** Hours until the poll closes. Default 24, max 32 days — Discord's bounds. */
+  durationHours: z.number().int().min(1).max(768).optional(),
+  allowMultiselect: z.boolean().optional(),
+});
+
 const NewTopicMessage = z.object({
   /** Present = reply into this topic; absent = create a topic (first message becomes the title). */
   topicId: TopicId.optional(),
@@ -38,6 +56,8 @@ const NewTopicMessage = z.object({
    */
   anchorMessageId: MessageId.optional(),
   body: z.string().min(1).max(65_536),
+  /** Present = this message carries a poll (immutable once posted; editMessage refuses). */
+  poll: NewPoll.optional(),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),
 });
@@ -338,6 +358,43 @@ export const routes = {
     request: z.object({
       emoji: ReactionEmoji,
       action: z.enum(['add', 'remove']),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ message: Message }),
+  },
+  /**
+   * Toggle a vote on a poll answer (reaction semantics: per-(member, answer),
+   * idempotent no-op on re-add/re-remove). Single-select polls MOVE a vote —
+   * adding while another answer holds yours removes that one atomically (a
+   * `removed` then an `added` event under one lock). Closed polls (`endedAt`
+   * set or `expiresAt` passed) and tombstones refuse; agents cannot vote
+   * (actingMode must be 'direct' — the Discord posture: apps don't vote).
+   * Returns the message with the poll's votes (and reactions) folded.
+   */
+  votePoll: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/messages/:messageId/poll/votes',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    request: z.object({
+      answerId: z.number().int().min(1),
+      action: z.enum(['add', 'remove']),
+      actingMode: ActingMode,
+      agentName: z.string().max(64).optional(),
+    }),
+    response: z.object({ message: Message }),
+  },
+  /**
+   * End a poll early — author-only, like deletion (the content plane stays
+   * role-flat). Sets `endedAt` and emits `poll_ended`. Ending a poll that is
+   * already closed (early-ended or naturally expired) is a 200 no-op with no
+   * event. Natural expiry needs no call — clients compute it from `expiresAt`.
+   */
+  endPoll: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/messages/:messageId/poll/end',
+    params: z.object({ spaceId: SpaceId, messageId: MessageId }),
+    request: z.object({
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),

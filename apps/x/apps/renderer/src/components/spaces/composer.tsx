@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, Bot, Clock, FileText, Globe, Loader2, Megaphone, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Bot, Clock, FileText, Globe, Loader2, Megaphone, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -82,11 +82,13 @@ const ASK_COMMAND: CommandEntry = { name: 'ask', args: '<question>', hint: 'Ask 
 /** A draft that IS a command: "/name" or "/name args". */
 const COMMAND_RE = /^\/([a-zA-Z]+)(?:\s+([\s\S]*))?$/
 
-export function Composer({ placeholder, onSend, onSchedule, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey, commands = [] }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey, commands = [] }: {
     placeholder: string
     onSend: (body: string, agent?: AgentOptions) => Promise<void>
     /** Send-later: the clock menu hands the built body + fire time here. */
     onSchedule?: (body: string, at: Date) => Promise<void>
+    /** Opens the poll creation dialog (same flow as /poll) — the button beside attach. */
+    onCreatePoll?: () => void
     busy: boolean
     autoFocus?: boolean
     /** Called on every keystroke — drives the typing presence lease. */
@@ -757,6 +759,16 @@ export function Composer({ placeholder, onSend, onSchedule, busy, autoFocus, onT
                                 <Paperclip className="size-4" />
                             </button>
                         </>
+                    )}
+                    {onCreatePoll && (
+                        <button
+                            type="button"
+                            onClick={onCreatePoll}
+                            title="Create a poll"
+                            className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                            <BarChart3 className="size-4" />
+                        </button>
                     )}
                     <button
                         type="button"

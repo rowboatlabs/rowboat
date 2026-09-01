@@ -3711,6 +3711,8 @@ export const ipcSchemas = {
       anchorChangeSetId: z.string().optional(),
       anchorMessageId: z.string().optional(),
       body: z.string(),
+      /** Present = the message carries a poll; body must be its markdown fallback. */
+      poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
     }),
     res: z.custom<SpacesPostResult>(),
   },
@@ -3754,6 +3756,29 @@ export const ipcSchemas = {
       spaceId: z.string(),
       messageId: z.string(),
       body: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // Poll vote toggle — reaction semantics on the org (idempotent; single-
+  // select add MOVES the member's vote); actingMode is stamped 'direct' by
+  // main, which is also the rule (agents cannot vote). Returns the message
+  // with the poll's votes folded.
+  'spaces:votePoll': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      answerId: z.number(),
+      action: z.enum(['add', 'remove']),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // End a poll early — author-only on the org; idempotent once closed.
+  'spaces:endPoll': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
     }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
   },

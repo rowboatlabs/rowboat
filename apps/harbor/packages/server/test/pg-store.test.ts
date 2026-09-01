@@ -187,6 +187,43 @@ describe('PgStore through the service', () => {
     expect(await service.headOffset(spaceId)).toBe(head);
   });
 
+  it('polls round-trip through jsonb: definition on the row, votes fold, single-select move, early end', async () => {
+    const posted = await service.postMessage(ram, spaceId, {
+      body: '📊 **Where to?**',
+      poll: { question: 'Where to?', answers: [{ text: 'A' }, { text: 'B', emoji: '🅱️' }], durationHours: 2 },
+      actingMode: 'direct',
+    });
+    const messageId = posted.message.id;
+    expect(posted.message.poll?.answers).toEqual([
+      { id: 1, text: 'A' },
+      { id: 2, text: 'B', emoji: '🅱️' },
+    ]);
+
+    // Votes fold from the poll_votes table; the single-select move rewrites in one lock.
+    await service.votePoll(gagan, spaceId, messageId, { answerId: 1, action: 'add', actingMode: 'direct' });
+    const moved = await service.votePoll(gagan, spaceId, messageId, { answerId: 2, action: 'add', actingMode: 'direct' });
+    expect(moved.poll?.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
+    const listed = await service.listMessages(ram, spaceId, posted.topic.id);
+    expect(listed.messages.find((m) => m.id === messageId)?.poll?.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
+
+    // Early end stamps the row's poll jsonb; the stored message event keeps its at-post poll.
+    const ended = await service.endPoll(ram, spaceId, messageId, { actingMode: 'direct' });
+    expect(ended.poll?.endedAt).toBeTruthy();
+    expect((await store.getMessage(spaceId, messageId))?.poll?.endedAt).toBe(ended.poll?.endedAt);
+    const events = await service.eventsAfter(spaceId, 0);
+    const messageEvent = events.find((e) => e.event.type === 'message' && e.event.message.id === messageId)!;
+    expect((messageEvent.event as { message: { poll?: { endedAt?: string } } }).message.poll?.endedAt).toBeUndefined();
+    expect(events.some((e) => e.event.type === 'poll_ended')).toBe(true);
+
+    // Deletion redacts the poll from the row and the stored event alike.
+    const deleted = await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
+    expect(deleted.poll).toBeUndefined();
+    const redacted = (await service.eventsAfter(spaceId, 0)).find(
+      (e) => e.event.type === 'message' && e.event.message.id === messageId,
+    )!;
+    expect((redacted.event as { message: { poll?: unknown } }).message.poll).toBeUndefined();
+  });
+
   it('identity mapping: (iss, sub) → member, upsert repoints, unmapped is undefined', async () => {
     const iss = 'https://as.example/auth/v1';
     expect(await store.getMemberByIdentity(iss, 'sub-1')).toBeUndefined();

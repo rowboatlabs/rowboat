@@ -5,12 +5,13 @@ import type {
   Member,
   Membership,
   Message,
+  Poll,
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
+import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredInvite, StoredPollVote, StoredReaction, StoredSpaceBlob } from './store.js';
 
 // The real Harbor's storage: mergeable text lives inline in Postgres (≤1MB,
 // riding the log rows); binary versions carry {hash, size, mime} pointing into
@@ -114,6 +115,7 @@ interface MessageRow {
   posted_at: string;
   deleted_at: string | null;
   edited_at: string | null;
+  poll: Poll | null;
   stream_offset: number;
 }
 
@@ -130,6 +132,8 @@ function rowToMessage(r: MessageRow): Message {
     ...(r.edited_at !== null ? { editedAt: r.edited_at } : {}),
     // Live reaction state is folded in by the service on reads; rows carry none.
     reactions: [],
+    // The poll definition rides the row; live votes fold in on reads too.
+    ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
   };
 }
 
@@ -146,6 +150,24 @@ function rowToReaction(r: ReactionRow): StoredReaction {
     spaceId: r.space_id,
     messageId: r.message_id,
     emoji: r.emoji,
+    by: r.attribution,
+    at: r.at,
+  };
+}
+
+interface PollVoteRow {
+  space_id: string;
+  message_id: string;
+  answer_id: number;
+  attribution: StoredPollVote['by'];
+  at: string;
+}
+
+function rowToPollVote(r: PollVoteRow): StoredPollVote {
+  return {
+    spaceId: r.space_id,
+    messageId: r.message_id,
+    answerId: r.answer_id,
     by: r.attribution,
     at: r.at,
   };
@@ -592,9 +614,18 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, topic_id, author, body, posted_at, stream_offset)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7)`,
-      [message.id, message.spaceId, message.topicId, JSON.stringify(message.author), message.body, message.postedAt, message.offset],
+      `insert into messages (id, space_id, topic_id, author, body, posted_at, stream_offset, poll)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb)`,
+      [
+        message.id,
+        message.spaceId,
+        message.topicId,
+        JSON.stringify(message.author),
+        message.body,
+        message.postedAt,
+        message.offset,
+        message.poll ? JSON.stringify(message.poll) : null,
+      ],
     );
   }
 
@@ -613,12 +644,13 @@ export class PgStore implements Store {
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', deleted_at = $3 where space_id = $1 and id = $2`,
+      `update messages set body = '', deleted_at = $3, poll = null where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
-    // Redact the stored message event too — replay must never resurrect the body.
+    // Redact the stored message event too — replay must never resurrect the
+    // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(jsonb_set(event, '{message,body}', '""'::jsonb), '{message,deletedAt}', to_jsonb($3::text))
+      `update events set event = jsonb_set(jsonb_set(event, '{message,body}', '""'::jsonb), '{message,deletedAt}', to_jsonb($3::text)) #- '{message,poll}'
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],
     );
@@ -679,6 +711,65 @@ export class PgStore implements Store {
       [spaceId, topicId],
     );
     return rows.map(rowToReaction);
+  }
+
+  // --- poll votes ------------------------------------------------------------
+
+  async getPollVote(
+    spaceId: string,
+    messageId: string,
+    answerId: number,
+    memberId: string,
+  ): Promise<StoredPollVote | undefined> {
+    const rows = await this.sql.query<PollVoteRow>(
+      'select * from poll_votes where space_id = $1 and message_id = $2 and answer_id = $3 and member_id = $4',
+      [spaceId, messageId, answerId, memberId],
+    );
+    return rows[0] ? rowToPollVote(rows[0]) : undefined;
+  }
+
+  async putPollVote(vote: StoredPollVote): Promise<void> {
+    await this.sql.query(
+      `insert into poll_votes (space_id, message_id, answer_id, member_id, attribution, at)
+       values ($1, $2, $3, $4, $5::jsonb, $6)
+       on conflict (space_id, message_id, answer_id, member_id) do update set attribution = excluded.attribution, at = excluded.at`,
+      [vote.spaceId, vote.messageId, vote.answerId, vote.by.memberId, JSON.stringify(vote.by), vote.at],
+    );
+  }
+
+  async deletePollVote(spaceId: string, messageId: string, answerId: number, memberId: string): Promise<void> {
+    await this.sql.query(
+      'delete from poll_votes where space_id = $1 and message_id = $2 and answer_id = $3 and member_id = $4',
+      [spaceId, messageId, answerId, memberId],
+    );
+  }
+
+  async listPollVotesByMessage(spaceId: string, messageId: string): Promise<StoredPollVote[]> {
+    const rows = await this.sql.query<PollVoteRow>(
+      'select * from poll_votes where space_id = $1 and message_id = $2 order by at, member_id',
+      [spaceId, messageId],
+    );
+    return rows.map(rowToPollVote);
+  }
+
+  async listPollVotesByTopic(spaceId: string, topicId: string): Promise<StoredPollVote[]> {
+    const rows = await this.sql.query<PollVoteRow>(
+      `select v.* from poll_votes v
+       join messages m on m.space_id = v.space_id and m.id = v.message_id
+       where v.space_id = $1 and m.topic_id = $2 order by v.at, v.member_id`,
+      [spaceId, topicId],
+    );
+    return rows.map(rowToPollVote);
+  }
+
+  async markPollEnded(spaceId: string, messageId: string, endedAt: string): Promise<void> {
+    // The stored message event keeps its at-post poll — replay folds the
+    // poll_ended event (nothing to redact, unlike deletion/editing).
+    await this.sql.query(
+      `update messages set poll = jsonb_set(poll, '{endedAt}', to_jsonb($3::text))
+       where space_id = $1 and id = $2 and poll is not null`,
+      [spaceId, messageId, endedAt],
+    );
   }
 
   // --- invites ---------------------------------------------------------------

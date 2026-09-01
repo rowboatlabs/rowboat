@@ -4,6 +4,7 @@ import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import {
     GENERAL_SEED_BODY, applyReaction, findGeneralTopic, isGeneralSeedMessage, mergeMessages, parseThreadMarker, type ThreadMarker,
 } from '@/lib/spaces-conventions'
+import { applyPollVote } from '@/lib/spaces-poll'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceFeed, useSpaceLive } from '@/hooks/use-spaces'
 import { effectiveNotifyLevel, ensureNotifyPrefs, subscribeNotifyPrefs } from '@/hooks/use-spaces-notify'
 import { getTopicLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
@@ -359,6 +360,32 @@ function wireBus(): void {
                         m.id === reaction.messageId
                             ? { ...m, reactions: applyReaction(m.reactions, { emoji: reaction.emoji, memberId: reaction.by.memberId, action }) }
                             : m,
+                    ),
+                })
+            }
+        } else if (frame.event.type === 'poll_vote') {
+            // Fold like reactions — and like them, the viewer's own toggles
+            // are EXCLUDED (they reconcile through their HTTP response; a
+            // late echo would fight the optimistic fold).
+            const { vote, action } = frame.event
+            const selfId = getSpacesOrgs().find((o) => o.id === event.orgId)?.memberId
+            if (vote.by.memberId === selfId) return
+            if (state?.topic && state.messages.some((m) => m.id === vote.messageId)) {
+                setGeneral(k, {
+                    messages: state.messages.map((m) =>
+                        m.id === vote.messageId && m.poll
+                            ? { ...m, poll: applyPollVote(m.poll, { answerId: vote.answerId, memberId: vote.by.memberId, action }) }
+                            : m,
+                    ),
+                })
+            }
+        } else if (frame.event.type === 'poll_ended') {
+            // Idempotent stamp — own ends included, like edits.
+            const { end } = frame.event
+            if (state?.topic && state.messages.some((m) => m.id === end.messageId)) {
+                setGeneral(k, {
+                    messages: state.messages.map((m) =>
+                        m.id === end.messageId && m.poll ? { ...m, poll: { ...m.poll, endedAt: end.at } } : m,
                     ),
                 })
             }

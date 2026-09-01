@@ -53,6 +53,8 @@ type SpacesHandlers = {
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
   'spaces:deleteMessage': InvokeHandler<'spaces:deleteMessage'>;
   'spaces:editMessage': InvokeHandler<'spaces:editMessage'>;
+  'spaces:votePoll': InvokeHandler<'spaces:votePoll'>;
+  'spaces:endPoll': InvokeHandler<'spaces:endPoll'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:getNotifyPrefs': InvokeHandler<'spaces:getNotifyPrefs'>;
@@ -292,6 +294,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
       ...(args.anchorMessageId ? { anchorMessageId: args.anchorMessageId } : {}),
       body: args.body,
+      ...(args.poll ? { poll: args.poll } : {}),
       actingMode: 'direct',
     }),
 
@@ -316,6 +319,20 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:editMessage': async (_event, args) => ({
     message: await orgs.getClient(args.orgId).editMessage(args.spaceId, args.messageId, {
       body: args.body,
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:votePoll': async (_event, args) => ({
+    message: await orgs.getClient(args.orgId).votePoll(args.spaceId, args.messageId, {
+      answerId: args.answerId,
+      action: args.action,
+      actingMode: 'direct',
+    }),
+  }),
+
+  'spaces:endPoll': async (_event, args) => ({
+    message: await orgs.getClient(args.orgId).endPoll(args.spaceId, args.messageId, {
       actingMode: 'direct',
     }),
   }),

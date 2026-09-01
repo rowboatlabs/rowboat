@@ -15,7 +15,8 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
-import { parsePollArgs, postPoll } from '@/lib/spaces-poll'
+import { PollDialog } from '@/components/spaces/poll-dialog'
+import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markRead, markTopicRead } from '@/lib/spaces-read-state'
@@ -286,6 +287,82 @@ export function GeneralStream({
     /** The message being forwarded — non-null renders the destination dialog. */
     const [forwarding, setForwarding] = useState<spaces.Message | null>(null)
 
+    /** Poll creation — true renders the dialog. */
+    const [pollOpen, setPollOpen] = useState(false)
+    const createPoll = async (input: spaces.SpacesNewPollInput) => {
+        if (!generalId) return
+        try {
+            const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, topicId: generalId, input })
+            ingestGeneralMessage(org.id, space.id, posted)
+            markTopicRead(org.id, space.id, generalId)
+            analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: false })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
+            throw err
+        }
+    }
+
+    // Poll votes, the reactions pattern: fold optimistically, confirm with the
+    // org's folded answer, put the old state back on failure. Multiselect
+    // submits one toggle per picked answer; the last response wins the fold.
+    const votePoll = async (message: spaces.Message, answerIds: number[]) => {
+        if (!message.poll || answerIds.length === 0) return
+        let optimistic = message.poll
+        for (const answerId of answerIds) {
+            optimistic = applyPollVote(optimistic, { answerId, memberId: org.memberId, action: 'added' })
+        }
+        updateGeneralMessage(org.id, space.id, { ...message, poll: optimistic })
+        try {
+            let updated: spaces.Message | undefined
+            for (const answerId of answerIds) {
+                const res = await window.ipc.invoke('spaces:votePoll', {
+                    orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'add',
+                })
+                updated = res.message
+            }
+            if (updated) updateGeneralMessage(org.id, space.id, updated)
+        } catch (err) {
+            updateGeneralMessage(org.id, space.id, message)
+            toast(err instanceof Error ? err.message : 'Could not vote', 'error')
+        }
+    }
+
+    const removePollVote = async (message: spaces.Message) => {
+        if (!message.poll) return
+        const mine = myPollVotes(message.poll, org.memberId)
+        if (mine.length === 0) return
+        let optimistic = message.poll
+        for (const answerId of mine) {
+            optimistic = applyPollVote(optimistic, { answerId, memberId: org.memberId, action: 'removed' })
+        }
+        updateGeneralMessage(org.id, space.id, { ...message, poll: optimistic })
+        try {
+            let updated: spaces.Message | undefined
+            for (const answerId of mine) {
+                const res = await window.ipc.invoke('spaces:votePoll', {
+                    orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'remove',
+                })
+                updated = res.message
+            }
+            if (updated) updateGeneralMessage(org.id, space.id, updated)
+        } catch (err) {
+            updateGeneralMessage(org.id, space.id, message)
+            toast(err instanceof Error ? err.message : 'Could not remove the vote', 'error')
+        }
+    }
+
+    const endPoll = async (message: spaces.Message) => {
+        if (!window.confirm('End this poll now? Voting stops immediately.')) return
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:endPoll', {
+                orgId: org.id, spaceId: space.id, messageId: message.id,
+            })
+            updateGeneralMessage(org.id, space.id, updated)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not end the poll', 'error')
+        }
+    }
+
     // Toggle: add when the viewer isn't in the group yet, remove when they are.
     // Optimistic — the chip moves the instant it's clicked; the org's answer
     // replaces it right behind, and a failure puts the old state back.
@@ -552,6 +629,9 @@ export function GeneralStream({
                 saved={savedIds.has(message.id)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
+                onVotePoll={(m, answerIds) => void votePoll(m, answerIds)}
+                onRemovePollVote={(m) => void removePollVote(m)}
+                onEndPoll={(m) => void endPoll(m)}
             />,
         )
         prev = message
@@ -682,6 +762,9 @@ export function GeneralStream({
             {forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
+            {pollOpen && (
+                <PollDialog onClose={() => setPollOpen(false)} onSubmit={createPoll} />
+            )}
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
                 busy={!generalId}
@@ -694,6 +777,7 @@ export function GeneralStream({
                     })
                     toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
                 }}
+                onCreatePoll={() => setPollOpen(true)}
                 onType={onType}
                 seed={seed}
                 members={members}
@@ -715,24 +799,8 @@ export function GeneralStream({
                     },
                     {
                         name: 'poll',
-                        args: '<question> | <option> | <option>',
-                        hint: 'Post a poll — tap a number to vote',
-                        run: async (args) => {
-                            if (!generalId) return
-                            const input = parsePollArgs(args)
-                            if (typeof input === 'string') {
-                                toast(input, 'info')
-                                return
-                            }
-                            try {
-                                const { posted, final } = await postPoll({ orgId: org.id, spaceId: space.id, topicId: generalId, input })
-                                ingestGeneralMessage(org.id, space.id, posted)
-                                updateGeneralMessage(org.id, space.id, final)
-                                markTopicRead(org.id, space.id, generalId)
-                            } catch (err) {
-                                toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
-                            }
-                        },
+                        hint: 'Create a poll — pick answers, votes tally live',
+                        run: () => setPollOpen(true),
                     },
                     {
                         name: 'remind',
