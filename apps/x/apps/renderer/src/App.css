@@ -1533,6 +1533,15 @@
    MessageContent component classes (ai-elements/message.tsx) so callers can
    still opt out (e.g. transparent attachment-only messages). */
 
+/* Inside the ink-dark user bubble, inline code keeps the bubble's light ink
+   over a faint overlay — per the reference, not a light chip. Unlayered on
+   purpose: Streamdown puts bg-muted on inline code as a utility class, which
+   outranks any @layer components rule. */
+.is-user [data-slot="message-content"] code:not(pre code) {
+  background: rgba(255, 255, 255, 0.09);
+  color: inherit;
+}
+
 /* Markdown content base styles for Streamdown/MessageResponse */
 @layer components {
   /* Target elements inside MessageResponse wrapper */
@@ -1568,10 +1577,6 @@
   }
   [data-slot="message-content"] code:not(pre code) {
     @apply rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[13px];
-  }
-  /* Inside the dark user bubble, code chips lighten instead of vanish */
-  .is-user [data-slot="message-content"] code:not(pre code) {
-    background: rgba(255, 255, 255, 0.14);
   }
   [data-slot="message-content"] pre {
     @apply my-3 overflow-x-auto rounded-lg;
