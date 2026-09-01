@@ -185,14 +185,18 @@ export function createAntigravityFetch(): typeof fetch {
         const isStreaming = url.includes(':streamGenerateContent');
         const isGenerate = url.includes(':generateContent') || isStreaming;
 
-        const accessToken = await getAntigravityAccessToken();
         if (!isGenerate) {
-            // Non-generate calls (e.g. model listing) still need auth headers.
-            const headers = new Headers(init?.headers);
-            headers.set('Authorization', `Bearer ${accessToken}`);
-            return fetch(input, { ...init, headers });
+            // Only generate/streamGenerate calls are routed to the gateway;
+            // the OAuth token is scoped to the Cloud Code gateway, so we never
+            // attach it to any other endpoint (the @ai-sdk/google base URL
+            // points at generativelanguage.googleapis.com — a different Google
+            // service). This provider's model list is served locally
+            // (listAntigravityModels), so no non-generate call is expected;
+            // pass any through unmodified and un-authenticated.
+            return fetch(input, init);
         }
 
+        const accessToken = await getAntigravityAccessToken();
         const { project } = await ensureSession(accessToken);
 
         const modelMatch = url.match(/\/models\/([^/:]+)/);
