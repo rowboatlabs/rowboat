@@ -195,13 +195,13 @@ Rail `bg/sidebar`, no visible border to canvas (the value shift is the border). 
 ### Spaces — the multiplayer stream
 
 The assistant chat is a dialogue, so it gets bubbles. A space is a record of
-many voices, so it borrows Slack's anatomy — and, deliberately, Slack's
-*contrast*: this is the one surface that breaks the app's quiet voice, because
+many voices, so it borrows classic team-chat anatomy — and, deliberately,
+team-chat *contrast*: this is the one surface that breaks the app's quiet voice, because
 loudness (heavy names, saturated tiles, chippy mentions) is what makes a
 multiplayer stream scannable. The dialect is scoped to the stream via
 `--stream-*` tokens:
 
-- `--stream-link`: `#1264A3` / dark `#1D9BD1` — Slack's teal-navy ink for
+- `--stream-link`: `#1264A3` / dark `#1D9BD1` — a teal-navy ink for
   links, mention chips, reply counts. The app-wide blue stays everywhere else.
 - `--stream-mention-wash`: `rgba(29,155,209,.13)` / dark `.2` — mention chips.
 - `--stream-you-wash` + `--stream-you-ink`: amber wash for `@here`/broadcasts.
@@ -211,7 +211,7 @@ Where the two surfaces differ:
 | | Assistant chat | Spaces stream |
 |---|---|---|
 | Message shape | User bubble / assistant prose | Full-width attributed rows, no bubbles |
-| Identity | Implicit (you vs. the agent) | 36px avatar + name **15/800** (heavy, Slack-style) + timestamp 12 tertiary |
+| Identity | Implicit (you vs. the agent) | 36px avatar + name **15/800** (heavy) + timestamp 12 tertiary |
 | Avatars | Circles | **Near-square tiles (radius 4-6, saturated fills) for people; circles stay reserved for AI** |
 | Density | Body 15/26, gap 28 | Body 15/22, grouped rows |
 | Actions | Icon row under last message | Floating hover toolbar, top-right of the row |
@@ -230,13 +230,13 @@ Anatomy rules:
 - **Hover toolbar**: `bg/raised` + ring-in-shadow (`shadow-soft`), radius 10,
   28px icon buttons, 16px icons at `ink/secondary` — react, reply in thread,
   share, more. Appears on row hover, floats at the row's top-right.
-- **Reactions**: Slack pills — white (`bg/canvas`) with a visible `control`
+- **Reactions**: bordered pills — white (`bg/canvas`) with a visible `control`
   border, radius full, emoji 13 + count 11 tabular. *You reacted* = the
   toggle-on state: `--stream-link` border + mention wash + blue count.
   Trailing ghost add-reaction button appears on row hover.
 - **Thread summary**: mini avatar tiles + "N replies" `--stream-link` bold +
   meta 13 tertiary. Borderless at rest; hover raises it (`bg/raised` +
-  hairline, radius 8) — Slack's inversion of the usual card.
+  hairline, radius 8) — an inversion of the usual card.
 - **Day divider**: hairline rule with a centered bordered date chip —
   `bg/canvas`, radius full, 12/700. (Streams need a stronger break than the
   assistant chat's plain centered text.)

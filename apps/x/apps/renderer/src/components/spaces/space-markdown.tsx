@@ -124,7 +124,7 @@ function ImageLightbox({ src, alt, open, onOpenChange, children }: {
 }
 
 /** An uploaded image in a message: inline preview, click to view, download from the viewer. */
-// Chat images render as Slack-style tiles: one consistent height, side by
+// Chat images render as uniform tiles: one consistent height, side by
 // side on a line (wrapping), very wide shots cropped to a max tile width —
 // the lightbox has the full image. Small images keep their natural size
 // (tiles never upscale).
@@ -413,7 +413,7 @@ const spaceComponents: StreamdownComponents = {
         return <ExternalImage src={url} alt={alt ?? ''} />
     },
     a: SpaceAnchor,
-    // decorateMentions renders "@name" as **bold**; the Slack dialect shows
+    // decorateMentions renders "@name" as **bold**; the stream dialect shows
     // those as tinted mention chips (broadcasts get the amber "needs you" wash).
     strong: MentionStrong,
 }

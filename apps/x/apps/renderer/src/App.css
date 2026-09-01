@@ -1184,8 +1184,8 @@
   --rowboat-ink-secondary: #5d5d5d;
   --rowboat-ink-faint: #b4b4b4;
   --rowboat-handle: #d9d9d9;
-  /* Spaces stream — the Slack dialect (multiplayer chat only). Slack's link
-     ink is a teal-leaning navy, not the app-wide blue. */
+  /* Spaces stream — the multiplayer dialect (team chat only). Its link ink
+     is a teal-leaning navy, not the app-wide blue. */
   --stream-link: #1264a3;
   --stream-mention-wash: rgba(29, 155, 209, 0.13);
   --stream-you-wash: rgba(242, 199, 68, 0.3);

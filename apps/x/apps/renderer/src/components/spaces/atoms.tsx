@@ -23,7 +23,7 @@ export function MemberAvatar({ id, name, size = 'md', className }: {
     size?: 'sm' | 'md' | 'lg' | 'xl'
     className?: string
 }) {
-    // Slack dialect: people are near-square tiles; circles stay reserved for AI.
+    // Stream dialect: people are near-square tiles; circles stay reserved for AI.
     const dims = size === 'sm' ? 'size-5 rounded-[4px] text-[9px]'
         : size === 'lg' ? 'size-8 rounded-[5px] text-xs'
         : size === 'xl' ? 'size-9 rounded-md text-[13px]'

@@ -21,7 +21,7 @@ import { toast } from '@/lib/toast'
 // One message in a stream (general or a thread). Consecutive messages by the
 // same author compact to a time gutter; hover reveals the action bar.
 
-/** The quick palette (Slack's defaults plus the team's usual suspects). */
+/** The quick palette (the common defaults plus the team's usual suspects). */
 const REACTION_PALETTE = ['👍', '✅', '👀', '❤️', '🎉', '😂', '🚀', '🙏', '💯', '🔥', '😮', '👎']
 
 function ReactionPicker({ onPick, onOpenChange, children }: {

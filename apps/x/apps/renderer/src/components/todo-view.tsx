@@ -86,7 +86,7 @@ function normKey(text: string): string {
 // ---------------------------------------------------------------------------
 // @rowboat autocomplete — shared by every composer (main, reply, sub-task).
 // A trailing "@" or partial "@row…" offers the completion; Tab or click
-// completes it. Slack/Notion muscle memory, everywhere text is typed.
+// completes it. Chat-app muscle memory, everywhere text is typed.
 // ---------------------------------------------------------------------------
 
 function useMention(text: string, setText: (t: string) => void) {
@@ -375,7 +375,7 @@ function Bubble({ b, onOpenNote, onRetry }: {
   onOpenNote: (path: string) => void
   onRetry?: () => void
 }) {
-  // Flat message rows, Slack-style: avatar + name, no chat bubbles.
+  // Flat message rows, stream-style: avatar + name, no chat bubbles.
   const isUser = b.role === 'user'
   return (
     <div className="flex gap-2">
@@ -694,7 +694,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
           </>
         )}
       </div>
-      {/* One floating action tray on hover or keyboard focus — Slack's
+      {/* One floating action tray on hover or keyboard focus — team-chat
           grammar: zero resting clutter, one surface to learn. Kept inside
           the row's own band so it never reads as the previous row's
           controls. Opacity (not display) so Tab can reach the buttons. */}
@@ -1086,7 +1086,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
               {isOpen && (
                 <div className="flex flex-col gap-1.5 pb-1 pl-5 pt-1">
                   {/* The last response only — the full thread lives in the
-                      sidebar, like Slack threads opening on the side. */}
+                      sidebar, like chat threads opening on the side. */}
                   {lastResponseTail(bubbles).map((b, i) => (
                     <Bubble key={i} b={b} onOpenNote={onOpenNote} />
                   ))}

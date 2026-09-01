@@ -231,7 +231,7 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
                             onMouseEnter={() => prefetchStream(org.id, space.id)}
                             className="pl-9"
                         >
-                            {/* Slack dialect: a space is a channel — # says so. */}
+                            {/* A space is a channel — # says so. */}
                             <Hash className="size-3.5 shrink-0 text-muted-foreground" />
                             <span className={cn('flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
                             {count > 0 && (

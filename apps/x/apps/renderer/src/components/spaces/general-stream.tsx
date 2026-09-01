@@ -178,7 +178,7 @@ export function GeneralStream({
         }
     }
 
-    // Optimistic send (the Slack pattern): the message renders the moment
+    // Optimistic send (standard team-chat pattern): the message renders the moment
     // Enter lands, dimmed as pending; the org's write confirms — or fails,
     // leaving a retry/discard row — in the background. The composer never
     // waits on the round trip.
