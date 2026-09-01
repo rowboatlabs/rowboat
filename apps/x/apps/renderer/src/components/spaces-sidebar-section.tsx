@@ -32,7 +32,7 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
                         type="button"
                         data-tour-id="nav-spaces"
                         onClick={() => setExpanded((v) => !v)}
-                        className="flex flex-1 items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground"
+                        className="flex flex-1 items-center gap-1.5 px-3 py-1 text-[13px] text-muted-foreground"
                     >
                         <ChevronRight className={cn('size-3 transition-transform', expanded && 'rotate-90')} />
                         <span className="flex-1 text-left">Spaces</span>

@@ -751,8 +751,10 @@ function ChatInputInner({
     <div
       data-tour-id="chat-composer"
       className={cn(
-        'rowboat-chat-input rounded-lg border bg-background shadow-none',
-        contextChip ? 'border-primary/40 ring-1 ring-primary/25' : 'border-border',
+        // Codex composer: radius 24, raised surface; the ring is folded into
+        // the shadow (see .rowboat-chat-input in App.css).
+        'rowboat-chat-input rounded-[24px] border bg-background',
+        contextChip ? 'border-primary/40 ring-1 ring-primary/25' : 'border-transparent',
       )}
     >
       {attachments.length > 0 && (
@@ -882,7 +884,8 @@ function ChatInputInner({
           )}
         </div>
       )}
-      <div className="px-4 pt-4 pb-2">
+      {/* Codex composer: the input line gets real air above the controls row. */}
+      <div className="px-4 pt-5 pb-3">
         <PromptInputTextarea
           placeholder={placeholder ?? 'Type your message...'}
           onKeyDown={handleKeyDown}
@@ -1339,7 +1342,7 @@ function ChatInputInner({
           <button
             type="button"
             onClick={onStartRecording}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label="Voice input"
           >
             <Mic className="h-4 w-4" />
@@ -1353,7 +1356,7 @@ function ChatInputInner({
                 onClick={onStop}
                 aria-label={isStopping ? 'Force stop generation' : 'Stop generation'}
                 className={cn(
-                  'h-7 w-7 shrink-0 rounded-full transition-all',
+                  'h-9 w-9 shrink-0 rounded-full transition-all',
                   isStopping
                     ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
                     : 'bg-primary text-primary-foreground hover:bg-primary/90'
@@ -1376,7 +1379,7 @@ function ChatInputInner({
             onClick={handleSubmit}
             disabled={!canSubmit}
             className={cn(
-              'h-7 w-7 shrink-0 rounded-full transition-all',
+              'h-9 w-9 shrink-0 rounded-full transition-all',
               canSubmit
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'bg-muted text-muted-foreground'

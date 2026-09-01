@@ -301,7 +301,9 @@ export const ConversationScrollButton = ({
     !isAtBottom && (
       <Button
         className={cn(
-          "absolute bottom-6 left-[50%] z-10 h-12 w-12 translate-x-[-50%] rounded-full border border-border/70 bg-background/95 text-foreground shadow-lg backdrop-blur-sm transition hover:bg-background",
+          // Codex floating circle: raised surface, hairline ring folded into
+          // the shadow, 36px.
+          "absolute bottom-6 left-[50%] z-10 h-9 w-9 translate-x-[-50%] rounded-full border-none bg-[var(--rowboat-raised)] text-[var(--codex-ink-secondary)] shadow-[var(--rowboat-shadow-soft)] transition hover:bg-[var(--rowboat-raised)] hover:text-foreground",
           className
         )}
         aria-label="Scroll to latest message"
@@ -310,7 +312,7 @@ export const ConversationScrollButton = ({
         variant="ghost"
         {...props}
       >
-        <ArrowDownIcon className="size-6" strokeWidth={1.75} />
+        <ArrowDownIcon className="size-4.5" strokeWidth={1.5} />
       </Button>
     )
   );

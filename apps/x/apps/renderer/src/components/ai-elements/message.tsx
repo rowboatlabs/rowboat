@@ -81,8 +81,10 @@ export const MessageContent = ({
   <div
     data-slot="message-content"
     className={cn(
-      "is-user:dark flex w-fit max-w-full min-w-0 flex-col gap-2 overflow-hidden text-sm",
-      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-tr-md group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-2.5 group-[.is-user]:text-foreground",
+      // Codex: user messages are ink-dark bubbles (radius 22, max 75% wide);
+      // assistant messages are plain prose on the canvas.
+      "is-user:dark flex w-fit max-w-full min-w-0 flex-col gap-2 overflow-hidden text-[15px]",
+      "group-[.is-user]:ml-auto group-[.is-user]:max-w-[75%] group-[.is-user]:rounded-[22px] group-[.is-user]:bg-[var(--codex-bubble)] group-[.is-user]:px-4 group-[.is-user]:py-2.5 group-[.is-user]:text-[var(--codex-bubble-foreground)]",
       "group-[.is-assistant]:w-full group-[.is-assistant]:text-foreground",
       className
     )}
