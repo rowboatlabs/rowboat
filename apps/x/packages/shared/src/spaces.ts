@@ -146,12 +146,6 @@ export type SpacesWhiteboardPayload =
   | { t: 'scene'; clientId: string; syncAll: boolean; elements: unknown[] }
   /** A joiner asking peers for a full scene (Excalidraw's new-user → SCENE_INIT). */
   | { t: 'scene_request'; clientId: string }
-  /**
-   * fileId → space-blob mapping for images. Bytes never ride the socket:
-   * the sender uploads them as space blobs first, peers fetch by hash
-   * (Excalidraw's own pattern — files travel out-of-band, elements in-band).
-   */
-  | { t: 'files'; clientId: string; entries: Record<string, { hash: string; mime: string }> }
   | { t: 'cursor'; clientId: string; cursor: SpacesWhiteboardCursor }
   | { t: 'idle'; clientId: string; state: 'active' | 'idle' | 'away' };
 
@@ -160,19 +154,6 @@ export const WHITEBOARD_DIR = 'whiteboards';
 export const WHITEBOARD_EXT = '.excalidraw';
 /** The board the header button opens, created on first use. */
 export const DEFAULT_WHITEBOARD_PATH = `${WHITEBOARD_DIR}/board${WHITEBOARD_EXT}`;
-
-/**
- * Board images live as regular space assets in this folder (visible in the
- * file tree like any upload), one per Excalidraw fileId. The deterministic
- * path is the lookup key: any client — or a cold load, or an agent — resolves
- * an image element's bytes with a plain readAsset, no side-channel needed.
- * Keeping bytes out of the scene JSON also keeps snapshots under the 1MB
- * text cap, so boards stay agent-readable text even with images on them.
- */
-export const WHITEBOARD_IMAGE_DIR = `${WHITEBOARD_DIR}/images`;
-export function whiteboardImagePath(fileId: string): string {
-  return `${WHITEBOARD_IMAGE_DIR}/${fileId}`;
-}
 
 export function isWhiteboardPath(path: string): boolean {
   return path.startsWith(`${WHITEBOARD_DIR}/`) && path.endsWith(WHITEBOARD_EXT);

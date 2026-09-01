@@ -10,8 +10,6 @@ import {
 } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import type {
-    BinaryFileData,
-    BinaryFiles,
     Collaborator,
     ExcalidrawImperativeAPI,
     SocketId,
@@ -21,7 +19,6 @@ import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconc
 import { spaces } from '@x/shared'
 import { useTheme } from '@/contexts/theme-context'
 import { useSpaceLive, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { toast } from '@/lib/toast'
 
 // A shared board (Excalidraw), synced Excalidraw's own way on top of the
 // spaces live channel: per-element last-writer-wins. Every element carries
@@ -40,9 +37,9 @@ import { toast } from '@/lib/toast'
 // transaction expressed in the propose contract. Only the editor saves
 // (dirty flag), so idle viewers never write.
 //
-// Live image bytes never ride the socket: new files upload as space blobs
-// and a {t:'files'} frame maps fileId → hash; peers fetch via the
-// authenticated app://space-blob protocol.
+// Images are disabled (UIOptions.tools.image=false gates the toolbar, paste
+// AND drop inside Excalidraw): boards are shapes + text only, which keeps
+// every snapshot a small agent-readable TEXT asset with no side-band bytes.
 
 declare global {
     interface Window {
@@ -62,12 +59,11 @@ const COLLABORATOR_TTL_MS = 65_000 // ~3 missed heartbeats
 
 type LoadState =
     | { phase: 'loading' }
-    | { phase: 'ready'; elements: OrderedExcalidrawElement[]; files: BinaryFiles }
+    | { phase: 'ready'; elements: OrderedExcalidrawElement[] }
     | { phase: 'error'; message: string }
 
 interface SnapshotJson {
     elements?: unknown[]
-    files?: BinaryFiles
 }
 
 function blobUrl(orgId: string, spaceId: string, hash: string): string {
@@ -119,10 +115,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     const cursorSentAtRef = useRef(0)
     const fullSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    /** fileId → space-blob mapping we know (uploaded ourselves or learned from peers). */
-    const knownFilesRef = useRef(new Map<string, { hash: string; mime: string }>())
-    const uploadingFilesRef = useRef(new Set<string>())
-    const lastFileCountRef = useRef(0)
     const collaboratorsRef = useRef(new Map<string, { collab: Collaborator; lastSeen: number }>())
     /** Blocks onChange broadcasts until the initial scene is seeded into the version gates. */
     const savingGateRef = useRef<'loading' | 'ready'>('loading')
@@ -161,14 +153,14 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 const elements = snapshot
                     ? (restoreElements(snapshot.elements as Parameters<typeof restoreElements>[0], null) as unknown as OrderedExcalidrawElement[])
                     : []
-                setLoad({ phase: 'ready', elements, files: snapshot?.files ?? {} })
+                setLoad({ phase: 'ready', elements })
             } catch (err) {
                 if (cancelled) return
                 const message = err instanceof Error ? err.message : String(err)
                 if (/not.?found|no such/i.test(message)) {
                     // A board that hasn't been drawn on yet.
                     baseVersionRef.current = 0
-                    setLoad({ phase: 'ready', elements: [], files: {} })
+                    setLoad({ phase: 'ready', elements: [] })
                 } else {
                     setLoad({ phase: 'error', message })
                 }
@@ -189,9 +181,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         const elements = api.getSceneElementsIncludingDeleted()
         for (const el of elements) broadcastVersionsRef.current.set(el.id, el.version)
         send({ t: 'scene', clientId: clientIdRef.current, syncAll: true, elements: elements as unknown[] })
-        if (knownFilesRef.current.size > 0) {
-            send({ t: 'files', clientId: clientIdRef.current, entries: Object.fromEntries(knownFilesRef.current) })
-        }
     }
 
     const scheduleFullSync = () => {
@@ -227,10 +216,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         try {
             const elements = api.getSceneElementsIncludingDeleted()
             const savedSceneVersion = getSceneVersion(elements)
-            // Standard .excalidraw JSON with `files` deliberately empty:
-            // image bytes live as assets at whiteboards/images/<fileId>
-            // (deterministic from each image element), which keeps every
-            // snapshot small enough to stay an agent-readable TEXT asset.
+            // Standard .excalidraw JSON; `files` is always empty because the
+            // image tool is disabled — boards are shapes + text only.
             const json = JSON.stringify({
                 type: 'excalidraw',
                 version: 2,
@@ -291,9 +278,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
             }
             if (!snapshot) return
             applyRemoteElements(snapshot.elements ?? [])
-            if (snapshot.files && Object.keys(snapshot.files).length > 0) {
-                api.addFiles(Object.values(snapshot.files))
-            }
         } catch {
             // unreachable org — the live channel keeps working; snapshots catch up later
         }
@@ -302,14 +286,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     const onChange = () => {
         const api = apiRef.current
         if (!api || savingGateRef.current !== 'ready') return
-        // Debug trace for the image pipeline: fires the moment a pasted /
-        // dropped / picked image lands in the editor's file store — if this
-        // never logs, the image never reached Excalidraw at all.
-        const fileCount = Object.keys(api.getFiles()).length
-        if (fileCount !== lastFileCountRef.current) {
-            console.log(`[whiteboard] editor file store: ${fileCount} file(s)`)
-            lastFileCountRef.current = fileCount
-        }
         const elements = api.getSceneElementsIncludingDeleted()
         const sceneVersion = getSceneVersion(elements)
         if (sceneVersion <= lastSceneVersionRef.current) return
@@ -322,62 +298,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         }
         scheduleFullSync()
         scheduleSave()
-        void syncNewFiles()
-    }
-
-    /**
-     * Persist files the editor holds that no asset backs yet: bytes upload as
-     * a blob, then a proposeChange files them at whiteboards/images/<fileId>
-     * — a normal space asset, visible in the file tree, and resolvable by
-     * anyone (peers, cold loads, agents) from the deterministic path alone.
-     * The {t:'files'} announce is just the fast path for open panes.
-     */
-    const syncNewFiles = async () => {
-        const api = apiRef.current
-        if (!api) return
-        const files = api.getFiles()
-        const announced: Record<string, { hash: string; mime: string }> = {}
-        for (const [fileId, file] of Object.entries(files)) {
-            if (knownFilesRef.current.has(fileId) || uploadingFilesRef.current.has(fileId)) continue
-            uploadingFilesRef.current.add(fileId)
-            try {
-                const comma = file.dataURL.indexOf(',')
-                if (comma < 0) continue
-                console.log(`[whiteboard] uploading image ${fileId} (${file.mimeType}, ~${Math.round((file.dataURL.length - comma) * 0.75 / 1024)}KB)`)
-                const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
-                    orgId: org.id,
-                    spaceId: space.id,
-                    bytes: file.dataURL.slice(comma + 1),
-                    name: fileId,
-                    mime: file.mimeType,
-                })
-                // A conflict here means another client filed the same image
-                // first — the bytes are content-addressed, so theirs IS ours
-                // and every outcome leaves the asset in place.
-                await window.ipc.invoke('spaces:proposeChange', {
-                    orgId: org.id,
-                    spaceId: space.id,
-                    input: {
-                        assetPath: spaces.whiteboardImagePath(fileId),
-                        baseVersion: 0,
-                        blob: uploaded.blob.hash,
-                        reason: 'whiteboard image',
-                    },
-                })
-                const entry = { hash: uploaded.blob.hash, mime: file.mimeType }
-                knownFilesRef.current.set(fileId, entry)
-                announced[fileId] = entry
-                console.log(`[whiteboard] image filed at ${spaces.whiteboardImagePath(fileId)}`)
-            } catch (err) {
-                console.warn('[whiteboard] image upload failed', fileId, err)
-                toast(err instanceof Error ? `Could not upload the image: ${err.message}` : 'Could not upload the image', 'error')
-            } finally {
-                uploadingFilesRef.current.delete(fileId)
-            }
-        }
-        if (Object.keys(announced).length > 0) {
-            send({ t: 'files', clientId: clientIdRef.current, entries: announced })
-        }
     }
 
     const onPointerUpdate = (payload: {
@@ -414,51 +334,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         const reconciled = reconcileElements(api.getSceneElementsIncludingDeleted(), restored, api.getAppState())
         lastSceneVersionRef.current = getSceneVersion(reconciled)
         api.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
-        void fetchMissingFiles()
-    }
-
-    /**
-     * Pull bytes for image elements whose file we don't hold yet. The fast
-     * path is the {t:'files'} announce from an open peer; the durable path is
-     * the image's own asset at whiteboards/images/<fileId> — deterministic
-     * from the element alone, so cold loads and agent-added images resolve too.
-     */
-    const fetchMissingFiles = async () => {
-        const api = apiRef.current
-        if (!api) return
-        const have = api.getFiles()
-        const toAdd: BinaryFileData[] = []
-        for (const el of api.getSceneElementsIncludingDeleted()) {
-            const fileId = el.type === 'image' ? (el as { fileId?: string | null }).fileId : null
-            if (!fileId || have[fileId as keyof typeof have]) continue
-            let known = knownFilesRef.current.get(fileId)
-            if (!known) {
-                try {
-                    const res = await window.ipc.invoke('spaces:readAsset', {
-                        orgId: org.id, spaceId: space.id, path: spaces.whiteboardImagePath(fileId),
-                    })
-                    if (!res.blob) continue
-                    known = { hash: res.blob.hash, mime: res.blob.mime }
-                    knownFilesRef.current.set(fileId, known)
-                } catch {
-                    continue // not filed yet — the uploader's announce or a later pass brings it
-                }
-            }
-            try {
-                const resp = await fetch(blobUrl(org.id, space.id, known.hash))
-                if (!resp.ok) continue
-                const b64 = bytesToBase64(new Uint8Array(await resp.arrayBuffer()))
-                toAdd.push({
-                    id: fileId,
-                    dataURL: `data:${known.mime};base64,${b64}`,
-                    mimeType: known.mime,
-                    created: Date.now(),
-                } as BinaryFileData)
-            } catch {
-                // next files/scene frame retries
-            }
-        }
-        if (toAdd.length > 0) api.addFiles(toAdd)
     }
 
     const pushCollaborators = () => {
@@ -491,13 +366,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 touchCollaborator(payload.clientId, memberId)
                 pushCollaborators()
                 broadcastAll()
-                break
-            }
-            case 'files': {
-                for (const [fileId, entry] of Object.entries(payload.entries)) {
-                    knownFilesRef.current.set(fileId, entry)
-                }
-                void fetchMissingFiles()
                 break
             }
             case 'cursor': {
@@ -560,8 +428,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         // Ask whoever is already drawing for the scene state newer than our snapshot.
         send({ t: 'scene_request', clientId: clientIdRef.current })
         send({ t: 'idle', clientId: clientIdRef.current, state: activeRef.current ? 'active' : 'idle' })
-        // Snapshots don't embed image bytes — resolve them from their assets.
-        void fetchMissingFiles()
     }
 
     useEffect(() => {
@@ -631,12 +497,15 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         <div className="flex-1 min-w-0 min-h-0">
             <Excalidraw
                 excalidrawAPI={onApiReady}
-                initialData={{ elements: load.elements, files: load.files, scrollToContent: true }}
+                initialData={{ elements: load.elements, scrollToContent: true }}
                 onChange={onChange}
                 onPointerUpdate={onPointerUpdate}
                 theme={resolvedTheme}
                 isCollaborating
                 autoFocus
+                // No images on boards (v1): this one flag disables the toolbar
+                // button, paste of image files, AND drag-drop inside Excalidraw.
+                UIOptions={{ tools: { image: false } }}
             >
                 {/* Our menu, not the stock one: the default carries Excalidraw's
                     socials/help links — this is Rowboat's canvas, so only the
