@@ -75,8 +75,7 @@ export interface StoredEvent {
 
 /**
  * A reaction as stored: keyed (spaceId, messageId, emoji, by.memberId) — one
- * per member+emoji, Slack semantics. Topic membership is derived through the
- * message (merge_into repoints messages; reactions follow by messageId).
+ * per member+emoji, Slack semantics.
  */
 export interface StoredReaction {
   spaceId: string;
@@ -143,22 +142,35 @@ export interface Store {
     opts: { assetId?: string; beforeOffset?: number; limit: number },
   ): Promise<ChangeSet[]>;
 
-  // topics & messages
+  // topics & messages — the annotation model (migration 011): messages form
+  // one stream per space with a write-once threadRoot pointer; a topic is one
+  // row pointing at a root, holding title + archived, and never any messages.
   getTopic(spaceId: string, topicId: string): Promise<Topic | undefined>;
-  /** The topic grown from this message, if one exists (anchorMessageId is unique). */
-  getTopicByAnchor(spaceId: string, anchorMessageId: string): Promise<Topic | undefined>;
+  /** The topic annotating this thread, if one exists (rootMessageId is unique). */
+  getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined>;
+  /** Insert or update (retitle / archive flips) — the row is the whole object. */
   putTopic(topic: Topic): Promise<void>;
+  /** "Convert back to thread": the row goes, the messages never knew it existed. */
+  deleteTopic(spaceId: string, topicId: string): Promise<void>;
   listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]>;
   getMessage(spaceId: string, messageId: string): Promise<Message | undefined>;
   /**
-   * Oldest first. With opts: the NEWEST `limit` messages whose offset is
-   * below `beforeOffset` (when given) — still returned oldest first.
+   * The stream: ROOT messages only (threadRoot null), oldest first. With
+   * opts: the NEWEST `limit` roots whose offset is below `beforeOffset`
+   * (when given) — still returned oldest first.
    */
-  listMessages(spaceId: string, topicId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
+  listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
+  /** One flat thread's replies (threadRoot = rootMessageId), same window semantics as listStream. */
+  listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]>;
   listMessagesBySpace(spaceId: string): Promise<Message[]>;
-  /** Each topic's first (oldest) message, keyed by topic id — listTopics decoration. */
-  getFirstMessages(spaceId: string): Promise<Map<string, Message>>;
   appendMessage(message: Message): Promise<void>;
+  /**
+   * Recompute a root's reply denorm (replyCount = live replies, lastReplyAt =
+   * newest reply) from the truth. Called inside the space lock whenever a
+   * reply is appended or tombstoned — recompute beats deltas because deletes
+   * and replays can't drift it.
+   */
+  refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void>;
   /**
    * Tombstone: blanks the row's body and sets deletedAt — and redacts the
    * stored `message` event the same way. That event rewrite is the one
@@ -167,8 +179,6 @@ export interface Store {
    */
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
   markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void>;
-  /** merge_into support: repoints messages; returns how many moved. */
-  reassignMessages(spaceId: string, fromTopicId: string, toTopicId: string): Promise<number>;
 
   // reactions — per-(member, emoji) toggles on messages
   getReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<StoredReaction | undefined>;
@@ -176,8 +186,8 @@ export interface Store {
   deleteReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<void>;
   /** Oldest first (fold order). */
   listReactionsByMessage(spaceId: string, messageId: string): Promise<StoredReaction[]>;
-  /** All reactions on the topic's current messages, oldest first. */
-  listReactionsByTopic(spaceId: string, topicId: string): Promise<StoredReaction[]>;
+  /** All reactions on the given messages (one page's fold), oldest first. */
+  listReactionsForMessages(spaceId: string, messageIds: string[]): Promise<StoredReaction[]>;
 
   // invites
   putInvite(invite: StoredInvite): Promise<void>;
