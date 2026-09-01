@@ -304,8 +304,11 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     /** The header buttons and ⌘1/2/3: say why when Split can't render. */
     const requestMode = (next: SpaceMode) => {
         if (next === 'split' && !splitFits) toast('Window is too narrow for Split — it will appear when you widen it')
-        // Picking a surface while a board is open leaves the board.
-        if (selection.kind === 'whiteboard' || (selection.kind === 'file' && spaces.isWhiteboardPath(selection.path))) onSelect({ kind: 'general' })
+        // Talk/Read while a board is open leave the board; Split KEEPS it —
+        // the board docks where the document goes, chat alongside.
+        if (next !== 'split' && (selection.kind === 'whiteboard' || (selection.kind === 'file' && spaces.isWhiteboardPath(selection.path)))) {
+            onSelect({ kind: 'general' })
+        }
         setMode(next)
     }
     requestModeRef.current = requestMode
@@ -322,6 +325,11 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         : selection.kind === 'file' && spaces.isWhiteboardPath(selection.path) ? selection.path
         : null
     const isWhiteboard = boardPath !== null
+    // Split with a board = chat + live board around the divider (the board
+    // takes the document slot); any other mode shows the board full-bleed.
+    // Narrow windows fall back through effMode to full-bleed automatically.
+    const boardSplit = isWhiteboard && effMode === 'split'
+    const boardFull = isWhiteboard && !boardSplit
     const boards = entries.filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
     const toggleWhiteboard = () => {
         if (isWhiteboard) {
@@ -629,7 +637,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             onClick={() => requestMode(k)}
                             className={cn(
                                 'inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs',
-                                mode === k && !isWhiteboard ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                                // Full-bleed board is mode-less; board-split IS Split.
+                                mode === k && !boardFull ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                             )}
                         >
                             <Icon className="size-3.5" />
@@ -683,29 +692,36 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     The stream is the expensive surface, so it never unmounts
                     while the space is open — a topic, a draft, or read mode
                     HIDE it (keep-alive), and closing them is instant. */}
-                {/* Whiteboard: a full-bleed surface beside the rail; the chat
-                    surfaces below stay mounted-but-hidden (keep-alive), same
-                    as Read mode. Keyed by path so switching boards remounts a
-                    fresh collab session. */}
+                {/* Whiteboard: full-bleed beside the rail, or — in Split —
+                    docked at the document slot with chat alongside. One
+                    wrapper in one tree position both ways (flex `order` moves
+                    it right of the chat visually), so toggling full ⇄ split
+                    never remounts the live collab session. Keyed by path so
+                    switching boards remounts a fresh session. */}
                 {boardPath && (
-                    <Suspense
-                        fallback={
-                            <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                                <Loader2 className="size-3.5 animate-spin" /> Opening board…
-                            </div>
-                        }
+                    <div
+                        style={boardSplit ? { width: docWidthEff } : undefined}
+                        className={cn('min-w-0 min-h-0 flex order-3', boardSplit ? 'shrink-0' : 'flex-1')}
                     >
-                        <WhiteboardPane
-                            key={boardPath}
-                            org={org}
-                            space={space}
-                            boardId={boardPath}
-                            memberNames={memberNames}
-                            active={active}
-                        />
-                    </Suspense>
+                        <Suspense
+                            fallback={
+                                <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                                    <Loader2 className="size-3.5 animate-spin" /> Opening board…
+                                </div>
+                            }
+                        >
+                            <WhiteboardPane
+                                key={boardPath}
+                                org={org}
+                                space={space}
+                                boardId={boardPath}
+                                memberNames={memberNames}
+                                active={active}
+                            />
+                        </Suspense>
+                    </div>
                 )}
-                <div className={cn('flex-1 min-w-0 min-h-0', effMode === 'read' || isWhiteboard ? 'hidden' : 'flex')}>
+                <div className={cn('flex-1 min-w-0 min-h-0', effMode === 'read' || boardFull ? 'hidden' : 'flex')}>
                     {draftParent ? (
                         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
                             <DraftThreadPane
@@ -743,7 +759,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
-                                visible={active && effMode !== 'read' && !isWhiteboard}
+                                visible={active && effMode !== 'read' && !boardFull}
                             />
                         </section>
                     ) : null}
@@ -761,15 +777,18 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
                             onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
                             onOpenSession={onOpenSession}
-                            visible={active && effMode !== 'read' && !isWhiteboard && !draftParent && !chatTopicId}
+                            visible={active && effMode !== 'read' && !boardFull && !draftParent && !chatTopicId}
                         />
                     </div>
                 </div>
-                {effMode === 'split' && !isWhiteboard && (
+                {effMode === 'split' && (!isWhiteboard || boardSplit) && (
                     <div
                         onMouseDown={startDocResize}
                         className={cn(
                             'relative z-10 w-1.5 shrink-0 cursor-col-resize border-l border-border transition-colors hover:bg-primary/20',
+                            // In board-split the board sits at order-3; the divider
+                            // slots between chat (order 0) and the board.
+                            boardSplit && 'order-2',
                             resizingDoc && 'bg-primary/30',
                         )}
                     />
