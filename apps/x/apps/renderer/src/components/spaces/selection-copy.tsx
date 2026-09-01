@@ -76,7 +76,7 @@ export function SelectionCopy() {
                 )
                 setPos(null)
             }}
-            className="z-50 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-xs font-medium text-foreground shadow-md hover:bg-accent"
+            className="z-50 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-lg border-none bg-popover px-2 py-1 text-xs font-medium text-foreground shadow-[var(--rowboat-shadow-soft)] hover:bg-accent"
         >
             <Copy className="size-3" /> Copy
         </button>

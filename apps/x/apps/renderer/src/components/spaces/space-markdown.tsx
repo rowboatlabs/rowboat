@@ -376,7 +376,7 @@ function ExternalLink({ href, children }: { href: string; children?: ReactNode }
                     if (isTrustedDomain(domain)) open()
                     else setConfirming(true)
                 }}
-                className="cursor-pointer break-words text-blue-600 underline underline-offset-2 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+                className="cursor-pointer break-words text-[var(--codex-link)] no-underline underline-offset-2 hover:underline"
             >
                 {children}
             </a>

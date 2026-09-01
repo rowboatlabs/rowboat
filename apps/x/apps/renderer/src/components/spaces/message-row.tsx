@@ -531,8 +531,8 @@ export function DayDivider({ label }: { label: string }) {
 export function NewDivider({ fading = false }: { fading?: boolean }) {
     return (
         <div className={cn('flex items-center gap-2.5 px-2 py-1 transition-opacity duration-700', fading && 'opacity-0')}>
-            <span className="h-px flex-1 bg-orange-500" />
-            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-orange-600">New</span>
+            <span className="h-px flex-1 bg-[var(--rowboat-attention)]" />
+            <span className="text-[11px] font-medium text-[var(--rowboat-attention)]">New</span>
         </div>
     )
 }

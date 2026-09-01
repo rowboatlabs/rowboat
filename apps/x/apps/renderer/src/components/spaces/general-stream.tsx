@@ -429,7 +429,7 @@ export function GeneralStream({
     return (
         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
             <div className="flex items-center gap-2.5 px-5 h-9 shrink-0">
-                <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Messages</span>
+                <span className="text-[13px] text-muted-foreground">Messages</span>
                 <span className="text-xs text-muted-foreground truncate">What the team says, in order. Reply to one to start a thread.</span>
                 <span className="flex-1" />
                 {stream.error && <span className="text-xs text-destructive truncate" title={stream.error}>messages unavailable</span>}
@@ -498,7 +498,7 @@ export function GeneralStream({
                     <button
                         type="button"
                         onClick={jumpToLatest}
-                        className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border border-border bg-background/95 px-3 py-1 text-xs font-medium shadow-md hover:bg-accent"
+                        className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border-none bg-[var(--rowboat-raised)] px-3 py-1 text-xs font-medium shadow-[var(--rowboat-shadow-soft)] hover:bg-accent"
                     >
                         {unseen > 0 ? `${unseen} new ${unseen === 1 ? 'message' : 'messages'}` : 'Latest'}
                         <ArrowDown className="size-3" />

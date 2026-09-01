@@ -180,8 +180,10 @@ export function SpaceRail({
             onMouseLeave={() => onHoverChange(false)}
             style={{ width: open ? 280 : 28, transition: 'width 200ms cubic-bezier(0.2,0,0,1)' }}
             className={cn(
-                'relative z-10 shrink-0 min-h-0 overflow-hidden border-r border-border flex flex-col',
-                open ? 'bg-muted/20' : 'bg-background',
+                'relative z-10 shrink-0 min-h-0 overflow-hidden flex flex-col',
+                // Codex: the open rail is a gray panel beside the canvas — the value
+                // shift is the seam, no border.
+                open ? 'bg-[var(--rowboat-panel)]' : 'border-r border-border bg-background',
             )}
         >
             {/* Always mounted: an input unmounted mid-pick (the rail toggled
@@ -220,7 +222,7 @@ export function SpaceRail({
                 // Inner content is fixed at the open width so text doesn't reflow mid-slide.
                 <div ref={railBodyRef} className="flex h-full w-[280px] flex-col">
                     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1.5">
-                        <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Discussions &amp; files</span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">Discussions &amp; files</span>
                         <button
                             type="button"
                             onClick={onTogglePin}
@@ -251,12 +253,12 @@ export function SpaceRail({
                                 {generalUnread > 0 && selection.kind !== 'general' && (
                                     <span className="text-[11px] font-semibold tabular-nums">{generalUnread}</span>
                                 )}
-                                {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-emerald-500" title="someone is typing" />}
+                                {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-[var(--codex-success)]" title="someone is typing" />}
                             </button>
                         </div>
 
                         <div className="mt-3 flex items-center gap-2 px-3 pr-2">
-                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Discussions</span>
+                            <span className="text-[13px] text-muted-foreground">Discussions</span>
                             <span className="text-[11px] text-muted-foreground/70">{topicRows.length}</span>
                             <span className="flex-1" />
                             <div className="inline-flex items-center rounded-md bg-muted p-0.5 text-[10.5px]">
@@ -272,7 +274,7 @@ export function SpaceRail({
                                 ))}
                             </div>
                         </div>
-                        <label className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus-within:border-foreground/30">
+                        <label className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2 text-xs text-muted-foreground focus-within:border-border">
                             <Search className="size-3" />
                             <input
                                 value={query}
@@ -399,7 +401,7 @@ export function SpaceRail({
 
                     <div className="shrink-0 border-t border-border">
                         <div className="flex h-8 items-center gap-2 px-3 pr-2 pt-1">
-                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Whiteboards</span>
+                            <span className="text-[13px] text-muted-foreground">Whiteboards</span>
                             <span className="text-[11px] text-muted-foreground/70">{boards.length}</span>
                             <span className="flex-1" />
                             <button
@@ -417,7 +419,7 @@ export function SpaceRail({
                                     <input
                                         autoFocus
                                         placeholder="Board name…"
-                                        className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/30"
+                                        className="h-7 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') createBoard(e.currentTarget.value)
                                             else if (e.key === 'Escape') setCreatingBoard(false)
@@ -461,7 +463,7 @@ export function SpaceRail({
                             )}
                         />
                         <div className="flex h-8 shrink-0 items-center gap-2 px-3 pr-2 pt-1">
-                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
+                            <span className="text-[13px] text-muted-foreground">Files</span>
                             <span className="text-[11px] text-muted-foreground/70">{fileEntries.length}</span>
                             <span className="flex-1" />
                             <button
