@@ -116,11 +116,11 @@ const DOCK_FLYOUT_LEFT_PX = DOCK_EDGE_PX + DOCK_ICON_MAX + DOCK_PAD * 2 + 20
 const tileFace = (glyphColor: string): string =>
   `linear-gradient(145deg, color-mix(in oklab, ${glyphColor} 9%, white), color-mix(in oklab, ${glyphColor} 18%, white))`
 
-// The Assistant tile stays untinted — a plain white face sets it apart
-// from the tinted destination tiles.
-const ASSISTANT_FACE = "linear-gradient(145deg, #ffffff, #f0f3f2)"
+// The Assistant tile stays untinted — an off-white face sets it apart
+// from the tinted destination tiles without glaring bright white.
+const ASSISTANT_FACE = "linear-gradient(145deg, #f7f8f8, #e9eceb)"
 const GLYPH_COLORS: Record<string, string> = {
-  assistant: "#0f766e",
+  assistant: "#795548",
   home: "#0f766e",
   email: "#1d4ed8",
   code: "#0f172a",
