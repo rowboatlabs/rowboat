@@ -27,7 +27,6 @@ import {
   Plus,
   Settings,
   Square,
-  Sparkles,
   SquarePen,
   Trash2,
   Video,
@@ -225,7 +224,7 @@ export type DockSidebarProps = {
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
   /** Which primary destination is currently active, for the running dot. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null
+  activeNav?: 'assistant' | 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null
   /** Live meeting recording state, so the Meetings tile can show it. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -1010,13 +1009,14 @@ export function DockSidebar({
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
       // The top section: Assistant (resumes the most recent chat, falling
-      // back to a fresh one — white tile, absent from the ⌥Tab switcher)
-      // with Spaces right under it, then a divider before the destinations.
+      // back to a fresh one — white tile) with Spaces right under it, then a
+      // divider before the destinations.
       ...(onOpenRun || onNewChat ? [
         {
           item: {
-            key: 'assistant', label: 'Assistant', icon: Sparkles,
+            key: 'assistant', label: 'Assistant', icon: MascotFaceIcon as unknown as LucideIcon,
             status: 'Rowboat assistant',
+            running: activeNav === 'assistant',
             onClick: () => {
               closeFlyouts()
               if (lastChat && onOpenRun) onOpenRun(lastChat.id)
@@ -1207,10 +1207,9 @@ export function DockSidebar({
   }, [activeNav])
 
   // Never-visited items keep their dock order at the end (stable sort).
-  // Assistant is an action tile — it doesn't cycle in the switcher.
   const switcherItems = useMemo(() => {
     const items = rows
-      .filter((r): r is { item: DockItemDef } => !r.sep && r.item.key !== 'assistant')
+      .filter((r): r is { item: DockItemDef } => !r.sep)
       .map((r) => r.item)
     const rank = (key: string) => {
       const i = mruKeys.indexOf(key)

@@ -494,9 +494,9 @@ function MascotHatArt({ hat }: { hat: MascotHat }) {
 }
 
 /** Small static mascot face used as the toolbar toggle icon. */
-export function MascotFaceIcon({ className }: { className?: string }) {
+export function MascotFaceIcon({ className, size = 16, style }: { className?: string; size?: number | string; style?: React.CSSProperties }) {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" className={className} aria-hidden="true">
+    <svg viewBox="0 0 24 24" width={size} height={size} style={style} className={className} aria-hidden="true">
       <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
       <ellipse cx="8.6" cy="10.5" rx="1.3" ry="1.8" fill="currentColor" />
       <ellipse cx="15.4" cy="10.5" rx="1.3" ry="1.8" fill="currentColor" />

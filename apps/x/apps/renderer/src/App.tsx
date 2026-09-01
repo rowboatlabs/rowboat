@@ -6736,8 +6736,11 @@ function App() {
       : isAppsOpen ? 'apps'
       : isSpacesOpen ? 'spaces'
       : isWorkspaceOpen ? 'workspaces'
+      // Full-screen chat (no section, file, or task open) is the Assistant's
+      // own surface — it carries the dock dot and the switcher's MRU rank.
+      : isFullScreenChat ? 'assistant'
       : null
-    ) as 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null,
+    ) as 'assistant' | 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null,
     onOpenMeetings: openMeetingsView,
     onOpenCode: openCodeView,
     onOpenBgTasks: () => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() },

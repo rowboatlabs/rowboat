@@ -218,7 +218,7 @@ type SidebarContentPanelProps = {
   /** Starts the mascot-guided product tour. */
   onStartTour?: () => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null
+  activeNav?: 'assistant' | 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
