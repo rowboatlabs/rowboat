@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AppWindow,
   ArrowUpRight,
@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Code2,
   FileText,
-  FilePlus,
   Folder,
   Globe,
   AlertTriangle,
@@ -20,7 +19,6 @@ import {
   PanelLeftClose,
   Pencil,
   Pin,
-  SquarePen,
   Trash2,
   Plug,
   LoaderIcon,
@@ -591,6 +589,16 @@ export function SidebarContentPanel({
       .slice(0, 10)
   }, [tree])
 
+  // The most recently touched chat, for the Assistant row (recency only —
+  // pinning shouldn't hijack "continue where I left off"). Mirrors the dock.
+  const lastChat = useMemo(() => {
+    const recency = (r: { createdAt: string; modifiedAt?: string }) => {
+      const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
+      return Number.isFinite(ms) ? ms : 0
+    }
+    return [...recentRuns].sort((a, b) => recency(b) - recency(a))[0] ?? null
+  }, [recentRuns])
+
   // Pinned chats: a per-machine UI preference, persisted in localStorage.
   const [pinnedChatIds, setPinnedChatIds] = useState<string[]>(() => {
     try {
@@ -835,26 +843,42 @@ export function SidebarContentPanel({
       <SidebarHeader className="titlebar-drag-region">
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
-        {/* Quick actions */}
+        {/* Quick actions — new chat lives in the titlebar compose button;
+            browser is a nav row below (dock parity) */}
         <div className="titlebar-no-drag flex items-center gap-1 pl-3 pr-6 pb-2">
-          {onNewChat && (
-            <button
-              type="button"
-              onClick={onNewChat}
-              className="flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--rowboat-wash)] text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            >
-              <SquarePen className="size-3.5" />
-              New chat
-            </button>
-          )}
-          <ActionButton icon={FilePlus} label="New note" onClick={() => knowledgeActions.createNote()} />
           <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} variant="action" />
-          {onToggleBrowser && (
-            <ActionButton icon={Globe} label="Run browser task" onClick={onToggleBrowser} />
-          )}
         </div>
       </SidebarHeader>
       <SidebarContent>
+        {/* Ordered to mirror the dock: Assistant, Spaces, then the
+            destinations, then Chats. Same glyphs as the dock tiles. */}
+        <SidebarGroup className="flex flex-col">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={activeNav === 'assistant'}
+                  onClick={() => {
+                    if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+                    else onNewChat?.()
+                  }}
+                >
+                  <MascotFaceIcon className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Assistant</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Spaces — orgs and their spaces, with unread counts */}
+        {SPACES_ENABLED && (
+          <>
+            <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
+            <div className="mx-3 border-t border-sidebar-border" />
+          </>
+        )}
+
         {/* Primary navigation */}
         <SidebarGroup className="flex flex-col">
           <SidebarGroupContent>
@@ -1061,19 +1085,19 @@ export function SidebarContentPanel({
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {onToggleBrowser && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={onToggleBrowser}>
+                    <Globe className="size-4 shrink-0" />
+                    <span className="flex-1 truncate">Browser</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
         <div className="mx-3 border-t border-sidebar-border" />
-
-        {/* Spaces — orgs and their spaces, with unread counts */}
-        {SPACES_ENABLED && (
-          <>
-            <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
-            <div className="mx-3 border-t border-sidebar-border" />
-          </>
-        )}
 
         {/* Chats */}
         <SidebarGroup className="flex flex-col">
@@ -1400,24 +1424,6 @@ export function SidebarContentPanel({
       <SyncStatusBar />
       <SidebarRail />
     </Sidebar>
-  )
-}
-
-function ActionButton({ icon: Icon, label, onClick }: { icon: typeof Mic; label: string; onClick: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          aria-label={label}
-          className="flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-        >
-          <Icon className="size-4" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
   )
 }
 
