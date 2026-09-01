@@ -322,7 +322,6 @@ stack to system, (3) set `--radius` to 10px. Everything downstream (shadcn compo
   --rowboat-bubble: #0d0d0d;
   --rowboat-bubble-foreground: #ffffff;
   --rowboat-ink-secondary: #5d5d5d;
-  --rowboat-ink-faint: #b4b4b4;
 }
 
 .dark {
@@ -374,7 +373,6 @@ stack to system, (3) set `--radius` to 10px. Everything downstream (shadcn compo
   --rowboat-bubble: #303030;
   --rowboat-bubble-foreground: #ececec;
   --rowboat-ink-secondary: #a6a6a6;
-  --rowboat-ink-faint: #666666;
 }
 ```
 

@@ -1182,8 +1182,6 @@
   --rowboat-bubble: #0d0d0d;
   --rowboat-bubble-foreground: #ffffff;
   --rowboat-ink-secondary: #5d5d5d;
-  --rowboat-ink-faint: #b4b4b4;
-  --rowboat-handle: #d9d9d9;
   /* Spaces stream — the multiplayer dialect (team chat only). Its link ink
      is a teal-leaning navy, not the app-wide blue. */
   --stream-link: #1264a3;
@@ -1243,8 +1241,6 @@
   --rowboat-bubble: #303030;
   --rowboat-bubble-foreground: #ececec;
   --rowboat-ink-secondary: #a6a6a6;
-  --rowboat-ink-faint: #666666;
-  --rowboat-handle: #4a4a4a;
   --stream-link: #1d9bd1;
   --stream-mention-wash: rgba(29, 155, 209, 0.2);
   --stream-you-wash: rgba(242, 199, 68, 0.22);
