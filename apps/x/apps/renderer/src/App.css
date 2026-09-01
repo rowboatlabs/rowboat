@@ -1165,6 +1165,9 @@
      Shared by the web search card and tool-call group. */
   --card-surface: color-mix(in oklab, var(--background) 98.5%, var(--foreground));
   --rowboat-panel: #f4f4f4;
+  /* Second-level rail (e.g. the Spaces topics rail): one step lighter than
+     the main sidebar so adjacent rails read as distinct layers. */
+  --rowboat-panel-soft: #fafafa;
   --rowboat-raised: #ffffff;
   --rowboat-wash: #ebebeb;
   --rowboat-hairline: rgba(0, 0, 0, 0.12);
@@ -1220,6 +1223,7 @@
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
   --card-surface: #2a2a2a;
   --rowboat-panel: #171717;
+  --rowboat-panel-soft: #1c1c1c;
   --rowboat-raised: #2a2a2a;
   --rowboat-wash: #303030;
   --rowboat-hairline: rgba(255, 255, 255, 0.14);

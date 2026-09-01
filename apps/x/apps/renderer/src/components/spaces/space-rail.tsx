@@ -181,9 +181,10 @@ export function SpaceRail({
             style={{ width: open ? 280 : 28, transition: 'width 200ms cubic-bezier(0.2,0,0,1)' }}
             className={cn(
                 'relative z-10 shrink-0 min-h-0 overflow-hidden flex flex-col',
-                // Codex: the open rail is a gray panel beside the canvas — the value
-                // shift is the seam, no border.
-                open ? 'bg-[var(--rowboat-panel)]' : 'border-r border-border bg-background',
+                // A step lighter than the main sidebar so the two rails read as
+                // distinct layers; at this subtle a shift the hairline to the
+                // canvas earns its place.
+                open ? 'border-r border-border bg-[var(--rowboat-panel-soft)]' : 'border-r border-border bg-background',
             )}
         >
             {/* Always mounted: an input unmounted mid-pick (the rail toggled
