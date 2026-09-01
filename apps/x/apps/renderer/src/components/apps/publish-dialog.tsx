@@ -109,7 +109,7 @@ export function PublishDialog({ folder, appName, published, onClose, onPublished
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl border-none bg-popover p-5 shadow-[var(--rowboat-shadow)]">
         <div className="mb-3 flex items-center gap-2 text-base font-semibold">
           <Github className="size-5" /> Publish {appName}
         </div>
@@ -172,7 +172,7 @@ export function PublishDialog({ folder, appName, published, onClose, onPublished
             )}
             {phase === 'done' && result && (
               <div className="space-y-1">
-                <p className="flex items-center gap-2"><CheckCircle2 className="size-4 text-green-600" /> Published v{result.version}</p>
+                <p className="flex items-center gap-2"><CheckCircle2 className="size-4 text-[var(--codex-success)]" /> Published v{result.version}</p>
                 <div className="text-xs">Release: <a className="text-primary underline" href={result.releaseUrl} target="_blank" rel="noreferrer">{result.releaseUrl}</a></div>
               </div>
             )}
@@ -188,7 +188,7 @@ export function PublishDialog({ folder, appName, published, onClose, onPublished
               return (
                 <div key={key} className="flex items-center gap-2">
                   {doneStep
-                    ? <CheckCircle2 className="size-4 text-green-600" />
+                    ? <CheckCircle2 className="size-4 text-[var(--codex-success)]" />
                     : phase === 'error'
                       ? <XCircle className="size-4 text-muted-foreground/40" />
                       : <Loader2 className={`size-4 ${active ? 'text-muted-foreground/40' : 'animate-spin text-muted-foreground'}`} />}

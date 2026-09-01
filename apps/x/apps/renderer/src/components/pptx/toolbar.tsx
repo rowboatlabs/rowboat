@@ -229,11 +229,11 @@ function FontPicker({ value, deckFonts, disabled, disabledReason, onChange }: Fo
               width: FONT_MENU_W,
               maxHeight: pos.maxHeight,
             }}
-            className="z-[100] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md"
+            className="z-[100] overflow-y-auto rounded-2xl border-none bg-popover p-2 shadow-[var(--rowboat-shadow)]"
           >
             {deckFonts.length > 0 && (
               <>
-                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <div className="px-2 py-1 text-[13px] text-muted-foreground">
                   In this presentation
                 </div>
                 {deckFonts.map((f) => (
@@ -243,7 +243,7 @@ function FontPicker({ value, deckFonts, disabled, disabledReason, onChange }: Fo
             )}
             {extras.length > 0 && (
               <>
-                <div className="mt-1 border-t border-border px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <div className="mt-1 border-t border-border px-2 pb-1 pt-2 text-[13px] text-muted-foreground">
                   Common
                 </div>
                 {extras.map((f) => (
@@ -422,7 +422,7 @@ function InsertMenu({ onInsert }: { onInsert: (choice: InsertChoice) => void }) 
             aria-label="Insert"
             onMouseDown={(e) => e.preventDefault()}
             style={{ position: 'fixed', left: pos.left, top: pos.top, width: 200, maxHeight: pos.maxHeight }}
-            className="z-[100] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md"
+            className="z-[100] overflow-y-auto rounded-2xl border-none bg-popover p-2 shadow-[var(--rowboat-shadow)]"
           >
             {INSERT_ITEMS.map((item) => (
               <button
@@ -580,7 +580,7 @@ export function EditorHeader({
       </span>
       <Badge
         variant="outline"
-        className="rounded px-1 py-0 text-[10px] font-medium tracking-wide text-muted-foreground"
+        className="rounded px-1 py-0 text-[10px] font-medium text-muted-foreground"
       >
         PPTX
       </Badge>

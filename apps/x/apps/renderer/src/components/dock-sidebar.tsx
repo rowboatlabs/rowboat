@@ -1546,7 +1546,7 @@ export function DockSidebar({
                     key={item.key}
                     className={cn(
                       'flex cursor-pointer flex-col items-center gap-2 rounded-2xl px-3 pb-2.5 pt-3.5',
-                      selected && 'bg-black/10 dark:bg-white/10',
+                      selected && 'bg-[var(--sidebar-accent)]',
                     )}
                     onClick={() => { setSwitcherOpen(false); (item.switchTo ?? item.onClick)() }}
                   >
@@ -1713,7 +1713,7 @@ function ChatsFlyout({
                 <button
                   type="button"
                   onClick={() => onOpenRun?.(chat.id)}
-                  className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13.5px] text-foreground/90 hover:bg-black/5 dark:hover:bg-white/10"
+                  className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13.5px] text-foreground/90 hover:bg-accent"
                 >
                   <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate pr-5">{chat.title || '(Untitled chat)'}</span>
@@ -1768,7 +1768,7 @@ function ChatsFlyout({
         <button
           type="button"
           onClick={onOpenChatHistory}
-          className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13px] text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10"
+          className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13px] text-muted-foreground hover:bg-accent"
         >
           <ArrowUpRight className="size-4 shrink-0" />
           View all
@@ -1937,8 +1937,8 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
             type="button"
             onClick={() => onOpenSpace(org.id, space.id)}
             className={cn(
-              'flex w-full items-center gap-2.5 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-[13.5px] text-foreground/90 hover:bg-black/5 dark:hover:bg-white/10',
-              active && 'bg-black/5 dark:bg-white/10',
+              'flex w-full items-center gap-2.5 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-[13.5px] text-foreground/90 hover:bg-accent',
+              active && 'bg-[var(--sidebar-accent)]',
             )}
           >
             <span className={cn('min-w-0 flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
@@ -1952,7 +1952,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="flex w-full items-center gap-2 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-xs text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10"
+          className="flex w-full items-center gap-2 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-xs text-muted-foreground hover:bg-accent"
         >
           <Plus className="size-3.5 shrink-0" />
           <span className="flex-1 truncate">Create the first space</span>

@@ -1290,21 +1290,13 @@
   flex-direction: column;
   align-items: flex-start;
   box-sizing: border-box;
-  border-radius: 22px;
-  background: rgba(250, 250, 252, 0.6);
-  backdrop-filter: blur(28px) saturate(1.8);
-  -webkit-backdrop-filter: blur(28px) saturate(1.8);
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  outline: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18);
+  /* Codex floating surface: solid raised ground, hairline ring folded into
+     the shadow token — no frosted glass. Tokens flip for dark mode. */
+  border-radius: 18px;
+  background: var(--rowboat-raised);
+  border: 1px solid transparent;
+  box-shadow: var(--rowboat-shadow);
   overflow: visible;
-}
-
-.dark .rowboat-dock {
-  background: rgba(38, 38, 42, 0.55);
-  border-color: rgba(255, 255, 255, 0.14);
-  outline-color: rgba(0, 0, 0, 0.4);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
 }
 
 .rowboat-dock-tile {
@@ -1315,20 +1307,16 @@
   justify-content: center;
   /* Off-white faces need definition the old saturated tiles didn't: a soft
      drop, a bright inner top edge, and a hairline border. */
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border);
   box-sizing: border-box;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
 }
 
 .rowboat-dock-sep {
   width: 70%;
   height: 1px;
-  background: rgba(0, 0, 0, 0.14);
+  background: var(--border);
   margin: 0 auto;
-}
-
-.dark .rowboat-dock-sep {
-  background: rgba(255, 255, 255, 0.16);
 }
 
 .rowboat-dock-badge {
@@ -1338,7 +1326,7 @@
   min-width: 15px;
   height: 15px;
   border-radius: 8px;
-  background: #e14b41;
+  background: var(--rowboat-attention);
   color: #fff;
   font-size: 9.5px;
   font-weight: 700;
@@ -1346,13 +1334,9 @@
   align-items: center;
   justify-content: center;
   padding: 0 3.5px;
-  border: 1.5px solid #fff;
+  border: 1.5px solid var(--rowboat-raised);
   z-index: 2;
   box-sizing: border-box;
-}
-
-.dark .rowboat-dock-badge {
-  border-color: rgba(30, 30, 34, 0.9);
 }
 
 .rowboat-dock-badge-amber {
@@ -1367,19 +1351,15 @@
   width: 4px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(0, 0, 0, 0.42);
-}
-
-.dark .rowboat-dock-dot {
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--codex-ink-secondary);
 }
 
 .rowboat-dock-tip {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  background: rgba(28, 28, 30, 0.88);
-  color: #fff;
+  background: var(--codex-bubble);
+  color: var(--codex-bubble-foreground);
   border-radius: 9px;
   font-size: 12px;
   font-weight: 600;
@@ -1395,7 +1375,7 @@
 .rowboat-dock-tip-status {
   font-size: 11px;
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.72);
+  color: color-mix(in oklab, var(--codex-bubble-foreground) 72%, transparent);
   white-space: nowrap;
 }
 
@@ -1410,20 +1390,13 @@
   width: 296px;
   max-height: 70%;
   overflow: auto;
-  background: rgba(252, 252, 253, 0.82);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  border: 1px solid rgba(0, 0, 0, 0.09);
+  background: var(--rowboat-raised);
+  border: 1px solid transparent;
   border-radius: 18px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--rowboat-shadow);
   padding: 12px;
   z-index: 35;
   animation: rowboat-dock-flyin 0.18s ease-out;
-}
-
-.dark .rowboat-dock-flyout {
-  background: rgba(34, 34, 38, 0.85);
-  border-color: rgba(255, 255, 255, 0.12);
 }
 
 @keyframes rowboat-dock-flyin {
@@ -1441,19 +1414,10 @@
   display: flex;
   gap: 4px;
   padding: 14px;
-  background: rgba(248, 248, 250, 0.78);
-  backdrop-filter: blur(30px) saturate(1.8);
-  -webkit-backdrop-filter: blur(30px) saturate(1.8);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  outline: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 24px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
-}
-
-.dark .rowboat-dock-switcher {
-  background: rgba(38, 38, 42, 0.78);
-  border-color: rgba(255, 255, 255, 0.14);
-  outline-color: rgba(0, 0, 0, 0.4);
+  background: var(--rowboat-raised);
+  border: 1px solid transparent;
+  border-radius: 18px;
+  box-shadow: var(--rowboat-shadow);
 }
 
 /* Codex: the sidebar carries no internal borders — spacing does the separating. */
@@ -1613,12 +1577,8 @@
 }
 
 .graph-view {
-  background-color: #f8f8f9;
+  background-color: var(--rowboat-panel-soft);
   user-select: none;
-}
-
-.dark .graph-view {
-  background-color: #0b0b0d;
 }
 
 .graph-view::before {

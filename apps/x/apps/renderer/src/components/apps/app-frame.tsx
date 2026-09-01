@@ -84,7 +84,7 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
               type="button"
               title={`Published as ${app.publish.repo} — view details`}
               onClick={() => setShowDetail(true)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-green-600 hover:bg-green-500/10 dark:text-green-500"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-[var(--codex-success)] hover:bg-[var(--codex-success)]/10"
             >
               <BadgeCheck className="size-4" /> Published
             </button>

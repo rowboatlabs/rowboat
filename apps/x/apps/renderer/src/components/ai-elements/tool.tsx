@@ -138,7 +138,7 @@ export const ToolHeader = ({
         )}
         {row.diff && (row.diff.added > 0 || row.diff.removed > 0) && (
           <span className="shrink-0 font-mono text-xs tabular-nums">
-            <span className="text-green-600 dark:text-green-500">+{row.diff.added}</span>{" "}
+            <span className="text-[var(--codex-success)]">+{row.diff.added}</span>{" "}
             <span className="text-red-600 dark:text-red-500">-{row.diff.removed}</span>
           </span>
         )}
@@ -197,7 +197,7 @@ export type ToolIODetailsProps = {
 
 const ToolIOSection = ({ label, children, error }: { label: string; children: ReactNode; error?: boolean }) => (
   <div className="min-w-0">
-    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+    <p className="mb-0.5 text-[13px] text-muted-foreground">
       {label}
     </p>
     <div

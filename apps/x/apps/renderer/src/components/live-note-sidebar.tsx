@@ -310,15 +310,15 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
       {/* Header */}
       <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
         <Radio
-          className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-emerald-600 dark:text-emerald-400'}`}
+          className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-[var(--codex-success)]'}`}
         />
         <span className="truncate text-sm font-semibold">{noteTitle}</span>
         <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
           paused
             ? 'bg-muted text-muted-foreground'
-            : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+            : 'bg-[var(--codex-success)]/10 text-[var(--codex-success)]'
         }`}>
-          <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-emerald-500'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
+          <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-[var(--codex-success)]'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
           {paused ? 'Paused' : 'Live note'}
         </span>
         <span className="ml-auto" />
@@ -356,7 +356,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
           <div className="shrink-0 border-b border-border px-4 py-3">
             <div className="grid grid-cols-2 gap-4">
               <div className="min-w-0">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Last run</div>
+                <div className="text-[13px] text-muted-foreground">Last run</div>
                 <div className="mt-0.5 truncate text-xs text-foreground">
                   {live.lastRunAt
                     ? <>
@@ -367,7 +367,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
                 </div>
               </div>
               <div className="min-w-0">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Triggers</div>
+                <div className="text-[13px] text-muted-foreground">Triggers</div>
                 <div className="mt-0.5 truncate text-xs text-foreground">{summarizeSchedule(live.triggers)}</div>
               </div>
             </div>
@@ -597,7 +597,7 @@ function DetailsTab({
         <button
           type="button"
           onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex w-full items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="flex w-full items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground"
           aria-expanded={showAdvanced}
         >
           {showAdvanced ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
@@ -652,7 +652,7 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
   return (
     <div className="border-b border-border px-4 py-4 last:border-b-0">
       {label && (
-        <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="mb-3 text-[13px] text-muted-foreground">
           {label}
         </div>
       )}
@@ -716,7 +716,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
 
       {/* Full transcript */}
       <div>
-        <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="mb-2 text-[13px] text-muted-foreground">
           Transcript
         </div>
         {loadingRun && (

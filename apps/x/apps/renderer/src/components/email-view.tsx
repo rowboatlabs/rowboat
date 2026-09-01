@@ -1075,7 +1075,7 @@ function RecipientField({
         />
         {showSuggestions && (
           <ul
-            className="absolute left-0 top-[calc(100%+6px)] z-30 m-0 max-h-[296px] w-max min-w-[280px] max-w-[min(440px,100%)] list-none overflow-y-auto overscroll-contain rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+            className="absolute left-0 top-[calc(100%+6px)] z-30 m-0 max-h-[296px] w-max min-w-[280px] max-w-[min(440px,100%)] list-none overflow-y-auto overscroll-contain rounded-2xl border-none bg-popover p-2 text-popover-foreground shadow-[var(--rowboat-shadow)]"
             role="listbox"
             ref={listRef}
           >
@@ -2600,7 +2600,7 @@ function ShortcutRow({ combo, alt, label }: { combo: string[]; alt?: string[]; l
 function ShortcutSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</div>
+      <div className="mb-1.5 text-[13px] text-muted-foreground">{title}</div>
       {children}
     </div>
   )

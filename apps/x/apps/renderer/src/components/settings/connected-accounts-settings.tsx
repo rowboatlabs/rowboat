@@ -56,7 +56,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
             ) : needsReconnect ? (
               <span className="text-xs text-amber-600">Needs reconnect</span>
             ) : state.isConnected ? (
-              <span className="text-xs text-emerald-600">Connected</span>
+              <span className="text-xs text-[var(--codex-success)]">Connected</span>
             ) : connectDisabled ? (
               <span className="text-xs text-muted-foreground truncate">{disabledReason}</span>
             ) : (
@@ -140,7 +140,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
         {(c.useComposioForGoogle || c.useComposioForGoogleCalendar || c.providers.includes('google') || c.providers.includes('microsoft')) && (
           <>
             <div className="px-3 pt-1 pb-0.5">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <span className="text-[13px] text-muted-foreground">
                 Email & Calendar
               </span>
             </div>
@@ -153,7 +153,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                     {c.gmailLoading ? (
                       <span className="text-xs text-muted-foreground">Checking...</span>
                     ) : c.gmailConnected ? (
-                      <span className="text-xs text-emerald-600">Connected</span>
+                      <span className="text-xs text-[var(--codex-success)]">Connected</span>
                     ) : (
                       <span className="text-xs text-muted-foreground truncate">Sync emails</span>
                     )}
@@ -215,7 +215,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                     {c.googleCalendarLoading ? (
                       <span className="text-xs text-muted-foreground">Checking...</span>
                     ) : c.googleCalendarConnected ? (
-                      <span className="text-xs text-emerald-600">Connected</span>
+                      <span className="text-xs text-[var(--codex-success)]">Connected</span>
                     ) : (
                       <span className="text-xs text-muted-foreground truncate">Sync calendar events</span>
                     )}
@@ -258,7 +258,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
         {c.providers.includes('fireflies-ai') && (
           <>
             <div className="px-3 pt-1 pb-0.5">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <span className="text-[13px] text-muted-foreground">
                 Meeting Notes
               </span>
             </div>
@@ -271,7 +271,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
         {/* Team Communication Section */}
         <>
           <div className="px-3 pt-3 pb-0.5">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <span className="text-[13px] text-muted-foreground">
               Team Communication
             </span>
           </div>
@@ -284,7 +284,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                   {c.slackLoading ? (
                     <span className="text-xs text-muted-foreground">Checking...</span>
                   ) : c.slackEnabled && c.slackWorkspaces.length > 0 ? (
-                    <span className="text-xs text-emerald-600 truncate">
+                    <span className="text-xs text-[var(--codex-success)] truncate">
                       {c.slackWorkspaces.map(workspace => workspace.name).join(', ')}
                     </span>
                   ) : (
@@ -418,7 +418,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
         {c.slackEnabled && (
           <>
             <div className="px-3 pt-3 pb-0.5">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <span className="text-[13px] text-muted-foreground">
                 Knowledge Sources
               </span>
             </div>

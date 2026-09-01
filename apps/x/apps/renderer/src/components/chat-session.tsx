@@ -353,7 +353,7 @@ export function ChatSessionComposer({
               >
                 {queuedMessageText(entry.message) || 'Attachment'}
               </button>
-              <span className="shrink-0 text-[10px] uppercase tracking-wider opacity-60">Queued</span>
+              <span className="shrink-0 text-[13px] text-muted-foreground">Queued</span>
               <button
                 type="button"
                 onClick={() => onRemoveQueued?.(entry.queueId)}

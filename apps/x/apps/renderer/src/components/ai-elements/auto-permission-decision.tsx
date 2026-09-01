@@ -78,18 +78,18 @@ export function AutoPermissionDecision({
       {expanded && (
         <div className="my-1 ml-[2.5px] flex flex-col gap-2 border-l-2 border-border pl-3">
           <div className="min-w-0">
-            <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Reason</p>
+            <p className="mb-0.5 text-[13px] text-muted-foreground">Reason</p>
             <p className="text-xs text-muted-foreground">{reason}</p>
           </div>
           {command && (
             <div className="min-w-0">
-              <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">Command</p>
+              <p className="mb-0.5 text-[13px] text-muted-foreground">Command</p>
               <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{command}</pre>
             </div>
           )}
           {filePermission && (
             <div className="min-w-0">
-              <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+              <p className="mb-0.5 text-[13px] text-muted-foreground">
                 Path{filePermission.paths.length === 1 ? "" : "s"}
               </p>
               <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">

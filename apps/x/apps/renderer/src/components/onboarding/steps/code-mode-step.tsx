@@ -104,7 +104,7 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
           {/* Per-agent selection (revealed when enabled) */}
           {enabled && (
             <div className="space-y-2">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <span className="text-[13px] text-muted-foreground">
                 Agents to set up
               </span>
               {AGENTS.map((a) => {
@@ -114,7 +114,7 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
                   <div key={a.key} className="rounded-xl border px-4 py-3 flex items-center gap-3">
                     <Terminal className="size-4 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0 text-sm font-medium">{a.name}</div>
-                    {ready && <CheckCircle2 className="size-4 text-green-600 shrink-0" />}
+                    {ready && <CheckCircle2 className="size-4 text-[var(--codex-success)] shrink-0" />}
                     <Switch
                       checked={selected[a.key]}
                       onCheckedChange={(v) => setSelected((prev) => ({ ...prev, [a.key]: v }))}

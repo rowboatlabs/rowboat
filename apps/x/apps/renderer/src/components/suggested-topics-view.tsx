@@ -54,11 +54,11 @@ function serializeTopics(topics: SuggestedTopicBlock[]): string {
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  Meetings: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-  Projects: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  People: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-  Organizations: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
-  Topics: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  Meetings: 'bg-secondary text-foreground',
+  Projects: 'bg-secondary text-foreground',
+  People: 'bg-secondary text-foreground',
+  Organizations: 'bg-secondary text-foreground',
+  Topics: 'bg-secondary text-foreground',
 }
 
 function getCategoryColor(category?: string): string {
@@ -74,7 +74,7 @@ interface TopicCardProps {
 
 function TopicCard({ topic, onTrack, isRemoving }: TopicCardProps) {
   return (
-    <div className="group flex flex-col gap-3 rounded-xl border border-border/60 bg-card p-5 transition-all hover:border-border hover:shadow-sm">
+    <div className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-5 transition-all">
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-sm font-semibold leading-snug text-foreground">
           {topic.title}
