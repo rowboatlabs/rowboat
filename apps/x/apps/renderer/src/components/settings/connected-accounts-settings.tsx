@@ -56,7 +56,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
             ) : needsReconnect ? (
               <span className="text-xs text-amber-600">Needs reconnect</span>
             ) : state.isConnected ? (
-              <span className="text-xs text-[var(--codex-success)]">Connected</span>
+              <span className="text-xs text-[var(--rowboat-success)]">Connected</span>
             ) : connectDisabled ? (
               <span className="text-xs text-muted-foreground truncate">{disabledReason}</span>
             ) : (
@@ -153,7 +153,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                     {c.gmailLoading ? (
                       <span className="text-xs text-muted-foreground">Checking...</span>
                     ) : c.gmailConnected ? (
-                      <span className="text-xs text-[var(--codex-success)]">Connected</span>
+                      <span className="text-xs text-[var(--rowboat-success)]">Connected</span>
                     ) : (
                       <span className="text-xs text-muted-foreground truncate">Sync emails</span>
                     )}
@@ -215,7 +215,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                     {c.googleCalendarLoading ? (
                       <span className="text-xs text-muted-foreground">Checking...</span>
                     ) : c.googleCalendarConnected ? (
-                      <span className="text-xs text-[var(--codex-success)]">Connected</span>
+                      <span className="text-xs text-[var(--rowboat-success)]">Connected</span>
                     ) : (
                       <span className="text-xs text-muted-foreground truncate">Sync calendar events</span>
                     )}
@@ -284,7 +284,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                   {c.slackLoading ? (
                     <span className="text-xs text-muted-foreground">Checking...</span>
                   ) : c.slackEnabled && c.slackWorkspaces.length > 0 ? (
-                    <span className="text-xs text-[var(--codex-success)] truncate">
+                    <span className="text-xs text-[var(--rowboat-success)] truncate">
                       {c.slackWorkspaces.map(workspace => workspace.name).join(', ')}
                     </span>
                   ) : (

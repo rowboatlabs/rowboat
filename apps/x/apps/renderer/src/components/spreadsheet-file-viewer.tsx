@@ -525,7 +525,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
             className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             {copied
-              ? <CheckIcon className="size-3.5 animate-in text-[var(--codex-success)] zoom-in-50 duration-200" />
+              ? <CheckIcon className="size-3.5 animate-in text-[var(--rowboat-success)] zoom-in-50 duration-200" />
               : <CopyIcon className="size-3.5" />}
           </button>
         </div>

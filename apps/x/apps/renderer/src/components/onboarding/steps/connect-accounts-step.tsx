@@ -44,7 +44,7 @@ function ProviderCard({
       className={cn(
         "flex items-center justify-between gap-4 rounded-xl border p-4 transition-colors",
         isConnected
-          ? "border-[var(--codex-success)]/25 bg-[var(--codex-success)]/5"
+          ? "border-[var(--rowboat-success)]/25 bg-[var(--rowboat-success)]/5"
           : "hover:bg-muted/50"
       )}
     >
@@ -62,7 +62,7 @@ function ProviderCard({
           providerState?.isLoading ? (
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           ) : isConnected ? (
-            <div className="flex items-center gap-1.5 text-sm text-[var(--codex-success)]">
+            <div className="flex items-center gap-1.5 text-sm text-[var(--rowboat-success)]">
               <CheckCircle2 className="size-4" />
               <span className="font-medium">Connected</span>
             </div>
@@ -181,11 +181,11 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: cardIndex++ * 0.06 }}
-              className="flex items-center justify-between gap-4 rounded-xl border border-[var(--codex-success)]/25 bg-[var(--codex-success)]/5 p-4"
+              className="flex items-center justify-between gap-4 rounded-xl border border-[var(--rowboat-success)]/25 bg-[var(--rowboat-success)]/5 p-4"
             >
               <div className="flex items-center gap-3 min-w-0">
-                <div className="size-10 rounded-lg flex items-center justify-center shrink-0 bg-[var(--codex-success)]/10">
-                  <span className="text-[var(--codex-success)]"><FileText className="size-5" /></span>
+                <div className="size-10 rounded-lg flex items-center justify-center shrink-0 bg-[var(--rowboat-success)]/10">
+                  <span className="text-[var(--rowboat-success)]"><FileText className="size-5" /></span>
                 </div>
                 <div className="min-w-0">
                   <div className="text-sm font-semibold">Rowboat Meeting Notes</div>
@@ -193,7 +193,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                 </div>
               </div>
               <div className="shrink-0">
-                <div className="flex items-center gap-1.5 text-sm text-[var(--codex-success)]">
+                <div className="flex items-center gap-1.5 text-sm text-[var(--rowboat-success)]">
                   <CheckCircle2 className="size-4" />
                 </div>
               </div>

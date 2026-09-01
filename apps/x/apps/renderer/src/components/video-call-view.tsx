@@ -46,7 +46,7 @@ interface VideoCallViewProps {
 
 const STATUS_DISPLAY: Record<VideoCallStatus, { label: string; dotClass: string }> = {
   idle: { label: 'Hold right ⌘ to talk · press & release it to go hands-free', dotClass: 'bg-neutral-500' },
-  listening: { label: 'Listening — release to send', dotClass: 'bg-[var(--codex-success)] animate-pulse' },
+  listening: { label: 'Listening — release to send', dotClass: 'bg-[var(--rowboat-success)] animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
 }
@@ -117,7 +117,7 @@ export function VideoCallView({
         <div
           className={cn(
             'relative flex items-center justify-center overflow-hidden rounded-2xl bg-neutral-900 transition-shadow',
-            userSpeaking && 'ring-2 ring-[var(--codex-success)]/80'
+            userSpeaking && 'ring-2 ring-[var(--rowboat-success)]/80'
           )}
         >
           {cameraOn ? (
@@ -208,7 +208,7 @@ export function VideoCallView({
             </>
           ) : pttStatus === 'locked' ? (
             <>
-              <span className="block h-2 w-2 rounded-full bg-[var(--codex-success)] animate-pulse" />
+              <span className="block h-2 w-2 rounded-full bg-[var(--rowboat-success)] animate-pulse" />
               Hands-free — press right ⌘ again to send
             </>
           ) : (
@@ -235,7 +235,7 @@ export function VideoCallView({
               className={cn(
                 'flex h-10 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors select-none',
                 pttStatus !== 'idle'
-                  ? 'bg-[var(--codex-success)] text-white hover:bg-[var(--codex-success)]/85'
+                  ? 'bg-[var(--rowboat-success)] text-white hover:bg-[var(--rowboat-success)]/85'
                   : 'bg-neutral-800 text-white/90 hover:bg-neutral-700',
                 micMuted && 'opacity-50'
               )}

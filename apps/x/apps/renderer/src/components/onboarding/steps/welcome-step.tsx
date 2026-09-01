@@ -36,7 +36,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         transition={{ delay: 0.15 }}
         className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3.5 py-1.5 text-xs font-medium text-muted-foreground mb-10"
       >
-        <span className="size-1.5 rounded-full bg-[var(--codex-success)] animate-pulse" />
+        <span className="size-1.5 rounded-full bg-[var(--rowboat-success)] animate-pulse" />
         Your AI coworker, with memory
       </motion.div>
       <motion.p
@@ -57,7 +57,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
       >
         {rowboatState.isConnected ? (
           <div className="flex flex-col items-center gap-4">
-            <div className="flex items-center gap-2 text-[var(--codex-success)]">
+            <div className="flex items-center gap-2 text-[var(--rowboat-success)]">
               <CheckCircle2 className="size-5" />
               <span className="text-sm font-medium">Connected to Rowboat</span>
             </div>

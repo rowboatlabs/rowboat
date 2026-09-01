@@ -16,7 +16,7 @@ function StatusDot({ status }: { status: CodeSessionStatus }) {
     return <span className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500" title="Needs your attention" />
   }
   if (status === 'working') {
-    return <span className="size-2 shrink-0 animate-pulse rounded-full bg-[var(--codex-git)]" title="Working" />
+    return <span className="size-2 shrink-0 animate-pulse rounded-full bg-[var(--rowboat-git)]" title="Working" />
   }
   return <span className="size-2 shrink-0 rounded-full bg-muted-foreground/30" title="Idle" />
 }

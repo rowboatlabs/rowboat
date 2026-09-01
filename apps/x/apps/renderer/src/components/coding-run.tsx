@@ -104,8 +104,8 @@ function toolKindIcon(kind?: string, title?: string) {
 }
 
 function planMarker(status?: string) {
-  if (status === 'completed') return <CheckCircle2 className="size-3.5 shrink-0 text-[var(--codex-success)]" />
-  if (status === 'in_progress') return <CircleDot className="size-3.5 shrink-0 text-[var(--codex-git)]" />
+  if (status === 'completed') return <CheckCircle2 className="size-3.5 shrink-0 text-[var(--rowboat-success)]" />
+  if (status === 'in_progress') return <CircleDot className="size-3.5 shrink-0 text-[var(--rowboat-git)]" />
   return <Circle className="size-3.5 shrink-0 text-muted-foreground" />
 }
 
@@ -156,7 +156,7 @@ export function CodingRunTimeline({
                 ) : failed ? (
                   <AlertCircle className="size-3.5 shrink-0 text-destructive" />
                 ) : (
-                  <CheckCircle2 className="size-3.5 shrink-0 text-[var(--codex-success)]" />
+                  <CheckCircle2 className="size-3.5 shrink-0 text-[var(--rowboat-success)]" />
                 )}
                 {toolKindIcon(row.toolKind, row.title)}
                 <span className="truncate text-foreground/90">{row.title ?? row.toolKind ?? 'Tool call'}</span>
@@ -202,7 +202,7 @@ export function CodingRunTimeline({
         // resolved permission
         const denied = row.decision === 'reject' || row.decision === 'cancelled'
         return (
-          <div key={row.id} className={cn('flex items-center gap-2 text-xs', denied ? 'text-red-600' : 'text-[var(--codex-success)]')}>
+          <div key={row.id} className={cn('flex items-center gap-2 text-xs', denied ? 'text-red-600' : 'text-[var(--rowboat-success)]')}>
             {denied ? '✕' : '✓'}
             <span className="truncate">{denied ? 'Denied' : 'Allowed'}: {row.title}</span>
           </div>

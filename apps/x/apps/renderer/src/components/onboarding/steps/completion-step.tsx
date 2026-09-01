@@ -32,7 +32,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
           transition={{ type: "spring", stiffness: 260, damping: 20, delay: 0.35 }}
           className="shrink-0"
         >
-          <CheckCircle2 className="size-9 text-[var(--codex-success)]" />
+          <CheckCircle2 className="size-9 text-[var(--rowboat-success)]" />
         </motion.span>
       </motion.div>
 
@@ -66,7 +66,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
                 transition={{ delay: 0.5 }}
                 className="flex items-center gap-2 text-sm text-muted-foreground"
               >
-                <CheckCircle2 className="size-4 text-[var(--codex-success)]" />
+                <CheckCircle2 className="size-4 text-[var(--rowboat-success)]" />
                 <span>Gmail (Email)</span>
               </motion.div>
             )}
@@ -77,7 +77,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
                 transition={{ delay: 0.52 }}
                 className="flex items-center gap-2 text-sm text-muted-foreground"
               >
-                <CheckCircle2 className="size-4 text-[var(--codex-success)]" />
+                <CheckCircle2 className="size-4 text-[var(--rowboat-success)]" />
                 <span>Google Calendar</span>
               </motion.div>
             )}
@@ -88,7 +88,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
                 transition={{ delay: 0.5 }}
                 className="flex items-center gap-2 text-sm text-muted-foreground"
               >
-                <CheckCircle2 className="size-4 text-[var(--codex-success)]" />
+                <CheckCircle2 className="size-4 text-[var(--rowboat-success)]" />
                 <span>Google (Email & Calendar)</span>
               </motion.div>
             )}
@@ -99,7 +99,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
                 transition={{ delay: 0.5 }}
                 className="flex items-center gap-2 text-sm text-muted-foreground"
               >
-                <CheckCircle2 className="size-4 text-[var(--codex-success)]" />
+                <CheckCircle2 className="size-4 text-[var(--rowboat-success)]" />
                 <span>Microsoft Outlook (Email & Calendar)</span>
               </motion.div>
             )}
@@ -110,7 +110,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
                 transition={{ delay: 0.55 }}
                 className="flex items-center gap-2 text-sm text-muted-foreground"
               >
-                <CheckCircle2 className="size-4 text-[var(--codex-success)]" />
+                <CheckCircle2 className="size-4 text-[var(--rowboat-success)]" />
                 <span>Fireflies (Meeting transcripts)</span>
               </motion.div>
             )}

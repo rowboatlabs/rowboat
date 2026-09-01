@@ -1197,7 +1197,7 @@ export const PromptInputTextarea = ({
         ref={textareaRef}
         dir="auto"
         className={cn(
-          // Codex: composer text matches message prose (15px). The highlight
+          // composer text matches message prose (15px). The highlight
           // overlay above must keep identical font metrics or mention boxes
           // drift from the caret.
           "relative z-10 !p-0 field-sizing-content max-h-48 min-h-10 text-[15px] leading-6",

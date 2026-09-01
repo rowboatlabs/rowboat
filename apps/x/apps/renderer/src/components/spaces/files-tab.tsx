@@ -1192,7 +1192,7 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
                                 {row.status === 'uploading' ? (
                                     <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                                 ) : row.status === 'done' ? (
-                                    <Check className="size-3.5 shrink-0 text-[var(--codex-success)]" />
+                                    <Check className="size-3.5 shrink-0 text-[var(--rowboat-success)]" />
                                 ) : row.status === 'error' ? (
                                     <X className="size-3.5 shrink-0 text-red-500" />
                                 ) : (

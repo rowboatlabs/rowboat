@@ -22,7 +22,7 @@ type RequestablePermission = ipcShared.IPCChannels["permissions:request"]["req"]
 type SettingsSection = ipcShared.IPCChannels["app:openPrivacySettings"]["req"]["section"]
 
 const CHIP_STYLES: Record<string, string> = {
-  granted: "bg-[var(--codex-success)]/10 text-[var(--codex-success)]",
+  granted: "bg-[var(--rowboat-success)]/10 text-[var(--rowboat-success)]",
   denied: "bg-red-500/10 text-red-600 dark:text-red-400",
   restricted: "bg-red-500/10 text-red-600 dark:text-red-400",
   "not-determined": "bg-amber-500/10 text-amber-600 dark:text-amber-400",

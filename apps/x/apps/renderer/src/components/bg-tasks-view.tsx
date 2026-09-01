@@ -1099,7 +1099,7 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
                                 <div className={`size-1.5 shrink-0 rounded-full ${
                                     inFlight ? 'bg-amber-500 animate-pulse'
                                         : isError ? 'bg-destructive'
-                                            : 'bg-[var(--codex-success)]'
+                                            : 'bg-[var(--rowboat-success)]'
                                 }`} />
                                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                                     <div className="flex items-center gap-2 text-xs">
@@ -1285,15 +1285,15 @@ function ControlSidebar({
             {/* Header */}
             <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
                 <ListChecks
-                    className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-[var(--codex-success)]'}`}
+                    className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-[var(--rowboat-success)]'}`}
                 />
                 <span className="truncate text-sm font-semibold">{task.name}</span>
                 <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
                     paused
                         ? 'bg-muted text-muted-foreground'
-                        : 'bg-[var(--codex-success)]/10 text-[var(--codex-success)]'
+                        : 'bg-[var(--rowboat-success)]/10 text-[var(--rowboat-success)]'
                 }`}>
-                    <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-[var(--codex-success)]'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
+                    <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-[var(--rowboat-success)]'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
                     {paused ? 'Paused' : 'Active'}
                 </span>
                 <span className="ml-auto" />

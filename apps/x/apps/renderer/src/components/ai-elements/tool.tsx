@@ -138,7 +138,7 @@ export const ToolHeader = ({
         )}
         {row.diff && (row.diff.added > 0 || row.diff.removed > 0) && (
           <span className="shrink-0 font-mono text-xs tabular-nums">
-            <span className="text-[var(--codex-success)]">+{row.diff.added}</span>{" "}
+            <span className="text-[var(--rowboat-success)]">+{row.diff.added}</span>{" "}
             <span className="text-red-600 dark:text-red-500">-{row.diff.removed}</span>
           </span>
         )}

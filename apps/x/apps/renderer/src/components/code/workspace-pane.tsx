@@ -222,10 +222,10 @@ export function WorkspacePane({
                   >
                     <Icon className={cn(
                       'size-3.5 shrink-0',
-                      file.state === 'deleted' ? 'text-red-500' : file.state === 'modified' || file.state === 'renamed' ? 'text-amber-500' : 'text-[var(--codex-success)]',
+                      file.state === 'deleted' ? 'text-red-500' : file.state === 'modified' || file.state === 'renamed' ? 'text-amber-500' : 'text-[var(--rowboat-success)]',
                     )} />
                     <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
-                    {file.insertions !== null && <span className="shrink-0 text-[var(--codex-success)]">+{file.insertions}</span>}
+                    {file.insertions !== null && <span className="shrink-0 text-[var(--rowboat-success)]">+{file.insertions}</span>}
                     {file.deletions !== null && <span className="shrink-0 text-red-500">−{file.deletions}</span>}
                   </button>
                 )

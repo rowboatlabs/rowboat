@@ -245,7 +245,7 @@ export function SpaceRail({
                                 {generalUnread > 0 && selection.kind !== 'general' && (
                                     <span className="text-[11px] font-semibold tabular-nums">{generalUnread}</span>
                                 )}
-                                {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-[var(--codex-success)]" title="someone is typing" />}
+                                {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" title="someone is typing" />}
                             </button>
                         </div>
 

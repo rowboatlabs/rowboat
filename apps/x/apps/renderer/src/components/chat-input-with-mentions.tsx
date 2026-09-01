@@ -751,7 +751,7 @@ function ChatInputInner({
     <div
       data-tour-id="chat-composer"
       className={cn(
-        // Codex composer: radius 24, raised surface; the ring is folded into
+        // Composer: radius 24, raised surface; the ring is folded into
         // the shadow (see .rowboat-chat-input in App.css).
         'rowboat-chat-input rounded-[24px] border bg-background',
         contextChip ? 'border-primary/40 ring-1 ring-primary/25' : 'border-transparent',
@@ -884,7 +884,7 @@ function ChatInputInner({
           )}
         </div>
       )}
-      {/* Codex composer: the input line gets real air above the controls row. */}
+      {/* Composer: the input line gets real air above the controls row. */}
       <div className="px-4 pt-5 pb-3">
         <PromptInputTextarea
           placeholder={placeholder ?? 'Type your message...'}

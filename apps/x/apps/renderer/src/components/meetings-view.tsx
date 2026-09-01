@@ -810,7 +810,7 @@ function UpcomingDayCard({ day, isToday, prepEventId, onOpenNote }: { day: DayGr
 
 function NowBadge() {
   return (
-    <span className="shrink-0 rounded bg-[var(--codex-success)] px-1.5 py-px text-[10px] font-bold leading-[1.5] text-white">
+    <span className="shrink-0 rounded bg-[var(--rowboat-success)] px-1.5 py-px text-[10px] font-bold leading-[1.5] text-white">
       Now
     </span>
   )

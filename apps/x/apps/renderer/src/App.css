@@ -1119,7 +1119,7 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* Codex design language tokens — see CODEX_DESIGN_LANGUAGE.md.
+/* Design language tokens — see DESIGN_LANGUAGE.md.
    Layering: canvas (#fff) is the floor; the sidebar sits beside it one step
    darker with no border (the value shift is the border); floating surfaces are
    raised white with hairline ring + shadow; inputs recess with no border.
@@ -1175,17 +1175,17 @@
   --rowboat-attention: #e5484d;
   --rowboat-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.05);
   --rowboat-shadow-soft: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
-  /* Codex extensions */
-  --codex-link: #3478f6;
-  --codex-success: #1ea446;
-  --codex-git: #8b5cf6;
-  --codex-bubble: #0d0d0d;
-  --codex-bubble-foreground: #ffffff;
-  --codex-ink-secondary: #5d5d5d;
-  --codex-ink-faint: #b4b4b4;
-  --codex-handle: #d9d9d9;
+  /* Language extensions */
+  --rowboat-link: #3478f6;
+  --rowboat-success: #1ea446;
+  --rowboat-git: #8b5cf6;
+  --rowboat-bubble: #0d0d0d;
+  --rowboat-bubble-foreground: #ffffff;
+  --rowboat-ink-secondary: #5d5d5d;
+  --rowboat-ink-faint: #b4b4b4;
+  --rowboat-handle: #d9d9d9;
   /* Spaces stream — the Slack dialect (multiplayer chat only). Slack's link
-     ink is a teal-leaning navy, not the Codex blue. */
+     ink is a teal-leaning navy, not the app-wide blue. */
   --stream-link: #1264a3;
   --stream-mention-wash: rgba(29, 155, 209, 0.13);
   --stream-you-wash: rgba(242, 199, 68, 0.3);
@@ -1237,14 +1237,14 @@
   --rowboat-attention: #f2555a;
   --rowboat-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.3);
   --rowboat-shadow-soft: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.35);
-  --codex-link: #5b94ff;
-  --codex-success: #3dcb70;
-  --codex-git: #a78bfa;
-  --codex-bubble: #303030;
-  --codex-bubble-foreground: #ececec;
-  --codex-ink-secondary: #a6a6a6;
-  --codex-ink-faint: #666666;
-  --codex-handle: #4a4a4a;
+  --rowboat-link: #5b94ff;
+  --rowboat-success: #3dcb70;
+  --rowboat-git: #a78bfa;
+  --rowboat-bubble: #303030;
+  --rowboat-bubble-foreground: #ececec;
+  --rowboat-ink-secondary: #a6a6a6;
+  --rowboat-ink-faint: #666666;
+  --rowboat-handle: #4a4a4a;
   --stream-link: #1d9bd1;
   --stream-mention-wash: rgba(29, 155, 209, 0.2);
   --stream-you-wash: rgba(242, 199, 68, 0.22);
@@ -1260,7 +1260,7 @@
 
   body {
     @apply bg-background text-foreground;
-    /* Codex language: the system font is the identity — SF Pro on macOS. */
+    /* The system font is the identity — SF Pro on macOS. */
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -1300,7 +1300,7 @@
   flex-direction: column;
   align-items: flex-start;
   box-sizing: border-box;
-  /* Codex floating surface: solid raised ground, hairline ring folded into
+  /* Floating surface: solid raised ground, hairline ring folded into
      the shadow token — no frosted glass. Tokens flip for dark mode. */
   border-radius: 18px;
   background: var(--rowboat-raised);
@@ -1361,15 +1361,15 @@
   width: 4px;
   height: 4px;
   border-radius: 2px;
-  background: var(--codex-ink-secondary);
+  background: var(--rowboat-ink-secondary);
 }
 
 .rowboat-dock-tip {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  background: var(--codex-bubble);
-  color: var(--codex-bubble-foreground);
+  background: var(--rowboat-bubble);
+  color: var(--rowboat-bubble-foreground);
   border-radius: 9px;
   font-size: 12px;
   font-weight: 600;
@@ -1385,7 +1385,7 @@
 .rowboat-dock-tip-status {
   font-size: 11px;
   font-weight: 400;
-  color: color-mix(in oklab, var(--codex-bubble-foreground) 72%, transparent);
+  color: color-mix(in oklab, var(--rowboat-bubble-foreground) 72%, transparent);
   white-space: nowrap;
 }
 
@@ -1430,7 +1430,7 @@
   box-shadow: var(--rowboat-shadow);
 }
 
-/* Codex: the sidebar carries no internal borders — spacing does the separating. */
+/* The sidebar carries no internal borders — spacing does the separating. */
 .rowboat-sidebar [data-sidebar="header"] {
   gap: 0.625rem;
   border-bottom: none;
@@ -1484,7 +1484,7 @@
   box-shadow: none;
 }
 
-/* Codex composer: raised surface, real hairline border (a ring-in-shadow gets
+/* Composer: raised surface, real hairline border (a ring-in-shadow gets
    painted over by the dock's scroll-fade gradient at the top seam) plus a soft
    blur. No blue focus ring — the caret is the focus signal. */
 .rowboat-chat-input {
@@ -1502,7 +1502,7 @@
   line-height: 1.62;
 }
 
-/* Codex: user messages are ink-dark bubbles (radius 22, no border) and
+/* User messages are ink-dark bubbles (radius 22, no border) and
    assistant messages are plain prose on the canvas. Both are styled by the
    MessageContent component classes (ai-elements/message.tsx) so callers can
    still opt out (e.g. transparent attachment-only messages). */
@@ -1562,7 +1562,7 @@
     @apply my-4 border-border;
   }
   [data-slot="message-content"] a {
-    color: var(--codex-link);
+    color: var(--rowboat-link);
     @apply no-underline underline-offset-2 hover:underline;
   }
   [data-slot="message-content"] table {

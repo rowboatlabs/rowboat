@@ -358,7 +358,7 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
                   {installedFolder ? (
                     <button type="button" title="Installed — open it"
                       onClick={(e) => { e.stopPropagation(); onInstalled(installedFolder) }}
-                      className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-[var(--codex-success)] hover:bg-[var(--codex-success)]/10">
+                      className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-[var(--rowboat-success)] hover:bg-[var(--rowboat-success)]/10">
                       <BadgeCheck className="size-4" /> Open
                     </button>
                   ) : (

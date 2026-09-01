@@ -262,7 +262,7 @@ function UpdateSettings() {
               idle + lastCheckedAt genuinely means "on the latest version". */}
           {status.lastCheckedAt !== undefined && (
             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-              <CheckCircle2 className="size-3.5 text-[var(--codex-success)] shrink-0" />
+              <CheckCircle2 className="size-3.5 text-[var(--rowboat-success)] shrink-0" />
               <span>
                 {`You're up to date! Rowboat v${status.version} is the latest version.`}
                 <span className="text-muted-foreground/60">
@@ -667,7 +667,7 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
           <span className="text-[13px] text-muted-foreground">Composio API Key</span>
           {apiKeyConfigured && !showApiKeyInput ? (
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 text-sm text-[var(--codex-success)]">
+              <div className="flex items-center gap-1.5 text-sm text-[var(--rowboat-success)]">
                 <CheckCircle2 className="size-4" />
                 API key configured
               </div>
@@ -772,7 +772,7 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-medium truncate">{toolkit.name}</span>
                           {isConnected && (
-                            <span className="rounded-full bg-[var(--codex-success)]/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--codex-success)]">
+                            <span className="rounded-full bg-[var(--rowboat-success)]/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--rowboat-success)]">
                               Connected
                             </span>
                           )}
@@ -1218,7 +1218,7 @@ function AgentStatusRow({
           <span
             className={cn(
               "size-2 rounded-full shrink-0",
-              active ? "bg-[var(--codex-success)]" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
+              active ? "bg-[var(--rowboat-success)]" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
             )}
           />
           <span className="truncate">

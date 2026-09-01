@@ -533,7 +533,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                     <div key={m.id} className="flex items-center gap-2 rounded-md px-2 py-1.5">
                                         <span className="relative shrink-0">
                                             <MemberAvatar id={m.id} name={m.displayName} size="md" />
-                                            {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--codex-success)] ring-2 ring-popover" />}
+                                            {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
                                         </span>
                                         <span className="min-w-0 flex-1 truncate text-sm">
                                             {m.displayName}
@@ -542,7 +542,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                         {m.role === 'admin' && (
                                             <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
                                         )}
-                                        {isHere && <span className="shrink-0 text-[10.5px] text-[var(--codex-success)]">here</span>}
+                                        {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
                                     </div>
                                 )
                             })}
@@ -560,7 +560,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                 </Popover>
                 {here.length > 0 && (
                     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={here.map((id) => memberNames.get(id) ?? id).join(', ')}>
-                        <span className="size-1.5 rounded-full bg-[var(--codex-success)]" /> {here.length} here
+                        <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" /> {here.length} here
                     </span>
                 )}
                 <div className="flex-1" />

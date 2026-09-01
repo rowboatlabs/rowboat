@@ -179,7 +179,7 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
                 <span
                   className={cn(
                     "size-2 rounded-full shrink-0",
-                    c.status === "ok" ? "bg-[var(--codex-success)]" : "bg-destructive",
+                    c.status === "ok" ? "bg-[var(--rowboat-success)]" : "bg-destructive",
                   )}
                 />
                 {c.status === "ok"
@@ -534,7 +534,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
 
         {step.kind === "result" && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-[var(--codex-success)]">
+            <div className="flex items-center gap-2 text-sm font-medium text-[var(--rowboat-success)]">
               <CheckCircle2 className="size-4" />
               {step.name} connected
             </div>
@@ -657,7 +657,7 @@ function ManageProviderDialog({ card, usedBy, onClose, onRefreshModels }: {
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={cn("size-2 rounded-full shrink-0", card.status === "ok" ? "bg-[var(--codex-success)]" : "bg-destructive")} />
+            <span className={cn("size-2 rounded-full shrink-0", card.status === "ok" ? "bg-[var(--rowboat-success)]" : "bg-destructive")} />
             {card.status === "ok"
               ? `Connected · ${card.modelCount} model${card.modelCount === 1 ? "" : "s"} available`
               : (card.error || "Could not load models")}
