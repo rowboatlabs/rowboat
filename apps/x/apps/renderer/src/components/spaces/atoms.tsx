@@ -20,14 +20,18 @@ import { toast } from '@/lib/toast'
 export function MemberAvatar({ id, name, size = 'md', className }: {
     id: string
     name: string
-    size?: 'sm' | 'md' | 'lg'
+    size?: 'sm' | 'md' | 'lg' | 'xl'
     className?: string
 }) {
-    const dims = size === 'sm' ? 'size-5 text-[9px]' : size === 'lg' ? 'size-8 text-xs' : 'size-7 text-[10.5px]'
+    // Slack dialect: people are near-square tiles; circles stay reserved for AI.
+    const dims = size === 'sm' ? 'size-5 rounded-[4px] text-[9px]'
+        : size === 'lg' ? 'size-8 rounded-[5px] text-xs'
+        : size === 'xl' ? 'size-9 rounded-md text-[13px]'
+        : 'size-7 rounded-[5px] text-[10.5px]'
     return (
         <span
             title={name}
-            className={cn('inline-flex shrink-0 items-center justify-center rounded-full font-semibold leading-none select-none', dims, avatarColorClass(id), className)}
+            className={cn('inline-flex shrink-0 items-center justify-center font-semibold leading-none select-none', dims, avatarColorClass(id), className)}
         >
             {initials(name)}
         </span>
@@ -58,7 +62,7 @@ export function AvatarStack({ members, max = 5 }: { members: spaces.Member[]; ma
                 <MemberAvatar key={m.id} id={m.id} name={m.displayName} size="md" className="ring-2 ring-background" />
             ))}
             {members.length > max && (
-                <span className="inline-flex size-7 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">
+                <span className="inline-flex size-7 items-center justify-center rounded-[5px] bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">
                     +{members.length - max}
                 </span>
             )}

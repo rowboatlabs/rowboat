@@ -196,42 +196,51 @@ Rail `bg/sidebar`, no visible border to canvas (the value shift is the border). 
 ### Spaces — the multiplayer stream
 
 The assistant chat is a dialogue, so it gets bubbles. A space is a record of
-many voices, so it borrows Slack's anatomy instead — while staying inside the
-same tokens and type ramp. Where the two differ:
+many voices, so it borrows Slack's anatomy — and, deliberately, Slack's
+*contrast*: this is the one surface that breaks the quiet Codex voice, because
+loudness (heavy names, saturated tiles, chippy mentions) is what makes a
+multiplayer stream scannable. The dialect is scoped to the stream via
+`--stream-*` tokens:
+
+- `--stream-link`: `#1264A3` / dark `#1D9BD1` — Slack's teal-navy ink for
+  links, mention chips, reply counts. The Codex blue stays everywhere else.
+- `--stream-mention-wash`: `rgba(29,155,209,.13)` / dark `.2` — mention chips.
+- `--stream-you-wash` + `--stream-you-ink`: amber wash for `@here`/broadcasts.
+
+Where the two surfaces differ:
 
 | | Assistant chat | Spaces stream |
 |---|---|---|
 | Message shape | User bubble / assistant prose | Full-width attributed rows, no bubbles |
-| Identity | Implicit (you vs. the agent) | 36px avatar + name 15/600 + timestamp 12 tertiary |
-| Avatars | Circles | **Rounded squares (radius 8) for people; circles stay reserved for AI** — @rowboat renders with the round `bg/bubble` avatar |
+| Identity | Implicit (you vs. the agent) | 36px avatar + name **15/800** (heavy, Slack-style) + timestamp 12 tertiary |
+| Avatars | Circles | **Near-square tiles (radius 4-6, saturated fills) for people; circles stay reserved for AI** |
 | Density | Body 15/26, gap 28 | Body 15/22, grouped rows |
 | Actions | Icon row under last message | Floating hover toolbar, top-right of the row |
 
 Anatomy rules:
 
-- **Row**: 8px vertical padding, full-bleed `bg/hover` wash on hover. Gutter =
-  36px avatar + 12px gap; text column aligns to the name.
+- **Row**: tight 6px vertical padding, **full-bleed edge-to-edge** `bg/hover`
+  band on hover (no rounded inset). Gutter = 36px avatar + 12px gap.
 - **Grouping**: consecutive messages from the same author within 5 min drop
   the avatar/name; the gutter shows the timestamp (11 tertiary, tabular) on
   hover only.
-- **Mentions**: `@name` is a chip — `accent/blue` text on an 10% accent wash,
-  radius 6, padding 1px 4px, weight 500. Broadcasts (`@here`) and mentions of
-  *you* use the amber "needs you" wash instead. Mentions are references, not
-  links — no underline ever.
-- **Links**: `accent/blue`, no underline, hover underline (same as everywhere).
+- **Mentions**: `@name` is a chip — `--stream-link` text on the mention wash,
+  radius 4, padding 1px 3px, weight 500. Broadcasts (`@here`) and mentions of
+  *you* use the amber wash. Mentions are references, not links — no underline.
+- **Links**: `--stream-link` (not the Codex blue), no underline, hover underline.
 - **Hover toolbar**: `bg/raised` + ring-in-shadow (`shadow-soft`), radius 10,
   28px icon buttons, 16px icons at `ink/secondary` — react, reply in thread,
   share, more. Appears on row hover, floats at the row's top-right.
-- **Reactions**: pills under the text — h-24px, radius full, `bg/inset`,
-  emoji 14 + count 12 tabular `ink/secondary`, 4px gaps. *You reacted* is a
-  toggle-on state, so it may take blue: 10% accent wash + `accent/blue` count.
+- **Reactions**: Slack pills — white (`bg/canvas`) with a visible `control`
+  border, radius full, emoji 13 + count 11 tabular. *You reacted* = the
+  toggle-on state: `--stream-link` border + mention wash + blue count.
   Trailing ghost add-reaction button appears on row hover.
-- **Thread summary**: mini avatar stack (20px) + "N replies" `accent/blue`
-  13/500 + "Last reply …" 13 tertiary. Hover raises it: `bg/raised`,
-  hairline, radius 8, and the meta swaps to "View thread".
-- **Day divider**: hairline rule with a centered date chip — `bg/canvas`,
-  hairline border, radius full, 12/500. (The assistant chat centers plain
-  text; streams need the stronger break.)
+- **Thread summary**: mini avatar tiles + "N replies" `--stream-link` bold +
+  meta 13 tertiary. Borderless at rest; hover raises it (`bg/raised` +
+  hairline, radius 8) — Slack's inversion of the usual card.
+- **Day divider**: hairline rule with a centered bordered date chip —
+  `bg/canvas`, radius full, 12/700. (Streams need a stronger break than the
+  assistant chat's plain centered text.)
 - **Unread marker**: `semantic/danger` hairline + "New" 11/500 in the same
   red, right-aligned.
 - **States**: edited = "(edited)" 12 tertiary suffix; sending = 60% opacity;

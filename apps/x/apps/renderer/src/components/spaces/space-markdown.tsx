@@ -376,7 +376,7 @@ function ExternalLink({ href, children }: { href: string; children?: ReactNode }
                     if (isTrustedDomain(domain)) open()
                     else setConfirming(true)
                 }}
-                className="cursor-pointer break-words text-[var(--codex-link)] no-underline underline-offset-2 hover:underline"
+                className="cursor-pointer break-words text-[var(--stream-link)] no-underline underline-offset-2 hover:underline"
             >
                 {children}
             </a>
@@ -413,6 +413,30 @@ const spaceComponents: StreamdownComponents = {
         return <ExternalImage src={url} alt={alt ?? ''} />
     },
     a: SpaceAnchor,
+    // decorateMentions renders "@name" as **bold**; the Slack dialect shows
+    // those as tinted mention chips (broadcasts get the amber "needs you" wash).
+    strong: MentionStrong,
+}
+
+function MentionStrong({ children, ...props }: ComponentProps<'strong'>) {
+    const label = plainLabel(children)
+    if (label?.startsWith('@')) {
+        const broadcast = /^@(here|channel|everyone)$/i.test(label)
+        return (
+            <strong
+                className={cn(
+                    'rounded-[4px] px-[3px] py-px font-medium',
+                    broadcast
+                        ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
+                        : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
+                )}
+                {...props}
+            >
+                {children}
+            </strong>
+        )
+    }
+    return <strong {...props}>{children}</strong>
 }
 
 function SpaceAnchor({ href, children }: ComponentProps<'a'>) {

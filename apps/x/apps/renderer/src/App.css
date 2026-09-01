@@ -1184,6 +1184,12 @@
   --codex-ink-secondary: #5d5d5d;
   --codex-ink-faint: #b4b4b4;
   --codex-handle: #d9d9d9;
+  /* Spaces stream — the Slack dialect (multiplayer chat only). Slack's link
+     ink is a teal-leaning navy, not the Codex blue. */
+  --stream-link: #1264a3;
+  --stream-mention-wash: rgba(29, 155, 209, 0.13);
+  --stream-you-wash: rgba(242, 199, 68, 0.3);
+  --stream-you-ink: #97620f;
 }
 
 .dark {
@@ -1239,6 +1245,10 @@
   --codex-ink-secondary: #a6a6a6;
   --codex-ink-faint: #666666;
   --codex-handle: #4a4a4a;
+  --stream-link: #1d9bd1;
+  --stream-mention-wash: rgba(29, 155, 209, 0.2);
+  --stream-you-wash: rgba(242, 199, 68, 0.22);
+  --stream-you-ink: #e8c25e;
 }
 
 @layer base {
