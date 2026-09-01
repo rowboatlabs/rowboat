@@ -153,7 +153,7 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 - `spaces_message_deleted` — a human deleted (tombstoned) their own message
 - `spaces_topic_started` — replying to a general message created a new topic from it
 - `spaces_fold_requested` — "Fold into file…" asked the person's agent to fold a topic's decision into a file (the agent's resulting change is an `llm_usage` + a change-set on the org, not a renderer event)
-- `spaces_tab_viewed` — `{ tab: 'general' | 'topics' | 'files' }` — the segmented control inside a space
+- `spaces_tab_viewed` — `{ tab: 'general' | 'topics' | 'files' | 'whiteboard' }` — the segmented control inside a space (plus the whiteboard surface)
 
 The adoption metric for the chat-first spike is `spaces_message_posted` where `kind = general`, per day, vs. the team Slack channel.
 

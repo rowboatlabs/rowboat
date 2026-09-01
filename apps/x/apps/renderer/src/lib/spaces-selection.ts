@@ -1,5 +1,5 @@
-// What's selected inside a space: General (the chat), a topic, or a file.
-// Part of the app's navigation history, so the top ‹ › retrace it.
+// What's selected inside a space: General (the chat), a topic, a file, or a
+// whiteboard. Part of the app's navigation history, so the top ‹ › retrace it.
 
 export type RailSelection =
     | { kind: 'general' }
@@ -8,11 +8,14 @@ export type RailSelection =
     | { kind: 'draft'; parentMessageId: string }
     /** `fromTopicId` = opened from a topic (an artifact link) — the file view shows a crumb back to it. */
     | { kind: 'file'; path: string; fromTopicId?: string }
+    /** A shared board, full-bleed. `path` is its asset path (whiteboards/<name>.excalidraw). */
+    | { kind: 'whiteboard'; path: string }
 
 /** Stable key for history comparisons. */
 export function railKey(sel: RailSelection | undefined): string {
     if (!sel || sel.kind === 'general') return 'general'
     if (sel.kind === 'topic') return `topic:${sel.topicId}`
     if (sel.kind === 'draft') return `draft:${sel.parentMessageId}`
+    if (sel.kind === 'whiteboard') return `whiteboard:${sel.path}`
     return `file:${sel.path}`
 }

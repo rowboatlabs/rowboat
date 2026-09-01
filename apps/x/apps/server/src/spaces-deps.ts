@@ -57,7 +57,8 @@ type SpacesRpcChannel =
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
   | 'spaces:listMessages' | 'spaces:postMessage' | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:invokeRowboat' | 'spaces:topicSession'
-  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:bounceLive';
+  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
+  | 'spaces:bounceLive';
 
 type SpacesHandlers = {
   [K in SpacesRpcChannel]: (
@@ -284,6 +285,13 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:presence': async (args) => {
     orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.topicId);
+    return { success: true };
+  },
+
+  // Fire-and-forget like presence; incoming whiteboard frames ride the same
+  // per-space live subscription and reach clients over 'spaces:events'.
+  'spaces:whiteboard': async (args) => {
+    orgs.getLive(args.orgId).whiteboard(args.spaceId, args.boardId, args.payload);
     return { success: true };
   },
 

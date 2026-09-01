@@ -302,6 +302,7 @@ export const RPC_CHANNELS = [
   'spaces:subscribeSpace',
   'spaces:unsubscribeSpace',
   'spaces:presence',
+  'spaces:whiteboard',
   'spaces:bounceLive',
 ] as const satisfies readonly ipc.InvokeChannels[];
 

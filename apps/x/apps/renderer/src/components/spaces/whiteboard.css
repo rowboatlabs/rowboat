@@ -1,0 +1,89 @@
+/* Rowboat skin for the embedded Excalidraw editor (whiteboard-pane.tsx).
+   Documented CSS custom properties only, plus two structural hides — no
+   internal-layout surgery, so upgrades stay safe (re-verify these variables
+   still exist when bumping @excalidraw/excalidraw; imported after the
+   package's index.css so equal-specificity declarations here win).
+
+   The UI chrome maps to the app's design tokens (App.css :root / .dark —
+   they flip with the app theme, which is why the token mappings are
+   repeated under .theme--dark: the package's own dark block would beat a
+   bare .excalidraw on specificity). The accent swaps Excalidraw's
+   signature purple for a calm blue. */
+
+.excalidraw,
+.excalidraw.theme--dark {
+    /* Editor UI text matches the app (default is the bundled "Assistant"). */
+    --ui-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    /* Panels and surfaces follow the app's cards. */
+    --island-bg-color: var(--popover);
+    --sidebar-bg-color: var(--popover);
+    --popup-bg-color: var(--popover);
+    --popup-secondary-bg-color: var(--muted);
+    --popup-text-color: var(--foreground);
+    --default-bg-color: var(--background);
+    --color-surface-lowest: var(--background);
+    --color-surface-low: var(--secondary);
+    --color-surface-mid: var(--muted);
+    --color-surface-high: var(--muted);
+    --color-on-surface: var(--foreground);
+    --text-primary-color: var(--foreground);
+    --default-border-color: var(--border);
+    --dialog-border-color: var(--border);
+    --sidebar-border-color: var(--border);
+    --avatar-border-color: var(--border);
+    --input-bg-color: var(--background);
+    --input-border-color: var(--input);
+    --input-hover-bg-color: var(--muted);
+    --input-label-color: var(--muted-foreground);
+
+    --border-radius-md: var(--radius);
+    --border-radius-lg: calc(var(--radius) + 0.125rem);
+    --shadow-island: var(--rowboat-shadow-soft);
+}
+
+.excalidraw {
+    /* Accent (light): selection, active tool, checkboxes, links. */
+    --color-primary: #2563eb;
+    --color-primary-darker: #1d4ed8;
+    --color-primary-darkest: #1e40af;
+    --color-primary-hover: #1d4ed8;
+    --color-primary-light: #dbeafe;
+    --color-primary-light-darker: #bfdbfe;
+    --color-brand-hover: #1d4ed8;
+    --color-brand-active: #1e40af;
+    --color-selection: #2563eb;
+    --select-highlight-color: #3b82f6;
+    --focus-highlight-color: #93c5fd;
+    --color-surface-primary-container: #dbeafe;
+    --link-color: #2563eb;
+}
+
+.excalidraw.theme--dark {
+    /* Accent (dark): lighter blues on dark islands. */
+    --color-primary: #60a5fa;
+    --color-primary-darker: #93c5fd;
+    --color-primary-darkest: #bfdbfe;
+    --color-primary-hover: #93c5fd;
+    --color-primary-light: #24344d;
+    --color-primary-light-darker: #1d2a3f;
+    --color-brand-hover: #93c5fd;
+    --color-brand-active: #bfdbfe;
+    --color-selection: #1e40af;
+    --select-highlight-color: #60a5fa;
+    --focus-highlight-color: #3b82f6;
+    --color-surface-primary-container: #24344d;
+    --link-color: #60a5fa;
+}
+
+/* The Library panel browses excalidraw.com's community libraries — an
+   external surface; our top-right slot shows live collaborators instead. */
+.excalidraw .default-sidebar-trigger {
+    display: none;
+}
+
+/* Keep the help dialog (the shortcut sheet is genuinely useful), drop its
+   header row of external links (Excalidraw docs / blog / GitHub). */
+.excalidraw .HelpDialog__header {
+    display: none;
+}

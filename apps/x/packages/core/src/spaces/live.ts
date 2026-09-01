@@ -121,6 +121,18 @@ export class SpacesLive {
     }
   }
 
+  /**
+   * Send one ephemeral whiteboard frame (scene diff, cursor, idle state).
+   * Same posture as presence: silently dropped when the socket is down — the
+   * collab loop's periodic full-scene rebroadcast and snapshot reconciliation
+   * absorb the gap, so a lost frame costs smoothness, not data.
+   */
+  whiteboard(spaceId: string, boardId: string, payload: unknown): void {
+    if (this.ws?.readyState === this.WebSocketImpl.OPEN) {
+      this.ws.send(JSON.stringify({ kind: 'whiteboard', spaceId, boardId, payload }));
+    }
+  }
+
   close(): void {
     this.closed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);

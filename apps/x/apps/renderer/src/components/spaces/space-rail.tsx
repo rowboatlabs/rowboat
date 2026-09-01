@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
-import type { spaces } from '@x/shared'
+import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, PenTool, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -29,7 +29,7 @@ const FILES_MIN = 96
 const TOPICS_FLOOR = 160
 
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, pinned, onHoverChange, onTogglePin,
 }: {
     orgId: string
@@ -47,6 +47,8 @@ export function SpaceRail({
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     onCreateFile: (path: string) => void
+    /** The "+" in Whiteboards: creates the board asset AND opens it (a taken name just opens). */
+    onCreateBoard: (path: string) => void
     /** Picked or dropped files headed for the space's file tree (upload dialog opens in the pane). */
     onUploadFiles: (files: File[]) => void
     /** Opens the space's Trash (deleted files, restorable). */
@@ -62,6 +64,7 @@ export function SpaceRail({
     const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all')
     const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
     const [creatingFolder, setCreatingFolder] = useState(false)
+    const [creatingBoard, setCreatingBoard] = useState(false)
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
     // Resizable Files section: null = natural height (grows with the tree,
@@ -168,6 +171,17 @@ export function SpaceRail({
 
     const selectedTopicId = selection.kind === 'topic' ? selection.topicId : null
     const selectedPath = selection.kind === 'file' ? selection.path : null
+    const selectedBoard = selection.kind === 'whiteboard' ? selection.path : null
+
+    // Boards live in the same asset namespace but get their own rail section;
+    // the file tree hides them so one thing appears in one place.
+    const boards = entries.filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
+    const fileEntries = entries.filter((e) => !spaces.isWhiteboardPath(e.path))
+    const createBoard = (name: string) => {
+        setCreatingBoard(false)
+        const path = spaces.whiteboardPathForName(name)
+        if (path) onCreateBoard(path)
+    }
 
     const unreadTopics = topics.filter((t) => t.id !== generalId && !t.archived && isUnread(t)).length + (generalUnread > 0 ? 1 : 0)
     const badge = unreadTopics + unreadPaths.size
@@ -389,6 +403,55 @@ export function SpaceRail({
                         </div>
                     </div>
 
+                    <div className="shrink-0 border-t border-border">
+                        <div className="flex h-8 items-center gap-2 px-3 pr-2 pt-1">
+                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Whiteboards</span>
+                            <span className="text-[11px] text-muted-foreground/70">{boards.length}</span>
+                            <span className="flex-1" />
+                            <button
+                                type="button"
+                                title="New whiteboard"
+                                onClick={() => setCreatingBoard(true)}
+                                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <Plus className="size-3.5" />
+                            </button>
+                        </div>
+                        <div className="max-h-36 overflow-y-auto px-2 pb-2">
+                            <div className="flex flex-col gap-0.5">
+                                {creatingBoard && (
+                                    <input
+                                        autoFocus
+                                        placeholder="Board name…"
+                                        className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/30"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') createBoard(e.currentTarget.value)
+                                            else if (e.key === 'Escape') setCreatingBoard(false)
+                                        }}
+                                        onBlur={(e) => (e.currentTarget.value.trim() ? createBoard(e.currentTarget.value) : setCreatingBoard(false))}
+                                    />
+                                )}
+                                {boards.map((b) => (
+                                    <button
+                                        key={b.path}
+                                        type="button"
+                                        onClick={() => onSelect({ kind: 'whiteboard', path: b.path })}
+                                        className={cn(
+                                            'flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[13px]',
+                                            b.path === selectedBoard ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                                        )}
+                                    >
+                                        <PenTool className="size-3.5 shrink-0 text-muted-foreground" />
+                                        <span className="flex-1 truncate">{spaces.whiteboardDisplayName(b.path)}</span>
+                                    </button>
+                                ))}
+                                {boards.length === 0 && !creatingBoard && (
+                                    <div className="px-2 py-1 text-xs text-muted-foreground">Draw together — boards sync live for everyone here.</div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
                     <div
                         ref={filesRef}
                         // maxHeight backstops a persisted height against a shorter window.
@@ -405,7 +468,7 @@ export function SpaceRail({
                         />
                         <div className="flex h-8 shrink-0 items-center gap-2 px-3 pr-2 pt-1">
                             <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
-                            <span className="text-[11px] text-muted-foreground/70">{entries.length}</span>
+                            <span className="text-[11px] text-muted-foreground/70">{fileEntries.length}</span>
                             <span className="flex-1" />
                             <button
                                 type="button"
@@ -453,7 +516,7 @@ export function SpaceRail({
                             <FileTree
                                 orgId={orgId}
                                 spaceId={spaceId}
-                                entries={entries}
+                                entries={fileEntries}
                                 draftFolders={draftFolders}
                                 selectedPath={selectedPath}
                                 unreadPaths={unreadPaths}
