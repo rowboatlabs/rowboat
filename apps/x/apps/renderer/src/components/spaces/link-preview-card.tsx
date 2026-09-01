@@ -25,7 +25,7 @@ export function MessageLinkPreview({ body }: { body: string }) {
     if (!url || !preview) return null
     const open = () => window.open(preview.url)
     return (
-        <div className="mt-1 flex max-w-md items-start gap-3 rounded-lg border-l-4 border-l-blue-500/70 bg-muted/40 py-2 pl-3 pr-3">
+        <div className="mt-1 flex max-w-md items-start gap-3 rounded-lg border-l-4 border-l-[var(--stream-link)] bg-muted/40 py-2 pl-3 pr-3">
             <div className="min-w-0 flex-1">
                 {preview.siteName && <div className="text-[11px] text-muted-foreground">{preview.siteName}</div>}
                 {preview.title && (
@@ -33,7 +33,7 @@ export function MessageLinkPreview({ body }: { body: string }) {
                         type="button"
                         onClick={open}
                         title={preview.url}
-                        className="block max-w-full truncate text-left text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                        className="block max-w-full truncate text-left text-sm font-semibold text-[var(--stream-link)] hover:underline"
                     >
                         {preview.title}
                     </button>

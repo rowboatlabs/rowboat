@@ -261,14 +261,12 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // (600px document + 480px chat + the 28px rail edge).
     // ------------------------------------------------------------------
     const [mode, setMode] = useState<SpaceMode>(() => (selection.kind === 'file' ? 'read' : 'talk'))
-    // The topics/files rail has two modes, persisted: PINNED (default) — a
-    // plain sidebar, always open; or AUTO-HIDE — a collapsed edge that opens
-    // on hover and lingers a few seconds after the cursor leaves, so moving
-    // to the stream and back doesn't slam it shut mid-thought. (The first
-    // design closed the instant the cursor left — too twitchy to use.)
+    // The discussions/files rail is a plain sticky sidebar (persisted):
+    // open by default, collapsed to a slim edge strip on demand. No hover
+    // behavior — the strip reopens on click only. (Two earlier designs
+    // auto-opened on hover; both read as random. The shell sidebar contracts
+    // to the dock while in Spaces, so this rail is THE sidebar here.)
     const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railOpen') !== '0')
-    const [railHover, setRailHover] = useState(false)
-    const railCloseTimer = useRef<number | null>(null)
 
     // Width of the pane drives the Split floor and pinnability.
     const paneRef = useRef<HTMLDivElement | null>(null)
@@ -301,7 +299,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // What actually renders: a Split that doesn't fit falls back to the one
     // surface the selection needs.
     const effMode: SpaceMode = mode === 'split' && !splitFits ? (selection.kind === 'file' ? 'read' : 'talk') : mode
-    const railOpen = railPinned || railHover
+    const railOpen = railPinned
 
     /** The header buttons and ⌘1/2/3: say why when Split can't render. */
     const requestMode = (next: SpaceMode) => {
@@ -360,29 +358,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     }
 
     /** Auto-hide grace: how long the rail lingers after the cursor leaves. */
-    const RAIL_LINGER_MS = 3_500
-    const clearRailTimer = () => {
-        if (railCloseTimer.current) {
-            window.clearTimeout(railCloseTimer.current)
-            railCloseTimer.current = null
-        }
-    }
-    useEffect(() => clearRailTimer, [])
-    const onRailHover = (hovering: boolean) => {
-        clearRailTimer()
-        if (hovering) setRailHover(true)
-        else railCloseTimer.current = window.setTimeout(() => setRailHover(false), RAIL_LINGER_MS)
-    }
     const toggleRailPin = () => {
         const pin = !railPinned
         localStorage.setItem('spaces:railOpen', pin ? '1' : '0')
         setRailPinned(pin)
-        // Unpinning closes NOW (the cursor is on the button, inside the rail —
-        // without this the hover hold keeps it open and the click reads as dead).
-        if (!pin) {
-            clearRailTimer()
-            setRailHover(false)
-        }
     }
 
     // Selecting is also choreography: a topic opened from Read grows into
@@ -544,7 +523,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         </button>
                     </PopoverTrigger>
                     <PopoverContent align="start" className="w-64 p-1.5">
-                        <div className="px-2 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <div className="px-2 pb-1 pt-0.5 text-[13px] text-muted-foreground">
                             Members — {members.length}
                         </div>
                         <div className="max-h-72 overflow-y-auto">
@@ -554,16 +533,16 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                     <div key={m.id} className="flex items-center gap-2 rounded-md px-2 py-1.5">
                                         <span className="relative shrink-0">
                                             <MemberAvatar id={m.id} name={m.displayName} size="md" />
-                                            {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-popover" />}
+                                            {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
                                         </span>
                                         <span className="min-w-0 flex-1 truncate text-sm">
                                             {m.displayName}
                                             {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
                                         </span>
                                         {m.role === 'admin' && (
-                                            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
+                                            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
                                         )}
-                                        {isHere && <span className="shrink-0 text-[10.5px] text-emerald-600">here</span>}
+                                        {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
                                     </div>
                                 )
                             })}
@@ -581,7 +560,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                 </Popover>
                 {here.length > 0 && (
                     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={here.map((id) => memberNames.get(id) ?? id).join(', ')}>
-                        <span className="size-1.5 rounded-full bg-emerald-500" /> {here.length} here
+                        <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" /> {here.length} here
                     </span>
                 )}
                 <div className="flex-1" />
@@ -667,8 +646,6 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     onAddFolder={addFolder}
                     onRemoveFolder={removeFolder}
                     open={railOpen}
-                    pinned={railPinned}
-                    onHoverChange={onRailHover}
                     onTogglePin={toggleRailPin}
                 />
                 {/* The surfaces. Talk = the stream or an open topic; Read =

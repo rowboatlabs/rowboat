@@ -793,7 +793,7 @@ export function QuickAskBar() {
                   </div>
                 )}
                 {(panelAsked || panelText) && earlierItems.length > 0 && (
-                  <div className="my-2 flex items-center gap-2 text-[9px] uppercase tracking-wider text-neutral-400">
+                  <div className="my-2 flex items-center gap-2 text-[13px] text-neutral-400">
                     <span className="h-px flex-1 bg-black/10" />
                     earlier
                     <span className="h-px flex-1 bg-black/10" />
@@ -897,11 +897,11 @@ export function QuickAskBar() {
           {!callState.micMuted && (callState.status === 'listening' || callState.pttLocked) && (
             <>
               <span
-                className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+                className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
                 style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
               />
               <span
-                className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+                className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
                 style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
               />
             </>
@@ -948,7 +948,7 @@ export function QuickAskBar() {
 
 const STATUS_DISPLAY: Record<NonNullable<CallState['status']>, { label: string; dotClass: string }> = {
   idle: { label: 'Hold right ⌘ to talk', dotClass: 'bg-neutral-500' },
-  listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
+  listening: { label: 'Listening', dotClass: 'bg-[var(--rowboat-success)] animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
 }
@@ -1140,7 +1140,7 @@ function SkipperPins({
         >
           <span
             className={`flex h-[18px] w-[18px] select-none items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
-              state.status === 'listening' || state.pttLocked ? 'bg-green-500' : 'bg-amber-400'
+              state.status === 'listening' || state.pttLocked ? 'bg-[var(--rowboat-success)]' : 'bg-amber-400'
             }`}
           >
             <Mic
@@ -1222,7 +1222,7 @@ function SkipperStatusChip({ state, activity }: { state: CallState; activity?: s
   return (
     <span
       className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 font-medium text-white shadow-md ${
-        micOpen ? 'bg-green-600 text-[11px] font-semibold' : 'bg-black/60 text-[10px]'
+        micOpen ? 'bg-[var(--rowboat-success)] text-[11px] font-semibold' : 'bg-black/60 text-[10px]'
       }`}
     >
       {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
@@ -1410,11 +1410,11 @@ function PinnedPill({
           {!state.micMuted && (state.status === 'listening' || state.pttLocked) && (
             <>
               <span
-                className="pointer-events-none absolute left-1/2 top-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+                className="pointer-events-none absolute left-1/2 top-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
                 style={{ width: 88, height: 88, marginLeft: -44, marginTop: -44, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
               />
               <span
-                className="pointer-events-none absolute left-1/2 top-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+                className="pointer-events-none absolute left-1/2 top-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
                 style={{ width: 88, height: 88, marginLeft: -44, marginTop: -44, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
               />
             </>
@@ -1441,7 +1441,7 @@ function PinnedPill({
                 </>
               ) : state.pttLocked ? (
                 <>
-                  <span className="block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                  <span className="block h-1.5 w-1.5 rounded-full bg-[var(--rowboat-success)] animate-pulse" />
                   Hands-free
                 </>
               ) : (
@@ -1492,7 +1492,7 @@ function PinnedPill({
           disabled={state.micMuted}
           className={`flex h-6 select-none items-center gap-1 rounded-full px-2 text-[10px] font-medium transition-colors ${
             state.status === 'listening' || state.pttLocked
-              ? 'bg-green-600 text-white hover:bg-green-500'
+              ? 'bg-[var(--rowboat-success)] text-white hover:bg-[var(--rowboat-success)]/85'
               : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
           } ${state.micMuted ? 'opacity-50' : ''}`}
           aria-label="Hold to talk — or hold the right ⌘ key from any app"
@@ -1700,11 +1700,11 @@ function TuckedMascot({
         {micOpen && (
           <>
             <span
-              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
               style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
             />
             <span
-              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-green-400/90"
+              className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
               style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
             />
           </>

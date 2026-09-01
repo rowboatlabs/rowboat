@@ -119,7 +119,7 @@ export function ChatSessionPane({
 
   const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
   const tabConversationContentClassName = cn(
-    'mx-auto w-full max-w-4xl',
+    'mx-auto w-full max-w-[820px] px-6',
     tabHasConversation ? 'pb-28' : 'pb-0',
     !tabHasConversation && 'min-h-full items-center justify-center',
   )
@@ -353,7 +353,7 @@ export function ChatSessionComposer({
               >
                 {queuedMessageText(entry.message) || 'Attachment'}
               </button>
-              <span className="shrink-0 text-[10px] uppercase tracking-wider opacity-60">Queued</span>
+              <span className="shrink-0 text-[13px] text-muted-foreground">Queued</span>
               <button
                 type="button"
                 onClick={() => onRemoveQueued?.(entry.queueId)}

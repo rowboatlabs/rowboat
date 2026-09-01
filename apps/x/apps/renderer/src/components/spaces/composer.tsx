@@ -465,19 +465,19 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     return (
         <div className="px-3 pb-3 pt-1 shrink-0">
             <div
-                className="relative rounded-xl border border-border bg-background shadow-sm focus-within:border-foreground/30"
+                className="relative rounded-2xl border border-border bg-background shadow-[0_8px_24px_rgb(0_0_0_/_0.04)]"
                 onDragEnter={onDragEnter}
                 onDragOver={(e) => { if (refs && dragHasFiles(e)) e.preventDefault() }}
                 onDragLeave={onDragLeave}
                 onDrop={onDrop}
             >
                 {dragOver && (
-                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-foreground/40 bg-background/90 text-sm text-muted-foreground">
+                    <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-foreground/40 bg-background/90 text-sm text-muted-foreground">
                         Drop to attach
                     </div>
                 )}
                 {showCommands && (
-                    <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 overflow-hidden rounded-xl border border-border bg-background p-1.5 shadow-sm">
+                    <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 overflow-hidden rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
                         {cmdCandidates.map((c, i) => (
                             <button
                                 key={c.name}
@@ -495,13 +495,13 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                     </div>
                 )}
                 {!showCommands && activeCommand && !showMentions && (
-                    <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 rounded-xl border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm">
+                    <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 rounded-2xl border-none bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--rowboat-shadow)]">
                         <span className="font-mono text-sm font-medium text-foreground">/{activeCommand.name}</span>
                         {activeCommand.args && <span className="font-mono text-sm"> {activeCommand.args}</span>} — {activeCommand.hint} · ↵ to run
                     </div>
                 )}
                 {showMentions && (
-                    <div className="absolute bottom-full left-2 z-20 mb-1 w-72 overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-md">
+                    <div className="absolute bottom-full left-2 z-20 mb-1 w-72 overflow-hidden rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
                         {candidates.map((c, i) => (
                             <button
                                 key={c.id}
@@ -701,7 +701,7 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                                 className={cn(
                                     'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
                                     searchEnabled
-                                        ? 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900'
+                                        ? 'border-transparent bg-secondary text-foreground hover:bg-secondary/70'
                                         : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
                                 )}
                             >
@@ -732,7 +732,7 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                         disabled={busy || uploading || (!draft.trim() && !attachments.some((a) => a.status === 'done'))}
                         aria-label="Send"
                         title={uploading ? 'Waiting for uploads…' : 'Send (↵ · Shift+↵ for a new line)'}
-                        className="inline-flex size-7 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30 transition-opacity"
+                        className="inline-flex size-8 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30 transition-opacity"
                     >
                         {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
                     </button>

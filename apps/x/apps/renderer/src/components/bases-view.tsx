@@ -520,7 +520,7 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
               {/* Left: categories */}
               <div className={cn('overflow-auto', filterCategory ? 'w-[160px] border-r border-border' : 'flex-1')}>
                 <div className="flex items-center justify-between px-2 py-1.5">
-                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Attributes</span>
+                  <span className="text-[13px] text-muted-foreground">Attributes</span>
                   {filters.length > 0 && (
                     <button
                       onClick={clearFilters}
@@ -744,7 +744,7 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
             onChange={(e) => setSaveName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleSaveConfirm() }}
             placeholder="e.g. Contacts, Projects..."
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+            className="w-full rounded-md border border-transparent bg-[var(--rowboat-wash)] px-3 py-2 text-sm outline-none focus:border-border focus:ring-1 focus:ring-ring"
             autoFocus
           />
           <DialogFooter>

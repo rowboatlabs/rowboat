@@ -509,7 +509,7 @@ function NewTaskDialog({
                     <>
                         <div className="space-y-4">
                             <div>
-                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Repository</label>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Repository</label>
                                 {projectName ? (
                                     <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
                                         <span className="flex items-center gap-2 text-[13px]">
@@ -529,15 +529,15 @@ function NewTaskDialog({
                                 </p>
                             </div>
                             <div>
-                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Name</label>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Name</label>
                                 <Input value={name} onChange={e => setName(e.target.value)} />
                             </div>
                             <div>
-                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Instructions</label>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Instructions</label>
                                 <Textarea value={instructions} onChange={e => setInstructions(e.target.value)} rows={6} className="text-[12.5px] leading-relaxed" />
                             </div>
                             <div>
-                                <label className="mb-2 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Triggers</label>
+                                <label className="mb-2 block text-[13px] text-muted-foreground">Triggers</label>
                                 <TriggersEditor value={triggers} onChange={setTriggers} />
                                 <p className="mt-2 text-[11px] text-muted-foreground">
                                     Prefilled to fire when a meeting's notes become available. Adjust if you want.
@@ -604,7 +604,7 @@ Example: every morning at 7, summarize my unread Gmail into a one-paragraph brie
                     <>
                         <div className="space-y-4">
                             <div>
-                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Name</label>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Name</label>
                                 <Input
                                     value={name}
                                     onChange={e => setName(e.target.value)}
@@ -613,7 +613,7 @@ Example: every morning at 7, summarize my unread Gmail into a one-paragraph brie
                                 />
                             </div>
                             <div>
-                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Instructions</label>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Instructions</label>
                                 <Textarea
                                     value={instructions}
                                     onChange={e => setInstructions(e.target.value)}
@@ -626,7 +626,7 @@ Example: every morning at 7, summarize my unread Gmail into a one-paragraph brie
                                 </p>
                             </div>
                             <div>
-                                <label className="mb-2 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Triggers</label>
+                                <label className="mb-2 block text-[13px] text-muted-foreground">Triggers</label>
                                 <TriggersEditor value={triggers} onChange={setTriggers} />
                                 <p className="mt-2 text-[11px] text-muted-foreground">
                                     No triggers = manual-only.
@@ -696,7 +696,7 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
     return (
         <div className="border-b border-border px-4 py-4 last:border-b-0">
             {label && (
-                <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                <div className="mb-3 text-[13px] text-muted-foreground">
                     {label}
                 </div>
             )}
@@ -865,7 +865,7 @@ function InstructionsBlock({
     return (
         <div>
             <div className="mb-2 flex items-center justify-between">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Instructions</div>
+                <div className="text-[13px] text-muted-foreground">Instructions</div>
                 <button
                     type="button"
                     onClick={() => setEditing(true)}
@@ -940,7 +940,7 @@ function SetupTab({
                 <button
                     type="button"
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="flex w-full items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                    className="flex w-full items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground"
                     aria-expanded={showAdvanced}
                 >
                     {showAdvanced ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
@@ -1099,7 +1099,7 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
                                 <div className={`size-1.5 shrink-0 rounded-full ${
                                     inFlight ? 'bg-amber-500 animate-pulse'
                                         : isError ? 'bg-destructive'
-                                            : 'bg-emerald-500'
+                                            : 'bg-[var(--rowboat-success)]'
                                 }`} />
                                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                                     <div className="flex items-center gap-2 text-xs">
@@ -1193,7 +1193,7 @@ function RunTranscriptView({
 
                 {/* Transcript */}
                 <div>
-                    <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    <div className="mb-2 text-[13px] text-muted-foreground">
                         Transcript
                     </div>
                     {loading && (
@@ -1285,15 +1285,15 @@ function ControlSidebar({
             {/* Header */}
             <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
                 <ListChecks
-                    className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-emerald-600 dark:text-emerald-400'}`}
+                    className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-[var(--rowboat-success)]'}`}
                 />
                 <span className="truncate text-sm font-semibold">{task.name}</span>
                 <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
                     paused
                         ? 'bg-muted text-muted-foreground'
-                        : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        : 'bg-[var(--rowboat-success)]/10 text-[var(--rowboat-success)]'
                 }`}>
-                    <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-emerald-500'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
+                    <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-[var(--rowboat-success)]'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
                     {paused ? 'Paused' : 'Active'}
                 </span>
                 <span className="ml-auto" />
@@ -1318,7 +1318,7 @@ function ControlSidebar({
             <div className="shrink-0 border-b border-border px-4 py-3">
                 <div className="grid grid-cols-2 gap-4">
                     <div className="min-w-0">
-                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Last run</div>
+                        <div className="text-[13px] text-muted-foreground">Last run</div>
                         <div className="mt-0.5 truncate text-xs text-foreground">
                             {task.lastRunAt || task.lastAttemptAt ? (
                                 <>
@@ -1331,7 +1331,7 @@ function ControlSidebar({
                         </div>
                     </div>
                     <div className="min-w-0">
-                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Schedule</div>
+                        <div className="text-[13px] text-muted-foreground">Schedule</div>
                         <div className="mt-0.5 truncate text-xs text-foreground">{summarizeSchedule(task.triggers)}</div>
                     </div>
                 </div>
@@ -1619,7 +1619,7 @@ function TaskDetail({
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div className="grid grid-cols-[100px_1fr] items-start gap-x-3">
-            <div className="pt-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
+            <div className="pt-0.5 text-[13px] text-muted-foreground">{label}</div>
             <div className="min-w-0 text-xs leading-relaxed text-foreground">{children}</div>
         </div>
     )
@@ -1906,10 +1906,10 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                             </colgroup>
                             <thead>
                                 <tr className="border-b border-border/60 bg-muted/30 text-left">
-                                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Task</th>
-                                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Schedule</th>
-                                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Last ran</th>
-                                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">State</th>
+                                    <th className="px-4 py-3 text-[13px] text-muted-foreground">Task</th>
+                                    <th className="px-4 py-3 text-[13px] text-muted-foreground">Schedule</th>
+                                    <th className="px-4 py-3 text-[13px] text-muted-foreground">Last ran</th>
+                                    <th className="px-4 py-3 text-[13px] text-muted-foreground">State</th>
                                     <th className="px-2 py-3"><span className="sr-only">Actions</span></th>
                                 </tr>
                             </thead>

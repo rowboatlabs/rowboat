@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AppWindow,
   ArrowUpRight,
@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Code2,
   FileText,
-  FilePlus,
   Folder,
   Globe,
   AlertTriangle,
@@ -20,7 +19,6 @@ import {
   PanelLeftClose,
   Pencil,
   Pin,
-  SquarePen,
   Trash2,
   Plug,
   LoaderIcon,
@@ -94,7 +92,6 @@ import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { toast } from "@/lib/toast"
 import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
-import { VoiceNoteButton } from "@/components/voice-note-button"
 import z from "zod"
 
 interface TreeNode {
@@ -363,7 +360,7 @@ function SyncStatusBar() {
           <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
         </div>
       )}
-      <SidebarFooter className="border-t border-sidebar-border px-2 py-2">
+      <SidebarFooter className="border-t border-border px-2 py-2">
         <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
           <PopoverTrigger asChild>
             <button
@@ -590,6 +587,16 @@ export function SidebarContentPanel({
       .sort((a, b) => (b.stat?.mtimeMs ?? 0) - (a.stat?.mtimeMs ?? 0))
       .slice(0, 10)
   }, [tree])
+
+  // The most recently touched chat, for the Assistant row (recency only —
+  // pinning shouldn't hijack "continue where I left off"). Mirrors the dock.
+  const lastChat = useMemo(() => {
+    const recency = (r: { createdAt: string; modifiedAt?: string }) => {
+      const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
+      return Number.isFinite(ms) ? ms : 0
+    }
+    return [...recentRuns].sort((a, b) => recency(b) - recency(a))[0] ?? null
+  }, [recentRuns])
 
   // Pinned chats: a per-machine UI preference, persisted in localStorage.
   const [pinnedChatIds, setPinnedChatIds] = useState<string[]>(() => {
@@ -832,29 +839,41 @@ export function SidebarContentPanel({
 
   return (
     <Sidebar className="rowboat-sidebar border-r-0" {...props}>
-      <SidebarHeader className="titlebar-drag-region">
-        {/* Top spacer to clear the traffic lights + fixed toggle row */}
+      <SidebarHeader className="titlebar-drag-region gap-0 pb-0">
+        {/* Just clears the traffic lights + fixed toggle row (voice note and
+            compose live up there now); nav starts right below. */}
         <div className="h-8" />
-        {/* Quick actions */}
-        <div className="titlebar-no-drag flex items-center gap-1 pl-3 pr-6 pb-2">
-          {onNewChat && (
-            <button
-              type="button"
-              onClick={onNewChat}
-              className="flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-sidebar-border text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            >
-              <SquarePen className="size-3.5" />
-              New chat
-            </button>
-          )}
-          <ActionButton icon={FilePlus} label="New note" onClick={() => knowledgeActions.createNote()} />
-          <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} variant="action" />
-          {onToggleBrowser && (
-            <ActionButton icon={Globe} label="Run browser task" onClick={onToggleBrowser} />
-          )}
-        </div>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="gap-0">
+        {/* Ordered to mirror the dock: Assistant, Spaces, then the
+            destinations, then Chats. Same glyphs as the dock tiles. */}
+        <SidebarGroup className="flex flex-col pb-0">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={activeNav === 'assistant'}
+                  onClick={() => {
+                    if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+                    else onNewChat?.()
+                  }}
+                >
+                  <MascotFaceIcon className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Assistant</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Spaces — orgs and their spaces, with unread counts */}
+        {SPACES_ENABLED && (
+          <>
+            <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
+            <div className="mx-3 my-2 border-t border-border" />
+          </>
+        )}
+
         {/* Primary navigation */}
         <SidebarGroup className="flex flex-col">
           <SidebarGroupContent>
@@ -870,7 +889,7 @@ export function SidebarContentPanel({
                   data-tour-id="nav-email"
                   isActive={activeNav === 'email'}
                   onClick={() => onOpenEmail?.()}
-                  className={previewEmail ? 'h-auto items-start py-1.5' : undefined}
+                  className={previewEmail ? 'h-auto items-start py-1' : undefined}
                 >
                   <Mail className={cn('size-4 shrink-0', previewEmail && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
@@ -901,7 +920,7 @@ export function SidebarContentPanel({
                   data-tour-id="nav-meetings"
                   isActive={activeNav === 'meetings'}
                   onClick={onOpenMeetings}
-                  className={meetingSublabel ? 'h-auto items-start py-1.5' : undefined}
+                  className={meetingSublabel ? 'h-auto items-start py-1' : undefined}
                 >
                   <Mic className={cn('size-4 shrink-0', meetingSublabel && 'mt-1', meetingIsRecording && 'text-red-500')} />
                   <div className="flex min-w-0 flex-1 flex-col">
@@ -980,7 +999,7 @@ export function SidebarContentPanel({
                   data-tour-id="nav-knowledge"
                   isActive={activeNav === 'knowledge'}
                   onClick={() => knowledgeActions.openKnowledgeView()}
-                  className={knowledgeUpdatedLabel ? 'h-auto items-start py-1.5' : undefined}
+                  className={knowledgeUpdatedLabel ? 'h-auto items-start py-1' : undefined}
                 >
                   <FileText className={cn('size-4 shrink-0', knowledgeUpdatedLabel && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
@@ -993,7 +1012,7 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
             </SidebarMenu>
 
-            <div className="mx-3 my-2 border-t border-sidebar-border" />
+            <div className="mx-3 my-2 border-t border-border" />
 
             <SidebarMenu>
               <SidebarMenuItem>
@@ -1029,7 +1048,7 @@ export function SidebarContentPanel({
                   data-tour-id="nav-agents"
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
-                  className={bgAgentsLabel ? 'h-auto items-start py-1.5' : undefined}
+                  className={bgAgentsLabel ? 'h-auto items-start py-1' : undefined}
                 >
                   <Bot className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
@@ -1050,7 +1069,7 @@ export function SidebarContentPanel({
                   data-tour-id="nav-workspaces"
                   isActive={activeNav === 'workspaces'}
                   onClick={() => knowledgeActions.openWorkspaceAt()}
-                  className="h-auto items-start py-1.5"
+                  className="h-auto items-start py-1"
                 >
                   <Folder className="mt-0.5 size-4 shrink-0" />
                   <div className="flex min-w-0 flex-1 flex-col">
@@ -1061,19 +1080,19 @@ export function SidebarContentPanel({
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {onToggleBrowser && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={onToggleBrowser}>
+                    <Globe className="size-4 shrink-0" />
+                    <span className="flex-1 truncate">Browser</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <div className="mx-3 border-t border-sidebar-border" />
-
-        {/* Spaces — orgs and their spaces, with unread counts */}
-        {SPACES_ENABLED && (
-          <>
-            <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
-            <div className="mx-3 border-t border-sidebar-border" />
-          </>
-        )}
+        <div className="mx-3 my-2 border-t border-border" />
 
         {/* Chats */}
         <SidebarGroup className="flex flex-col">
@@ -1082,7 +1101,7 @@ export function SidebarContentPanel({
               type="button"
               data-tour-id="nav-chats"
               onClick={() => setChatsExpanded((v) => !v)}
-              className="flex w-full items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground"
+              className="flex w-full items-center gap-1.5 px-3 py-1 text-[13px] text-muted-foreground"
             >
               <ChevronRight className={cn('size-3 transition-transform', chatsExpanded && 'rotate-90')} />
               <span className="flex-1 text-left">Chats</span>
@@ -1311,7 +1330,7 @@ export function SidebarContentPanel({
         </div>
       )}
       {/* Bottom actions */}
-      <div className="border-t border-sidebar-border px-2 py-2">
+      <div className="border-t border-border px-2 py-2">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <button
@@ -1400,24 +1419,6 @@ export function SidebarContentPanel({
       <SyncStatusBar />
       <SidebarRail />
     </Sidebar>
-  )
-}
-
-function ActionButton({ icon: Icon, label, onClick }: { icon: typeof Mic; label: string; onClick: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          aria-label={label}
-          className="flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-        >
-          <Icon className="size-4" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
   )
 }
 

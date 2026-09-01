@@ -143,11 +143,11 @@ export function SidebarCreditRewards({
                   <div
                     className={cn(
                       "flex size-6 shrink-0 items-center justify-center rounded-full",
-                      activity.claimed ? "bg-emerald-500/15" : "bg-muted",
+                      activity.claimed ? "bg-[var(--rowboat-success)]/15" : "bg-muted",
                     )}
                   >
                     {activity.claimed ? (
-                      <Check className="size-3.5 text-emerald-600" />
+                      <Check className="size-3.5 text-[var(--rowboat-success)]" />
                     ) : (
                       <Icon className="size-3.5 text-muted-foreground" />
                     )}
@@ -178,11 +178,11 @@ export function SidebarCreditRewards({
                 <div
                   className={cn(
                     "flex size-6 shrink-0 items-center justify-center rounded-full",
-                    inviteSlotsLeft === 0 ? "bg-emerald-500/15" : "bg-muted",
+                    inviteSlotsLeft === 0 ? "bg-[var(--rowboat-success)]/15" : "bg-muted",
                   )}
                 >
                   {inviteSlotsLeft === 0 ? (
-                    <Check className="size-3.5 text-emerald-600" />
+                    <Check className="size-3.5 text-[var(--rowboat-success)]" />
                   ) : (
                     <UserPlus className="size-3.5 text-muted-foreground" />
                   )}
@@ -214,7 +214,7 @@ export function SidebarCreditRewards({
                     onClick={copyInviteCode}
                     className="flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   >
-                    {copied ? <Check className="size-3 text-emerald-600" /> : <Copy className="size-3" />}
+                    {copied ? <Check className="size-3 text-[var(--rowboat-success)]" /> : <Copy className="size-3" />}
                     {copied ? "Copied" : "Copy"}
                   </button>
                 </div>

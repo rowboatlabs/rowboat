@@ -46,7 +46,7 @@ export function FoldIntoFileButton({ entries, onPick, busy }: {
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
-                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Fold this topic into</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-[13px] text-muted-foreground">Fold this topic into</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {entries.length === 0 && <DropdownMenuItem disabled>No files in this space yet</DropdownMenuItem>}
                 {entries.map((e) => (
@@ -90,7 +90,7 @@ export function ArtifactsRail({ org, space, groups, memberNames, working, entrie
     return (
         <aside className="w-80 shrink-0 flex flex-col min-h-0 border-l border-border">
             <div className="flex items-center gap-2 pl-3.5 pr-1.5 h-9 shrink-0 border-b border-border">
-                <span className="whitespace-nowrap text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Files changed here</span>
+                <span className="whitespace-nowrap text-[13px] text-muted-foreground">Files changed here</span>
                 <span className="text-xs text-muted-foreground">{groups.length === 0 ? 'none yet' : groups.length}</span>
                 <span className="flex-1" />
                 <FoldIntoFileButton entries={entries} onPick={onFold} busy={folding} />

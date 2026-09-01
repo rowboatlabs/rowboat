@@ -103,7 +103,7 @@ export function BackgroundTaskDetail({
             <h2 className="text-sm font-medium text-muted-foreground mb-2">Status</h2>
             <div className="bg-muted/50 rounded-lg p-4">
               <div className="flex items-center gap-2">
-                <CheckCircle className="size-4 text-green-500" />
+                <CheckCircle className="size-4 text-[var(--rowboat-success)]" />
                 <p className="text-sm font-medium">Completed</p>
               </div>
               <p className="text-xs text-muted-foreground mt-1">

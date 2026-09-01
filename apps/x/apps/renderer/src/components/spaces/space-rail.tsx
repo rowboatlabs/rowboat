@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, PenTool, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, PenTool, Plus, Search, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -21,11 +21,11 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // every surface — Messages + discussions on top, the file tree below. The
 // Discussions section lists ONLY deliberate topic annotations (annotation
 // model): threads someone gave a goal. Plain reply chains stay behind their
-// chips in the stream — the rail holds intentions, not accidents. Two modes:
-// PINNED (default) it is a plain 280px sidebar; unpinned it is a 28px edge
-// that opens on hover and lingers a few seconds after the cursor leaves
-// (instant close was too twitchy). The header button flips the mode; a click
-// on the closed edge pins it back open. The surfaces own everything else.
+// chips in the stream — the rail holds intentions, not accidents. It is a
+// plain sticky 280px sidebar (the shell sidebar contracts to the dock while
+// in Spaces, so this is THE sidebar here), collapsible to a 28px edge strip
+// via the header button; clicking the strip reopens it. No hover behavior —
+// the rail moves only on explicit clicks. The surfaces own everything else.
 
 /** Resizable Files section: never shorter than this (header + a couple of rows). */
 const FILES_MIN = 96
@@ -34,7 +34,7 @@ const TOPICS_FLOOR = 160
 
 export function SpaceRail({
     orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
-    open, pinned, onHoverChange, onTogglePin,
+    open, onTogglePin,
 }: {
     orgId: string
     spaceId: string
@@ -59,8 +59,6 @@ export function SpaceRail({
     onAddFolder: (path: string) => void
     onRemoveFolder: (path: string) => void
     open: boolean
-    pinned: boolean
-    onHoverChange: (hovering: boolean) => void
     onTogglePin: () => void
 }) {
     const [query, setQuery] = useState('')
@@ -176,12 +174,13 @@ export function SpaceRail({
 
     return (
         <aside
-            onMouseEnter={() => onHoverChange(true)}
-            onMouseLeave={() => onHoverChange(false)}
             style={{ width: open ? 280 : 28, transition: 'width 200ms cubic-bezier(0.2,0,0,1)' }}
             className={cn(
-                'relative z-10 shrink-0 min-h-0 overflow-hidden border-r border-border flex flex-col',
-                open ? 'bg-muted/20' : 'bg-background',
+                'relative z-10 shrink-0 min-h-0 overflow-hidden flex flex-col',
+                // A step lighter than the main sidebar so the two rails read as
+                // distinct layers; at this subtle a shift the hairline to the
+                // canvas earns its place.
+                open ? 'border-r border-border bg-[var(--rowboat-panel-soft)]' : 'border-r border-border bg-background',
             )}
         >
             {/* Always mounted: an input unmounted mid-pick (the rail toggled
@@ -199,8 +198,8 @@ export function SpaceRail({
                 }}
             />
             {!open ? (
-                // The closed edge: hovering opens the rail; a click pins it
-                // (the strong signal — and the only path on touch screens).
+                // The collapsed edge strip: click to reopen. Deliberately not
+                // hover-triggered — the rail appears only on an explicit act.
                 <button
                     type="button"
                     onClick={onTogglePin}
@@ -220,19 +219,14 @@ export function SpaceRail({
                 // Inner content is fixed at the open width so text doesn't reflow mid-slide.
                 <div ref={railBodyRef} className="flex h-full w-[280px] flex-col">
                     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1.5">
-                        <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Discussions &amp; files</span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">Discussions &amp; files</span>
                         <button
                             type="button"
                             onClick={onTogglePin}
-                            title={pinned ? 'Auto-hide — opens on hover, slides away a moment after the cursor leaves' : 'Keep open'}
-                            className={cn(
-                                'flex size-6 shrink-0 items-center justify-center rounded-md',
-                                pinned
-                                    ? 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                                    : 'border border-border bg-background text-muted-foreground hover:text-foreground',
-                            )}
+                            title="Collapse — reopen from the edge strip"
+                            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                         >
-                            {pinned ? <PanelLeftClose className="size-3.5" /> : <Pin className="size-3" />}
+                            <PanelLeftClose className="size-3.5" />
                         </button>
                     </div>
 
@@ -251,12 +245,12 @@ export function SpaceRail({
                                 {generalUnread > 0 && selection.kind !== 'general' && (
                                     <span className="text-[11px] font-semibold tabular-nums">{generalUnread}</span>
                                 )}
-                                {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-emerald-500" title="someone is typing" />}
+                                {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" title="someone is typing" />}
                             </button>
                         </div>
 
                         <div className="mt-3 flex items-center gap-2 px-3 pr-2">
-                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Discussions</span>
+                            <span className="text-[13px] text-muted-foreground">Discussions</span>
                             <span className="text-[11px] text-muted-foreground/70">{topicRows.length}</span>
                             <span className="flex-1" />
                             <div className="inline-flex items-center rounded-md bg-muted p-0.5 text-[10.5px]">
@@ -272,7 +266,7 @@ export function SpaceRail({
                                 ))}
                             </div>
                         </div>
-                        <label className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus-within:border-foreground/30">
+                        <label className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2 text-xs text-muted-foreground focus-within:border-border">
                             <Search className="size-3" />
                             <input
                                 value={query}
@@ -399,7 +393,7 @@ export function SpaceRail({
 
                     <div className="shrink-0 border-t border-border">
                         <div className="flex h-8 items-center gap-2 px-3 pr-2 pt-1">
-                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Whiteboards</span>
+                            <span className="text-[13px] text-muted-foreground">Whiteboards</span>
                             <span className="text-[11px] text-muted-foreground/70">{boards.length}</span>
                             <span className="flex-1" />
                             <button
@@ -417,7 +411,7 @@ export function SpaceRail({
                                     <input
                                         autoFocus
                                         placeholder="Board name…"
-                                        className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/30"
+                                        className="h-7 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') createBoard(e.currentTarget.value)
                                             else if (e.key === 'Escape') setCreatingBoard(false)
@@ -461,7 +455,7 @@ export function SpaceRail({
                             )}
                         />
                         <div className="flex h-8 shrink-0 items-center gap-2 px-3 pr-2 pt-1">
-                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
+                            <span className="text-[13px] text-muted-foreground">Files</span>
                             <span className="text-[11px] text-muted-foreground/70">{fileEntries.length}</span>
                             <span className="flex-1" />
                             <button

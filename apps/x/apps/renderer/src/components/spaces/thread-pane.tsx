@@ -403,7 +403,7 @@ export function ThreadPane({
                         <span className="h-4 w-px shrink-0 bg-border" />
                     </>
                 )}
-                <span className="pl-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">{topic ? 'Discussion' : 'Thread'}</span>
+                <span className="pl-1 text-[13px] text-muted-foreground">{topic ? 'Discussion' : 'Thread'}</span>
                 <span className="truncate text-xs text-muted-foreground">
                     {editingTitle !== null ? (
                         <input

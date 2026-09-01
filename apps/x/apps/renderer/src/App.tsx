@@ -5,7 +5,7 @@ import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
@@ -19,6 +19,7 @@ import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './compo
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
+import { VoiceNoteButton } from '@/components/voice-note-button'
 import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
@@ -735,8 +736,12 @@ function parseDeepLink(input: string): ViewState | null {
     swaps between the expanded panel and the dock, in both directions. */
 function FixedSidebarToggle({
   leftInsetPx,
+  onNewChat,
+  onVoiceNoteCreated,
 }: {
   leftInsetPx: number
+  onNewChat?: () => void
+  onVoiceNoteCreated?: (path: string) => void
 }) {
   const { toggleSidebar, state } = useSidebar()
   return (
@@ -745,13 +750,25 @@ function FixedSidebarToggle({
       <button
         type="button"
         onClick={toggleSidebar}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
         aria-label="Toggle sidebar"
         title={state === 'collapsed' ? 'Expand sidebar' : 'Collapse to dock'}
       >
-        <PanelLeftIcon className="size-5" />
+        <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
       </button>
+      {onNewChat && (
+        <button
+          type="button"
+          onClick={onNewChat}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          aria-label="New chat"
+          title="New chat"
+        >
+          <SquarePen className="size-[17px]" strokeWidth={1.5} />
+        </button>
+      )}
+      <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} variant="action" />
     </div>
   )
 }
@@ -776,7 +793,7 @@ function ContentHeader({
   const { state } = useSidebar()
   return (
     <header
-      className="rowboat-titlebar titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar overflow-hidden"
+      className="rowboat-titlebar titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-background overflow-hidden"
       style={{
         paddingLeft: state === 'collapsed' ? (collapsedLeftPaddingPx ?? 12) : 12,
         paddingRight: 12,
@@ -7519,7 +7536,7 @@ function App() {
                   })}
                 </div>
 
-                <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
+                <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-2 shadow-lg">
                   <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
                     {chatTabs.map((tab) => {
@@ -7759,6 +7776,8 @@ function App() {
                 last so its no-drag region paints over the drag regions. */}
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
+              onNewChat={handleNewChat}
+              onVoiceNoteCreated={handleVoiceNoteCreated}
             />
           </SidebarProvider>
         </div>
