@@ -22,7 +22,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
-import { VoiceNoteButton } from '@/components/sidebar-content'
+import { VoiceNoteButton } from '@/components/voice-note-button'
 import { getViewerType } from '@/lib/file-types'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'

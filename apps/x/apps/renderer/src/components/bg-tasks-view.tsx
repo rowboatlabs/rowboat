@@ -1736,7 +1736,12 @@ function formatLastRanLabel(iso: string | null | undefined): string {
 export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlug, slugVersion }: BgTasksViewProps = {}) {
     const [items, setItems] = useState<BackgroundTaskSummary[]>([])
     const [selectedSlug, setSelectedSlug] = useState<string | null>(initialSlug ?? null)
+    // Version-guarded: the view is kept alive in an <Activity> while hidden
+    // and effects re-run on every re-show — apply only on real version bumps.
+    const appliedSlugVersionRef = useRef<number | null>(null)
     useEffect(() => {
+      if (appliedSlugVersionRef.current === (slugVersion ?? 0)) return
+      appliedSlugVersionRef.current = slugVersion ?? 0
       setSelectedSlug(initialSlug ?? null)
     }, [initialSlug, slugVersion])
     const [loading, setLoading] = useState(true)

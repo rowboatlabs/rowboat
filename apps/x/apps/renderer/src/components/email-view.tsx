@@ -2708,7 +2708,13 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const hadPersistedDataOnMount = useRef(persistedImportant !== null)
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialThreadId ?? null)
   const [openedThreadIds, setOpenedThreadIds] = useState<string[]>(initialThreadId ? [initialThreadId] : [])
+  // Guarded by the applied version, not effect identity: the view is kept
+  // alive in an <Activity> while hidden, and effects re-run on every re-show —
+  // the deep link must apply once per version bump, not once per re-show.
+  const appliedThreadVersionRef = useRef<number | null>(null)
   useEffect(() => {
+    if (appliedThreadVersionRef.current === (threadIdVersion ?? 0)) return
+    appliedThreadVersionRef.current = threadIdVersion ?? 0
     setSelectedThreadId(initialThreadId ?? null)
     setFocusedThreadId(initialThreadId ?? null)
     if (initialThreadId) {
@@ -2724,7 +2730,10 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   // Externally-driven search (assistant read-view email query): load it into
   // the search box so the debounced full-mailbox search below runs — matched
   // threads get real rows even when they're not in the synced inbox.
+  const appliedSearchVersionRef = useRef<number | null>(null)
   useEffect(() => {
+    if (appliedSearchVersionRef.current === (searchQueryVersion ?? 0)) return
+    appliedSearchVersionRef.current = searchQueryVersion ?? 0
     const q = initialSearchQuery?.trim()
     if (q) setQuery(q)
   }, [initialSearchQuery, searchQueryVersion])

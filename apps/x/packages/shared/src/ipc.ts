@@ -1209,6 +1209,20 @@ export const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
+  // The ⌥/⌃+Tab section switcher, forwarded from the main process when an
+  // embedded page (e.g. the browser <webview>) holds keyboard focus — its
+  // keystrokes go to the guest and never reach the app renderer's listeners.
+  'shortcuts:switcherKey': {
+    req: z.object({
+      type: z.enum(['keyDown', 'keyUp']),
+      key: z.string(),
+      code: z.string(),
+      alt: z.boolean(),
+      control: z.boolean(),
+      shift: z.boolean(),
+    }),
+    res: z.null(),
+  },
   // Launch-at-login (resident app). The OS login-item registry is the source
   // of truth; these read/write it directly rather than a config file.
   'app:getLoginItemSettings': {
