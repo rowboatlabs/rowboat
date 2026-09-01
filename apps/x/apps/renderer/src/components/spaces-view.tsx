@@ -261,14 +261,12 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // (600px document + 480px chat + the 28px rail edge).
     // ------------------------------------------------------------------
     const [mode, setMode] = useState<SpaceMode>(() => (selection.kind === 'file' ? 'read' : 'talk'))
-    // The topics/files rail has two modes, persisted: PINNED (default) — a
-    // plain sidebar, always open; or AUTO-HIDE — a collapsed edge that opens
-    // on hover and lingers a few seconds after the cursor leaves, so moving
-    // to the stream and back doesn't slam it shut mid-thought. (The first
-    // design closed the instant the cursor left — too twitchy to use.)
+    // The discussions/files rail is a plain sticky sidebar (persisted):
+    // open by default, collapsed to a slim edge strip on demand. No hover
+    // behavior — the strip reopens on click only. (Two earlier designs
+    // auto-opened on hover; both read as random. The shell sidebar contracts
+    // to the dock while in Spaces, so this rail is THE sidebar here.)
     const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railOpen') !== '0')
-    const [railHover, setRailHover] = useState(false)
-    const railCloseTimer = useRef<number | null>(null)
 
     // Width of the pane drives the Split floor and pinnability.
     const paneRef = useRef<HTMLDivElement | null>(null)
@@ -301,7 +299,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // What actually renders: a Split that doesn't fit falls back to the one
     // surface the selection needs.
     const effMode: SpaceMode = mode === 'split' && !splitFits ? (selection.kind === 'file' ? 'read' : 'talk') : mode
-    const railOpen = railPinned || railHover
+    const railOpen = railPinned
 
     /** The header buttons and ⌘1/2/3: say why when Split can't render. */
     const requestMode = (next: SpaceMode) => {
@@ -360,29 +358,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     }
 
     /** Auto-hide grace: how long the rail lingers after the cursor leaves. */
-    const RAIL_LINGER_MS = 3_500
-    const clearRailTimer = () => {
-        if (railCloseTimer.current) {
-            window.clearTimeout(railCloseTimer.current)
-            railCloseTimer.current = null
-        }
-    }
-    useEffect(() => clearRailTimer, [])
-    const onRailHover = (hovering: boolean) => {
-        clearRailTimer()
-        if (hovering) setRailHover(true)
-        else railCloseTimer.current = window.setTimeout(() => setRailHover(false), RAIL_LINGER_MS)
-    }
     const toggleRailPin = () => {
         const pin = !railPinned
         localStorage.setItem('spaces:railOpen', pin ? '1' : '0')
         setRailPinned(pin)
-        // Unpinning closes NOW (the cursor is on the button, inside the rail —
-        // without this the hover hold keeps it open and the click reads as dead).
-        if (!pin) {
-            clearRailTimer()
-            setRailHover(false)
-        }
     }
 
     // Selecting is also choreography: a topic opened from Read grows into
@@ -667,8 +646,6 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     onAddFolder={addFolder}
                     onRemoveFolder={removeFolder}
                     open={railOpen}
-                    pinned={railPinned}
-                    onHoverChange={onRailHover}
                     onTogglePin={toggleRailPin}
                 />
                 {/* The surfaces. Talk = the stream or an open topic; Read =

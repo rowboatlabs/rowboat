@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, PenTool, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, PenTool, Plus, Search, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -21,11 +21,11 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // every surface — Messages + discussions on top, the file tree below. The
 // Discussions section lists ONLY deliberate topic annotations (annotation
 // model): threads someone gave a goal. Plain reply chains stay behind their
-// chips in the stream — the rail holds intentions, not accidents. Two modes:
-// PINNED (default) it is a plain 280px sidebar; unpinned it is a 28px edge
-// that opens on hover and lingers a few seconds after the cursor leaves
-// (instant close was too twitchy). The header button flips the mode; a click
-// on the closed edge pins it back open. The surfaces own everything else.
+// chips in the stream — the rail holds intentions, not accidents. It is a
+// plain sticky 280px sidebar (the shell sidebar contracts to the dock while
+// in Spaces, so this is THE sidebar here), collapsible to a 28px edge strip
+// via the header button; clicking the strip reopens it. No hover behavior —
+// the rail moves only on explicit clicks. The surfaces own everything else.
 
 /** Resizable Files section: never shorter than this (header + a couple of rows). */
 const FILES_MIN = 96
@@ -34,7 +34,7 @@ const TOPICS_FLOOR = 160
 
 export function SpaceRail({
     orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
-    open, pinned, onHoverChange, onTogglePin,
+    open, onTogglePin,
 }: {
     orgId: string
     spaceId: string
@@ -59,8 +59,6 @@ export function SpaceRail({
     onAddFolder: (path: string) => void
     onRemoveFolder: (path: string) => void
     open: boolean
-    pinned: boolean
-    onHoverChange: (hovering: boolean) => void
     onTogglePin: () => void
 }) {
     const [query, setQuery] = useState('')
@@ -176,8 +174,6 @@ export function SpaceRail({
 
     return (
         <aside
-            onMouseEnter={() => onHoverChange(true)}
-            onMouseLeave={() => onHoverChange(false)}
             style={{ width: open ? 280 : 28, transition: 'width 200ms cubic-bezier(0.2,0,0,1)' }}
             className={cn(
                 'relative z-10 shrink-0 min-h-0 overflow-hidden flex flex-col',
@@ -202,8 +198,8 @@ export function SpaceRail({
                 }}
             />
             {!open ? (
-                // The closed edge: hovering opens the rail; a click pins it
-                // (the strong signal — and the only path on touch screens).
+                // The collapsed edge strip: click to reopen. Deliberately not
+                // hover-triggered — the rail appears only on an explicit act.
                 <button
                     type="button"
                     onClick={onTogglePin}
@@ -227,15 +223,10 @@ export function SpaceRail({
                         <button
                             type="button"
                             onClick={onTogglePin}
-                            title={pinned ? 'Auto-hide — opens on hover, slides away a moment after the cursor leaves' : 'Keep open'}
-                            className={cn(
-                                'flex size-6 shrink-0 items-center justify-center rounded-md',
-                                pinned
-                                    ? 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                                    : 'border border-border bg-background text-muted-foreground hover:text-foreground',
-                            )}
+                            title="Collapse — reopen from the edge strip"
+                            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                         >
-                            {pinned ? <PanelLeftClose className="size-3.5" /> : <Pin className="size-3" />}
+                            <PanelLeftClose className="size-3.5" />
                         </button>
                     </div>
 

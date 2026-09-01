@@ -189,8 +189,23 @@ const KEEP_ALIVE_SECTIONS: ReadonlySet<MiddleView> = new Set<MiddleView>([
 
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
-// The expanded/collapsed sidebar choice, persisted per machine.
+// The expanded/collapsed sidebar choice, persisted per machine — separately
+// for Spaces (defaults to the dock, so the space's rail is the one sidebar)
+// and for everything else (defaults to the panel). Manual toggles persist to
+// the mode they were made in, so the app never re-reverses a user's choice.
 const SIDEBAR_VIEW_STORAGE_KEY = 'x:sidebar-view'
+const SIDEBAR_SPACES_VIEW_STORAGE_KEY = 'x:sidebar-view:spaces'
+
+function readSidebarPref(inSpaces: boolean): boolean {
+  try {
+    const stored = window.localStorage.getItem(inSpaces ? SIDEBAR_SPACES_VIEW_STORAGE_KEY : SIDEBAR_VIEW_STORAGE_KEY)
+    if (stored === 'panel') return true
+    if (stored === 'dock') return false
+    return !inSpaces
+  } catch {
+    return !inSpaces
+  }
+}
 const WORKSPACE_ROOT = 'knowledge/Workspace'
 // Sentinel path for the default Bases view (a virtual "file" the bases table
 // renders under). The other __rowboat_* sentinel tab paths died with the tab
@@ -915,20 +930,23 @@ function App() {
       TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 32 + 8 - DOCK_GUTTER_PX,
   )
   // Expanded panel vs. collapsed dock — the collapse button swaps between
-  // them; the choice persists per machine.
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
-    try {
-      return window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY) !== 'dock'
-    } catch {
-      return true
-    }
-  })
+  // them; the choice persists per machine and per mode (see readSidebarPref).
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => readSidebarPref(false))
   const handleSidebarOpenChange = useCallback((open: boolean) => {
     setSidebarOpen(open)
     try {
-      window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, open ? 'panel' : 'dock')
+      window.localStorage.setItem(
+        isSpacesOpen ? SIDEBAR_SPACES_VIEW_STORAGE_KEY : SIDEBAR_VIEW_STORAGE_KEY,
+        open ? 'panel' : 'dock',
+      )
     } catch { /* keep in-memory behavior */ }
-  }, [])
+  }, [isSpacesOpen])
+  // Entering Spaces adopts the Spaces preference (default: contracted to the
+  // dock, making the space's rail the one sidebar); leaving restores the
+  // general preference.
+  useEffect(() => {
+    setSidebarOpen(readSidebarPref(isSpacesOpen))
+  }, [isSpacesOpen])
 
   // Keep the latest selected path in a ref (avoids stale async updates when switching rapidly)
   const selectedPathRef = useRef<string | null>(null)
