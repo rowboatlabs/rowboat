@@ -60,7 +60,8 @@ export interface SpacesClientOptions {
   fetchImpl?: typeof fetch;
 }
 
-type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
+type NewMessage = z.infer<Routes['postMessage']['request']>;
+type CreateTopicInput = z.infer<Routes['createTopic']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
@@ -308,25 +309,42 @@ export class SpacesClient {
     return (await this.request('GET', this.space(spaceId, `/topics${qs}`), routes.listTopics.response)).topics;
   }
 
-  /** Windowed, newest-first: without beforeOffset the LATEST page — never the full history. */
-  async listMessages(
-    spaceId: string,
-    topicId: string,
-    opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ topic: Topic; messages: Message[]; hasMore: boolean }> {
+  private windowQuery(opts?: { beforeOffset?: number; limit?: number }): string {
     const q = new URLSearchParams();
     if (opts?.beforeOffset !== undefined) q.set('beforeOffset', String(opts.beforeOffset));
     if (opts?.limit !== undefined) q.set('limit', String(opts.limit));
-    const qs = q.size > 0 ? `?${q.toString()}` : '';
+    return q.size > 0 ? `?${q.toString()}` : '';
+  }
+
+  /** The stream (roots only), windowed newest-first: without beforeOffset the LATEST page — never the full history. */
+  async listStream(
+    spaceId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean }> {
+    return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
+  }
+
+  /** One flat thread: root + topic row (null = plain thread) + windowed replies. A reply id resolves to its root. */
+  async listThread(
+    spaceId: string,
+    rootMessageId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<{ root: Message; topic: Topic | null; messages: Message[]; hasMore: boolean }> {
     return this.request(
       'GET',
-      this.space(spaceId, `/topics/${encodeURIComponent(topicId)}/messages${qs}`),
-      routes.listMessages.response,
+      this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}${this.windowQuery(opts)}`),
+      routes.listThread.response,
     );
   }
 
-  async postMessage(spaceId: string, input: NewTopicMessage): Promise<{ topic: Topic; message: Message }> {
+  /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */
+  async postMessage(spaceId: string, input: NewMessage): Promise<{ message: Message }> {
     return this.request('POST', this.space(spaceId, '/messages'), routes.postMessage.response, input);
+  }
+
+  /** The deliberate ceremony: promote a thread (rootMessageId) or post + annotate (body). */
+  async createTopic(spaceId: string, input: CreateTopicInput): Promise<{ topic: Topic; rootMessage: Message }> {
+    return this.request('POST', this.space(spaceId, '/topics'), routes.createTopic.response, input);
   }
 
   /** Author-only tombstone (idempotent). Returns the deleted message (body '', deletedAt set). */

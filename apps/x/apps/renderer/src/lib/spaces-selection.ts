@@ -1,21 +1,21 @@
-// What's selected inside a space: General (the chat), a topic, a file, or a
-// whiteboard. Part of the app's navigation history, so the top ‹ › retrace it.
+// What's selected inside a space: the stream, a thread (by its root message —
+// annotated or plain, the pane is the same), a file, or a whiteboard. Part of
+// the app's navigation history, so the top ‹ › retrace it. Replying never
+// creates anything, so there is no draft state: a thread with zero replies is
+// just a thread.
 
 export type RailSelection =
     | { kind: 'general' }
-    | { kind: 'topic'; topicId: string }
-    /** A reply pane with no topic behind it yet — the topic is created on first send. */
-    | { kind: 'draft'; parentMessageId: string }
-    /** `fromTopicId` = opened from a topic (an artifact link) — the file view shows a crumb back to it. */
-    | { kind: 'file'; path: string; fromTopicId?: string }
+    | { kind: 'thread'; rootMessageId: string }
+    /** `fromThreadRootId` = opened from a thread (an artifact link) — the file view shows a crumb back to it. */
+    | { kind: 'file'; path: string; fromThreadRootId?: string }
     /** A shared board, full-bleed. `path` is its asset path (whiteboards/<name>.excalidraw). */
     | { kind: 'whiteboard'; path: string }
 
 /** Stable key for history comparisons. */
 export function railKey(sel: RailSelection | undefined): string {
     if (!sel || sel.kind === 'general') return 'general'
-    if (sel.kind === 'topic') return `topic:${sel.topicId}`
-    if (sel.kind === 'draft') return `draft:${sel.parentMessageId}`
+    if (sel.kind === 'thread') return `thread:${sel.rootMessageId}`
     if (sel.kind === 'whiteboard') return `whiteboard:${sel.path}`
     return `file:${sel.path}`
 }

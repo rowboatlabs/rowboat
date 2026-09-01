@@ -74,23 +74,38 @@ export interface SpacesAssetEntry {
   state?: 'deleted';
 }
 
-export interface SpacesTopicWithMessages {
-  topic: Topic;
+/** A stream page: roots only, plus the topic rows annotating this page's roots. */
+export interface SpacesStreamPage {
   messages: Message[];
-  /** Older messages exist below the returned window (listMessages is windowed, newest-first). */
+  topics: Topic[];
+  /** Older roots exist below the returned window (listStream is windowed, newest-first). */
+  hasMore: boolean;
+}
+
+/** One flat thread: the root, its annotation (null = a plain thread), windowed replies. */
+export interface SpacesThreadPage {
+  root: Message;
+  topic: Topic | null;
+  messages: Message[];
   hasMore: boolean;
 }
 
 export interface SpacesPostResult {
-  topic: Topic;
   message: Message;
+}
+
+/** Promote (rootMessageId) or post + annotate (body) — exactly one of the two. */
+export interface SpacesCreateTopicInput {
+  rootMessageId?: string;
+  title: string;
+  body?: string;
 }
 
 export type SpacesManageTopicAction =
   | { action: 'retitle'; title: string }
   | { action: 'archive' }
   | { action: 'unarchive' }
-  | { action: 'merge_into'; targetTopicId: string };
+  | { action: 'remove' };
 
 /**
  * What the renderer may propose. actingMode is deliberately absent: everything

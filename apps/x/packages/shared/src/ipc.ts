@@ -40,7 +40,8 @@ import {
     type SpacesManageTopicAction,
     type SpacesPostResult,
     type SpacesProposeInput,
-    type SpacesTopicWithMessages,
+    type SpacesStreamPage,
+    type SpacesThreadPage,
 } from './spaces.js';
 import type * as SpacesTypes from './spaces.js';
 
@@ -3704,30 +3705,57 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), includeArchived: z.boolean().optional() }),
     res: z.object({ topics: z.array(z.custom<SpacesTypes.TopicListing>()) }),
   },
-  'spaces:listMessages': {
+  // The space's one stream: ROOT messages only, windowed newest-first, with
+  // the topic rows annotating this page's roots riding along.
+  'spaces:listStream': {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      topicId: z.string(),
-      /** Page back: only messages below this offset. Absent = the latest page. */
+      /** Page back: only roots below this offset. Absent = the latest page. */
       beforeOffset: z.number().optional(),
       limit: z.number().optional(),
     }),
-    res: z.custom<SpacesTopicWithMessages>(),
+    res: z.custom<SpacesStreamPage>(),
+  },
+  // One flat thread: root + topic annotation (null = plain thread) + windowed
+  // replies. A reply id resolves to its root on the org.
+  'spaces:listThread': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      rootMessageId: z.string(),
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.custom<SpacesThreadPage>(),
   },
   // actingMode is set by main ('direct' — the renderer is the human surface;
-  // agents write through the org's MCP face, never through IPC).
+  // agents write through the org's MCP face, never through IPC). Posting never
+  // creates a topic; threadRoot present = a reply, absent = a stream root.
   'spaces:postMessage': {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      topicId: z.string().optional(),
+      threadRoot: z.string().optional(),
       anchorChangeSetId: z.string().optional(),
-      anchorMessageId: z.string().optional(),
       body: z.string(),
     }),
     res: z.custom<SpacesPostResult>(),
   },
+  // The deliberate ceremony: promote a thread (rootMessageId) or post a new
+  // root + annotate it (body) — exactly one of the two, org-enforced.
+  'spaces:createTopic': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      rootMessageId: z.string().optional(),
+      title: z.string(),
+      body: z.string().optional(),
+    }),
+    res: z.object({ topic: z.custom<SpacesTypes.Topic>(), rootMessage: z.custom<SpacesTypes.Message>() }),
+  },
+  // One-row lifecycle ops on the annotation ('remove' = convert back to
+  // thread; the conversation is untouched).
   'spaces:manageTopic': {
     req: z.object({
       orgId: z.string(),
@@ -3771,16 +3799,17 @@ export const ipcSchemas = {
     }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
   },
-  // @rowboat in a topic (spec §8): the renderer detected an addressed message
-  // it just posted; main routes it into the topic's session (creating one on
-  // first use — the queue/steer machinery handles the rest). messageId is the
-  // posted feed message, stamped into the turn input as provenance.
+  // @rowboat in a thread (spec §8): the renderer detected an addressed message
+  // it just posted; main routes it into the thread's session (keyed on the
+  // permanent root message id, creating one on first use — the queue/steer
+  // machinery handles the rest). messageId is the posted feed message,
+  // stamped into the turn input as provenance.
   'spaces:invokeRowboat': {
     req: z.object({
       orgId: z.string(),
       spaceId: z.string(),
-      topicId: z.string(),
-      topicTitle: z.string(),
+      threadRootId: z.string(),
+      threadLabel: z.string(),
       spaceName: z.string(),
       messageId: z.string(),
       body: z.string(),
@@ -3797,10 +3826,10 @@ export const ipcSchemas = {
     }),
     res: z.object({ sessionId: z.string(), queued: z.boolean() }),
   },
-  // The topic's session, if any — powers the invoker-only "open the turn"
+  // The thread's session, if any — powers the invoker-only "open the turn"
   // affordance on the presence chip.
   'spaces:topicSession': {
-    req: z.object({ orgId: z.string(), spaceId: z.string(), topicId: z.string() }),
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string() }),
     res: z.object({ sessionId: z.string().nullable() }),
   },
   // Upload phase 1 (spec §6): bytes in, {hash, size, mime} out. Bytes travel
@@ -3867,7 +3896,7 @@ export const ipcSchemas = {
     res: z.object({ success: z.literal(true) }),
   },
   // Ephemeral presence from the human surface (viewing / typing / idle), scoped
-  // to a topic when set. agent_working is only ever sent by the topic agent.
+  // to a thread when set. agent_working is only ever sent by the thread agent.
   // Client wake signal: sleep leaves spaces WebSockets half-open; the desktop
   // calls this on powerMonitor resume so the server bounces every stream.
   'spaces:bounceLive': {
@@ -3879,7 +3908,7 @@ export const ipcSchemas = {
       orgId: z.string(),
       spaceId: z.string(),
       state: z.enum(['viewing', 'typing', 'idle']),
-      topicId: z.string().optional(),
+      threadRootId: z.string().optional(),
     }),
     res: z.object({ success: z.literal(true) }),
   },

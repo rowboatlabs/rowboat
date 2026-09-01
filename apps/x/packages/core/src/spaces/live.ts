@@ -113,10 +113,10 @@ export class SpacesLive {
     };
   }
 
-  presence(spaceId: string, state: PresenceState, topicId?: string): void {
+  presence(spaceId: string, state: PresenceState, threadRootId?: string): void {
     if (this.ws?.readyState === this.WebSocketImpl.OPEN) {
       this.ws.send(
-        JSON.stringify({ kind: 'presence', spaceId, state, ...(topicId !== undefined ? { topicId } : {}) }),
+        JSON.stringify({ kind: 'presence', spaceId, state, ...(threadRootId !== undefined ? { threadRootId } : {}) }),
       );
     }
   }
