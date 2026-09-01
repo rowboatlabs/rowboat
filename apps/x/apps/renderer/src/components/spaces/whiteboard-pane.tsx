@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, PenTool } from 'lucide-react'
 import {
     CaptureUpdateAction,
     Excalidraw,
+    FONT_FAMILY,
     getSceneVersion,
     MainMenu,
     reconcileElements,
     restoreElements,
+    WelcomeScreen,
 } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
+import './whiteboard.css'
 import type {
     Collaborator,
     ExcalidrawImperativeAPI,
@@ -88,6 +91,19 @@ function parseSnapshot(raw: string): SnapshotJson | null {
     }
 }
 
+/** Deterministic per-client hue: cursors, name labels, and the avatar stack all agree. */
+function clientColor(clientId: string): { background: string; stroke: string } {
+    let h = 0
+    for (const ch of clientId) h = (h * 31 + ch.charCodeAt(0)) % 360
+    return { background: `oklch(0.62 0.15 ${h})`, stroke: `oklch(0.45 0.15 ${h})` }
+}
+
+function initials(name: string | null | undefined): string {
+    const parts = (name ?? '').trim().split(/\s+/).filter(Boolean)
+    if (parts.length === 0) return '?'
+    return ((parts[0][0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase()
+}
+
 export default function WhiteboardPane({ org, space, boardId, memberNames, active }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -100,6 +116,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     const { resolvedTheme } = useTheme()
     const [load, setLoad] = useState<LoadState>({ phase: 'loading' })
     const [retryTick, setRetryTick] = useState(0)
+    /** Render mirror of collaboratorsRef — drives the top-right avatar stack. */
+    const [liveCollabs, setLiveCollabs] = useState<Collaborator[]>([])
 
     const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
     /** Per-pane identity: the relay echoes our own frames back; this is how we drop them. */
@@ -340,6 +358,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         const map = new Map<SocketId, Collaborator>()
         for (const [cid, entry] of collaboratorsRef.current) map.set(cid as SocketId, entry.collab)
         apiRef.current?.updateScene({ collaborators: map })
+        setLiveCollabs([...map.values()])
     }
 
     /** Any frame from a peer proves the pane is open — keep their entry alive. */
@@ -349,6 +368,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
             id: memberId,
             socketId: clientId as SocketId,
             username: memberNamesRef.current.get(memberId) ?? memberId,
+            color: clientColor(clientId),
         }
         collaboratorsRef.current.set(clientId, { collab, lastSeen: Date.now() })
         return collab
@@ -497,15 +517,55 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         <div className="flex-1 min-w-0 min-h-0">
             <Excalidraw
                 excalidrawAPI={onApiReady}
-                initialData={{ elements: load.elements, scrollToContent: true }}
+                initialData={{
+                    elements: load.elements,
+                    scrollToContent: true,
+                    // New elements default to the crisp, modern look: clean
+                    // sans text and architect-straight strokes. Only defaults —
+                    // the hand-drawn font and sketchy style stay in the picker.
+                    appState: {
+                        currentItemFontFamily: FONT_FAMILY.Nunito,
+                        currentItemRoughness: 0,
+                    },
+                }}
                 onChange={onChange}
                 onPointerUpdate={onPointerUpdate}
                 theme={resolvedTheme}
                 isCollaborating
                 autoFocus
-                // No images on boards (v1): this one flag disables the toolbar
-                // button, paste of image files, AND drag-drop inside Excalidraw.
-                UIOptions={{ tools: { image: false } }}
+                UIOptions={{
+                    // No images on boards (v1): this one flag disables the toolbar
+                    // button, paste of image files, AND drag-drop inside Excalidraw.
+                    tools: { image: false },
+                    // ⌘O would replace the shared scene with a local file and ⌘S
+                    // implies manual saving — the space owns persistence. Theme
+                    // follows the app, so the editor's own toggle is off too.
+                    canvasActions: { loadScene: false, saveToActiveFile: false, toggleTheme: false },
+                }}
+                // Live collaborator avatars sit where the Library button was
+                // (hidden in whiteboard.css) — same hue as each cursor.
+                renderTopRightUI={() => {
+                    if (liveCollabs.length === 0) return null
+                    return (
+                        <div className="flex items-center -space-x-1.5 px-0.5">
+                            {liveCollabs.slice(0, 5).map((c) => (
+                                <div
+                                    key={String(c.socketId)}
+                                    title={c.username ?? undefined}
+                                    className="flex size-[1.6rem] items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2 ring-background"
+                                    style={{ background: c.color?.background, opacity: c.userState === 'idle' ? 0.55 : 1 }}
+                                >
+                                    {initials(c.username)}
+                                </div>
+                            ))}
+                            {liveCollabs.length > 5 && (
+                                <div className="flex size-[1.6rem] items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground ring-2 ring-background">
+                                    +{liveCollabs.length - 5}
+                                </div>
+                            )}
+                        </div>
+                    )
+                }}
             >
                 {/* Our menu, not the stock one: the default carries Excalidraw's
                     socials/help links — this is Rowboat's canvas, so only the
@@ -515,6 +575,18 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                     <MainMenu.DefaultItems.ClearCanvas />
                     <MainMenu.DefaultItems.ChangeCanvasBackground />
                 </MainMenu>
+                {/* Our empty state, not the stock one (Excalidraw wordmark + data
+                    pitch): what this surface is, in the app's voice. */}
+                <WelcomeScreen>
+                    <WelcomeScreen.Center>
+                        <WelcomeScreen.Center.Logo>
+                            <PenTool className="size-9 text-muted-foreground" />
+                        </WelcomeScreen.Center.Logo>
+                        <WelcomeScreen.Center.Heading>
+                            Draw together — everyone in this space sees it live.
+                        </WelcomeScreen.Center.Heading>
+                    </WelcomeScreen.Center>
+                </WelcomeScreen>
             </Excalidraw>
         </div>
     )
