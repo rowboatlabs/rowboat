@@ -12,12 +12,12 @@ import { GeneralStream } from '@/components/spaces/general-stream'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
-import { DraftThreadPane, ThreadPane } from '@/components/spaces/thread-pane'
-import { useGeneral, useSpacePresence, useThreadIndex } from '@/hooks/use-space-chat'
+import { ThreadPane } from '@/components/spaces/thread-pane'
+import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { SpaceMembersProvider } from '@/components/spaces/member-text'
 import { SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
-import { artifactsForThread, stripThreadMarker } from '@/lib/spaces-conventions'
+import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { markRead, markTopicRead } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
@@ -177,14 +177,13 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     const [, setFolding] = useState(false)
 
     const feed = useSpaceFeed(org.id, space.id)
-    const general = useGeneral(org.id, space.id)
-    const threads = useThreadIndex(org.id, space.id)
+    const stream = useStream(org.id, space.id)
     const presence = useSpacePresence(org.id, space.id, org.memberId)
     const lastReadAt = useSpaceLastReadAt(org.id, space.id)
     const memberNames = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
 
-    // The artifacts rail: open by default when a topic has artifacts, collapsed
-    // when it has none; a per-topic pin remembers a manual toggle.
+    // The artifacts rail: open by default when a thread has artifacts, collapsed
+    // when it has none; a per-thread pin remembers a manual toggle.
     const [railPins, setRailPins] = useState<ReadonlyMap<string, boolean>>(new Map())
 
     useEffect(() => {
@@ -242,8 +241,11 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
 
     const markAllRead = () => {
         markRead(org.id, space.id)
-        if (general.topic) markTopicRead(org.id, space.id, general.topic.id)
-        for (const t of feed.topics) markTopicRead(org.id, space.id, t.id)
+        markTopicRead(org.id, space.id, STREAM_READ_KEY)
+        for (const t of feed.topics) markTopicRead(org.id, space.id, t.rootMessageId)
+        for (const m of stream.messages) {
+            if (!m.pending && !m.failed && (m.replyCount ?? 0) > 0) markTopicRead(org.id, space.id, m.id)
+        }
     }
 
     const unreadPaths = useMemo(
@@ -391,12 +393,12 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         onSelect(next)
         analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
         if (next.kind === 'whiteboard') return // full-bleed surface; mode is untouched and resumes on the way back
-        if ((next.kind === 'topic' || next.kind === 'draft') && mode === 'read') setMode('split')
+        if (next.kind === 'thread' && mode === 'read') setMode('split')
         else if (next.kind === 'general' && mode === 'read') setMode('talk')
         else if (next.kind === 'file') {
             // A file opened while talking keeps the conversation beside it:
             // Split (effMode falls back to Read below the floor).
-            if (next.fromTopicId || mode === 'talk') setMode('split')
+            if (next.fromThreadRootId || mode === 'talk') setMode('split')
         }
     }
     const openFile = (path: string) => select({ kind: 'file', path })
@@ -413,7 +415,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     }, [selKey, selection.kind, mode])
 
     // The last dismissed file — Read/Split and the header chip reopen it.
-    const [lastDoc, setLastDoc] = useState<{ path: string; fromTopicId?: string } | null>(null)
+    const [lastDoc, setLastDoc] = useState<{ path: string; fromThreadRootId?: string } | null>(null)
 
     // The document pane: an explicitly opened file, else the one that was
     // just dismissed, else the space's front page (README.md), else the
@@ -455,8 +457,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         window.addEventListener('mousemove', onMove)
         window.addEventListener('mouseup', onUp)
     }
-    /** Open a file from inside a topic — the file view gets a crumb back to the topic. */
-    const openFileFromTopic = (topicId: string) => (path: string) => select({ kind: 'file', path, fromTopicId: topicId })
+    /** Open a file from inside a thread — the file view gets a crumb back to it. */
+    const openFileFromThread = (rootMessageId: string) => (path: string) => select({ kind: 'file', path, fromThreadRootId: rootMessageId })
 
     // A persisted width from a wider window must not crush the chat side.
     const docWidthEff = Math.max(420, Math.min(docWidth, paneWidth - CHAT_FLOOR - 34))
@@ -468,34 +470,21 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         (a, b) => Number(hereSet.has(b.id)) - Number(hereSet.has(a.id)) || a.displayName.localeCompare(b.displayName),
     )
 
-    // The chat surface keeps its context while a file has focus: a topic
-    // stays open beside the document it changed (fromTopicId), otherwise the
-    // last chat selection sticks until the user picks another.
+    // The chat surface keeps its context while a file has focus: a thread
+    // stays open beside the document it changed (fromThreadRootId), otherwise
+    // the last chat selection sticks until the user picks another.
     const chatContextRef = useRef<string | null>(null)
-    if (selection.kind === 'topic') chatContextRef.current = selection.topicId
-    else if (selection.kind === 'general' || selection.kind === 'draft') chatContextRef.current = null
-    else if (selection.kind === 'file' && selection.fromTopicId) chatContextRef.current = selection.fromTopicId
-    const chatTopicId = chatContextRef.current
+    if (selection.kind === 'thread') chatContextRef.current = selection.rootMessageId
+    else if (selection.kind === 'general') chatContextRef.current = null
+    else if (selection.kind === 'file' && selection.fromThreadRootId) chatContextRef.current = selection.fromThreadRootId
+    const chatRootId = chatContextRef.current
 
-    // Draft thread: the reply pane before any topic exists. The parent lives
-    // in the general stream; a stale draft (relaunch, deep link) falls back.
-    const draftParent = selection.kind === 'draft'
-        ? general.messages.find((m) => m.id === selection.parentMessageId) ?? null
-        : null
-    const draftMissing = selection.kind === 'draft' && general.ready && !draftParent
-    useEffect(() => {
-        if (draftMissing) onSelect({ kind: 'general' })
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [draftMissing])
-
-    const selectedTopic = chatTopicId ? feed.topics.find((t) => t.id === chatTopicId) : undefined
-    const selectedInfo = chatTopicId ? threads.byTopic.get(chatTopicId) : undefined
-    const selectedAnchor = selectedTopic?.anchorChangeSetId ? feed.changeSets.find((c) => c.id === selectedTopic.anchorChangeSetId) ?? null : null
-    const selectedGroups = chatTopicId ? artifactsForThread(feed.changeSets, chatTopicId) : []
-    const artifactsRailOpen = chatTopicId ? (railPins.get(chatTopicId) ?? selectedGroups.length > 0) : false
+    const selectedTopic = chatRootId ? feed.topics.find((t) => t.rootMessageId === chatRootId) : undefined
+    const selectedGroups = chatRootId ? artifactsForThread(feed.changeSets, chatRootId) : []
+    const artifactsRailOpen = chatRootId ? (railPins.get(chatRootId) ?? selectedGroups.length > 0) : false
     const toggleArtifactsRail = () => {
-        if (!chatTopicId) return
-        setRailPins((prev) => new Map(prev).set(chatTopicId, !artifactsRailOpen))
+        if (!chatRootId) return
+        setRailPins((prev) => new Map(prev).set(chatRootId, !artifactsRailOpen))
     }
 
     // Split: dismissing the document closes it and returns to Talk, landing
@@ -504,24 +493,21 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // re-entering Read/Split (which prefer it over the README default).
     const dismissFile = () => {
         if (selection.kind === 'file') {
-            setLastDoc({ path: selection.path, fromTopicId: selection.fromTopicId })
-            onSelect(chatTopicId ? { kind: 'topic', topicId: chatTopicId } : { kind: 'general' })
+            setLastDoc({ path: selection.path, fromThreadRootId: selection.fromThreadRootId })
+            onSelect(chatRootId ? { kind: 'thread', rootMessageId: chatRootId } : { kind: 'general' })
         }
         setMode('talk')
     }
     const reopenDoc = () => {
-        if (lastDoc) select({ kind: 'file', path: lastDoc.path, fromTopicId: lastDoc.fromTopicId })
+        if (lastDoc) select({ kind: 'file', path: lastDoc.path, fromThreadRootId: lastDoc.fromThreadRootId })
     }
 
-    // Crumb for a file opened from a topic.
-    const crumbTopicId = selection.kind === 'file' ? selection.fromTopicId ?? null : null
-    const crumbTopic = crumbTopicId ? feed.topics.find((t) => t.id === crumbTopicId) : undefined
-    const crumbInfo = crumbTopicId ? threads.byTopic.get(crumbTopicId) : undefined
-    const crumbLabelRaw = crumbTopic
-        ? crumbInfo?.parentMessageId && crumbInfo.firstMessage
-            ? stripThreadMarker(crumbInfo.firstMessage.body).split('\n')[0] ?? crumbTopic.title
-            : crumbTopic.title
-        : crumbTopicId ? 'Back to topic' : null
+    // Crumb for a file opened from a thread: the discussion's goal, else the
+    // root's first line, else a generic label.
+    const crumbRootId = selection.kind === 'file' ? selection.fromThreadRootId ?? null : null
+    const crumbTopic = crumbRootId ? feed.topics.find((t) => t.rootMessageId === crumbRootId) : undefined
+    const crumbRoot = crumbRootId ? stream.messages.find((m) => m.id === crumbRootId) : undefined
+    const crumbLabelRaw = crumbTopic?.title ?? (crumbRoot ? threadLabelOf(crumbRoot.body) : crumbRootId ? 'Back to thread' : null)
     const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames)
 
     // Files picked (rail Upload button) or dropped on the tree, awaiting the
@@ -665,9 +651,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     orgId={org.id}
                     spaceId={space.id}
                     selfMemberId={org.memberId}
-                    general={general}
+                    stream={stream}
                     topics={feed.topics}
-                    threads={threads}
                     changeSets={feed.changeSets}
                     entries={entries}
                     draftFolders={draftFolders}
@@ -724,39 +709,24 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     </div>
                 )}
                 <div className={cn('flex-1 min-w-0 min-h-0', effMode === 'read' || boardFull ? 'hidden' : 'flex')}>
-                    {draftParent ? (
-                        <section className="flex-1 min-w-0 min-h-0 flex flex-col">
-                            <DraftThreadPane
-                                key={draftParent.id}
-                                org={org}
-                                space={space}
-                                parent={draftParent}
-                                members={members}
-                                memberNames={memberNames}
-                                entries={entries}
-                                onBack={() => select({ kind: 'general' })}
-                                onCreated={(topicId) => select({ kind: 'topic', topicId })}
-                            />
-                        </section>
-                    ) : chatTopicId ? (
+                    {chatRootId ? (
                         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
                             <ThreadPane
-                                key={chatTopicId}
+                                key={chatRootId}
                                 org={org}
                                 space={space}
-                                topicId={chatTopicId}
-                                threadInfo={selectedInfo}
-                                topic={selectedTopic}
+                                rootMessageId={chatRootId}
+                                rootFromStream={stream.messages.find((m) => m.id === chatRootId)}
+                                topicFromStream={selectedTopic ?? stream.topicsByRoot.get(chatRootId)}
                                 changeSets={feed.changeSets}
                                 entries={entries}
                                 presence={presence}
                                 members={members}
                                 memberNames={memberNames}
                                 refreshTick={refreshTick}
-                                anchorChange={selectedAnchor}
                                 showBack
                                 onBack={() => select({ kind: 'general' })}
-                                onOpenFile={openFileFromTopic(chatTopicId)}
+                                onOpenFile={openFileFromThread(chatRootId)}
                                 onOpenSession={onOpenSession}
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
@@ -765,21 +735,17 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             />
                         </section>
                     ) : null}
-                    <div className={cn('flex-1 min-w-0 min-h-0', draftParent || chatTopicId ? 'hidden' : 'flex')}>
+                    <div className={cn('flex-1 min-w-0 min-h-0', chatRootId ? 'hidden' : 'flex')}>
                         <GeneralStream
                             org={org}
                             space={space}
-                            general={general}
-                            threads={threads}
-                            topics={feed.topics}
+                            stream={stream}
                             presence={presence}
                             members={members}
                             memberNames={memberNames}
                             entries={entries}
-                            onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
-                            onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
-                            onOpenSession={onOpenSession}
-                            visible={active && effMode !== 'read' && !boardFull && !draftParent && !chatTopicId}
+                            onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                            visible={active && effMode !== 'read' && !boardFull && !chatRootId}
                         />
                     </div>
                 </div>
@@ -815,10 +781,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                     onRedirect={openFile}
                                     onOpenFile={openFile}
                                     onDeleted={() => select({ kind: 'general' })}
-                                    crumb={selection.kind === 'file' && crumbTopicId && crumbLabel ? {
+                                    crumb={selection.kind === 'file' && crumbRootId && crumbLabel ? {
                                         label: crumbLabel,
-                                        // Back to the topic means back to the conversation: Talk.
-                                        onBack: () => { select({ kind: 'topic', topicId: crumbTopicId }); setMode('talk') },
+                                        // Back to the thread means back to the conversation: Talk.
+                                        onBack: () => { select({ kind: 'thread', rootMessageId: crumbRootId }); setMode('talk') },
                                     } : null}
                                     onDismiss={effMode === 'split' ? dismissFile : null}
                                 />

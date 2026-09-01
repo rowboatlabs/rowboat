@@ -8,7 +8,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { AddOrgDialog, OrgMonogram, type SpaceSelection } from '@/components/spaces-view'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { prefetchGeneral, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
+import { prefetchStream, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import { toast } from '@/lib/toast'
 
 // The sidebar's SPACES section (design: "App shell scope planning"): every
@@ -184,7 +184,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
                             onClick={() => onOpenSpace(org.id, space.id)}
                             // Hover = intent: warm the cached tail + start the
                             // refresh, so the click paints instantly.
-                            onMouseEnter={() => prefetchGeneral(org.id, space.id)}
+                            onMouseEnter={() => prefetchStream(org.id, space.id)}
                             className="pl-4"
                         >
                             <span className={cn('flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>

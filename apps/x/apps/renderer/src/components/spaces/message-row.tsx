@@ -134,13 +134,15 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
 const MESSAGE_PROSE = 'text-sm leading-relaxed [&_p]:my-0.5 [&_h1]:text-base [&_h2]:text-[15px] [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-2 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_ul]:my-1 [&_ol]:my-1'
 
 export interface ThreadRowData {
-    topicId: string
+    /** The thread's identity: its root message id (the row's own message). */
+    rootMessageId: string
+    /** The topic annotation's archived flag (false when the thread is plain). */
     archived: boolean
     replyCount: number
     lastActivityAt: string
     unreadCount: number
     workingAgents: string[]
-    /** The topic's explicit name (renamed by someone), mentions already resolved; null while auto-titled. */
+    /** The topic annotation's stated goal, mentions already resolved; null = a plain thread. */
     title?: string | null
 }
 
@@ -152,9 +154,9 @@ function MessageRowImpl({
     /** Names the viewer's own agent "Your Rowboat" on thread rows. */
     selfMemberId?: string
     continuation: boolean
-    /** Present when a topic was started from this message (general only). */
+    /** Present when a thread hangs under this message (stream only). */
     thread?: ThreadRowData | null
-    onOpenThread?: (topicId: string) => void
+    onOpenThread?: (rootMessageId: string) => void
     onReplyInThread?: (message: spaces.Message) => void
     onAskRowboat?: (message: spaces.Message) => void
     onCopyLink?: (message: spaces.Message) => void
@@ -293,7 +295,7 @@ function MessageRowImpl({
                     // of the message itself.
                     <button
                         type="button"
-                        onClick={() => onOpenThread(thread.topicId)}
+                        onClick={() => onOpenThread(thread.rootMessageId)}
                         className={cn(
                             'group/thread mt-1.5 flex w-full max-w-2xl items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-left text-xs transition-colors hover:border-foreground/30 hover:bg-accent/40',
                             thread.archived && 'opacity-60',
@@ -328,7 +330,7 @@ function MessageRowImpl({
                 {thread && thread.replyCount === 0 && thread.workingAgents.length > 0 && onOpenThread && (
                     <button
                         type="button"
-                        onClick={() => onOpenThread(thread.topicId)}
+                        onClick={() => onOpenThread(thread.rootMessageId)}
                         className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
                     >
                         <Loader2 className="size-3 animate-spin" /> Rowboat is working on a reply…
@@ -353,8 +355,8 @@ function MessageRowImpl({
                         // and a bare glyph made people hunt for it.
                         <button
                             type="button"
-                            title={thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
-                            onClick={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
+                            title={thread && thread.replyCount > 0 ? 'Open thread' : 'Reply in thread'}
+                            onClick={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.rootMessageId) : onReplyInThread(message))}
                             className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
                         >
                             <MessageSquare className="size-3.5" />
@@ -444,9 +446,9 @@ function MessageRowImpl({
                 )}
                 {onReplyInThread && (
                     <ContextMenuItem
-                        onSelect={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
+                        onSelect={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.rootMessageId) : onReplyInThread(message))}
                     >
-                        <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
+                        <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open thread' : 'Reply in thread'}
                     </ContextMenuItem>
                 )}
                 {onAskRowboat && (
@@ -487,7 +489,8 @@ type MessageRowProps = Parameters<typeof MessageRowImpl>[0]
 function threadRowEqual(a: ThreadRowData | null | undefined, b: ThreadRowData | null | undefined): boolean {
     if (!a || !b) return !a === !b
     return (
-        a.topicId === b.topicId &&
+        a.rootMessageId === b.rootMessageId &&
+        a.archived === b.archived &&
         a.replyCount === b.replyCount &&
         a.lastActivityAt === b.lastActivityAt &&
         a.unreadCount === b.unreadCount &&

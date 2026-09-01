@@ -723,8 +723,8 @@ function parseDeepLink(input: string): ViewState | null {
       const orgId = params.get('orgId')
       const spaceId = params.get('spaceId')
       if (!orgId || !spaceId) return { type: 'spaces' }
-      const topicId = params.get('topicId')
-      return { type: 'spaces', orgId, spaceId, ...(topicId ? { rail: { kind: 'topic' as const, topicId } } : {}) }
+      const threadRootId = params.get('threadRootId')
+      return { type: 'spaces', orgId, spaceId, ...(threadRootId ? { rail: { kind: 'thread' as const, rootMessageId: threadRootId } } : {}) }
     }
     default:
       return null

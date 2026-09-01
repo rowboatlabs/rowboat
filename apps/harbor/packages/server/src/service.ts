@@ -3,7 +3,7 @@ import { createTwoFilesPatch } from 'diff';
 import { monotonicFactory } from 'ulid';
 import {
   inviteUrl,
-  topicIdFromReason,
+  threadRootFromReason,
   type ActingMode,
   type AcceptInviteResult,
   type Attribution,
@@ -28,6 +28,7 @@ import {
   type SpaceEvent,
   type Topic,
   type TopicListing,
+  type TopicRemoval,
 } from '@rowboat/spaces-protocol';
 
 /** listMessages window bounds — the default page and the per-request cap. */
@@ -71,7 +72,8 @@ function seedDisplayName(identity: BindIdentity): string {
   return identity.sub.slice(0, 24);
 }
 
-type NewTopicMessage = z.infer<Routes['postMessage']['request']>;
+type NewMessage = z.infer<Routes['postMessage']['request']>;
+type CreateTopicInput = z.infer<Routes['createTopic']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
@@ -91,8 +93,6 @@ export interface OrgInfo {
 
 const RECENT_HISTORY = 10;
 const DEFAULT_INVITE_HOURS = 24 * 7;
-/** The seeded stream topic's title — what legacy clients (pre-kind) look for. */
-const GENERAL_TOPIC_TITLE = 'messages';
 
 export class HarborService {
   readonly org: OrgInfo;
@@ -157,22 +157,8 @@ export class HarborService {
       await this.store.putMembership(membership);
       const offset = (await this.store.head(space.id)) + 1;
       await this.append(space.id, offset, now, { type: 'membership', membership, action: 'joined' });
-      // Every space is born with its stream (kind 'general', exactly one —
-      // migration 004's partial unique index). No seed message needed: the
-      // title is set directly, so the topic starts empty.
-      const general: Topic = {
-        id: this.ulid(),
-        spaceId: space.id,
-        title: GENERAL_TOPIC_TITLE,
-        kind: 'general',
-        createdBy: { memberId: ctx.memberId, actingMode: 'direct' },
-        createdAt: now,
-        archived: false,
-        lastActivityAt: now,
-        messageCount: 0,
-      };
-      await this.store.putTopic(general);
-      await this.append(space.id, offset + 1, now, { type: 'topic', topic: general });
+      // The stream needs no object (annotation model): it is simply the
+      // space's root messages, born empty.
       return space;
     });
   }
@@ -363,8 +349,8 @@ export class HarborService {
   ): Promise<MoveAssetResult> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    if (input.topicId && !(await this.store.getTopic(spaceId, input.topicId))) {
-      throw new HarborError('invalid_request', 'topicId does not exist in this space');
+    if (input.threadRootId && !(await this.store.getMessage(spaceId, input.threadRootId))) {
+      throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
     const attribution: Attribution = {
       memberId: ctx.memberId,
@@ -401,7 +387,7 @@ export class HarborService {
         op: 'move',
         movedFrom: input.fromPath,
         reason: input.reason,
-        topicId: input.topicId,
+        threadRootId: input.threadRootId,
         at,
       });
       return { outcome: 'moved' as const, changeSet, version: from.version };
@@ -415,8 +401,8 @@ export class HarborService {
   ): Promise<DeleteAssetResult> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    if (input.topicId && !(await this.store.getTopic(spaceId, input.topicId))) {
-      throw new HarborError('invalid_request', 'topicId does not exist in this space');
+    if (input.threadRootId && !(await this.store.getMessage(spaceId, input.threadRootId))) {
+      throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
     const attribution: Attribution = {
       memberId: ctx.memberId,
@@ -440,7 +426,7 @@ export class HarborService {
         attribution,
         op: 'delete',
         reason: input.reason,
-        topicId: input.topicId,
+        threadRootId: input.threadRootId,
         at,
       });
       return { outcome: 'deleted' as const, changeSet };
@@ -491,12 +477,12 @@ export class HarborService {
       op: 'move' | 'delete' | 'restore';
       movedFrom?: string;
       reason?: string;
-      topicId?: string;
+      threadRootId?: string;
       at: string;
     },
   ): Promise<ChangeSet> {
     const offset = (await this.store.head(spaceId)) + 1;
-    const topicId = input.topicId ?? topicIdFromReason(input.reason);
+    const threadRootId = input.threadRootId ?? threadRootFromReason(input.reason);
     const changeSet: ChangeSet = {
       id: this.ulid(),
       spaceId,
@@ -505,7 +491,7 @@ export class HarborService {
       resultVersion: input.version,
       attribution: input.attribution,
       ...(input.reason ? { reason: input.reason } : {}),
-      ...(topicId ? { topicId } : {}),
+      ...(threadRootId ? { threadRootId } : {}),
       op: input.op,
       ...(input.movedFrom ? { movedFrom: input.movedFrom } : {}),
       committedAt: input.at,
@@ -605,8 +591,8 @@ export class HarborService {
   async proposeChange(ctx: ActorCtx, spaceId: string, input: ProposeChange): Promise<ProposeChangeResult> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    if (input.topicId && !(await this.store.getTopic(spaceId, input.topicId))) {
-      throw new HarborError('invalid_request', 'topicId does not exist in this space');
+    if (input.threadRootId && !(await this.store.getMessage(spaceId, input.threadRootId))) {
+      throw new HarborError('invalid_request', 'threadRootId does not exist in this space');
     }
     // Binary variant: the hash must be phase-1-uploaded to THIS space — a
     // version row can never point at nothing (and never at another space's
@@ -713,10 +699,10 @@ export class HarborService {
   ): Promise<ChangeSet> {
     const at = this.now();
     const offset = (await this.store.head(spaceId)) + 1;
-    // Provenance: an explicit topicId wins; otherwise the "· topic:<id>"
+    // Provenance: an explicit threadRootId wins; otherwise the "· thread:<id>"
     // reason suffix that prompt-driven agents write (best effort — the suffix
     // is a claim, not validated).
-    const topicId = input.topicId ?? topicIdFromReason(input.reason);
+    const threadRootId = input.threadRootId ?? threadRootFromReason(input.reason);
     const changeSet: ChangeSet = {
       id: this.ulid(),
       spaceId,
@@ -725,7 +711,7 @@ export class HarborService {
       resultVersion: version,
       attribution,
       ...(input.reason ? { reason: input.reason } : {}),
-      ...(topicId ? { topicId } : {}),
+      ...(threadRootId ? { threadRootId } : {}),
       ...(data.blob ? { blob: data.blob } : {}),
       committedAt: at,
       offset,
@@ -792,52 +778,100 @@ export class HarborService {
   }
 
   // --- feed ------------------------------------------------------------------
+  // The annotation model (spec §7, 2026-09-01): one stream of root messages,
+  // flat threads behind reply chips (threadRoot, write-once), topics as
+  // archivable annotation rows on threads. Posting never creates a container.
+
+  /** A root's live reactions folded in — every read path carries current truth. */
+  private async foldPage(spaceId: string, messages: Message[]): Promise<Message[]> {
+    const byMessage = new Map<string, StoredReaction[]>();
+    for (const r of await this.store.listReactionsForMessages(spaceId, messages.map((m) => m.id))) {
+      byMessage.set(r.messageId, [...(byMessage.get(r.messageId) ?? []), r]);
+    }
+    return messages.map((m) => ({ ...m, reactions: foldReactions(byMessage.get(m.id) ?? []) }));
+  }
+
+  private pageLimit(limit?: number): number {
+    return Math.min(Math.max(limit ?? MESSAGES_PAGE_DEFAULT, 1), MESSAGES_PAGE_MAX);
+  }
+
+  /** A topic listing's activity stamp: the newest reply, else the root's post. */
+  private static activityOf(root: Message | undefined, topic: Topic): string {
+    return root?.lastReplyAt ?? root?.postedAt ?? topic.createdAt;
+  }
 
   async listTopics(ctx: ActorCtx, spaceId: string, includeArchived = false): Promise<TopicListing[]> {
     await this.requireMember(ctx, spaceId);
     const topics = await this.store.listTopics(spaceId, includeArchived);
-    // Every consumer needs the first message (derived titles, thread parent
-    // cards, seed detection) — always folded in, one query for all topics.
-    const firsts = await this.store.getFirstMessages(spaceId);
-    return topics.map((t) => ({ ...t, firstMessage: firsts.get(t.id) ?? null }));
+    // Every consumer needs the root message (reply chips, parent cards,
+    // unread anchors) — always folded in; activity computes from its denorm.
+    const listings: TopicListing[] = [];
+    for (const t of topics) {
+      const root = await this.store.getMessage(spaceId, t.rootMessageId);
+      listings.push({ ...t, rootMessage: root ?? null, lastActivityAt: HarborService.activityOf(root, t) });
+    }
+    return listings.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id));
   }
 
-  async listMessages(
+  async listStream(
     ctx: ActorCtx,
     spaceId: string,
-    topicId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ topic: Topic; messages: Message[]; hasMore: boolean }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean }> {
     await this.requireMember(ctx, spaceId);
-    const topic = await this.store.getTopic(spaceId, topicId);
-    if (!topic) throw new HarborError('not_found', 'no such topic');
     // Newest page by default — never the full history. One extra row answers
     // hasMore without a count query.
-    const limit = Math.min(Math.max(opts?.limit ?? MESSAGES_PAGE_DEFAULT, 1), MESSAGES_PAGE_MAX);
-    const window = await this.store.listMessages(spaceId, topicId, {
+    const limit = this.pageLimit(opts?.limit);
+    const window = await this.store.listStream(spaceId, {
       ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
       limit: limit + 1,
     });
     const hasMore = window.length > limit;
-    const messages = hasMore ? window.slice(1) : window;
-    // Fold live reaction state in — the reactions field on a stored message
-    // event is its at-post snapshot (empty); reads carry the current truth.
-    const byMessage = new Map<string, StoredReaction[]>();
-    for (const r of await this.store.listReactionsByTopic(spaceId, topicId)) {
-      byMessage.set(r.messageId, [...(byMessage.get(r.messageId) ?? []), r]);
+    const roots = hasMore ? window.slice(1) : window;
+    // The page's topic badges, one batched decoration.
+    const topics: Topic[] = [];
+    for (const m of roots) {
+      const topic = await this.store.getTopicByRoot(spaceId, m.id);
+      if (topic) topics.push(topic);
     }
+    return { messages: await this.foldPage(spaceId, roots), topics, hasMore };
+  }
+
+  /** A reply's id resolves to its root — callers always land on the thread. */
+  private async resolveRoot(spaceId: string, messageId: string): Promise<Message> {
+    const message = await this.store.getMessage(spaceId, messageId);
+    if (!message) throw new HarborError('not_found', 'no such message');
+    if (message.threadRoot === undefined) return message;
+    const root = await this.store.getMessage(spaceId, message.threadRoot);
+    if (!root) throw new HarborError('internal', 'reply points at a missing root');
+    return root;
+  }
+
+  async listThread(
+    ctx: ActorCtx,
+    spaceId: string,
+    rootMessageId: string,
+    opts?: { beforeOffset?: number; limit?: number },
+  ): Promise<{ root: Message; topic: Topic | null; messages: Message[]; hasMore: boolean }> {
+    await this.requireMember(ctx, spaceId);
+    const root = await this.resolveRoot(spaceId, rootMessageId);
+    const limit = this.pageLimit(opts?.limit);
+    const window = await this.store.listThread(spaceId, root.id, {
+      ...(opts?.beforeOffset !== undefined ? { beforeOffset: opts.beforeOffset } : {}),
+      limit: limit + 1,
+    });
+    const hasMore = window.length > limit;
+    const replies = hasMore ? window.slice(1) : window;
+    const [foldedRoot] = await this.foldPage(spaceId, [root]);
     return {
-      topic,
-      messages: messages.map((m) => ({ ...m, reactions: foldReactions(byMessage.get(m.id) ?? []) })),
+      root: foldedRoot!,
+      topic: (await this.store.getTopicByRoot(spaceId, root.id)) ?? null,
+      messages: await this.foldPage(spaceId, replies),
       hasMore,
     };
   }
 
-  async postMessage(
-    ctx: ActorCtx,
-    spaceId: string,
-    input: NewTopicMessage,
-  ): Promise<{ topic: Topic; message: Message }> {
+  async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
     const author: Attribution = {
@@ -849,80 +883,121 @@ export class HarborService {
     return this.store.withSpaceLock(spaceId, async () => {
       const at = this.now();
 
-      if (input.topicId) {
-        const topic = await this.store.getTopic(spaceId, input.topicId);
-        if (!topic) throw new HarborError('not_found', 'no such topic');
+      if (input.threadRoot) {
+        // A reply. Normalize to the root (Slack-style: replying to a reply is
+        // replying to its thread) — threads stay flat by construction.
+        const root = await this.resolveRoot(spaceId, input.threadRoot);
         const offset = (await this.store.head(spaceId)) + 1;
         const message: Message = {
           id: this.ulid(),
-          topicId: topic.id,
           spaceId,
+          threadRoot: root.id,
           author,
           body: input.body,
           postedAt: at,
           offset,
+          replyCount: 0,
           reactions: [],
         };
         await this.store.appendMessage(message);
-        // Replying revives an archived topic; counts/lastActivity update without
-        // a topic event (clients derive those from message events).
-        const updated: Topic = {
-          ...topic,
-          archived: false,
-          lastActivityAt: at,
-          messageCount: topic.messageCount + 1,
-        };
-        await this.store.putTopic(updated);
+        await this.store.refreshReplyStats(spaceId, root.id);
         await this.append(spaceId, offset, at, { type: 'message', message });
-        if (topic.archived) {
-          await this.append(spaceId, offset + 1, at, { type: 'topic', topic: updated });
+        // Gmail semantics: activity returns an archived topic to the rail.
+        const topic = await this.store.getTopicByRoot(spaceId, root.id);
+        if (topic?.archived) {
+          const revived: Topic = { ...topic, archived: false };
+          await this.store.putTopic(revived);
+          await this.append(spaceId, offset + 1, at, { type: 'topic', topic: revived, action: 'unarchived', by: author });
         }
-        return { topic: updated, message };
+        return { message };
       }
 
-      // First message becomes the title (spec §7); agents recover structure later.
+      // A new root in the stream. Never a container — createTopic is the
+      // deliberate ceremony.
       if (input.anchorChangeSetId) {
         const anchor = await this.store.getChangeSet(spaceId, input.anchorChangeSetId);
         if (!anchor) throw new HarborError('invalid_request', 'anchorChangeSetId does not exist in this space');
       }
-      if (input.anchorMessageId) {
-        const anchor = await this.store.getMessage(spaceId, input.anchorMessageId);
-        if (!anchor) throw new HarborError('invalid_request', 'anchorMessageId does not exist in this space');
-        // One topic per message — the space lock makes this check race-free.
-        const claimed = await this.store.getTopicByAnchor(spaceId, input.anchorMessageId);
-        if (claimed) {
-          throw new HarborError('invalid_request', `a topic already grew from this message (${claimed.id})`);
-        }
-      }
-      const topicOffset = (await this.store.head(spaceId)) + 1;
-      const topic: Topic = {
-        id: this.ulid(),
-        spaceId,
-        title: deriveTitle(input.body),
-        kind: 'discussion',
-        createdBy: author,
-        createdAt: at,
-        archived: false,
-        ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
-        ...(input.anchorMessageId ? { anchorMessageId: input.anchorMessageId } : {}),
-        lastActivityAt: at,
-        messageCount: 1,
-      };
+      const offset = (await this.store.head(spaceId)) + 1;
       const message: Message = {
         id: this.ulid(),
-        topicId: topic.id,
         spaceId,
         author,
         body: input.body,
         postedAt: at,
-        offset: topicOffset + 1,
+        offset,
+        replyCount: 0,
+        ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
         reactions: [],
       };
-      await this.store.putTopic(topic);
       await this.store.appendMessage(message);
-      await this.append(spaceId, topicOffset, at, { type: 'topic', topic });
-      await this.append(spaceId, topicOffset + 1, at, { type: 'message', message });
-      return { topic, message };
+      await this.append(spaceId, offset, at, { type: 'message', message });
+      return { message };
+    });
+  }
+
+  /**
+   * The deliberate ceremony (spec §7): annotate a thread with a stated goal.
+   * Promote (rootMessageId) inserts one row and cannot touch a message; from
+   * scratch (body) posts the root first — nothing is born outside the stream.
+   */
+  async createTopic(
+    ctx: ActorCtx,
+    spaceId: string,
+    input: CreateTopicInput,
+  ): Promise<{ topic: Topic; rootMessage: Message }> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const at = this.now();
+
+      let root: Message;
+      let offset = (await this.store.head(spaceId)) + 1;
+      if (input.rootMessageId) {
+        const message = await this.store.getMessage(spaceId, input.rootMessageId);
+        if (!message) throw new HarborError('not_found', 'no such message');
+        if (message.threadRoot !== undefined) {
+          throw new HarborError('invalid_request', `this is a reply — promote the thread's root (${message.threadRoot})`);
+        }
+        const claimed = await this.store.getTopicByRoot(spaceId, message.id);
+        if (claimed) {
+          throw new HarborError('invalid_request', `this thread already has a topic (${claimed.id})`);
+        }
+        root = message;
+      } else {
+        root = {
+          id: this.ulid(),
+          spaceId,
+          author: by,
+          body: input.body!,
+          postedAt: at,
+          offset,
+          replyCount: 0,
+          reactions: [],
+        };
+        await this.store.appendMessage(root);
+        await this.append(spaceId, offset, at, { type: 'message', message: root });
+        offset += 1;
+      }
+
+      const topic: Topic = {
+        id: this.ulid(),
+        spaceId,
+        rootMessageId: root.id,
+        title: input.title,
+        createdBy: by,
+        createdAt: at,
+        archived: false,
+      };
+      await this.store.putTopic(topic);
+      await this.append(spaceId, offset, at, { type: 'topic', topic, action: 'created', by });
+      return { topic, rootMessage: root };
     });
   }
 
@@ -962,17 +1037,22 @@ export class HarborService {
 
       const at = this.now();
       await this.store.markMessageDeleted(spaceId, messageId, at);
-      // The tombstone stays a row but stops counting; activity is not bumped
-      // (deleting must not resurface a quiet topic). No topic event — clients
-      // refresh their topic lists off the deletion event like any other.
-      const topic = await this.store.getTopic(spaceId, message.topicId);
-      if (topic) {
-        await this.store.putTopic({ ...topic, messageCount: Math.max(0, topic.messageCount - 1) });
+      // The tombstone stays a row (threads anchored under it survive) but a
+      // deleted reply stops counting toward its root's chip. lastReplyAt is
+      // deliberately untouched — deleting must not resurface or reorder.
+      if (message.threadRoot !== undefined) {
+        await this.store.refreshReplyStats(spaceId, message.threadRoot);
       }
       const offset = (await this.store.head(spaceId)) + 1;
       await this.append(spaceId, offset, at, {
         type: 'message_deleted',
-        deletion: { spaceId, topicId: message.topicId, messageId, by, at },
+        deletion: {
+          spaceId,
+          messageId,
+          ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+          by,
+          at,
+        },
       });
       return withReactions({ ...message, body: '', deletedAt: at });
     });
@@ -1017,7 +1097,14 @@ export class HarborService {
       const offset = (await this.store.head(spaceId)) + 1;
       await this.append(spaceId, offset, at, {
         type: 'message_edited',
-        edit: { spaceId, topicId: message.topicId, messageId, body: input.body, by, at },
+        edit: {
+          spaceId,
+          messageId,
+          ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+          body: input.body,
+          by,
+          at,
+        },
       });
       return withReactions({ ...message, body: input.body, editedAt: at });
     });
@@ -1048,22 +1135,22 @@ export class HarborService {
       const existing = await this.store.getReaction(spaceId, messageId, input.emoji, ctx.memberId);
       const at = this.now();
 
+      const reaction = {
+        spaceId,
+        messageId,
+        ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+        emoji: input.emoji,
+        by,
+        at,
+      };
       if (input.action === 'add' && !existing) {
         await this.store.putReaction({ spaceId, messageId, emoji: input.emoji, by, at });
         const offset = (await this.store.head(spaceId)) + 1;
-        await this.append(spaceId, offset, at, {
-          type: 'reaction',
-          reaction: { spaceId, topicId: message.topicId, messageId, emoji: input.emoji, by, at },
-          action: 'added',
-        });
+        await this.append(spaceId, offset, at, { type: 'reaction', reaction, action: 'added' });
       } else if (input.action === 'remove' && existing) {
         await this.store.deleteReaction(spaceId, messageId, input.emoji, ctx.memberId);
         const offset = (await this.store.head(spaceId)) + 1;
-        await this.append(spaceId, offset, at, {
-          type: 'reaction',
-          reaction: { spaceId, topicId: message.topicId, messageId, emoji: input.emoji, by, at },
-          action: 'removed',
-        });
+        await this.append(spaceId, offset, at, { type: 'reaction', reaction, action: 'removed' });
       }
 
       return {
@@ -1073,9 +1160,20 @@ export class HarborService {
     });
   }
 
+  /**
+   * One-row lifecycle ops on the annotation — none can touch a message.
+   * Retitle/archive/unarchive update the row; remove deletes it ("convert
+   * back to thread") and the conversation never knew. Every act narrates on
+   * the log with its actor, so threads can render attributed lifecycle lines.
+   */
   async manageTopic(ctx: ActorCtx, spaceId: string, topicId: string, action: ManageTopicAction): Promise<Topic> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: action.actingMode,
+      ...(action.agentName ? { agentName: action.agentName } : {}),
+    };
 
     return this.store.withSpaceLock(spaceId, async () => {
       const topic = await this.store.getTopic(spaceId, topicId);
@@ -1084,10 +1182,11 @@ export class HarborService {
 
       switch (action.action) {
         case 'retitle': {
+          if (topic.title === action.title) return topic; // idempotent, no event
           const updated: Topic = { ...topic, title: action.title };
           await this.store.putTopic(updated);
           const offset = (await this.store.head(spaceId)) + 1;
-          await this.append(spaceId, offset, at, { type: 'topic', topic: updated });
+          await this.append(spaceId, offset, at, { type: 'topic', topic: updated, action: 'retitled', by });
           return updated;
         }
         case 'archive':
@@ -1097,30 +1196,15 @@ export class HarborService {
           const updated: Topic = { ...topic, archived };
           await this.store.putTopic(updated);
           const offset = (await this.store.head(spaceId)) + 1;
-          await this.append(spaceId, offset, at, { type: 'topic', topic: updated });
+          await this.append(spaceId, offset, at, { type: 'topic', topic: updated, action: action.action === 'archive' ? 'archived' : 'unarchived', by });
           return updated;
         }
-        case 'merge_into': {
-          if (action.targetTopicId === topicId) {
-            throw new HarborError('invalid_request', 'cannot merge a topic into itself');
-          }
-          const target = await this.store.getTopic(spaceId, action.targetTopicId);
-          if (!target) throw new HarborError('not_found', 'no such target topic');
-          const moved = await this.store.reassignMessages(spaceId, topicId, target.id);
-          const source: Topic = { ...topic, archived: true };
-          const updatedTarget: Topic = {
-            ...target,
-            messageCount: target.messageCount + moved,
-            lastActivityAt: target.lastActivityAt > topic.lastActivityAt ? target.lastActivityAt : topic.lastActivityAt,
-            archived: false,
-          };
-          await this.store.putTopic(source);
-          await this.store.putTopic(updatedTarget);
+        case 'remove': {
+          await this.store.deleteTopic(spaceId, topicId);
+          const removal: TopicRemoval = { spaceId, topicId, rootMessageId: topic.rootMessageId, by, at };
           const offset = (await this.store.head(spaceId)) + 1;
-          await this.append(spaceId, offset, at, { type: 'topic', topic: source });
-          await this.append(spaceId, offset + 1, at, { type: 'topic', topic: updatedTarget });
-          // The surviving topic is what the caller works with next.
-          return updatedTarget;
+          await this.append(spaceId, offset, at, { type: 'topic_removed', removal });
+          return topic;
         }
       }
     });
@@ -1131,35 +1215,35 @@ export class HarborService {
     spaceId: string,
     query: string,
     limit = 20,
-  ): Promise<Array<{ topicId: string; title: string; snippet: string; lastActivityAt: string }>> {
+  ): Promise<Array<{ messageId: string; threadRootId: string; topicTitle?: string; snippet: string; at: string }>> {
     await this.requireMember(ctx, spaceId);
     const q = query.toLowerCase();
-    const topics = await this.store.listTopics(spaceId, true);
     const messages = await this.store.listMessagesBySpace(spaceId);
-    const byTopic = new Map<string, Message[]>();
-    for (const m of messages) {
-      const list = byTopic.get(m.topicId) ?? [];
-      list.push(m);
-      byTopic.set(m.topicId, list);
-    }
+    const topics = await this.store.listTopics(spaceId, true);
+    const titleByRoot = new Map(topics.map((t) => [t.rootMessageId, t.title]));
 
-    const results: Array<{ topicId: string; title: string; snippet: string; lastActivityAt: string }> = [];
-    for (const topic of topics) {
-      if (topic.title.toLowerCase().includes(q)) {
-        results.push({ topicId: topic.id, title: topic.title, snippet: topic.title, lastActivityAt: topic.lastActivityAt });
-        continue;
-      }
-      const hit = (byTopic.get(topic.id) ?? []).find((m) => m.body.toLowerCase().includes(q));
-      if (hit) {
+    // Newest hits first: body matches, plus topic-title matches surfacing the
+    // thread even when the words never appear in a message.
+    const results: Array<{ messageId: string; threadRootId: string; topicTitle?: string; snippet: string; at: string }> = [];
+    const seenThreadsByTitle = new Set<string>();
+    for (let i = messages.length - 1; i >= 0 && results.length < limit; i--) {
+      const m = messages[i]!;
+      const rootId = m.threadRoot ?? m.id;
+      const topicTitle = titleByRoot.get(rootId);
+      if (m.body.toLowerCase().includes(q)) {
         results.push({
-          topicId: topic.id,
-          title: topic.title,
-          snippet: excerpt(hit.body, q),
-          lastActivityAt: topic.lastActivityAt,
+          messageId: m.id,
+          threadRootId: rootId,
+          ...(topicTitle !== undefined ? { topicTitle } : {}),
+          snippet: excerpt(m.body, q),
+          at: m.postedAt,
         });
+      } else if (m.threadRoot === undefined && topicTitle?.toLowerCase().includes(q) && !seenThreadsByTitle.has(rootId)) {
+        seenThreadsByTitle.add(rootId);
+        results.push({ messageId: m.id, threadRootId: rootId, topicTitle, snippet: topicTitle, at: m.postedAt });
       }
     }
-    return results.slice(0, limit); // topics come sorted by lastActivityAt desc
+    return results;
   }
 
   // --- live ------------------------------------------------------------------
@@ -1168,7 +1252,7 @@ export class HarborService {
     ctx: ActorCtx,
     spaceId: string,
     state: PresenceState,
-    topicId?: string,
+    threadRootId?: string,
   ): Promise<void> {
     await this.requireMember(ctx, spaceId);
     this.hub.publish(spaceId, {
@@ -1176,7 +1260,7 @@ export class HarborService {
       spaceId,
       memberId: ctx.memberId,
       state,
-      ...(topicId !== undefined ? { topicId } : {}),
+      ...(threadRootId !== undefined ? { threadRootId } : {}),
       at: this.now(),
     });
   }
@@ -1217,17 +1301,6 @@ function foldReactions(reactions: StoredReaction[]): ReactionGroup[] {
     groups.set(r.emoji, members);
   }
   return [...groups.entries()].map(([emoji, memberIds]) => ({ emoji, memberIds }));
-}
-
-function deriveTitle(body: string): string {
-  const firstLine = body
-    .split('\n')
-    .map((l) => l.trim())
-    .find((l) => l.length > 0);
-  if (!firstLine) return 'Untitled';
-  const stripped = firstLine.replace(/^#{1,6}\s+/, '').replace(/^[-*]\s+/, '').trim();
-  const title = stripped.length > 0 ? stripped : firstLine;
-  return title.length > 256 ? `${title.slice(0, 255)}…` : title;
 }
 
 function excerpt(body: string, lowerQuery: string): string {

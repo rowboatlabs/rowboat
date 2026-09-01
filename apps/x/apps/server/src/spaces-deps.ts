@@ -55,7 +55,8 @@ type SpacesRpcChannel =
   | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
-  | 'spaces:listMessages' | 'spaces:postMessage' | 'spaces:manageTopic' | 'spaces:reactToMessage'
+  | 'spaces:listStream' | 'spaces:listThread' | 'spaces:postMessage' | 'spaces:createTopic'
+  | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:invokeRowboat' | 'spaces:topicSession'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive';
@@ -217,23 +218,36 @@ export const spacesRpcHandlers: SpacesHandlers = {
     topics: await orgs.getClient(args.orgId).listTopics(args.spaceId, args.includeArchived ?? false),
   }),
 
-  'spaces:listMessages': async (args) =>
-    orgs.getClient(args.orgId).listMessages(args.spaceId, args.topicId, {
+  'spaces:listStream': async (args) =>
+    orgs.getClient(args.orgId).listStream(args.spaceId, {
+      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    }),
+
+  'spaces:listThread': async (args) =>
+    orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 
   'spaces:postMessage': async (args) =>
     orgs.getClient(args.orgId).postMessage(args.spaceId, {
-      ...(args.topicId ? { topicId: args.topicId } : {}),
+      ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
-      ...(args.anchorMessageId ? { anchorMessageId: args.anchorMessageId } : {}),
       body: args.body,
       actingMode: 'direct',
     }),
 
+  'spaces:createTopic': async (args) =>
+    orgs.getClient(args.orgId).createTopic(args.spaceId, {
+      ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
+      title: args.title,
+      ...(args.body ? { body: args.body } : {}),
+      actingMode: 'direct',
+    }),
+
   'spaces:manageTopic': async (args) => ({
-    topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, args.action),
+    topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, { ...args.action, actingMode: 'direct' }),
   }),
 
   'spaces:reactToMessage': async (args) => ({
@@ -260,7 +274,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:invokeRowboat': async (args) => invokeTopicAgent(args),
 
   'spaces:topicSession': async (args) => ({
-    sessionId: topicSessionId(args.orgId, args.spaceId, args.topicId),
+    sessionId: topicSessionId(args.orgId, args.spaceId, args.threadRootId),
   }),
 
   'spaces:subscribeSpace': async (args) => {
@@ -284,7 +298,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:presence': async (args) => {
-    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.topicId);
+    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.threadRootId);
     return { success: true };
   },
 

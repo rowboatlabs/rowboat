@@ -6,18 +6,21 @@ import type { TurnBusEvent } from '@x/shared/dist/turns.js';
 import { WorkDir } from '../config/config.js';
 import { getClient, getLive, spacesMcpServerNameFor } from './orgs.js';
 
-// @rowboat in a space topic (spec §8 grammar, §11 beat 7): an addressed
-// message routes into ONE session per topic. The session runtime's queue/steer
-// machinery decides what a second mention does (steer the running turn or
-// start a new one) — this module deliberately doesn't.
+// @rowboat in a space (spec §8 grammar, §11 beat 7): an addressed message
+// routes into ONE session per thread — the anchor is the addressed message's
+// thread root (the message itself when it was posted to the stream), which is
+// permanent, so topic rows can come and go (annotation model) without ever
+// orphaning a session. The session runtime's queue/steer machinery decides
+// what a second mention does (steer the running turn or start a new one) —
+// this module deliberately doesn't.
 //
 // Contracts kept here:
-// - The agent's final act is one post_to_topic receipt (spaces skill). A
-//   WATCHDOG enforces never-go-dark: any turn that ends without having posted
-//   gets a short mechanical receipt posted on its behalf, attributed
-//   actingMode 'agent' — the thread never ends in silence.
+// - The agent's final act is one post_message reply into the thread (spaces
+//   skill). A WATCHDOG enforces never-go-dark: any turn that ends without
+//   having posted gets a short mechanical receipt posted on its behalf,
+//   attributed actingMode 'agent' — the thread never ends in silence.
 // - While turns run, an agent_working presence lease (renewed every 10s,
-//   topic-scoped) tells the room; viewers prune stale chips themselves.
+//   thread-scoped) tells the room; viewers prune stale chips themselves.
 
 const REGISTRY_FILE = path.join(WorkDir, 'config', 'spaces_topic_sessions.json');
 const PRESENCE_RENEW_MS = 10_000;
@@ -25,8 +28,10 @@ const PRESENCE_RENEW_MS = 10_000;
 export interface InvokeTopicAgentInput {
   orgId: string;
   spaceId: string;
-  topicId: string;
-  topicTitle: string;
+  /** The thread the mention lives in: the message's root (its own id when it IS a root). */
+  threadRootId: string;
+  /** What to call the conversation: the topic's title when annotated, else the root's first line. */
+  threadLabel: string;
   spaceName: string;
   /** Feed message id of the @rowboat message — the invocation's provenance. */
   messageId: string;
@@ -54,8 +59,8 @@ interface Registry {
   sessions: Record<string, string>;
 }
 
-function registryKey(orgId: string, spaceId: string, topicId: string): string {
-  return `${orgId}/${spaceId}/${topicId}`;
+function registryKey(orgId: string, spaceId: string, threadRootId: string): string {
+  return `${orgId}/${spaceId}/${threadRootId}`;
 }
 
 function readRegistry(): Registry {
@@ -74,29 +79,29 @@ function writeRegistry(registry: Registry): void {
   fs.writeFileSync(REGISTRY_FILE, JSON.stringify(registry, null, 2));
 }
 
-/** The topic's session, if one has been created — the renderer's "open the turn" affordance. */
-export function topicSessionId(orgId: string, spaceId: string, topicId: string): string | null {
-  return readRegistry().sessions[registryKey(orgId, spaceId, topicId)] ?? null;
+/** The thread's session, if one has been created — the renderer's "open the turn" affordance. */
+export function topicSessionId(orgId: string, spaceId: string, threadRootId: string): string | null {
+  return readRegistry().sessions[registryKey(orgId, spaceId, threadRootId)] ?? null;
 }
 
 // --- invocation message (pure; tested) --------------------------------------
 
 export function buildInvocationMessage(input: InvokeTopicAgentInput, mcpServerName: string | null): string {
   // Deliberately carries NO thread content: the agent reads the discussion on
-  // demand via read_topic — always fresh, paid for only when the task needs
+  // demand via read_thread — always fresh, paid for only when the task needs
   // it (read-before-act as procedure, same as the asset tools).
   return [
-    '[Invoked from a space topic]',
+    '[Invoked from a space thread]',
     `Space: "${input.spaceName}" (spaceId: ${input.spaceId})`,
-    `Topic: "${input.topicTitle}" (topicId: ${input.topicId})`,
+    `Thread: "${input.threadLabel}" (rootMessageId: ${input.threadRootId})`,
     ...(mcpServerName ? [`Org MCP server: ${mcpServerName}`] : []),
     `Invoked by feed message: ${input.messageId}`,
     '',
-    'Load the "spaces" skill if not loaded and follow its "When invoked from a space topic" procedure. ' +
-      `If the task concerns the discussion itself (summarising it, answering questions about it, catching up), ` +
-      `call read_topic on this topicId FIRST. ` +
-      `Any propose_change you make must end its reason with " · topic:${input.topicId}" (provenance — it lists the change under this topic's artifacts). ` +
-      `Do the work, then end with exactly ONE post_to_topic receipt to topicId ${input.topicId}.`,
+    'Load the "spaces" skill if not loaded and follow its "When invoked from a space thread" procedure. ' +
+      `If the task concerns the conversation itself (summarising it, answering questions about it, catching up), ` +
+      `call read_thread on this rootMessageId FIRST. ` +
+      `Any propose_change you make must end its reason with " · thread:${input.threadRootId}" (provenance — it lists the change under this thread's artifacts). ` +
+      `Do the work, then end with exactly ONE post_message receipt with threadRoot ${input.threadRootId}.`,
     '',
     '--- message from your person ---',
     input.body,
@@ -120,18 +125,18 @@ export function describeTurnError(error: string | undefined): string {
   return truncate(raw, 200);
 }
 
-/** Does this turn event carry the agent's receipt for the given topic? (pure; tested) */
-export function isTopicReceiptCall(event: unknown, topicId: string): boolean {
+/** Does this turn event carry the agent's receipt into the given thread? (pure; tested) */
+export function isTopicReceiptCall(event: unknown, threadRootId: string): boolean {
   const e = event as {
     type?: string;
     toolName?: string;
-    input?: { toolName?: string; arguments?: { topicId?: string } };
+    input?: { toolName?: string; arguments?: { threadRoot?: string } };
   };
   return (
     e.type === 'tool_invocation_requested' &&
     e.toolName === 'executeMcpTool' &&
-    e.input?.toolName === 'post_to_topic' &&
-    e.input?.arguments?.topicId === topicId
+    e.input?.toolName === 'post_message' &&
+    e.input?.arguments?.threadRoot === threadRootId
   );
 }
 
@@ -145,7 +150,7 @@ interface TurnRecord {
 interface TopicWatch {
   orgId: string;
   spaceId: string;
-  topicId: string;
+  threadRootId: string;
   turns: Map<string, TurnRecord>;
   activeTurns: Set<string>;
   presenceTimer: ReturnType<typeof setInterval> | null;
@@ -153,7 +158,7 @@ interface TopicWatch {
 
 const watches = new Map<string, TopicWatch>();
 
-function ensureWatch(bus: ITurnEventBus, sessionId: string, scope: { orgId: string; spaceId: string; topicId: string }): void {
+function ensureWatch(bus: ITurnEventBus, sessionId: string, scope: { orgId: string; spaceId: string; threadRootId: string }): void {
   if (watches.has(sessionId)) return;
   const watch: TopicWatch = {
     ...scope,
@@ -181,7 +186,7 @@ function handleTurnEvent(watch: TopicWatch, busEvent: TurnBusEvent): void {
   if (record.terminal) return;
 
   const event = busEvent.event as { type?: string };
-  if (isTopicReceiptCall(event, watch.topicId)) {
+  if (isTopicReceiptCall(event, watch.threadRootId)) {
     record.posted = true;
     return;
   }
@@ -203,7 +208,7 @@ function startPresence(watch: TopicWatch): void {
   if (watch.presenceTimer) return;
   const send = () => {
     try {
-      getLive(watch.orgId).presence(watch.spaceId, 'agent_working', watch.topicId);
+      getLive(watch.orgId).presence(watch.spaceId, 'agent_working', watch.threadRootId);
     } catch {
       // org removed mid-run; nothing to signal
     }
@@ -220,7 +225,7 @@ function stopPresence(watch: TopicWatch): void {
   try {
     // agent_idle, not idle: both frames carry the member's id, and idle would
     // read as the human lease ending (the agent chip then lingers to its TTL).
-    getLive(watch.orgId).presence(watch.spaceId, 'agent_idle', watch.topicId);
+    getLive(watch.orgId).presence(watch.spaceId, 'agent_idle', watch.threadRootId);
   } catch {
     // best effort
   }
@@ -282,7 +287,7 @@ async function postBackstop(
 ): Promise<void> {
   const body = backstopBody(event);
   await getClient(watch.orgId).postMessage(watch.spaceId, {
-    topicId: watch.topicId,
+    threadRoot: watch.threadRootId,
     body,
     actingMode: 'agent',
     agentName: 'Rowboat',
@@ -303,8 +308,8 @@ async function resolveDeps(): Promise<{ sessions: ISessions; turnEventBus: ITurn
 export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<InvokeTopicAgentResult> {
   const { sessions, turnEventBus } = await resolveDeps();
 
-  // The topic's session — verified alive, or recreated (todo-runner idiom).
-  const key = registryKey(input.orgId, input.spaceId, input.topicId);
+  // The thread's session — verified alive, or recreated (todo-runner idiom).
+  const key = registryKey(input.orgId, input.spaceId, input.threadRootId);
   const registry = readRegistry();
   let sessionId: string | null = registry.sessions[key] ?? null;
   if (sessionId) {
@@ -316,7 +321,7 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
   }
   if (!sessionId) {
     sessionId = await sessions.createSession({
-      title: truncate(`${input.spaceName}: ${input.topicTitle}`, 100),
+      title: truncate(`${input.spaceName}: ${input.threadLabel}`, 100),
     });
     registry.sessions[key] = sessionId;
     writeRegistry(registry);
@@ -326,7 +331,7 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
   ensureWatch(turnEventBus, sessionId, {
     orgId: input.orgId,
     spaceId: input.spaceId,
-    topicId: input.topicId,
+    threadRootId: input.threadRootId,
   });
 
   const serverName = spacesMcpServerNameFor(input.orgId);

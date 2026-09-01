@@ -6,16 +6,18 @@ import type { SqlDb } from '../src/sql.js';
 import { pgliteDb } from './pglite.js';
 import { agentClient, callStructured } from './helpers.js';
 
-// Message pagination (v0 breaking change, by decision — dogfooding, no legacy
-// mode): listMessages returns the NEWEST page by default, never the full
-// history; beforeOffset pages back; listTopics always folds each topic's
-// first message in. Runs on both stores, the §11 dual gate.
+// Windowed reads under the annotation model: the stream (roots only) and each
+// flat thread page the same way — NEWEST window by default, never the full
+// history; beforeOffset pages back on the space's one offset sequence.
+// listTopics always folds each topic's root message in. Runs on both stores,
+// the §11 dual gate.
 
 let harbor: RunningHarbor;
 let sqlDb: SqlDb | undefined;
 let spaceId: string;
-let topicId: string;
-let posted: Message[];
+let rootId: string;
+let replies: Message[];
+let roots: Message[];
 
 function api(token: string) {
   return {
@@ -36,7 +38,7 @@ function api(token: string) {
 
 let ramnique: ReturnType<typeof api>;
 
-describe.each([['memory'], ['postgres']] as const)('message pagination (%s store)', (storeKind) => {
+describe.each([['memory'], ['postgres']] as const)('windowed reads (%s store)', (storeKind) => {
   beforeAll(async () => {
     const options: HarborOptions = {
       orgName: 'Page Test Org',
@@ -52,14 +54,21 @@ describe.each([['memory'], ['postgres']] as const)('message pagination (%s store
     ramnique = api('dev-ramnique');
     const created = await ramnique.post('/v1/spaces', { name: 'Paging' });
     spaceId = created.body.space.id;
-    // Seven messages in one topic: the seed plus six replies.
-    posted = [];
-    const first = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'm1 — the opener', actingMode: 'direct' });
-    topicId = first.body.topic.id;
-    posted.push(first.body.message);
+    // Five roots in the stream; the first grows a six-reply thread. Replies
+    // interleave with later roots on the one offset sequence — the windows
+    // must stay disjoint anyway.
+    roots = [];
+    replies = [];
+    const first = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'r1 — the opener', actingMode: 'direct' });
+    rootId = first.body.message.id;
+    roots.push(first.body.message);
     for (let i = 2; i <= 7; i += 1) {
-      const res = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: `m${i}`, actingMode: 'direct' });
-      posted.push(res.body.message);
+      const reply = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { threadRoot: rootId, body: `reply${i - 1}`, actingMode: 'direct' });
+      replies.push(reply.body.message);
+      if (i <= 5) {
+        const root = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: `r${i}`, actingMode: 'direct' });
+        roots.push(root.body.message);
+      }
     }
   });
 
@@ -69,60 +78,86 @@ describe.each([['memory'], ['postgres']] as const)('message pagination (%s store
     sqlDb = undefined;
   });
 
-  it('returns the latest page by default (never full history), oldest first within the window', async () => {
-    const res = await ramnique.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages?limit=3`);
+  it('the stream returns the latest page of ROOTS by default, oldest first within the window', async () => {
+    const res = await ramnique.get(`/v1/spaces/${spaceId}/stream?limit=3`);
     expect(res.status).toBe(200);
     expect(res.body.hasMore).toBe(true);
-    expect((res.body.messages as Message[]).map((m) => m.body)).toEqual(['m5', 'm6', 'm7']);
+    expect((res.body.messages as Message[]).map((m) => m.body)).toEqual(['r3', 'r4', 'r5']);
   });
 
-  it('a window that covers everything says hasMore: false', async () => {
-    const res = await ramnique.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages?limit=200`);
+  it('a stream window that covers everything says hasMore: false and never leaks replies', async () => {
+    const res = await ramnique.get(`/v1/spaces/${spaceId}/stream?limit=200`);
     expect(res.body.hasMore).toBe(false);
-    expect((res.body.messages as Message[]).map((m) => m.body)).toEqual(['m1 — the opener', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7']);
+    expect((res.body.messages as Message[]).map((m) => m.body)).toEqual(['r1 — the opener', 'r2', 'r3', 'r4', 'r5']);
   });
 
-  it('beforeOffset pages back to the start, offsets as the cursor', async () => {
+  it('beforeOffset pages the stream back to the start, offsets as the cursor', async () => {
     const all: Message[] = [];
     let before: number | undefined;
     for (let guard = 0; guard < 10; guard += 1) {
       const q = before !== undefined ? `&beforeOffset=${before}` : '';
-      const res = await ramnique.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages?limit=3${q}`);
+      const res = await ramnique.get(`/v1/spaces/${spaceId}/stream?limit=2${q}`);
       all.unshift(...(res.body.messages as Message[]));
       if (!res.body.hasMore) break;
       before = (res.body.messages as Message[])[0]!.offset;
     }
-    expect(all.map((m) => m.body)).toEqual(['m1 — the opener', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7']);
+    expect(all.map((m) => m.body)).toEqual(['r1 — the opener', 'r2', 'r3', 'r4', 'r5']);
     // Every page is disjoint and complete — nothing duplicated, nothing lost.
-    expect(new Set(all.map((m) => m.id)).size).toBe(7);
+    expect(new Set(all.map((m) => m.id)).size).toBe(5);
+  });
+
+  it('a thread windows its replies the same way', async () => {
+    const res = await ramnique.get(`/v1/spaces/${spaceId}/threads/${rootId}?limit=3`);
+    expect(res.body.hasMore).toBe(true);
+    expect(res.body.root.id).toBe(rootId);
+    expect((res.body.messages as Message[]).map((m) => m.body)).toEqual(['reply4', 'reply5', 'reply6']);
+    const older = await ramnique.get(
+      `/v1/spaces/${spaceId}/threads/${rootId}?limit=3&beforeOffset=${(res.body.messages as Message[])[0]!.offset}`,
+    );
+    expect(older.body.hasMore).toBe(false);
+    expect((older.body.messages as Message[]).map((m) => m.body)).toEqual(['reply1', 'reply2', 'reply3']);
   });
 
   it('reactions are folded live on windowed reads', async () => {
-    const target = posted[6]!;
+    const target = replies[5]!;
     await ramnique.post(`/v1/spaces/${spaceId}/messages/${target.id}/reactions`, { emoji: '👍', action: 'add', actingMode: 'direct' });
-    const res = await ramnique.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages?limit=2`);
-    const m7 = (res.body.messages as Message[]).find((m) => m.id === target.id);
-    expect(m7?.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'] }]);
+    const res = await ramnique.get(`/v1/spaces/${spaceId}/threads/${rootId}?limit=2`);
+    const hit = (res.body.messages as Message[]).find((m) => m.id === target.id);
+    expect(hit?.reactions).toEqual([{ emoji: '👍', memberIds: ['ramnique'] }]);
   });
 
-  it('listTopics always carries each topic firstMessage', async () => {
+  it('listTopics always carries each topic rootMessage with its live reply denorm', async () => {
+    const made = await ramnique.post(`/v1/spaces/${spaceId}/topics`, {
+      rootMessageId: rootId,
+      title: 'Decide: the opener thread',
+      actingMode: 'direct',
+    });
     const res = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
-    const listing = (res.body.topics as TopicListing[]).find((t) => t.id === topicId);
-    expect(listing?.firstMessage?.id).toBe(posted[0]!.id);
-    expect(listing?.firstMessage?.body).toBe('m1 — the opener');
+    const listing = (res.body.topics as TopicListing[]).find((t) => t.id === made.body.topic.id);
+    expect(listing?.rootMessage?.id).toBe(rootId);
+    expect(listing?.rootMessage?.replyCount).toBe(6);
+    expect(listing?.lastActivityAt).toBe(listing?.rootMessage?.lastReplyAt);
   });
 
-  it('read_topic (MCP) windows the same way and states truncation', async () => {
+  it('read_stream and read_thread (MCP) window the same way and state truncation', async () => {
     const agent = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
-    const page = await callStructured<{ topic: Topic; messages: Message[]; truncated: boolean }>(agent, 'read_topic', {
-      spaceId, topicId, limit: 2,
+    const page = await callStructured<{ messages: Message[]; topics: Topic[]; truncated: boolean }>(agent, 'read_stream', {
+      spaceId, limit: 2,
     });
     expect(page.truncated).toBe(true);
-    expect(page.messages.map((m) => m.body)).toEqual(['m6', 'm7']);
-    const older = await callStructured<{ messages: Message[]; truncated: boolean }>(agent, 'read_topic', {
-      spaceId, topicId, limit: 2, beforeOffset: page.messages[0]!.offset,
+    expect(page.messages.map((m) => m.body)).toEqual(['r4', 'r5']);
+    const older = await callStructured<{ messages: Message[]; truncated: boolean }>(agent, 'read_stream', {
+      spaceId, limit: 2, beforeOffset: page.messages[0]!.offset,
     });
-    expect(older.messages.map((m) => m.body)).toEqual(['m4', 'm5']);
+    expect(older.messages.map((m) => m.body)).toEqual(['r2', 'r3']);
+
+    const thread = await callStructured<{ root: Message; topic: Topic | null; messages: Message[]; truncated: boolean }>(
+      agent, 'read_thread', { spaceId, rootMessageId: rootId, limit: 2 },
+    );
+    expect(thread.truncated).toBe(true);
+    expect(thread.root.id).toBe(rootId);
+    expect(thread.topic?.title).toBe('Decide: the opener thread');
+    expect(thread.messages.map((m) => m.body)).toEqual(['reply5', 'reply6']);
     await agent.close();
   });
 });
