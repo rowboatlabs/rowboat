@@ -25,14 +25,14 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
     const [addOrgOpen, setAddOrgOpen] = useState(false)
 
     return (
-        <SidebarGroup className="flex flex-col">
+        <SidebarGroup className="flex flex-col pt-0">
             <SidebarGroupContent>
                 <div className="group/spaces-head flex items-center pr-1.5">
                     <button
                         type="button"
                         data-tour-id="nav-spaces"
                         onClick={() => setExpanded((v) => !v)}
-                        className="flex h-9 flex-1 items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                        className="flex h-8 flex-1 items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     >
                         <MessagesSquare className="size-4 shrink-0" />
                         <span className="flex-1 truncate text-left">Spaces</span>

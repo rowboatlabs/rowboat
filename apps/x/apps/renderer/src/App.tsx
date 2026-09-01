@@ -19,6 +19,7 @@ import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './compo
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
+import { VoiceNoteButton } from '@/components/voice-note-button'
 import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
@@ -736,9 +737,11 @@ function parseDeepLink(input: string): ViewState | null {
 function FixedSidebarToggle({
   leftInsetPx,
   onNewChat,
+  onVoiceNoteCreated,
 }: {
   leftInsetPx: number
   onNewChat?: () => void
+  onVoiceNoteCreated?: (path: string) => void
 }) {
   const { toggleSidebar, state } = useSidebar()
   return (
@@ -765,6 +768,7 @@ function FixedSidebarToggle({
           <SquarePen className="size-[17px]" strokeWidth={1.5} />
         </button>
       )}
+      <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} variant="action" />
     </div>
   )
 }
@@ -7773,6 +7777,7 @@ function App() {
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
               onNewChat={handleNewChat}
+              onVoiceNoteCreated={handleVoiceNoteCreated}
             />
           </SidebarProvider>
         </div>
