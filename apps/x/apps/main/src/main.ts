@@ -32,6 +32,7 @@ import { shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
 import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
+import { setAntigravityTokenCipher } from "@x/core/dist/auth/antigravity-auth.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-providers.js";
@@ -628,6 +629,12 @@ app.whenReady().then(async () => {
   });
   // ChatGPT subscription tokens at rest: same keychain-backed cipher.
   setChatGPTTokenCipher({
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+  });
+  // Antigravity (Google) tokens at rest: same keychain-backed cipher.
+  setAntigravityTokenCipher({
     isAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),

@@ -1133,6 +1133,44 @@ export const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // --- "Sign in with Google" → Antigravity (Google Cloud Code) gateway ---
+  // Same contract as the chatgpt:* channels above; identity is email-only
+  // (Google's account id isn't surfaced). Raw tokens are never exposed.
+  'antigravity:getStatus': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      email: z.string().optional(),
+    }),
+  },
+  'antigravity:signIn': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      email: z.string().optional(),
+      cancelled: z.boolean().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'antigravity:cancelSignIn': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  'antigravity:signOut': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  // Push event (main → renderer): Antigravity sign-in state changed.
+  'antigravity:statusChanged': {
+    req: z.object({
+      signedIn: z.boolean(),
+    }),
+    res: z.null(),
+  },
   'app:openUrl': {
     req: z.object({
       url: z.string(),

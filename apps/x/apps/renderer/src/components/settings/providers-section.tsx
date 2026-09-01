@@ -13,6 +13,7 @@ import { normalizeModelRecommendation, type ModelRecommendations } from "@x/shar
 import { useModels } from "@/hooks/use-models"
 import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { useChatGPT } from "@/hooks/useChatGPT"
+import { useAntigravity } from "@/hooks/useAntigravity"
 import {
   AnthropicIcon,
   GenericApiIcon,
@@ -84,6 +85,7 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
 }) {
   const { groups, isRowboatConnected, refresh } = useModels()
   const chatgpt = useChatGPT()
+  const antigravity = useAntigravity()
   const modelRecommendations = useRowboatConfig()?.modelRecommendations
 
   const [providersMeta, setProvidersMeta] = useState<ProviderMeta[]>([])
@@ -113,6 +115,7 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
     const cleanups = [
       window.ipc.on("oauth:didConnect", handler),
       window.ipc.on("chatgpt:statusChanged", handler),
+      window.ipc.on("antigravity:statusChanged", handler),
     ]
     return () => {
       window.removeEventListener("models-config-changed", handler)
@@ -226,6 +229,8 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
         isRowboatConnected={isRowboatConnected}
         chatgptSignedIn={chatgpt.status.signedIn}
         onChatGPTSignIn={chatgpt.signIn}
+        antigravitySignedIn={antigravity.status.signedIn}
+        onAntigravitySignIn={antigravity.signIn}
         hadAssistant={selections.assistantModel !== null}
         modelRecommendations={modelRecommendations}
         analyticsSource={variant === "onboarding" ? "onboarding" : "connect"}
@@ -248,18 +253,20 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
 type AddStep =
   | { kind: "choose" }
   | { kind: "creds"; flavor: ByokFlavor }
-  | { kind: "authwait"; which: "rowboat" | "chatgpt" }
+  | { kind: "authwait"; which: "rowboat" | "chatgpt" | "antigravity" }
   | { kind: "loading"; flavor: ByokFlavor }
   | { kind: "result"; name: string; first: boolean; pickedModel: string | null; modelCount: number | null }
   | { kind: "error"; flavor: ByokFlavor; message: string }
 
-function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnected, chatgptSignedIn, onChatGPTSignIn, hadAssistant, modelRecommendations, analyticsSource }: {
+function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnected, chatgptSignedIn, onChatGPTSignIn, antigravitySignedIn, onAntigravitySignIn, hadAssistant, modelRecommendations, analyticsSource }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   connectedIds: string[]
   isRowboatConnected: boolean
   chatgptSignedIn: boolean
   onChatGPTSignIn: () => Promise<unknown> | void
+  antigravitySignedIn: boolean
+  onAntigravitySignIn: () => Promise<unknown> | void
   hadAssistant: boolean
   modelRecommendations: ModelRecommendations | undefined
   analyticsSource: 'connect' | 'onboarding'
@@ -283,7 +290,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
   // connectedIds is the completion signal.
   useEffect(() => {
     if (step.kind !== "authwait") return
-    const id = step.which === "rowboat" ? "rowboat" : "codex"
+    const id = step.which === "rowboat" ? "rowboat" : step.which === "antigravity" ? "antigravity" : "codex"
     if (connectedIds.includes(id)) {
       setStep({
         kind: "result",
@@ -329,6 +336,21 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
         },
       })
     }
+    if (!antigravitySignedIn) {
+      entries.push({
+        id: "antigravity",
+        name: "Antigravity",
+        tagline: "Use your Google account",
+        icon: null,
+        onChoose: () => {
+          setStep({ kind: "authwait", which: "antigravity" })
+          void Promise.resolve(onAntigravitySignIn()).catch(() => {
+            setStep({ kind: "choose" })
+            toast.error("Sign-in failed to start")
+          })
+        },
+      })
+    }
     for (const c of BYOK_CATALOG) {
       if (connectedIds.includes(c.flavor)) continue
       entries.push({
@@ -345,7 +367,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
       })
     }
     return entries
-  }, [isRowboatConnected, chatgptSignedIn, connectedIds, onChatGPTSignIn])
+  }, [isRowboatConnected, chatgptSignedIn, antigravitySignedIn, connectedIds, onChatGPTSignIn, onAntigravitySignIn])
 
   const connect = useCallback(async (flavor: ByokFlavor) => {
     const meta = flavorMeta(flavor)
@@ -592,9 +614,10 @@ function ManageProviderDialog({ card, usedBy, onClose, onRefreshModels }: {
   onClose: () => void
   onRefreshModels: () => Promise<void>
 }) {
-  const isAuthDerived = card.flavor === "rowboat" || card.flavor === "codex"
+  const isAuthDerived = card.flavor === "rowboat" || card.flavor === "codex" || card.flavor === "antigravity"
   const meta = flavorMeta(card.flavor)
   const chatgpt = useChatGPT()
+  const antigravity = useAntigravity()
   const [replacingKey, setReplacingKey] = useState(false)
   const [newKey, setNewKey] = useState("")
   const [endpoint, setEndpoint] = useState(card.meta?.baseURL ?? "")
@@ -636,6 +659,8 @@ function ManageProviderDialog({ card, usedBy, onClose, onRefreshModels }: {
         await window.ipc.invoke("oauth:disconnect", { provider: "rowboat" })
       } else if (card.flavor === "codex") {
         await chatgpt.signOut()
+      } else if (card.flavor === "antigravity") {
+        await antigravity.signOut()
       } else {
         await window.ipc.invoke("models:removeProvider", { id: card.id })
       }
@@ -645,7 +670,7 @@ function ManageProviderDialog({ card, usedBy, onClose, onRefreshModels }: {
     } catch {
       toast.error("Failed to disconnect")
     }
-  }, [card, chatgpt, onClose])
+  }, [card, chatgpt, antigravity, onClose])
 
   const assistantAffected = usedBy.some((u) => u.label === "Assistant model")
 
