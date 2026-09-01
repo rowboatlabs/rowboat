@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { startTransition, useEffect, useState, type MutableRefObject } from 'react'
 import { Plus, SmilePlus, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
@@ -13,7 +13,33 @@ import {
 
 // Poll creation, the Discord flow: a question, 2–10 answers each with an
 // optional emoji, a duration picker (24h default), and an allow-multiple
-// toggle. Opened by /poll.
+// toggle. Opened by /poll or the composer's poll button.
+
+/**
+ * Owns the dialog's open state so toggling it re-renders THIS component
+ * only. When the flag lived in GeneralStream/ThreadPane, every open and
+ * close re-rendered the whole message stream — a measured ~140ms main-
+ * thread stall that froze the dialog's entrance animation. Callers hold
+ * the ref and call it to open.
+ */
+export function PollDialogHost({ openRef, onSubmit }: {
+    openRef: MutableRefObject<(() => void) | null>
+    onSubmit: (input: spaces.SpacesNewPollInput) => Promise<void>
+}) {
+    const [open, setOpen] = useState(false)
+    useEffect(() => {
+        // Transition: the dialog tree is a chunky mount (~100ms in dev) — as a
+        // discrete update it froze the click's frame and the entrance animation
+        // with it. Time-sliced, the frame stays fluid and the dialog commits a
+        // beat later, animating from its first painted frame.
+        openRef.current = () => startTransition(() => setOpen(true))
+        return () => {
+            openRef.current = null
+        }
+    }, [openRef])
+    if (!open) return null
+    return <PollDialog onClose={() => startTransition(() => setOpen(false))} onSubmit={onSubmit} />
+}
 
 interface DraftAnswer {
     text: string

@@ -15,7 +15,7 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
 import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
-import { PollDialog } from '@/components/spaces/poll-dialog'
+import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
@@ -287,8 +287,8 @@ export function GeneralStream({
     /** The message being forwarded — non-null renders the destination dialog. */
     const [forwarding, setForwarding] = useState<spaces.Message | null>(null)
 
-    /** Poll creation — true renders the dialog. */
-    const [pollOpen, setPollOpen] = useState(false)
+    /** Opens the poll dialog (state lives in PollDialogHost — see its doc). */
+    const openPollRef = useRef<(() => void) | null>(null)
     const createPoll = async (input: spaces.SpacesNewPollInput) => {
         if (!generalId) return
         try {
@@ -762,9 +762,7 @@ export function GeneralStream({
             {forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            {pollOpen && (
-                <PollDialog onClose={() => setPollOpen(false)} onSubmit={createPoll} />
-            )}
+            <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
                 busy={!generalId}
@@ -777,7 +775,7 @@ export function GeneralStream({
                     })
                     toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
                 }}
-                onCreatePoll={() => setPollOpen(true)}
+                onCreatePoll={() => openPollRef.current?.()}
                 onType={onType}
                 seed={seed}
                 members={members}
@@ -800,7 +798,7 @@ export function GeneralStream({
                     {
                         name: 'poll',
                         hint: 'Create a poll — pick answers, votes tally live',
-                        run: () => setPollOpen(true),
+                        run: () => openPollRef.current?.(),
                     },
                     {
                         name: 'remind',

@@ -19,7 +19,7 @@ import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, artifactsForThread, buildThreadSeed, explicitTitle, isContinuation, mergeMessages, parseThreadMarker, stripThreadMarker } from '@/lib/spaces-conventions'
 import { consumeJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
-import { PollDialog } from '@/components/spaces/poll-dialog'
+import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { attributionLabel, formatFeedTime, resolveMentions, shortId } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
@@ -355,8 +355,8 @@ export function ThreadPane({
     /** The message being forwarded — non-null renders the destination dialog. */
     const [forwarding, setForwarding] = useState<spaces.Message | null>(null)
 
-    /** Poll creation — true renders the dialog. */
-    const [pollOpen, setPollOpen] = useState(false)
+    /** Opens the poll dialog (state lives in PollDialogHost — see its doc). */
+    const openPollRef = useRef<(() => void) | null>(null)
     const createPoll = async (input: spaces.SpacesNewPollInput) => {
         try {
             const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, topicId, input })
@@ -724,9 +724,7 @@ export function ThreadPane({
             {forwarding && (
                 <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
             )}
-            {pollOpen && (
-                <PollDialog onClose={() => setPollOpen(false)} onSubmit={createPoll} />
-            )}
+            <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
             <Composer
                 placeholder="Reply…"
                 busy={false}
@@ -737,7 +735,7 @@ export function ThreadPane({
                     })
                     toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
                 }}
-                onCreatePoll={() => setPollOpen(true)}
+                onCreatePoll={() => openPollRef.current?.()}
                 onType={onType}
                 seed={seed}
                 autoFocus
@@ -761,7 +759,7 @@ export function ThreadPane({
                     {
                         name: 'poll',
                         hint: 'Create a poll — pick answers, votes tally live',
-                        run: () => setPollOpen(true),
+                        run: () => openPollRef.current?.(),
                     },
                     topic?.archived
                         ? { name: 'unarchive', hint: 'Unarchive this topic', run: () => void manage({ action: 'unarchive' }) }
