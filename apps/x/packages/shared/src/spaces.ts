@@ -155,6 +155,20 @@ export const WHITEBOARD_EXT = '.excalidraw';
 /** The board the header button opens, created on first use. */
 export const DEFAULT_WHITEBOARD_PATH = `${WHITEBOARD_DIR}/board${WHITEBOARD_EXT}`;
 
+/**
+ * A just-created board's snapshot — the same single-line shape the pane
+ * saves, so creating via the rail's "+" and the pane's first save write
+ * byte-identical content for an empty scene (identical proposes merge clean).
+ */
+export const EMPTY_WHITEBOARD_CONTENT = JSON.stringify({
+  type: 'excalidraw',
+  version: 2,
+  source: 'rowboat',
+  elements: [],
+  appState: {},
+  files: {},
+});
+
 export function isWhiteboardPath(path: string): boolean {
   return path.startsWith(`${WHITEBOARD_DIR}/`) && path.endsWith(WHITEBOARD_EXT);
 }

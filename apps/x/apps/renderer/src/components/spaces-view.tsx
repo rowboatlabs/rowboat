@@ -333,6 +333,21 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         }
     }
     toggleWhiteboardRef.current = toggleWhiteboard
+    /**
+     * The rail's "+": an explicitly named board exists from the moment it is
+     * created — an empty snapshot files the asset right away, so the rail
+     * lists it (highlighted) before the first stroke and an untouched board
+     * still survives navigating away. A taken name just opens that board.
+     */
+    const createBoard = (path: string) => {
+        select({ kind: 'whiteboard', path })
+        if (entries.some((e) => e.path === path && !e.state)) return
+        void window.ipc.invoke('spaces:proposeChange', {
+            orgId: org.id,
+            spaceId: space.id,
+            input: { assetPath: path, baseVersion: 0, newContent: spaces.EMPTY_WHITEBOARD_CONTENT, reason: 'new whiteboard' },
+        }).catch(() => {}) // org unreachable — the pane's own first save creates it instead
+    }
 
     /** Auto-hide grace: how long the rail lingers after the cursor leaves. */
     const RAIL_LINGER_MS = 3_500
@@ -600,7 +615,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     )}
                 >
                     <PenTool className="size-3.5" />
-                    <span className="hidden lg:inline">Board</span>
+                    {/* Which board is open — the confirmation that creating/switching worked. */}
+                    <span className="hidden lg:inline max-w-32 truncate">
+                        {boardPath ? spaces.whiteboardDisplayName(boardPath) : 'Board'}
+                    </span>
                 </button>
                 <div className="inline-flex items-center rounded-md bg-muted p-0.5">
                     {MODES.map(({ k, label, Icon, kb }) => (
@@ -650,6 +668,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     selection={selection}
                     onSelect={select}
                     onCreateFile={openFile}
+                    onCreateBoard={createBoard}
                     onUploadFiles={setUploadFiles}
                     onOpenTrash={() => setTrashOpen(true)}
                     onAddFolder={addFolder}

@@ -29,7 +29,7 @@ const FILES_MIN = 96
 const TOPICS_FLOOR = 160
 
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, pinned, onHoverChange, onTogglePin,
 }: {
     orgId: string
@@ -47,6 +47,8 @@ export function SpaceRail({
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     onCreateFile: (path: string) => void
+    /** The "+" in Whiteboards: creates the board asset AND opens it (a taken name just opens). */
+    onCreateBoard: (path: string) => void
     /** Picked or dropped files headed for the space's file tree (upload dialog opens in the pane). */
     onUploadFiles: (files: File[]) => void
     /** Opens the space's Trash (deleted files, restorable). */
@@ -179,8 +181,7 @@ export function SpaceRail({
         setCreatingBoard(false)
         const cleaned = name.trim().replace(/\//g, '-').replace(/\.excalidraw$/i, '')
         if (!cleaned) return
-        // The board becomes an asset on its first save — opening is creating.
-        onSelect({ kind: 'whiteboard', path: `${spaces.WHITEBOARD_DIR}/${cleaned}${spaces.WHITEBOARD_EXT}` })
+        onCreateBoard(`${spaces.WHITEBOARD_DIR}/${cleaned}${spaces.WHITEBOARD_EXT}`)
     }
 
     const unreadTopics = topics.filter((t) => t.id !== generalId && !t.archived && isUnread(t)).length + (generalUnread > 0 ? 1 : 0)
