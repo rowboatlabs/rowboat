@@ -9,7 +9,11 @@ import { Input } from '@/components/ui/input'
 import { AddOrgDialog, OrgMonogram, type SpaceSelection } from '@/components/spaces-view'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { prefetchStream, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
+import { bumpSpaceUse, readSpaceUse, spaceUseKey } from '@/lib/space-usage'
 import { toast } from '@/lib/toast'
+
+/** The fold: how many spaces the section shows before "Show all". */
+const MAX_VISIBLE_SPACES = 5
 
 // The sidebar's SPACES section (design: "App shell scope planning"): every
 // org this install is signed into, its spaces underneath with unread counts,
@@ -23,6 +27,34 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
     const unread = useSpacesUnreadCounts()
     const [expanded, setExpanded] = useState(true)
     const [addOrgOpen, setAddOrgOpen] = useState(false)
+    // Top-5 fold: the section shows the most-opened spaces; the rest sit
+    // behind "Show all" (Gmail's Spaces treatment). Per-session toggle.
+    const [showAll, setShowAll] = useState(false)
+    const totalSpaces = orgs.reduce((n, o) => n + o.spaces.length, 0)
+    const folded = !showAll && totalSpaces > MAX_VISIBLE_SPACES
+    let visibleSpaceKeys: ReadonlySet<string> | null = null
+    if (folded) {
+        const counts = readSpaceUse()
+        const ranked = orgs
+            .flatMap((o) => o.spaces.map((sp) => ({ key: spaceUseKey(o.id, sp.id), count: counts[spaceUseKey(o.id, sp.id)] ?? 0 })))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, MAX_VISIBLE_SPACES)
+            .map((r) => r.key)
+        const keys = new Set(ranked)
+        // The open space never falls below the fold.
+        if (activeSpace) {
+            const activeKey = spaceUseKey(activeSpace.orgId, activeSpace.spaceId)
+            if (!keys.has(activeKey)) {
+                keys.delete(ranked[ranked.length - 1]!)
+                keys.add(activeKey)
+            }
+        }
+        visibleSpaceKeys = keys
+    }
+    const openSpace = (orgId: string, spaceId: string) => {
+        bumpSpaceUse(orgId, spaceId)
+        onOpenSpace(orgId, spaceId)
+    }
 
     return (
         <SidebarGroup className="flex flex-col pt-0">
@@ -69,10 +101,19 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
                                     org={org}
                                     activeSpace={activeSpace}
                                     unread={unread}
-                                    onOpenSpace={onOpenSpace}
+                                    visibleSpaceKeys={visibleSpaceKeys}
+                                    onOpenSpace={openSpace}
                                     onChanged={() => void refresh()}
                                 />
                             ))}
+                            {totalSpaces > MAX_VISIBLE_SPACES && (
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton onClick={() => setShowAll((v) => !v)} className="pl-6 text-muted-foreground">
+                                        <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', showAll && 'rotate-90')} />
+                                        <span className="flex-1 truncate">{showAll ? 'Show less' : `Show all ${totalSpaces} spaces`}</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            )}
                         </SidebarMenu>
                     )
                 )}
@@ -82,10 +123,12 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
     )
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
+function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onChanged }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
     unread: Map<string, number>
+    /** Non-null while folded: only these org/space keys render. */
+    visibleSpaceKeys?: ReadonlySet<string> | null
     onOpenSpace: (orgId: string, spaceId: string) => void
     onChanged: () => void
 }) {
@@ -175,7 +218,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
                     </DropdownMenu>
                 </div>
             </SidebarMenuItem>
-            {org.spaces.map((space) => {
+            {org.spaces.filter((space) => !visibleSpaceKeys || visibleSpaceKeys.has(spaceUseKey(org.id, space.id))).map((space) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
                 const count = unread.get(`${org.id}/${space.id}`) ?? 0
                 return (
