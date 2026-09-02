@@ -6,7 +6,11 @@ import { WorkDir } from '../config/config.js';
 
 export const APPS_DIR = path.join(WorkDir, 'apps');
 
-export const APPS_PORT = 3210; // reuses the local-sites port (D8)
+// 3210 reuses the local-sites port (D8). ROWBOAT_APPS_PORT is the
+// per-instance override for sandboxed dev instances (`npm run dev:sandbox`) —
+// appOrigin() below derives from this constant, so app URLs follow along.
+const envAppsPort = Number(process.env.ROWBOAT_APPS_PORT);
+export const APPS_PORT = Number.isInteger(envAppsPort) && envAppsPort > 0 ? envAppsPort : 3210;
 export const APPS_HOST_SUFFIX = '.apps.localhost'; // full host: <slug>.apps.localhost:3210
 export const CONTROL_HOST = 'apps.localhost'; // control endpoints only (§6.4)
 
