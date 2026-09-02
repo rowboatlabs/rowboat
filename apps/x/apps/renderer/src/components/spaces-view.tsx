@@ -21,6 +21,7 @@ import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { useSpaceNotifyPrefs, type NotifyLevel } from '@/hooks/use-spaces-notify'
 import { requestJump } from '@/lib/spaces-jump'
+import { chord } from '@/lib/shortcut'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
 import { SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
@@ -58,9 +59,9 @@ const CHAT_FLOOR = 460
 const SPLIT_FLOOR = 960
 
 const MODES: { k: SpaceMode; label: string; Icon: typeof MessageSquare; kb: string }[] = [
-    { k: 'talk', label: 'Talk', Icon: MessageSquare, kb: '⌘1' },
-    { k: 'read', label: 'Read', Icon: FileText, kb: '⌘2' },
-    { k: 'split', label: 'Split', Icon: Columns2, kb: '⌘3' },
+    { k: 'talk', label: 'Talk', Icon: MessageSquare, kb: chord('1') },
+    { k: 'read', label: 'Read', Icon: FileText, kb: chord('2') },
+    { k: 'split', label: 'Split', Icon: Columns2, kb: chord('3') },
 ]
 
 // The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
@@ -675,7 +676,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                 )}
                 <button
                     type="button"
-                    title={isWhiteboard ? 'Back to the conversation ⌘4' : 'Whiteboard — draw together, live ⌘4'}
+                    title={isWhiteboard ? `Back to the conversation ${chord('4')}` : `Whiteboard — draw together, live ${chord('4')}`}
                     onClick={toggleWhiteboard}
                     className={cn(
                         'inline-flex h-6 items-center gap-1.5 rounded-md border px-2 text-xs',

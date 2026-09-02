@@ -6,6 +6,7 @@ import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
 import { cn } from '@/lib/utils'
 import { hasKind, parseSearchQuery } from '@/lib/spaces-corpus'
 import { requestJump } from '@/lib/spaces-jump'
+import { chord } from '@/lib/shortcut'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { useMemberNames } from './member-text'
@@ -257,7 +258,7 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate }: Props)
                     'flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground',
                     'w-40 transition-[width] focus-within:w-64 focus-within:border-foreground/30',
                 )}
-                title="Search this space (⌘⇧K)"
+                title={`Search this space (${chord('K', { shift: true })})`}
             >
                 <Search className="size-3 shrink-0" />
                 <input
@@ -270,7 +271,7 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate }: Props)
                     placeholder="Search"
                     className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
                 />
-                {!focused && <kbd className="rounded border border-border bg-muted px-1 text-[10px]">⌘⇧K</kbd>}
+                {!focused && <kbd className="rounded border border-border bg-muted px-1 text-[10px]">{chord('K', { shift: true })}</kbd>}
             </label>
             {open && (
                 <div className="absolute right-0 top-full z-30 mt-1 max-h-96 w-[26rem] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md">
