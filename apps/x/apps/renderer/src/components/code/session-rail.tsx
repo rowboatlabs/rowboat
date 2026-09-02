@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { ProjectRow } from './use-code-sessions'
+import { projectLabel, type ProjectRow } from './use-code-sessions'
 import { AGENT_LABEL, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
 export const CODE_RAIL_WIDTH = 272
@@ -105,7 +105,12 @@ export function SessionRail({
             </Button>
           </div>
         )}
-        {projects.map(({ project }) => {
+        {projects.map((row) => {
+          const { project } = row
+          const label = projectLabel(row)
+          // Repo-relative labels are distinctive on their own; only a bare
+          // folder name needs its parent to stay tellable-apart.
+          const parentHint = row.git.root ? '' : parentPath(project.path)
           const projectSessions = sessions.filter((s) => s.projectId === project.id)
           const isCollapsed = collapsed.has(project.id)
           // A collapsed group still surfaces its live sessions — attention
@@ -134,15 +139,18 @@ export function SessionRail({
                       className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
                     >
                       <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                        {project.name}
-                        {/* Where it lives — same-named repos in different
-                            parents stay tellable-apart at a glance. */}
-                        {parentPath(project.path) && (
-                          <span className="ml-1.5 font-normal text-muted-foreground/60">
-                            {compactPath(parentPath(project.path), 22)}
-                          </span>
-                        )}
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium" dir="rtl">
+                        {/* Right-to-left truncation: when the label doesn't fit,
+                            the leaf folder — the part that tells packages apart —
+                            survives and the ellipsis eats the root end. */}
+                        <span dir="ltr">
+                          {label}
+                          {parentHint && (
+                            <span className="ml-1.5 font-normal text-muted-foreground/60">
+                              {compactPath(parentHint, 22)}
+                            </span>
+                          )}
+                        </span>
                       </span>
                     </button>
                   </TooltipTrigger>

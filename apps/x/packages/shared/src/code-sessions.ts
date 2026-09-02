@@ -21,6 +21,12 @@ export const GitRepoInfo = z.object({
     branch: z.string().nullable(),
     hasCommits: z.boolean(),
     dirtyCount: z.number(),
+    // The repository's top-level directory (real path) and where the project
+    // sits inside it ("" when the project IS the root; "apps/x" for a package
+    // in a monorepo). Both null outside a repo. Lets a project be labelled
+    // "rowboat/apps/x" instead of a bare "x".
+    root: z.string().nullable(),
+    subpath: z.string().nullable(),
 });
 export type GitRepoInfo = z.infer<typeof GitRepoInfo>;
 

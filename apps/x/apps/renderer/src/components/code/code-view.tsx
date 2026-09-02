@@ -14,7 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useCodeSessions } from './use-code-sessions'
+import { useCodeSessions, projectLabel } from './use-code-sessions'
 import { SessionRail, CODE_RAIL_WIDTH } from './session-rail'
 import { AGENT_LABEL, fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
@@ -212,7 +212,7 @@ export function CodeView({
           ) : projects.length === 1 ? (
             <Button size="sm" onClick={() => void handleNewSession(projects[0].project.id)}>
               <Plus className="size-3.5" />
-              New session in {projects[0].project.name}
+              New session in {projectLabel(projects[0])}
             </Button>
           ) : (
             <p className="text-xs text-muted-foreground">Pick a session on the left, or start one from a project's + button.</p>

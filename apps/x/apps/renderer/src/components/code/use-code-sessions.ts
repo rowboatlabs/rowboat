@@ -6,6 +6,18 @@ export interface ProjectRow {
   git: GitRepoInfo
 }
 
+// What to call a project: the path from the git root down ("rowboat/apps/x"
+// for a package inside a monorepo, "rowboat" for the root itself), since a
+// bare folder name like "x" says nothing. Outside a repo, the folder name.
+export function projectLabel(row: ProjectRow): string {
+  const { root, subpath } = row.git
+  if (root !== null && subpath !== null) {
+    const rootName = root.split('/').filter(Boolean).pop() ?? row.project.name
+    return subpath ? `${rootName}/${subpath}` : rootName
+  }
+  return row.project.name
+}
+
 const STATUS_RANK: Record<CodeSessionStatus, number> = {
   'needs-you': 0,
   working: 1,
