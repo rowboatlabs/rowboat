@@ -69,6 +69,8 @@ import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight,
 import { loadEmailInstructions, saveEmailInstructions } from '@x/core/dist/knowledge/email_instructions.js';
 import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/knowledge/email_labels.js';
 import { getChatGPTStatus } from '@x/core/dist/auth/chatgpt-auth.js';
+import { getAntigravityStatus, signOutAntigravity } from '@x/core/dist/auth/antigravity-auth.js';
+import { signInWithAntigravity, cancelAntigravitySignIn } from '@x/core/dist/auth/antigravity-signin.js';
 import type { IChannelsConfigRepo } from '@x/core/dist/channels/repo.js';
 import { applyChannelsConfig, getChannelsStatus, logoutWhatsApp } from '@x/core/dist/channels/service.js';
 import type { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
@@ -96,7 +98,7 @@ import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import * as composioFlows from '@x/core/dist/composio/flows.js';
 import { signInWithChatGPT, cancelChatGPTSignIn } from '@x/core/dist/auth/chatgpt-signin.js';
 import { signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
-import { chatgptStatusBus, oauthConnectBus, composioConnectBus } from '@x/core/dist/auth/connector-events.js';
+import { chatgptStatusBus, antigravityStatusBus, oauthConnectBus, composioConnectBus } from '@x/core/dist/auth/connector-events.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
 import { startManagedGooglePick } from '@x/core/dist/knowledge/google-picker-managed.js';
@@ -696,6 +698,9 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     'chatgpt:getStatus': async () => {
       return await getChatGPTStatus();
     },
+    'antigravity:getStatus': async () => {
+      return await getAntigravityStatus();
+    },
 
     'channels:getConfig': async () => {
       return container.resolve<IChannelsConfigRepo>('channelsConfigRepo').getConfig();
@@ -967,6 +972,29 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
         return { success: true };
       } catch (error) {
         console.error('[ChatGPTAuth] Sign-out failed:', error);
+        return { success: false };
+      }
+    },
+    'antigravity:signIn': async () => {
+      const result = await signInWithAntigravity();
+      if (result.signedIn) {
+        antigravityStatusBus.publish({ signedIn: true });
+        captureProviderConnected('antigravity');
+      }
+      return result;
+    },
+    'antigravity:cancelSignIn': async () => {
+      await cancelAntigravitySignIn();
+      return { success: true };
+    },
+    'antigravity:signOut': async () => {
+      try {
+        await signOutAntigravity();
+        antigravityStatusBus.publish({ signedIn: false });
+        captureProviderDisconnected('antigravity');
+        return { success: true };
+      } catch (error) {
+        console.error('[AntigravityAuth] Sign-out failed:', error);
         return { success: false };
       }
     },
@@ -1547,6 +1575,7 @@ export function createCoreEventSources(): EventSources {
     subscribeOAuthEvents: (listener) => oauthConnectBus.subscribe(listener),
     subscribeComposioEvents: (listener) => composioConnectBus.subscribe(listener),
     subscribeChatgptEvents: (listener) => chatgptStatusBus.subscribe(listener),
+    subscribeAntigravityEvents: (listener) => antigravityStatusBus.subscribe(listener),
     subscribeTerminalEvents: (listener) => subscribeTerminalEvents(listener),
     subscribeTtsChunks: (listener) => subscribeTtsChunks(listener),
     subscribeSpacesEvents: (listener) => subscribeSpacesEvents(listener),

@@ -17,6 +17,7 @@ import { registerUrlOpener } from '@x/core/dist/auth/url-opener.js';
 import { installLoopbackRelay } from './loopback-relay.js';
 import { createFileCipher } from './file-cipher.js';
 import { setTokenCipher as setChatGPTTokenCipher } from '@x/core/dist/auth/chatgpt-auth.js';
+import { setAntigravityTokenCipher } from '@x/core/dist/auth/antigravity-auth.js';
 import { setTokenCipher as setGithubTokenCipher } from '@x/core/dist/apps/github-auth.js';
 
 // Headless rowboat-server: the RFC's end-state entrypoint, where main spawns
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
   // (cipher-key, 0600) backs AES-256-GCM for the github/chatgpt token stores.
   const cipher = await createFileCipher(WorkDir);
   setChatGPTTokenCipher(cipher);
+  setAntigravityTokenCipher(cipher);
   setGithubTokenCipher(cipher);
 
   await prepareCoreData();
