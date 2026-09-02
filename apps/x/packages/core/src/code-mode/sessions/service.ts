@@ -324,6 +324,20 @@ export class CodeSessionService {
         return updated;
     }
 
+    // Done is the user's own verdict on a session (or the natural end of a
+    // merge-back). It touches nothing on disk: worktree, branch and chat all
+    // stay, so reopening is just clearing the flag. Activity clears it too
+    // (status tracker) so a done session that gets a message comes back.
+    async setDone(sessionId: string, done: boolean): Promise<CodeSession> {
+        const session = await this.codeSessionsRepo.get(sessionId);
+        if (!session) throw new Error(`Unknown session: ${sessionId}`);
+        const updated: CodeSession = { ...session };
+        if (done) updated.doneAt = new Date().toISOString();
+        else delete updated.doneAt;
+        await this.codeSessionsRepo.save(updated);
+        return updated;
+    }
+
     // Stop whatever turn is live on the session's chat. The turn's abort
     // signal unwinds code_agent_run (ACP cancel → grace → force-kill) and
     // cancels any pending approval card.
@@ -349,9 +363,13 @@ export class CodeSessionService {
         }
         const result = await gitService.mergeBack(project.path, session.worktree.branch);
         if (result.ok) {
+            // Merging back is the natural end of a session: file it under
+            // Done as well. Reopen is one click if the user wasn't finished.
+            const now = new Date().toISOString();
             await this.codeSessionsRepo.save({
                 ...session,
-                worktree: { ...session.worktree, mergedAt: new Date().toISOString() },
+                worktree: { ...session.worktree, mergedAt: now },
+                doneAt: session.doneAt ?? now,
             });
         }
         return result;

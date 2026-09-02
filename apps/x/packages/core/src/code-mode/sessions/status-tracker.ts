@@ -140,7 +140,11 @@ export class CodeSessionStatusTracker {
         try {
             const session = await this.codeSessionsRepo.get(sessionId);
             if (!session) return;
-            await this.codeSessionsRepo.save({ ...session, lastActivityAt: new Date().toISOString() });
+            // A new turn on a done session reopens it — work resumed, so it
+            // belongs back in the active list.
+            const reopened = { ...session, lastActivityAt: new Date().toISOString() };
+            delete reopened.doneAt;
+            await this.codeSessionsRepo.save(reopened);
         } catch {
             // Recency sort just stays where it was.
         }

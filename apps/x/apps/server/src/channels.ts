@@ -248,6 +248,7 @@ export const RPC_CHANNELS = [
   'codeSession:create',
   'codeSession:list',
   'codeSession:update',
+  'codeSession:setDone',
   'codeSession:delete',
   'codeSession:stop',
   'codeSession:gitStatus',

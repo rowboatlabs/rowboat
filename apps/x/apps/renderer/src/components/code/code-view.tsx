@@ -152,6 +152,17 @@ export function CodeView({
     await refresh()
   }, [refresh])
 
+  // Done is a flag: nothing on disk changes, and the session stays selected
+  // if it was — the row just moves piles.
+  const handleSetDone = useCallback(async (session: CodeSession, done: boolean) => {
+    try {
+      await window.ipc.invoke('codeSession:setDone', { sessionId: session.id, done })
+      await refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update session')
+    }
+  }, [refresh])
+
   const handleDeleteSession = useCallback(async (session: CodeSession, removeWorktree: boolean) => {
     try {
       await window.ipc.invoke('codeSession:delete', {
@@ -195,6 +206,7 @@ export function CodeView({
           onAddProject={() => void handleAddProject()}
           onRemoveProject={(id) => void handleRemoveProject(id)}
           onNewSession={(projectId, agent) => void handleNewSession(projectId, agent)}
+          onSetDone={(session, done) => void handleSetDone(session, done)}
           onDeleteSession={setDeleteTarget}
         />
       </div>

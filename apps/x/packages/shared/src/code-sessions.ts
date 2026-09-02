@@ -63,6 +63,10 @@ export const CodeSession = z.object({
     // The coding agent's own model + reasoning effort (applied to the ACP engine,
     // not the Rowboat-mode LLM). Values come from CODE_AGENT_MODELS /
     // CODE_AGENT_EFFORTS; unset (or 'default') leaves the engine's own default.
+    // Set when the user marks the session done (rail check, menus). Nothing
+    // on disk changes — worktree, branch and chat stay; the rail just files
+    // the session under Done. Cleared by activity (a new turn) or Reopen.
+    doneAt: z.iso.datetime().optional(),
     agentModel: z.string().optional(),
     agentEffort: z.string().optional(),
     createdAt: z.iso.datetime(),
