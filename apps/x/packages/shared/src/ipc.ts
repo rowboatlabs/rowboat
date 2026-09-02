@@ -3705,6 +3705,20 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), includeArchived: z.boolean().optional() }),
     res: z.object({ topics: z.array(z.custom<SpacesTypes.TopicListing>()) }),
   },
+  // Space search: categorized top-N (messages / topics / assets), served by
+  // the org's GET /v1/spaces/:spaceId/search. Snippets arrive raw — resolve
+  // mentions renderer-side like any message body.
+  'spaces:search': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      q: z.string(),
+      kinds: z.array(z.enum(['messages', 'topics', 'assets'])).optional(),
+      /** Per-category cap (org default 10, max 50). */
+      limit: z.number().optional(),
+    }),
+    res: z.custom<SpacesTypes.SearchResults>(),
+  },
   // The space's one stream: ROOT messages only, windowed newest-first, with
   // the topic rows annotating this page's roots riding along.
   'spaces:listStream': {

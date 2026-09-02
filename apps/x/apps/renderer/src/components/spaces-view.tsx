@@ -11,6 +11,7 @@ import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { SpaceRail } from '@/components/spaces/space-rail'
+import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
@@ -564,6 +565,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     </span>
                 )}
                 <div className="flex-1" />
+                <SpaceSearch orgId={org.id} spaceId={space.id} onNavigate={select} />
                 {effMode === 'talk' && !isWhiteboard && selection.kind !== 'file' && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
                     <button
                         type="button"

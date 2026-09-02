@@ -291,6 +291,7 @@ export const RPC_CHANNELS = [
   'spaces:assetHistory',
   'spaces:diff',
   'spaces:listTopics',
+  'spaces:search',
   'spaces:listStream',
   'spaces:listThread',
   'spaces:postMessage',

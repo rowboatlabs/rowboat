@@ -6,7 +6,18 @@ import type {
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
-import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
+import { extractSearchText, matchesAllTerms, snippetAround, type SearchQuery } from './search.js';
+import type {
+  AssetRecord,
+  AssetSearchRow,
+  AssetVersionData,
+  MessageSearchRow,
+  Store,
+  StoredEvent,
+  StoredInvite,
+  StoredReaction,
+  StoredSpaceBlob,
+} from './store.js';
 
 interface SpaceState {
   space: Space;
@@ -272,6 +283,51 @@ export class MemoryStore implements Store {
     const s = this.must(message.spaceId);
     s.messages.push(message);
     s.messagesById.set(message.id, message);
+  }
+
+  // --- search ----------------------------------------------------------------
+  // Scan-based (the stub keeps API parity, not index parity). Matching goes
+  // through the same shared matcher/snippet helpers as the pg driver's
+  // TS-side, so both stores agree on what a term means.
+
+  async searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]> {
+    if (query.terms.length === 0) return [];
+    const out: MessageSearchRow[] = [];
+    const messages = this.must(spaceId).messages;
+    for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
+      const m = messages[i]!;
+      if (m.deletedAt !== undefined) continue;
+      if (matchesAllTerms(m.body, query)) out.push({ message: m, snippet: snippetAround(m.body, query) });
+    }
+    return out;
+  }
+
+  async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
+    if (query.terms.length === 0) return [];
+    return [...this.must(spaceId).topics.values()]
+      .filter((t) => matchesAllTerms(t.title, query))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, limit);
+  }
+
+  async searchAssets(spaceId: string, query: SearchQuery, limit: number): Promise<AssetSearchRow[]> {
+    if (query.terms.length === 0) return [];
+    const s = this.must(spaceId);
+    const hits: Array<AssetSearchRow & { pathHit: boolean }> = [];
+    for (const record of s.assets.values()) {
+      if (record.state !== 'live') continue;
+      const pathLower = record.path.toLowerCase();
+      const pathHit = query.terms.every((t) => pathLower.includes(t.text));
+      const content = s.assetVersions.get(`${record.id}@${record.version}`)?.content;
+      const extracted = content != null ? extractSearchText(record.path, content) : '';
+      const contentHit = extracted !== '' && matchesAllTerms(extracted, query);
+      if (!pathHit && !contentHit) continue;
+      hits.push({ record, ...(contentHit ? { snippet: snippetAround(extracted, query) } : {}), pathHit });
+    }
+    return hits
+      .sort((a, b) => Number(b.pathHit) - Number(a.pathHit) || b.record.updatedAt.localeCompare(a.record.updatedAt))
+      .slice(0, limit)
+      .map(({ pathHit: _pathHit, ...hit }) => hit);
   }
 
   async refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void> {

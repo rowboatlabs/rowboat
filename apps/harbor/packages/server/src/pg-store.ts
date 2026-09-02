@@ -9,8 +9,19 @@ import type {
   Topic,
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
+import { extractSearchText, matchesAllTerms, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
+import type {
+  AssetRecord,
+  AssetSearchRow,
+  AssetVersionData,
+  MessageSearchRow,
+  Store,
+  StoredEvent,
+  StoredInvite,
+  StoredReaction,
+  StoredSpaceBlob,
+} from './store.js';
 
 // The real Harbor's storage: mergeable text lives inline in Postgres (≤1MB,
 // riding the log rows); binary versions carry {hash, size, mime} pointing into
@@ -177,6 +188,42 @@ export class PgStore implements Store {
 
   async init(): Promise<void> {
     await migrate(this.db);
+    // Messages/topics backfilled by migration 012 itself (generated columns);
+    // assets need code (extraction is TypeScript), so boot fills what's
+    // missing. Org-agnostic on purpose: only the boot-time store runs init(),
+    // and derived search rows are repair work, not a permission surface.
+    await this.backfillAssetSearch();
+  }
+
+  /**
+   * (Re)derive asset_search rows from asset heads: every live asset missing a
+   * row — or, with `all`, every live asset (re-extraction after the extractor
+   * learns a new file type). Idempotent; safe to run any time.
+   */
+  async backfillAssetSearch(all = false): Promise<number> {
+    const rows = await this.sql.query<{ space_id: string; id: string; path: string; version: number }>(
+      `select a.space_id, a.id, a.path, a.version from assets a
+       where a.state = 'live' and a.version > 0
+       ${all ? '' : 'and not exists (select 1 from asset_search s where s.space_id = a.space_id and s.asset_id = a.id)'}`,
+      [],
+    );
+    for (const r of rows) {
+      const v = await this.sql.query<{ content: string | null }>(
+        'select content from asset_versions where space_id = $1 and asset_id = $2 and version = $3',
+        [r.space_id, r.id, r.version],
+      );
+      const content = v[0]?.content;
+      await this.upsertAssetSearch(r.space_id, r.id, content != null ? extractSearchText(r.path, content) : '', new Date().toISOString());
+    }
+    return rows.length;
+  }
+
+  private async upsertAssetSearch(spaceId: string, assetId: string, extracted: string, updatedAt: string): Promise<void> {
+    await this.sql.query(
+      `insert into asset_search (space_id, asset_id, extracted, updated_at) values ($1, $2, $3, $4)
+       on conflict (space_id, asset_id) do update set extracted = excluded.extracted, updated_at = excluded.updated_at`,
+      [spaceId, assetId, extracted, updatedAt],
+    );
   }
 
   /** The active executor: the lock's transaction inside withSpaceLock, the pool outside. */
@@ -365,6 +412,15 @@ export class PgStore implements Store {
       'insert into asset_versions (space_id, asset_id, version, content, blob) values ($1, $2, $3, $4, $5::jsonb)',
       [spaceId, assetId, version, data.content, data.blob ? JSON.stringify(data.blob) : null],
     );
+    // The search row rides the same transaction as the version write (inside
+    // withSpaceLock), so head content and its index can never disagree.
+    // Binary heads index as '' — findable by filename via the path predicate.
+    const paths = await this.sql.query<{ path: string }>('select path from assets where space_id = $1 and id = $2', [
+      spaceId,
+      assetId,
+    ]);
+    const path = paths[0]?.path ?? '';
+    await this.upsertAssetSearch(spaceId, assetId, data.content !== null ? extractSearchText(path, data.content) : '', updatedAt);
   }
 
   async setAssetPath(spaceId: string, assetId: string, path: string, updatedAt: string): Promise<void> {
@@ -581,6 +637,55 @@ export class PgStore implements Store {
       [spaceId],
     );
     return rows.map(rowToMessage);
+  }
+
+  // --- search ----------------------------------------------------------------
+  // The three GIN lookups (migration 012). Tombstones can't match (blank body
+  // → empty tsv); deleted assets are filtered here, never de-indexed. Query
+  // strings arrive pre-quoted from toTsQueryString — no user text ever
+  // reaches tsquery syntax.
+
+  async searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]> {
+    if (query.terms.length === 0) return [];
+    const rows = await this.sql.query<MessageRow>(
+      `select * from messages where space_id = $1 and body_tsv @@ to_tsquery('simple', $2)
+       order by stream_offset desc limit $3`,
+      [spaceId, toTsQueryString(query), limit],
+    );
+    return rows.map((r) => ({ message: rowToMessage(r), snippet: snippetAround(r.body, query) }));
+  }
+
+  async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
+    if (query.terms.length === 0) return [];
+    const rows = await this.sql.query<TopicRow>(
+      `select * from topics where space_id = $1 and title_tsv @@ to_tsquery('simple', $2)
+       order by ts_rank(title_tsv, to_tsquery('simple', $2)) desc, created_at desc, id desc limit $3`,
+      [spaceId, toTsQueryString(query), limit],
+    );
+    return rows.map(rowToTopic);
+  }
+
+  async searchAssets(spaceId: string, query: SearchQuery, limit: number): Promise<AssetSearchRow[]> {
+    if (query.terms.length === 0) return [];
+    const rows = await this.sql.query<AssetRow & { extracted: string | null; content_hit: boolean; path_hit: boolean }>(
+      `select a.id, a.path, a.version, a.updated_at, a.state, v.blob, s.extracted,
+              coalesce(s.tsv @@ to_tsquery('simple', $2), false) as content_hit,
+              (a.path ilike all($3::text[])) as path_hit
+       from assets a
+       join asset_versions v on v.space_id = a.space_id and v.asset_id = a.id and v.version = a.version
+       left join asset_search s on s.space_id = a.space_id and s.asset_id = a.id
+       where a.space_id = $1 and a.state = 'live'
+         and (coalesce(s.tsv @@ to_tsquery('simple', $2), false) or a.path ilike all($3::text[]))
+       order by (a.path ilike all($3::text[])) desc,
+                coalesce(ts_rank(s.tsv, to_tsquery('simple', $2)), 0) desc,
+                a.updated_at desc
+       limit $4`,
+      [spaceId, toTsQueryString(query), toPathPatterns(query), limit],
+    );
+    return rows.map((r) => ({
+      record: this.assetRow(r),
+      ...(r.content_hit && r.extracted ? { snippet: snippetAround(r.extracted, query) } : {}),
+    }));
   }
 
   async appendMessage(message: Message): Promise<void> {

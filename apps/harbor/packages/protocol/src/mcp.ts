@@ -3,6 +3,7 @@ import { BlobInfo } from './blob.js';
 import { DeleteAssetResult, MoveAssetResult, ProposeChangeResult, ReadAssetResult } from './changeset.js';
 import { Message, Topic } from './core.js';
 import { AssetPath, AssetVersion, BlobHash, MessageId, SpaceId, TopicId } from './ids.js';
+import { SearchKind, SearchLimit, SearchResults } from './search.js';
 
 // Decision 5 (CONTRACT.md): the agent face — direct projections of the core
 // operations; the MCP server attributes every call as the token's member with
@@ -244,30 +245,25 @@ export const manageTopic = tool({
   output: z.object({ topic: Topic }),
 });
 
-export const searchFeed = tool({
-  name: 'search_feed',
+export const searchSpace = tool({
+  name: 'search_space',
   description:
-    'Search messages and topic titles in a space. Each hit names the thread it lives in ' +
-    '(threadRootId — feed it to read_thread for context). Use before posting a new root to avoid ' +
-    'duplicating a conversation.',
+    'Search a space: messages, topic titles, and files (by extracted content or filename), ' +
+    'returned as three independently-ranked lists. Query words are AND-ed; a word that is a ' +
+    "member's name also matches @-mentions of them. Message hits name their thread " +
+    '(threadRootId — feed it to read_thread for context); asset hits name the path for ' +
+    'read_asset. A truncated flag means more hits existed than limit — refine the query ' +
+    'rather than raising the limit. Use before posting a new root to avoid duplicating a ' +
+    'conversation, and to locate files without listing everything.',
   input: z.object({
     spaceId: SpaceId,
     query: z.string().min(1).max(512),
-    limit: z.number().int().positive().max(50).optional(),
+    /** Narrow to specific categories; omit for all three. */
+    kinds: z.array(SearchKind).optional(),
+    /** Per-category cap, default 10. */
+    limit: SearchLimit.optional(),
   }),
-  output: z.object({
-    results: z.array(
-      z.object({
-        messageId: MessageId,
-        /** The thread the hit lives in: its root's id (the hit's own id when it IS a root). */
-        threadRootId: MessageId,
-        /** The topic annotating that thread, when one exists. */
-        topicTitle: z.string().optional(),
-        snippet: z.string(),
-        at: z.iso.datetime(),
-      }),
-    ),
-  }),
+  output: SearchResults,
 });
 
 export const mcpTools = [
@@ -282,5 +278,5 @@ export const mcpTools = [
   listTopics,
   createTopic,
   manageTopic,
-  searchFeed,
+  searchSpace,
 ] as const;

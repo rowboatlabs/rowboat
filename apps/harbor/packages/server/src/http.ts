@@ -314,6 +314,20 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listTopics.response, { topics });
   });
 
+  app.get('/v1/spaces/:spaceId/search', async (c) => {
+    const { spaceId } = parseWith(routes.search.params, c.req.param());
+    const q = parseWith(routes.search.query, {
+      q: c.req.query('q'),
+      ...(c.req.query('kinds') !== undefined ? { kinds: c.req.query('kinds') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    const results = await service.search(actor(c), spaceId, q.q, {
+      ...(q.kinds !== undefined ? { kinds: q.kinds } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    });
+    return reply(c, routes.search.response, results);
+  });
+
   app.get('/v1/spaces/:spaceId/stream', async (c) => {
     const { spaceId } = parseWith(routes.listStream.params, c.req.param());
     const q = parseWith(routes.listStream.query, {

@@ -15,6 +15,8 @@ import {
   type ResolveInviteResult,
   type RestoreAssetResult,
   type Routes,
+  type SearchKind,
+  type SearchResults,
   type Space,
   type Topic,
   type TopicListing,
@@ -307,6 +309,17 @@ export class SpacesClient {
   async listTopics(spaceId: string, includeArchived = false): Promise<TopicListing[]> {
     const qs = includeArchived ? '?includeArchived=true' : '';
     return (await this.request('GET', this.space(spaceId, `/topics${qs}`), routes.listTopics.response)).topics;
+  }
+
+  /** Categorized space search (protocol search.ts): messages / topics / assets, top-N each. */
+  async search(
+    spaceId: string,
+    opts: { q: string; kinds?: SearchKind[]; limit?: number },
+  ): Promise<SearchResults> {
+    const qs = new URLSearchParams({ q: opts.q });
+    if (opts.kinds !== undefined) qs.set('kinds', opts.kinds.join(','));
+    if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
+    return this.request('GET', this.space(spaceId, `/search?${qs.toString()}`), routes.search.response);
   }
 
   private windowQuery(opts?: { beforeOffset?: number; limit?: number }): string {
