@@ -5,7 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { getMaxEmails } from '../config/gmail_sync_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
-import { gmailRateLimitCooldownMs } from './gmail-rate-limit.js';
+import { gmailCooldownInfo, gmailQuotaTight, gmailRateLimitCooldownMs } from './gmail-rate-limit.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import { formatTimestampForModel } from '@x/shared/dist/time.js';
@@ -902,7 +902,7 @@ async function backfillMissingRecentThreads(
     lookbackDays: number,
     opts: { force?: boolean } = {},
 ): Promise<SyncedThread[]> {
-    if (!opts.force && !shouldRunRecentBackfill(stateFile)) return [];
+    if (!opts.force && (gmailQuotaTight() || !shouldRunRecentBackfill(stateFile))) return [];
 
     const gmailClient = GoogleClientFactory.gmailClient(auth);
     const recentThreads = await listRecentNonDeletedThreadIds(gmailClient, lookbackDays);
@@ -1385,11 +1385,15 @@ async function sweepUnclassifiedMarkdown(auth: OAuth2Client, llmBudget: number =
 // run_complete would wrongly clear the sidebar's red failed state (any
 // non-error outcome clears it) while Gmail is still locked out.
 let lastCooldownNoticeUntil = 0;
+// True after a failed pass until the next successful one (drives the
+// recovery event in performSync).
+let syncDegraded = false;
 async function logRateLimitCooldownNotice(cooldownMs: number): Promise<void> {
     const until = Date.now() + cooldownMs;
     if (Math.abs(until - lastCooldownNoticeUntil) < 5_000) return;
     lastCooldownNoticeUntil = until;
     const at = new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const info = gmailCooldownInfo();
     try {
         await serviceLogger.log({
             type: 'progress',
@@ -1397,6 +1401,11 @@ async function logRateLimitCooldownNotice(cooldownMs: number): Promise<void> {
             runId: 'gmail_rate_limit_notice',
             level: 'warn',
             message: `Rate limited by Gmail — next sync attempt at ${at}`,
+            // Which cooldown fired matters when reading field reports: 'gmail'
+            // means we honored a deadline Gmail named; 'default' means the
+            // error carried none (or we failed to parse it) and the fallback
+            // ladder chose the wait.
+            details: { source: info?.source ?? 'default', until: new Date(until).toISOString() },
         });
     } catch {
         // Best-effort: the caller's console log still records the skip.
@@ -1479,16 +1488,40 @@ async function performSync() {
             await publishGmailSyncEvent(backfilled);
         }
 
-        // Keep inbox_lists/ in lock-step with Gmail's INBOX label —
-        // remove cache files for threads that were archived/trashed elsewhere.
-        await pruneInboxCache(auth);
+        // Quota-tight (a cooldown armed mid-pass, or the grace right after a
+        // lockout): skip the heavy maintenance passes so the first passes back
+        // are the lean core sync, not a burst that re-trips the limit.
+        if (!gmailQuotaTight()) {
+            // Keep inbox_lists/ in lock-step with Gmail's INBOX label —
+            // remove cache files for threads that were archived/trashed elsewhere.
+            await pruneInboxCache(auth);
 
-        // Backfill classification verdicts onto any markdown the main sync
-        // paths missed — the knowledge graph holds unstamped files forever.
-        await sweepUnclassifiedMarkdown(auth);
+            // Backfill classification verdicts onto any markdown the main sync
+            // paths missed — the knowledge graph holds unstamped files forever.
+            await sweepUnclassifiedMarkdown(auth);
+        }
+
+        // A pass succeeded after one or more failed ones: emit a run so the
+        // sidebar's red "failed" state clears. Quiet successful ticks emit no
+        // events by design, so without this the red state lingered until new
+        // mail happened to arrive.
+        if (syncDegraded) {
+            syncDegraded = false;
+            const run = await serviceLogger.startRun({ service: 'gmail', message: 'Syncing Gmail', trigger: 'timer' });
+            await serviceLogger.log({
+                type: 'run_complete',
+                service: run.service,
+                runId: run.runId,
+                level: 'info',
+                message: 'Gmail sync recovered',
+                durationMs: Date.now() - run.startedAt,
+                outcome: 'ok',
+            });
+        }
 
         console.log("Sync completed.");
     } catch (error) {
+        syncDegraded = true;
         console.error("Error during sync:", error);
     }
 }

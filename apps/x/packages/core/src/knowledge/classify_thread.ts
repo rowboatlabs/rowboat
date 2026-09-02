@@ -3,6 +3,7 @@ import path from 'path';
 import { z } from 'zod';
 import type { OAuth2Client } from 'google-auth-library';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { noteGmailSuccess } from './gmail-rate-limit.js';
 import { WorkDir } from '../config/config.js';
 import { createLanguageModel } from '../models/models.js';
 import { generateObjectSafe } from '../models/structured.js';
@@ -88,14 +89,25 @@ function formatCalendar(events: CalendarSlice[]): string {
 }
 
 let cachedUserEmail: string | null = null;
+// Negative cache: agent_notes' 10s loop and the email view's status poll both
+// funnel here; without it a failing getProfile was re-attempted on every poll.
+let lastUserEmailAttemptAt = 0;
+const USER_EMAIL_RETRY_MS = 60_000;
 
 export async function getUserEmail(auth: OAuth2Client): Promise<string | null> {
     if (cachedUserEmail) return cachedUserEmail;
+    if (Date.now() - lastUserEmailAttemptAt < USER_EMAIL_RETRY_MS) return null;
+    lastUserEmailAttemptAt = Date.now();
     try {
         const gmailClient = GoogleClientFactory.gmailClient(auth);
         const res = await gmailClient.users.getProfile({ userId: 'me' });
         if (res.data.emailAddress) {
             cachedUserEmail = res.data.emailAddress.toLowerCase();
+            // Deliberately NOT gated on the rate-limit cooldown: this
+            // 1-quota-unit call is the designated recovery probe — its
+            // success proves Gmail is healthy again and ends a stale
+            // cooldown early.
+            noteGmailSuccess();
             return cachedUserEmail;
         }
     } catch (err) {

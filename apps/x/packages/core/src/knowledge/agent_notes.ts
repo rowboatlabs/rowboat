@@ -7,6 +7,7 @@ import { getErrorDetails } from '../application/lib/errors.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { loadUserConfig, updateUserEmail } from '../config/user_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { gmailRateLimitCooldownMs } from './gmail-rate-limit.js';
 import {
     loadAgentNotesState,
     saveAgentNotesState,
@@ -190,11 +191,23 @@ function extractConversationMessages(runFilePath: string): { role: string; text:
 
 // --- User email resolution ---
 
+// The processing loop ticks every 10s; until the profile fetch succeeds once
+// (it persists into user config and is never needed again) each tick would
+// re-hit Gmail — during a rate-limit lockout that both burned quota and kept
+// re-arming the cooldown. Attempt at most every 15 minutes, never during a
+// lockout.
+let lastProfileAttemptAt = 0;
+const PROFILE_RETRY_MS = 15 * 60_000;
+
 async function ensureUserEmail(): Promise<string | null> {
     const existing = loadUserConfig();
     if (existing?.email) {
         return existing.email;
     }
+
+    if (gmailRateLimitCooldownMs() > 0) return null;
+    if (Date.now() - lastProfileAttemptAt < PROFILE_RETRY_MS) return null;
+    lastProfileAttemptAt = Date.now();
 
     // Try direct Google OAuth (covers both BYOK and rowboat modes)
     try {
