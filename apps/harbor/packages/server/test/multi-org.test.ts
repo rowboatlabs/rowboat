@@ -100,6 +100,37 @@ describe('multi-org deployment', () => {
     expect(atBeta.body.code).toBe('not_a_member');
   });
 
+  it('deployment boot backfills asset_search — the path single-org init() covers, on the fleet', async () => {
+    const ram = await as.mint({ sub: 'sub-ram' });
+    const spaceId = (await http('acme.test', ram).get('/v1/spaces')).body.spaces[0].id;
+    await http('acme.test', ram).post(`/v1/spaces/${spaceId}/changes`, {
+      assetPath: 'notes/relics.md',
+      baseVersion: 0,
+      newContent: 'the amphora survives the reboot',
+      actingMode: 'direct',
+    });
+
+    // Simulate pre-012 data: the asset exists, its search row does not.
+    await db.query('delete from asset_search', []);
+    expect(
+      (await http('acme.test', ram).get(`/v1/spaces/${spaceId}/search?q=amphora`)).body.assets,
+    ).toEqual([]);
+
+    // A fresh deployment over the same database — the fleet's restart.
+    const dep2 = await startHarborDeployment({ db, apexDomain: 'spaces.test', issuer: as.issuer });
+    try {
+      const url = dep2.url;
+      const res = await fetch(`${url}/v1/spaces/${spaceId}/search?q=amphora`, {
+        headers: { 'x-forwarded-host': 'acme.test', authorization: `Bearer ${ram}` },
+      });
+      const body = (await res.json()) as { assets: Array<{ path: string; snippet?: string }> };
+      expect(body.assets.map((a) => a.path)).toEqual(['notes/relics.md']);
+      expect(body.assets[0]!.snippet).toContain('amphora');
+    } finally {
+      await dep2.close();
+    }
+  });
+
   it("an org's invite token is not_found at another org", async () => {
     const ram = await as.mint({ sub: 'sub-ram' });
     const spaceId = (await http('acme.test', ram).get('/v1/spaces')).body.spaces[0].id;

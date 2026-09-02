@@ -73,6 +73,11 @@ interface OrgRuntime {
 
 export async function startHarborDeployment(options: DeploymentOptions): Promise<RunningDeployment> {
   await migrate(options.db);
+  // Derived-index repair rides boot on BOTH boot paths (this one and the
+  // single-org PgStore.init()): fill asset_search rows the migrations can't
+  // (extraction is TypeScript). Org-agnostic and idempotent — one pass covers
+  // every org; per-org runtimes below deliberately never run init().
+  await new PgStore(options.db).backfillAssetSearch();
   const directory = new OrgDirectory(options.db);
   const hub = new SpaceHub();
   const runtimes = new Map<string, OrgRuntime>();
