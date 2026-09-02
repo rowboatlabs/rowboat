@@ -41,9 +41,11 @@ import {
 import { COMMAND_CENTER_CHAT_SENTINEL } from '@x/shared/src/home-threads.js'
 import { reduceTurn } from '@x/shared/src/turns.js'
 import * as quickAskShortcut from '@x/shared/src/quick-ask-shortcut.js'
+import * as pttKey from '@x/shared/src/ptt-key.js'
 import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
 
 import { TalkingHead } from '@/components/talking-head'
+import { isMac } from '@/lib/shortcut'
 import { isChatMessage } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
 import { buildTurnConversation, stripVoiceTags } from '@/lib/session-chat/turn-view'
@@ -56,11 +58,14 @@ import {
 } from '@/components/chat-input-with-mentions'
 import type { FileMention, PromptInputMessage } from '@/components/ai-elements/prompt-input'
 
-// Hold-to-speak key by platform. macOS: right ⌘. Windows: the same physical
-// position is the right Win key, which the OS owns (a tap opens the Start
-// menu) — right Ctrl is the safe equivalent there.
-const IS_MAC = navigator.platform.startsWith('Mac')
-const PTT_CODE = IS_MAC ? 'MetaRight' : 'ControlRight'
+// Hold-to-speak key by platform (shared/ptt-key.ts is the one place that
+// decides): macOS right ⌘, elsewhere right Ctrl — the same physical position
+// on a PC is the right Win key, which the OS owns (a tap opens the Start
+// menu). The LABELS come from there too: this window used to bind Ctrl and
+// still say ⌘, which is the worst of both.
+const PTT_CODE = pttKey.pttEventCode(isMac)
+const PTT_LABEL = pttKey.pttKeyLabel(isMac)
+const PTT_KEYCAP = pttKey.pttKeycap(isMac)
 
 type CompanionMode = 'hidden' | 'pinned'
 
@@ -77,7 +82,7 @@ type CallState = {
   /** Tool-name-level "what's happening" while a turn runs, else null. */
   activityText: string | null
   interimText: string | null
-  /** A quick ⌘ tap locked hands-free capture (until the next tap). */
+  /** A quick talk-key tap locked hands-free capture (until the next tap). */
   pttLocked: boolean
   /** Latest assistant reply of this call (streams while generating). */
   responseText: string | null
@@ -477,8 +482,8 @@ export function QuickAskBar() {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === PTT_CODE) sendAction('ptt-up')
     }
-    // Capture phase: right ⌘ must work even while the embedded composer (or
-    // any popover) has focus — "press ⌘ and speak" is promised in BOTH
+    // Capture phase: the talk key must work even while the embedded composer
+    // (or any popover) has focus — "press and speak" is promised in BOTH
     // Skipper states, and bubble-phase listeners can be swallowed below.
     document.addEventListener('keydown', onKeyDown, true)
     document.addEventListener('keyup', onKeyUp, true)
@@ -892,7 +897,7 @@ export function QuickAskBar() {
           style={{ animation: 'skipper-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
         >
           {/* Listening halo — rings pulse around the head while the mic
-              gate is open, so "press ⌘ and speak" is visibly working in
+              gate is open, so "press the talk key and speak" is visibly working in
               both states. */}
           {!callState.micMuted && (callState.status === 'listening' || callState.pttLocked) && (
             <>
@@ -947,7 +952,7 @@ export function QuickAskBar() {
 }
 
 const STATUS_DISPLAY: Record<NonNullable<CallState['status']>, { label: string; dotClass: string }> = {
-  idle: { label: 'Hold right ⌘ to talk', dotClass: 'bg-neutral-500' },
+  idle: { label: `Hold ${PTT_LABEL} to talk`, dotClass: 'bg-neutral-500' },
   listening: { label: 'Listening', dotClass: 'bg-[var(--rowboat-success)] animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
@@ -1097,10 +1102,7 @@ function SkipperPins({
   onTextPin: () => void
 }) {
   const shortcutState = useQuickAskShortcut()
-  const shortcutLabel = quickAskShortcut.formatShortcut(
-    shortcutState.accelerator,
-    typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac'),
-  )
+  const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
   // The mic and Stop are exclusive states of ONE control: while a turn is
   // in flight the mic is dead anyway, so the hat's single pin morphs.
   const busy = state.status === 'thinking' || state.status === 'speaking'
@@ -1134,7 +1136,7 @@ function SkipperPins({
             if (!state.micMuted) sendAction('ptt-up')
           }}
           aria-label="Hold to talk — tap for hands-free"
-          title="Hold to talk (tap for hands-free) — or hold the right ⌘ key"
+          title={`Hold to talk (tap for hands-free) — or hold the ${PTT_LABEL} key`}
           className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
           style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
         >
@@ -1211,7 +1213,7 @@ function SkipperPins({
 /**
  * The Skipper's status line — the same words under the mascot in both
  * presentations. While the mic gate is open it goes loud (green, mic icon):
- * paired with the listening halo, holding right ⌘ is unmistakably working.
+ * paired with the listening halo, holding the talk key is unmistakably working.
  * While a turn runs, the generic "Thinking…" upgrades to the current
  * activity ("Searching the web…") when one is known — flicker-held by the
  * caller via useHeldLabel.
@@ -1233,7 +1235,7 @@ function SkipperStatusChip({ state, activity }: { state: CallState; activity?: s
       ) : state.pttLocked ? (
         <>
           <Mic className="h-3 w-3 animate-pulse" />
-          Hands-free — tap ⌘ to send
+          Hands-free — tap {PTT_KEYCAP} to send
         </>
       ) : state.status === 'listening' ? (
         <>
@@ -1244,7 +1246,7 @@ function SkipperStatusChip({ state, activity }: { state: CallState; activity?: s
         <>
           <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
           {state.status === 'idle'
-            ? 'Hold the mic — or right ⌘'
+            ? `Hold the mic — or ${PTT_LABEL}`
             : state.status === 'thinking' && activity
               ? activity
               : statusDisplay.label}
@@ -1405,7 +1407,7 @@ function PinnedPill({
             }
           `}</style>
           {/* Listening halo — same signal as the tucked mascot: while the
-              mic gate is open (right ⌘ held / hands-free), green rings pulse
+              mic gate is open (talk key held / hands-free), green rings pulse
               around the head. The corner chip alone is too easy to miss. */}
           {!state.micMuted && (state.status === 'listening' || state.pttLocked) && (
             <>
@@ -1479,7 +1481,7 @@ function PinnedPill({
       {/* Control bar — actions execute in the main app window */}
       <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>
         {/* Push-to-talk: hold to talk, quick tap to lock hands-free —
-            mirrors the Right ⌘ key. Pointer capture keeps the release edge
+            mirrors the talk key. Pointer capture keeps the release edge
             even if the cursor slides off mid-hold. */}
         <button
           type="button"
@@ -1495,8 +1497,8 @@ function PinnedPill({
               ? 'bg-[var(--rowboat-success)] text-white hover:bg-[var(--rowboat-success)]/85'
               : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
           } ${state.micMuted ? 'opacity-50' : ''}`}
-          aria-label="Hold to talk — or hold the right ⌘ key from any app"
-          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
+          aria-label={`Hold to talk — or hold the ${PTT_LABEL} key from any app`}
+          title={`Hold to talk (tap to go hands-free) — or hold the ${PTT_LABEL} key from any app`}
         >
           <Mic className="h-3 w-3" />
           {state.pttLocked ? 'Tap to send' : state.status === 'listening' ? 'Release to send' : 'Hold to talk'}
@@ -1664,7 +1666,7 @@ function TuckedMascot({
       : ''
   const caption = state.interimText || replyTail
 
-  // Mic gate open (holding right ⌘ / the pin, or hands-free lock): the ONE
+  // Mic gate open (holding the talk key / the pin, or hands-free lock): the ONE
   // state the user must never have to squint for — without visible feedback
   // there is no way to tell a working hold from a dead key hook.
   const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)

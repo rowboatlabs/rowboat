@@ -1278,14 +1278,15 @@ export const ipcSchemas = {
       success: z.literal(true),
     }),
   },
-  // --- Global push-to-talk (Right ⌘) ---
+  // --- Global push-to-talk (right ⌘ on macOS, right Ctrl elsewhere —
+  // see ptt-key.ts) ---
   // Push channel: main → app window, a system-wide PTT key transition.
-  // 'chord' = another key/click while Right ⌘ was held (it's being used as a
+  // 'chord' = another key/click while the talk key was held (it's being used as a
   // modifier, not the talk key) — the renderer cancels the capture.
   'voice:ptt-key': {
     req: z.object({
       type: z.enum(['down', 'up', 'chord']),
-      // Ghostwriter chord (⇧ held when Right ⌘ went down): this capture's
+      // Ghostwriter chord (⇧ held when the talk key went down): this capture's
       // result should be pasted at the user's cursor.
       paste: z.boolean().optional(),
     }),
