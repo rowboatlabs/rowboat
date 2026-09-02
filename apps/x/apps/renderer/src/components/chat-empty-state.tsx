@@ -34,7 +34,9 @@ export function ChatEmptyState({
   if (variant === 'code') {
     return (
       <div className={cn('mx-auto flex w-full flex-col items-center py-6 text-center', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
-        <div className={cn('font-normal tracking-tight text-foreground/90', wide ? 'text-2xl' : 'text-lg')}>
+        {/* A larger, regular-weight display line in the system face — the
+            look of a title, without the weight of one. */}
+        <div className={cn('font-normal leading-tight tracking-[-0.01em] text-foreground', wide ? 'text-[30px]' : 'text-xl')}>
           What should we build together?
         </div>
       </div>
