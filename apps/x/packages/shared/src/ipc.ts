@@ -1681,7 +1681,9 @@ export const ipcSchemas = {
       projectId: z.string(),
       title: z.string().optional(),
       agent: CodingAgent,
-      policy: ApprovalPolicy,
+      // Only an explicit user choice; a quick-created session omits it and
+      // follows the composer chip / global setting ("Auto").
+      policy: ApprovalPolicy.optional(),
       isolation: z.enum(['in-repo', 'worktree']),
       // The coding agent's own model + reasoning effort (ACP engine),
       // re-applied each turn so they stay editable. The copilot LLM is

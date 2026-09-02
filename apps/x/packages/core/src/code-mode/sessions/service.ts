@@ -85,6 +85,10 @@ export class CodeSessionService {
         this.codeSessionsRepo = codeSessionsRepo;
         this.codeProjectsRepo = codeProjectsRepo;
         this.sessionBus = sessionBus;
+        this.sessionBus.subscribe((event) => {
+            if (event.kind !== 'index-changed' || !event.entry?.title) return;
+            void this.adoptChatTitle(event.sessionId, event.entry.title);
+        });
     }
 
     // Sessions created before code mode moved onto the turns runtime have meta
@@ -128,9 +132,30 @@ export class CodeSessionService {
         // The session is a real chat session, created first so its id becomes
         // the code session id. Everything chat (messaging, stop, permission
         // cards, history) works on it with no code-mode special casing.
-        const title = args.title?.trim() || `${project.name} session`;
-        const sessionId = await this.sessions.createSession({ title });
-        return this.createForSession(sessionId, { ...args, title });
+        //
+        // No name given → the chat is created UNTITLED so the runtime titles
+        // it from the first message (a placeholder, then a generated title);
+        // the index-changed subscription in the constructor carries that into
+        // the meta. Until then the meta wears a project-name placeholder so
+        // the rail has something to show.
+        const explicit = args.title?.trim();
+        const sessionId = await this.sessions.createSession(explicit ? { title: explicit } : undefined);
+        return this.createForSession(sessionId, { ...args, title: explicit || `${project.name} session` });
+    }
+
+    // Code sessions show the CHAT's title (rail, chat header). The runtime
+    // titles untitled chats from their first message and renames flow through
+    // the index; mirror those into the meta so every list of code sessions
+    // stays in step. A rename made here (update → sessions.setTitle) comes
+    // back as an equal title and is a no-op.
+    private async adoptChatTitle(sessionId: string, title: string): Promise<void> {
+        try {
+            const meta = await this.codeSessionsRepo.get(sessionId);
+            if (!meta || meta.title === title) return;
+            await this.codeSessionsRepo.save({ ...meta, title });
+        } catch {
+            // Observational — a missed title never affects the session.
+        }
     }
 
     /**

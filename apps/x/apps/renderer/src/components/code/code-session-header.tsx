@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown, GitBranch, SlidersHorizontal } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
-import type { ApprovalPolicy } from '@x/shared/src/code-mode.js'
+import type { ApprovalPolicy, CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -22,8 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { fetchCodeAgentOptions, withDefault, optionLabel } from './code-agent-options'
 import { refreshCodeSessions } from './use-code-sessions'
 import { CODE_PANELS, type CodePanel } from './code-panels'
-
-const AGENT_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
+import { AGENT_LABEL, fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 const POLICY_LABEL: Record<ApprovalPolicy, string> = {
   ask: 'Ask every time',
   'auto-approve-reads': 'Auto-approve reads',
@@ -39,7 +38,7 @@ export interface CodeSessionHeaderProps {
   onTogglePanel: (panel: CodePanel) => void
 }
 
-type SessionPatch = { policy?: ApprovalPolicy; agentModel?: string; agentEffort?: string }
+type SessionPatch = { agent?: CodingAgent; policy?: ApprovalPolicy; agentModel?: string; agentEffort?: string }
 
 function StatusPill({ status }: { status: CodeSessionStatus }) {
   if (status === 'idle') return null
@@ -70,6 +69,13 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
     void fetchCodeAgentOptions(session.agent).then((opts) => { if (!cancelled) setModelOpts(opts) })
     return () => { cancelled = true }
   }, [session.agent])
+  // Which agents can be switched to (cached probe; null until known).
+  const [agentsStatus, setAgentsStatus] = useState<CodeAgentsStatus | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    fetchCodeAgentsStatus().then((s) => { if (!cancelled) setAgentsStatus(s) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const update = async (patch: SessionPatch) => {
     try {
@@ -122,6 +128,32 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
             </span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          {/* A quick-created session lands on the last-used agent; switching
+              here starts the other engine fresh on the next turn. */}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <span className="flex-1">Agent</span>
+              <span className="ml-3 truncate text-xs text-muted-foreground">{AGENT_LABEL[session.agent] ?? session.agent}</span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={session.agent}
+                  onValueChange={(v) => void update({ agent: v as CodingAgent })}
+                >
+                  {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
+                    <DropdownMenuRadioItem
+                      key={agent}
+                      value={agent}
+                      disabled={agentsStatus !== null && !isAgentReady(agentsStatus, agent)}
+                    >
+                      {AGENT_LABEL[agent]}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuPortal>
+          </DropdownMenuSub>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <span className="flex-1">Model</span>

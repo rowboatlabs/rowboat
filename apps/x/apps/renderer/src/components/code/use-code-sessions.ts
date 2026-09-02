@@ -60,6 +60,19 @@ function ensureIpcSubscription() {
       void window.ipc.invoke('codeSession:list', null).then((res) => setState({ sessions: res.sessions }))
     }
   })
+  // A code session shows its CHAT's title: the runtime names an untitled
+  // chat from its first message, and renames flow through the session index.
+  // Patch the row in place so the rail and header follow without a refetch
+  // (the main process mirrors the same title into the session meta).
+  window.ipc.on('sessions:events', (event) => {
+    if (event.kind !== 'index-changed' || !event.entry?.title) return
+    const title = event.entry.title
+    const idx = state.sessions.findIndex((s) => s.id === event.sessionId)
+    if (idx < 0 || state.sessions[idx].title === title) return
+    const sessions = state.sessions.slice()
+    sessions[idx] = { ...sessions[idx], title }
+    setState({ sessions })
+  })
 }
 
 export async function refreshCodeSessions(): Promise<void> {

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, FolderGit2, FolderPlus, MoreHorizontal, Plus, Trash2 } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions.js'
+import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { cn, compactPath, parentPath } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { Button } from '@/components/ui/button'
@@ -8,14 +9,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ProjectRow } from './use-code-sessions'
+import { AGENT_LABEL, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
 export const CODE_RAIL_WIDTH = 272
-
-const AGENT_SHORT: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
 
 // Inline status prefix: a dot plus a word, only when there is something to
 // say. Idle rows carry no prefix so the list stays quiet.
@@ -47,6 +48,7 @@ export function SessionRail({
   projects,
   sessions,
   statusOf,
+  agentsStatus,
   selectedSessionId,
   onSelectSession,
   onAddProject,
@@ -57,11 +59,14 @@ export function SessionRail({
   projects: ProjectRow[]
   sessions: CodeSession[]
   statusOf: (sessionId: string) => CodeSessionStatus
+  // Null while the probe is still running — entries stay enabled until known.
+  agentsStatus: CodeAgentsStatus | null
   selectedSessionId: string | null
   onSelectSession: (sessionId: string) => void
   onAddProject: () => void
   onRemoveProject: (projectId: string) => void
-  onNewSession: (projectId: string) => void
+  // No agent = the default (last used, whichever is ready).
+  onNewSession: (projectId: string, agent?: CodingAgent) => void
   onDeleteSession: (session: CodeSession) => void
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
@@ -169,6 +174,19 @@ export function SessionRail({
                       <Plus className="size-4" />
                       New session
                     </DropdownMenuItem>
+                    {/* The explicit picks — the plain entry (and the + button)
+                        take the agent you last worked with. */}
+                    {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
+                      <DropdownMenuItem
+                        key={agent}
+                        disabled={agentsStatus !== null && !isAgentReady(agentsStatus, agent)}
+                        onClick={() => onNewSession(project.id, agent)}
+                      >
+                        <span className="size-4" />
+                        New {AGENT_LABEL[agent]} session
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => onRemoveProject(project.id)}>
                       <Trash2 className="size-4" />
                       Remove project
@@ -196,7 +214,7 @@ export function SessionRail({
                     key={session.id}
                     role="button"
                     tabIndex={0}
-                    title={`${session.title}\n${AGENT_SHORT[session.agent] ?? session.agent}${worktree ? ` · ${session.worktree?.branch}` : ''}`}
+                    title={`${session.title}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${session.worktree?.branch}` : ''}`}
                     className={cn(
                       'group relative ml-3 mt-0.5 flex h-8 cursor-pointer items-center gap-2 rounded-lg pl-2 pr-1.5',
                       selected ? 'bg-accent text-foreground' : 'hover:bg-accent/60',
