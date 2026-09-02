@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { ArrowRight, BookOpen, Mail, Zap } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
@@ -21,6 +22,59 @@ const SUGGESTED_ACTIONS: { icon: typeof Mail; title: string; sub: string; prompt
   { icon: BookOpen, title: 'Research a topic', sub: 'create a local wiki for me', prompt: 'Research [topic] and create a local wiki for me' },
 ]
 
+const CODE_LINE = 'What should we build together?'
+// The reveal types the line out once when an empty session appears — quick
+// enough to read as a flourish, not a wait.
+const CODE_REVEAL_MS = 650
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+// A coding session's empty state: one display line typed out under a block
+// cursor that keeps blinking while the session sits empty — the one detail
+// that says "terminal" without a badge. Clicking it focuses the composer,
+// since a cursor invites typing.
+function CodeEmptyState({ wide }: { wide: boolean }) {
+  const [shown, setShown] = useState(() => (prefersReducedMotion() ? CODE_LINE.length : 0))
+  const done = shown >= CODE_LINE.length
+  useEffect(() => {
+    if (done) return
+    const stepMs = CODE_REVEAL_MS / CODE_LINE.length
+    const timer = setInterval(() => {
+      setShown((n) => {
+        if (n + 1 >= CODE_LINE.length) clearInterval(timer)
+        return Math.min(CODE_LINE.length, n + 1)
+      })
+    }, stepMs)
+    return () => clearInterval(timer)
+  }, [done])
+
+  return (
+    <div
+      className={cn('mx-auto flex w-full flex-col items-center py-6 text-center', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}
+      onClick={(e) => {
+        const root = e.currentTarget.closest<HTMLElement>('[data-chat-sidebar-root]') ?? document
+        root.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+      }}
+    >
+      {/* Regular weight in the system face: the look of a title without the
+          weight of one. Baseline-aligned block cursor, blinking with a
+          stepped cycle (a fade would read as loading). */}
+      <div className={cn('cursor-default font-normal leading-tight tracking-[-0.01em] text-foreground', wide ? 'text-[30px]' : 'text-xl')}>
+        <span>{CODE_LINE.slice(0, shown)}</span>
+        <span
+          aria-hidden
+          className={cn(
+            'ml-[0.08em] inline-block h-[0.9em] w-[0.5ch] translate-y-[0.1em] bg-foreground',
+            done && 'code-cursor-blink',
+          )}
+        />
+      </div>
+    </div>
+  )
+}
+
 /**
  * Empty-state body for the chat surface: greeting and starter action cards.
  * Shown in both the side-pane copilot and full-screen chat; the side pane
@@ -31,17 +85,7 @@ export function ChatEmptyState({
   wide = false,
   variant = 'default',
 }: ChatEmptyStateProps) {
-  if (variant === 'code') {
-    return (
-      <div className={cn('mx-auto flex w-full flex-col items-center py-6 text-center', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
-        {/* A larger, regular-weight display line in the system face — the
-            look of a title, without the weight of one. */}
-        <div className={cn('font-normal leading-tight tracking-[-0.01em] text-foreground', wide ? 'text-[30px]' : 'text-xl')}>
-          What should we build together?
-        </div>
-      </div>
-    )
-  }
+  if (variant === 'code') return <CodeEmptyState wide={wide} />
   return (
     <div className={cn('mx-auto flex w-full flex-col gap-5 py-6', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
       <div>

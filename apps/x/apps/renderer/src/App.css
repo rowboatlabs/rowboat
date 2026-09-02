@@ -1725,3 +1725,18 @@
 @media (prefers-reduced-motion: reduce) {
   .code-working-outline::after { animation: none; }
 }
+
+
+/* Code session empty state: the block cursor after the display line. A
+   stepped blink like a real terminal's — it snaps, never fades. Reduced
+   motion keeps it solid. */
+@keyframes code-cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.code-cursor-blink {
+  animation: code-cursor-blink 1.06s step-end infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-cursor-blink { animation: none; }
+}
