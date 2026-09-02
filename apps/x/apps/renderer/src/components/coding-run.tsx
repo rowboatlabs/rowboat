@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
 import { getToolErrorText, toToolState, type ToolCall } from '@/lib/chat-conversation'
 import { clearCodeRunBuffer, useCodeRunFeed } from '@/lib/code-run-feed'
+import { useCodeDiffOpener } from '@/contexts/code-diff-context'
 
 // ── Timeline reduction ──────────────────────────────────────────────
 // The raw ACP stream is a flat list of events; collapse it into ordered rows,
@@ -287,6 +288,9 @@ export function CodingRunBlock({
   // batch, or the legacy path's inline accumulation) wins; while it's absent
   // the live CodeRunFeed buffer streams the run in real time.
   const liveEvents = useCodeRunFeed(item.id)
+  // Changed-file names open the Code drawer's diff when the chat is bound to
+  // a code session; elsewhere they stay plain text.
+  const openDiff = useCodeDiffOpener()
   const durableEvents = item.codeRunEvents
   const events = durableEvents?.length ? durableEvents : liveEvents
   // Once the durable batch has landed the buffer is redundant — drop it.
@@ -302,7 +306,7 @@ export function CodingRunBlock({
           state={toToolState(item.status)}
         />
         <ToolContent>
-          <CodingRunTimeline events={events} error={error} />
+          <CodingRunTimeline events={events} error={error} onOpenDiff={openDiff ?? undefined} />
         </ToolContent>
       </Tool>
       {item.pendingCodePermission && (

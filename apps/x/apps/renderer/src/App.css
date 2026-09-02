@@ -1686,3 +1686,42 @@
 *:hover + [data-turn-usage] {
   opacity: 1;
 }
+
+/* Code rail: the session that is currently working wears an outline that
+   orbits its row — a comet travelling a faint ring — so the live session is
+   findable at a glance even when it isn't the selected one. The gradient's
+   start angle is a registered property so it can animate. */
+@property --code-orbit {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes code-orbit-spin {
+  to { --code-orbit: 360deg; }
+}
+.code-working-outline {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--rowboat-git) 28%, transparent);
+}
+.code-working-outline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--code-orbit),
+    transparent 0deg,
+    transparent 230deg,
+    color-mix(in oklab, var(--rowboat-git) 35%, transparent) 300deg,
+    var(--rowboat-git) 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: code-orbit-spin 2.4s linear infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-working-outline::after { animation: none; }
+}
