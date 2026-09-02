@@ -6,6 +6,18 @@ export interface ProjectRow {
   git: GitRepoInfo
 }
 
+// What to call a project: the path from the git root down ("rowboat/apps/x"
+// for a package inside a monorepo, "rowboat" for the root itself), since a
+// bare folder name like "x" says nothing. Outside a repo, the folder name.
+export function projectLabel(row: ProjectRow): string {
+  const { root, subpath } = row.git
+  if (root !== null && subpath !== null) {
+    const rootName = root.split('/').filter(Boolean).pop() ?? row.project.name
+    return subpath ? `${rootName}/${subpath}` : rootName
+  }
+  return row.project.name
+}
+
 const STATUS_RANK: Record<CodeSessionStatus, number> = {
   'needs-you': 0,
   working: 1,
@@ -59,6 +71,19 @@ function ensureIpcSubscription() {
     if (status === 'idle' || unknown) {
       void window.ipc.invoke('codeSession:list', null).then((res) => setState({ sessions: res.sessions }))
     }
+  })
+  // A code session shows its CHAT's title: the runtime names an untitled
+  // chat from its first message, and renames flow through the session index.
+  // Patch the row in place so the rail and header follow without a refetch
+  // (the main process mirrors the same title into the session meta).
+  window.ipc.on('sessions:events', (event) => {
+    if (event.kind !== 'index-changed' || !event.entry?.title) return
+    const title = event.entry.title
+    const idx = state.sessions.findIndex((s) => s.id === event.sessionId)
+    if (idx < 0 || state.sessions[idx].title === title) return
+    const sessions = state.sessions.slice()
+    sessions[idx] = { ...sessions[idx], title }
+    setState({ sessions })
   })
 }
 

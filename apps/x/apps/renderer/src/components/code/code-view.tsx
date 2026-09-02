@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Code2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Code2, Plus } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions.js'
+import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,9 +14,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useCodeSessions } from './use-code-sessions'
+import { useCodeSessions, projectLabel } from './use-code-sessions'
 import { SessionRail, CODE_RAIL_WIDTH } from './session-rail'
-import { NewSessionDialog } from './new-session-dialog'
+import { AGENT_LABEL, fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
 // Remember which session was open so leaving the Code section (which unmounts
 // this view) and coming back restores the selection — and with it the chat
@@ -56,8 +57,15 @@ export function CodeView({
     setSelectedSessionId(focusSessionId)
     onFocusConsumed?.()
   }, [focusSessionId, onFocusConsumed])
-  const [newSessionProjectId, setNewSessionProjectId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CodeSession | null>(null)
+
+  // Warm the agent probe so a quick-create doesn't pay for it on the click.
+  const [agentsStatus, setAgentsStatus] = useState<CodeAgentsStatus | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    fetchCodeAgentsStatus().then((s) => { if (!cancelled) setAgentsStatus(s) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (selectedSessionId) window.localStorage.setItem(SELECTED_SESSION_STORAGE_KEY, selectedSessionId)
@@ -66,7 +74,6 @@ export function CodeView({
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
   const selectedStatus = selectedSession ? statusOf(selectedSession.id) : 'idle'
-  const newSessionProject = projects.find((p) => p.project.id === newSessionProjectId) ?? null
 
   // Tell App which session (and status) owns the chat.
   useEffect(() => {
@@ -79,6 +86,53 @@ export function CodeView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const creatingRef = useRef(false)
+
+  // Quick create — no form. An isolated worktree whenever the repo allows
+  // one, the agent the user last worked with (whichever is ready), and
+  // everything else at its default; all of it stays editable from the chat
+  // header once the session is open. The chat is created untitled so the
+  // runtime names it from the first message.
+  const handleNewSession = useCallback(async (projectId: string, agentOverride?: CodingAgent) => {
+    if (creatingRef.current) return
+    const row = projects.find((p) => p.project.id === projectId)
+    if (!row) return
+    creatingRef.current = true
+    try {
+      const status = agentsStatus ?? (await fetchCodeAgentsStatus().catch(() => null))
+      if (status && !agentsStatus) setAgentsStatus(status)
+      const ready = (a: CodingAgent) => isAgentReady(status, a)
+      const lastUsed = [...sessions]
+        .sort((a, b) => (b.lastActivityAt ?? b.createdAt).localeCompare(a.lastActivityAt ?? a.createdAt))[0]?.agent
+      let agent: CodingAgent
+      if (agentOverride) {
+        if (status && !ready(agentOverride)) {
+          toast.error(`${AGENT_LABEL[agentOverride]} isn't ready — sign in or enable it in Settings.`)
+          return
+        }
+        agent = agentOverride
+      } else if (!status) {
+        // The probe failed: trust the last choice rather than block the click.
+        agent = lastUsed ?? 'claude'
+      } else if (lastUsed && ready(lastUsed)) {
+        agent = lastUsed
+      } else if (ready('claude') || ready('codex')) {
+        agent = ready('claude') ? 'claude' : 'codex'
+      } else {
+        toast.error('No coding agent is ready — sign in to Claude Code or Codex in Settings.')
+        return
+      }
+      const isolation = row.git.isGitRepo && row.git.hasCommits ? 'worktree' : 'in-repo'
+      const res = await window.ipc.invoke('codeSession:create', { projectId, agent, isolation })
+      await refresh()
+      setSelectedSessionId(res.session.id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create session')
+    } finally {
+      creatingRef.current = false
+    }
+  }, [projects, sessions, agentsStatus, refresh])
+
   const handleAddProject = useCallback(async () => {
     const res = await window.ipc.invoke('dialog:openDirectory', { title: 'Choose a project folder' })
     const dir = res.path
@@ -86,20 +140,16 @@ export function CodeView({
     try {
       const added = await window.ipc.invoke('codeProject:add', { path: dir })
       await refresh()
-      setNewSessionProjectId(added.project.id)
+      // A fresh project goes straight into its first session.
+      void handleNewSession(added.project.id)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add project')
     }
-  }, [refresh])
+  }, [refresh, handleNewSession])
 
   const handleRemoveProject = useCallback(async (projectId: string) => {
     await window.ipc.invoke('codeProject:remove', { projectId })
     await refresh()
-  }, [refresh])
-
-  const handleSessionCreated = useCallback(async (session: CodeSession) => {
-    await refresh()
-    setSelectedSessionId(session.id)
   }, [refresh])
 
   const handleDeleteSession = useCallback(async (session: CodeSession, removeWorktree: boolean) => {
@@ -129,6 +179,7 @@ export function CodeView({
           projects={projects}
           sessions={sessions}
           statusOf={statusOf}
+          agentsStatus={agentsStatus}
           selectedSessionId={selectedSessionId}
           onSelectSession={(id) => {
             setSelectedSessionId(id)
@@ -143,7 +194,7 @@ export function CodeView({
           }}
           onAddProject={() => void handleAddProject()}
           onRemoveProject={(id) => void handleRemoveProject(id)}
-          onNewSession={setNewSessionProjectId}
+          onNewSession={(projectId, agent) => void handleNewSession(projectId, agent)}
           onDeleteSession={setDeleteTarget}
         />
       </div>
@@ -158,18 +209,16 @@ export function CodeView({
           </p>
           {projects.length === 0 ? (
             <Button size="sm" onClick={() => void handleAddProject()}>Add a project to get started</Button>
+          ) : projects.length === 1 ? (
+            <Button size="sm" onClick={() => void handleNewSession(projects[0].project.id)}>
+              <Plus className="size-3.5" />
+              New session in {projectLabel(projects[0])}
+            </Button>
           ) : (
-            <p className="text-xs text-muted-foreground">Pick a session on the left, or create a new one.</p>
+            <p className="text-xs text-muted-foreground">Pick a session on the left, or start one from a project's + button.</p>
           )}
         </div>
       )}
-
-      <NewSessionDialog
-        projectRow={newSessionProject}
-        open={newSessionProjectId !== null}
-        onOpenChange={(open) => { if (!open) setNewSessionProjectId(null) }}
-        onCreated={(session) => void handleSessionCreated(session)}
-      />
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
         <AlertDialogContent>

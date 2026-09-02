@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, FolderGit2, FolderPlus, MoreHorizontal, Plus, Trash2 } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions.js'
+import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { cn, compactPath, parentPath } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { Button } from '@/components/ui/button'
@@ -8,14 +9,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { ProjectRow } from './use-code-sessions'
+import { projectLabel, type ProjectRow } from './use-code-sessions'
+import { AGENT_LABEL, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
 export const CODE_RAIL_WIDTH = 272
-
-const AGENT_SHORT: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
 
 // Inline status prefix: a dot plus a word, only when there is something to
 // say. Idle rows carry no prefix so the list stays quiet.
@@ -47,6 +48,7 @@ export function SessionRail({
   projects,
   sessions,
   statusOf,
+  agentsStatus,
   selectedSessionId,
   onSelectSession,
   onAddProject,
@@ -57,11 +59,14 @@ export function SessionRail({
   projects: ProjectRow[]
   sessions: CodeSession[]
   statusOf: (sessionId: string) => CodeSessionStatus
+  // Null while the probe is still running — entries stay enabled until known.
+  agentsStatus: CodeAgentsStatus | null
   selectedSessionId: string | null
   onSelectSession: (sessionId: string) => void
   onAddProject: () => void
   onRemoveProject: (projectId: string) => void
-  onNewSession: (projectId: string) => void
+  // No agent = the default (last used, whichever is ready).
+  onNewSession: (projectId: string, agent?: CodingAgent) => void
   onDeleteSession: (session: CodeSession) => void
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
@@ -100,7 +105,12 @@ export function SessionRail({
             </Button>
           </div>
         )}
-        {projects.map(({ project }) => {
+        {projects.map((row) => {
+          const { project } = row
+          const label = projectLabel(row)
+          // Repo-relative labels are distinctive on their own; only a bare
+          // folder name needs its parent to stay tellable-apart.
+          const parentHint = row.git.root ? '' : parentPath(project.path)
           const projectSessions = sessions.filter((s) => s.projectId === project.id)
           const isCollapsed = collapsed.has(project.id)
           // A collapsed group still surfaces its live sessions — attention
@@ -129,15 +139,18 @@ export function SessionRail({
                       className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
                     >
                       <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                        {project.name}
-                        {/* Where it lives — same-named repos in different
-                            parents stay tellable-apart at a glance. */}
-                        {parentPath(project.path) && (
-                          <span className="ml-1.5 font-normal text-muted-foreground/60">
-                            {compactPath(parentPath(project.path), 22)}
-                          </span>
-                        )}
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium" dir="rtl">
+                        {/* Right-to-left truncation: when the label doesn't fit,
+                            the leaf folder — the part that tells packages apart —
+                            survives and the ellipsis eats the root end. */}
+                        <span dir="ltr">
+                          {label}
+                          {parentHint && (
+                            <span className="ml-1.5 font-normal text-muted-foreground/60">
+                              {compactPath(parentHint, 22)}
+                            </span>
+                          )}
+                        </span>
                       </span>
                     </button>
                   </TooltipTrigger>
@@ -169,6 +182,19 @@ export function SessionRail({
                       <Plus className="size-4" />
                       New session
                     </DropdownMenuItem>
+                    {/* The explicit picks — the plain entry (and the + button)
+                        take the agent you last worked with. */}
+                    {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
+                      <DropdownMenuItem
+                        key={agent}
+                        disabled={agentsStatus !== null && !isAgentReady(agentsStatus, agent)}
+                        onClick={() => onNewSession(project.id, agent)}
+                      >
+                        <span className="size-4" />
+                        New {AGENT_LABEL[agent]} session
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => onRemoveProject(project.id)}>
                       <Trash2 className="size-4" />
                       Remove project
@@ -196,7 +222,7 @@ export function SessionRail({
                     key={session.id}
                     role="button"
                     tabIndex={0}
-                    title={`${session.title}\n${AGENT_SHORT[session.agent] ?? session.agent}${worktree ? ` · ${session.worktree?.branch}` : ''}`}
+                    title={`${session.title}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${session.worktree?.branch}` : ''}`}
                     className={cn(
                       'group relative ml-3 mt-0.5 flex h-8 cursor-pointer items-center gap-2 rounded-lg pl-2 pr-1.5',
                       selected ? 'bg-accent text-foreground' : 'hover:bg-accent/60',
