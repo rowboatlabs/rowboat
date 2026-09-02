@@ -655,6 +655,8 @@ export class PgStore implements Store {
       `update messages set body = '', deleted_at = $3, poll = null where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
+    // Votes are content too: a member-attributed row must not outlive the poll it was cast on.
+    await this.sql.query(`delete from poll_votes where space_id = $1 and message_id = $2`, [spaceId, messageId]);
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(

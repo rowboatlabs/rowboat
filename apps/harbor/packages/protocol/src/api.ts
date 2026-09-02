@@ -34,9 +34,9 @@ import {
  * still show it; poll-aware clients render the card instead.
  */
 const NewPoll = z.object({
-  question: z.string().min(1).max(300),
+  question: z.string().trim().min(1).max(300),
   answers: z
-    .array(z.object({ text: z.string().min(1).max(55), emoji: ReactionEmoji.optional() }))
+    .array(z.object({ text: z.string().trim().min(1).max(55), emoji: ReactionEmoji.optional() }))
     .min(2)
     .max(10),
   /** Hours until the poll closes. Default 24, max 32 days — Discord's bounds. */

@@ -12,7 +12,11 @@ export type NotifyLevel = 'all' | 'mentions' | 'mute'
 export interface SpaceNotifyPrefs {
     /** Space-wide level; null = the 'mentions' default. */
     spaceLevel: NotifyLevel | null
-    /** Per-topic overrides; absent topic = inherit the space level. */
+    /**
+     * Per-thread overrides keyed by the thread's ROOT MESSAGE id (never a
+     * Topic row id — main's watcher resolves `threadRoot ?? id`); absent =
+     * inherit the space level.
+     */
     topics: Record<string, NotifyLevel>
 }
 

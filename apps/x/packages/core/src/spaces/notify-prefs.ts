@@ -4,10 +4,12 @@ import { WorkDir } from '../config/config.js';
 
 // Notification levels for the space mention watcher (mention-watch.ts):
 // 'mentions' is the default everywhere (notify on @you/@here only); 'all'
-// notifies on every message; 'mute' on none. A topic override beats the
-// space level beats the default. Stored main-side, next to the watcher's
-// offsets — the watcher notifies with the renderer closed, so its prefs
-// can't live in renderer localStorage.
+// notifies on every message; 'mute' on none. A thread override beats the
+// space level beats the default. Overrides key on the thread's ROOT MESSAGE
+// id (`threadRoot ?? id`), never a Topic row id — the watcher only ever sees
+// messages. Stored main-side, next to the watcher's offsets — the watcher
+// notifies with the renderer closed, so its prefs can't live in renderer
+// localStorage. Written atomically (temp file + rename).
 
 export type NotifyLevel = 'all' | 'mentions' | 'mute';
 
@@ -44,14 +46,19 @@ function load(): Record<string, SpacePrefs> {
   return prefs;
 }
 
+// Written whole via a sibling temp file + rename: a crash mid-write must
+// leave the previous file intact, never a half-written one the next load
+// would parse as empty and then overwrite.
 function persist(): void {
   try {
     const dir = path.dirname(PREFS_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${PREFS_FILE}.tmp`;
     fs.writeFileSync(
-      PREFS_FILE,
+      tmp,
       JSON.stringify({ version: 1, spaces: load(), ...(dndUntil ? { dnd: dndUntil } : {}) } satisfies PrefsFile, null, 2),
     );
+    fs.renameSync(tmp, PREFS_FILE);
   } catch (err) {
     console.error('[spaces:notify-prefs] failed to persist:', err);
   }

@@ -319,6 +319,9 @@ export class MemoryStore implements Store {
       const { poll: _poll, ...rest } = existing;
       this.replace(s, { ...rest, body: '', deletedAt });
     }
+    // Votes are content too: they were cast on a poll that no longer exists,
+    // and a member-attributed row must not outlive what it attributed.
+    s.pollVotes.delete(messageId);
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     for (let i = 0; i < s.events.length; i++) {

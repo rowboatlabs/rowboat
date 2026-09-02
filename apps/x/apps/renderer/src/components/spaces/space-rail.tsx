@@ -369,15 +369,18 @@ export function SpaceRail({
                                                         <ContextMenuSubTrigger>
                                                             <Bell className="size-3.5 mr-2" /> Notifications
                                                         </ContextMenuSubTrigger>
+                                                    {/* Overrides key on the thread's ROOT message id, never topic.id: the
+                                                        watcher (main) and the unread badge both resolve a message to
+                                                        `threadRoot ?? id` and look the level up by that. */}
                                                         <ContextMenuSubContent>
                                                             {NOTIFY_CHOICES.map((c) => (
-                                                                <ContextMenuItem key={c.level} onSelect={() => notify.setTopicLevel(topic.id, c.level)}>
-                                                                    <Check className={cn('size-3.5 mr-2', notify.topics[topic.id] !== c.level && 'opacity-0')} /> {c.label}
+                                                                <ContextMenuItem key={c.level} onSelect={() => notify.setTopicLevel(topic.rootMessageId, c.level)}>
+                                                                    <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] !== c.level && 'opacity-0')} /> {c.label}
                                                                 </ContextMenuItem>
                                                             ))}
                                                             <ContextMenuSeparator />
-                                                            <ContextMenuItem onSelect={() => notify.setTopicLevel(topic.id, null)}>
-                                                                <Check className={cn('size-3.5 mr-2', notify.topics[topic.id] && 'opacity-0')} /> Space default
+                                                            <ContextMenuItem onSelect={() => notify.setTopicLevel(topic.rootMessageId, null)}>
+                                                                <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] && 'opacity-0')} /> Space default
                                                             </ContextMenuItem>
                                                         </ContextMenuSubContent>
                                                     </ContextMenuSub>
@@ -416,13 +419,13 @@ export function SpaceRail({
                                                         </DropdownMenuSubTrigger>
                                                         <DropdownMenuSubContent>
                                                             {NOTIFY_CHOICES.map((c) => (
-                                                                <DropdownMenuItem key={c.level} onClick={() => notify.setTopicLevel(topic.id, c.level)}>
-                                                                    <Check className={cn('size-3.5 mr-2', notify.topics[topic.id] !== c.level && 'opacity-0')} /> {c.label}
+                                                                <DropdownMenuItem key={c.level} onClick={() => notify.setTopicLevel(topic.rootMessageId, c.level)}>
+                                                                    <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] !== c.level && 'opacity-0')} /> {c.label}
                                                                 </DropdownMenuItem>
                                                             ))}
                                                             <DropdownMenuSeparator />
-                                                            <DropdownMenuItem onClick={() => notify.setTopicLevel(topic.id, null)}>
-                                                                <Check className={cn('size-3.5 mr-2', notify.topics[topic.id] && 'opacity-0')} /> Space default
+                                                            <DropdownMenuItem onClick={() => notify.setTopicLevel(topic.rootMessageId, null)}>
+                                                                <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] && 'opacity-0')} /> Space default
                                                             </DropdownMenuItem>
                                                         </DropdownMenuSubContent>
                                                     </DropdownMenuSub>

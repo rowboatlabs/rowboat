@@ -3921,8 +3921,10 @@ export const ipcSchemas = {
     res: z.object({ success: z.literal(true) }),
   },
   // Notification levels for the mention watcher: a space-wide level plus
-  // per-topic overrides. null = inherit (topic → space → the 'mentions'
+  // per-thread overrides. null = inherit (thread → space → the 'mentions'
   // default). Stored main-side (the watcher runs there, screen or no screen).
+  // `topicId` is the thread's ROOT MESSAGE id, never a Topic row id: the
+  // watcher resolves a message to `threadRoot ?? id` and looks up by that.
   'spaces:getNotifyPrefs': {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({
@@ -3951,7 +3953,7 @@ export const ipcSchemas = {
       threadRootId: z.string().optional(),
       body: z.string(),
       /** ISO instant to fire at. */
-      at: z.string(),
+      at: z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'at must be an ISO instant'),
       kind: z.enum(['message', 'reminder']),
     }),
     res: z.object({ id: z.string() }),

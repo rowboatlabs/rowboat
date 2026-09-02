@@ -225,9 +225,12 @@ describe('PgStore through the service', () => {
     expect((messageEvent.event as { message: { poll?: { endedAt?: string } } }).message.poll?.endedAt).toBeUndefined();
     expect(events.some((e) => e.event.type === 'poll_ended')).toBe(true);
 
-    // Deletion redacts the poll from the row and the stored event alike.
+    // Deletion redacts the poll from the row and the stored event alike, and
+    // the poll_votes rows go with it — gagan's vote on B must not outlive the poll.
+    expect(await store.listPollVotesForMessages(spaceId, [messageId])).toHaveLength(1);
     const deleted = await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
     expect(deleted.poll).toBeUndefined();
+    expect(await store.listPollVotesForMessages(spaceId, [messageId])).toEqual([]);
     const redacted = (await service.eventsAfter(spaceId, 0)).find(
       (e) => e.event.type === 'message' && e.event.message.id === messageId,
     )!;

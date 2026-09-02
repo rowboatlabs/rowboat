@@ -425,12 +425,17 @@ function wireBus(): void {
         } else if (frame.event.type === 'message_deleted') {
             // Tombstone in place — the row stays (threads may hang under it),
             // the body is gone. Thread panes pick theirs up on their own tick.
+            // The org redacts a poll with the body (and drops its votes) —
+            // mirror it, so a refetch never disagrees with the live fold.
             const { deletion } = frame.event
             if (state.messages.some((m) => m.id === deletion.messageId)) {
                 setStream(k, {
-                    messages: state.messages.map((m) =>
-                        m.id === deletion.messageId ? { ...m, body: '', deletedAt: deletion.at } : m,
-                    ),
+                    messages: state.messages.map((m) => {
+                        if (m.id !== deletion.messageId) return m
+                        const tombstone = { ...m, body: '', deletedAt: deletion.at }
+                        delete tombstone.poll
+                        return tombstone
+                    }),
                 })
             }
         }

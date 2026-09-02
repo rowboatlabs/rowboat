@@ -827,11 +827,18 @@ export class HarborService {
     const topics = await this.store.listTopics(spaceId, includeArchived);
     // Every consumer needs the root message (reply chips, parent cards,
     // unread anchors) — always folded in; activity computes from its denorm.
-    const listings: TopicListing[] = [];
+    // Folded like any page read: a root's reactions and poll votes are the
+    // rail's business too (a poll root card with zero votes would lie).
+    const roots: Message[] = [];
     for (const t of topics) {
       const root = await this.store.getMessage(spaceId, t.rootMessageId);
-      listings.push({ ...t, rootMessage: root ?? null, lastActivityAt: HarborService.activityOf(root, t) });
+      if (root) roots.push(root);
     }
+    const folded = new Map((await this.foldPage(spaceId, roots)).map((m) => [m.id, m]));
+    const listings: TopicListing[] = topics.map((t) => {
+      const root = folded.get(t.rootMessageId) ?? null;
+      return { ...t, rootMessage: root, lastActivityAt: HarborService.activityOf(root ?? undefined, t) };
+    });
     return listings.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id));
   }
 
@@ -1277,6 +1284,11 @@ export class HarborService {
   async endPoll(ctx: ActorCtx, spaceId: string, messageId: string, input: EndPollInput): Promise<Message> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
+    // Same line as voting: a poll is a member's question to members, and an
+    // app acting under the author's identity must not close it either.
+    if (input.actingMode !== 'direct') {
+      throw new HarborError('invalid_request', 'agents cannot end polls');
+    }
     const by: Attribution = {
       memberId: ctx.memberId,
       actingMode: input.actingMode,

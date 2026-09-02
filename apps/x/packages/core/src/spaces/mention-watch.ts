@@ -57,6 +57,17 @@ export function isMissedArrival(postedAt: string, now: number = Date.now()): boo
   return Number.isFinite(t) && now - t > MISSED_THRESHOLD_MS;
 }
 
+/**
+ * The cooldown bucket for one notification: per space, per thread, AND per
+ * kind class. A level-'all' plain message must never mask a direct @you (or
+ * @here) landing in the same thread right after — so mentions and plain
+ * messages cool down separately; @you and @here share a bucket (both are
+ * "someone wants you here", one is enough per window).
+ */
+export function cooldownKeyFor(spaceKey: string, threadRootId: string, kind: MentionHit['kind']): string {
+  return `${spaceKey}/${threadRootId}/${kind === 'message' ? 'message' : 'mention'}`;
+}
+
 export function mentionLink(orgId: string, spaceId: string, threadRootId?: string): string {
   const thread = threadRootId ? `&threadRootId=${encodeURIComponent(threadRootId)}` : '';
   return `rowboat://open?type=spaces&orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}${thread}`;
@@ -240,7 +251,8 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
       if (kind !== 'message') queueMissed(k, orgId, spaceId, spaceName, threadRootId, kind);
       return;
     }
-    const cooldownKey = `${k}/${threadRootId}`;
+    // Cooldown per thread AND per kind class (see cooldownKeyFor).
+    const cooldownKey = cooldownKeyFor(k, threadRootId, kind);
     const last = threadCooldown.get(cooldownKey) ?? 0;
     if (Date.now() - last < THREAD_COOLDOWN_MS) return;
     threadCooldown.set(cooldownKey, Date.now());

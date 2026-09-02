@@ -178,9 +178,15 @@ team and a Roadboard space (`src/main.ts`).
   compute it. `endPoll` is author-only (deletion's posture), idempotent once
   closed. Closed polls and tombstones refuse votes (both directions — a closed
   ballot is sealed); deletion redacts the poll with the body, row and stored
-  event alike. Agents cannot vote (`actingMode` must be `direct` — Discord's
-  "apps can't vote"); render-face only for now, like reactions — the MCP face
-  doesn't expose poll creation yet. No `is_finalized` dance: every vote lands
+  event alike, and drops its votes (a member-attributed vote must not outlive
+  the poll it was cast on). Agents can neither vote nor end a poll
+  (`actingMode` must be `direct` on both routes — Discord's "apps can't
+  vote"; a poll is a member's question to members, and an app acting under
+  the author's identity must not close it either); render-face only for now,
+  like reactions — the MCP face doesn't expose poll creation yet. Question
+  and answer text are trimmed before the length bounds apply — whitespace-only
+  text is refused. Topic listings fold their root like any page read, so a
+  poll root card carries its votes. No `is_finalized` dance: every vote lands
   under the space lock, so folded counts are exact, live.
 - **Unknown invite tokens are 404**; `expired`/`revoked` are resolvable states.
 - **MCP face attribution**: acting mode defaults to `agent`; automations

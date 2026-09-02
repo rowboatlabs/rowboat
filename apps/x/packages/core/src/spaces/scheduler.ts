@@ -53,11 +53,16 @@ function load(): ScheduledItem[] {
   return items;
 }
 
+// Written whole via a sibling temp file + rename: a crash mid-write must
+// leave the previous file intact, never a half-written one the next load
+// would parse as empty and then overwrite.
 function persist(): void {
   try {
     const dir = path.dirname(FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify({ version: 1, items: load() } satisfies ScheduleFile, null, 2));
+    const tmp = `${FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, items: load() } satisfies ScheduleFile, null, 2));
+    fs.renameSync(tmp, FILE);
   } catch (err) {
     console.error('[spaces:scheduler] failed to persist:', err);
   }
