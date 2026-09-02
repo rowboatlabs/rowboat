@@ -309,6 +309,13 @@ export class CodeSessionService {
         const session = await this.codeSessionsRepo.get(sessionId);
         if (!session) throw new Error(`Unknown session: ${sessionId}`);
         const updated: CodeSession = { ...session, ...patch };
+        // Model and effort are ids of ONE engine's catalog — a Codex model on
+        // a Claude Code session is nonsense. Switching agents drops them back
+        // to the engine default unless the same patch chooses new ones.
+        if (patch.agent && patch.agent !== session.agent) {
+            if (patch.agentModel === undefined) delete updated.agentModel;
+            if (patch.agentEffort === undefined) delete updated.agentEffort;
+        }
         await this.codeSessionsRepo.save(updated);
         if (patch.title && patch.title !== session.title) {
             // Keep the chat session's title (history list, notifications) in sync.

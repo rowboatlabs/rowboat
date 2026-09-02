@@ -128,9 +128,10 @@ const CODE_MODE_TEMPLATE = (
 ): string => `# Code Mode (Active) — Agent: ${agentDisplay}
 The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY coding task this turn, use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
 
-The chip is the single source of truth for which agent runs:
+That selection is the single source of truth for which agent runs:
 - Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **${agentDisplay}** now.
-- Do NOT switch agents based on an in-chat text request ("use codex", "switch to claude"). The agent only changes when the user toggles the chip; if they ask in chat, tell them to toggle the chip.
+- A message that names **${agentDisplay}** ("use ${codeMode}", "have ${agentDisplay} do it") is NOT a switch request — it names the agent already selected. Just do the work with it.
+- Only a request for the OTHER agent is a switch request, and you cannot switch from chat: do the work with **${agentDisplay}**, and mention that the agent is changed ${codeCwd ? "from the Agent setting in the session's header menu" : "with the composer chip"}.
 
 **How to run coding work — call the \`code_agent_run\` tool** with:
 - \`agent\`: \`${codeMode}\` (always — match the chip).
