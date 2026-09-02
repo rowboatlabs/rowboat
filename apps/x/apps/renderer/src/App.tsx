@@ -52,6 +52,12 @@ import { ChatHistoryView } from '@/components/chat-history-view';
 import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
+import { CodeWorkspaceDrawer } from '@/components/code/workspace-drawer';
+import type { CodePanel } from '@/components/code/code-panels';
+import { CODE_RAIL_WIDTH } from '@/components/code/session-rail';
+import { useCodeGitStatus } from '@/components/code/use-code-git-status';
+import { refreshCodeSessions } from '@/components/code/use-code-sessions';
+import { CodeDiffOpenerProvider } from '@/contexts/code-diff-context';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   type PromptInputMessage,
@@ -2679,8 +2685,14 @@ function App() {
   // Deep-link into the Code section (a Home Deck strip's door): select this
   // session when the view opens, then clear.
   const [codeFocusSessionId, setCodeFocusSessionId] = useState<string | null>(null)
-  // A file the code chat asked to review — consumed by the workspace pane.
+  // A file the code chat asked to review — consumed by the workspace drawer.
   const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
+  // Which workspace panel (changes / files / terminal) is open beside the
+  // code chat, if any. The chat is the main surface; these are a button away.
+  const [codePanel, setCodePanel] = useState<CodePanel | null>(null)
+  // Working-tree status of the selected code session — the chat header shows
+  // the changed-file count even while the drawer is closed.
+  const codeGit = useCodeGitStatus(activeCodeSession?.session.id ?? null, activeCodeSession?.status ?? 'idle')
   // Composer locks for runs that are code sessions: the session's cwd + agent
   // are frozen in the chat input (the backend pins them server-side anyway).
   // Kept after the Code view unmounts — the chat stays bound to the session.
@@ -4549,6 +4561,17 @@ function App() {
     // The conversation lives in the dock — selecting a session must show it.
     setIsChatSidebarOpen(true)
   }, [bindChatToRun])
+
+  // Chat-header doors to the workspace drawer: clicking the open one closes it.
+  const toggleCodePanel = useCallback((panel: CodePanel) => {
+    setCodePanel((prev) => (prev === panel ? null : panel))
+  }, [])
+  // A changed file clicked inside a coding run: open the drawer on its diff.
+  const openCodeDiff = useCallback((path: string) => {
+    setCodeDiffPath(path)
+    setCodePanel('changes')
+  }, [])
+  const handleCodeDiffOpened = useCallback(() => setCodeDiffPath(null), [])
 
   useEffect(() => {
     let cleanupScrollListener: (() => void) | undefined
@@ -6665,11 +6688,20 @@ function App() {
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
   const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isSpacesOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || isBrowserOpen)
-  const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
+  // Code mode with a session selected: the chat is the main surface — the
+  // middle pane is just the session rail and the chat fills the rest, with
+  // the workspace drawer at its edge. Before a session is picked the empty
+  // state owns the pane and the chat stays out of the way.
+  const codeChatMain = isCodeOpen && activeCodeSession !== null
+  const chatPaneOpen = isCodeOpen ? codeChatMain : isChatSidebarOpen
+  const isRightPaneOnlyMode = isRightPaneContext && chatPaneOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
-    if (!isRightPaneContext || !isChatSidebarOpen || isRightPaneMaximized) return style
+    if (!isRightPaneContext || !chatPaneOpen || isRightPaneMaximized) return style
+    if (codeChatMain) {
+      return { ...style, width: CODE_RAIL_WIDTH, flex: '0 0 auto' }
+    }
     if (chatPaneSize === 'chat-equal') {
       return { ...style, width: 0, flex: '1 1 0' }
     }
@@ -6677,7 +6709,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [chatPaneSize, insetMaxWidth, isChatSidebarOpen, isRightPaneContext, isRightPaneMaximized])
+  }, [chatPaneSize, codeChatMain, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -6929,9 +6961,10 @@ function App() {
                   const viewOpen = !isFullScreenChat
                   const action = isFullScreenChat
                     ? { onClick: pushChatToSidePane, icon: <ArrowRight className="size-5" />, label: 'Dock chat to side pane' }
-                    : (viewOpen && !isChatSidebarOpen)
+                    : (viewOpen && !chatPaneOpen && !isCodeOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
-                      : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
+                      // In Code mode the chat IS the section — nothing to expand into.
+                      : (viewOpen && chatPaneOpen && !isRightPaneMaximized && !codeChatMain)
                         ? {
                             onClick: () => setIsChatSidebarOpen(false),
                             icon: isChatPaneInMiddle ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />,
@@ -7117,8 +7150,6 @@ function App() {
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <CodeView
                     onSessionSelected={handleCodeSessionSelected}
-                    openDiffPath={codeDiffPath}
-                    onDiffOpened={() => setCodeDiffPath(null)}
                     focusSessionId={codeFocusSessionId}
                     onFocusConsumed={() => setCodeFocusSessionId(null)}
                   />
@@ -7620,12 +7651,14 @@ function App() {
                 bind this same assistant chat (a code session IS a chat
                 session) — there is no separate code chat surface. */}
             {isRightPaneContext && (
+              <CodeDiffOpenerProvider onOpenDiff={codeChatMain ? openCodeDiff : null}>
               <ChatSidebar
                 placement={chatPanePlacement}
-                paneSize={chatPaneSize}
+                // Code mode: the chat fills whatever the rail and drawer leave.
+                paneSize={codeChatMain ? 'chat-bigger' : chatPaneSize}
                 className={isChatPaneInMiddle ? "order-2" : undefined}
                 defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
-                isOpen={isChatSidebarOpen}
+                isOpen={chatPaneOpen}
                 isMaximized={isRightPaneMaximized}
                 chatTabs={chatTabs}
                 activeChatTabId={activeChatTabId}
@@ -7675,12 +7708,18 @@ function App() {
                 onWorkDirChangeForTab={setTabWorkDir}
                 codeSessionLocks={codeSessionLocks}
                 pinnedToCodeSession={
-                  isCodeOpen
+                  codeChatMain
                     && activeCodeSession
                     // Only while the pane is actually bound to the session — a
                     // palette-initiated fresh chat, for example, unbinds it.
                     && chatTabs.find((t) => t.id === activeChatTabId)?.runId === activeCodeSession.session.id
-                    ? { title: activeCodeSession.session.title }
+                    ? {
+                        session: activeCodeSession.session,
+                        status: activeCodeSession.status,
+                        changedCount: codeGit.gitStatus?.isRepo ? codeGit.gitStatus.files.length : null,
+                        panel: codePanel,
+                        onTogglePanel: toggleCodePanel,
+                      }
                     : null
                 }
                 pendingAskHumanRequests={activeChatTabState.pendingAskHumanRequests}
@@ -7714,6 +7753,24 @@ function App() {
                 onEndCall={endCall}
                 callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
+              />
+              </CodeDiffOpenerProvider>
+            )}
+            {/* Workspace drawer beside the code chat: changes, files or a
+                terminal — one of the chat header's buttons opens it. */}
+            {codeChatMain && activeCodeSession && codePanel && (
+              <CodeWorkspaceDrawer
+                session={activeCodeSession.session}
+                panel={codePanel}
+                onPanelChange={setCodePanel}
+                onClose={() => setCodePanel(null)}
+                gitStatus={codeGit.gitStatus}
+                onRefreshGit={() => void codeGit.refresh()}
+                openDiffPath={codeDiffPath}
+                onDiffOpened={handleCodeDiffOpened}
+                onSessionChanged={() => void refreshCodeSessions()}
+                placement={chatPanePlacement}
+                className={isChatPaneInMiddle ? "order-2" : undefined}
               />
             )}
             {/* Full-screen call: user tile + animated mascot tile. Shown only
