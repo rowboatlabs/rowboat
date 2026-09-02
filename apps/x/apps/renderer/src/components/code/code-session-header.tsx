@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, GitBranch, SlidersHorizontal } from 'lucide-react'
+import { Check, ChevronDown, GitBranch, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
 import type { ApprovalPolicy, CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuPortal,
   DropdownMenuRadioGroup,
@@ -87,6 +88,14 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
   }
 
   const worktreeActive = session.worktree && !session.worktree.removedAt
+  const setDone = async (done: boolean) => {
+    try {
+      await window.ipc.invoke('codeSession:setDone', { sessionId: session.id, done })
+      await refreshCodeSessions()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update session')
+    }
+  }
   const models = withDefault(modelOpts.models)
   const efforts = withDefault(modelOpts.efforts)
 
@@ -217,6 +226,13 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
           </DropdownMenuSub>
+          <DropdownMenuSeparator />
+          {/* Done files the session under the rail's Done pile; the chat,
+              worktree and branch stay. Reopen brings it back. */}
+          <DropdownMenuItem onClick={() => void setDone(!session.doneAt)}>
+            {session.doneAt ? <RotateCcw className="size-4" /> : <Check className="size-4" />}
+            {session.doneAt ? 'Reopen' : 'Mark as done'}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 

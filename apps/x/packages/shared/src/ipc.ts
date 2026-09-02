@@ -1717,6 +1717,12 @@ export const ipcSchemas = {
     req: z.object({ agent: CodingAgent }),
     res: CodeAgentModelOptions,
   },
+  // Done is a flag, not a lifecycle change: the worktree, branch and chat are
+  // untouched. `done: false` reopens.
+  'codeSession:setDone': {
+    req: z.object({ sessionId: z.string(), done: z.boolean() }),
+    res: z.object({ session: CodeSession }),
+  },
   'codeSession:delete': {
     req: z.object({
       sessionId: z.string(),

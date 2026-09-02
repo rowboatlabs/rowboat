@@ -1740,6 +1740,10 @@ export function setupIpcHandlers() {
       const manager = container.resolve<CodeModeManager>('codeModeManager');
       return manager.listModelOptions(args.agent);
     },
+    'codeSession:setDone': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return { session: await service.setDone(args.sessionId, args.done) };
+    },
     'codeSession:delete': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       disposeTerminal(args.sessionId);
