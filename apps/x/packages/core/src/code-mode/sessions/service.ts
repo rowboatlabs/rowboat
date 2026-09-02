@@ -331,8 +331,9 @@ export class CodeSessionService {
     async setDone(sessionId: string, done: boolean): Promise<CodeSession> {
         const session = await this.codeSessionsRepo.get(sessionId);
         if (!session) throw new Error(`Unknown session: ${sessionId}`);
-        const { doneAt: _previous, ...rest } = session;
-        const updated: CodeSession = done ? { ...rest, doneAt: new Date().toISOString() } : rest;
+        const updated: CodeSession = { ...session };
+        if (done) updated.doneAt = new Date().toISOString();
+        else delete updated.doneAt;
         await this.codeSessionsRepo.save(updated);
         return updated;
     }
