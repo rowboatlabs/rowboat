@@ -442,6 +442,7 @@ export function ChatSidebar({
                       activeIsReasoning={isReasoning}
                       onCodePermissionResponse={onCodePermissionResponse}
                       onComposioConnected={onComposioConnected}
+                      emptyStateVariant={pinnedToCodeSession ? 'code' : 'default'}
                     />
                   )
                 })}

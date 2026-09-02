@@ -70,6 +70,8 @@ export interface ChatSessionPaneProps {
   onCodePermissionResponse?: (toolCallId: string, requestId: string, decision: PermissionDecision) => void | Promise<void>
   /** Notified when a ComposioConnectCard finishes connecting a toolkit. */
   onComposioConnected?: (toolkitSlug: string) => void
+  /** Empty-state flavour: 'code' for a chat bound to a coding session. */
+  emptyStateVariant?: 'default' | 'code'
 }
 
 export function ChatSessionPane({
@@ -87,6 +89,7 @@ export function ChatSessionPane({
   activeIsReasoning,
   onCodePermissionResponse,
   onComposioConnected,
+  emptyStateVariant = 'default',
 }: ChatSessionPaneProps) {
   // Content-owned tab meta (see lib/tab-meta.ts). Both live instances of a
   // chat (full-screen App pane + side-pane chat) report the same values, so
@@ -143,6 +146,7 @@ export function ChatSessionPane({
           {!tabHasConversation ? (
             <ChatEmptyState
               wide
+              variant={emptyStateVariant}
               onPickPrompt={onPickPrompt}
             />
           ) : (

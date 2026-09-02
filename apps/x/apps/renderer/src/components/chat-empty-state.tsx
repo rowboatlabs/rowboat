@@ -8,6 +8,11 @@ interface ChatEmptyStateProps {
   onPickPrompt: (prompt: string) => void
   /** Use a wider column — for the full-screen chat where the narrow column looks cramped. */
   wide?: boolean
+  /**
+   * 'code': the chat is a coding session. One line, no starter cards — the
+   * email/agent/research suggestions don't apply, and the work is the code.
+   */
+  variant?: 'default' | 'code'
 }
 
 const SUGGESTED_ACTIONS: { icon: typeof Mail; title: string; sub: string; prompt: string }[] = [
@@ -24,7 +29,17 @@ const SUGGESTED_ACTIONS: { icon: typeof Mail; title: string; sub: string; prompt
 export function ChatEmptyState({
   onPickPrompt,
   wide = false,
+  variant = 'default',
 }: ChatEmptyStateProps) {
+  if (variant === 'code') {
+    return (
+      <div className={cn('mx-auto flex w-full flex-col py-6', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
+        <div className={cn('font-semibold tracking-tight', wide ? 'text-2xl' : 'text-lg')}>
+          What should we build together?
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={cn('mx-auto flex w-full flex-col gap-5 py-6', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
       <div>
