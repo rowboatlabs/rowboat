@@ -4,6 +4,8 @@ export const BrowserTabStateSchema = z.object({
   id: z.string(),
   url: z.string(),
   title: z.string(),
+  // Page-declared favicon URL; null until the page reports one.
+  favicon: z.string().nullable(),
   canGoBack: z.boolean(),
   canGoForward: z.boolean(),
   loading: z.boolean(),
