@@ -9,6 +9,7 @@ import type {
   SpaceEvent,
   Topic,
 } from '@rowboat/spaces-protocol';
+import type { SearchQuery } from './search.js';
 
 // Data-access boundary. The stub implements it in memory (memory-store.ts); the
 // real Harbor's Postgres driver replaces that one file. The service core owns
@@ -83,6 +84,18 @@ export interface StoredReaction {
   emoji: string;
   by: Attribution;
   at: string;
+}
+
+/** A message search hit: the row plus a raw-body excerpt (mentions unresolved). */
+export interface MessageSearchRow {
+  message: Message;
+  snippet: string;
+}
+
+/** An asset search hit: snippet present only for extracted-content matches. */
+export interface AssetSearchRow {
+  record: AssetRecord;
+  snippet?: string;
 }
 
 export interface Store {
@@ -179,6 +192,16 @@ export interface Store {
    */
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
   markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void>;
+
+  // search — space-scoped, per kind (the contract categorizes; see
+  // protocol search.ts for ordering semantics). Tombstones never match
+  // (their bodies are blank); deleted assets are filtered, not de-indexed.
+  /** Body matches, newest first. */
+  searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]>;
+  /** Title matches, best first. */
+  searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]>;
+  /** Live assets by extracted content or path; path matches rank first. */
+  searchAssets(spaceId: string, query: SearchQuery, limit: number): Promise<AssetSearchRow[]>;
 
   // reactions — per-(member, emoji) toggles on messages
   getReaction(spaceId: string, messageId: string, emoji: string, memberId: string): Promise<StoredReaction | undefined>;

@@ -9,6 +9,7 @@ export * from './core.js';
 export * from './changeset.js';
 export * from './events.js';
 export * from './invite.js';
+export * from './search.js';
 export * from './api.js';
 export * from './mcp.js';
 export * from './errors.js';

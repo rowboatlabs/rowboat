@@ -19,6 +19,7 @@ import {
   ResolveInvite,
   ResolveInviteResult,
 } from './invite.js';
+import { SearchKind, SearchResults } from './search.js';
 
 // The render face (spec §9): REST + the live stream in events.ts. Member token
 // auth on every route. Shapes here are v0 — Latitude items (pagination, ETags,
@@ -417,6 +418,29 @@ export const routes = {
       z.object({ action: z.literal('remove'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     ]),
     response: z.object({ topic: Topic }),
+  },
+
+  // --- search ---------------------------------------------------------------
+  /**
+   * Space search (search.ts): categorized top-N over messages, topics, and
+   * assets. `q` is free text (AND-ed words, last word prefix-matched, member
+   * names expand to their mentions); `kinds` narrows the categories searched
+   * (default all); `limit` caps each category independently.
+   */
+  search: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/search',
+    params: z.object({ spaceId: SpaceId }),
+    query: z.object({
+      q: z.string().min(1).max(512),
+      kinds: z
+        .string()
+        .transform((s) => s.split(','))
+        .pipe(z.array(SearchKind))
+        .optional(),
+      limit: z.coerce.number().int().positive().max(50).optional(),
+    }),
+    response: SearchResults,
   },
 
   // --- live ----------------------------------------------------------------

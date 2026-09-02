@@ -45,6 +45,7 @@ type SpacesHandlers = {
   'spaces:assetHistory': InvokeHandler<'spaces:assetHistory'>;
   'spaces:diff': InvokeHandler<'spaces:diff'>;
   'spaces:listTopics': InvokeHandler<'spaces:listTopics'>;
+  'spaces:search': InvokeHandler<'spaces:search'>;
   'spaces:listStream': InvokeHandler<'spaces:listStream'>;
   'spaces:listThread': InvokeHandler<'spaces:listThread'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
@@ -273,6 +274,13 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:listTopics': async (_event, args) => ({
     topics: await orgs.getClient(args.orgId).listTopics(args.spaceId, args.includeArchived ?? false),
   }),
+
+  'spaces:search': async (_event, args) =>
+    orgs.getClient(args.orgId).search(args.spaceId, {
+      q: args.q,
+      ...(args.kinds !== undefined ? { kinds: args.kinds } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    }),
 
   'spaces:listStream': async (_event, args) =>
     orgs.getClient(args.orgId).listStream(args.spaceId, {
