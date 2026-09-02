@@ -1,7 +1,5 @@
 import type { spaces } from '@x/shared'
 import { getSpaceFeed } from '@/hooks/use-spaces'
-import { threadRootOf } from '@/lib/spaces-conventions'
-import { resolveMentions } from '@/lib/spaces-presentation'
 
 // The search corpus for one space: the newest page of the stream plus the
 // active discussions' threads, fetched on demand and cached briefly. The
@@ -108,48 +106,12 @@ export function parseSearchQuery(query: string): ParsedQuery {
     return parsed
 }
 
-/** has:<kind> detectors, over the wire body (blob links carry /b/<hash>). */
-function hasKind(body: string, kind: string): boolean {
+/** has:<kind> detectors over raw wire text (a body or a search snippet; blob links carry /b/<hash>). */
+export function hasKind(body: string, kind: string): boolean {
     if (kind === 'link') return /https?:\/\//.test(body)
     if (kind === 'image') return /!\[[^\]]*\]\(/.test(body)
     if (kind === 'file') return /(?<!!)\[[^\]]*\]\([^)]*\/b\//.test(body)
     return false
-}
-
-/**
- * Substring match with the filter grammar above. Newest first. A query of
- * only filters (no free text) still matches — "from:ana has:image" is a
- * complete Discord-style search.
- */
-export function searchMessages(
-    messages: readonly spaces.Message[],
-    query: string,
-    memberNames: ReadonlyMap<string, string>,
-    opts: { limit?: number; topicLabelOf?: (rootMessageId: string) => string; selfName?: string | null } = {},
-): spaces.Message[] {
-    const { terms, from, inTopic, has, mentions, filtered } = parseSearchQuery(query)
-    if (terms.length === 0 && !filtered) return []
-    const limit = opts.limit ?? 20
-    const selfName = opts.selfName?.toLowerCase() ?? null
-    const nameFor = (frag: string) => (frag === 'me' && selfName ? selfName : frag)
-    const hits: spaces.Message[] = []
-    const sorted = [...messages].sort((a, b) => b.postedAt.localeCompare(a.postedAt))
-    for (const m of sorted) {
-        const author = (memberNames.get(m.author.memberId) ?? m.author.memberId).toLowerCase()
-        if (!from.every((f) => author.includes(nameFor(f)))) continue
-        if (!has.every((kind) => hasKind(m.body, kind))) continue
-        if (inTopic.length > 0) {
-            const label = opts.topicLabelOf?.(threadRootOf(m)).toLowerCase() ?? ''
-            if (!inTopic.every((f) => label.includes(f))) continue
-        }
-        const resolved = resolveMentions(m.body, memberNames).toLowerCase()
-        if (!mentions.every((f) => resolved.includes(`@${nameFor(f)}`))) continue
-        const hay = `${resolved} ${author}`
-        if (!terms.every((t) => hay.includes(t))) continue
-        hits.push(m)
-        if (hits.length >= limit) break
-    }
-    return hits
 }
 
 /**

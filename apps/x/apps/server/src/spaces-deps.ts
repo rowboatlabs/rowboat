@@ -57,6 +57,7 @@ type SpacesRpcChannel =
   | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
+  | 'spaces:search'
   | 'spaces:listStream' | 'spaces:listThread' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
@@ -221,6 +222,13 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:listTopics': async (args) => ({
     topics: await orgs.getClient(args.orgId).listTopics(args.spaceId, args.includeArchived ?? false),
   }),
+
+  'spaces:search': async (args) =>
+    orgs.getClient(args.orgId).search(args.spaceId, {
+      q: args.q,
+      ...(args.kinds !== undefined ? { kinds: args.kinds } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    }),
 
   'spaces:listStream': async (args) =>
     orgs.getClient(args.orgId).listStream(args.spaceId, {

@@ -21,6 +21,7 @@ import type { OrderedExcalidrawElement } from '@excalidraw/excalidraw/element/ty
 import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconcile'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import { createBoardSaver, type BoardSaver } from '@/lib/whiteboard-saver'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useTheme } from '@/contexts/theme-context'
 import { useSpaceLive, type OrgWithSpaces } from '@/hooks/use-spaces'
@@ -41,6 +42,15 @@ import { useSpaceLive, type OrgWithSpaces } from '@/hooks/use-spaces'
 // the winner, reconcile, and re-propose — excalidraw.com's merge-on-save
 // transaction expressed in the propose contract. Only the editor saves
 // (dirty flag), so idle viewers never write.
+//
+// When a write is ALLOWED lives in lib/whiteboard-saver.ts, because the
+// timing here is treacherous: Excalidraw hands out its imperative API from
+// the constructor with a still-empty scene, hydrates initialData async (the
+// hydration itself fires onChange), and swaps in a fresh empty scene on
+// unmount while the API keeps answering. Read the scene at the wrong moment
+// and you persist {"elements":[]} over a real board — which shipped. The
+// saver exists only after the snapshot loads and serializes the last scene
+// it accepted, never a live API read.
 //
 // Images are disabled (UIOptions.tools.image=false gates the toolbar, paste
 // AND drop inside Excalidraw): boards are shapes + text only, which keeps
@@ -144,18 +154,15 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     const clientIdRef = useRef<string>(crypto.randomUUID())
     /** elementId → last version we broadcast (diff gate, Excalidraw's broadcastedElementVersions). */
     const broadcastVersionsRef = useRef(new Map<string, number>())
-    /** Excalidraw's lastBroadcastedOrReceivedSceneVersion — gates onChange re-broadcasts. */
-    const lastSceneVersionRef = useRef(0)
-    /** The asset version our next propose declares as base. */
-    const baseVersionRef = useRef(0)
-    const dirtyRef = useRef(false)
-    const savingRef = useRef(false)
+    /**
+     * Persistence for the loaded board — null until the snapshot arrives, so
+     * nothing can save (or broadcast) an uninitialized scene. Recreated per
+     * load; the old saver is flushed + disposed on the way out.
+     */
+    const saverRef = useRef<BoardSaver | null>(null)
     const cursorSentAtRef = useRef(0)
     const fullSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const collaboratorsRef = useRef(new Map<string, { collab: Collaborator; lastSeen: number }>())
-    /** Blocks onChange broadcasts until the initial scene is seeded into the version gates. */
-    const savingGateRef = useRef<'loading' | 'ready'>('loading')
     const activeRef = useRef(active)
     activeRef.current = active
     const memberNamesRef = useRef(memberNames)
@@ -173,7 +180,24 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     // ------------------------------------------------------------------
     useEffect(() => {
         let cancelled = false
+        const clientId = clientIdRef.current
         setLoad({ phase: 'loading' })
+        // The previous editor (if any) is unmounting; its API keeps answering
+        // with a fresh EMPTY scene, so nothing may read through it anymore.
+        apiRef.current = null
+        broadcastVersionsRef.current = new Map()
+        /** The snapshot is in hand — only now does a saver (and any write path) exist. */
+        const adopt = (version: number, elements: OrderedExcalidrawElement[]) => {
+            for (const el of elements) broadcastVersionsRef.current.set(el.id, el.version)
+            saverRef.current = createBoardSaver({
+                baseVersion: version,
+                elements,
+                sceneVersion: getSceneVersion(elements),
+                firstSaveDelayMs: FIRST_SAVE_AFTER_MS,
+                saveDelayMs: SAVE_AFTER_MS,
+                io: { propose: proposeSnapshot, pullAndReconcile: pullSnapshot },
+            })
+        }
         void (async () => {
             try {
                 const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, path: boardId })
@@ -187,17 +211,17 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                     snapshot = parseSnapshot(res.content)
                 }
                 if (cancelled) return
-                baseVersionRef.current = res.version
                 const elements = snapshot
                     ? (restoreElements(snapshot.elements as Parameters<typeof restoreElements>[0], null) as unknown as OrderedExcalidrawElement[])
                     : []
+                adopt(res.version, elements)
                 setLoad({ phase: 'ready', elements })
             } catch (err) {
                 if (cancelled) return
                 const message = err instanceof Error ? err.message : String(err)
                 if (/not.?found|no such/i.test(message)) {
                     // A board that hasn't been drawn on yet.
-                    baseVersionRef.current = 0
+                    adopt(0, [])
                     setLoad({ phase: 'ready', elements: [] })
                 } else {
                     setLoad({ phase: 'error', message })
@@ -206,7 +230,23 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         })()
         return () => {
             cancelled = true
+            if (fullSyncTimerRef.current) {
+                clearTimeout(fullSyncTimerRef.current)
+                fullSyncTimerRef.current = null
+            }
+            // Leaving the board: tell peers, flush edits the save timer hadn't
+            // gotten to, and make sure this session can never write again
+            // (best effort — peers hold the scene live, and their saves
+            // persist it even if this one loses the race).
+            const saver = saverRef.current
+            saverRef.current = null
+            if (saver) {
+                saver.flush()
+                saver.dispose()
+            }
+            send({ t: 'idle', clientId, state: 'away' })
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [org.id, space.id, boardId, retryTick])
 
     // ------------------------------------------------------------------
@@ -229,84 +269,37 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         }, FULL_SYNC_MS)
     }
 
-    const scheduleSave = () => {
-        if (saveTimerRef.current) return
-        saveTimerRef.current = setTimeout(() => {
-            saveTimerRef.current = null
-            void saveSnapshot()
-        }, baseVersionRef.current === 0 ? FIRST_SAVE_AFTER_MS : SAVE_AFTER_MS)
-    }
-
     /**
      * Text assets cap at 1MB (contract). Snapshots below this store as TEXT so
      * agents read and draw through the plain read_asset/propose_change MCP
-     * tools; bigger boards (embedded images) fall back to a blob version.
-     * The JSON is one line on purpose: Harbor's line-merge can then never
-     * produce a mangled "merged" body — non-identical concurrent saves always
-     * conflict (fixture 02), which the reconcile-and-retry below handles.
+     * tools; bigger boards fall back to a blob version.
      */
     const TEXT_SNAPSHOT_MAX_BYTES = 900_000
 
-    const saveSnapshot = async () => {
-        const api = apiRef.current
-        if (!api || !dirtyRef.current || savingRef.current) return
-        savingRef.current = true
-        try {
-            const elements = api.getSceneElementsIncludingDeleted()
-            const savedSceneVersion = getSceneVersion(elements)
-            // Standard .excalidraw JSON; `files` is always empty because the
-            // image tool is disabled — boards are shapes + text only.
-            const json = JSON.stringify({
-                type: 'excalidraw',
-                version: 2,
-                source: 'rowboat',
-                elements,
-                appState: {},
-                files: {},
+    /** The saver's transport: one serialized snapshot → one propose (text or blob). */
+    const proposeSnapshot = async (json: string, baseVersion: number): Promise<spaces.ProposeChangeResult> => {
+        const encoded = new TextEncoder().encode(json)
+        let input: spaces.SpacesProposeInput
+        if (encoded.length <= TEXT_SNAPSHOT_MAX_BYTES) {
+            input = { assetPath: boardId, baseVersion, newContent: json, reason: 'whiteboard' }
+        } else {
+            const name = boardId.slice(boardId.lastIndexOf('/') + 1)
+            const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                orgId: org.id, spaceId: space.id, bytes: bytesToBase64(encoded), name, mime: 'application/json',
             })
-            const encoded = new TextEncoder().encode(json)
-            let input: spaces.SpacesProposeInput
-            if (encoded.length <= TEXT_SNAPSHOT_MAX_BYTES) {
-                input = { assetPath: boardId, baseVersion: baseVersionRef.current, newContent: json, reason: 'whiteboard' }
-            } else {
-                const name = boardId.slice(boardId.lastIndexOf('/') + 1)
-                const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
-                    orgId: org.id, spaceId: space.id, bytes: bytesToBase64(encoded), name, mime: 'application/json',
-                })
-                input = { assetPath: boardId, baseVersion: baseVersionRef.current, blob: uploaded.blob.hash, reason: 'whiteboard' }
-            }
-            const result = await window.ipc.invoke('spaces:proposeChange', { orgId: org.id, spaceId: space.id, input })
-            if (result.outcome === 'conflict') {
-                // Someone saved meanwhile. Pull the winner, reconcile it into
-                // the live scene, and re-propose the merge against their base.
-                baseVersionRef.current = result.currentVersion
-                await pullSnapshot()
-                scheduleSave()
-            } else if (result.outcome === 'merged' && result.mergedContent !== json) {
-                // Only identical proposals merge for one-line JSON; anything
-                // else stored something we didn't write — reconcile and resave.
-                baseVersionRef.current = result.version
-                await pullSnapshot()
-                scheduleSave()
-            } else {
-                baseVersionRef.current = result.version
-                if (getSceneVersion(api.getSceneElementsIncludingDeleted()) === savedSceneVersion) dirtyRef.current = false
-                else scheduleSave() // kept drawing while the save was in flight
-            }
-        } catch {
-            scheduleSave() // org unreachable — retry on the normal cadence
-        } finally {
-            savingRef.current = false
+            input = { assetPath: boardId, baseVersion, blob: uploaded.blob.hash, reason: 'whiteboard' }
         }
+        return await window.ipc.invoke('spaces:proposeChange', { orgId: org.id, spaceId: space.id, input })
     }
 
     /** Fetch the stored snapshot and reconcile it into the open scene (conflict / change-event heal, agent writes included). */
     const pullSnapshot = async () => {
-        const api = apiRef.current
-        if (!api) return
+        const saver = saverRef.current
+        if (!apiRef.current || !saver) return
         try {
             const res = await window.ipc.invoke('spaces:readAsset', { orgId: org.id, spaceId: space.id, path: boardId })
-            baseVersionRef.current = Math.max(baseVersionRef.current, res.version)
+            if (saverRef.current !== saver) return // the pane moved on while we fetched
+            saver.noteRemoteVersion(res.version)
             let snapshot: SnapshotJson | null = null
             if (res.blob) {
                 const resp = await fetch(blobUrl(org.id, space.id, res.blob.hash))
@@ -314,7 +307,7 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
             } else if (res.content.trim()) {
                 snapshot = parseSnapshot(res.content)
             }
-            if (!snapshot) return
+            if (!snapshot || saverRef.current !== saver) return
             applyRemoteElements(snapshot.elements ?? [])
         } catch {
             // unreachable org — the live channel keeps working; snapshots catch up later
@@ -323,19 +316,19 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
 
     const onChange = () => {
         const api = apiRef.current
-        if (!api || savingGateRef.current !== 'ready') return
+        const saver = saverRef.current
+        if (!api || !saver) return
         const elements = api.getSceneElementsIncludingDeleted()
-        const sceneVersion = getSceneVersion(elements)
-        if (sceneVersion <= lastSceneVersionRef.current) return
-        lastSceneVersionRef.current = sceneVersion
-        dirtyRef.current = true
+        // The saver accepts only scene versions past the hydrated snapshot's,
+        // so the hydration echo and pre-hydration empty scenes gate out here —
+        // for the broadcast as well as the save.
+        if (!saver.onLocalChange(elements, getSceneVersion(elements))) return
         const changed = elements.filter((el) => (broadcastVersionsRef.current.get(el.id) ?? -1) < el.version)
         if (changed.length > 0) {
             for (const el of changed) broadcastVersionsRef.current.set(el.id, el.version)
             send({ t: 'scene', clientId: clientIdRef.current, syncAll: false, elements: changed as unknown[] })
         }
         scheduleFullSync()
-        scheduleSave()
     }
 
     const onPointerUpdate = (payload: {
@@ -370,7 +363,9 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         if (!api || raw.length === 0) return
         const restored = restoreElements(raw as Parameters<typeof restoreElements>[0], null) as unknown as RemoteExcalidrawElement[]
         const reconciled = reconcileElements(api.getSceneElementsIncludingDeleted(), restored, api.getAppState())
-        lastSceneVersionRef.current = getSceneVersion(reconciled)
+        // Adopt before updateScene: the onChange it fires must not read as a
+        // local edit (idle viewers never write).
+        saverRef.current?.onRemoteApplied(reconciled, getSceneVersion(reconciled))
         api.updateScene({ elements: reconciled, captureUpdate: CaptureUpdateAction.NEVER })
     }
 
@@ -447,7 +442,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
             handlePayload(frame.memberId, payload)
         } else if (frame.kind === 'event' && frame.event.type === 'change') {
             const cs = frame.event.changeSet
-            if (cs.assetPath !== boardId || cs.op || cs.resultVersion <= baseVersionRef.current) return
+            const saver = saverRef.current
+            if (!saver || cs.assetPath !== boardId || cs.op || cs.resultVersion <= saver.baseVersion) return
             // A snapshot we didn't write (another client, another window, or an
             // agent via the MCP face) — pull and reconcile it into the scene.
             void pullSnapshot()
@@ -459,12 +455,10 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     // while open, leave (and flush the last edits) on the way out.
     // ------------------------------------------------------------------
     const onApiReady = (api: ExcalidrawImperativeAPI) => {
+        // Excalidraw calls this from its constructor, BEFORE initialData
+        // hydrates — the scene behind this API is still empty, so nothing here
+        // may read it. The saver was seeded from the loaded snapshot instead.
         apiRef.current = api
-        lastSceneVersionRef.current = getSceneVersion(api.getSceneElementsIncludingDeleted())
-        for (const el of api.getSceneElementsIncludingDeleted()) {
-            broadcastVersionsRef.current.set(el.id, el.version)
-        }
-        savingGateRef.current = 'ready'
         // Ask whoever is already drawing for the scene state newer than our snapshot.
         send({ t: 'scene_request', clientId: clientIdRef.current })
         send({ t: 'idle', clientId: clientIdRef.current, state: activeRef.current ? 'active' : 'idle' })
@@ -492,19 +486,6 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
         return () => clearInterval(timer)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [load.phase])
-
-    useEffect(() => {
-        return () => {
-            // Leaving the board: tell peers, and flush edits the save timer
-            // hadn't gotten to (best effort — peers hold the scene live, and
-            // their saves persist it even if this one loses the race).
-            if (fullSyncTimerRef.current) clearTimeout(fullSyncTimerRef.current)
-            if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-            send({ t: 'idle', clientId: clientIdRef.current, state: 'away' })
-            if (dirtyRef.current) void saveSnapshot()
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
 
     // ------------------------------------------------------------------
 

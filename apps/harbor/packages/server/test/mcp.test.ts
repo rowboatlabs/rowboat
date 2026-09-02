@@ -53,7 +53,7 @@ describe('agent face (MCP)', () => {
       'read_asset',
       'read_stream',
       'read_thread',
-      'search_feed',
+      'search_space',
     ]);
     const propose = tools.find((t) => t.name === 'propose_change')!;
     expect(propose.inputSchema.required).toContain('reason'); // required on this face only
@@ -258,7 +258,7 @@ describe('agent face (MCP)', () => {
     await client.close();
   });
 
-  it('post_message replies flat; create_topic annotates; list_topics and search_feed navigate; manage_topic tidies', async () => {
+  it('post_message replies flat; create_topic annotates; list_topics and search_space navigate; manage_topic tidies', async () => {
     const client = await mcpClient('dev-harsh');
     const started = (
       await client.callTool({
@@ -292,9 +292,9 @@ describe('agent face (MCP)', () => {
     expect(row?.rootMessage?.replyCount).toBe(1);
 
     const search = (
-      await client.callTool({ name: 'search_feed', arguments: { spaceId, query: 'webhook retries' } })
-    ).structuredContent as { results: Array<{ threadRootId: string; topicTitle?: string }> };
-    const hit = search.results.find((r) => r.threadRootId === started.messageId);
+      await client.callTool({ name: 'search_space', arguments: { spaceId, query: 'webhook retries' } })
+    ).structuredContent as { messages: Array<{ threadRootId: string; topicTitle?: string }> };
+    const hit = search.messages.find((r) => r.threadRootId === started.messageId);
     expect(hit).toBeDefined();
     expect(hit!.topicTitle).toBe('Decide: webhook retry policy');
 

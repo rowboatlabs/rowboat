@@ -417,12 +417,53 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
-    // Runs AFTER the annotation model (011) by necessity, not preference:
+    id: '012-search',
+    statements: [
+      // Space search (search.ts). Messages and topics index via GENERATED
+      // columns — a formula cell, not a hook: Postgres recomputes the tsvector
+      // whenever the source column changes, in the same transaction, so the
+      // tombstone (body blanked) and edit (body rewritten) semantics apply to
+      // search with zero code and zero drift. Adding a STORED generated column
+      // rewrites the table, so every EXISTING row is indexed right here — the
+      // message/topic backfill IS this migration. 'simple' config on purpose:
+      // no stemming, language-neutral, predictable for names/code/ids; the
+      // query side compensates with last-term prefix matching. Mention ids
+      // ("@<ulid>") tokenize to the bare id, which is what makes query-time
+      // mention expansion (search.ts) an index no-op.
+      `alter table messages add column if not exists body_tsv tsvector
+        generated always as (to_tsvector('simple', coalesce(body, ''))) stored`,
+      `create index if not exists messages_search on messages using gin (body_tsv)`,
+      `alter table topics add column if not exists title_tsv tsvector
+        generated always as (to_tsvector('simple', title)) stored`,
+      `create index if not exists topics_search on topics using gin (title_tsv)`,
+      // Assets need a side table because what's searchable is an EXTRACTION
+      // (an Excalidraw board is geometry JSON wrapping the words on it) and
+      // extraction is TypeScript, which a generated column can't call. The
+      // TS-maintained part is only `extracted` (upserted in the same
+      // transaction as each version write); tsv still derives in-database.
+      // One row per live head per asset — keyed by asset_id (the inode
+      // model), so moves/renames never touch it; deletion is filtered at
+      // query time via assets.state. No SQL backfill (extraction is code):
+      // PgStore.init() fills missing rows on boot, idempotently — which is
+      // also the standing repair path.
+      `create table if not exists asset_search (
+        space_id text not null,
+        asset_id text not null,
+        extracted text not null,
+        tsv tsvector generated always as (to_tsvector('simple', extracted)) stored,
+        updated_at text not null,
+        primary key (space_id, asset_id)
+      )`,
+      `create index if not exists asset_search_gin on asset_search using gin (tsv)`,
+    ],
+  },
+  {
+    // Runs AFTER the annotation model (011) and search (012) by necessity, not preference:
     // that migration deletes the pre-004 machine parent-copies and re-points
     // thread_root, so anything keyed on message ids must land once the ids
     // have settled. Polls never shipped before this, so there is nothing to
     // backfill and nothing 011 can orphan.
-    id: '012-polls',
+    id: '013-polls',
     statements: [
       // Discord-model polls: the poll definition (question, answers, expiry,
       // multiselect, endedAt) rides the message row as jsonb — immutable

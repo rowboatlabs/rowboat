@@ -11,9 +11,9 @@ Each org your person belongs to appears as an MCP server named \`spaces-<org>\`:
 2. \`executeMcpTool(<server>, 'list_spaces', {})\` → the member's spaces, each with \`id\`, \`name\`, \`memberCount\`, and its full file listing (\`assets\`: path + version). Resolve space names here ("Roadboard" → its \`id\`, case-insensitive). Never guess a spaceId or a file path — this call makes discovery mechanical.
 3. Every other tool takes that \`spaceId\`.
 
-The server's tools: \`list_spaces\`, \`read_stream\`, \`read_thread\`, \`read_asset\`, \`propose_change\`, \`move_asset\`, \`delete_asset\`, \`post_message\`, \`list_topics\`, \`create_topic\`, \`manage_topic\`, \`search_feed\` (\`listMcpTools\` shows full schemas). Alongside them you have two local bridge tools for binary files — \`spaces-upload-blob\` and \`spaces-download-blob\` (see "Binary files & attachments") — which take the same server name, not \`executeMcpTool\`.
+The server's tools: \`list_spaces\`, \`read_stream\`, \`read_thread\`, \`read_asset\`, \`propose_change\`, \`move_asset\`, \`delete_asset\`, \`post_message\`, \`list_topics\`, \`create_topic\`, \`manage_topic\`, \`search_space\` (\`listMcpTools\` shows full schemas). Alongside them you have two local bridge tools for binary files — \`spaces-upload-blob\` and \`spaces-download-blob\` (see "Binary files & attachments") — which take the same server name, not \`executeMcpTool\`.
 
-**How conversation is shaped:** each space has ONE message stream. A message either sits in the stream (a root) or is a reply in the flat thread under one root (\`threadRoot\` on the message — there is no deeper nesting). A **topic** is an annotation a member deliberately put on a thread — a stated goal (its title) plus an archived flag; it contains no messages, and threads without one are just plain conversations. To catch up: \`read_stream\` for the room's recent roots (each with a \`replyCount\`), \`read_thread\` (spaceId + rootMessageId) for one conversation, \`list_topics\` for the goals currently on the rail. Use \`search_feed\` only to FIND a conversation — never to reconstruct one you already have the root id for.
+**How conversation is shaped:** each space has ONE message stream. A message either sits in the stream (a root) or is a reply in the flat thread under one root (\`threadRoot\` on the message — there is no deeper nesting). A **topic** is an annotation a member deliberately put on a thread — a stated goal (its title) plus an archived flag; it contains no messages, and threads without one are just plain conversations. To catch up: \`read_stream\` for the room's recent roots (each with a \`replyCount\`), \`read_thread\` (spaceId + rootMessageId) for one conversation, \`list_topics\` for the goals currently on the rail. Use \`search_space\` to FIND a conversation or file (it searches messages, topic titles, and asset content/names) — never to reconstruct one you already have the root id for.
 
 ## Editing a shared file — the procedure
 
@@ -41,7 +41,7 @@ A referenced upload is team-visible like any other write — same care, same rea
 ## Feed etiquette
 
 - **You are silent in the feed by default.** \`post_message\` only when your person explicitly asks you to post, reply, or announce.
-- Reply into the right thread (\`threadRoot\` = the conversation's root message id) rather than posting a new root; \`search_feed\` finds the conversation if you only know the subject. A new root goes to the whole room — post one only when the ask really is a fresh subject.
+- Reply into the right thread (\`threadRoot\` = the conversation's root message id) rather than posting a new root; \`search_space\` finds the conversation if you only know the subject. A new root goes to the whole room — post one only when the ask really is a fresh subject.
 - \`create_topic\` puts a stated goal on a thread ("Decide: launch cut" — a goal, not a summary) and \`manage_topic\` (retitle / archive / unarchive / remove) is housekeeping: only when asked, or as part of a tidy task your person explicitly set up. \`remove\` deletes only the annotation — the conversation is untouched.
 
 ## When invoked from a space thread (@rowboat)

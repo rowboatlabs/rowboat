@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, type ActingMode } from '@rowboat/spaces-protocol';
+import { mcpTools, type ActingMode, type SearchKind } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import type { AuthDriver } from './auth.js';
 import { HarborError } from './errors.js';
@@ -250,9 +250,12 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
       }
       return { topic: await service.manageTopic(ctx, a.spaceId, a.topicId, action) };
     }
-    case 'search_feed': {
-      const a = args as { spaceId: string; query: string; limit?: number };
-      return { results: await service.searchFeed(ctx, a.spaceId, a.query, a.limit) };
+    case 'search_space': {
+      const a = args as { spaceId: string; query: string; kinds?: SearchKind[]; limit?: number };
+      return service.search(ctx, a.spaceId, a.query, {
+        ...(a.kinds !== undefined ? { kinds: a.kinds } : {}),
+        ...(a.limit !== undefined ? { limit: a.limit } : {}),
+      });
     }
     default:
       throw new HarborError('invalid_request', `unknown tool ${name}`);

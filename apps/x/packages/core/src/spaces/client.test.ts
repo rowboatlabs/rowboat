@@ -128,6 +128,27 @@ describe('SpacesClient', () => {
     expect(listed.find((t) => t.id === topic.id)?.rootMessage?.id).toBe(started.message.id);
   });
 
+  it('search returns categorized hits with mention expansion over the wire', async () => {
+    await ramnique.postMessage(spaceId, { body: 'hey @gagan the quarterly numbers landed', actingMode: 'direct' });
+    await ramnique.proposeChange(spaceId, {
+      assetPath: 'finance/quarterly.md',
+      baseVersion: 0,
+      newContent: 'Quarterly numbers: all green.',
+      actingMode: 'direct',
+    });
+
+    const results = await ramnique.search(spaceId, { q: 'quarterly' });
+    expect(results.messages.length).toBe(1);
+    expect(results.messages[0]!.snippet).toContain('quarterly numbers');
+    expect(results.assets.map((a) => a.path)).toContain('finance/quarterly.md');
+    expect(results.truncated.messages).toBe(false);
+
+    // "gagan" is a display name — the hit is the @-mention of the member id.
+    const byName = await ramnique.search(spaceId, { q: 'gagan numbers', kinds: ['messages'] });
+    expect(byName.messages.length).toBe(1);
+    expect(byName.assets).toEqual([]);
+  });
+
   it('the stream windows newest-first and pages back by offset, roots only', async () => {
     const roots: string[] = [];
     for (const body of ['p1', 'p2', 'p3', 'p4', 'p5']) {

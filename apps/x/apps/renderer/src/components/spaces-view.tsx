@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BellOff, Check, ChevronDown, Clock, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, PenTool, Plus, Search } from 'lucide-react'
+import { Bell, BellOff, Check, ChevronDown, Clock, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, PenTool, Plus } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,10 +11,10 @@ import { AddOrgDialog, AvatarStack, MemberAvatar, MemberProfilePopover, OrgMonog
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
-import { QuickSwitcher } from '@/components/spaces/quick-switcher'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { SpaceRail } from '@/components/spaces/space-rail'
+import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
@@ -169,7 +169,7 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onOpenSession, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
@@ -252,25 +252,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         }
     }
 
-    // The quick switcher (⌘⇧K): topics, messages, spaces. Shift because plain
-    // ⌘K is the app's global search palette and must stay reachable inside a
-    // space. Capture phase so nothing below grabs the press. While the switcher
-    // is open its own input handles ⌘⇧K (so the close animates); this listener
-    // only opens.
-    const [switcherOpen, setSwitcherOpen] = useState(false)
-    useEffect(() => {
-        if (!active || switcherOpen) return
-        const onKey = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && !e.altKey && e.shiftKey && e.key.toLowerCase() === 'k') {
-                e.preventDefault()
-                e.stopPropagation()
-                setSwitcherOpen(true)
-            }
-        }
-        window.addEventListener('keydown', onKey, true)
-        return () => window.removeEventListener('keydown', onKey, true)
-    }, [active, switcherOpen])
-
     // Space-wide notification level ('mentions' is the default; topics
     // override per-row from the rail's menus).
     const notify = useSpaceNotifyPrefs(org.id, space.id)
@@ -286,7 +267,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     useEffect(() => {
         void window.ipc.invoke('spaces:getDnd', null).then((r) => setDndUntilState(r.until)).catch(() => {})
     }, [])
-    const dndActive = !!dndUntil && new Date(dndUntil).getTime() > Date.now()
+    // A clock the render may read: ticks every 30s so the bell clears itself
+    // when the DND instant passes (Date.now() in render is impure and never
+    // re-runs on its own).
+    const [now, setNow] = useState(() => Date.now())
+    useEffect(() => {
+        const t = setInterval(() => setNow(Date.now()), 30_000)
+        return () => clearInterval(t)
+    }, [])
+    const dndActive = !!dndUntil && new Date(dndUntil).getTime() > now
     const setDnd = (minutes: number | null) => {
         const until = minutes === null ? null : new Date(Date.now() + minutes * 60_000).toISOString()
         setDndUntilState(until)
@@ -575,18 +564,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         <div className="relative flex-1 min-h-0 flex flex-col">
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
-            <QuickSwitcher
-                orgId={org.id}
-                spaceId={space.id}
-                topics={feed.topics}
-                streamKey={STREAM_READ_KEY}
-                open={switcherOpen}
-                onClose={() => setSwitcherOpen(false)}
-                onOpenGeneral={() => select({ kind: 'general' })}
-                onOpenTopic={(rootMessageId) => select({ kind: 'thread', rootMessageId })}
-                onOpenMessage={navigateToMessage}
-                onSwitchSpace={onSwitchSpace}
-            />
             <header className="flex items-center gap-3 px-4 h-12 shrink-0 border-b border-border">
                 <OrgMonogram org={org} />
                 <h1 className="text-[15px] font-semibold truncate">{space.name}</h1>
@@ -651,14 +628,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     </span>
                 )}
                 <div className="flex-1" />
-                <button
-                    type="button"
-                    title="Search this space (⌘⇧K)"
-                    onClick={() => setSwitcherOpen(true)}
-                    className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                    <Search className="size-4" />
-                </button>
+                <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} />
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <button

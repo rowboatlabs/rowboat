@@ -25,6 +25,8 @@ import {
   type ResolveInviteResult,
   type RestoreAssetResult,
   type Routes,
+  type SearchKind,
+  type SearchResults,
   type Space,
   type SpaceEvent,
   type Topic,
@@ -48,6 +50,7 @@ import { HarborError } from './errors.js';
 import { SpaceHub } from './hub.js';
 import { merge3 } from './merge.js';
 import { dispositionFor, imageDimensions, resolveMime } from './mime.js';
+import { parseSearchQuery } from './search.js';
 import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredPollVote, StoredReaction } from './store.js';
 
 // The one service core (spec §9: one core, two faces). REST (http.ts) and MCP
@@ -1366,38 +1369,79 @@ export class HarborService {
     });
   }
 
-  async searchFeed(
+  /**
+   * Space search (protocol search.ts): three categorized top-N lists over one
+   * pair of GIN-backed store calls per kind. Member names are resolved here —
+   * not in the store — so mention expansion (search.ts) always sees the
+   * CURRENT roster: renames are correct on the very next query. Structure
+   * (which thread a hit lives in, which topic annotates it) is joined at
+   * query time, never copied into any index.
+   */
+  async search(
     ctx: ActorCtx,
     spaceId: string,
-    query: string,
-    limit = 20,
-  ): Promise<Array<{ messageId: string; threadRootId: string; topicTitle?: string; snippet: string; at: string }>> {
+    rawQuery: string,
+    opts?: { kinds?: SearchKind[]; limit?: number },
+  ): Promise<SearchResults> {
     await this.requireMember(ctx, spaceId);
-    const q = query.toLowerCase();
-    const messages = await this.store.listMessagesBySpace(spaceId);
-    const topics = await this.store.listTopics(spaceId, true);
-    const titleByRoot = new Map(topics.map((t) => [t.rootMessageId, t.title]));
+    const limit = Math.min(opts?.limit ?? 10, 50);
+    const kinds = new Set<SearchKind>(opts?.kinds ?? ['messages', 'topics', 'assets']);
 
-    // Newest hits first: body matches, plus topic-title matches surfacing the
-    // thread even when the words never appear in a message.
-    const results: Array<{ messageId: string; threadRootId: string; topicTitle?: string; snippet: string; at: string }> = [];
-    const seenThreadsByTitle = new Set<string>();
-    for (let i = messages.length - 1; i >= 0 && results.length < limit; i--) {
-      const m = messages[i]!;
-      const rootId = m.threadRoot ?? m.id;
-      const topicTitle = titleByRoot.get(rootId);
-      if (m.body.toLowerCase().includes(q)) {
-        results.push({
-          messageId: m.id,
+    const memberships = await this.store.listMemberships(spaceId);
+    const members: Member[] = [];
+    for (const m of memberships) {
+      const member = await this.store.getMember(m.memberId);
+      if (member) members.push(member);
+    }
+    const query = parseSearchQuery(rawQuery, members);
+
+    const empty: SearchResults = {
+      messages: [],
+      topics: [],
+      assets: [],
+      truncated: { messages: false, topics: false, assets: false },
+    };
+    if (query.terms.length === 0) return empty;
+    const results = empty;
+
+    if (kinds.has('messages')) {
+      // limit+1 detects truncation without a count query.
+      const rows = await this.store.searchMessages(spaceId, query, limit + 1);
+      results.truncated.messages = rows.length > limit;
+      const titleByRoot = new Map<string, string>();
+      for (const { message, snippet } of rows.slice(0, limit)) {
+        const rootId = message.threadRoot ?? message.id;
+        if (!titleByRoot.has(rootId)) {
+          const topic = await this.store.getTopicByRoot(spaceId, rootId);
+          if (topic) titleByRoot.set(rootId, topic.title);
+        }
+        const topicTitle = titleByRoot.get(rootId);
+        results.messages.push({
+          messageId: message.id,
           threadRootId: rootId,
           ...(topicTitle !== undefined ? { topicTitle } : {}),
-          snippet: excerpt(m.body, q),
-          at: m.postedAt,
+          author: message.author,
+          snippet,
+          postedAt: message.postedAt,
+          offset: message.offset,
         });
-      } else if (m.threadRoot === undefined && topicTitle?.toLowerCase().includes(q) && !seenThreadsByTitle.has(rootId)) {
-        seenThreadsByTitle.add(rootId);
-        results.push({ messageId: m.id, threadRootId: rootId, topicTitle, snippet: topicTitle, at: m.postedAt });
       }
+    }
+    if (kinds.has('topics')) {
+      const rows = await this.store.searchTopics(spaceId, query, limit + 1);
+      results.truncated.topics = rows.length > limit;
+      results.topics = rows.slice(0, limit).map((topic) => ({ topic }));
+    }
+    if (kinds.has('assets')) {
+      const rows = await this.store.searchAssets(spaceId, query, limit + 1);
+      results.truncated.assets = rows.length > limit;
+      results.assets = rows.slice(0, limit).map(({ record, snippet }) => ({
+        path: record.path,
+        version: record.version,
+        updatedAt: record.updatedAt,
+        ...(record.blob !== undefined ? { blob: record.blob } : {}),
+        ...(snippet !== undefined ? { snippet } : {}),
+      }));
     }
     return results;
   }
@@ -1473,14 +1517,6 @@ function foldReactions(reactions: StoredReaction[]): ReactionGroup[] {
     groups.set(r.emoji, members);
   }
   return [...groups.entries()].map(([emoji, memberIds]) => ({ emoji, memberIds }));
-}
-
-function excerpt(body: string, lowerQuery: string): string {
-  const idx = body.toLowerCase().indexOf(lowerQuery);
-  const start = Math.max(0, idx - 60);
-  const end = Math.min(body.length, idx + lowerQuery.length + 100);
-  const slice = body.slice(start, end).replace(/\s+/g, ' ').trim();
-  return `${start > 0 ? '…' : ''}${slice}${end < body.length ? '…' : ''}`;
 }
 
 export type { ActingMode };

@@ -107,13 +107,13 @@ describe('PgStore through the service', () => {
       title: 'Decide: webhook retry strategy',
       actingMode: 'direct',
     });
-    const byTitle = await service.searchFeed(ram, spaceId, 'webhook retry');
-    expect(byTitle.length).toBe(1);
-    expect(byTitle[0]!.threadRootId).toBe(posted.message.id);
-    const byBody = await service.searchFeed(ram, spaceId, 'exponential');
-    expect(byBody.length).toBe(1);
-    expect(byBody[0]!.snippet).toContain('exponential');
-    expect(byBody[0]!.topicTitle).toBe('Decide: webhook retry strategy');
+    const byTitle = await service.search(ram, spaceId, 'webhook retry');
+    expect(byTitle.topics.length).toBe(1);
+    expect(byTitle.topics[0]!.topic.rootMessageId).toBe(posted.message.id);
+    const byBody = await service.search(ram, spaceId, 'exponential');
+    expect(byBody.messages.length).toBe(1);
+    expect(byBody.messages[0]!.snippet).toContain('exponential');
+    expect(byBody.messages[0]!.topicTitle).toBe('Decide: webhook retry strategy');
   });
 
   it('invite expiry round-trips through storage', async () => {
