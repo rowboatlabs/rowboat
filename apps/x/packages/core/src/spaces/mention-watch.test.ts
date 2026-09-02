@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveMentions } from '@x/shared/dist/spaces.js';
-import { buildMentionNotify, buildMissedSummaryNotify, isMissedArrival, mentionExcerpt, mentionLink } from './mention-watch.js';
+import { buildMentionNotify, buildMissedSummaryNotify, cooldownKeyFor, isMissedArrival, mentionExcerpt, mentionLink } from './mention-watch.js';
 
 describe('isMissedArrival', () => {
     const now = new Date('2026-08-20T12:00:00Z').getTime();
@@ -53,5 +53,19 @@ describe('notification payloads', () => {
     it('counts @here separately in the missed summary', () => {
         expect(buildMissedSummaryNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', youCount: 0, hereCount: 2 }).message).toBe('2 @here');
         expect(buildMissedSummaryNotify({ orgId: 'o1', spaceId: 's1', spaceName: 'Roadboard', youCount: 2, hereCount: 1 }).message).toBe('2 mentions of you · 1 @here');
+    });
+});
+
+describe('cooldownKeyFor', () => {
+    it('buckets per space, per thread, and per kind class', () => {
+        const k = 'org-1/space-1';
+        // A level-'all' plain message must never mask a direct mention that
+        // lands in the same thread right after: separate buckets.
+        expect(cooldownKeyFor(k, 'root-1', 'message')).not.toBe(cooldownKeyFor(k, 'root-1', 'you'));
+        // @you and @here are both "someone wants you here" — one per window.
+        expect(cooldownKeyFor(k, 'root-1', 'you')).toBe(cooldownKeyFor(k, 'root-1', 'here'));
+        // Threads and spaces never share a window.
+        expect(cooldownKeyFor(k, 'root-1', 'you')).not.toBe(cooldownKeyFor(k, 'root-2', 'you'));
+        expect(cooldownKeyFor(k, 'root-1', 'you')).not.toBe(cooldownKeyFor('org-1/space-2', 'root-1', 'you'));
     });
 });

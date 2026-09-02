@@ -808,6 +808,232 @@ describe('message editing', () => {
   });
 });
 
+describe('polls', () => {
+  let spaceId: string;
+
+  const postPoll = (who: ReturnType<typeof api>, poll: Record<string, unknown>, body = '📊 **poll**') =>
+    who.post(`/v1/spaces/${spaceId}/messages`, { body, poll, actingMode: 'direct' });
+  const vote = (who: ReturnType<typeof api>, messageId: string, answerId: number, action: 'add' | 'remove', actingMode = 'direct') =>
+    who.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/votes`, { answerId, action, actingMode });
+  const end = (who: ReturnType<typeof api>, messageId: string) =>
+    who.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/end`, { actingMode: 'direct' });
+
+  beforeAll(async () => {
+    const r = await ramnique.post('/v1/spaces', { name: 'Polls' });
+    spaceId = r.body.space.id;
+    const inv = await ramnique.post('/v1/invites', { spaceId });
+    await gagan.post('/v1/invites/accept', { token: inv.body.token });
+  });
+
+  it('the org stamps the poll: sequential answer ids, expiry from duration, defaults applied', async () => {
+    const r = await postPoll(ramnique, {
+      question: 'Where do we take standup?',
+      answers: [{ text: 'Keep it async' }, { text: 'Daily call', emoji: '📞' }],
+      durationHours: 48,
+    });
+    expect(r.status).toBe(200);
+    const poll = r.body.message.poll;
+    expect(poll.answers).toEqual([
+      { id: 1, text: 'Keep it async' },
+      { id: 2, text: 'Daily call', emoji: '📞' },
+    ]);
+    expect(poll.allowMultiselect).toBe(false);
+    expect(poll.votes).toEqual([]);
+    expect(Date.parse(poll.expiresAt) - Date.parse(r.body.message.postedAt)).toBe(48 * 3_600_000);
+  });
+
+  it('bad polls refuse: one answer, too many, oversized text', async () => {
+    expect((await postPoll(ramnique, { question: 'q', answers: [{ text: 'only' }] })).status).toBe(400);
+    expect(
+      (await postPoll(ramnique, { question: 'q', answers: Array.from({ length: 11 }, (_, i) => ({ text: `a${i}` })) })).status,
+    ).toBe(400);
+    expect((await postPoll(ramnique, { question: 'q', answers: [{ text: 'x'.repeat(56) }, { text: 'b' }] })).status).toBe(400);
+  });
+
+  it('text is trimmed before the bounds apply: whitespace-only refuses, padding is stored stripped', async () => {
+    expect((await postPoll(ramnique, { question: '   ', answers: [{ text: 'a' }, { text: 'b' }] })).status).toBe(400);
+    expect((await postPoll(ramnique, { question: 'q', answers: [{ text: '  ' }, { text: 'b' }] })).status).toBe(400);
+    // 55 real chars wrapped in spaces is still 55 — the bound is on content.
+    const padded = await postPoll(ramnique, { question: '  Where?  ', answers: [{ text: ` ${'x'.repeat(55)} ` }, { text: ' b ' }] });
+    expect(padded.status).toBe(200);
+    expect(padded.body.message.poll.question).toBe('Where?');
+    expect(padded.body.message.poll.answers.map((a: any) => a.text)).toEqual(['x'.repeat(55), 'b']);
+  });
+
+  it('single-select: votes fold on reads; adding elsewhere MOVES the vote (removed + added events)', async () => {
+    const posted = await postPoll(ramnique, { question: 'Pick one', answers: [{ text: 'A' }, { text: 'B' }] });
+    const messageId = posted.body.message.id;
+
+    const live = await liveClient(harbor, 'dev-ramnique');
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
+
+    const first = await vote(gagan, messageId, 1, 'add');
+    expect(first.status).toBe(200);
+    expect(first.body.message.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
+
+    // Reads fold the same state in.
+    const msgs = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
+    const m = msgs.body.messages.find((x: any) => x.id === messageId);
+    expect(m.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
+
+    // The move: voting B while holding A removes A and adds B atomically.
+    const moved = await vote(gagan, messageId, 2, 'add');
+    expect(moved.body.message.poll.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
+
+    await live.until(
+      (frames) => frames.filter((f) => f.kind === 'event' && f.event.type === 'poll_vote').length >= 3,
+      'vote events',
+    );
+    const actions = live
+      .events()
+      .filter((f) => f.event.type === 'poll_vote')
+      .map((f) => (f.event as any).action);
+    expect(actions).toEqual(['added', 'removed', 'added']);
+    live.close();
+  });
+
+  it('toggles are idempotent; multiselect answers toggle independently', async () => {
+    const posted = await postPoll(ramnique, {
+      question: 'Pick many',
+      answers: [{ text: 'A' }, { text: 'B' }],
+      allowMultiselect: true,
+    });
+    const messageId = posted.body.message.id;
+
+    await vote(gagan, messageId, 1, 'add');
+    const both = await vote(gagan, messageId, 2, 'add');
+    expect(both.body.message.poll.votes).toEqual([
+      { answerId: 1, memberIds: ['gagan'] },
+      { answerId: 2, memberIds: ['gagan'] },
+    ]);
+
+    const again = await vote(gagan, messageId, 1, 'add');
+    expect(again.body.message.poll.votes).toEqual(both.body.message.poll.votes);
+    const removed = await vote(gagan, messageId, 1, 'remove');
+    expect(removed.body.message.poll.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
+  });
+
+  it('agents cannot vote; unknown answers and non-poll messages refuse', async () => {
+    const posted = await postPoll(ramnique, { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] });
+    const messageId = posted.body.message.id;
+    expect((await vote(gagan, messageId, 1, 'add', 'agent')).status).toBe(400);
+    expect((await vote(gagan, messageId, 9, 'add')).status).toBe(400);
+    const plain = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'no poll here', actingMode: 'direct' });
+    expect((await vote(gagan, plain.body.message.id, 1, 'add')).status).toBe(400);
+  });
+
+  it('poll messages cannot be edited; deletion redacts the poll everywhere', async () => {
+    const posted = await postPoll(ramnique, { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] });
+    const messageId = posted.body.message.id;
+    const edited = await ramnique.post(`/v1/spaces/${spaceId}/messages/${messageId}/edit`, {
+      body: 'rewritten',
+      actingMode: 'direct',
+    });
+    expect(edited.status).toBe(400);
+
+    expect((await vote(gagan, messageId, 1, 'add')).status).toBe(200);
+    const deleted = await ramnique.post(`/v1/spaces/${spaceId}/messages/${messageId}/delete`, { actingMode: 'direct' });
+    expect(deleted.body.message.poll).toBeUndefined();
+    expect((await vote(gagan, messageId, 1, 'add')).status).toBe(400);
+    // The vote rows go with the poll: a member-attributed vote must not outlive it.
+    expect(await harbor.store.listPollVotesForMessages(spaceId, [messageId])).toEqual([]);
+
+    // Replay redaction: the stored message event lost its poll with its body.
+    const live = await liveClient(harbor, 'dev-gagan');
+    live.send({ kind: 'subscribe', spaceId, afterOffset: 0 });
+    await live.until(
+      (frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'message' && f.event.message.id === messageId),
+      'replayed message',
+    );
+    const replayed = live.events().find((f) => f.event.type === 'message' && f.event.message.id === messageId)!;
+    expect((replayed.event as any).message.poll).toBeUndefined();
+    expect((replayed.event as any).message.body).toBe('');
+    live.close();
+  });
+
+  it('a poll on a reply: events carry threadRoot, and the thread read folds the votes', async () => {
+    const root = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'root', actingMode: 'direct' });
+    const rootId = root.body.message.id as string;
+    const live = await liveClient(harbor, 'dev-gagan');
+    live.send({ kind: 'subscribe', spaceId, afterOffset: root.body.message.offset });
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      body: 'poll in thread',
+      threadRoot: rootId,
+      poll: { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] },
+      actingMode: 'direct',
+    });
+    expect(posted.status).toBe(200);
+    const messageId = posted.body.message.id as string;
+    expect((await vote(gagan, messageId, 2, 'add')).status).toBe(200);
+    expect((await ramnique.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/end`, { actingMode: 'direct' })).status).toBe(200);
+    await live.until((frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'poll_ended'), 'poll_ended frame');
+    const voteFrame = live.events().find((f) => f.event.type === 'poll_vote')!;
+    expect((voteFrame.event as any).vote.threadRoot).toBe(rootId);
+    const endFrame = live.events().find((f) => f.event.type === 'poll_ended')!;
+    expect((endFrame.event as any).end.threadRoot).toBe(rootId);
+    live.close();
+
+    const thread = await gagan.get(`/v1/spaces/${spaceId}/threads/${rootId}`);
+    expect(thread.status).toBe(200);
+    const inThread = (thread.body.messages as any[]).find((m) => m.id === messageId);
+    expect(inThread.poll.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
+    expect(inThread.poll.endedAt).toBeDefined();
+  });
+
+  it('a topic whose root is a poll lists the root folded (votes present)', async () => {
+    const posted = await postPoll(ramnique, { question: 'goal?', answers: [{ text: 'A' }, { text: 'B' }] });
+    const messageId = posted.body.message.id as string;
+    expect((await vote(gagan, messageId, 1, 'add')).status).toBe(200);
+    const topic = await ramnique.post(`/v1/spaces/${spaceId}/topics`, { rootMessageId: messageId, title: 'Poll goal', actingMode: 'direct' });
+    expect(topic.status).toBe(200);
+    const listed = await gagan.get(`/v1/spaces/${spaceId}/topics`);
+    const row = (listed.body.topics as any[]).find((t) => t.rootMessageId === messageId);
+    expect(row.rootMessage.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
+  });
+
+  it('agents cannot end polls, even acting as the author', async () => {
+    const posted = await postPoll(ramnique, { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] });
+    const messageId = posted.body.message.id as string;
+    const asAgent = await ramnique.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/end`, { actingMode: 'agent', agentName: 'bot' });
+    expect(asAgent.status).toBe(400);
+    const still = await gagan.get(`/v1/spaces/${spaceId}/stream`);
+    expect((still.body.messages as any[]).find((m) => m.id === messageId).poll.endedAt).toBeUndefined();
+  });
+
+  it('ending early is author-only and idempotent; closed polls refuse votes', async () => {
+    const posted = await postPoll(ramnique, { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] });
+    const messageId = posted.body.message.id;
+    await vote(gagan, messageId, 1, 'add');
+
+    expect((await end(gagan, messageId)).status).toBe(403);
+
+    const live = await liveClient(harbor, 'dev-ramnique');
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
+
+    const ended = await end(ramnique, messageId);
+    expect(ended.status).toBe(200);
+    expect(ended.body.message.poll.endedAt).toBeTruthy();
+    expect(ended.body.message.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
+
+    const again = await end(ramnique, messageId);
+    expect(again.status).toBe(200);
+    expect(again.body.message.poll.endedAt).toBe(ended.body.message.poll.endedAt);
+
+    expect((await vote(gagan, messageId, 2, 'add')).status).toBe(400);
+    expect((await vote(gagan, messageId, 1, 'remove')).status).toBe(400);
+
+    // Exactly ONE poll_ended event for the two calls; reads carry endedAt.
+    await live.until((frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'poll_ended'), 'poll_ended');
+    expect(live.events().filter((f) => f.event.type === 'poll_ended')).toHaveLength(1);
+    const msgs = await gagan.get(`/v1/spaces/${spaceId}/stream`);
+    const m = msgs.body.messages.find((x: any) => x.id === messageId);
+    expect(m.poll.endedAt).toBe(ended.body.message.poll.endedAt);
+    live.close();
+  });
+});
+
 describe('read-only limit (spec §4: never lockout)', () => {
   it('writes pause, reads keep working', async () => {
     const r = await ramnique.post('/v1/spaces', { name: 'Limits' });

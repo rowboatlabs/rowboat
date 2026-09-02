@@ -457,6 +457,31 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists asset_search_gin on asset_search using gin (tsv)`,
     ],
   },
+  {
+    // Runs AFTER the annotation model (011) and search (012) by necessity, not preference:
+    // that migration deletes the pre-004 machine parent-copies and re-points
+    // thread_root, so anything keyed on message ids must land once the ids
+    // have settled. Polls never shipped before this, so there is nothing to
+    // backfill and nothing 011 can orphan.
+    id: '013-polls',
+    statements: [
+      // Discord-model polls: the poll definition (question, answers, expiry,
+      // multiselect, endedAt) rides the message row as jsonb — immutable
+      // content except endedAt. Votes mirror reactions: one row per
+      // (message, answer, member) — the primary key IS the toggle invariant.
+      `alter table messages add column if not exists poll jsonb`,
+      `create table if not exists poll_votes (
+        space_id text not null,
+        message_id text not null,
+        answer_id int not null,
+        member_id text not null,
+        attribution jsonb not null,
+        at text not null,
+        primary key (space_id, message_id, answer_id, member_id)
+      )`,
+      `create index if not exists poll_votes_space_message on poll_votes (space_id, message_id)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

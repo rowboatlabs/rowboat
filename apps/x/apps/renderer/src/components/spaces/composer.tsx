@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, Bot, FileText, Globe, Loader2, Megaphone, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Bot, Clock, FileText, Globe, Loader2, Megaphone, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import {
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
+import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
+import { schedulePresets } from '@/lib/spaces-schedule'
 import { blobAppUrl, blobWireUrl, encodeMentions, encodeSpaceLinkTarget, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
@@ -77,15 +82,19 @@ const ASK_COMMAND: CommandEntry = { name: 'ask', args: '<question>', hint: 'Ask 
 /** A draft that IS a command: "/name" or "/name args". */
 const COMMAND_RE = /^\/([a-zA-Z]+)(?:\s+([\s\S]*))?$/
 
-export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey, commands = [] }: {
+export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey, commands = [] }: {
     placeholder: string
     onSend: (body: string, agent?: AgentOptions) => Promise<void>
+    /** Send-later: the clock menu hands the built body + fire time here. */
+    onSchedule?: (body: string, at: Date) => Promise<void>
+    /** Opens the poll creation dialog (same flow as /poll) — the button beside attach. */
+    onCreatePoll?: () => void
     busy: boolean
     autoFocus?: boolean
     /** Called on every keystroke — drives the typing presence lease. */
     onType?: () => void
-    /** Prefill (e.g. "Ask @rowboat about this"); a new nonce re-applies it. */
-    seed?: { text: string; nonce: number } | null
+    /** Prefill (e.g. "Ask @rowboat about this"); a new nonce re-applies it. `append` adds to the draft instead of replacing it. */
+    seed?: { text: string; nonce: number; append?: boolean } | null
     /** Space members, for @ autocomplete. */
     members?: spaces.Member[]
     /** Space files — the same @ autocomplete offers them; picking one links it. */
@@ -239,7 +248,9 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     // Apply a new seed during render (React's adjust-state-on-prop-change pattern).
     if (seed && seed.nonce !== appliedSeed) {
         setAppliedSeed(seed.nonce)
-        setDraft(seed.text)
+        // Append (the profile popover's "Mention") joins a draft in progress;
+        // a plain seed replaces it (quote-reply, ask-rowboat).
+        setDraft(seed.append && draft ? `${draft}${/\s$/.test(draft) ? '' : ' '}${seed.text}` : seed.text)
     }
     const seedNonce = seed?.nonce ?? null
     useEffect(() => {
@@ -296,6 +307,30 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
     }
     const showMentions = mentionOpen && !!mentionMatch && candidates.length > 0
 
+    // --- :emoji: autocomplete ------------------------------------------------
+    // ":fi" at the caret offers 🔥 etc.; a completed ":fire:" left as text
+    // still converts at send time (replaceShortcodes).
+    const emojiMatch = useMemo(() => {
+        const m = /(^|[\s([{]):([a-z0-9_+-]{2,})$/.exec(draft.slice(0, caret))
+        if (!m) return null
+        return { query: m[2]!, start: caret - m[2]!.length - 1 }
+    }, [draft, caret])
+    const emojiCandidates = useMemo<EmojiEntry[]>(() => (emojiMatch ? searchEmoji(emojiMatch.query, 8) : []), [emojiMatch])
+    const [emojiIndex, setEmojiIndex] = useState(0)
+    const [emojiDismissed, setEmojiDismissed] = useState(false)
+    const emojiQuery = emojiMatch?.query ?? null
+    const [lastEmojiQuery, setLastEmojiQuery] = useState<string | null>(null)
+    if (emojiQuery !== lastEmojiQuery) {
+        setLastEmojiQuery(emojiQuery)
+        setEmojiIndex(0)
+        setEmojiDismissed(false)
+    }
+    const pickEmoji = (entry: EmojiEntry) => {
+        if (!emojiMatch) return
+        noteEmojiUsed(entry.e)
+        insertAt(emojiMatch.start, caret, `${entry.e} `)
+    }
+
     // --- slash commands ------------------------------------------------------
     // "/name" (no space yet) filters the menu; "/name args" pins the matched
     // command's usage hint above the box; Enter runs it via send().
@@ -312,6 +347,7 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
         setCmdDismissed(false)
     }
     const showCommands = !showMentions && !cmdDismissed && cmdCandidates.length > 0
+    const showEmoji = !showMentions && !showCommands && !emojiDismissed && emojiCandidates.length > 0
     const activeCommand = (() => {
         const m = /^\/([a-zA-Z]+)\s/.exec(draft)
         return m ? allCommands.find((c) => c.name === m[1]!.toLowerCase()) ?? null : null
@@ -404,6 +440,38 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
 
     // --- send ----------------------------------------------------------------
     const mentioned = containsRowboatAddress(draft)
+
+    /** The one body builder — send and send-later produce identical wire text. */
+    const buildBody = (raw: string): string => {
+        const ready = attachments.filter((a) => a.status === 'done' && a.hash)
+        const text = encodeMentions(replaceShortcodes(raw), members)
+        const attachmentLines = refs
+            ? ready.map((a) => {
+                  const dims = a.width && a.height ? { width: a.width, height: a.height } : undefined
+                  return isImageMime(a.mime)
+                      ? `![${a.name}](${blobWireUrl(refs, a.hash!, a.name, dims)})`
+                      : `[${a.name}](${blobWireUrl(refs, a.hash!, a.name)})`
+              })
+            : []
+        return [text, attachmentLines.join('\n')].filter(Boolean).join('\n\n')
+    }
+
+    const scheduleDraft = async (at: Date) => {
+        if (!onSchedule || busy || uploading) return
+        const raw = draft.trim()
+        const m = COMMAND_RE.exec(raw)
+        if (m && allCommands.some((c) => c.name === m[1]!.toLowerCase())) {
+            toast('Commands run now — schedule a plain message instead', 'info')
+            return
+        }
+        const body = buildBody(raw)
+        if (!body) return
+        await onSchedule(body, at)
+        setDraft('')
+        setAttachments([])
+        setMentionOpen(false)
+    }
+
     const send = async (textOverride?: string) => {
         if (busy || uploading) return
         const raw = (textOverride ?? draft).trim()
@@ -428,23 +496,10 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                 return
             }
         }
-        const ready = attachments.filter((a) => a.status === 'done' && a.hash)
-        const text = encodeMentions(raw, members)
-        // Each attachment lands on the wire as a canonical blob link: images as
-        // markdown images (renderers show them inline), the rest as plain links
-        // (rendered as download cards). ?name= keeps the display filename;
-        // images add ?w=&h= so renderers reserve the exact box before loading.
-        const attachmentLines = refs
-            ? ready.map((a) => {
-                  const dims = a.width && a.height ? { width: a.width, height: a.height } : undefined
-                  return isImageMime(a.mime)
-                      ? `![${a.name}](${blobWireUrl(refs, a.hash!, a.name, dims)})`
-                      : `[${a.name}](${blobWireUrl(refs, a.hash!, a.name)})`
-              })
-            : []
-        // Attachments form their own paragraph (blank line): tiles render as a
-        // row under the text instead of flowing inline after it.
-        const body = [text, attachmentLines.join('\n')].filter(Boolean).join('\n\n')
+        // Each attachment lands on the wire as a canonical blob link (images
+        // inline, the rest as download cards), in its own paragraph — see
+        // buildBody, shared with send-later.
+        const body = buildBody(raw)
         if (!body) return
         // From the text actually going out — an /ask rewrite mentions @rowboat
         // even though the draft it came from didn't.
@@ -498,6 +553,23 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                     <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 rounded-2xl border-none bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--rowboat-shadow)]">
                         <span className="font-mono text-sm font-medium text-foreground">/{activeCommand.name}</span>
                         {activeCommand.args && <span className="font-mono text-sm"> {activeCommand.args}</span>} — {activeCommand.hint} · ↵ to run
+                    </div>
+                )}
+                {showEmoji && (
+                    <div className="absolute bottom-full left-2 z-20 mb-1 w-64 overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-md">
+                        {emojiCandidates.map((c, i) => (
+                            <button
+                                key={c.n}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => pickEmoji(c)}
+                                className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left', i === emojiIndex ? 'bg-accent' : 'hover:bg-accent/60')}
+                            >
+                                <span className="text-base leading-none">{c.e}</span>
+                                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">:{c.n}:</span>
+                            </button>
+                        ))}
+                        <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
                     </div>
                 )}
                 {showMentions && (
@@ -624,6 +696,29 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                                 return
                             }
                         }
+                        if (showEmoji) {
+                            if (e.key === 'ArrowDown') {
+                                e.preventDefault()
+                                setEmojiIndex((i) => (i + 1) % emojiCandidates.length)
+                                return
+                            }
+                            if (e.key === 'ArrowUp') {
+                                e.preventDefault()
+                                setEmojiIndex((i) => (i - 1 + emojiCandidates.length) % emojiCandidates.length)
+                                return
+                            }
+                            if (e.key === 'Enter' || e.key === 'Tab') {
+                                e.preventDefault()
+                                const c = emojiCandidates[emojiIndex]
+                                if (c) pickEmoji(c)
+                                return
+                            }
+                            if (e.key === 'Escape') {
+                                e.preventDefault()
+                                setEmojiDismissed(true)
+                                return
+                            }
+                        }
                         if ((e.metaKey || e.ctrlKey) && !e.altKey) {
                             const key = e.key.toLowerCase()
                             const marker = e.shiftKey
@@ -664,6 +759,16 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                                 <Paperclip className="size-4" />
                             </button>
                         </>
+                    )}
+                    {onCreatePoll && (
+                        <button
+                            type="button"
+                            onClick={onCreatePoll}
+                            title="Create a poll"
+                            className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                            <BarChart3 className="size-4" />
+                        </button>
                     )}
                     <button
                         type="button"
@@ -726,6 +831,27 @@ export function Composer({ placeholder, onSend, busy, autoFocus, onType, seed, m
                         </>
                     )}
                     <div className="flex-1" />
+                    {onSchedule && (draft.trim() || attachments.some((a) => a.status === 'done')) && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    title="Send later"
+                                    disabled={busy || uploading}
+                                    className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                >
+                                    <Clock className="size-4" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                {schedulePresets().map((p) => (
+                                    <DropdownMenuItem key={p.label} onClick={() => void scheduleDraft(p.at)}>
+                                        {p.label}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
                     <button
                         type="button"
                         onClick={() => void send()}

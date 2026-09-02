@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { applyReaction, mergeMessages, threadRootOf } from '@/lib/spaces-conventions'
+import { applyPollVote } from '@/lib/spaces-poll'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
+import { effectiveNotifyLevel, ensureNotifyPrefs, subscribeNotifyPrefs } from '@/hooks/use-spaces-notify'
 import { getTopicLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
 
 // Chat stores for one space under the annotation model (spec §7, 2026-09-01):
@@ -383,6 +385,32 @@ function wireBus(): void {
                     ),
                 })
             }
+        } else if (frame.event.type === 'poll_vote') {
+            // Fold like reactions — and like them, the viewer's own toggles
+            // are EXCLUDED (they reconcile through their HTTP response; a
+            // late echo would fight the optimistic fold).
+            const { vote, action } = frame.event
+            const selfId = getSpacesOrgs().find((o) => o.id === event.orgId)?.memberId
+            if (vote.by.memberId === selfId) return
+            if (state.messages.some((m) => m.id === vote.messageId)) {
+                setStream(k, {
+                    messages: state.messages.map((m) =>
+                        m.id === vote.messageId && m.poll
+                            ? { ...m, poll: applyPollVote(m.poll, { answerId: vote.answerId, memberId: vote.by.memberId, action }) }
+                            : m,
+                    ),
+                })
+            }
+        } else if (frame.event.type === 'poll_ended') {
+            // Idempotent stamp — own ends included, like edits.
+            const { end } = frame.event
+            if (state.messages.some((m) => m.id === end.messageId)) {
+                setStream(k, {
+                    messages: state.messages.map((m) =>
+                        m.id === end.messageId && m.poll ? { ...m, poll: { ...m.poll, endedAt: end.at } } : m,
+                    ),
+                })
+            }
         } else if (frame.event.type === 'message_edited') {
             // Rewrite in place. Own edits are NOT excluded (unlike reactions):
             // the fold is idempotent — re-applying the same body is harmless.
@@ -397,12 +425,17 @@ function wireBus(): void {
         } else if (frame.event.type === 'message_deleted') {
             // Tombstone in place — the row stays (threads may hang under it),
             // the body is gone. Thread panes pick theirs up on their own tick.
+            // The org redacts a poll with the body (and drops its votes) —
+            // mirror it, so a refetch never disagrees with the live fold.
             const { deletion } = frame.event
             if (state.messages.some((m) => m.id === deletion.messageId)) {
                 setStream(k, {
-                    messages: state.messages.map((m) =>
-                        m.id === deletion.messageId ? { ...m, body: '', deletedAt: deletion.at } : m,
-                    ),
+                    messages: state.messages.map((m) => {
+                        if (m.id !== deletion.messageId) return m
+                        const tombstone = { ...m, body: '', deletedAt: deletion.at }
+                        delete tombstone.poll
+                        return tombstone
+                    }),
                 })
             }
         }
@@ -594,6 +627,7 @@ function wireUnread(): void {
     subscribeSpaceFeedStore(bumpUnread)
     subscribeReadState(bumpUnread)
     subscribeOrgs(bumpUnread)
+    subscribeNotifyPrefs(bumpUnread)
     streamListeners.add(bumpUnread)
 }
 
@@ -601,16 +635,25 @@ export function countSpaceUnread(orgId: string, spaceId: string, selfMemberId: s
     const k = key(orgId, spaceId)
     const state = streamState.get(k)
     let count = 0
+    // Muted destinations don't badge (the Slack posture) — the messages stay
+    // unread in the pane, they just don't count here. The stream itself mutes
+    // under STREAM_READ_KEY; each thread mutes under its own root.
+    ensureNotifyPrefs(orgId, spaceId)
+    const muted = (dest: string) => effectiveNotifyLevel(orgId, spaceId, dest) === 'mute'
     const streamMark = getTopicLastReadAt(orgId, spaceId, STREAM_READ_KEY)
     if (state?.ready) {
         // New roots since the stream mark (loaded window — exact enough).
-        count += state.messages.filter(
-            (m) => !m.pending && !m.failed && !m.deletedAt && (!streamMark || m.postedAt > streamMark) && m.author.memberId !== selfMemberId,
-        ).length
+        if (!muted(STREAM_READ_KEY)) {
+            count += state.messages.filter(
+                (m) => !m.pending && !m.failed && !m.deletedAt && (!streamMark || m.postedAt > streamMark) && m.author.memberId !== selfMemberId,
+            ).length
+        }
         // Threads with replies past their own mark count once each.
         for (const m of state.messages) {
             if (m.pending || m.failed || !m.lastReplyAt || (m.replyCount ?? 0) === 0) continue
-            const mark = getTopicLastReadAt(orgId, spaceId, threadRootOf(m))
+            const root = threadRootOf(m)
+            if (muted(root)) continue
+            const mark = getTopicLastReadAt(orgId, spaceId, root)
             if (!mark || m.lastReplyAt > mark) count += 1
         }
         return count
@@ -619,7 +662,7 @@ export function countSpaceUnread(orgId: string, spaceId: string, selfMemberId: s
     const feed = getSpaceFeed(orgId, spaceId)
     if (!feed.loaded) return 0
     for (const t of feed.topics) {
-        if (t.archived) continue
+        if (t.archived || muted(t.rootMessageId)) continue
         const mark = getTopicLastReadAt(orgId, spaceId, t.rootMessageId)
         if (!mark || t.lastActivityAt > mark) count += 1
     }

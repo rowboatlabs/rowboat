@@ -157,6 +157,37 @@ team and a Roadboard space (`src/main.ts`).
   200 no-op — no write, no event. Editing bumps neither `lastActivityAt` nor
   `messageCount` and emits no topic event. Render-face only, like reactions
   and deletion — an agent's correction is a new message.
+- **Polls are a field on a message, the Discord model** (`Message.poll`,
+  `postMessage`'s `poll` create block, `votePoll`/`endPoll` routes, the
+  `poll_vote`/`poll_ended` events — 2026-09-01). The definition (question ≤300,
+  2–10 answers ≤55 chars each with optional emoji, `allowMultiselect`,
+  `expiresAt`) is immutable once posted — `editMessage` refuses poll messages.
+  Creation sends a `durationHours` (default 24, max 768 — Discord's bounds);
+  the org stamps `expiresAt` from its own clock and assigns answer ids 1..n.
+  The message's `body` carries a plain-markdown fallback rendering (client-
+  composed) so poll-blind clients still show something; body semantics are
+  untouched. **Votes are reaction-shaped**: per-(member, answer) toggles,
+  idempotent no-ops, folded `votes` groups (answer order, voteless answers
+  omitted) on reads with the stored `message` event carrying the at-post
+  snapshot — clients fold `poll_vote` events or refetch. Votes are visible by
+  design (member ids in the fold — the Discord posture, not anonymous ballots).
+  On single-select polls, adding while another answer holds your vote MOVES it:
+  a `removed` then an `added` event under one space lock. **Expiry is lazy**:
+  a poll is closed when `endedAt` is set OR `expiresAt` has passed — no server
+  job, no event on natural expiry; the vote route enforces it and clients
+  compute it. `endPoll` is author-only (deletion's posture), idempotent once
+  closed. Closed polls and tombstones refuse votes (both directions — a closed
+  ballot is sealed); deletion redacts the poll with the body, row and stored
+  event alike, and drops its votes (a member-attributed vote must not outlive
+  the poll it was cast on). Agents can neither vote nor end a poll
+  (`actingMode` must be `direct` on both routes — Discord's "apps can't
+  vote"; a poll is a member's question to members, and an app acting under
+  the author's identity must not close it either); render-face only for now,
+  like reactions — the MCP face doesn't expose poll creation yet. Question
+  and answer text are trimmed before the length bounds apply — whitespace-only
+  text is refused. Topic listings fold their root like any page read, so a
+  poll root card carries its votes. No `is_finalized` dance: every vote lands
+  under the space lock, so folded counts are exact, live.
 - **Unknown invite tokens are 404**; `expired`/`revoked` are resolvable states.
 - **MCP face attribution**: acting mode defaults to `agent`; automations
   declare `x-acting-mode: scheduled`; `x-agent-name` carries the display label.

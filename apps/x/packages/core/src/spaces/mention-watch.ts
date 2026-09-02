@@ -5,6 +5,7 @@ import type { Member, ServerFrame } from '@rowboat/spaces-protocol';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import type { NotifyInput } from '../application/notification/service.js';
 import { WorkDir } from '../config/config.js';
+import { dndActive, notifyLevelFor } from './notify-prefs.js';
 import { getClient, getLive, listOrgs } from './orgs.js';
 
 // Space mention notifications: main-side watcher that subscribes to EVERY
@@ -43,13 +44,28 @@ export interface MentionHit {
   threadRootId: string;
   authorName: string;
   body: string;
-  /** 'you' = addressed me by name/id; 'here' = @here, addressed everyone online. */
-  kind: 'you' | 'here';
+  /**
+   * 'you' = addressed me by name/id; 'here' = @here, addressed everyone
+   * online; 'message' = no mention — sent only when the destination's notify
+   * level is 'all'.
+   */
+  kind: 'you' | 'here' | 'message';
 }
 
 export function isMissedArrival(postedAt: string, now: number = Date.now()): boolean {
   const t = new Date(postedAt).getTime();
   return Number.isFinite(t) && now - t > MISSED_THRESHOLD_MS;
+}
+
+/**
+ * The cooldown bucket for one notification: per space, per thread, AND per
+ * kind class. A level-'all' plain message must never mask a direct @you (or
+ * @here) landing in the same thread right after — so mentions and plain
+ * messages cool down separately; @you and @here share a bucket (both are
+ * "someone wants you here", one is enough per window).
+ */
+export function cooldownKeyFor(spaceKey: string, threadRootId: string, kind: MentionHit['kind']): string {
+  return `${spaceKey}/${threadRootId}/${kind === 'message' ? 'message' : 'mention'}`;
 }
 
 export function mentionLink(orgId: string, spaceId: string, threadRootId?: string): string {
@@ -69,8 +85,12 @@ export function mentionExcerpt(body: string, max = 140): string {
 }
 
 export function buildMentionNotify(hit: MentionHit): NotifyInput {
+  const title =
+    hit.kind === 'message'
+      ? `${hit.authorName} · ${hit.spaceName}`
+      : `${hit.authorName} ${hit.kind === 'here' ? 'mentioned everyone' : 'mentioned you'} · ${hit.spaceName}`;
   return {
-    title: `${hit.authorName} ${hit.kind === 'here' ? 'mentioned everyone' : 'mentioned you'} · ${hit.spaceName}`,
+    title,
     message: mentionExcerpt(hit.body),
     link: mentionLink(hit.orgId, hit.spaceId, hit.threadRootId),
     onlyWhenBackground: true,
@@ -206,21 +226,33 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
     if (frame.event.type !== 'message') return;
     const message = frame.event.message;
     if (message.author.memberId === me.id) return;
+    // Do-not-disturb drops everything, mentions included — and nothing is
+    // summarised after it lifts (Slack's posture: DND is silence, not a queue).
+    if (dndActive()) return;
+    // The per-destination level: 'mute' silences even direct mentions; 'all'
+    // notifies on plain messages too (fresh ones — replayed history never
+    // floods, only real mentions fold into the away summary).
+    // The thread this message belongs to — a root stands for its own thread.
+    const threadRootId = message.threadRoot ?? message.id;
+    const level = notifyLevelFor(orgId, spaceId, threadRootId);
+    if (level === 'mute') return;
     // People type the NAME (ids are opaque); agent-written mentions may carry
     // the id. A direct mention outranks @here when both appear.
     const kind: MentionHit['kind'] | null = mentionsMember(message.body, me)
       ? 'you'
       : containsHereAddress(message.body)
         ? 'here'
-        : null;
+        : level === 'all'
+          ? 'message'
+          : null;
     if (!kind) return;
 
-    const threadRootId = message.threadRoot ?? message.id;
     if (isMissedArrival(message.postedAt)) {
-      queueMissed(k, orgId, spaceId, spaceName, threadRootId, kind);
+      if (kind !== 'message') queueMissed(k, orgId, spaceId, spaceName, threadRootId, kind);
       return;
     }
-    const cooldownKey = `${k}/${threadRootId}`;
+    // Cooldown per thread AND per kind class (see cooldownKeyFor).
+    const cooldownKey = cooldownKeyFor(k, threadRootId, kind);
     const last = threadCooldown.get(cooldownKey) ?? 0;
     if (Date.now() - last < THREAD_COOLDOWN_MS) return;
     threadCooldown.set(cooldownKey, Date.now());

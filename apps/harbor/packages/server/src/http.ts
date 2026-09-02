@@ -379,6 +379,20 @@ export function buildHttpApp(deps: {
     return reply(c, routes.reactToMessage.response, { message });
   });
 
+  app.post('/v1/spaces/:spaceId/messages/:messageId/poll/votes', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.votePoll.params, c.req.param());
+    const input = await body(c, routes.votePoll.request);
+    const message = await service.votePoll(actor(c), spaceId, messageId, input);
+    return reply(c, routes.votePoll.response, { message });
+  });
+
+  app.post('/v1/spaces/:spaceId/messages/:messageId/poll/end', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.endPoll.params, c.req.param());
+    const input = await body(c, routes.endPoll.request);
+    const message = await service.endPoll(actor(c), spaceId, messageId, input);
+    return reply(c, routes.endPoll.response, { message });
+  });
+
   app.post('/v1/spaces/:spaceId/topics/:topicId', async (c) => {
     const { spaceId, topicId } = parseWith(routes.manageTopic.params, c.req.param());
     const input = await body(c, routes.manageTopic.request);

@@ -68,6 +68,8 @@ type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 type EditMessageInput = z.infer<Routes['editMessage']['request']>;
+type VotePollInput = z.infer<Routes['votePoll']['request']>;
+type EndPollInput = z.infer<Routes['endPoll']['request']>;
 
 export class SpacesClient {
   private readonly baseUrl: string;
@@ -391,6 +393,30 @@ export class SpacesClient {
         'POST',
         this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/reactions`),
         routes.reactToMessage.response,
+        input,
+      )
+    ).message;
+  }
+
+  /** Toggle a poll vote (idempotent; single-select add moves the vote). Returns the message with votes folded. */
+  async votePoll(spaceId: string, messageId: string, input: VotePollInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/poll/votes`),
+        routes.votePoll.response,
+        input,
+      )
+    ).message;
+  }
+
+  /** End a poll early (author-only; idempotent once closed). Returns the message with endedAt set. */
+  async endPoll(spaceId: string, messageId: string, input: EndPollInput): Promise<Message> {
+    return (
+      await this.request(
+        'POST',
+        this.space(spaceId, `/messages/${encodeURIComponent(messageId)}/poll/end`),
+        routes.endPoll.response,
         input,
       )
     ).message;

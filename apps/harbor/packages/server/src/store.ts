@@ -86,6 +86,19 @@ export interface StoredReaction {
   at: string;
 }
 
+/**
+ * A poll vote as stored: keyed (spaceId, messageId, answerId, by.memberId) —
+ * the reactions shape with an answer id in the emoji's seat. The poll
+ * definition itself rides on the message row; votes fold in on reads.
+ */
+export interface StoredPollVote {
+  spaceId: string;
+  messageId: string;
+  answerId: number;
+  by: Attribution;
+  at: string;
+}
+
 /** A message search hit: the row plus a raw-body excerpt (mentions unresolved). */
 export interface MessageSearchRow {
   message: Message;
@@ -211,6 +224,21 @@ export interface Store {
   listReactionsByMessage(spaceId: string, messageId: string): Promise<StoredReaction[]>;
   /** All reactions on the given messages (one page's fold), oldest first. */
   listReactionsForMessages(spaceId: string, messageIds: string[]): Promise<StoredReaction[]>;
+
+  // poll votes — per-(member, answer) toggles, mirroring reactions
+  getPollVote(spaceId: string, messageId: string, answerId: number, memberId: string): Promise<StoredPollVote | undefined>;
+  putPollVote(vote: StoredPollVote): Promise<void>;
+  deletePollVote(spaceId: string, messageId: string, answerId: number, memberId: string): Promise<void>;
+  /** Oldest first (fold order). */
+  listPollVotesByMessage(spaceId: string, messageId: string): Promise<StoredPollVote[]>;
+  /** Bulk fold for a page of messages (mirrors listReactionsForMessages), oldest first. */
+  listPollVotesForMessages(spaceId: string, messageIds: string[]): Promise<StoredPollVote[]>;
+  /**
+   * Early close: stamps `endedAt` on the message row's poll. The stored
+   * `message` event keeps its at-post poll — replay folds the `poll_ended`
+   * event instead (nothing to redact here, unlike deletion/editing).
+   */
+  markPollEnded(spaceId: string, messageId: string, endedAt: string): Promise<void>;
 
   // invites
   putInvite(invite: StoredInvite): Promise<void>;

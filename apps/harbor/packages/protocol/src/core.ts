@@ -113,6 +113,70 @@ export const ReactionGroup = z.object({
 export type ReactionGroup = z.infer<typeof ReactionGroup>;
 
 /**
+ * One poll answer, immutable once posted. `id` is server-assigned (1..n in
+ * creation order) — votes and events key on it, never on array position.
+ */
+export const PollAnswer = z.object({
+  id: z.number().int().min(1),
+  text: z.string().min(1).max(55),
+  emoji: ReactionEmoji.optional(),
+});
+export type PollAnswer = z.infer<typeof PollAnswer>;
+
+/** Display aggregate: who voted for one answer. Votes are visible by design (the Discord posture). */
+export const PollVoteGroup = z.object({
+  answerId: z.number().int().min(1),
+  memberIds: z.array(MemberId).min(1),
+});
+export type PollVoteGroup = z.infer<typeof PollVoteGroup>;
+
+/**
+ * A poll riding on a message (the Discord model: a field, not a message
+ * kind). The definition — question, answers, expiry, multiselect — is
+ * immutable once posted; only `endedAt` (early close) and the folded `votes`
+ * move. A poll is closed when `endedAt` is set OR `expiresAt` has passed —
+ * expiry is lazy, no server job fires; clients and the vote route both
+ * compute it from data already on the wire. Like `reactions`, `votes` is
+ * folded live state on reads; the copy inside a stored `message` event is
+ * the at-post snapshot (empty).
+ */
+export const Poll = z.object({
+  question: z.string().min(1).max(300),
+  answers: z.array(PollAnswer).min(2).max(10),
+  allowMultiselect: z.boolean().default(false),
+  expiresAt: z.iso.datetime(),
+  /** Set when the author ended the poll early; natural expiry never sets it. */
+  endedAt: z.iso.datetime().optional(),
+  votes: z.array(PollVoteGroup).default([]),
+});
+export type Poll = z.infer<typeof Poll>;
+
+/**
+ * One member's vote toggle on one poll answer — the payload of `poll_vote`.
+ * Per-(member, answer), reaction semantics; on single-select polls the org
+ * moves a vote by emitting a `removed` then an `added` under one lock.
+ */
+export const PollVote = z.object({
+  spaceId: SpaceId,
+  threadRoot: MessageId.optional(),
+  messageId: MessageId,
+  answerId: z.number().int().min(1),
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type PollVote = z.infer<typeof PollVote>;
+
+/** The author closing their poll early — the payload of `poll_ended`. */
+export const PollEnd = z.object({
+  spaceId: SpaceId,
+  threadRoot: MessageId.optional(),
+  messageId: MessageId,
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type PollEnd = z.infer<typeof PollEnd>;
+
+/**
  * The author tombstoning their own message — the one act the content plane
  * restricts to a single member (deleter == author always; admin powers are
  * membership/policy, never content — spec §4). Like Reaction, `threadRoot`
@@ -179,5 +243,13 @@ export const Message = z.object({
    * fold live state in, so the field is current wherever messages are listed.
    */
   reactions: z.array(ReactionGroup).default([]),
+  /**
+   * Present on poll messages. `body` still carries a plain-markdown fallback
+   * rendering of the poll (clients that predate the field show something
+   * sensible; body semantics — min 1, tombstone = empty — stay untouched);
+   * poll-aware clients render the card instead of the body. Deletion redacts
+   * the poll along with the body.
+   */
+  poll: Poll.optional(),
 });
 export type Message = z.infer<typeof Message>;

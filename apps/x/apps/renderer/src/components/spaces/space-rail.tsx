@@ -1,14 +1,19 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bot, FileText, Folder, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, PenTool, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bell, BellOff, Bot, Check, FileText, Folder, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, PenTool, Plus, Search, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub,
+    DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
+import {
+    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub,
+    ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { toast } from '@/lib/toast'
 import { FileTree } from '@/components/spaces/files-tab'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
+import type { NotifyLevel, SpaceNotifyHandle } from '@/hooks/use-spaces-notify'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
@@ -32,8 +37,14 @@ const FILES_MIN = 96
 /** Dragging the Files divider always leaves this much for Messages + topics. */
 const TOPICS_FLOOR = 160
 
+const NOTIFY_CHOICES: { level: NotifyLevel; label: string }[] = [
+    { level: 'all', label: 'All messages' },
+    { level: 'mentions', label: 'Mentions only' },
+    { level: 'mute', label: 'Muted' },
+]
+
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, notify, onMenuOpenChange, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, onTogglePin,
 }: {
     orgId: string
@@ -47,6 +58,10 @@ export function SpaceRail({
     draftFolders: readonly string[]
     presence: SpacePresence
     unreadPaths: ReadonlySet<string>
+    /** The pane's notification-prefs state — shared so the header's space-level changes reflect here live. */
+    notify: SpaceNotifyHandle
+    /** A row menu is up — the unpinned rail must not slide away underneath it. */
+    onMenuOpenChange?: (open: boolean) => void
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     onCreateFile: (path: string) => void
@@ -121,6 +136,11 @@ export function SpaceRail({
         await manageTopic(topicId, { action: 'retitle', title })
     }
 
+    // Per-thread notification levels (the context/⋯ menus set them; the
+    // main-side watcher reads them), keyed by the thread's root message id.
+    // 'mute' also earns the row a glyph.
+    const effectiveLevel = (dest: string): NotifyLevel => notify.topics[dest] ?? notify.spaceLevel ?? 'mentions'
+
     const generalUnread = useMemo(() => {
         if (!stream.ready) return 0
         const mark = getTopicLastReadAt(orgId, spaceId, STREAM_READ_KEY)
@@ -148,7 +168,7 @@ export function SpaceRail({
     const q = query.trim().toLowerCase()
     const topicRows = topics
         .filter((t) => (filter === 'archived' ? t.archived : !t.archived))
-        .filter((t) => (filter === 'unread' ? isUnread(t) : true))
+        .filter((t) => (filter === 'unread' ? isUnread(t) && effectiveLevel(t.rootMessageId) !== 'mute' : true))
         // Titles resolve before the search filter so searching a person's
         // name finds the discussions that mention them.
         .map((t) => ({ topic: t, title: resolveMentions(t.title, memberNames) }))
@@ -169,7 +189,12 @@ export function SpaceRail({
         if (path) onCreateBoard(path)
     }
 
-    const unreadTopics = topics.filter((t) => !t.archived && isUnread(t)).length + (generalUnread > 0 ? 1 : 0)
+    // The stream mutes under its own key, like any thread.
+    const generalBadge = effectiveLevel(STREAM_READ_KEY) === 'mute' ? 0 : generalUnread
+
+    // Muted destinations don't badge here either (same posture as the sidebar).
+    const unreadTopics =
+        topics.filter((t) => !t.archived && isUnread(t) && effectiveLevel(t.rootMessageId) !== 'mute').length + (generalBadge > 0 ? 1 : 0)
     const badge = unreadTopics + unreadPaths.size
 
     return (
@@ -241,9 +266,9 @@ export function SpaceRail({
                                 )}
                             >
                                 <MessagesSquare className="size-3.5 shrink-0 text-muted-foreground" />
-                                <span className={cn('flex-1 truncate', generalUnread > 0 && selection.kind !== 'general' && 'font-semibold')}>Messages</span>
-                                {generalUnread > 0 && selection.kind !== 'general' && (
-                                    <span className="text-[11px] font-semibold tabular-nums">{generalUnread}</span>
+                                <span className={cn('flex-1 truncate', generalBadge > 0 && selection.kind !== 'general' && 'font-semibold')}>Messages</span>
+                                {generalBadge > 0 && selection.kind !== 'general' && (
+                                    <span className="text-[11px] font-semibold tabular-nums">{generalBadge}</span>
                                 )}
                                 {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" title="someone is typing" />}
                             </button>
@@ -279,7 +304,10 @@ export function SpaceRail({
                             <div className="flex flex-col gap-0.5">
                                 {topicRows.map(({ topic, title }) => {
                                     const active = topic.rootMessageId === selectedRootId
-                                    const unread = isUnread(topic)
+                                    const muted = effectiveLevel(topic.rootMessageId) === 'mute'
+                                    // Muted topics don't clamor: no bold, no dot,
+                                    // greyed like archived (Slack's treatment).
+                                    const unread = isUnread(topic) && !muted
                                     const replies = topic.rootMessage?.replyCount ?? 0
                                     const files = artifactFiles.get(topic.rootMessageId)
                                     const working = (presence.working.get(topic.rootMessageId) ?? []).length > 0
@@ -303,7 +331,7 @@ export function SpaceRail({
                                     }
                                     return (
                                         <div key={topic.id} className="group/topicrow relative">
-                                            <ContextMenu>
+                                            <ContextMenu onOpenChange={onMenuOpenChange}>
                                                 <ContextMenuTrigger asChild>
                                                     <button
                                                         type="button"
@@ -311,7 +339,7 @@ export function SpaceRail({
                                                         className={cn(
                                                             'flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left',
                                                             active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
-                                                            topic.archived && 'opacity-60',
+                                                            (topic.archived || muted) && 'opacity-60',
                                                         )}
                                                     >
                                                         <div className="flex items-center gap-1.5">
@@ -325,6 +353,7 @@ export function SpaceRail({
                                                                 <span className="inline-flex items-center gap-0.5" title={`Files changed here: ${[...files].join(', ')}`}><FileText className="size-2.5" />{files.size}</span>
                                                             )}
                                                             {working && <Bot className="size-2.5" aria-label="a Rowboat is working here" />}
+                                                            {muted && <BellOff className="size-2.5" aria-label="muted" />}
                                                             {topic.archived && <span>· archived</span>}
                                                         </div>
                                                     </button>
@@ -336,6 +365,25 @@ export function SpaceRail({
                                                     <ContextMenuItem onSelect={() => setRenaming({ topicId: topic.id, value: title })}>
                                                         <Pencil className="size-3.5 mr-2" /> Rename
                                                     </ContextMenuItem>
+                                                    <ContextMenuSub>
+                                                        <ContextMenuSubTrigger>
+                                                            <Bell className="size-3.5 mr-2" /> Notifications
+                                                        </ContextMenuSubTrigger>
+                                                    {/* Overrides key on the thread's ROOT message id, never topic.id: the
+                                                        watcher (main) and the unread badge both resolve a message to
+                                                        `threadRoot ?? id` and look the level up by that. */}
+                                                        <ContextMenuSubContent>
+                                                            {NOTIFY_CHOICES.map((c) => (
+                                                                <ContextMenuItem key={c.level} onSelect={() => notify.setTopicLevel(topic.rootMessageId, c.level)}>
+                                                                    <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] !== c.level && 'opacity-0')} /> {c.label}
+                                                                </ContextMenuItem>
+                                                            ))}
+                                                            <ContextMenuSeparator />
+                                                            <ContextMenuItem onSelect={() => notify.setTopicLevel(topic.rootMessageId, null)}>
+                                                                <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] && 'opacity-0')} /> Space default
+                                                            </ContextMenuItem>
+                                                        </ContextMenuSubContent>
+                                                    </ContextMenuSub>
                                                     <ContextMenuSeparator />
                                                     {topic.archived ? (
                                                         <ContextMenuItem onSelect={() => void manageTopic(topic.id, { action: 'unarchive' })}>
@@ -351,7 +399,7 @@ export function SpaceRail({
                                                     </ContextMenuItem>
                                                 </ContextMenuContent>
                                             </ContextMenu>
-                                            <DropdownMenu>
+                                            <DropdownMenu onOpenChange={onMenuOpenChange}>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
                                                         type="button"
@@ -365,6 +413,22 @@ export function SpaceRail({
                                                     <DropdownMenuItem onClick={() => setRenaming({ topicId: topic.id, value: title })}>
                                                         <Pencil className="size-3.5 mr-2" /> Rename
                                                     </DropdownMenuItem>
+                                                    <DropdownMenuSub>
+                                                        <DropdownMenuSubTrigger>
+                                                            <Bell className="size-3.5 mr-2" /> Notifications
+                                                        </DropdownMenuSubTrigger>
+                                                        <DropdownMenuSubContent>
+                                                            {NOTIFY_CHOICES.map((c) => (
+                                                                <DropdownMenuItem key={c.level} onClick={() => notify.setTopicLevel(topic.rootMessageId, c.level)}>
+                                                                    <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] !== c.level && 'opacity-0')} /> {c.label}
+                                                                </DropdownMenuItem>
+                                                            ))}
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem onClick={() => notify.setTopicLevel(topic.rootMessageId, null)}>
+                                                                <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] && 'opacity-0')} /> Space default
+                                                            </DropdownMenuItem>
+                                                        </DropdownMenuSubContent>
+                                                    </DropdownMenuSub>
                                                     {topic.archived ? (
                                                         <DropdownMenuItem onClick={() => void manageTopic(topic.id, { action: 'unarchive' })}>
                                                             <ArchiveRestore className="size-3.5 mr-2" /> Unarchive

@@ -1,7 +1,8 @@
-import { startTransition, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, Loader2 } from 'lucide-react'
+import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ArrowDown, ArrowUp, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
+import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
@@ -9,10 +10,17 @@ import {
     removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { applyReaction, threadLabelOf } from '@/lib/spaces-conventions'
-import { dayKey, formatDayLabel, isContinuation } from '@/lib/spaces-conventions'
+import { subscribeComposeInsert } from '@/lib/spaces-compose'
+import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
+import { consumeJump, requestJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
+import { pinnedMessages } from '@/lib/spaces-corpus'
+import { PinnedBanner } from '@/components/spaces/pinned-banner'
+import { PollDialogHost } from '@/components/spaces/poll-dialog'
+import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
+import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markRead, markTopicRead } from '@/lib/spaces-read-state'
+import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
@@ -32,6 +40,8 @@ const RENDER_CAP = 100
 const NEW_LINGER_MS = 5_000
 /** Clear delay after the fade starts — must outlast the divider's duration-700. */
 const NEW_FADE_MS = 800
+/** The pinned strip shows the newest pins, stepped through with a chevron. */
+const PIN_BANNER_MAX = 3
 
 export function GeneralStream({
     org, space, stream, presence, members, memberNames, entries = [], onOpenThread, visible = true,
@@ -53,7 +63,7 @@ export function GeneralStream({
      */
     visible?: boolean
 }) {
-    const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null)
+    const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const { onType } = usePresenceSender(org.id, space.id, undefined, visible)
@@ -218,6 +228,110 @@ export function GeneralStream({
         setSeed({ text: `@rowboat \n\n${quote}\n— ${name}`, nonce: Date.now() })
     }
 
+    // Quote-reply (the Discord gesture): the quoted copy seeds the composer,
+    // the reply lands in the stream beside it — plain markdown on the wire.
+    // Image embeds drop (a quote is text); names, not wire ids, like askRowboat.
+    const quoteReply = (message: spaces.Message) => {
+        const name = memberNames.get(message.author.memberId) ?? message.author.memberId
+        const text = resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+        if (!text) return
+        const quote = text.split('\n').map((l) => `> ${l}`).join('\n')
+        setSeed({ text: `${quote}\n> — ${name}\n\n`, nonce: Date.now() })
+    }
+
+    // The profile popover's "Mention" lands in whichever composer is visible.
+    useEffect(() => {
+        if (!visible) return
+        return subscribeComposeInsert((insert) => setSeed({ text: insert.text, nonce: Date.now(), append: true }))
+    }, [visible])
+
+    // Saved-for-later is personal and local; the row's menu label needs to
+    // know which messages are in it.
+    const savedList = useSaved(org.id, space.id)
+    const savedIds = useMemo(() => new Set(savedList.map((s) => s.messageId)), [savedList])
+    const toggleSave = (message: spaces.Message) => {
+        const nowSaved = toggleSaved(org.id, space.id, message)
+        toast(nowSaved ? 'Saved for later' : 'Removed from saved', 'success')
+    }
+
+    /** The message being forwarded — non-null renders the destination dialog. */
+    const [forwarding, setForwarding] = useState<spaces.Message | null>(null)
+
+    /** Opens the poll dialog (state lives in PollDialogHost — see its doc). */
+    const openPollRef = useRef<(() => void) | null>(null)
+    const createPoll = async (input: spaces.SpacesNewPollInput) => {
+        try {
+            const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, input })
+            ingestStreamMessage(org.id, space.id, posted)
+            markTopicRead(org.id, space.id, STREAM_READ_KEY)
+            analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: false })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
+            throw err
+        }
+    }
+
+    // Poll votes, the reactions pattern: fold optimistically, confirm with the
+    // org's folded answer, put the old state back on failure. Multiselect
+    // submits one toggle per picked answer; the last response wins the fold.
+    const votePoll = async (message: spaces.Message, answerIds: number[]) => {
+        if (!message.poll || answerIds.length === 0) return
+        let optimistic = message.poll
+        for (const answerId of answerIds) {
+            optimistic = applyPollVote(optimistic, { answerId, memberId: org.memberId, action: 'added' })
+        }
+        updateStreamMessage(org.id, space.id, { ...message, poll: optimistic })
+        try {
+            let updated: spaces.Message | undefined
+            for (const answerId of answerIds) {
+                const res = await window.ipc.invoke('spaces:votePoll', {
+                    orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'add',
+                })
+                updated = res.message
+            }
+            if (updated) updateStreamMessage(org.id, space.id, updated)
+        } catch (err) {
+            updateStreamMessage(org.id, space.id, message)
+            toast(err instanceof Error ? err.message : 'Could not vote', 'error')
+        }
+    }
+
+    const removePollVote = async (message: spaces.Message) => {
+        if (!message.poll) return
+        const mine = myPollVotes(message.poll, org.memberId)
+        if (mine.length === 0) return
+        let optimistic = message.poll
+        for (const answerId of mine) {
+            optimistic = applyPollVote(optimistic, { answerId, memberId: org.memberId, action: 'removed' })
+        }
+        updateStreamMessage(org.id, space.id, { ...message, poll: optimistic })
+        try {
+            let updated: spaces.Message | undefined
+            for (const answerId of mine) {
+                const res = await window.ipc.invoke('spaces:votePoll', {
+                    orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'remove',
+                })
+                updated = res.message
+            }
+            if (updated) updateStreamMessage(org.id, space.id, updated)
+        } catch (err) {
+            updateStreamMessage(org.id, space.id, message)
+            toast(err instanceof Error ? err.message : 'Could not remove the vote', 'error')
+        }
+    }
+
+    const endPoll = async (message: spaces.Message) => {
+        if (!window.confirm('End this poll now? Voting stops immediately.')) return
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:endPoll', {
+                orgId: org.id, spaceId: space.id, messageId: message.id,
+            })
+            updateStreamMessage(org.id, space.id, updated)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not end the poll', 'error')
+        }
+    }
+
     // Toggle: add when the viewer isn't in the group yet, remove when they are.
     // Optimistic — the chip moves the instant it's clicked; the org's answer
     // replaces it right behind, and a failure puts the old state back.
@@ -281,6 +395,7 @@ export function GeneralStream({
     // Streamdown, so an uncapped list makes the first paint crawl. "Show
     // earlier" just lifts the cap; the messages are already in memory.
     const streamMessages = stream.messages
+    const pinned = useMemo(() => pinnedMessages(streamMessages).slice(0, PIN_BANNER_MAX), [streamMessages])
     const [renderCap, setRenderCap] = useState(FIRST_PAINT_CAP)
     useEffect(() => setRenderCap(FIRST_PAINT_CAP), [memoryKey])
     // The short tail is on screen — widen to the full window right after, as
@@ -342,6 +457,64 @@ export function GeneralStream({
             pendingRestoreRef.current = null
         }
     }, [stream.messages, stream.loadingOlder])
+
+    // Jump-to-message (search, pinned, saved): consume the pending jump once
+    // visible, lift the render cap so the row is in the DOM, then scroll +
+    // flash. The landing position counts as a reader scroll (tail pin lets go).
+    const [jumpMid, setJumpMid] = useState<string | null>(null)
+    useEffect(() => {
+        if (!visible) return
+        const attempt = () => {
+            const mid = consumeJump(STREAM_READ_KEY)
+            if (mid) setJumpMid(mid)
+        }
+        attempt()
+        return subscribeJump(attempt)
+    }, [visible])
+    useLayoutEffect(() => {
+        if (!jumpMid) return
+        const el = scrollRef.current
+        if (!el) return
+        if (scrollToMessage(el, jumpMid)) {
+            lastScrollTopRef.current = el.scrollTop
+            setJumpMid(null)
+            return
+        }
+        // Row not in the DOM: a cap hiding settled rows lifts and retries on
+        // the next commit; a fully-rendered window without the row is a real
+        // miss (the corpus only holds loaded pages) — give up, don't spin.
+        if (streamMessages.length > renderCap) setRenderCap(streamMessages.length + 10)
+        else if (stream.ready) setJumpMid(null)
+    }, [jumpMid, renderCap, stream.ready, streamMessages.length])
+
+    // Jump-to-unread: the stream always opens at the bottom, so when the New
+    // line sits above the fold a pill at the top scrolls to it. Dismissed by
+    // use; re-arms whenever the divider re-arms (adjust-on-change).
+    const [newJumpNonce, setNewJumpNonce] = useState(0)
+    const [newJumped, setNewJumped] = useState(false)
+    const [lastNewSince, setLastNewSince] = useState(newSince)
+    if (newSince !== lastNewSince) {
+        setLastNewSince(newSince)
+        setNewJumped(false)
+    }
+    const newCount = newSince
+        ? stream.messages.filter((m) => !m.deletedAt && !m.pending && !m.failed && m.postedAt > newSince && m.author.memberId !== org.memberId).length
+        : 0
+    const jumpToNew = () => {
+        setRenderCap((c) => Math.max(c, stream.messages.length + 10))
+        setNewJumped(true)
+        setNewJumpNonce((n) => n + 1)
+    }
+    useLayoutEffect(() => {
+        if (newJumpNonce === 0) return
+        const el = scrollRef.current
+        if (!el) return
+        const divider = el.querySelector<HTMLElement>('[data-new-divider]')
+        if (divider) {
+            divider.scrollIntoView({ block: 'center' })
+            lastScrollTopRef.current = el.scrollTop
+        }
+    }, [newJumpNonce])
 
     // The bottom anchor is not one-shot: message bodies keep growing after
     // first layout (lazy images have no reserved height, code highlighting and
@@ -417,8 +590,15 @@ export function GeneralStream({
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
                 onEdit={(m, body) => void editMessage(m, body)}
+                onQuoteReply={quoteReply}
+                onForward={setForwarding}
+                onToggleSave={toggleSave}
+                saved={savedIds.has(message.id)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
+                onVotePoll={(m, answerIds) => void votePoll(m, answerIds)}
+                onRemovePollVote={(m) => void removePollVote(m)}
+                onEndPoll={(m) => void endPoll(m)}
             />,
         )
         prev = message
@@ -434,6 +614,11 @@ export function GeneralStream({
                 <span className="flex-1" />
                 {stream.error && <span className="text-xs text-destructive truncate" title={stream.error}>messages unavailable</span>}
             </div>
+            <PinnedBanner
+                pinned={pinned}
+                memberNames={memberNames}
+                onJump={(messageId) => requestJump({ topicId: STREAM_READ_KEY, messageId })}
+            />
             <div className="relative flex-1 min-h-0 flex flex-col">
             <div
                 ref={scrollRef}
@@ -490,6 +675,16 @@ export function GeneralStream({
                 <div ref={bottomRef} />
                 </div>
             </div>
+            {hasNewLine && newCount > 0 && !newJumped && (
+                <button
+                    type="button"
+                    onClick={jumpToNew}
+                    className="absolute top-2 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-top-2 items-center gap-1.5 rounded-full border border-orange-500/40 bg-background/95 px-3 py-1 text-xs font-medium text-orange-600 shadow-md hover:bg-accent"
+                >
+                    <ArrowUp className="size-3" />
+                    {newCount} new — jump to unread
+                </button>
+            )}
             {awayFromBottom && (() => {
                 const unseen = streamMessages.filter(
                     (m) => m.offset > lastSeenOffsetRef.current && !m.pending && !m.failed && m.author.memberId !== org.memberId,
@@ -506,11 +701,22 @@ export function GeneralStream({
                 )
             })()}
             </div>
+            {forwarding && (
+                <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
+            )}
+            <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
                 busy={false}
                 draftKey={memoryKey}
                 onSend={post}
+                onSchedule={async (body, at) => {
+                    await window.ipc.invoke('spaces:schedule', {
+                        orgId: org.id, spaceId: space.id, body, at: at.toISOString(), kind: 'message',
+                    })
+                    toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
+                }}
+                onCreatePoll={() => openPollRef.current?.()}
                 onType={onType}
                 seed={seed}
                 members={members}
@@ -527,6 +733,31 @@ export function GeneralStream({
                                 toast('Invite link copied to clipboard', 'success')
                             } catch (err) {
                                 toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')
+                            }
+                        },
+                    },
+                    {
+                        name: 'poll',
+                        hint: 'Create a poll — pick answers, votes tally live',
+                        run: () => openPollRef.current?.(),
+                    },
+                    {
+                        name: 'remind',
+                        args: '<when> <text>',
+                        hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
+                        run: async (args) => {
+                            const parsed = parseRemindArgs(args)
+                            if (typeof parsed === 'string') {
+                                toast(parsed, 'info')
+                                return
+                            }
+                            try {
+                                await window.ipc.invoke('spaces:schedule', {
+                                    orgId: org.id, spaceId: space.id, body: parsed.text, at: parsed.at.toISOString(), kind: 'reminder',
+                                })
+                                toast(`Reminder set for ${formatScheduleTime(parsed.at)}`, 'success')
+                            } catch (err) {
+                                toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
                             }
                         },
                     },

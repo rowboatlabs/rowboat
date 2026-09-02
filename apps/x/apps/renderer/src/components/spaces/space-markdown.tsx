@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ZoomableImage } from '@/components/image-lightbox'
 import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
 import { toast } from '@/lib/toast'
+import { MemberProfilePopover } from '@/components/spaces/atoms'
 import { useMemberNames } from '@/components/spaces/member-text'
 import {
     decorateMentions,
@@ -414,29 +415,55 @@ const spaceComponents: StreamdownComponents = {
     },
     a: SpaceAnchor,
     // decorateMentions renders "@name" as **bold**; the stream dialect shows
-    // those as tinted mention chips (broadcasts get the amber "needs you" wash).
+    // those as tinted mention chips (broadcasts get the amber "needs you"
+    // wash). A chip naming a real member also opens their profile on click.
     strong: MentionStrong,
 }
 
 function MentionStrong({ children, ...props }: ComponentProps<'strong'>) {
+    const names = useMemberNames()
     const label = plainLabel(children)
-    if (label?.startsWith('@')) {
-        const broadcast = /^@(here|channel|everyone)$/i.test(label)
+    if (!label?.startsWith('@')) return <strong {...props}>{children}</strong>
+
+    const broadcast = /^@(here|channel|everyone)$/i.test(label)
+    const chip = cn(
+        'rounded-[4px] px-[3px] py-px font-medium',
+        broadcast
+            ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
+            : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
+    )
+    // @here/@channel address the room, not a person — no profile to open.
+    if (broadcast) {
         return (
-            <strong
-                className={cn(
-                    'rounded-[4px] px-[3px] py-px font-medium',
-                    broadcast
-                        ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
-                        : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
-                )}
-                {...props}
-            >
+            <strong className={chip} {...props}>
                 {children}
             </strong>
         )
     }
-    return <strong {...props}>{children}</strong>
+    // The label carries the display name (decorateMentions), so the id comes
+    // from a reverse lookup; an unmatched name still renders as a chip.
+    const name = label.slice(1)
+    let memberId: string | null = null
+    for (const [id, display] of names) {
+        if (display === name) {
+            memberId = id
+            break
+        }
+    }
+    if (!memberId) {
+        return (
+            <strong className={chip} {...props}>
+                {children}
+            </strong>
+        )
+    }
+    return (
+        <MemberProfilePopover id={memberId}>
+            <button type="button" className={cn(chip, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
+                {children}
+            </button>
+        </MemberProfilePopover>
+    )
 }
 
 function SpaceAnchor({ href, children }: ComponentProps<'a'>) {

@@ -1,14 +1,17 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, PenTool, Plus } from 'lucide-react'
+import { Bell, BellOff, Check, ChevronDown, Clock, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, PenTool, Plus } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent,
+    DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { AddOrgDialog, AvatarStack, MemberAvatar, OrgMonogram } from '@/components/spaces/atoms'
+import { AddOrgDialog, AvatarStack, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
+import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceSearch } from '@/components/spaces/space-search'
@@ -16,7 +19,10 @@ import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { SpaceMembersProvider } from '@/components/spaces/member-text'
+import { useSpaceNotifyPrefs, type NotifyLevel } from '@/hooks/use-spaces-notify'
+import { requestJump } from '@/lib/spaces-jump'
+import { chord } from '@/lib/shortcut'
+import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
 import { SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
@@ -53,9 +59,9 @@ const CHAT_FLOOR = 460
 const SPLIT_FLOOR = 960
 
 const MODES: { k: SpaceMode; label: string; Icon: typeof MessageSquare; kb: string }[] = [
-    { k: 'talk', label: 'Talk', Icon: MessageSquare, kb: '⌘1' },
-    { k: 'read', label: 'Read', Icon: FileText, kb: '⌘2' },
-    { k: 'split', label: 'Split', Icon: Columns2, kb: '⌘3' },
+    { k: 'talk', label: 'Talk', Icon: MessageSquare, kb: chord('1') },
+    { k: 'read', label: 'Read', Icon: FileText, kb: chord('2') },
+    { k: 'split', label: 'Split', Icon: Columns2, kb: chord('3') },
 ]
 
 // The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
@@ -116,6 +122,11 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                 space={selectedSpace}
                 selection={railSelection}
                 onSelect={onRailSelect}
+                onSwitchSpace={(orgId, spaceId) => {
+                    onSelect({ orgId, spaceId })
+                    // The old space's rail selection means nothing over there.
+                    onRailSelect({ kind: 'general' })
+                }}
                 onOpenSession={onOpenSession}
                 active={active}
             />
@@ -164,6 +175,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     space: spaces.Space
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
+    /** The quick switcher can land on another space entirely. */
+    onSwitchSpace: (orgId: string, spaceId: string) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
@@ -239,6 +252,46 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
             toast(err instanceof Error ? err.message : 'Could not create an invite', 'error')
         }
     }
+
+    // Space-wide notification level ('mentions' is the default; topics
+    // override per-row from the rail's menus).
+    const notify = useSpaceNotifyPrefs(org.id, space.id)
+    const notifyChoices: { level: NotifyLevel; label: string }[] = [
+        { level: 'all', label: 'All messages' },
+        { level: 'mentions', label: 'Mentions only' },
+        { level: 'mute', label: 'Muted' },
+    ]
+
+    // Do-not-disturb — one global until-instant; the mention watcher (main)
+    // drops everything while it holds. The bell shows the state.
+    const [dndUntil, setDndUntilState] = useState<string | null>(null)
+    useEffect(() => {
+        void window.ipc.invoke('spaces:getDnd', null).then((r) => setDndUntilState(r.until)).catch(() => {})
+    }, [])
+    // A clock the render may read: ticks every 30s so the bell clears itself
+    // when the DND instant passes (Date.now() in render is impure and never
+    // re-runs on its own).
+    const [now, setNow] = useState(() => Date.now())
+    useEffect(() => {
+        const t = setInterval(() => setNow(Date.now()), 30_000)
+        return () => clearInterval(t)
+    }, [])
+    const dndActive = !!dndUntil && new Date(dndUntil).getTime() > now
+    const setDnd = (minutes: number | null) => {
+        const until = minutes === null ? null : new Date(Date.now() + minutes * 60_000).toISOString()
+        setDndUntilState(until)
+        void window.ipc.invoke('spaces:setDnd', { until }).catch(() => {})
+    }
+    const setDndUntilTomorrow = () => {
+        const t = new Date()
+        t.setDate(t.getDate() + 1)
+        t.setHours(9, 0, 0, 0)
+        setDndUntilState(t.toISOString())
+        void window.ipc.invoke('spaces:setDnd', { until: t.toISOString() }).catch(() => {})
+    }
+
+    // The scheduled sends/reminders list (⋯ menu).
+    const [scheduledOpen, setScheduledOpen] = useState(false)
 
     const markAllRead = () => {
         markRead(org.id, space.id)
@@ -383,6 +436,14 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     }
     const openFile = (path: string) => select({ kind: 'file', path })
 
+    /** Search / pinned / saved landings: open the surface, then scroll + flash. */
+    const navigateToMessage = (rootMessageId: string, messageId: string) => {
+        requestJump({ topicId: rootMessageId, messageId })
+        // STREAM_READ_KEY stands for the stream itself; anything else is a thread.
+        if (rootMessageId === STREAM_READ_KEY) select({ kind: 'general' })
+        else select({ kind: 'thread', rootMessageId })
+    }
+
     // Selection can also change under us (history ‹ ›, deep links). Only
     // reconcile when the current mode cannot show what arrived.
     const selKey = railKey(selection)
@@ -498,9 +559,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
 
     return (
         <SpaceMembersProvider members={memberNames}>
+        <SpaceProfilesProvider members={members} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
         <SpaceNavProvider onOpenFile={openFile}>
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="relative flex-1 min-h-0 flex flex-col">
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
             <header className="flex items-center gap-3 px-4 h-12 shrink-0 border-b border-border">
@@ -531,20 +593,22 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             {roster.map((m) => {
                                 const isHere = hereSet.has(m.id)
                                 return (
-                                    <div key={m.id} className="flex items-center gap-2 rounded-md px-2 py-1.5">
-                                        <span className="relative shrink-0">
-                                            <MemberAvatar id={m.id} name={m.displayName} size="md" />
-                                            {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
-                                        </span>
-                                        <span className="min-w-0 flex-1 truncate text-sm">
-                                            {m.displayName}
-                                            {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
-                                        </span>
-                                        {m.role === 'admin' && (
-                                            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
-                                        )}
-                                        {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
-                                    </div>
+                                    <MemberProfilePopover key={m.id} id={m.id}>
+                                        <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
+                                            <span className="relative shrink-0">
+                                                <MemberAvatar id={m.id} name={m.displayName} size="md" />
+                                                {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
+                                            </span>
+                                            <span className="min-w-0 flex-1 truncate text-sm">
+                                                {m.displayName}
+                                                {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
+                                            </span>
+                                            {m.role === 'admin' && (
+                                                <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
+                                            )}
+                                            {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
+                                        </button>
+                                    </MemberProfilePopover>
                                 )
                             })}
                         </div>
@@ -565,7 +629,39 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     </span>
                 )}
                 <div className="flex-1" />
-                <SpaceSearch orgId={org.id} spaceId={space.id} onNavigate={select} />
+                <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} />
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            title={dndActive ? `Do not disturb until ${new Date(dndUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Do not disturb'}
+                            className={cn(
+                                'inline-flex size-7 items-center justify-center rounded-md hover:bg-accent',
+                                dndActive ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground hover:text-foreground',
+                            )}
+                        >
+                            {dndActive ? <BellOff className="size-4" /> : <Bell className="size-4" />}
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        {dndActive && (
+                            <DropdownMenuItem onClick={() => setDnd(null)}>
+                                <Bell className="size-3.5 mr-2" /> Turn off do not disturb
+                            </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onClick={() => setDnd(30)}>For 30 minutes</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setDnd(60)}>For 1 hour</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setDnd(120)}>For 2 hours</DropdownMenuItem>
+                        <DropdownMenuItem onClick={setDndUntilTomorrow}>Until tomorrow 9:00</DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+                <BookmarksPopover
+                    orgId={org.id}
+                    spaceId={space.id}
+                    streamKey={STREAM_READ_KEY}
+                    topics={feed.topics}
+                    onNavigate={navigateToMessage}
+                />
                 {effMode === 'talk' && !isWhiteboard && selection.kind !== 'file' && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
                     <button
                         type="button"
@@ -580,7 +676,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                 )}
                 <button
                     type="button"
-                    title={isWhiteboard ? 'Back to the conversation ⌘4' : 'Whiteboard — draw together, live ⌘4'}
+                    title={isWhiteboard ? `Back to the conversation ${chord('4')}` : `Whiteboard — draw together, live ${chord('4')}`}
                     onClick={toggleWhiteboard}
                     className={cn(
                         'inline-flex h-6 items-center gap-1.5 rounded-md border px-2 text-xs',
@@ -623,6 +719,21 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         <DropdownMenuItem onClick={markAllRead}>
                             <Check className="size-3.5 mr-2" /> Mark all read
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setScheduledOpen(true)}>
+                            <Clock className="size-3.5 mr-2" /> Scheduled
+                        </DropdownMenuItem>
+                        <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                                <Bell className="size-3.5 mr-2" /> Notifications
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                                {notifyChoices.map((c) => (
+                                    <DropdownMenuItem key={c.level} onClick={() => notify.setSpaceLevel(c.level)}>
+                                        <Check className={cn('size-3.5 mr-2', (notify.spaceLevel ?? 'mentions') !== c.level && 'opacity-0')} /> {c.label}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuSubContent>
+                        </DropdownMenuSub>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </header>
@@ -639,6 +750,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     draftFolders={draftFolders}
                     presence={presence}
                     unreadPaths={unreadPaths}
+                    notify={notify}
+
                     selection={selection}
                     onSelect={select}
                     onCreateFile={openFile}
@@ -779,6 +892,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     </aside>
                 )}
             </div>
+            {scheduledOpen && <ScheduledDialog orgId={org.id} spaceId={space.id} onClose={() => setScheduledOpen(false)} />}
             {trashOpen && (
                 <TrashDialog org={org} space={space} onClose={() => { setTrashOpen(false); setRefreshTick((t) => t + 1) }} />
             )}
@@ -796,6 +910,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         </div>
         </SpaceNavProvider>
         </SpaceRefsProvider>
+        </SpaceProfilesProvider>
         </SpaceMembersProvider>
     )
 }

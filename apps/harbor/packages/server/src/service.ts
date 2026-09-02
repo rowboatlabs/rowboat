@@ -16,6 +16,7 @@ import {
   type Membership,
   type Message,
   type MoveAssetResult,
+  type Poll,
   type PresenceState,
   type ProposeChange,
   type ProposeChangeResult,
@@ -50,7 +51,7 @@ import { SpaceHub } from './hub.js';
 import { merge3 } from './merge.js';
 import { dispositionFor, imageDimensions, resolveMime } from './mime.js';
 import { parseSearchQuery } from './search.js';
-import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredReaction } from './store.js';
+import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredPollVote, StoredReaction } from './store.js';
 
 // The one service core (spec §9: one core, two faces). REST (http.ts) and MCP
 // (mcp.ts) are thin projections over this class; neither has a privileged path.
@@ -81,6 +82,11 @@ type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
 type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 type EditMessageInput = z.infer<Routes['editMessage']['request']>;
+type VotePollInput = z.infer<Routes['votePoll']['request']>;
+type EndPollInput = z.infer<Routes['endPoll']['request']>;
+
+/** Poll duration when the create request names none — Discord's default. */
+const DEFAULT_POLL_HOURS = 24;
 
 export interface OrgInfo {
   name: string;
@@ -785,13 +791,29 @@ export class HarborService {
   // flat threads behind reply chips (threadRoot, write-once), topics as
   // archivable annotation rows on threads. Posting never creates a container.
 
-  /** A root's live reactions folded in — every read path carries current truth. */
+  /**
+   * Live reaction and poll-vote state folded in — every read path carries
+   * current truth. Both fields are at-post snapshots on the stored message
+   * event; only reads are authoritative. Poll votes are fetched only when the
+   * page actually carries a poll, so the common all-prose page costs nothing.
+   */
   private async foldPage(spaceId: string, messages: Message[]): Promise<Message[]> {
     const byMessage = new Map<string, StoredReaction[]>();
     for (const r of await this.store.listReactionsForMessages(spaceId, messages.map((m) => m.id))) {
       byMessage.set(r.messageId, [...(byMessage.get(r.messageId) ?? []), r]);
     }
-    return messages.map((m) => ({ ...m, reactions: foldReactions(byMessage.get(m.id) ?? []) }));
+    const pollIds = messages.filter((m) => m.poll).map((m) => m.id);
+    const votesByMessage = new Map<string, StoredPollVote[]>();
+    if (pollIds.length > 0) {
+      for (const v of await this.store.listPollVotesForMessages(spaceId, pollIds)) {
+        votesByMessage.set(v.messageId, [...(votesByMessage.get(v.messageId) ?? []), v]);
+      }
+    }
+    return messages.map((m) => ({
+      ...m,
+      reactions: foldReactions(byMessage.get(m.id) ?? []),
+      ...(m.poll ? { poll: foldPollVotes(m.poll, votesByMessage.get(m.id) ?? []) } : {}),
+    }));
   }
 
   private pageLimit(limit?: number): number {
@@ -808,11 +830,18 @@ export class HarborService {
     const topics = await this.store.listTopics(spaceId, includeArchived);
     // Every consumer needs the root message (reply chips, parent cards,
     // unread anchors) — always folded in; activity computes from its denorm.
-    const listings: TopicListing[] = [];
+    // Folded like any page read: a root's reactions and poll votes are the
+    // rail's business too (a poll root card with zero votes would lie).
+    const roots: Message[] = [];
     for (const t of topics) {
       const root = await this.store.getMessage(spaceId, t.rootMessageId);
-      listings.push({ ...t, rootMessage: root ?? null, lastActivityAt: HarborService.activityOf(root, t) });
+      if (root) roots.push(root);
     }
+    const folded = new Map((await this.foldPage(spaceId, roots)).map((m) => [m.id, m]));
+    const listings: TopicListing[] = topics.map((t) => {
+      const root = folded.get(t.rootMessageId) ?? null;
+      return { ...t, rootMessage: root, lastActivityAt: HarborService.activityOf(root ?? undefined, t) };
+    });
     return listings.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id));
   }
 
@@ -874,6 +903,18 @@ export class HarborService {
     };
   }
 
+  /** Live folded state onto one message: reactions always, poll votes when a poll rides it. */
+  private async foldLive(spaceId: string, message: Message): Promise<Message> {
+    const folded: Message = {
+      ...message,
+      reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, message.id)),
+    };
+    if (message.poll) {
+      folded.poll = foldPollVotes(message.poll, await this.store.listPollVotesByMessage(spaceId, message.id));
+    }
+    return folded;
+  }
+
   async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
@@ -885,6 +926,17 @@ export class HarborService {
 
     return this.store.withSpaceLock(spaceId, async () => {
       const at = this.now();
+      // The org stamps the poll from its own clock: answer ids 1..n, a
+      // duration in becomes an expiry out (the Discord create asymmetry).
+      const poll: Poll | undefined = input.poll
+        ? {
+            question: input.poll.question,
+            answers: input.poll.answers.map((a, i) => ({ id: i + 1, text: a.text, ...(a.emoji ? { emoji: a.emoji } : {}) })),
+            allowMultiselect: input.poll.allowMultiselect ?? false,
+            expiresAt: new Date(Date.parse(at) + (input.poll.durationHours ?? DEFAULT_POLL_HOURS) * 3_600_000).toISOString(),
+            votes: [],
+          }
+        : undefined;
 
       if (input.threadRoot) {
         // A reply. Normalize to the root (Slack-style: replying to a reply is
@@ -901,6 +953,7 @@ export class HarborService {
           offset,
           replyCount: 0,
           reactions: [],
+          ...(poll ? { poll } : {}),
         };
         await this.store.appendMessage(message);
         await this.store.refreshReplyStats(spaceId, root.id);
@@ -932,6 +985,7 @@ export class HarborService {
         replyCount: 0,
         ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
         reactions: [],
+        ...(poll ? { poll } : {}),
       };
       await this.store.appendMessage(message);
       await this.append(spaceId, offset, at, { type: 'message', message });
@@ -1032,11 +1086,7 @@ export class HarborService {
       if (message.author.memberId !== ctx.memberId) {
         throw new HarborError('forbidden', 'only the author can delete a message');
       }
-      const withReactions = async (m: Message): Promise<Message> => ({
-        ...m,
-        reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, messageId)),
-      });
-      if (message.deletedAt) return withReactions(message);
+      if (message.deletedAt) return this.foldLive(spaceId, message);
 
       const at = this.now();
       await this.store.markMessageDeleted(spaceId, messageId, at);
@@ -1057,7 +1107,9 @@ export class HarborService {
           at,
         },
       });
-      return withReactions({ ...message, body: '', deletedAt: at });
+      // A poll is content: redacted with the body (the store already dropped it).
+      const { poll: _poll, ...rest } = message;
+      return this.foldLive(spaceId, { ...rest, body: '', deletedAt: at });
     });
   }
 
@@ -1089,11 +1141,10 @@ export class HarborService {
         throw new HarborError('forbidden', 'only the author can edit a message');
       }
       if (message.deletedAt) throw new HarborError('invalid_request', 'cannot edit a deleted message');
-      const withReactions = async (m: Message): Promise<Message> => ({
-        ...m,
-        reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, messageId)),
-      });
-      if (message.body === input.body) return withReactions(message);
+      // The Discord posture: a poll message is immutable once posted — its
+      // body is the poll's fallback rendering, and votes were cast on it.
+      if (message.poll) throw new HarborError('invalid_request', 'poll messages cannot be edited');
+      if (message.body === input.body) return this.foldLive(spaceId, message);
 
       const at = this.now();
       await this.store.markMessageEdited(spaceId, messageId, input.body, at);
@@ -1109,7 +1160,7 @@ export class HarborService {
           at,
         },
       });
-      return withReactions({ ...message, body: input.body, editedAt: at });
+      return this.foldLive(spaceId, { ...message, body: input.body, editedAt: at });
     });
   }
 
@@ -1156,10 +1207,115 @@ export class HarborService {
         await this.append(spaceId, offset, at, { type: 'reaction', reaction, action: 'removed' });
       }
 
-      return {
-        ...message,
-        reactions: foldReactions(await this.store.listReactionsByMessage(spaceId, messageId)),
-      };
+      return this.foldLive(spaceId, message);
+    });
+  }
+
+  /**
+   * Toggle a vote on a poll answer — reaction semantics (per-(member, answer),
+   * idempotent no-ops), plus the single-select rule: adding while another
+   * answer holds this member's vote MOVES it (remove-then-add, two events,
+   * one lock). Closed polls and tombstones refuse. Agents cannot vote (the
+   * Discord posture: apps don't vote — an agent's opinion is a reply).
+   */
+  async votePoll(ctx: ActorCtx, spaceId: string, messageId: string, input: VotePollInput): Promise<Message> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    if (input.actingMode !== 'direct') {
+      throw new HarborError('invalid_request', 'agents cannot vote on polls');
+    }
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const message = await this.store.getMessage(spaceId, messageId);
+      if (!message) throw new HarborError('not_found', 'no such message');
+      const poll = message.poll;
+      if (!poll || message.deletedAt) throw new HarborError('invalid_request', 'no poll on this message');
+      const at = this.now();
+      // Lazy expiry: both close states end voting; ISO-8601 UTC compares lexically.
+      if (poll.endedAt || poll.expiresAt <= at) throw new HarborError('invalid_request', 'the poll has ended');
+      if (!poll.answers.some((a) => a.id === input.answerId)) {
+        throw new HarborError('invalid_request', 'no such answer');
+      }
+      const existing = await this.store.getPollVote(spaceId, messageId, input.answerId, ctx.memberId);
+
+      if (input.action === 'add' && !existing) {
+        if (!poll.allowMultiselect) {
+          const mine = (await this.store.listPollVotesByMessage(spaceId, messageId)).filter(
+            (v) => v.by.memberId === ctx.memberId,
+          );
+          for (const v of mine) {
+            await this.store.deletePollVote(spaceId, messageId, v.answerId, ctx.memberId);
+            const offset = (await this.store.head(spaceId)) + 1;
+            await this.append(spaceId, offset, at, {
+              type: 'poll_vote',
+              vote: { spaceId, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}), messageId, answerId: v.answerId, by, at },
+              action: 'removed',
+            });
+          }
+        }
+        await this.store.putPollVote({ spaceId, messageId, answerId: input.answerId, by, at });
+        const offset = (await this.store.head(spaceId)) + 1;
+        await this.append(spaceId, offset, at, {
+          type: 'poll_vote',
+          vote: { spaceId, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}), messageId, answerId: input.answerId, by, at },
+          action: 'added',
+        });
+      } else if (input.action === 'remove' && existing) {
+        await this.store.deletePollVote(spaceId, messageId, input.answerId, ctx.memberId);
+        const offset = (await this.store.head(spaceId)) + 1;
+        await this.append(spaceId, offset, at, {
+          type: 'poll_vote',
+          vote: { spaceId, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}), messageId, answerId: input.answerId, by, at },
+          action: 'removed',
+        });
+      }
+
+      return this.foldLive(spaceId, message);
+    });
+  }
+
+  /**
+   * End a poll early — author-only, deletion's posture. Ending an already-
+   * closed poll (early-ended or naturally expired) is an idempotent no-op
+   * with no event; natural expiry itself never calls this.
+   */
+  async endPoll(ctx: ActorCtx, spaceId: string, messageId: string, input: EndPollInput): Promise<Message> {
+    await this.requireMember(ctx, spaceId);
+    this.guardWrite();
+    // Same line as voting: a poll is a member's question to members, and an
+    // app acting under the author's identity must not close it either.
+    if (input.actingMode !== 'direct') {
+      throw new HarborError('invalid_request', 'agents cannot end polls');
+    }
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+
+    return this.store.withSpaceLock(spaceId, async () => {
+      const message = await this.store.getMessage(spaceId, messageId);
+      if (!message) throw new HarborError('not_found', 'no such message');
+      const poll = message.poll;
+      if (!poll || message.deletedAt) throw new HarborError('invalid_request', 'no poll on this message');
+      if (message.author.memberId !== ctx.memberId) {
+        throw new HarborError('forbidden', 'only the poll author can end it');
+      }
+      const at = this.now();
+      if (poll.endedAt || poll.expiresAt <= at) return this.foldLive(spaceId, message);
+
+      await this.store.markPollEnded(spaceId, messageId, at);
+      const offset = (await this.store.head(spaceId)) + 1;
+      await this.append(spaceId, offset, at, {
+        type: 'poll_ended',
+        end: { spaceId, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}), messageId, by, at },
+      });
+      return this.foldLive(spaceId, { ...message, poll: { ...poll, endedAt: at } });
     });
   }
 
@@ -1334,6 +1490,22 @@ export class HarborService {
   async headOffset(spaceId: string): Promise<number> {
     return this.store.head(spaceId);
   }
+}
+
+/** Stored rows (oldest first) → groups in ANSWER order (a poll's order is fixed); voteless answers are omitted. */
+function foldPollVotes(poll: Poll, votes: StoredPollVote[]): Poll {
+  const groups = new Map<number, string[]>();
+  for (const v of votes) {
+    const members = groups.get(v.answerId) ?? [];
+    if (!members.includes(v.by.memberId)) members.push(v.by.memberId);
+    groups.set(v.answerId, members);
+  }
+  return {
+    ...poll,
+    votes: poll.answers
+      .filter((a) => groups.has(a.id))
+      .map((a) => ({ answerId: a.id, memberIds: groups.get(a.id)! })),
+  };
 }
 
 /** Stored rows (oldest first) → display groups: emojis in first-reacted order, members likewise. */

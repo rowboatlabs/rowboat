@@ -15,6 +15,7 @@ import type {
   Store,
   StoredEvent,
   StoredInvite,
+  StoredPollVote,
   StoredReaction,
   StoredSpaceBlob,
 } from './store.js';
@@ -33,6 +34,7 @@ interface SpaceState {
   messages: Message[]; // the one stream, roots and replies interleaved, oldest first
   messagesById: Map<string, Message>;
   reactions: Map<string, StoredReaction[]>; // messageId → oldest first
+  pollVotes: Map<string, StoredPollVote[]>; // messageId → oldest first
   events: StoredEvent[]; // offsets start at 1; events[i].offset === i + 1
   lock: Promise<void>;
 }
@@ -90,6 +92,7 @@ export class MemoryStore implements Store {
       messages: [],
       messagesById: new Map(),
       reactions: new Map(),
+      pollVotes: new Map(),
       events: [],
       lock: Promise.resolve(),
     });
@@ -368,12 +371,21 @@ export class MemoryStore implements Store {
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     const s = this.must(spaceId);
     const existing = s.messagesById.get(messageId);
-    if (existing) this.replace(s, { ...existing, body: '', deletedAt });
-    // Redact the stored message event too — replay must never resurrect the body.
+    if (existing) {
+      // A poll is content the way a body is: deletion redacts both.
+      const { poll: _poll, ...rest } = existing;
+      this.replace(s, { ...rest, body: '', deletedAt });
+    }
+    // Votes are content too: they were cast on a poll that no longer exists,
+    // and a member-attributed row must not outlive what it attributed.
+    s.pollVotes.delete(messageId);
+    // Redact the stored message event too — replay must never resurrect the
+    // body (nor a poll, which is content the same way).
     for (let i = 0; i < s.events.length; i++) {
       const e = s.events[i]!;
       if (e.event.type === 'message' && e.event.message.id === messageId) {
-        s.events[i] = { ...e, event: { type: 'message', message: { ...e.event.message, body: '', deletedAt } } };
+        const { poll: _poll, ...rest } = e.event.message;
+        s.events[i] = { ...e, event: { type: 'message', message: { ...rest, body: '', deletedAt } } };
         break;
       }
     }
@@ -419,6 +431,55 @@ export class MemoryStore implements Store {
     return messageIds
       .flatMap((id) => s.reactions.get(id) ?? [])
       .sort((a, b) => a.at.localeCompare(b.at) || a.by.memberId.localeCompare(b.by.memberId));
+  }
+
+  async getPollVote(
+    spaceId: string,
+    messageId: string,
+    answerId: number,
+    memberId: string,
+  ): Promise<StoredPollVote | undefined> {
+    return this.state(spaceId)?.pollVotes
+      .get(messageId)
+      ?.find((v) => v.answerId === answerId && v.by.memberId === memberId);
+  }
+
+  async putPollVote(vote: StoredPollVote): Promise<void> {
+    const s = this.must(vote.spaceId);
+    const list = (s.pollVotes.get(vote.messageId) ?? []).filter(
+      (v) => !(v.answerId === vote.answerId && v.by.memberId === vote.by.memberId),
+    );
+    list.push(vote);
+    s.pollVotes.set(vote.messageId, list);
+  }
+
+  async deletePollVote(spaceId: string, messageId: string, answerId: number, memberId: string): Promise<void> {
+    const s = this.must(spaceId);
+    const list = (s.pollVotes.get(messageId) ?? []).filter(
+      (v) => !(v.answerId === answerId && v.by.memberId === memberId),
+    );
+    if (list.length === 0) s.pollVotes.delete(messageId);
+    else s.pollVotes.set(messageId, list);
+  }
+
+  async listPollVotesByMessage(spaceId: string, messageId: string): Promise<StoredPollVote[]> {
+    return [...(this.must(spaceId).pollVotes.get(messageId) ?? [])].sort(
+      (a, b) => a.at.localeCompare(b.at) || a.by.memberId.localeCompare(b.by.memberId),
+    );
+  }
+
+  async listPollVotesForMessages(spaceId: string, messageIds: string[]): Promise<StoredPollVote[]> {
+    const s = this.must(spaceId);
+    return messageIds
+      .flatMap((id) => s.pollVotes.get(id) ?? [])
+      .sort((a, b) => a.at.localeCompare(b.at) || a.by.memberId.localeCompare(b.by.memberId));
+  }
+
+  async markPollEnded(spaceId: string, messageId: string, endedAt: string): Promise<void> {
+    const s = this.must(spaceId);
+    const message = s.messagesById.get(messageId);
+    if (!message?.poll) return;
+    this.replace(s, { ...message, poll: { ...message.poll, endedAt } });
   }
 
   async putInvite(invite: StoredInvite): Promise<void> {

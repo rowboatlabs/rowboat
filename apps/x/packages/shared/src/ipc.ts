@@ -3753,6 +3753,8 @@ export const ipcSchemas = {
       threadRoot: z.string().optional(),
       anchorChangeSetId: z.string().optional(),
       body: z.string(),
+      /** Present = the message carries a poll; body must be its markdown fallback. */
+      poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
     }),
     res: z.custom<SpacesPostResult>(),
   },
@@ -3810,6 +3812,29 @@ export const ipcSchemas = {
       spaceId: z.string(),
       messageId: z.string(),
       body: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // Poll vote toggle — reaction semantics on the org (idempotent; single-
+  // select add MOVES the member's vote); actingMode is stamped 'direct' by
+  // main, which is also the rule (agents cannot vote). Returns the message
+  // with the poll's votes folded.
+  'spaces:votePoll': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      answerId: z.number(),
+      action: z.enum(['add', 'remove']),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // End a poll early — author-only on the org; idempotent once closed.
+  'spaces:endPoll': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
     }),
     res: z.object({ message: z.custom<SpacesTypes.Message>() }),
   },
@@ -3907,6 +3932,75 @@ export const ipcSchemas = {
   },
   'spaces:unsubscribeSpace': {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Notification levels for the mention watcher: a space-wide level plus
+  // per-thread overrides. null = inherit (thread → space → the 'mentions'
+  // default). Stored main-side (the watcher runs there, screen or no screen).
+  // `topicId` is the thread's ROOT MESSAGE id, never a Topic row id: the
+  // watcher resolves a message to `threadRoot ?? id` and looks up by that.
+  'spaces:getNotifyPrefs': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({
+      spaceLevel: z.enum(['all', 'mentions', 'mute']).nullable(),
+      topics: z.record(z.string(), z.enum(['all', 'mentions', 'mute'])),
+    }),
+  },
+  'spaces:setNotifyPref': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      /** Absent = set the space-wide level. */
+      topicId: z.string().optional(),
+      /** null clears the override back to inherit. */
+      level: z.enum(['all', 'mentions', 'mute']).nullable(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Scheduled sends and reminders — the main-side queue (core scheduler).
+  // 'message' posts to the topic at `at`; 'reminder' notifies the member.
+  'spaces:schedule': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      /** The thread to post into; absent = the space's stream. */
+      threadRootId: z.string().optional(),
+      body: z.string(),
+      /** ISO instant to fire at. */
+      at: z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'at must be an ISO instant'),
+      kind: z.enum(['message', 'reminder']),
+    }),
+    res: z.object({ id: z.string() }),
+  },
+  'spaces:listScheduled': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({
+      items: z.array(
+        z.object({
+          id: z.string(),
+          kind: z.enum(['message', 'reminder']),
+          orgId: z.string(),
+          spaceId: z.string(),
+          /** The thread the send targets; absent = the space's stream. */
+          threadRootId: z.string().optional(),
+          body: z.string(),
+          at: z.string(),
+          createdAt: z.string(),
+        }),
+      ),
+    }),
+  },
+  'spaces:cancelScheduled': {
+    req: z.object({ id: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Do-not-disturb: one global until-instant gating the mention watcher.
+  'spaces:getDnd': {
+    req: z.null(),
+    res: z.object({ until: z.string().nullable() }),
+  },
+  'spaces:setDnd': {
+    req: z.object({ until: z.string().nullable() }),
     res: z.object({ success: z.literal(true) }),
   },
   // Ephemeral presence from the human surface (viewing / typing / idle), scoped
