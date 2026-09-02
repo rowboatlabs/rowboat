@@ -33,7 +33,7 @@ export function ChatEmptyState({
 }: ChatEmptyStateProps) {
   if (variant === 'code') {
     return (
-      <div className={cn('mx-auto flex w-full flex-col py-6', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
+      <div className={cn('mx-auto flex w-full flex-col items-center py-6 text-center', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
         <div className={cn('font-semibold tracking-tight', wide ? 'text-2xl' : 'text-lg')}>
           What should we build together?
         </div>
