@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Topic } from './core.js';
-import { MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Topic, TopicRemoval } from './core.js';
+import { AssetPath, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
 // offset-based catch-up. Subscribing with `afterOffset` replays durable events
@@ -12,8 +12,21 @@ import { MemberId, SpaceId, StreamOffset, TopicId } from './ids.js';
 export const SpaceEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('change'), changeSet: ChangeSet }),
   z.object({ type: z.literal('message'), message: Message }),
-  /** Emitted on create and on any update (retitle, archive, anchor); carries the full topic. */
-  z.object({ type: z.literal('topic'), topic: Topic }),
+  /**
+   * A topic's lifecycle: created (promote or from-scratch), retitled,
+   * archived, unarchived — the full row plus who did it, so clients can
+   * render attributed lifecycle lines in the thread. Idempotent re-archives
+   * emit nothing; a reply reviving an archived topic emits 'unarchived'
+   * attributed to the replier.
+   */
+  z.object({
+    type: z.literal('topic'),
+    topic: Topic,
+    action: z.enum(['created', 'retitled', 'archived', 'unarchived']),
+    by: Attribution,
+  }),
+  /** The row deleted ("convert back to thread") — the thread itself is untouched. */
+  z.object({ type: z.literal('topic_removed'), removal: TopicRemoval }),
   z.object({
     type: z.literal('membership'),
     membership: Membership,
@@ -70,11 +83,11 @@ export const SpaceEvent = z.discriminatedUnion('type', [
 export type SpaceEvent = z.infer<typeof SpaceEvent>;
 
 /**
- * A member holds two independent leases per topic: a human one (viewing /
- * typing, ended by `idle`) and an agent one (`agent_working`, ended by
- * `agent_idle`). Both frames carry the same memberId — the agent acts as the
- * member — so the end states must be distinct for receivers to know which
- * lease an `idle` closes.
+ * A member holds two independent leases per conversation: a human one
+ * (viewing / typing, ended by `idle`) and an agent one (`agent_working`,
+ * ended by `agent_idle`). Both frames carry the same memberId — the agent
+ * acts as the member — so the end states must be distinct for receivers to
+ * know which lease an `idle` closes.
  */
 export const PresenceState = z.enum(['viewing', 'typing', 'agent_working', 'agent_idle', 'idle']);
 export type PresenceState = z.infer<typeof PresenceState>;
@@ -94,8 +107,8 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     spaceId: SpaceId,
     memberId: MemberId,
     state: PresenceState,
-    /** Scopes the state to one topic (e.g. agent_working on a thread); absent = space-wide. */
-    topicId: TopicId.optional(),
+    /** Scopes the state to one thread (its root message id); absent = the stream / space-wide. */
+    threadRootId: MessageId.optional(),
     at: z.iso.datetime(),
   }),
   /** Acknowledges a subscription; replay (if any) starts immediately after this frame. */
@@ -120,6 +133,25 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * kinds by contract, so this is a v0-legal addition.
    */
   z.object({ kind: z.literal('ping'), at: z.iso.datetime() }),
+  /**
+   * Ephemeral whiteboard collaboration traffic (scene diffs, cursors, idle
+   * state), fanned out to the space's subscribers. The payload is opaque to
+   * the org on purpose — the same content-blind posture as the relay servers
+   * whiteboard tools ship: membership is checked, bytes are relayed, nothing
+   * is inspected. Never persisted, never replayed, no offset; durable board
+   * state travels the normal asset path as blob snapshots, so a dropped frame
+   * costs smoothness, not data. Pre-whiteboard clients ignore unknown frame
+   * kinds by contract.
+   */
+  z.object({
+    kind: z.literal('whiteboard'),
+    spaceId: SpaceId,
+    /** The board's asset path (its identity — a board IS an asset). */
+    boardId: AssetPath,
+    memberId: MemberId,
+    at: z.iso.datetime(),
+    payload: z.unknown(),
+  }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 
@@ -136,7 +168,14 @@ export const ClientFrame = z.discriminatedUnion('kind', [
     kind: z.literal('presence'),
     spaceId: SpaceId,
     state: PresenceState,
-    topicId: TopicId.optional(),
+    threadRootId: MessageId.optional(),
+  }),
+  /** Ephemeral whiteboard traffic; relayed to the space's subscribers with the sender stamped on. */
+  z.object({
+    kind: z.literal('whiteboard'),
+    spaceId: SpaceId,
+    boardId: AssetPath,
+    payload: z.unknown(),
   }),
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;

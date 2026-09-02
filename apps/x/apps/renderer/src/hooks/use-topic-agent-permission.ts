@@ -10,11 +10,11 @@ import { subscribeSessionFeed } from '@/lib/session-chat/feed'
 // the topic's session and, when its latest turn is suspended, fetches the
 // turn to see whether permissions (not async tools) are what it waits on.
 
-/** Tool names the topic's agent is blocked on, oldest first ([] = not blocked). */
+/** Tool names the thread's agent is blocked on, oldest first ([] = not blocked). */
 export function useTopicAgentPermissionWait(
     orgId: string,
     spaceId: string,
-    topicId: string | null,
+    threadRootId: string | null,
     /** Gate for kept-alive hidden panes — no watching while off screen. */
     enabled: boolean,
 ): string[] {
@@ -24,9 +24,9 @@ export function useTopicAgentPermissionWait(
     useEffect(() => {
         let cancelled = false
         setSessionId(null)
-        if (!topicId || !enabled) return
+        if (!threadRootId || !enabled) return
         void window.ipc
-            .invoke('spaces:topicSession', { orgId, spaceId, topicId })
+            .invoke('spaces:topicSession', { orgId, spaceId, threadRootId })
             .then((res) => {
                 if (!cancelled) setSessionId(res.sessionId ?? null)
             })
@@ -34,7 +34,7 @@ export function useTopicAgentPermissionWait(
         return () => {
             cancelled = true
         }
-    }, [orgId, spaceId, topicId, enabled])
+    }, [orgId, spaceId, threadRootId, enabled])
 
     useEffect(() => {
         setTools([])

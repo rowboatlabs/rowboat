@@ -8,18 +8,20 @@ import { getClient } from './orgs.js';
 
 // Scheduled sends and reminders — one main-side queue, persisted, fired by a
 // slow tick (a 20s scan beats juggling long setTimeouts across sleep/resume).
-// A scheduled MESSAGE posts to its topic as the member, silently, like
-// Slack's "send later". A REMINDER notifies the member (always — the user
-// set an alarm; do-not-disturb does not swallow explicit alarms) and clicking
-// it lands in the topic. Failures retry on later ticks; a message that keeps
-// failing surfaces as a notification instead of vanishing.
+// A scheduled MESSAGE posts to the stream (or into a thread, when it names a
+// thread root) as the member, silently, like Slack's "send later". A REMINDER
+// notifies the member (always — the user set an alarm; do-not-disturb does not
+// swallow explicit alarms) and clicking it lands in that thread. Failures retry
+// on later ticks; a message that keeps failing surfaces as a notification
+// instead of vanishing.
 
 export interface ScheduledItem {
   id: string;
   kind: 'message' | 'reminder';
   orgId: string;
   spaceId: string;
-  topicId: string;
+  /** The thread this is bound to; absent = the space's stream. */
+  threadRootId?: string;
   body: string;
   /** ISO instant to fire at. */
   at: string;
@@ -66,12 +68,12 @@ async function fire(item: ScheduledItem): Promise<void> {
     void notifyIfEnabled('space_mention', {
       title: 'Reminder',
       message: mentionExcerpt(item.body),
-      link: mentionLink(item.orgId, item.spaceId, item.topicId),
+      link: mentionLink(item.orgId, item.spaceId, item.threadRootId),
     });
     return;
   }
   await getClient(item.orgId).postMessage(item.spaceId, {
-    topicId: item.topicId,
+    ...(item.threadRootId ? { threadRoot: item.threadRootId } : {}),
     body: item.body,
     actingMode: 'direct',
   });
@@ -96,7 +98,7 @@ async function tick(): Promise<void> {
           void notifyIfEnabled('space_mention', {
             title: 'Scheduled message failed',
             message: mentionExcerpt(item.body),
-            link: mentionLink(item.orgId, item.spaceId, item.topicId),
+            link: mentionLink(item.orgId, item.spaceId, item.threadRootId),
           });
         } else {
           persist();

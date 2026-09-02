@@ -244,22 +244,22 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     arjunOpenDoc.close();
   });
 
-  it('beat 7 — chat grammar: a topic starts, agents stay silent, @rowboat runs only for its own person', async () => {
+  it('beat 7 — chat grammar: a thread starts flat in the stream, agents stay silent, @rowboat runs only for its own person', async () => {
     const headBefore = await harbor.service.headOffset(spaceId);
 
     const started = await arjun.post(`/v1/spaces/${spaceId}/messages`, {
       body: 'should SSO jump the migration work?',
       actingMode: 'direct',
     });
-    const topicId = started.body.topic.id;
-    expect(started.body.topic.title).toBe('should SSO jump the migration work?');
+    const rootId = started.body.message.id;
+    expect(started.body.message.threadRoot).toBeUndefined();
 
     const replied = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
-      topicId,
+      threadRoot: rootId,
       body: 'Yes — Customer X moved it for me. @rowboat move SSO to P1.',
       actingMode: 'direct',
     });
-    expect(replied.body.topic.messageCount).toBe(2);
+    expect(replied.body.message.threadRoot).toBe(rootId);
 
     // Agents were silent so far: everything since the topic started is direct.
     const midEvents = await harbor.service.eventsAfter(spaceId, headBefore);
@@ -284,16 +284,16 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     expect(change.outcome).toBe('applied');
     expect(change.version).toBe(6);
 
-    const turnSummary = await callStructured<{ topicId: string }>(ramniqueAgent, 'post_to_topic', {
+    const turnSummary = await callStructured<{ messageId: string; threadRoot?: string }>(ramniqueAgent, 'post_message', {
       spaceId,
-      topicId,
+      threadRoot: rootId,
       body: 'Moved SSO to P1 in roadmap.md.',
     });
-    expect(turnSummary.topicId).toBe(topicId);
+    expect(turnSummary.threadRoot).toBe(rootId);
 
-    const thread = await arjun.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
+    const thread = await arjun.get(`/v1/spaces/${spaceId}/threads/${rootId}`);
+    expect(thread.body.root.author).toEqual({ memberId: 'arjun', actingMode: 'direct' });
     expect(thread.body.messages.map((m: any) => m.author)).toEqual([
-      { memberId: 'arjun', actingMode: 'direct' },
       { memberId: 'ramnique', actingMode: 'direct' },
       { memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' },
     ]);
@@ -323,9 +323,8 @@ describe.each([['memory'], ['postgres']] as const)('§11 — a day in the life o
     expect(replay.map((e) => e.offset)).toEqual(
       Array.from({ length: head - arjunLastSeen }, (_, i) => arjunLastSeen + 1 + i),
     );
-    // The unread badge's story: one topic, three thread messages, two changes.
+    // The unread badge's story: three messages (a root + two replies), two changes.
     const kinds = replay.map((e) => e.event.type);
-    expect(kinds.filter((k) => k === 'topic').length).toBe(1);
     expect(kinds.filter((k) => k === 'message').length).toBe(3);
     expect(kinds.filter((k) => k === 'change').length).toBe(2);
     catchUp.close();

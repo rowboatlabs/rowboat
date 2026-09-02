@@ -22,7 +22,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
-import { VoiceNoteButton } from '@/components/sidebar-content'
+import { VoiceNoteButton } from '@/components/voice-note-button'
 import { getViewerType } from '@/lib/file-types'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
@@ -395,7 +395,7 @@ function QuickAction({
 function SectionHeader({ label, aside }: { label: string; aside?: string }) {
   return (
     <div className="mb-2.5 flex items-center justify-between">
-      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+      <span className="text-[13px] text-muted-foreground">
         {label}
       </span>
       {aside && <span className="text-xs text-muted-foreground">{aside}</span>}

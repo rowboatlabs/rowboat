@@ -6,39 +6,31 @@ import { MemberAvatar } from '@/components/spaces/atoms'
 import { messageExcerpt } from '@/components/spaces/bookmarks'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import { useSpacesOrgs } from '@/hooks/use-spaces'
-import { explicitTitle, stripThreadMarker } from '@/lib/spaces-conventions'
 import { loadSpaceCorpus, parseSearchQuery, peekSpaceCorpus, searchMessages } from '@/lib/spaces-corpus'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 
-// ⌘K inside Spaces: one box that finds topics (this space), messages (this
+// ⌘⇧K inside Spaces: one box that finds topics (this space), messages (this
 // space — searched over the corpus of every topic's newest page; the protocol
 // has no search route yet, so this is recent history, not an archive crawl),
 // and other spaces. Enter opens; messages also scroll into view and flash.
 
 type Result =
     | { kind: 'general'; label: string }
-    | { kind: 'topic'; topic: spaces.Topic; title: string }
+    | { kind: 'topic'; topic: spaces.TopicListing; title: string }
     | { kind: 'message'; message: spaces.Message; topicLabel: string }
     | { kind: 'space'; orgId: string; spaceId: string; label: string; orgLabel: string }
 
-function topicTitle(t: spaces.TopicListing, memberNames: ReadonlyMap<string, string>): string {
-    const seedBody = t.firstMessage?.body ?? null
-    const named = explicitTitle(t, seedBody)
-    const seed = seedBody ? stripThreadMarker(seedBody) : null
-    const raw = named ?? (seed ? seed.split('\n')[0] ?? t.title : t.title)
-    return resolveMentions(raw, memberNames)
-}
-
-export function QuickSwitcher({ orgId, spaceId, topics, generalId, open, onClose, onOpenGeneral, onOpenTopic, onOpenMessage, onSwitchSpace }: {
+export function QuickSwitcher({ orgId, spaceId, topics, streamKey, open, onClose, onOpenGeneral, onOpenTopic, onOpenMessage, onSwitchSpace }: {
     orgId: string
     spaceId: string
     topics: spaces.TopicListing[]
-    generalId: string | null
+    /** The read-state key standing for the stream. */
+    streamKey: string
     open: boolean
     onClose: () => void
     onOpenGeneral: () => void
-    onOpenTopic: (topicId: string) => void
-    onOpenMessage: (topicId: string, messageId: string) => void
+    onOpenTopic: (rootMessageId: string) => void
+    onOpenMessage: (rootMessageId: string, messageId: string) => void
     onSwitchSpace: (orgId: string, spaceId: string) => void
 }) {
     const memberNames = useMemberNames()
@@ -94,10 +86,10 @@ export function QuickSwitcher({ orgId, spaceId, topics, generalId, open, onClose
     }, [open, orgId, spaceId])
 
     const q = query.trim().toLowerCase()
-    const topicLabelOf = (topicId: string): string => {
-        if (topicId === generalId) return 'Messages'
-        const t = topics.find((x) => x.id === topicId)
-        return t ? topicTitle(t, memberNames) : 'topic'
+    const topicLabelOf = (rootMessageId: string): string => {
+        if (rootMessageId === streamKey) return 'Messages'
+        const t = topics.find((x) => x.rootMessageId === rootMessageId)
+        return t ? resolveMentions(t.title, memberNames) : 'thread'
     }
 
     const results = useMemo<Result[]>(() => {
@@ -109,8 +101,8 @@ export function QuickSwitcher({ orgId, spaceId, topics, generalId, open, onClose
         const tq = parsed.terms.join(' ')
         const selfName = selfId ? memberNames.get(selfId) ?? null : null
         const rows = topics
-            .filter((t) => t.id !== generalId)
-            .map((t) => ({ topic: t as spaces.Topic, title: topicTitle(t, memberNames) }))
+            .filter((t) => !t.archived)
+            .map((t) => ({ topic: t, title: resolveMentions(t.title, memberNames) }))
             .sort((a, b) => b.topic.lastActivityAt.localeCompare(a.topic.lastActivityAt))
         if (!q) {
             out.push({ kind: 'general', label: 'Messages' })
@@ -121,7 +113,7 @@ export function QuickSwitcher({ orgId, spaceId, topics, generalId, open, onClose
                 for (const r of rows.filter((r) => tq && r.title.toLowerCase().includes(tq)).slice(0, 8)) out.push({ kind: 'topic', ...r })
             }
             for (const m of searchMessages(corpus ?? [], q, memberNames, { limit: 12, topicLabelOf, selfName })) {
-                out.push({ kind: 'message', message: m, topicLabel: topicLabelOf(m.topicId) })
+                out.push({ kind: 'message', message: m, topicLabel: topicLabelOf(m.threadRoot ?? streamKey) })
             }
         }
         if (!parsed.filtered) {
@@ -136,7 +128,7 @@ export function QuickSwitcher({ orgId, spaceId, topics, generalId, open, onClose
         }
         return out
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [q, topics, generalId, memberNames, corpus, orgs, orgId, spaceId, selfId])
+    }, [q, topics, streamKey, memberNames, corpus, orgs, orgId, spaceId, selfId])
 
     // Clamp the highlight when the result set shrinks (adjust-on-change).
     const [lastQ, setLastQ] = useState(q)
@@ -149,8 +141,8 @@ export function QuickSwitcher({ orgId, spaceId, topics, generalId, open, onClose
     const pick = (r: Result) => {
         close()
         if (r.kind === 'general') onOpenGeneral()
-        else if (r.kind === 'topic') onOpenTopic(r.topic.id)
-        else if (r.kind === 'message') onOpenMessage(r.message.topicId, r.message.id)
+        else if (r.kind === 'topic') onOpenTopic(r.topic.rootMessageId)
+        else if (r.kind === 'message') onOpenMessage(r.message.threadRoot ?? streamKey, r.message.id)
         else onSwitchSpace(r.orgId, r.spaceId)
     }
 
@@ -251,10 +243,10 @@ export function QuickSwitcher({ orgId, spaceId, topics, generalId, open, onClose
                         placeholder="Search topics, messages, spaces…"
                         className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                         onKeyDown={(e) => {
-                            // ⌘K toggles closed too — the pane's opener stands
+                            // ⌘⇧K toggles closed too — the pane's opener stands
                             // down while we're open, and the app's global
                             // palette must not grab this press either.
-                            if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+                            if ((e.metaKey || e.ctrlKey) && !e.altKey && e.shiftKey && e.key.toLowerCase() === 'k') {
                                 e.preventDefault()
                                 e.stopPropagation()
                                 close()

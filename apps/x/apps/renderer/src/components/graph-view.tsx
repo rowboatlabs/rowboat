@@ -470,10 +470,10 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
 
       {legendItems.length > 0 ? (
         <div
-          className="absolute right-3 top-3 z-20 rounded-md border border-border/80 bg-background/90 px-3 py-2 text-xs text-foreground shadow-sm backdrop-blur"
+          className="absolute right-3 top-3 z-20 rounded-md border-none bg-[var(--rowboat-raised)] px-3 py-2 text-xs text-foreground shadow-[var(--rowboat-shadow-soft)]"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <div className="mb-2 text-[0.7rem] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="mb-2 text-[13px] text-muted-foreground">
             Folders
           </div>
           <div className="grid gap-1">
@@ -654,7 +654,7 @@ export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps)
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search nodes..."
-            className="w-64 pl-9 pr-20 shadow-lg backdrop-blur"
+            className="w-64 border-none bg-[var(--rowboat-raised)] pl-9 pr-20 shadow-[var(--rowboat-shadow-soft)]"
           />
           <div className="absolute right-3 flex items-center gap-2">
             {searchMatchingNodes && (

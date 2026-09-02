@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, Loader2, MoreVertical, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, Hash, Loader2, MessagesSquare, MoreVertical, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -8,8 +8,12 @@ import {
 import { Input } from '@/components/ui/input'
 import { AddOrgDialog, OrgMonogram, type SpaceSelection } from '@/components/spaces-view'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { prefetchGeneral, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
+import { prefetchStream, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
+import { bumpSpaceUse, readSpaceUse, spaceUseKey } from '@/lib/space-usage'
 import { toast } from '@/lib/toast'
+
+/** The fold: how many spaces the section shows before "Show all". */
+const MAX_VISIBLE_SPACES = 5
 
 // The sidebar's SPACES section (design: "App shell scope planning"): every
 // org this install is signed into, its spaces underneath with unread counts,
@@ -23,19 +27,48 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
     const unread = useSpacesUnreadCounts()
     const [expanded, setExpanded] = useState(true)
     const [addOrgOpen, setAddOrgOpen] = useState(false)
+    // Top-5 fold: the section shows the most-opened spaces; the rest sit
+    // behind "Show all" (Gmail's Spaces treatment). Per-session toggle.
+    const [showAll, setShowAll] = useState(false)
+    const totalSpaces = orgs.reduce((n, o) => n + o.spaces.length, 0)
+    const folded = !showAll && totalSpaces > MAX_VISIBLE_SPACES
+    let visibleSpaceKeys: ReadonlySet<string> | null = null
+    if (folded) {
+        const counts = readSpaceUse()
+        const ranked = orgs
+            .flatMap((o) => o.spaces.map((sp) => ({ key: spaceUseKey(o.id, sp.id), count: counts[spaceUseKey(o.id, sp.id)] ?? 0 })))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, MAX_VISIBLE_SPACES)
+            .map((r) => r.key)
+        const keys = new Set(ranked)
+        // The open space never falls below the fold.
+        if (activeSpace) {
+            const activeKey = spaceUseKey(activeSpace.orgId, activeSpace.spaceId)
+            if (!keys.has(activeKey)) {
+                keys.delete(ranked[ranked.length - 1]!)
+                keys.add(activeKey)
+            }
+        }
+        visibleSpaceKeys = keys
+    }
+    const openSpace = (orgId: string, spaceId: string) => {
+        bumpSpaceUse(orgId, spaceId)
+        onOpenSpace(orgId, spaceId)
+    }
 
     return (
-        <SidebarGroup className="flex flex-col">
+        <SidebarGroup className="flex flex-col pt-0">
             <SidebarGroupContent>
                 <div className="group/spaces-head flex items-center pr-1.5">
                     <button
                         type="button"
                         data-tour-id="nav-spaces"
                         onClick={() => setExpanded((v) => !v)}
-                        className="flex flex-1 items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground"
+                        className="flex h-8 flex-1 items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     >
-                        <ChevronRight className={cn('size-3 transition-transform', expanded && 'rotate-90')} />
-                        <span className="flex-1 text-left">Spaces</span>
+                        <MessagesSquare className="size-4 shrink-0" />
+                        <span className="flex-1 truncate text-left">Spaces</span>
+                        <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-90')} />
                     </button>
                     <button
                         type="button"
@@ -49,14 +82,14 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
                 </div>
                 {expanded && (
                     loading ? (
-                        <div className="flex items-center gap-2 px-4 pb-2 text-[11.5px] text-muted-foreground">
+                        <div className="flex items-center gap-2 pl-6 pr-4 pb-2 text-[11.5px] text-muted-foreground">
                             <Loader2 className="size-3 animate-spin" /> Loading…
                         </div>
                     ) : orgs.length === 0 ? (
                         <button
                             type="button"
                             onClick={() => setAddOrgOpen(true)}
-                            className="px-4 pb-2 text-left text-[11.5px] italic text-muted-foreground hover:text-foreground"
+                            className="pl-6 pr-4 pb-2 text-left text-[11.5px] italic text-muted-foreground hover:text-foreground"
                         >
                             Add an org to see its spaces here.
                         </button>
@@ -68,10 +101,19 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
                                     org={org}
                                     activeSpace={activeSpace}
                                     unread={unread}
-                                    onOpenSpace={onOpenSpace}
+                                    visibleSpaceKeys={visibleSpaceKeys}
+                                    onOpenSpace={openSpace}
                                     onChanged={() => void refresh()}
                                 />
                             ))}
+                            {totalSpaces > MAX_VISIBLE_SPACES && (
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton onClick={() => setShowAll((v) => !v)} className="pl-6 text-muted-foreground">
+                                        <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', showAll && 'rotate-90')} />
+                                        <span className="flex-1 truncate">{showAll ? 'Show less' : `Show all ${totalSpaces} spaces`}</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            )}
                         </SidebarMenu>
                     )
                 )}
@@ -81,10 +123,12 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
     )
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
+function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onChanged }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
     unread: Map<string, number>
+    /** Non-null while folded: only these org/space keys render. */
+    visibleSpaceKeys?: ReadonlySet<string> | null
     onOpenSpace: (orgId: string, spaceId: string) => void
     onChanged: () => void
 }) {
@@ -124,7 +168,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
     return (
         <>
             <SidebarMenuItem>
-                <div className="group/org flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-muted-foreground" title={`${org.address} · you are ${org.memberId}`}>
+                <div className="group/org flex h-7 items-center gap-1.5 rounded-md pl-6 pr-2 text-[11.5px] text-muted-foreground" title={`${org.address} · you are ${org.memberId}`}>
                     <OrgMonogram org={org} size="sm" />
                     <span className="flex-1 truncate">{org.name}</span>
                     {needsSignIn ? (
@@ -174,7 +218,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
                     </DropdownMenu>
                 </div>
             </SidebarMenuItem>
-            {org.spaces.map((space) => {
+            {org.spaces.filter((space) => !visibleSpaceKeys || visibleSpaceKeys.has(spaceUseKey(org.id, space.id))).map((space) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
                 const count = unread.get(`${org.id}/${space.id}`) ?? 0
                 return (
@@ -184,9 +228,11 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
                             onClick={() => onOpenSpace(org.id, space.id)}
                             // Hover = intent: warm the cached tail + start the
                             // refresh, so the click paints instantly.
-                            onMouseEnter={() => prefetchGeneral(org.id, space.id)}
-                            className="pl-4"
+                            onMouseEnter={() => prefetchStream(org.id, space.id)}
+                            className="pl-9"
                         >
+                            {/* A space is a channel — # says so. */}
+                            <Hash className="size-3.5 shrink-0 text-muted-foreground" />
                             <span className={cn('flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
                             {count > 0 && (
                                 <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
@@ -197,7 +243,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
             })}
             {org.spaces.length === 0 && !org.error && !creating && (
                 <SidebarMenuItem>
-                    <SidebarMenuButton onClick={() => setCreating(true)} className="pl-4 text-muted-foreground">
+                    <SidebarMenuButton onClick={() => setCreating(true)} className="pl-9 text-muted-foreground">
                         <Plus className="size-3.5 shrink-0" />
                         <span className="flex-1 truncate text-xs">Create the first space</span>
                     </SidebarMenuButton>
@@ -205,7 +251,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
             )}
             {creating && (
                 <SidebarMenuItem>
-                    <div className="flex items-center gap-1 py-0.5 pl-4 pr-2">
+                    <div className="flex items-center gap-1 py-0.5 pl-9 pr-2">
                         <Input
                             autoFocus
                             value={newName}

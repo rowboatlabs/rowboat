@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { getSpaceFeed, getSpacesOrgs } from '@/hooks/use-spaces'
-import { findGeneralTopic, stripThreadMarker } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
@@ -19,7 +18,8 @@ import { toast } from '@/lib/toast'
 interface Destination {
     orgId: string
     spaceId: string
-    topicId: string
+    /** The thread to land in; absent = the space's stream. */
+    threadRootId?: string
     label: string
     sub: string
     kind: 'general' | 'topic' | 'space'
@@ -41,19 +41,16 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
         // Straight off the feed store — every known space's topics are kept
         // loaded there, and a dialog's lifetime doesn't need live updates.
         const topics = getSpaceFeed(org.id, space.id).topics
-        const generalId = findGeneralTopic(topics)?.id ?? null
-        const out: Destination[] = []
-        if (generalId) {
-            out.push({ orgId: org.id, spaceId: space.id, topicId: generalId, label: 'Messages', sub: space.name, kind: 'general' })
-        }
+        const out: Destination[] = [
+            { orgId: org.id, spaceId: space.id, label: 'Messages', sub: space.name, kind: 'general' },
+        ]
         for (const t of topics) {
-            if (t.archived || t.id === generalId) continue
-            const seed = t.firstMessage ? stripThreadMarker(t.firstMessage.body).split('\n')[0] : null
+            if (t.archived) continue
             out.push({
                 orgId: org.id,
                 spaceId: space.id,
-                topicId: t.id,
-                label: resolveMentions(seed ?? t.title, memberNames),
+                threadRootId: t.rootMessageId,
+                label: resolveMentions(t.title, memberNames),
                 sub: space.name,
                 kind: 'topic',
             })
@@ -61,9 +58,7 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
         for (const o of getSpacesOrgs()) {
             for (const s of o.spaces) {
                 if (o.id === org.id && s.id === space.id) continue
-                const general = findGeneralTopic(getSpaceFeed(o.id, s.id).topics)
-                if (!general) continue
-                out.push({ orgId: o.id, spaceId: s.id, topicId: general.id, label: s.name, sub: o.name, kind: 'space' })
+                out.push({ orgId: o.id, spaceId: s.id, label: s.name, sub: o.name, kind: 'space' })
             }
         }
         return out
@@ -96,7 +91,7 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
             await window.ipc.invoke('spaces:postMessage', {
                 orgId: picked.orgId,
                 spaceId: picked.spaceId,
-                topicId: picked.topicId,
+                ...(picked.threadRootId ? { threadRoot: picked.threadRootId } : {}),
                 body,
             })
             toast(`Forwarded to ${picked.label}`, 'success')
@@ -126,10 +121,10 @@ export function ForwardDialog({ org, space, message, memberNames, onClose }: {
                 </label>
                 <div className="max-h-56 overflow-y-auto rounded-md border border-border p-1">
                     {shown.map((d) => {
-                        const active = picked?.topicId === d.topicId && picked.spaceId === d.spaceId
+                        const active = picked?.threadRootId === d.threadRootId && picked?.orgId === d.orgId && picked?.spaceId === d.spaceId
                         return (
                             <button
-                                key={`${d.orgId}/${d.spaceId}/${d.topicId}`}
+                                key={`${d.orgId}/${d.spaceId}/${d.threadRootId ?? 'stream'}`}
                                 type="button"
                                 onClick={() => setPicked(d)}
                                 className={cn(

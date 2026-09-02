@@ -27,6 +27,14 @@ import { toast } from '@/lib/toast'
 /** The full searchable picker; kept under the old name for the two call sites here. */
 const ReactionPicker = EmojiPickerPopover
 
+// Main's --accent is a 5–6% wash — as a menu highlight it barely reads on the
+// new dark ground. Spaces menus and the hover-bar icons use the stronger wash
+// and tint the label + glyph, so the pointer's target is never in doubt.
+const MENU_HIGHLIGHT =
+    '[&_[role^=menuitem]:focus]:bg-[var(--rowboat-wash)] [&_[role^=menuitem]:focus]:text-[var(--stream-link)] [&_[role^=menuitem]:focus_svg]:text-[var(--stream-link)]!'
+const ICON_HOVER =
+    'transition-colors hover:bg-[var(--rowboat-wash)] hover:text-[var(--stream-link)] active:bg-[var(--stream-mention-wash)] data-[state=open]:bg-[var(--rowboat-wash)] data-[state=open]:text-[var(--stream-link)]'
+
 function joinNames(names: string[]): string {
     if (names.length <= 1) return names[0] ?? ''
     return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
@@ -42,7 +50,9 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
     onReact: (message: spaces.Message, emoji: string) => void
     onPickerOpenChange: (open: boolean) => void
 }) {
-    const groups = message.reactions ?? []
+    // The 📌 group is the pin's storage, not a reaction to show: the stream's
+    // pinned banner is its only surface.
+    const groups = (message.reactions ?? []).filter((g) => g.emoji !== PIN_EMOJI)
     if (groups.length === 0) return null
     return (
         <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -59,11 +69,11 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
                                 onClick={() => onReact(message, group.emoji)}
                                 className={cn(
                                     'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 transition-all duration-150 animate-in fade-in-0 zoom-in-50 active:scale-90',
-                                    mine ? 'border-foreground/40 bg-accent' : 'border-border bg-background hover:border-foreground/30',
+                                    mine ? 'border-[var(--stream-link)] bg-[var(--stream-mention-wash)]' : 'border-border bg-background hover:border-foreground/30',
                                 )}
                             >
                                 <span key={group.memberIds.length} className="text-[13px] leading-none animate-in zoom-in-50 duration-300">{group.emoji}</span>
-                                <span className="text-[11px] font-medium leading-none tabular-nums text-muted-foreground">{group.memberIds.length}</span>
+                                <span className={cn('text-[11px] font-medium leading-none tabular-nums', mine ? 'text-[var(--stream-link)]' : 'text-muted-foreground')}>{group.memberIds.length}</span>
                             </button>
                         </HoverCardTrigger>
                         <HoverCardContent side="top" className="w-auto max-w-60 p-3">
@@ -100,16 +110,18 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
     )
 }
 
-const MESSAGE_PROSE = 'text-sm leading-relaxed [&_p]:my-0.5 [&_h1]:text-base [&_h2]:text-[15px] [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-2 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_ul]:my-1 [&_ol]:my-1'
+const MESSAGE_PROSE = 'text-[15px] leading-[22px] [&_p]:my-0.5 [&_h1]:text-base [&_h2]:text-[15px] [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-2 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_ul]:my-1 [&_ol]:my-1'
 
 export interface ThreadRowData {
-    topicId: string
+    /** The thread's identity: its root message id (the row's own message). */
+    rootMessageId: string
+    /** The topic annotation's archived flag (false when the thread is plain). */
     archived: boolean
     replyCount: number
     lastActivityAt: string
     unreadCount: number
     workingAgents: string[]
-    /** The topic's explicit name (renamed by someone), mentions already resolved; null while auto-titled. */
+    /** The topic annotation's stated goal, mentions already resolved; null = a plain thread. */
     title?: string | null
 }
 
@@ -121,9 +133,9 @@ function MessageRowImpl({
     /** Names the viewer's own agent "Your Rowboat" on thread rows. */
     selfMemberId?: string
     continuation: boolean
-    /** Present when a topic was started from this message (general only). */
+    /** Present when a thread hangs under this message (stream only). */
     thread?: ThreadRowData | null
-    onOpenThread?: (topicId: string) => void
+    onOpenThread?: (rootMessageId: string) => void
     onReplyInThread?: (message: spaces.Message) => void
     onAskRowboat?: (message: spaces.Message) => void
     onCopyLink?: (message: spaces.Message) => void
@@ -155,8 +167,8 @@ function MessageRowImpl({
 }) {
     const name = memberNames.get(message.author.memberId) ?? message.author.memberId
     const viaAgent = message.author.actingMode !== 'direct'
-    const avatarSize = dense ? 'md' : 'lg'
-    const gutter = dense ? 'w-7' : 'w-8'
+    const avatarSize = dense ? 'md' : 'xl'
+    const gutter = dense ? 'w-7' : 'w-9'
     // A tombstone renders only its note (and any thread row under it) — no
     // reactions, no hover actions; the deed is done.
     const deleted = !!message.deletedAt
@@ -213,13 +225,14 @@ function MessageRowImpl({
         <div
             data-mid={message.id}
             className={cn(
-                'group/msg relative flex items-start gap-2.5 rounded-lg px-2 hover:bg-accent/40',
+                'group/msg relative flex items-start gap-3 px-3 hover:bg-accent',
                 continuation ? 'py-0.5' : 'py-1.5',
-                pingsMe && 'bg-yellow-400/10 shadow-[inset_3px_0_0] shadow-yellow-500/80 hover:bg-yellow-400/15 dark:bg-yellow-400/[0.07] dark:hover:bg-yellow-400/10',
+                // A message that pings you carries the dialect's "needs you" wash.
+                pingsMe && 'bg-[var(--stream-you-wash)] shadow-[inset_3px_0_0] shadow-[var(--stream-you-ink)]',
             )}
         >
             {continuation ? (
-                <span title={formatFullTimestamp(message.postedAt)} className={cn('shrink-0 pt-1 text-right text-[10px] leading-5 text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
+                <span title={formatFullTimestamp(message.postedAt)} className={cn('shrink-0 pt-1 text-right text-[11px] leading-[22px] tabular-nums text-muted-foreground/0 group-hover/msg:text-muted-foreground', gutter)}>
                     {formatFeedTime(message.postedAt).replace(/^Yesterday /, '')}
                 </span>
             ) : (
@@ -231,9 +244,9 @@ function MessageRowImpl({
             )}
             <div className="min-w-0 flex-1">
                 {!continuation && (
-                    <div className="flex items-baseline gap-1.5 text-xs">
+                    <div className="flex items-baseline gap-2 text-xs">
                         <MemberProfilePopover id={message.author.memberId}>
-                            <button type="button" className="cursor-pointer font-semibold text-foreground hover:underline">{name}</button>
+                            <button type="button" className="cursor-pointer text-[15px] font-extrabold leading-[22px] text-foreground hover:underline">{name}</button>
                         </MemberProfilePopover>
                         {viaAgent && (
                             <span className="text-muted-foreground">
@@ -318,18 +331,18 @@ function MessageRowImpl({
                     // of the message itself.
                     <button
                         type="button"
-                        onClick={() => onOpenThread(thread.topicId)}
+                        onClick={() => onOpenThread(thread.rootMessageId)}
                         className={cn(
-                            'group/thread mt-1.5 flex w-full max-w-2xl items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-left text-xs transition-colors hover:border-foreground/30 hover:bg-accent/40',
+                            'group/thread mt-1.5 flex w-full max-w-2xl items-center gap-2 rounded-md border border-transparent px-2 py-1 text-left text-xs transition-colors hover:border-border hover:bg-[var(--rowboat-raised)]',
                             thread.archived && 'opacity-60',
                         )}
                     >
                         <MessageSquare className="size-3 text-muted-foreground" />
                         {thread.title && <span className="max-w-48 truncate font-semibold">{thread.title}</span>}
-                        <span className={cn(thread.unreadCount > 0 ? 'font-bold' : 'font-semibold', thread.title && 'font-normal text-muted-foreground')}>
+                        <span className={cn('font-bold text-[var(--stream-link)]', thread.title && 'font-normal text-muted-foreground')}>
                             {thread.replyCount} {thread.replyCount === 1 ? 'reply' : 'replies'}
                         </span>
-                        {thread.unreadCount > 0 && <span className="font-semibold text-orange-600">{thread.unreadCount} new</span>}
+                        {thread.unreadCount > 0 && <span className="font-semibold text-[var(--rowboat-attention)]">{thread.unreadCount} new</span>}
                         <span title={formatFullTimestamp(thread.lastActivityAt)} className="text-muted-foreground">{formatFeedTime(thread.lastActivityAt)}</span>
                         {thread.archived && <span className="text-muted-foreground">archived</span>}
                         {thread.workingAgents.length > 0 && (
@@ -353,7 +366,7 @@ function MessageRowImpl({
                 {thread && thread.replyCount === 0 && thread.workingAgents.length > 0 && onOpenThread && (
                     <button
                         type="button"
-                        onClick={() => onOpenThread(thread.topicId)}
+                        onClick={() => onOpenThread(thread.rootMessageId)}
                         className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
                     >
                         <Loader2 className="size-3 animate-spin" /> Rowboat is working on a reply…
@@ -361,13 +374,13 @@ function MessageRowImpl({
                 )}
             </div>
             {showActions && (
-                <div className={cn('absolute right-2 top-1 items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 shadow-sm', pickerOpen || menuOpen ? 'flex' : 'hidden group-hover/msg:flex')}>
+                <div className={cn('absolute -top-3.5 right-3 items-center gap-0.5 rounded-lg border border-border bg-[var(--rowboat-raised)] p-0.5 shadow-[var(--rowboat-shadow-soft)]', pickerOpen || menuOpen ? 'flex' : 'hidden group-hover/msg:flex')}>
                     {onReact && (
                         <ReactionPicker onPick={(emoji) => onReact(message, emoji)} onOpenChange={setPickerOpen}>
                             <button
                                 type="button"
                                 title="Add reaction"
-                                className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                                className={cn('inline-flex size-7 items-center justify-center rounded-md text-muted-foreground', ICON_HOVER)}
                             >
                                 <SmilePlus className="size-3.5" />
                             </button>
@@ -378,9 +391,9 @@ function MessageRowImpl({
                         // and a bare glyph made people hunt for it.
                         <button
                             type="button"
-                            title={thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
-                            onClick={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
-                            className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                            title={thread && thread.replyCount > 0 ? 'Open thread' : 'Reply in thread'}
+                            onClick={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.rootMessageId) : onReplyInThread(message))}
+                            className={cn('inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground', ICON_HOVER)}
                         >
                             <MessageSquare className="size-3.5" />
                             {thread && thread.replyCount > 0 ? 'Open' : 'Reply'}
@@ -391,7 +404,7 @@ function MessageRowImpl({
                             type="button"
                             title="Ask @rowboat about this"
                             onClick={() => onAskRowboat(message)}
-                            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className={cn('inline-flex size-7 items-center justify-center rounded-md text-muted-foreground', ICON_HOVER)}
                         >
                             <Bot className="size-3.5" />
                         </button>
@@ -399,11 +412,11 @@ function MessageRowImpl({
                     {(onCopyLink || canDelete || canEdit || canQuote || canForward || canPin || canSave) && (
                         <DropdownMenu onOpenChange={setMenuOpen}>
                             <DropdownMenuTrigger asChild>
-                                <button type="button" title="More" className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+                                <button type="button" title="More" className={cn('inline-flex size-7 items-center justify-center rounded-md text-muted-foreground', ICON_HOVER)}>
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
+                            <DropdownMenuContent align="end" className={MENU_HIGHLIGHT}>
                                 {canQuote && (
                                     <DropdownMenuItem onClick={() => onQuoteReply!(message)}>
                                         <Quote className="size-3.5 mr-2" /> Quote reply
@@ -463,7 +476,7 @@ function MessageRowImpl({
     return (
         <ContextMenu onOpenChange={(open) => { if (open) setSelectionText(window.getSelection()?.toString().trim() ?? '') }}>
             <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-            <ContextMenuContent className="w-56">
+            <ContextMenuContent className={cn('w-56', MENU_HIGHLIGHT)}>
                 {selectionText && (
                     <ContextMenuItem onSelect={() => copyToClipboard(selectionText)}>
                         <Copy className="size-3.5 mr-2" /> Copy
@@ -474,7 +487,7 @@ function MessageRowImpl({
                         <ContextMenuSubTrigger>
                             <SmilePlus className="size-3.5 mr-2" /> Add reaction
                         </ContextMenuSubTrigger>
-                        <ContextMenuSubContent className="w-auto p-1.5">
+                        <ContextMenuSubContent className={cn('w-auto p-1.5', MENU_HIGHLIGHT)}>
                             <div className="grid grid-cols-6 gap-0.5">
                                 {frequentEmoji(12).map((emoji) => (
                                     <ContextMenuItem
@@ -494,9 +507,9 @@ function MessageRowImpl({
                 )}
                 {onReplyInThread && (
                     <ContextMenuItem
-                        onSelect={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.topicId) : onReplyInThread(message))}
+                        onSelect={() => (thread && thread.replyCount > 0 && onOpenThread ? onOpenThread(thread.rootMessageId) : onReplyInThread(message))}
                     >
-                        <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open topic' : 'Reply — starts a topic'}
+                        <MessageSquare className="size-3.5 mr-2" /> {thread && thread.replyCount > 0 ? 'Open thread' : 'Reply in thread'}
                     </ContextMenuItem>
                 )}
                 {canQuote && (
@@ -559,7 +572,8 @@ type MessageRowProps = Parameters<typeof MessageRowImpl>[0]
 function threadRowEqual(a: ThreadRowData | null | undefined, b: ThreadRowData | null | undefined): boolean {
     if (!a || !b) return !a === !b
     return (
-        a.topicId === b.topicId &&
+        a.rootMessageId === b.rootMessageId &&
+        a.archived === b.archived &&
         a.replyCount === b.replyCount &&
         a.lastActivityAt === b.lastActivityAt &&
         a.unreadCount === b.unreadCount &&
@@ -591,7 +605,7 @@ export function DayDivider({ label }: { label: string }) {
     return (
         <div className="flex items-center gap-2.5 px-2 py-1.5">
             <span className="h-px flex-1 bg-border" />
-            <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+            <span className="rounded-full border border-border bg-background px-3 py-0.5 text-xs font-bold">{label}</span>
             <span className="h-px flex-1 bg-border" />
         </div>
     )
@@ -602,8 +616,8 @@ export function NewDivider({ fading = false }: { fading?: boolean }) {
     return (
         // data-new-divider: the jump-to-unread pill scrolls to this element.
         <div data-new-divider className={cn('flex items-center gap-2.5 px-2 py-1 transition-opacity duration-700', fading && 'opacity-0')}>
-            <span className="h-px flex-1 bg-orange-500" />
-            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-orange-600">New</span>
+            <span className="h-px flex-1 bg-[var(--rowboat-attention)]" />
+            <span className="text-[11px] font-medium text-[var(--rowboat-attention)]">New</span>
         </div>
     )
 }

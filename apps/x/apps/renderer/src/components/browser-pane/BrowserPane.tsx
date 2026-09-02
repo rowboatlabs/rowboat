@@ -75,6 +75,9 @@ const BLOCKING_OVERLAY_SLOTS = new Set([
   'popover-content',
   'select-content',
   'sheet-content',
+  // The dock's ⌥Tab switcher and Chats/Spaces flyouts (custom overlays, not
+  // Radix) — they stamp data-slot/data-state themselves (see dock-sidebar).
+  'dock-overlay',
 ])
 
 interface BrowserPaneProps {
@@ -518,7 +521,11 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
       cancelled = true
       cancelAnimationFrame(rafId)
       lastBoundsRef.current = null
-      setViewVisible(false)
+      // Force the hide, bypassing the ref-equality guard: an earlier hide
+      // request may have been lost while the ref already reads hidden — the
+      // native view must never outlive this pane.
+      viewVisibleRef.current = false
+      void window.ipc.invoke('browser:setVisible', { visible: false })
     }
   }, [setViewVisible, syncView])
 

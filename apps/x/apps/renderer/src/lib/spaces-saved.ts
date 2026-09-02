@@ -11,7 +11,8 @@ const KEY_PREFIX = 'spaces:saved:'
 
 export interface SavedMessage {
     messageId: string
-    topicId: string
+    /** The thread the message lives in (a root stands for its own thread). */
+    threadRootId: string
     authorId: string
     body: string
     postedAt: string
@@ -67,7 +68,7 @@ export function toggleSaved(orgId: string, spaceId: string, message: spaces.Mess
     }
     const entry: SavedMessage = {
         messageId: message.id,
-        topicId: message.topicId,
+        threadRootId: message.threadRoot ?? message.id,
         authorId: message.author.memberId,
         body: message.body,
         postedAt: message.postedAt,

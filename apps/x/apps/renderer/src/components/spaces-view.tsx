@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BellOff, Check, ChevronDown, Clock, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Plus, Search } from 'lucide-react'
-import type { spaces } from '@x/shared'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Bell, BellOff, Check, ChevronDown, Clock, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, PenTool, Plus, Search } from 'lucide-react'
+import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent,
@@ -16,14 +16,14 @@ import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
-import { DraftThreadPane, ThreadPane } from '@/components/spaces/thread-pane'
-import { useGeneral, useSpacePresence, useThreadIndex } from '@/hooks/use-space-chat'
+import { ThreadPane } from '@/components/spaces/thread-pane'
+import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { useSpaceNotifyPrefs, type NotifyLevel } from '@/hooks/use-spaces-notify'
 import { requestJump } from '@/lib/spaces-jump'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
 import { SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
-import { artifactsForThread, stripThreadMarker } from '@/lib/spaces-conventions'
+import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { markRead, markTopicRead } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
@@ -62,6 +62,10 @@ const MODES: { k: SpaceMode; label: string; Icon: typeof MessageSquare; kb: stri
     { k: 'read', label: 'Read', Icon: FileText, kb: '⌘2' },
     { k: 'split', label: 'Split', Icon: Columns2, kb: '⌘3' },
 ]
+
+// The whiteboard is heavy (the Excalidraw editor); it loads as its own chunk
+// the first time a board opens, never inflating the main renderer bundle.
+const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 
 
 // ---------------------------------------------------------------------------
@@ -186,14 +190,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [, setFolding] = useState(false)
 
     const feed = useSpaceFeed(org.id, space.id)
-    const general = useGeneral(org.id, space.id)
-    const threads = useThreadIndex(org.id, space.id)
+    const stream = useStream(org.id, space.id)
     const presence = useSpacePresence(org.id, space.id, org.memberId)
     const lastReadAt = useSpaceLastReadAt(org.id, space.id)
     const memberNames = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
 
-    // The artifacts rail: open by default when a topic has artifacts, collapsed
-    // when it has none; a per-topic pin remembers a manual toggle.
+    // The artifacts rail: open by default when a thread has artifacts, collapsed
+    // when it has none; a per-thread pin remembers a manual toggle.
     const [railPins, setRailPins] = useState<ReadonlyMap<string, boolean>>(new Map())
 
     useEffect(() => {
@@ -249,15 +252,16 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         }
     }
 
-    // The quick switcher (⌘K): topics, messages, spaces. Capture phase so the
-    // app's global ⌘K search palette yields inside a space — the Slack
-    // gesture. While the switcher is open its own input handles ⌘K (so the
-    // close animates); this listener only opens.
+    // The quick switcher (⌘⇧K): topics, messages, spaces. Shift because plain
+    // ⌘K is the app's global search palette and must stay reachable inside a
+    // space. Capture phase so nothing below grabs the press. While the switcher
+    // is open its own input handles ⌘⇧K (so the close animates); this listener
+    // only opens.
     const [switcherOpen, setSwitcherOpen] = useState(false)
     useEffect(() => {
         if (!active || switcherOpen) return
         const onKey = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+            if ((e.metaKey || e.ctrlKey) && !e.altKey && e.shiftKey && e.key.toLowerCase() === 'k') {
                 e.preventDefault()
                 e.stopPropagation()
                 setSwitcherOpen(true)
@@ -301,12 +305,17 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     const markAllRead = () => {
         markRead(org.id, space.id)
-        if (general.topic) markTopicRead(org.id, space.id, general.topic.id)
-        for (const t of feed.topics) markTopicRead(org.id, space.id, t.id)
+        markTopicRead(org.id, space.id, STREAM_READ_KEY)
+        for (const t of feed.topics) markTopicRead(org.id, space.id, t.rootMessageId)
+        for (const m of stream.messages) {
+            if (!m.pending && !m.failed && (m.replyCount ?? 0) > 0) markTopicRead(org.id, space.id, m.id)
+        }
     }
 
     const unreadPaths = useMemo(
-        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, lastReadAt, org.memberId)).map((c) => c.assetPath)),
+        // Boards are excluded: their saves are throttled snapshots, not reading
+        // material — the boards rail is their surface, not the files tree.
+        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, lastReadAt, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetPath)),
         [feed.changeSets, lastReadAt, org.memberId],
     )
 
@@ -316,17 +325,12 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // (600px document + 480px chat + the 28px rail edge).
     // ------------------------------------------------------------------
     const [mode, setMode] = useState<SpaceMode>(() => (selection.kind === 'file' ? 'read' : 'talk'))
-    // The topics/files rail has two modes, persisted: PINNED (default) — a
-    // plain sidebar, always open; or AUTO-HIDE — a collapsed edge that opens
-    // on hover and lingers a few seconds after the cursor leaves, so moving
-    // to the stream and back doesn't slam it shut mid-thought. (The first
-    // design closed the instant the cursor left — too twitchy to use.)
+    // The discussions/files rail is a plain sticky sidebar (persisted):
+    // open by default, collapsed to a slim edge strip on demand. No hover
+    // behavior — the strip reopens on click only. (Two earlier designs
+    // auto-opened on hover; both read as random. The shell sidebar contracts
+    // to the dock while in Spaces, so this rail is THE sidebar here.)
     const [railPinned, setRailPinned] = useState(() => localStorage.getItem('spaces:railOpen') !== '0')
-    const [railHover, setRailHover] = useState(false)
-    // An open row menu (context or ⋯) pins the rail for its lifetime — the
-    // short hover linger must not slide the rail out from under a menu.
-    const [railMenuOpen, setRailMenuOpen] = useState(false)
-    const railCloseTimer = useRef<number | null>(null)
 
     // Width of the pane drives the Split floor and pinnability.
     const paneRef = useRef<HTMLDivElement | null>(null)
@@ -342,12 +346,14 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
     // Stable listener; requestMode itself re-derives per render (splitFits).
     const requestModeRef = useRef<(next: SpaceMode) => void>(() => {})
+    const toggleWhiteboardRef = useRef<() => void>(() => {})
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if ((!e.metaKey && !e.ctrlKey) || e.altKey || e.shiftKey) return
             if (e.key === '1') { e.preventDefault(); requestModeRef.current('talk') }
             else if (e.key === '2') { e.preventDefault(); requestModeRef.current('read') }
             else if (e.key === '3') { e.preventDefault(); requestModeRef.current('split') }
+            else if (e.key === '4') { e.preventDefault(); toggleWhiteboardRef.current() }
         }
         window.addEventListener('keydown', onKey)
         return () => window.removeEventListener('keydown', onKey)
@@ -357,42 +363,69 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // What actually renders: a Split that doesn't fit falls back to the one
     // surface the selection needs.
     const effMode: SpaceMode = mode === 'split' && !splitFits ? (selection.kind === 'file' ? 'read' : 'talk') : mode
-    const railOpen = railPinned || railHover || railMenuOpen
+    const railOpen = railPinned
 
     /** The header buttons and ⌘1/2/3: say why when Split can't render. */
     const requestMode = (next: SpaceMode) => {
         if (next === 'split' && !splitFits) toast('Window is too narrow for Split — it will appear when you widen it')
+        // Talk/Read while a board is open leave the board; Split KEEPS it —
+        // the board docks where the document goes, chat alongside.
+        if (next !== 'split' && (selection.kind === 'whiteboard' || (selection.kind === 'file' && spaces.isWhiteboardPath(selection.path)))) {
+            onSelect({ kind: 'general' })
+        }
         setMode(next)
     }
     requestModeRef.current = requestMode
 
-    /**
-     * Auto-hide grace: just enough to survive the cursor clipping the border
-     * on its way somewhere else — the rail otherwise closes as you leave.
-     */
-    const RAIL_LINGER_MS = 250
-    const clearRailTimer = () => {
-        if (railCloseTimer.current) {
-            window.clearTimeout(railCloseTimer.current)
-            railCloseTimer.current = null
+    // ------------------------------------------------------------------
+    // Whiteboard: a full-bleed surface of its own. The header button (and
+    // ⌘4) opens the space's most recent board — created on its first save
+    // when none exists yet; the rail lists and creates named boards.
+    // ------------------------------------------------------------------
+    // A board reached through any file-shaped path (artifact link, deep link,
+    // history) is still a board — it must never render as raw JSON in the
+    // document pane.
+    const boardPath = selection.kind === 'whiteboard' ? selection.path
+        : selection.kind === 'file' && spaces.isWhiteboardPath(selection.path) ? selection.path
+        : null
+    const isWhiteboard = boardPath !== null
+    // Split with a board = chat + live board around the divider (the board
+    // takes the document slot); any other mode shows the board full-bleed.
+    // Narrow windows fall back through effMode to full-bleed automatically.
+    const boardSplit = isWhiteboard && effMode === 'split'
+    const boardFull = isWhiteboard && !boardSplit
+    const boards = entries.filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
+    const toggleWhiteboard = () => {
+        if (isWhiteboard) {
+            onSelect({ kind: 'general' })
+        } else {
+            const recent = [...boards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+            onSelect({ kind: 'whiteboard', path: recent?.path ?? spaces.DEFAULT_WHITEBOARD_PATH })
+            analytics.spacesTabViewed('whiteboard')
         }
     }
-    useEffect(() => clearRailTimer, [])
-    const onRailHover = (hovering: boolean) => {
-        clearRailTimer()
-        if (hovering) setRailHover(true)
-        else railCloseTimer.current = window.setTimeout(() => setRailHover(false), RAIL_LINGER_MS)
+    toggleWhiteboardRef.current = toggleWhiteboard
+    /**
+     * The rail's "+": an explicitly named board exists from the moment it is
+     * created — an empty snapshot files the asset right away, so the rail
+     * lists it (highlighted) before the first stroke and an untouched board
+     * still survives navigating away. A taken name just opens that board.
+     */
+    const createBoard = (path: string) => {
+        select({ kind: 'whiteboard', path })
+        if (entries.some((e) => e.path === path && !e.state)) return
+        void window.ipc.invoke('spaces:proposeChange', {
+            orgId: org.id,
+            spaceId: space.id,
+            input: { assetPath: path, baseVersion: 0, newContent: spaces.EMPTY_WHITEBOARD_CONTENT, reason: 'new whiteboard' },
+        }).catch(() => {}) // org unreachable — the pane's own first save creates it instead
     }
+
+    /** Auto-hide grace: how long the rail lingers after the cursor leaves. */
     const toggleRailPin = () => {
         const pin = !railPinned
         localStorage.setItem('spaces:railOpen', pin ? '1' : '0')
         setRailPinned(pin)
-        // Unpinning closes NOW (the cursor is on the button, inside the rail —
-        // without this the hover hold keeps it open and the click reads as dead).
-        if (!pin) {
-            clearRailTimer()
-            setRailHover(false)
-        }
     }
 
     // Selecting is also choreography: a topic opened from Read grows into
@@ -401,22 +434,24 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // sidebar, not a flyout.
     const select = (next: RailSelection) => {
         onSelect(next)
-        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : 'topics')
-        if ((next.kind === 'topic' || next.kind === 'draft') && mode === 'read') setMode('split')
+        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
+        if (next.kind === 'whiteboard') return // full-bleed surface; mode is untouched and resumes on the way back
+        if (next.kind === 'thread' && mode === 'read') setMode('split')
         else if (next.kind === 'general' && mode === 'read') setMode('talk')
         else if (next.kind === 'file') {
             // A file opened while talking keeps the conversation beside it:
             // Split (effMode falls back to Read below the floor).
-            if (next.fromTopicId || mode === 'talk') setMode('split')
+            if (next.fromThreadRootId || mode === 'talk') setMode('split')
         }
     }
     const openFile = (path: string) => select({ kind: 'file', path })
 
     /** Search / pinned / saved landings: open the surface, then scroll + flash. */
-    const navigateToMessage = (topicId: string, messageId: string) => {
-        requestJump({ topicId, messageId })
-        if (general.topic && topicId === general.topic.id) select({ kind: 'general' })
-        else select({ kind: 'topic', topicId })
+    const navigateToMessage = (rootMessageId: string, messageId: string) => {
+        requestJump({ topicId: rootMessageId, messageId })
+        // STREAM_READ_KEY stands for the stream itself; anything else is a thread.
+        if (rootMessageId === STREAM_READ_KEY) select({ kind: 'general' })
+        else select({ kind: 'thread', rootMessageId })
     }
 
     // Selection can also change under us (history ‹ ›, deep links). Only
@@ -431,13 +466,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     }, [selKey, selection.kind, mode])
 
     // The last dismissed file — Read/Split and the header chip reopen it.
-    const [lastDoc, setLastDoc] = useState<{ path: string; fromTopicId?: string } | null>(null)
+    const [lastDoc, setLastDoc] = useState<{ path: string; fromThreadRootId?: string } | null>(null)
 
     // The document pane: an explicitly opened file, else the one that was
     // just dismissed, else the space's front page (README.md), else the
-    // first file there is.
-    const defaultDocPath = entries.some((e) => e.path === 'README.md') ? 'README.md' : (entries[0]?.path ?? null)
-    const centerPath = selection.kind === 'file' ? selection.path : (lastDoc?.path ?? defaultDocPath)
+    // first file there is. Boards never qualify — their JSON is not a
+    // document, and they have their own surface.
+    const docEntries = entries.filter((e) => !spaces.isWhiteboardPath(e.path))
+    const defaultDocPath = docEntries.some((e) => e.path === 'README.md') ? 'README.md' : (docEntries[0]?.path ?? null)
+    const centerPath = selection.kind === 'file' && !spaces.isWhiteboardPath(selection.path) ? selection.path : (lastDoc?.path ?? defaultDocPath)
 
     // Resizable Split divider: drag it; the document width persists.
     const [docWidth, setDocWidth] = useState<number>(() => {
@@ -471,8 +508,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         window.addEventListener('mousemove', onMove)
         window.addEventListener('mouseup', onUp)
     }
-    /** Open a file from inside a topic — the file view gets a crumb back to the topic. */
-    const openFileFromTopic = (topicId: string) => (path: string) => select({ kind: 'file', path, fromTopicId: topicId })
+    /** Open a file from inside a thread — the file view gets a crumb back to it. */
+    const openFileFromThread = (rootMessageId: string) => (path: string) => select({ kind: 'file', path, fromThreadRootId: rootMessageId })
 
     // A persisted width from a wider window must not crush the chat side.
     const docWidthEff = Math.max(420, Math.min(docWidth, paneWidth - CHAT_FLOOR - 34))
@@ -484,34 +521,21 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         (a, b) => Number(hereSet.has(b.id)) - Number(hereSet.has(a.id)) || a.displayName.localeCompare(b.displayName),
     )
 
-    // The chat surface keeps its context while a file has focus: a topic
-    // stays open beside the document it changed (fromTopicId), otherwise the
-    // last chat selection sticks until the user picks another.
+    // The chat surface keeps its context while a file has focus: a thread
+    // stays open beside the document it changed (fromThreadRootId), otherwise
+    // the last chat selection sticks until the user picks another.
     const chatContextRef = useRef<string | null>(null)
-    if (selection.kind === 'topic') chatContextRef.current = selection.topicId
-    else if (selection.kind === 'general' || selection.kind === 'draft') chatContextRef.current = null
-    else if (selection.kind === 'file' && selection.fromTopicId) chatContextRef.current = selection.fromTopicId
-    const chatTopicId = chatContextRef.current
+    if (selection.kind === 'thread') chatContextRef.current = selection.rootMessageId
+    else if (selection.kind === 'general') chatContextRef.current = null
+    else if (selection.kind === 'file' && selection.fromThreadRootId) chatContextRef.current = selection.fromThreadRootId
+    const chatRootId = chatContextRef.current
 
-    // Draft thread: the reply pane before any topic exists. The parent lives
-    // in the general stream; a stale draft (relaunch, deep link) falls back.
-    const draftParent = selection.kind === 'draft'
-        ? general.messages.find((m) => m.id === selection.parentMessageId) ?? null
-        : null
-    const draftMissing = selection.kind === 'draft' && general.ready && !draftParent
-    useEffect(() => {
-        if (draftMissing) onSelect({ kind: 'general' })
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [draftMissing])
-
-    const selectedTopic = chatTopicId ? feed.topics.find((t) => t.id === chatTopicId) : undefined
-    const selectedInfo = chatTopicId ? threads.byTopic.get(chatTopicId) : undefined
-    const selectedAnchor = selectedTopic?.anchorChangeSetId ? feed.changeSets.find((c) => c.id === selectedTopic.anchorChangeSetId) ?? null : null
-    const selectedGroups = chatTopicId ? artifactsForThread(feed.changeSets, chatTopicId) : []
-    const artifactsRailOpen = chatTopicId ? (railPins.get(chatTopicId) ?? selectedGroups.length > 0) : false
+    const selectedTopic = chatRootId ? feed.topics.find((t) => t.rootMessageId === chatRootId) : undefined
+    const selectedGroups = chatRootId ? artifactsForThread(feed.changeSets, chatRootId) : []
+    const artifactsRailOpen = chatRootId ? (railPins.get(chatRootId) ?? selectedGroups.length > 0) : false
     const toggleArtifactsRail = () => {
-        if (!chatTopicId) return
-        setRailPins((prev) => new Map(prev).set(chatTopicId, !artifactsRailOpen))
+        if (!chatRootId) return
+        setRailPins((prev) => new Map(prev).set(chatRootId, !artifactsRailOpen))
     }
 
     // Split: dismissing the document closes it and returns to Talk, landing
@@ -520,24 +544,21 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     // re-entering Read/Split (which prefer it over the README default).
     const dismissFile = () => {
         if (selection.kind === 'file') {
-            setLastDoc({ path: selection.path, fromTopicId: selection.fromTopicId })
-            onSelect(chatTopicId ? { kind: 'topic', topicId: chatTopicId } : { kind: 'general' })
+            setLastDoc({ path: selection.path, fromThreadRootId: selection.fromThreadRootId })
+            onSelect(chatRootId ? { kind: 'thread', rootMessageId: chatRootId } : { kind: 'general' })
         }
         setMode('talk')
     }
     const reopenDoc = () => {
-        if (lastDoc) select({ kind: 'file', path: lastDoc.path, fromTopicId: lastDoc.fromTopicId })
+        if (lastDoc) select({ kind: 'file', path: lastDoc.path, fromThreadRootId: lastDoc.fromThreadRootId })
     }
 
-    // Crumb for a file opened from a topic.
-    const crumbTopicId = selection.kind === 'file' ? selection.fromTopicId ?? null : null
-    const crumbTopic = crumbTopicId ? feed.topics.find((t) => t.id === crumbTopicId) : undefined
-    const crumbInfo = crumbTopicId ? threads.byTopic.get(crumbTopicId) : undefined
-    const crumbLabelRaw = crumbTopic
-        ? crumbInfo?.parentMessageId && crumbInfo.firstMessage
-            ? stripThreadMarker(crumbInfo.firstMessage.body).split('\n')[0] ?? crumbTopic.title
-            : crumbTopic.title
-        : crumbTopicId ? 'Back to topic' : null
+    // Crumb for a file opened from a thread: the discussion's goal, else the
+    // root's first line, else a generic label.
+    const crumbRootId = selection.kind === 'file' ? selection.fromThreadRootId ?? null : null
+    const crumbTopic = crumbRootId ? feed.topics.find((t) => t.rootMessageId === crumbRootId) : undefined
+    const crumbRoot = crumbRootId ? stream.messages.find((m) => m.id === crumbRootId) : undefined
+    const crumbLabelRaw = crumbTopic?.title ?? (crumbRoot ? threadLabelOf(crumbRoot.body) : crumbRootId ? 'Back to thread' : null)
     const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames)
 
     // Files picked (rail Upload button) or dropped on the tree, awaiting the
@@ -558,11 +579,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 orgId={org.id}
                 spaceId={space.id}
                 topics={feed.topics}
-                generalId={general.topic?.id ?? null}
+                streamKey={STREAM_READ_KEY}
                 open={switcherOpen}
                 onClose={() => setSwitcherOpen(false)}
                 onOpenGeneral={() => select({ kind: 'general' })}
-                onOpenTopic={(topicId) => select({ kind: 'topic', topicId })}
+                onOpenTopic={(rootMessageId) => select({ kind: 'thread', rootMessageId })}
                 onOpenMessage={navigateToMessage}
                 onSwitchSpace={onSwitchSpace}
             />
@@ -587,7 +608,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         </button>
                     </PopoverTrigger>
                     <PopoverContent align="start" className="w-64 p-1.5">
-                        <div className="px-2 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <div className="px-2 pb-1 pt-0.5 text-[13px] text-muted-foreground">
                             Members — {members.length}
                         </div>
                         <div className="max-h-72 overflow-y-auto">
@@ -598,16 +619,16 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                         <button type="button" className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent/60">
                                             <span className="relative shrink-0">
                                                 <MemberAvatar id={m.id} name={m.displayName} size="md" />
-                                                {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 ring-2 ring-popover" />}
+                                                {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-popover" />}
                                             </span>
                                             <span className="min-w-0 flex-1 truncate text-sm">
                                                 {m.displayName}
                                                 {m.id === org.memberId && <span className="text-muted-foreground"> (you)</span>}
                                             </span>
                                             {m.role === 'admin' && (
-                                                <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
+                                                <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">admin</span>
                                             )}
-                                            {isHere && <span className="shrink-0 text-[10.5px] text-emerald-600">here</span>}
+                                            {isHere && <span className="shrink-0 text-[10.5px] text-[var(--rowboat-success)]">here</span>}
                                         </button>
                                     </MemberProfilePopover>
                                 )
@@ -626,13 +647,13 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 </Popover>
                 {here.length > 0 && (
                     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={here.map((id) => memberNames.get(id) ?? id).join(', ')}>
-                        <span className="size-1.5 rounded-full bg-emerald-500" /> {here.length} here
+                        <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" /> {here.length} here
                     </span>
                 )}
                 <div className="flex-1" />
                 <button
                     type="button"
-                    title="Search this space (⌘K)"
+                    title="Search this space (⌘⇧K)"
                     onClick={() => setSwitcherOpen(true)}
                     className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
@@ -666,11 +687,11 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                 <BookmarksPopover
                     orgId={org.id}
                     spaceId={space.id}
-                    generalId={general.topic?.id ?? null}
+                    streamKey={STREAM_READ_KEY}
                     topics={feed.topics}
                     onNavigate={navigateToMessage}
                 />
-                {effMode === 'talk' && selection.kind !== 'file' && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
+                {effMode === 'talk' && !isWhiteboard && selection.kind !== 'file' && lastDoc && entries.some((e) => e.path === lastDoc.path) && (
                     <button
                         type="button"
                         onClick={reopenDoc}
@@ -682,6 +703,22 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         <Columns2 className="size-3 shrink-0" />
                     </button>
                 )}
+                <button
+                    type="button"
+                    title={isWhiteboard ? 'Back to the conversation ⌘4' : 'Whiteboard — draw together, live ⌘4'}
+                    onClick={toggleWhiteboard}
+                    className={cn(
+                        'inline-flex h-6 items-center gap-1.5 rounded-md border px-2 text-xs',
+                        isWhiteboard
+                            ? 'border-primary/40 bg-primary/10 text-foreground'
+                            : 'border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                    )}
+                >
+                    <PenTool className="size-3.5" />
+                    {/* Stable identity on purpose: always "Board", active state via the
+                        highlight — the board's NAME lives in the chip on the canvas. */}
+                    <span className="hidden lg:inline">Board</span>
+                </button>
                 <div className="inline-flex items-center rounded-md bg-muted p-0.5">
                     {MODES.map(({ k, label, Icon, kb }) => (
                         <button
@@ -691,7 +728,8 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                             onClick={() => requestMode(k)}
                             className={cn(
                                 'inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs',
-                                mode === k ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                                // Full-bleed board is mode-less; board-split IS Split.
+                                mode === k && !boardFull ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                             )}
                         >
                             <Icon className="size-3.5" />
@@ -734,26 +772,24 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     orgId={org.id}
                     spaceId={space.id}
                     selfMemberId={org.memberId}
-                    general={general}
+                    stream={stream}
                     topics={feed.topics}
-                    threads={threads}
                     changeSets={feed.changeSets}
                     entries={entries}
                     draftFolders={draftFolders}
                     presence={presence}
                     unreadPaths={unreadPaths}
                     notify={notify}
-                    onMenuOpenChange={setRailMenuOpen}
+
                     selection={selection}
                     onSelect={select}
                     onCreateFile={openFile}
+                    onCreateBoard={createBoard}
                     onUploadFiles={setUploadFiles}
                     onOpenTrash={() => setTrashOpen(true)}
                     onAddFolder={addFolder}
                     onRemoveFolder={removeFolder}
                     open={railOpen}
-                    pinned={railPinned}
-                    onHoverChange={onRailHover}
                     onTogglePin={toggleRailPin}
                 />
                 {/* The surfaces. Talk = the stream or an open topic; Read =
@@ -761,76 +797,92 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     The stream is the expensive surface, so it never unmounts
                     while the space is open — a topic, a draft, or read mode
                     HIDE it (keep-alive), and closing them is instant. */}
-                <div className={cn('flex-1 min-w-0 min-h-0', effMode === 'read' ? 'hidden' : 'flex')}>
-                    {draftParent ? (
-                        <section className="flex-1 min-w-0 min-h-0 flex flex-col">
-                            <DraftThreadPane
-                                key={draftParent.id}
+                {/* Whiteboard: full-bleed beside the rail, or — in Split —
+                    docked at the document slot with chat alongside. One
+                    wrapper in one tree position both ways (flex `order` moves
+                    it right of the chat visually), so toggling full ⇄ split
+                    never remounts the live collab session. Keyed by path so
+                    switching boards remounts a fresh session. */}
+                {boardPath && (
+                    <div
+                        style={boardSplit ? { width: docWidthEff } : undefined}
+                        className={cn('min-w-0 min-h-0 flex order-3', boardSplit ? 'shrink-0' : 'flex-1')}
+                    >
+                        <Suspense
+                            fallback={
+                                <div className="flex-1 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                                    <Loader2 className="size-3.5 animate-spin" /> Opening board…
+                                </div>
+                            }
+                        >
+                            <WhiteboardPane
+                                key={boardPath}
                                 org={org}
                                 space={space}
-                                parent={draftParent}
-                                members={members}
+                                boardId={boardPath}
                                 memberNames={memberNames}
-                                entries={entries}
-                                onBack={() => select({ kind: 'general' })}
-                                onCreated={(topicId) => select({ kind: 'topic', topicId })}
+                                active={active}
+                                boards={boards.map((b) => b.path)}
+                                onSelectBoard={(path) => select({ kind: 'whiteboard', path })}
+                                onCreateBoard={createBoard}
                             />
-                        </section>
-                    ) : chatTopicId ? (
+                        </Suspense>
+                    </div>
+                )}
+                <div className={cn('flex-1 min-w-0 min-h-0', effMode === 'read' || boardFull ? 'hidden' : 'flex')}>
+                    {chatRootId ? (
                         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
                             <ThreadPane
-                                key={chatTopicId}
+                                key={chatRootId}
                                 org={org}
                                 space={space}
-                                topicId={chatTopicId}
-                                threadInfo={selectedInfo}
-                                topic={selectedTopic}
+                                rootMessageId={chatRootId}
+                                rootFromStream={stream.messages.find((m) => m.id === chatRootId)}
+                                topicFromStream={selectedTopic ?? stream.topicsByRoot.get(chatRootId)}
                                 changeSets={feed.changeSets}
                                 entries={entries}
                                 presence={presence}
                                 members={members}
                                 memberNames={memberNames}
                                 refreshTick={refreshTick}
-                                anchorChange={selectedAnchor}
                                 showBack
                                 onBack={() => select({ kind: 'general' })}
-                                onOpenFile={openFileFromTopic(chatTopicId)}
+                                onOpenFile={openFileFromThread(chatRootId)}
                                 onOpenSession={onOpenSession}
                                 artifactsRailOpen={artifactsRailOpen}
                                 onToggleArtifactsRail={toggleArtifactsRail}
                                 onFolding={setFolding}
-                                visible={active && effMode !== 'read'}
+                                visible={active && effMode !== 'read' && !boardFull}
                             />
                         </section>
                     ) : null}
-                    <div className={cn('flex-1 min-w-0 min-h-0', draftParent || chatTopicId ? 'hidden' : 'flex')}>
+                    <div className={cn('flex-1 min-w-0 min-h-0', chatRootId ? 'hidden' : 'flex')}>
                         <GeneralStream
                             org={org}
                             space={space}
-                            general={general}
-                            threads={threads}
-                            topics={feed.topics}
+                            stream={stream}
                             presence={presence}
                             members={members}
                             memberNames={memberNames}
                             entries={entries}
-                            onOpenThread={(id) => select({ kind: 'topic', topicId: id })}
-                            onStartThread={(m) => select({ kind: 'draft', parentMessageId: m.id })}
-                            onOpenSession={onOpenSession}
-                            visible={active && effMode !== 'read' && !draftParent && !chatTopicId}
+                            onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                            visible={active && effMode !== 'read' && !boardFull && !chatRootId}
                         />
                     </div>
                 </div>
-                {effMode === 'split' && (
+                {effMode === 'split' && (!isWhiteboard || boardSplit) && (
                     <div
                         onMouseDown={startDocResize}
                         className={cn(
                             'relative z-10 w-1.5 shrink-0 cursor-col-resize border-l border-border transition-colors hover:bg-primary/20',
+                            // In board-split the board sits at order-3; the divider
+                            // slots between chat (order 0) and the board.
+                            boardSplit && 'order-2',
                             resizingDoc && 'bg-primary/30',
                         )}
                     />
                 )}
-                {effMode !== 'talk' && (
+                {effMode !== 'talk' && !isWhiteboard && (
                     <aside
                         style={effMode === 'split' ? { width: docWidthEff } : undefined}
                         className={cn('min-w-0 min-h-0 flex', effMode === 'split' ? 'shrink-0' : 'flex-1 justify-center')}
@@ -850,10 +902,10 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                                     onRedirect={openFile}
                                     onOpenFile={openFile}
                                     onDeleted={() => select({ kind: 'general' })}
-                                    crumb={selection.kind === 'file' && crumbTopicId && crumbLabel ? {
+                                    crumb={selection.kind === 'file' && crumbRootId && crumbLabel ? {
                                         label: crumbLabel,
-                                        // Back to the topic means back to the conversation: Talk.
-                                        onBack: () => { select({ kind: 'topic', topicId: crumbTopicId }); setMode('talk') },
+                                        // Back to the thread means back to the conversation: Talk.
+                                        onBack: () => { select({ kind: 'thread', rootMessageId: crumbRootId }); setMode('talk') },
                                     } : null}
                                     onDismiss={effMode === 'split' ? dismissFile : null}
                                 />

@@ -24,8 +24,8 @@ const OFFSETS_FILE = path.join(WorkDir, 'config', 'spaces_mention_offsets.json')
 
 /** Older than this at arrival = it happened while we weren't watching. */
 const MISSED_THRESHOLD_MS = 90_000;
-/** At most one individual notification per topic per window; extras stay in-app unread. */
-const TOPIC_COOLDOWN_MS = 45_000;
+/** At most one individual notification per thread per window; extras stay in-app unread. */
+const THREAD_COOLDOWN_MS = 45_000;
 /** Missed mentions are summarised after the replay settles. */
 const MISSED_DEBOUNCE_MS = 3_000;
 const RESYNC_INTERVAL_MS = 5 * 60_000;
@@ -40,7 +40,8 @@ export interface MentionHit {
   orgId: string;
   spaceId: string;
   spaceName: string;
-  topicId: string;
+  /** The conversation the mention lives in: the message's thread root (its own id when it IS a root). */
+  threadRootId: string;
   authorName: string;
   body: string;
   /**
@@ -56,9 +57,9 @@ export function isMissedArrival(postedAt: string, now: number = Date.now()): boo
   return Number.isFinite(t) && now - t > MISSED_THRESHOLD_MS;
 }
 
-export function mentionLink(orgId: string, spaceId: string, topicId?: string): string {
-  const topic = topicId ? `&topicId=${encodeURIComponent(topicId)}` : '';
-  return `rowboat://open?type=spaces&orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}${topic}`;
+export function mentionLink(orgId: string, spaceId: string, threadRootId?: string): string {
+  const thread = threadRootId ? `&threadRootId=${encodeURIComponent(threadRootId)}` : '';
+  return `rowboat://open?type=spaces&orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}${thread}`;
 }
 
 /** Message body → one notification-sized line (markdown scaffolding dropped). */
@@ -80,7 +81,7 @@ export function buildMentionNotify(hit: MentionHit): NotifyInput {
   return {
     title,
     message: mentionExcerpt(hit.body),
-    link: mentionLink(hit.orgId, hit.spaceId, hit.topicId),
+    link: mentionLink(hit.orgId, hit.spaceId, hit.threadRootId),
     onlyWhenBackground: true,
   };
 }
@@ -93,8 +94,8 @@ export function buildMissedSummaryNotify(input: {
   youCount: number;
   /** Missed @here mentions — surfaced on coming back online. */
   hereCount: number;
-  /** When every missed mention sits in one topic, click lands there. */
-  soleTopicId?: string;
+  /** When every missed mention sits in one thread, click lands there. */
+  soleThreadRootId?: string;
 }): NotifyInput {
   const parts: string[] = [];
   if (input.youCount > 0) parts.push(`${input.youCount} ${input.youCount === 1 ? 'mention' : 'mentions'} of you`);
@@ -102,7 +103,7 @@ export function buildMissedSummaryNotify(input: {
   return {
     title: `While you were away · ${input.spaceName}`,
     message: parts.join(' · '),
-    link: mentionLink(input.orgId, input.spaceId, input.soleTopicId),
+    link: mentionLink(input.orgId, input.spaceId, input.soleThreadRootId),
     onlyWhenBackground: true,
     // The summary IS the replay burst — never drop it to the startup grace.
   };
@@ -144,14 +145,14 @@ interface SpaceSub {
 interface MissedBucket {
   youCount: number;
   hereCount: number;
-  topicIds: Set<string>;
+  threadRootIds: Set<string>;
   spaceName: string;
   timer: ReturnType<typeof setTimeout>;
 }
 
 const subs = new Map<string, SpaceSub>();
 const memberNames = new Map<string, Map<string, string>>();
-const topicCooldown = new Map<string, number>();
+const threadCooldown = new Map<string, number>();
 const missed = new Map<string, MissedBucket>();
 const offsets = readOffsets();
 let offsetsFlush: ReturnType<typeof setTimeout> | null = null;
@@ -178,18 +179,18 @@ function authorName(k: string, memberId: string): string {
   return memberNames.get(k)?.get(memberId) ?? memberId;
 }
 
-function queueMissed(k: string, orgId: string, spaceId: string, spaceName: string, topicId: string, kind: MentionHit['kind']): void {
+function queueMissed(k: string, orgId: string, spaceId: string, spaceName: string, threadRootId: string, kind: MentionHit['kind']): void {
   const existing = missed.get(k);
   if (existing) {
     existing[kind === 'here' ? 'hereCount' : 'youCount'] += 1;
-    existing.topicIds.add(topicId);
+    existing.threadRootIds.add(threadRootId);
     existing.timer.refresh();
     return;
   }
   const bucket: MissedBucket = {
     youCount: kind === 'here' ? 0 : 1,
     hereCount: kind === 'here' ? 1 : 0,
-    topicIds: new Set([topicId]),
+    threadRootIds: new Set([threadRootId]),
     spaceName,
     timer: setTimeout(() => {
       missed.delete(k);
@@ -199,7 +200,7 @@ function queueMissed(k: string, orgId: string, spaceId: string, spaceName: strin
         spaceName: bucket.spaceName,
         youCount: bucket.youCount,
         hereCount: bucket.hereCount,
-        ...(bucket.topicIds.size === 1 ? { soleTopicId: [...bucket.topicIds][0] } : {}),
+        ...(bucket.threadRootIds.size === 1 ? { soleThreadRootId: [...bucket.threadRootIds][0] } : {}),
       }));
     }, MISSED_DEBOUNCE_MS),
   };
@@ -220,7 +221,9 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
     // The per-destination level: 'mute' silences even direct mentions; 'all'
     // notifies on plain messages too (fresh ones — replayed history never
     // floods, only real mentions fold into the away summary).
-    const level = notifyLevelFor(orgId, spaceId, message.topicId);
+    // The thread this message belongs to — a root stands for its own thread.
+    const threadRootId = message.threadRoot ?? message.id;
+    const level = notifyLevelFor(orgId, spaceId, threadRootId);
     if (level === 'mute') return;
     // People type the NAME (ids are opaque); agent-written mentions may carry
     // the id. A direct mention outranks @here when both appear.
@@ -234,18 +237,18 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
     if (!kind) return;
 
     if (isMissedArrival(message.postedAt)) {
-      if (kind !== 'message') queueMissed(k, orgId, spaceId, spaceName, message.topicId, kind);
+      if (kind !== 'message') queueMissed(k, orgId, spaceId, spaceName, threadRootId, kind);
       return;
     }
-    const cooldownKey = `${k}/${message.topicId}`;
-    const last = topicCooldown.get(cooldownKey) ?? 0;
-    if (Date.now() - last < TOPIC_COOLDOWN_MS) return;
-    topicCooldown.set(cooldownKey, Date.now());
+    const cooldownKey = `${k}/${threadRootId}`;
+    const last = threadCooldown.get(cooldownKey) ?? 0;
+    if (Date.now() - last < THREAD_COOLDOWN_MS) return;
+    threadCooldown.set(cooldownKey, Date.now());
     void notifyIfEnabled('space_mention', buildMentionNotify({
       orgId,
       spaceId,
       spaceName,
-      topicId: message.topicId,
+      threadRootId,
       authorName: authorName(k, message.author.memberId),
       // The wire carries "@<memberId>" addresses — show people, not ids.
       body: resolveMentions(message.body, memberNames.get(k) ?? new Map()),

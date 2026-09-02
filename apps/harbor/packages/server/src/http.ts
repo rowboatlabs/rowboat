@@ -314,13 +314,28 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listTopics.response, { topics });
   });
 
-  app.get('/v1/spaces/:spaceId/topics/:topicId/messages', async (c) => {
-    const { spaceId, topicId } = parseWith(routes.listMessages.params, c.req.param());
-    const q = parseWith(routes.listMessages.query, {
+  app.get('/v1/spaces/:spaceId/stream', async (c) => {
+    const { spaceId } = parseWith(routes.listStream.params, c.req.param());
+    const q = parseWith(routes.listStream.query, {
       ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
-    return reply(c, routes.listMessages.response, await service.listMessages(actor(c), spaceId, topicId, q));
+    return reply(c, routes.listStream.response, await service.listStream(actor(c), spaceId, q));
+  });
+
+  app.get('/v1/spaces/:spaceId/threads/:rootMessageId', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.listThread.params, c.req.param());
+    const q = parseWith(routes.listThread.query, {
+      ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.listThread.response, await service.listThread(actor(c), spaceId, rootMessageId, q));
+  });
+
+  app.post('/v1/spaces/:spaceId/topics', async (c) => {
+    const { spaceId } = parseWith(routes.createTopic.params, c.req.param());
+    const input = await body(c, routes.createTopic.request);
+    return reply(c, routes.createTopic.response, await service.createTopic(actor(c), spaceId, input));
   });
 
   app.post('/v1/spaces/:spaceId/messages', async (c) => {

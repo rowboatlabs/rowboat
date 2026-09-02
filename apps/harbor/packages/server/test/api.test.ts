@@ -279,7 +279,7 @@ describe('assets and the change-set log', () => {
   });
 });
 
-describe('feed: topics and messages', () => {
+describe('feed: the stream, threads, and topic annotations', () => {
   let spaceId: string;
 
   beforeAll(async () => {
@@ -289,58 +289,178 @@ describe('feed: topics and messages', () => {
     await gagan.post('/v1/invites/accept', { token: inv.body.token });
   });
 
-  it('first message creates the topic and becomes its title (markdown stripped)', async () => {
+  it('a new space has an empty stream and no topics — the stream is not an object', async () => {
+    const r = await ramnique.post('/v1/spaces', { name: 'Born empty' });
+    const stream = await ramnique.get(`/v1/spaces/${r.body.space.id}/stream`);
+    expect(stream.body).toEqual({ messages: [], topics: [], hasMore: false });
+    const topics = await ramnique.get(`/v1/spaces/${r.body.space.id}/topics`);
+    expect(topics.body.topics).toEqual([]);
+  });
+
+  it('posting a root lands in the stream and creates NO container', async () => {
     const r = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
-      body: '## Should we cut the pricing section?\nIt reads long to me.',
+      body: 'Should we cut the pricing section? It reads long to me.',
       actingMode: 'direct',
     });
     expect(r.status).toBe(200);
-    expect(r.body.topic.title).toBe('Should we cut the pricing section?');
-    expect(r.body.topic.messageCount).toBe(1);
+    expect(r.body.message.threadRoot).toBeUndefined();
+    expect(r.body.message.replyCount).toBe(0);
     expect(r.body.message.offset).toBeGreaterThan(0);
+    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics?includeArchived=true`);
+    expect(topics.body.topics).toEqual([]);
   });
 
-  it('replies thread into the topic; counts and lastActivity move', async () => {
-    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
-    const topicId = topics.body.topics[0].id;
-    const r = await gagan.post(`/v1/spaces/${spaceId}/messages`, {
-      topicId,
+  it('replies point at the root; the reply chip denorm moves; reply-to-a-reply lands flat', async () => {
+    const stream = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
+    const rootId = stream.body.messages[0].id;
+    const first = await gagan.post(`/v1/spaces/${spaceId}/messages`, {
+      threadRoot: rootId,
       body: 'Cut it — link the pricing page instead.',
       actingMode: 'direct',
     });
-    expect(r.body.topic.messageCount).toBe(2);
-    const msgs = await ramnique.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
-    expect(msgs.body.messages).toHaveLength(2);
-    expect(msgs.body.messages[0].author.memberId).toBe('ramnique');
-    expect(msgs.body.messages[1].author.memberId).toBe('gagan');
-  });
+    expect(first.body.message.threadRoot).toBe(rootId);
 
-  it('retitle, archive (hidden by default), unarchive-by-reply', async () => {
-    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
-    // The seeded stream topic is not archivable chatter — operate on the discussion.
-    const topicId = topics.body.topics.find((t: { kind: string }) => t.kind === 'discussion').id;
-
-    const retitled = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, {
-      action: 'retitle',
-      title: 'Pricing section: cut or keep',
-    });
-    expect(retitled.body.topic.title).toBe('Pricing section: cut or keep');
-
-    await ramnique.post(`/v1/spaces/${spaceId}/topics/${topicId}`, { action: 'archive' });
-    const remaining = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
-    expect(remaining.body.topics.map((t: { kind: string }) => t.kind)).toEqual(['general']);
-    const withArchived = await ramnique.get(`/v1/spaces/${spaceId}/topics?includeArchived=true`);
-    expect(withArchived.body.topics).toHaveLength(2);
-
-    const reply = await gagan.post(`/v1/spaces/${spaceId}/messages`, {
-      topicId,
-      body: 'Reviving this — Acme asked about pricing again.',
+    // Replying to the REPLY normalizes to the root — threads are flat by shape.
+    const second = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      threadRoot: first.body.message.id,
+      body: 'Agreed.',
       actingMode: 'direct',
     });
-    expect(reply.body.topic.archived).toBe(false);
+    expect(second.body.message.threadRoot).toBe(rootId);
+
+    const thread = await ramnique.get(`/v1/spaces/${spaceId}/threads/${rootId}`);
+    expect(thread.body.topic).toBeNull();
+    expect(thread.body.root.replyCount).toBe(2);
+    expect(thread.body.root.lastReplyAt).toBe(second.body.message.postedAt);
+    expect(thread.body.messages.map((m: any) => m.author.memberId)).toEqual(['gagan', 'ramnique']);
+
+    // The stream shows only the root, chip data riding on it; replies stay behind it.
+    const after = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
+    expect(after.body.messages).toHaveLength(1);
+    expect(after.body.messages[0].replyCount).toBe(2);
+
+    // A reply's id in the thread path resolves to the root (Slack-style).
+    const viaReply = await ramnique.get(`/v1/spaces/${spaceId}/threads/${first.body.message.id}`);
+    expect(viaReply.body.root.id).toBe(rootId);
   });
 
-  it('topics anchored to a change-set validate the anchor', async () => {
+  it('promote: a title annotates the thread; one topic per root; replies refuse', async () => {
+    const stream = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
+    const rootId = stream.body.messages[0].id;
+
+    const created = await ramnique.post(`/v1/spaces/${spaceId}/topics`, {
+      rootMessageId: rootId,
+      title: 'Decide: pricing section, cut or keep',
+      actingMode: 'direct',
+    });
+    expect(created.status).toBe(200);
+    expect(created.body.topic).toMatchObject({ rootMessageId: rootId, title: 'Decide: pricing section, cut or keep', archived: false });
+    expect(created.body.rootMessage.id).toBe(rootId);
+
+    // The stream page now decorates the root with its annotation.
+    const after = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
+    expect(after.body.topics).toHaveLength(1);
+    expect(after.body.topics[0].id).toBe(created.body.topic.id);
+
+    // One topic per thread; a reply cannot be promoted (the error names the root).
+    const again = await gagan.post(`/v1/spaces/${spaceId}/topics`, { rootMessageId: rootId, title: 'Duplicate', actingMode: 'direct' });
+    expect(again.status).toBe(400);
+    expect(again.body.message).toContain(created.body.topic.id);
+    const thread = await ramnique.get(`/v1/spaces/${spaceId}/threads/${rootId}`);
+    const replyId = thread.body.messages[0].id;
+    const onReply = await ramnique.post(`/v1/spaces/${spaceId}/topics`, { rootMessageId: replyId, title: 'On a reply', actingMode: 'direct' });
+    expect(onReply.status).toBe(400);
+    expect(onReply.body.message).toContain(rootId);
+
+    // Exactly one of rootMessageId | body.
+    expect((await ramnique.post(`/v1/spaces/${spaceId}/topics`, { title: 'Neither', actingMode: 'direct' })).status).toBe(400);
+  });
+
+  it('from scratch: body posts the root into the stream, then annotates it', async () => {
+    const r = await gagan.post(`/v1/spaces/${spaceId}/topics`, {
+      title: 'Ship: importer fix',
+      body: 'Tracking the importer fix to done.',
+      actingMode: 'direct',
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.topic.rootMessageId).toBe(r.body.rootMessage.id);
+    // Nothing is born outside the stream.
+    const stream = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
+    expect(stream.body.messages.some((m: any) => m.id === r.body.rootMessage.id)).toBe(true);
+  });
+
+  it('retitle, archive (off the rail, thread untouched), revive-by-reply', async () => {
+    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    const topic = topics.body.topics.find((t: any) => t.title.startsWith('Ship:'));
+
+    const retitled = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topic.id}`, {
+      action: 'retitle',
+      title: 'Ship: importer fix (v2)',
+      actingMode: 'direct',
+    });
+    expect(retitled.body.topic.title).toBe('Ship: importer fix (v2)');
+
+    await ramnique.post(`/v1/spaces/${spaceId}/topics/${topic.id}`, { action: 'archive', actingMode: 'direct' });
+    const rail = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    expect(rail.body.topics.some((t: any) => t.id === topic.id)).toBe(false);
+    const all = await ramnique.get(`/v1/spaces/${spaceId}/topics?includeArchived=true`);
+    expect(all.body.topics.find((t: any) => t.id === topic.id)?.archived).toBe(true);
+    // Archiving hides nothing: the root keeps its stream place, the thread reads fine.
+    const stream = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
+    expect(stream.body.messages.some((m: any) => m.id === topic.rootMessageId)).toBe(true);
+
+    // Gmail semantics: a new reply revives it.
+    await gagan.post(`/v1/spaces/${spaceId}/messages`, {
+      threadRoot: topic.rootMessageId,
+      body: 'Reviving this — Acme asked again.',
+      actingMode: 'direct',
+    });
+    const revived = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    expect(revived.body.topics.find((t: any) => t.id === topic.id)?.archived).toBe(false);
+  });
+
+  it('remove converts back to a thread: the row goes, every message stays, re-promote is lossless', async () => {
+    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    const topic = topics.body.topics.find((t: any) => t.title.startsWith('Ship:'));
+    const removed = await ramnique.post(`/v1/spaces/${spaceId}/topics/${topic.id}`, { action: 'remove', actingMode: 'direct' });
+    expect(removed.status).toBe(200);
+
+    const all = await ramnique.get(`/v1/spaces/${spaceId}/topics?includeArchived=true`);
+    expect(all.body.topics.some((t: any) => t.id === topic.id)).toBe(false);
+    // The thread is untouched — root in the stream, replies behind it.
+    const thread = await ramnique.get(`/v1/spaces/${spaceId}/threads/${topic.rootMessageId}`);
+    expect(thread.body.topic).toBeNull();
+    expect(thread.body.root.replyCount).toBeGreaterThan(0);
+
+    // Re-promoting round-trips.
+    const back = await ramnique.post(`/v1/spaces/${spaceId}/topics`, {
+      rootMessageId: topic.rootMessageId,
+      title: 'Ship: importer fix (returned)',
+      actingMode: 'direct',
+    });
+    expect(back.status).toBe(200);
+    await ramnique.post(`/v1/spaces/${spaceId}/topics/${back.body.topic.id}`, { action: 'remove', actingMode: 'direct' });
+  });
+
+  it('the rail sorts by activity: newest reply, else the root post', async () => {
+    const quiet = await ramnique.post(`/v1/spaces/${spaceId}/topics`, {
+      title: 'Fix: quiet one', body: 'quiet thread', actingMode: 'direct',
+    });
+    const busy = await ramnique.post(`/v1/spaces/${spaceId}/topics`, {
+      title: 'Fix: busy one', body: 'busy thread', actingMode: 'direct',
+    });
+    await gagan.post(`/v1/spaces/${spaceId}/messages`, {
+      threadRoot: quiet.body.rootMessage.id, body: 'now the quiet one is loudest', actingMode: 'direct',
+    });
+    const rail = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
+    const titles = rail.body.topics.map((t: any) => t.title);
+    expect(titles.indexOf('Fix: quiet one')).toBeLessThan(titles.indexOf('Fix: busy one'));
+    const quietRow = rail.body.topics.find((t: any) => t.title === 'Fix: quiet one');
+    expect(quietRow.rootMessage.replyCount).toBe(1);
+    expect(quietRow.lastActivityAt).toBe(quietRow.rootMessage.lastReplyAt);
+  });
+
+  it('reply-to-activity-row: anchorChangeSetId rides the root message, validated', async () => {
     const cs = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
       assetPath: 'draft.md',
       baseVersion: 0,
@@ -352,7 +472,7 @@ describe('feed: topics and messages', () => {
       anchorChangeSetId: cs.body.changeSet.id,
       actingMode: 'direct',
     });
-    expect(ok.body.topic.anchorChangeSetId).toBe(cs.body.changeSet.id);
+    expect(ok.body.message.anchorChangeSetId).toBe(cs.body.changeSet.id);
 
     const bad = await gagan.post(`/v1/spaces/${spaceId}/messages`, {
       body: 'Anchored to nothing',
@@ -362,107 +482,73 @@ describe('feed: topics and messages', () => {
     expect(bad.status).toBe(400);
   });
 
-  it('every space is born with its stream topic — exactly one, kind general, empty', async () => {
-    const r = await ramnique.post('/v1/spaces', { name: 'Born with a stream' });
-    const topics = await ramnique.get(`/v1/spaces/${r.body.space.id}/topics`);
-    const generals = topics.body.topics.filter((t: any) => t.kind === 'general');
-    expect(generals).toHaveLength(1);
-    expect(generals[0]).toMatchObject({ title: 'messages', messageCount: 0, archived: false });
-    expect(topics.body.topics).toHaveLength(1);
-  });
-
-  it('a topic can grow from a message — once, and the anchor must exist', async () => {
-    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
-    const general = topics.body.topics.find((t: any) => t.kind === 'general');
-    const parent = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
-      topicId: general.id,
-      body: 'The launch date question keeps coming back.',
-      actingMode: 'direct',
-    });
-
-    const thread = await gagan.post(`/v1/spaces/${spaceId}/messages`, {
-      body: 'The launch date question keeps coming back.',
-      anchorMessageId: parent.body.message.id,
-      actingMode: 'direct',
-    });
-    expect(thread.status).toBe(200);
-    expect(thread.body.topic.kind).toBe('discussion');
-    expect(thread.body.topic.anchorMessageId).toBe(parent.body.message.id);
-
-    // One topic per message: a second claim is refused and names the winner.
-    const again = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
-      body: 'Me too',
-      anchorMessageId: parent.body.message.id,
-      actingMode: 'direct',
-    });
-    expect(again.status).toBe(400);
-    expect(again.body.message).toContain(thread.body.topic.id);
-
-    const dangling = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
-      body: 'Anchored to nothing',
-      anchorMessageId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-      actingMode: 'direct',
-    });
-    expect(dangling.status).toBe(400);
-  });
-
-  it('change-sets carry topic provenance — explicit topicId validated, reason suffix derived', async () => {
-    const topics = await ramnique.get(`/v1/spaces/${spaceId}/topics`);
-    const topicId = topics.body.topics[0].id;
+  it('change-sets carry thread provenance — explicit threadRootId validated, reason suffix derived', async () => {
+    const stream = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
+    const rootId = stream.body.messages[0].id;
 
     const explicit = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
       assetPath: 'provenance.md',
       baseVersion: 0,
-      newContent: '# From a topic\n',
-      topicId,
+      newContent: '# From a thread\n',
+      threadRootId: rootId,
       actingMode: 'direct',
     });
-    expect(explicit.body.changeSet.topicId).toBe(topicId);
+    expect(explicit.body.changeSet.threadRootId).toBe(rootId);
 
     const derived = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
       assetPath: 'provenance.md',
       baseVersion: 1,
-      newContent: '# From a topic, via the reason suffix\n',
-      reason: `folded the discussion · topic:${topicId}`,
+      newContent: '# From a thread, via the reason suffix\n',
+      reason: `folded the discussion · thread:${rootId}`,
       actingMode: 'agent',
       agentName: 'Rowboat',
     });
-    expect(derived.body.changeSet.topicId).toBe(topicId);
+    expect(derived.body.changeSet.threadRootId).toBe(rootId);
 
     const bad = await ramnique.post(`/v1/spaces/${spaceId}/changes`, {
       assetPath: 'provenance.md',
       baseVersion: 2,
       newContent: '# Bad provenance\n',
-      topicId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      threadRootId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
       actingMode: 'direct',
     });
     expect(bad.status).toBe(400);
   });
 
-  it('merge_into moves messages, archives the source, returns the target', async () => {
-    const a = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'SSO scoping', actingMode: 'direct' });
-    const b = await gagan.post(`/v1/spaces/${spaceId}/messages`, { body: 'SSO scoping (dup)', actingMode: 'direct' });
-    const merged = await ramnique.post(`/v1/spaces/${spaceId}/topics/${b.body.topic.id}`, {
-      action: 'merge_into',
-      targetTopicId: a.body.topic.id,
+  it('topic lifecycle narrates on the log with its actor', async () => {
+    const live = await liveClient(harbor, 'dev-ramnique');
+    live.send({ kind: 'subscribe', spaceId });
+    await live.until((frames) => frames.some((f) => f.kind === 'subscribed'), 'subscribed');
+
+    const made = await gagan.post(`/v1/spaces/${spaceId}/topics`, {
+      title: 'Decide: logging vendor', body: 'datadog or axiom?', actingMode: 'direct',
     });
-    expect(merged.body.topic.id).toBe(a.body.topic.id);
-    expect(merged.body.topic.messageCount).toBe(2);
-    const msgs = await ramnique.get(`/v1/spaces/${spaceId}/topics/${a.body.topic.id}/messages`);
-    expect(msgs.body.messages.map((m: any) => m.body)).toEqual(['SSO scoping', 'SSO scoping (dup)']);
-    const all = await ramnique.get(`/v1/spaces/${spaceId}/topics?includeArchived=true`);
-    expect(all.body.topics.find((t: any) => t.id === b.body.topic.id)?.archived).toBe(true);
-    expect((await ramnique.post(`/v1/spaces/${spaceId}/topics/${a.body.topic.id}`, {
-      action: 'merge_into',
-      targetTopicId: a.body.topic.id,
-    })).status).toBe(400);
+    await ramnique.post(`/v1/spaces/${spaceId}/topics/${made.body.topic.id}`, {
+      action: 'retitle', title: 'Decide: observability vendor', actingMode: 'direct',
+    });
+    await ramnique.post(`/v1/spaces/${spaceId}/topics/${made.body.topic.id}`, { action: 'remove', actingMode: 'direct' });
+
+    await live.until(
+      (frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'topic_removed'),
+      'topic lifecycle events',
+    );
+    const topicEvents = live.events().filter((f) => f.event.type === 'topic' || f.event.type === 'topic_removed');
+    expect(topicEvents.map((f) => (f.event.type === 'topic' ? f.event.action : 'removed'))).toEqual([
+      'created',
+      'retitled',
+      'removed',
+    ]);
+    const createdEvent = topicEvents[0]!.event as Extract<typeof topicEvents[0]['event'], { type: 'topic' }>;
+    expect(createdEvent.by.memberId).toBe('gagan');
+    const removedEvent = topicEvents[2]!.event as Extract<typeof topicEvents[0]['event'], { type: 'topic_removed' }>;
+    expect(removedEvent.removal).toMatchObject({ topicId: made.body.topic.id, rootMessageId: made.body.rootMessage.id, by: { memberId: 'ramnique' } });
+    live.close();
   });
 });
 
 describe('reactions', () => {
   let spaceId: string;
   let messageId: string;
-  let topicId: string;
 
   const react = (who: ReturnType<typeof api>, emoji: string, action: 'add' | 'remove') =>
     who.post(`/v1/spaces/${spaceId}/messages/${messageId}/reactions`, { emoji, action, actingMode: 'direct' });
@@ -477,7 +563,6 @@ describe('reactions', () => {
       actingMode: 'direct',
     });
     messageId = posted.body.message.id;
-    topicId = posted.body.topic.id;
   });
 
   it('any member reacts to any message; groups fold in first-reacted order', async () => {
@@ -493,8 +578,8 @@ describe('reactions', () => {
     ]);
 
     // Reads fold the same state in.
-    const msgs = await gagan.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
-    expect(msgs.body.messages[0].reactions).toEqual(second.body.message.reactions);
+    const stream = await gagan.get(`/v1/spaces/${spaceId}/stream`);
+    expect(stream.body.messages[0].reactions).toEqual(second.body.message.reactions);
   });
 
   it('toggles are idempotent: re-add and re-remove write nothing and emit nothing', async () => {
@@ -520,7 +605,7 @@ describe('reactions', () => {
     expect(reactionEvents[0]!.event).toMatchObject({
       type: 'reaction',
       action: 'removed',
-      reaction: { messageId, topicId, emoji: '👍', by: { memberId: 'gagan', actingMode: 'direct' } },
+      reaction: { messageId, emoji: '👍', by: { memberId: 'gagan', actingMode: 'direct' } },
     });
     live.close();
   });
@@ -544,7 +629,7 @@ describe('reactions', () => {
 
 describe('message deletion', () => {
   let spaceId: string;
-  let topicId: string;
+  let rootId: string;
 
   const del = (who: ReturnType<typeof api>, messageId: string) =>
     who.post(`/v1/spaces/${spaceId}/messages/${messageId}/delete`, { actingMode: 'direct' });
@@ -556,27 +641,29 @@ describe('message deletion', () => {
     spaceId = r.body.space.id;
     const inv = await ramnique.post('/v1/invites', { spaceId });
     await gagan.post('/v1/invites/accept', { token: inv.body.token });
+    const root = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'thread base', actingMode: 'direct' });
+    rootId = root.body.message.id;
   });
 
-  it('the author tombstones a message; reads and replay never show the body again', async () => {
+  it('the author tombstones a reply; reads, replay, and the reply chip all forget it', async () => {
     const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, {
+      threadRoot: rootId,
       body: 'oops — that was for another space',
       actingMode: 'direct',
     });
     const messageId = posted.body.message.id;
-    topicId = posted.body.topic.id;
 
     const r = await del(ramnique, messageId);
     expect(r.status).toBe(200);
     expect(r.body.message.body).toBe('');
     expect(r.body.message.deletedAt).toBeTruthy();
 
-    // Reads carry the tombstone, and it no longer counts.
-    const msgs = await gagan.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
-    const m = msgs.body.messages.find((x: any) => x.id === messageId);
+    // Reads carry the tombstone, and it no longer counts toward the chip.
+    const thread = await gagan.get(`/v1/spaces/${spaceId}/threads/${rootId}`);
+    const m = thread.body.messages.find((x: any) => x.id === messageId);
     expect(m.body).toBe('');
     expect(m.deletedAt).toBe(r.body.message.deletedAt);
-    expect(msgs.body.topic.messageCount).toBe(0);
+    expect(thread.body.root.replyCount).toBe(0);
 
     // Replay redaction: a full catch-up gets the REDACTED message event plus the deletion.
     const live = await liveClient(harbor, 'dev-gagan');
@@ -592,13 +679,13 @@ describe('message deletion', () => {
     });
     expect(live.events().find((f) => f.event.type === 'message_deleted')!.event).toMatchObject({
       type: 'message_deleted',
-      deletion: { messageId, topicId, by: { memberId: 'ramnique', actingMode: 'direct' } },
+      deletion: { messageId, threadRoot: rootId, by: { memberId: 'ramnique', actingMode: 'direct' } },
     });
     live.close();
   });
 
   it('only the author can delete; non-members and unknown messages refuse', async () => {
-    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'keep out', actingMode: 'direct' });
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { threadRoot: rootId, body: 'keep out', actingMode: 'direct' });
     const messageId = posted.body.message.id;
     expect((await del(gagan, messageId)).status).toBe(403);
     expect((await del(prakhar, messageId)).status).toBe(403);
@@ -606,7 +693,7 @@ describe('message deletion', () => {
   });
 
   it('re-deleting is an idempotent no-op: one event for two calls', async () => {
-    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'delete me twice', actingMode: 'direct' });
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { threadRoot: rootId, body: 'delete me twice', actingMode: 'direct' });
     const messageId = posted.body.message.id;
 
     // Live-only subscription (no replay): every event from here on is new.
@@ -628,7 +715,7 @@ describe('message deletion', () => {
   });
 
   it('tombstones take no new reactions; removes still work', async () => {
-    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'react then delete', actingMode: 'direct' });
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { threadRoot: rootId, body: 'react then delete', actingMode: 'direct' });
     const messageId = posted.body.message.id;
     await react(gagan, messageId, '👍', 'add');
     await del(ramnique, messageId);
@@ -642,7 +729,6 @@ describe('message deletion', () => {
 
 describe('message editing', () => {
   let spaceId: string;
-  let topicId: string;
 
   const edit = (who: ReturnType<typeof api>, messageId: string, body: string) =>
     who.post(`/v1/spaces/${spaceId}/messages/${messageId}/edit`, { body, actingMode: 'direct' });
@@ -660,7 +746,6 @@ describe('message editing', () => {
       actingMode: 'direct',
     });
     const messageId = posted.body.message.id;
-    topicId = posted.body.topic.id;
 
     const r = await edit(ramnique, messageId, 'the quick fix');
     expect(r.status).toBe(200);
@@ -668,8 +753,8 @@ describe('message editing', () => {
     expect(r.body.message.editedAt).toBeTruthy();
 
     // Reads carry the rewrite; counts and activity are untouched.
-    const msgs = await gagan.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
-    const m = msgs.body.messages.find((x: any) => x.id === messageId);
+    const stream = await gagan.get(`/v1/spaces/${spaceId}/stream`);
+    const m = stream.body.messages.find((x: any) => x.id === messageId);
     expect(m.body).toBe('the quick fix');
     expect(m.editedAt).toBe(r.body.message.editedAt);
 
@@ -687,13 +772,13 @@ describe('message editing', () => {
     });
     expect(live.events().find((f) => f.event.type === 'message_edited')!.event).toMatchObject({
       type: 'message_edited',
-      edit: { messageId, topicId, body: 'the quick fix', by: { memberId: 'ramnique', actingMode: 'direct' } },
+      edit: { messageId, body: 'the quick fix', by: { memberId: 'ramnique', actingMode: 'direct' } },
     });
     live.close();
   });
 
   it('only the author edits; tombstones and unknown messages refuse', async () => {
-    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'mine', actingMode: 'direct' });
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'mine', actingMode: 'direct' });
     const messageId = posted.body.message.id;
     expect((await edit(gagan, messageId, 'hijack')).status).toBe(403);
     expect((await edit(ramnique, '01ARZ3NDEKTSV4RRFFQ69G5FAV', 'ghost')).status).toBe(404);
@@ -702,7 +787,7 @@ describe('message editing', () => {
   });
 
   it('an identical body is an idempotent no-op: no event', async () => {
-    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'stable', actingMode: 'direct' });
+    const posted = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'stable', actingMode: 'direct' });
     const messageId = posted.body.message.id;
 
     const live = await liveClient(harbor, 'dev-ramnique');
@@ -725,10 +810,9 @@ describe('message editing', () => {
 
 describe('polls', () => {
   let spaceId: string;
-  let topicId: string;
 
   const postPoll = (who: ReturnType<typeof api>, poll: Record<string, unknown>, body = '📊 **poll**') =>
-    who.post(`/v1/spaces/${spaceId}/messages`, { topicId, body, poll, actingMode: 'direct' });
+    who.post(`/v1/spaces/${spaceId}/messages`, { body, poll, actingMode: 'direct' });
   const vote = (who: ReturnType<typeof api>, messageId: string, answerId: number, action: 'add' | 'remove', actingMode = 'direct') =>
     who.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/votes`, { answerId, action, actingMode });
   const end = (who: ReturnType<typeof api>, messageId: string) =>
@@ -739,8 +823,6 @@ describe('polls', () => {
     spaceId = r.body.space.id;
     const inv = await ramnique.post('/v1/invites', { spaceId });
     await gagan.post('/v1/invites/accept', { token: inv.body.token });
-    const seeded = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'seed', actingMode: 'direct' });
-    topicId = seeded.body.topic.id;
   });
 
   it('the org stamps the poll: sequential answer ids, expiry from duration, defaults applied', async () => {
@@ -781,7 +863,7 @@ describe('polls', () => {
     expect(first.body.message.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
 
     // Reads fold the same state in.
-    const msgs = await ramnique.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
+    const msgs = await ramnique.get(`/v1/spaces/${spaceId}/stream`);
     const m = msgs.body.messages.find((x: any) => x.id === messageId);
     expect(m.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
 
@@ -827,7 +909,7 @@ describe('polls', () => {
     const messageId = posted.body.message.id;
     expect((await vote(gagan, messageId, 1, 'add', 'agent')).status).toBe(400);
     expect((await vote(gagan, messageId, 9, 'add')).status).toBe(400);
-    const plain = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { topicId, body: 'no poll here', actingMode: 'direct' });
+    const plain = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'no poll here', actingMode: 'direct' });
     expect((await vote(gagan, plain.body.message.id, 1, 'add')).status).toBe(400);
   });
 
@@ -883,7 +965,7 @@ describe('polls', () => {
     // Exactly ONE poll_ended event for the two calls; reads carry endedAt.
     await live.until((frames) => frames.some((f) => f.kind === 'event' && f.event.type === 'poll_ended'), 'poll_ended');
     expect(live.events().filter((f) => f.event.type === 'poll_ended')).toHaveLength(1);
-    const msgs = await gagan.get(`/v1/spaces/${spaceId}/topics/${topicId}/messages`);
+    const msgs = await gagan.get(`/v1/spaces/${spaceId}/stream`);
     const m = msgs.body.messages.find((x: any) => x.id === messageId);
     expect(m.poll.endedAt).toBe(ended.body.message.poll.endedAt);
     live.close();

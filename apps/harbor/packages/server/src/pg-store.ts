@@ -50,7 +50,7 @@ interface ChangeSetRow {
   result_version: number;
   attribution: ChangeSet['attribution'];
   reason: string | null;
-  topic_id: string | null;
+  thread_root_id: string | null;
   blob: BlobInfo | null;
   op: ChangeSet['op'] | null;
   moved_from: string | null;
@@ -67,7 +67,7 @@ function rowToChangeSet(r: ChangeSetRow): ChangeSet {
     resultVersion: r.result_version,
     attribution: r.attribution,
     ...(r.reason !== null ? { reason: r.reason } : {}),
-    ...(r.topic_id !== null ? { topicId: r.topic_id } : {}),
+    ...(r.thread_root_id !== null ? { threadRootId: r.thread_root_id } : {}),
     ...(r.blob !== null && r.blob !== undefined ? { blob: r.blob } : {}),
     ...(r.op !== null && r.op !== undefined ? { op: r.op } : {}),
     ...(r.moved_from !== null && r.moved_from !== undefined ? { movedFrom: r.moved_from } : {}),
@@ -79,40 +79,35 @@ function rowToChangeSet(r: ChangeSetRow): ChangeSet {
 interface TopicRow {
   id: string;
   space_id: string;
+  root_message_id: string;
   title: string;
-  kind: Topic['kind'];
   created_by: Topic['createdBy'];
   created_at: string;
   archived: boolean;
-  anchor_change_set_id: string | null;
-  anchor_message_id: string | null;
-  last_activity_at: string;
-  message_count: number;
 }
 
 function rowToTopic(r: TopicRow): Topic {
   return {
     id: r.id,
     spaceId: r.space_id,
+    rootMessageId: r.root_message_id,
     title: r.title,
-    kind: r.kind,
     createdBy: r.created_by,
     createdAt: r.created_at,
     archived: r.archived,
-    ...(r.anchor_change_set_id !== null ? { anchorChangeSetId: r.anchor_change_set_id } : {}),
-    ...(r.anchor_message_id !== null ? { anchorMessageId: r.anchor_message_id } : {}),
-    lastActivityAt: r.last_activity_at,
-    messageCount: r.message_count,
   };
 }
 
 interface MessageRow {
   id: string;
   space_id: string;
-  topic_id: string;
+  thread_root: string | null;
   author: Message['author'];
   body: string;
   posted_at: string;
+  reply_count: number;
+  last_reply_at: string | null;
+  anchor_change_set_id: string | null;
   deleted_at: string | null;
   edited_at: string | null;
   poll: Poll | null;
@@ -123,11 +118,14 @@ function rowToMessage(r: MessageRow): Message {
   return {
     id: r.id,
     spaceId: r.space_id,
-    topicId: r.topic_id,
+    ...(r.thread_root !== null ? { threadRoot: r.thread_root } : {}),
     author: r.author,
     body: r.body,
     postedAt: r.posted_at,
     offset: r.stream_offset,
+    replyCount: r.reply_count,
+    ...(r.last_reply_at !== null ? { lastReplyAt: r.last_reply_at } : {}),
+    ...(r.anchor_change_set_id !== null ? { anchorChangeSetId: r.anchor_change_set_id } : {}),
     ...(r.deleted_at !== null ? { deletedAt: r.deleted_at } : {}),
     ...(r.edited_at !== null ? { editedAt: r.edited_at } : {}),
     // Live reaction state is folded in by the service on reads; rows carry none.
@@ -471,7 +469,7 @@ export class PgStore implements Store {
 
   async appendChangeSet(changeSet: ChangeSet, assetId: string): Promise<void> {
     await this.sql.query(
-      `insert into change_sets (id, space_id, asset_id, asset_path, base_version, result_version, attribution, reason, topic_id, blob, op, moved_from, committed_at, stream_offset)
+      `insert into change_sets (id, space_id, asset_id, asset_path, base_version, result_version, attribution, reason, thread_root_id, blob, op, moved_from, committed_at, stream_offset)
        values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12, $13, $14)`,
       [
         changeSet.id,
@@ -482,7 +480,7 @@ export class PgStore implements Store {
         changeSet.resultVersion,
         JSON.stringify(changeSet.attribution),
         changeSet.reason ?? null,
-        changeSet.topicId ?? null,
+        changeSet.threadRootId ?? null,
         changeSet.blob ? JSON.stringify(changeSet.blob) : null,
         changeSet.op ?? null,
         changeSet.movedFrom ?? null,
@@ -531,33 +529,30 @@ export class PgStore implements Store {
 
   async putTopic(topic: Topic): Promise<void> {
     await this.sql.query(
-      `insert into topics (id, space_id, title, kind, created_by, created_at, archived, anchor_change_set_id, anchor_message_id, last_activity_at, message_count)
-       values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
+      `insert into topics (id, space_id, root_message_id, title, created_by, created_at, archived)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7)
        on conflict (id) do update set
-         title = excluded.title, archived = excluded.archived,
-         anchor_change_set_id = excluded.anchor_change_set_id,
-         anchor_message_id = excluded.anchor_message_id,
-         last_activity_at = excluded.last_activity_at, message_count = excluded.message_count`,
+         title = excluded.title, archived = excluded.archived`,
       [
         topic.id,
         topic.spaceId,
+        topic.rootMessageId,
         topic.title,
-        topic.kind,
         JSON.stringify(topic.createdBy),
         topic.createdAt,
         topic.archived,
-        topic.anchorChangeSetId ?? null,
-        topic.anchorMessageId ?? null,
-        topic.lastActivityAt,
-        topic.messageCount,
       ],
     );
   }
 
-  async getTopicByAnchor(spaceId: string, anchorMessageId: string): Promise<Topic | undefined> {
+  async deleteTopic(spaceId: string, topicId: string): Promise<void> {
+    await this.sql.query('delete from topics where space_id = $1 and id = $2', [spaceId, topicId]);
+  }
+
+  async getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined> {
     const rows = await this.sql.query<TopicRow>(
-      'select * from topics where space_id = $1 and anchor_message_id = $2',
-      [spaceId, anchorMessageId],
+      'select * from topics where space_id = $1 and root_message_id = $2',
+      [spaceId, rootMessageId],
     );
     return rows[0] ? rowToTopic(rows[0]) : undefined;
   }
@@ -565,7 +560,7 @@ export class PgStore implements Store {
   async listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]> {
     const rows = await this.sql.query<TopicRow>(
       `select * from topics where space_id = $1 ${includeArchived ? '' : 'and archived = false'}
-       order by last_activity_at desc, id desc`,
+       order by created_at desc, id desc`,
       [spaceId],
     );
     return rows.map(rowToTopic);
@@ -579,14 +574,12 @@ export class PgStore implements Store {
     return rows[0] ? rowToMessage(rows[0]) : undefined;
   }
 
-  async listMessages(spaceId: string, topicId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
-    const params: unknown[] = [spaceId, topicId];
-    let where = 'space_id = $1 and topic_id = $2';
+  /** Shared window shape: NEWEST `limit` rows below `beforeOffset`, returned oldest first. */
+  private async windowMessages(where: string, params: unknown[], opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
     if (opts?.beforeOffset !== undefined) {
       params.push(opts.beforeOffset);
       where += ` and stream_offset < $${params.length}`;
     }
-    // The window is the NEWEST `limit` rows; the caller gets them oldest first.
     let sql = `select * from messages where ${where} order by stream_offset`;
     if (opts?.limit !== undefined) {
       params.push(opts.limit);
@@ -596,12 +589,12 @@ export class PgStore implements Store {
     return rows.map(rowToMessage);
   }
 
-  async getFirstMessages(spaceId: string): Promise<Map<string, Message>> {
-    const rows = await this.sql.query<MessageRow>(
-      'select distinct on (topic_id) * from messages where space_id = $1 order by topic_id, stream_offset',
-      [spaceId],
-    );
-    return new Map(rows.map((r) => [r.topic_id, rowToMessage(r)]));
+  async listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+    return this.windowMessages('space_id = $1 and thread_root is null', [spaceId], opts);
+  }
+
+  async listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+    return this.windowMessages('space_id = $1 and thread_root = $2', [spaceId, rootMessageId], opts);
   }
 
   async listMessagesBySpace(spaceId: string): Promise<Message[]> {
@@ -614,18 +607,33 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, topic_id, author, body, posted_at, stream_offset, poll)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
       [
         message.id,
         message.spaceId,
-        message.topicId,
+        message.threadRoot ?? null,
         JSON.stringify(message.author),
         message.body,
         message.postedAt,
         message.offset,
+        message.replyCount,
+        message.lastReplyAt ?? null,
+        message.anchorChangeSetId ?? null,
         message.poll ? JSON.stringify(message.poll) : null,
       ],
+    );
+  }
+
+  async refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void> {
+    await this.sql.query(
+      `update messages r set
+         reply_count = coalesce(s.cnt, 0),
+         last_reply_at = s.last_at
+       from (select count(*) filter (where deleted_at is null) as cnt, max(posted_at) as last_at
+             from messages where space_id = $1 and thread_root = $2) s
+       where r.space_id = $1 and r.id = $2`,
+      [spaceId, rootMessageId],
     );
   }
 
@@ -654,14 +662,6 @@ export class PgStore implements Store {
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],
     );
-  }
-
-  async reassignMessages(spaceId: string, fromTopicId: string, toTopicId: string): Promise<number> {
-    const rows = await this.sql.query<{ id: string }>(
-      'update messages set topic_id = $3 where space_id = $1 and topic_id = $2 returning id',
-      [spaceId, fromTopicId, toTopicId],
-    );
-    return rows.length;
   }
 
   // --- reactions -------------------------------------------------------------
@@ -703,12 +703,11 @@ export class PgStore implements Store {
     return rows.map(rowToReaction);
   }
 
-  async listReactionsByTopic(spaceId: string, topicId: string): Promise<StoredReaction[]> {
+  async listReactionsForMessages(spaceId: string, messageIds: string[]): Promise<StoredReaction[]> {
+    if (messageIds.length === 0) return [];
     const rows = await this.sql.query<ReactionRow>(
-      `select r.* from reactions r
-       join messages m on m.space_id = r.space_id and m.id = r.message_id
-       where r.space_id = $1 and m.topic_id = $2 order by r.at, r.member_id`,
-      [spaceId, topicId],
+      `select * from reactions where space_id = $1 and message_id = any($2::text[]) order by at, member_id`,
+      [spaceId, messageIds],
     );
     return rows.map(rowToReaction);
   }
@@ -752,12 +751,11 @@ export class PgStore implements Store {
     return rows.map(rowToPollVote);
   }
 
-  async listPollVotesByTopic(spaceId: string, topicId: string): Promise<StoredPollVote[]> {
+  async listPollVotesForMessages(spaceId: string, messageIds: string[]): Promise<StoredPollVote[]> {
+    if (messageIds.length === 0) return [];
     const rows = await this.sql.query<PollVoteRow>(
-      `select v.* from poll_votes v
-       join messages m on m.space_id = v.space_id and m.id = v.message_id
-       where v.space_id = $1 and m.topic_id = $2 order by v.at, v.member_id`,
-      [spaceId, topicId],
+      `select * from poll_votes where space_id = $1 and message_id = any($2::text[]) order by at, member_id`,
+      [spaceId, messageIds],
     );
     return rows.map(rowToPollVote);
   }

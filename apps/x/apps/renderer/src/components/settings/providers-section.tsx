@@ -179,7 +179,7 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
                 <span
                   className={cn(
                     "size-2 rounded-full shrink-0",
-                    c.status === "ok" ? "bg-green-500" : "bg-destructive",
+                    c.status === "ok" ? "bg-[var(--rowboat-success)]" : "bg-destructive",
                   )}
                 />
                 {c.status === "ok"
@@ -477,7 +477,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
             </button>
             {credsMeta.needsKey && (
               <div className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                <span className="text-[13px] text-muted-foreground">
                   API key{credsMeta.optionalKey ? " (optional)" : ""}
                 </span>
                 <Input
@@ -490,7 +490,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
             )}
             {credsMeta.needsEndpoint && (
               <div className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Endpoint URL</span>
+                <span className="text-[13px] text-muted-foreground">Endpoint URL</span>
                 <Input
                   value={baseURL}
                   onChange={(e) => setBaseURL(e.target.value)}
@@ -500,7 +500,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
             )}
             {credsMeta.manualModel && (
               <div className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model id (optional)</span>
+                <span className="text-[13px] text-muted-foreground">Model id (optional)</span>
                 <Input
                   value={manualModel}
                   onChange={(e) => setManualModel(e.target.value)}
@@ -534,7 +534,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
 
         {step.kind === "result" && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-green-600">
+            <div className="flex items-center gap-2 text-sm font-medium text-[var(--rowboat-success)]">
               <CheckCircle2 className="size-4" />
               {step.name} connected
             </div>
@@ -563,7 +563,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
             <p className="text-xs text-muted-foreground break-words">{step.message}</p>
             {credsMeta.manualModel && (
               <div className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model id</span>
+                <span className="text-[13px] text-muted-foreground">Model id</span>
                 <Input
                   value={manualModel}
                   onChange={(e) => setManualModel(e.target.value)}
@@ -657,7 +657,7 @@ function ManageProviderDialog({ card, usedBy, onClose, onRefreshModels }: {
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={cn("size-2 rounded-full shrink-0", card.status === "ok" ? "bg-green-500" : "bg-destructive")} />
+            <span className={cn("size-2 rounded-full shrink-0", card.status === "ok" ? "bg-[var(--rowboat-success)]" : "bg-destructive")} />
             {card.status === "ok"
               ? `Connected · ${card.modelCount} model${card.modelCount === 1 ? "" : "s"} available`
               : (card.error || "Could not load models")}
@@ -665,7 +665,7 @@ function ManageProviderDialog({ card, usedBy, onClose, onRefreshModels }: {
 
           {!isAuthDerived && meta?.needsKey && (
             <div className="space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API key</span>
+              <span className="text-[13px] text-muted-foreground">API key</span>
               {replacingKey ? (
                 <div className="flex gap-2">
                   <Input
@@ -691,7 +691,7 @@ function ManageProviderDialog({ card, usedBy, onClose, onRefreshModels }: {
 
           {!isAuthDerived && meta?.needsEndpoint && (
             <div className="space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Endpoint URL</span>
+              <span className="text-[13px] text-muted-foreground">Endpoint URL</span>
               <div className="flex gap-2">
                 <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
                 <Button
@@ -715,7 +715,7 @@ function ManageProviderDialog({ card, usedBy, onClose, onRefreshModels }: {
           </div>
 
           <div className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Used by</span>
+            <span className="text-[13px] text-muted-foreground">Used by</span>
             {usedBy.length === 0 ? (
               <div className="text-xs text-muted-foreground">No model selections currently use this provider.</div>
             ) : (

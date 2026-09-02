@@ -186,7 +186,11 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
             break;
           }
           case 'presence': {
-            await deps.service.publishPresence({ memberId }, frame.spaceId, frame.state, frame.topicId);
+            await deps.service.publishPresence({ memberId }, frame.spaceId, frame.state, frame.threadRootId);
+            break;
+          }
+          case 'whiteboard': {
+            await deps.service.publishWhiteboard({ memberId }, frame.spaceId, frame.boardId, frame.payload);
             break;
           }
         }

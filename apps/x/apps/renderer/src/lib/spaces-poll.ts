@@ -97,9 +97,16 @@ export function pollDeadlineLabel(poll: spaces.Poll, now: Date = new Date()): st
 export async function postPoll(opts: {
     orgId: string
     spaceId: string
-    topicId: string
+    /** Absent = post into the space's stream; present = into that thread. */
+    rootMessageId?: string
     input: spaces.SpacesNewPollInput
-}): Promise<{ topic: spaces.Topic; message: spaces.Message }> {
-    const { orgId, spaceId, topicId, input } = opts
-    return window.ipc.invoke('spaces:postMessage', { orgId, spaceId, topicId, body: buildPollFallbackBody(input), poll: input })
+}): Promise<spaces.SpacesPostResult> {
+    const { orgId, spaceId, rootMessageId, input } = opts
+    return window.ipc.invoke('spaces:postMessage', {
+        orgId,
+        spaceId,
+        ...(rootMessageId ? { threadRoot: rootMessageId } : {}),
+        body: buildPollFallbackBody(input),
+        poll: input,
+    })
 }

@@ -3,6 +3,8 @@ import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
+import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
+import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
@@ -55,11 +57,14 @@ type SpacesRpcChannel =
   | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
-  | 'spaces:listMessages' | 'spaces:postMessage' | 'spaces:manageTopic' | 'spaces:reactToMessage'
+  | 'spaces:listStream' | 'spaces:listThread' | 'spaces:postMessage' | 'spaces:createTopic'
+  | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:invokeRowboat' | 'spaces:topicSession'
-  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:bounceLive';
-
+  | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
+  | 'spaces:bounceLive'
+  | 'spaces:getNotifyPrefs' | 'spaces:setNotifyPref' | 'spaces:getDnd' | 'spaces:setDnd'
+  | 'spaces:schedule' | 'spaces:listScheduled' | 'spaces:cancelScheduled';
 type SpacesHandlers = {
   [K in SpacesRpcChannel]: (
     args: ipc.IPCChannels[K]['req'],
@@ -217,24 +222,37 @@ export const spacesRpcHandlers: SpacesHandlers = {
     topics: await orgs.getClient(args.orgId).listTopics(args.spaceId, args.includeArchived ?? false),
   }),
 
-  'spaces:listMessages': async (args) =>
-    orgs.getClient(args.orgId).listMessages(args.spaceId, args.topicId, {
+  'spaces:listStream': async (args) =>
+    orgs.getClient(args.orgId).listStream(args.spaceId, {
+      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    }),
+
+  'spaces:listThread': async (args) =>
+    orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 
   'spaces:postMessage': async (args) =>
     orgs.getClient(args.orgId).postMessage(args.spaceId, {
-      ...(args.topicId ? { topicId: args.topicId } : {}),
+      ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
-      ...(args.anchorMessageId ? { anchorMessageId: args.anchorMessageId } : {}),
       body: args.body,
       ...(args.poll ? { poll: args.poll } : {}),
       actingMode: 'direct',
     }),
 
+  'spaces:createTopic': async (args) =>
+    orgs.getClient(args.orgId).createTopic(args.spaceId, {
+      ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
+      title: args.title,
+      ...(args.body ? { body: args.body } : {}),
+      actingMode: 'direct',
+    }),
+
   'spaces:manageTopic': async (args) => ({
-    topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, args.action),
+    topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, { ...args.action, actingMode: 'direct' }),
   }),
 
   'spaces:reactToMessage': async (args) => ({
@@ -275,7 +293,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:invokeRowboat': async (args) => invokeTopicAgent(args),
 
   'spaces:topicSession': async (args) => ({
-    sessionId: topicSessionId(args.orgId, args.spaceId, args.topicId),
+    sessionId: topicSessionId(args.orgId, args.spaceId, args.threadRootId),
   }),
 
   'spaces:subscribeSpace': async (args) => {
@@ -299,7 +317,14 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:presence': async (args) => {
-    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.topicId);
+    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.threadRootId);
+    return { success: true };
+  },
+
+  // Fire-and-forget like presence; incoming whiteboard frames ride the same
+  // per-space live subscription and reach clients over 'spaces:events'.
+  'spaces:whiteboard': async (args) => {
+    orgs.getLive(args.orgId).whiteboard(args.spaceId, args.boardId, args.payload);
     return { success: true };
   },
 
@@ -308,6 +333,41 @@ export const spacesRpcHandlers: SpacesHandlers = {
   // replays immediately instead of waiting out the watchdog.
   'spaces:bounceLive': async () => {
     orgs.bounceAllLive();
+    return { success: true };
+  },
+
+  // Notify prefs + DND: read by the mention watcher in THIS process through
+  // notify-prefs' in-memory cache, so the writes have to happen here as well.
+  'spaces:getNotifyPrefs': async (args) => getNotifyPrefs(args.orgId, args.spaceId),
+
+  'spaces:setNotifyPref': async (args) => {
+    setNotifyPref(args.orgId, args.spaceId, args.topicId, args.level);
+    return { success: true };
+  },
+
+  'spaces:getDnd': async () => ({ until: getDndUntil() }),
+
+  'spaces:setDnd': async (args) => {
+    setDndUntil(args.until);
+    return { success: true };
+  },
+
+  // Scheduled sends + reminders: same story — the 20s scheduler tick lives here.
+  'spaces:schedule': async (args) => ({
+    id: scheduleItem({
+      kind: args.kind,
+      orgId: args.orgId,
+      spaceId: args.spaceId,
+      ...(args.threadRootId ? { threadRootId: args.threadRootId } : {}),
+      body: args.body,
+      at: args.at,
+    }).id,
+  }),
+
+  'spaces:listScheduled': async (args) => ({ items: listScheduled(args.orgId, args.spaceId) }),
+
+  'spaces:cancelScheduled': async (args) => {
+    cancelScheduled(args.id);
     return { success: true };
   },
 };

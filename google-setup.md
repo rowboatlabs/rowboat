@@ -26,7 +26,7 @@ https://console.cloud.google.com/projectcreate
 
 Once created, make sure the new project is selected in the top project dropdown.
 
-![Select the new project in the dropdown](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/01-select-project-dropdown.png)
+![Select the new project in the dropdown](assets/google-setup/01-select-project-dropdown.png)
 
 ---
 
@@ -51,7 +51,7 @@ For each API:
 
 - Click **Enable**
 
-    ![Enable the API](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/02-enable-api.png)
+    ![Enable the API](assets/google-setup/02-enable-api.png)
 
 
 ---
@@ -79,7 +79,7 @@ Click **Save and Continue** through the remaining steps.
 
 You do NOT need to publish the app — keeping it in **Testing** mode is fine.
 
-![OAuth consent screen](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/03-oauth-consent-screen.png)
+![OAuth consent screen](assets/google-setup/03-oauth-consent-screen.png)
 
 ---
 
@@ -98,7 +98,7 @@ Under **Test Users**:
 
 Save changes.
 
-![Add test users](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/04-add-test-users.png)
+![Add test users](assets/google-setup/04-add-test-users.png)
 
 ---
 
@@ -139,7 +139,7 @@ After creation, Google will show:
 
 Copy **both values** and paste them into Rowboat when prompted.
 
-![Enter credentials in Rowboat](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/07-enter-credentials.png)
+![Enter credentials in Rowboat](assets/google-setup/07-enter-credentials.png)
 
 ---
 

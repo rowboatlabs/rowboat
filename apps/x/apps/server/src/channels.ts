@@ -291,8 +291,10 @@ export const RPC_CHANNELS = [
   'spaces:assetHistory',
   'spaces:diff',
   'spaces:listTopics',
-  'spaces:listMessages',
+  'spaces:listStream',
+  'spaces:listThread',
   'spaces:postMessage',
+  'spaces:createTopic',
   'spaces:manageTopic',
   'spaces:reactToMessage',
   'spaces:deleteMessage',
@@ -304,7 +306,19 @@ export const RPC_CHANNELS = [
   'spaces:subscribeSpace',
   'spaces:unsubscribeSpace',
   'spaces:presence',
+  'spaces:whiteboard',
   'spaces:bounceLive',
+  // Notify prefs, DND and the scheduler: the mention watcher and the
+  // scheduler tick run in this process (initCoreServices), and both read
+  // their files through an in-memory cache — so the writes must land here
+  // too, or a mute set in main is invisible until the server restarts.
+  'spaces:getNotifyPrefs',
+  'spaces:setNotifyPref',
+  'spaces:getDnd',
+  'spaces:setDnd',
+  'spaces:schedule',
+  'spaces:listScheduled',
+  'spaces:cancelScheduled',
 ] as const satisfies readonly ipc.InvokeChannels[];
 
 export type RpcChannel = (typeof RPC_CHANNELS)[number];

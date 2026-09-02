@@ -16,7 +16,7 @@ function StatusDot({ status }: { status: CodeSessionStatus }) {
     return <span className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500" title="Needs your attention" />
   }
   if (status === 'working') {
-    return <span className="size-2 shrink-0 animate-pulse rounded-full bg-blue-500" title="Working" />
+    return <span className="size-2 shrink-0 animate-pulse rounded-full bg-[var(--rowboat-git)]" title="Working" />
   }
   return <span className="size-2 shrink-0 rounded-full bg-muted-foreground/30" title="Idle" />
 }
@@ -48,7 +48,7 @@ export function SessionRail({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Projects</span>
+        <span className="text-[13px] text-muted-foreground">Projects</span>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onAddProject}>

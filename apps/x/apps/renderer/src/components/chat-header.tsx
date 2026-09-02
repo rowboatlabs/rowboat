@@ -95,7 +95,7 @@ export function ChatHeader({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
             {recentRuns.length > 0 && (
-              <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <DropdownMenuLabel className="text-[13px] font-normal text-muted-foreground">
                 Recent
               </DropdownMenuLabel>
             )}

@@ -78,14 +78,14 @@ describe('live face', () => {
   it('subscribe with afterOffset 0 replays the full space log, in order, after the subscribed frame', async () => {
     const client = await connect('dev-ramnique');
     client.send({ kind: 'subscribe', spaceId, afterOffset: 0 });
-    await client.until((fs) => eventFrames(fs).length >= 4, 'replay of seeded events');
+    await client.until((fs) => eventFrames(fs).length >= 3, 'replay of seeded events');
 
     expect(client.frames[0]).toMatchObject({ kind: 'subscribed', spaceId, fromOffset: 0 });
     const events = eventFrames(client.frames);
-    // Seed produced: ramnique joined, the space's stream topic was born with
-    // it, gagan joined, then the README change.
-    expect(events.map((e) => e.event.type)).toEqual(['membership', 'topic', 'membership', 'change']);
-    expect(events.map((e) => e.offset)).toEqual([1, 2, 3, 4]);
+    // Seed produced: ramnique joined, gagan joined, then the README change —
+    // the stream is not an object, so nothing else is born with a space.
+    expect(events.map((e) => e.event.type)).toEqual(['membership', 'membership', 'change']);
+    expect(events.map((e) => e.offset)).toEqual([1, 2, 3]);
     client.close();
   });
 
@@ -118,12 +118,12 @@ describe('live face', () => {
     expect(eventFrames(client.frames).map((e) => e.offset)).toEqual([head]);
 
     await harbor.service.postMessage({ memberId: 'ramnique' }, spaceId, {
-      body: 'New topic while gagan is live',
+      body: 'New root while gagan is live',
       actingMode: 'direct',
     });
-    await client.until((fs) => eventFrames(fs).length >= 3, 'live topic+message events');
+    await client.until((fs) => eventFrames(fs).length >= 2, 'live message event');
     const offsets = eventFrames(client.frames).map((e) => e.offset);
-    expect(offsets).toEqual([head, head + 1, head + 2]); // no gaps, no duplicates
+    expect(offsets).toEqual([head, head + 1]); // no gaps, no duplicates
     client.close();
   });
 
@@ -148,21 +148,50 @@ describe('live face', () => {
     const presence = watcher.frames.find((f) => f.kind === 'presence') as Extract<ServerFrame, { kind: 'presence' }>;
     expect(presence).toMatchObject({ spaceId, memberId: 'gagan', state: 'typing' });
     expect('offset' in presence).toBe(false);
-    expect('topicId' in presence).toBe(false); // absent = space-wide
+    expect('threadRootId' in presence).toBe(false); // absent = the stream / space-wide
 
-    // Topic-scoped presence (agent_working on a thread) carries the topicId through.
-    const topicId = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
-    typer.send({ kind: 'presence', spaceId, state: 'agent_working', topicId });
+    // Thread-scoped presence (agent_working on a thread) carries the root id through.
+    const threadRootId = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+    typer.send({ kind: 'presence', spaceId, state: 'agent_working', threadRootId });
     await watcher.until(
       (fs) => fs.some((f) => f.kind === 'presence' && f.state === 'agent_working'),
-      'topic-scoped presence frame',
+      'thread-scoped presence frame',
     );
     const scoped = watcher.frames.find(
       (f) => f.kind === 'presence' && f.state === 'agent_working',
     ) as Extract<ServerFrame, { kind: 'presence' }>;
-    expect(scoped).toMatchObject({ spaceId, memberId: 'gagan', state: 'agent_working', topicId });
+    expect(scoped).toMatchObject({ spaceId, memberId: 'gagan', state: 'agent_working', threadRootId });
     watcher.close();
     typer.close();
+  });
+
+  it('whiteboard frames relay the payload verbatim to space subscribers, stamped with the sender', async () => {
+    const watcher = await connect('dev-ramnique');
+    watcher.send({ kind: 'subscribe', spaceId });
+    await watcher.until((fs) => fs.some((f) => f.kind === 'subscribed'), 'watcher subscribed');
+
+    const drawer = await connect('dev-gagan');
+    // The payload is opaque to the org — this shape is app-side vocabulary the
+    // server must relay untouched, unknown keys and all.
+    const payload = { t: 'SCENE_UPDATE', clientId: 'pane-1', elements: [{ id: 'rect-1', version: 3 }] };
+    drawer.send({ kind: 'whiteboard', spaceId, boardId: 'whiteboards/roadmap.excalidraw', payload });
+    await watcher.until((fs) => fs.some((f) => f.kind === 'whiteboard'), 'whiteboard frame');
+    const frame = watcher.frames.find((f) => f.kind === 'whiteboard') as Extract<ServerFrame, { kind: 'whiteboard' }>;
+    expect(frame).toMatchObject({ spaceId, boardId: 'whiteboards/roadmap.excalidraw', memberId: 'gagan' });
+    expect(frame.payload).toEqual(payload);
+    expect('offset' in frame).toBe(false); // ephemeral: no offset, never replayed
+    watcher.close();
+    drawer.close();
+  });
+
+  it('whiteboard frames to a space you are not in yield a forbidden error', async () => {
+    const other = await harbor.service.createSpace({ memberId: 'ramnique' }, 'Private board');
+    const client = await connect('dev-gagan');
+    client.send({ kind: 'whiteboard', spaceId: other.id, boardId: 'whiteboards/x.excalidraw', payload: {} });
+    await client.until((fs) => fs.some((f) => f.kind === 'error'), 'error frame');
+    const err = client.frames.find((f) => f.kind === 'error') as Extract<ServerFrame, { kind: 'error' }>;
+    expect(err.code).toBe('forbidden');
+    client.close();
   });
 
   it('malformed frames get an error frame, not a dropped socket', async () => {

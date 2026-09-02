@@ -10,7 +10,7 @@ import {
   RestoreAssetResult,
 } from './changeset.js';
 import { ActingMode, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
   AcceptInviteResult,
@@ -44,17 +44,16 @@ const NewPoll = z.object({
   allowMultiselect: z.boolean().optional(),
 });
 
-const NewTopicMessage = z.object({
-  /** Present = reply into this topic; absent = create a topic (first message becomes the title). */
-  topicId: TopicId.optional(),
-  /** Reply-to-activity-row: anchors the new topic to a change-set (only valid when creating). */
-  anchorChangeSetId: z.string().optional(),
+const NewMessage = z.object({
   /**
-   * Reply-becomes-a-thread: anchors the new topic to an existing message
-   * (only valid when creating; at most one topic per message). The org
-   * validates the message exists in the space.
+   * Present = a reply into the flat thread under this root (the org
+   * normalizes a reply's id to its root, Slack-style); absent = a new root
+   * message in the space's one stream. Posting a message never creates a
+   * container — a topic exists only via createTopic.
    */
-  anchorMessageId: MessageId.optional(),
+  threadRoot: MessageId.optional(),
+  /** Reply-to-activity-row provenance (root posts only): the change-set this message answers. */
+  anchorChangeSetId: ChangeSetId.optional(),
   body: z.string().min(1).max(65_536),
   /** Present = this message carries a poll (immutable once posted; editMessage refuses). */
   poll: NewPoll.optional(),
@@ -63,14 +62,16 @@ const NewTopicMessage = z.object({
 });
 
 /**
- * A listTopics entry: the topic plus its immutable FIRST message — every
- * consumer needs it (derived titles, thread parent cards, seed detection), so
- * it is always included rather than fetched per topic. Listing decoration
- * only: Topic objects inside events and post responses stay lean. The
- * firstMessage's `reactions` are the at-post snapshot (not folded live) —
- * this field is title/parent material, not a message listing.
+ * A listTopics entry: the row plus its root message (reply chips, parent
+ * cards, unread anchors all need it) and the computed activity stamp the rail
+ * sorts by (newest reply, else the root's post time). The rootMessage's
+ * `reactions` are the at-post snapshot (not folded live) — this field is
+ * title/parent material, not a message listing.
  */
-export const TopicListing = Topic.extend({ firstMessage: Message.nullable() });
+export const TopicListing = Topic.extend({
+  rootMessage: Message.nullable(),
+  lastActivityAt: z.iso.datetime(),
+});
 export type TopicListing = z.infer<typeof TopicListing>;
 
 export const routes = {
@@ -168,7 +169,7 @@ export const routes = {
       /** Version of fromPath you last read — stale = conflict, same discipline as propose. */
       baseVersion: z.number().int().positive(),
       reason: z.string().max(1_000).optional(),
-      topicId: TopicId.optional(),
+      threadRootId: MessageId.optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),
@@ -182,7 +183,7 @@ export const routes = {
       path: AssetPath,
       baseVersion: z.number().int().positive(),
       reason: z.string().max(1_000).optional(),
-      topicId: TopicId.optional(),
+      threadRootId: MessageId.optional(),
       actingMode: ActingMode,
       agentName: z.string().max(64).optional(),
     }),
@@ -276,6 +277,7 @@ export const routes = {
   },
 
   // --- feed ----------------------------------------------------------------
+  /** The rail: topic rows with their root messages, sorted by lastActivityAt desc. */
   listTopics: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/topics',
@@ -284,29 +286,58 @@ export const routes = {
     response: z.object({ topics: z.array(TopicListing) }),
   },
   /**
-   * A topic's messages, windowed newest-first (returned oldest-first for
-   * rendering): without `beforeOffset` the LATEST `limit` messages — never the
-   * full history. Page back by passing the oldest received offset. `hasMore`
-   * = older messages exist below the window. Message offsets ride the
+   * The space's one stream: ROOT messages only (replies live behind their
+   * reply chips), windowed newest-first (returned oldest-first for
+   * rendering): without `beforeOffset` the LATEST `limit` messages — never
+   * the full history. Page back by passing the oldest received offset.
+   * `hasMore` = older roots exist below the window. Message offsets ride the
    * space's one event sequence, so they are strictly increasing and are the
-   * cursor (no timestamp ties).
+   * cursor (no timestamp ties). `topics` carries the rows annotating this
+   * page's roots — the stream's badge decoration, one batched fetch.
    */
-  listMessages: {
+  listStream: {
     method: 'GET',
-    path: '/v1/spaces/:spaceId/topics/:topicId/messages',
-    params: z.object({ spaceId: SpaceId, topicId: TopicId }),
+    path: '/v1/spaces/:spaceId/stream',
+    params: z.object({ spaceId: SpaceId }),
     query: z.object({
       beforeOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
-    response: z.object({ topic: Topic, messages: z.array(Message), hasMore: z.boolean() }),
+    response: z.object({ messages: z.array(Message), topics: z.array(Topic), hasMore: z.boolean() }),
   },
+  /**
+   * One flat thread: the root, its topic row (null = a plain thread), and the
+   * replies — same window semantics as the stream. A reply's id in the path
+   * resolves to its root (Slack-style), and the response's `root` says where
+   * you landed.
+   */
+  listThread: {
+    method: 'GET',
+    path: '/v1/spaces/:spaceId/threads/:rootMessageId',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
+    query: z.object({
+      beforeOffset: z.coerce.number().int().positive().optional(),
+      limit: z.coerce.number().int().positive().max(200).optional(),
+    }),
+    response: z.object({
+      root: Message,
+      topic: Topic.nullable(),
+      messages: z.array(Message),
+      hasMore: z.boolean(),
+    }),
+  },
+  /**
+   * Post a message: a stream root (no threadRoot) or a reply (threadRoot).
+   * Never creates a topic. A reply to an archived topic's thread revives it —
+   * the 'unarchived' topic event narrates (Gmail semantics: activity returns
+   * a conversation to the rail).
+   */
   postMessage: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/messages',
     params: z.object({ spaceId: SpaceId }),
-    request: NewTopicMessage,
-    response: z.object({ topic: Topic, message: Message }),
+    request: NewMessage,
+    response: z.object({ message: Message }),
   },
   /**
    * Author-only tombstone (the content plane is role-flat, so deleter ==
@@ -400,15 +431,47 @@ export const routes = {
     }),
     response: z.object({ message: Message }),
   },
+  /**
+   * The deliberate ceremony: annotate a thread with a stated goal. Two modes,
+   * exactly one of rootMessageId | body:
+   *   - promote: `rootMessageId` names an existing thread's root (a reply's
+   *     id is refused — promote the root); at most one topic per root.
+   *   - from scratch: `body` posts a new root into the stream, then annotates
+   *     it — nothing is ever born outside the stream.
+   */
+  createTopic: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/topics',
+    params: z.object({ spaceId: SpaceId }),
+    request: z
+      .object({
+        rootMessageId: MessageId.optional(),
+        title: z.string().min(1).max(256),
+        body: z.string().min(1).max(65_536).optional(),
+        actingMode: ActingMode,
+        agentName: z.string().max(64).optional(),
+      })
+      .superRefine((v, ctx) => {
+        if ((v.rootMessageId === undefined) === (v.body === undefined)) {
+          ctx.addIssue({ code: 'custom', message: 'exactly one of rootMessageId (promote) or body (from scratch)' });
+        }
+      }),
+    response: z.object({ topic: Topic, rootMessage: Message }),
+  },
+  /**
+   * One-row lifecycle ops on the annotation — none can touch a message.
+   * `remove` deletes the row ("convert back to thread"); the conversation
+   * stays in the stream untouched, and re-promoting later is lossless.
+   */
   manageTopic: {
     method: 'POST',
     path: '/v1/spaces/:spaceId/topics/:topicId',
     params: z.object({ spaceId: SpaceId, topicId: TopicId }),
     request: z.discriminatedUnion('action', [
-      z.object({ action: z.literal('retitle'), title: z.string().min(1).max(256) }),
-      z.object({ action: z.literal('archive') }),
-      z.object({ action: z.literal('unarchive') }),
-      z.object({ action: z.literal('merge_into'), targetTopicId: TopicId }),
+      z.object({ action: z.literal('retitle'), title: z.string().min(1).max(256), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('archive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('unarchive'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+      z.object({ action: z.literal('remove'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     ]),
     response: z.object({ topic: Topic }),
   },

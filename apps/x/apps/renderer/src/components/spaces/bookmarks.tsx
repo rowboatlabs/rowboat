@@ -66,14 +66,14 @@ function BookmarkRow({ authorId, authorName, postedAt, excerpt, topicLabel, onOp
     )
 }
 
-export function BookmarksPopover({ orgId, spaceId, generalId, topics, onNavigate }: {
+export function BookmarksPopover({ orgId, spaceId, streamKey, topics, onNavigate }: {
     orgId: string
     spaceId: string
-    /** The stream topic's id — its messages label as "Messages". */
-    generalId: string | null
+    /** The read-state key standing for the stream — its messages label as "Messages". */
+    streamKey: string
     topics: spaces.Topic[]
     /** Open the message's surface and scroll to it. */
-    onNavigate: (topicId: string, messageId: string) => void
+    onNavigate: (rootMessageId: string, messageId: string) => void
 }) {
     const memberNames = useMemberNames()
     const [tab, setTab] = useState<'pinned' | 'saved'>('pinned')
@@ -102,10 +102,10 @@ export function BookmarksPopover({ orgId, spaceId, generalId, topics, onNavigate
     }, [open, orgId, spaceId])
 
     const pinned = useMemo(() => pinnedMessages(corpus ?? []), [corpus])
-    const topicLabel = (topicId: string): string => {
-        if (topicId === generalId) return 'Messages'
-        const topic = topics.find((t) => t.id === topicId)
-        return topic ? resolveMentions(topic.title, memberNames) : 'topic'
+    const topicLabel = (rootMessageId: string): string => {
+        if (rootMessageId === streamKey) return 'Messages'
+        const topic = topics.find((t) => t.rootMessageId === rootMessageId)
+        return topic ? resolveMentions(topic.title, memberNames) : 'thread'
     }
     const nameOf = (id: string) => memberNames.get(id) ?? id
 
@@ -154,10 +154,10 @@ export function BookmarksPopover({ orgId, spaceId, generalId, topics, onNavigate
                                 authorName={nameOf(m.author.memberId)}
                                 postedAt={m.postedAt}
                                 excerpt={messageExcerpt(m.body, memberNames)}
-                                topicLabel={topicLabel(m.topicId)}
+                                topicLabel={topicLabel(m.threadRoot ?? streamKey)}
                                 onOpen={() => {
                                     setOpen(false)
-                                    onNavigate(m.topicId, m.id)
+                                    onNavigate(m.threadRoot ?? streamKey, m.id)
                                 }}
                                 onRemove={undefined}
                             />
@@ -175,10 +175,10 @@ export function BookmarksPopover({ orgId, spaceId, generalId, topics, onNavigate
                                 authorName={nameOf(s.authorId)}
                                 postedAt={s.postedAt}
                                 excerpt={messageExcerpt(s.body, memberNames)}
-                                topicLabel={topicLabel(s.topicId)}
+                                topicLabel={topicLabel(s.threadRootId)}
                                 onOpen={() => {
                                     setOpen(false)
-                                    onNavigate(s.topicId, s.messageId)
+                                    onNavigate(s.threadRootId, s.messageId)
                                 }}
                                 onRemove={() => removeSaved(orgId, spaceId, s.messageId)}
                             />

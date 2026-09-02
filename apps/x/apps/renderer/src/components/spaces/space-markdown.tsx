@@ -125,7 +125,7 @@ function ImageLightbox({ src, alt, open, onOpenChange, children }: {
 }
 
 /** An uploaded image in a message: inline preview, click to view, download from the viewer. */
-// Chat images render as Slack-style tiles: one consistent height, side by
+// Chat images render as uniform tiles: one consistent height, side by
 // side on a line (wrapping), very wide shots cropped to a max tile width —
 // the lightbox has the full image. Small images keep their natural size
 // (tiles never upscale).
@@ -309,34 +309,6 @@ function plainLabel(children: ReactNode): string | null {
     return null
 }
 
-const MENTION_PILL_CLASS = 'rounded bg-indigo-500/15 px-1 py-px font-semibold text-indigo-600 dark:bg-indigo-400/25 dark:text-indigo-300'
-
-/**
- * A mention pill. A real member's pill opens their profile on click — the
- * label carries the display name (decorateMentions), so the id comes from a
- * reverse lookup over the roster; @here, @rowboat, and a name the roster no
- * longer carries stay inert.
- */
-function MentionPill({ label }: { label: string }) {
-    const names = useMemberNames()
-    const name = label.slice(1)
-    let memberId: string | null = null
-    for (const [id, display] of names) {
-        if (display === name) {
-            memberId = id
-            break
-        }
-    }
-    if (!memberId) return <span className={MENTION_PILL_CLASS}>{label}</span>
-    return (
-        <MemberProfilePopover id={memberId}>
-            <button type="button" className={cn(MENTION_PILL_CLASS, 'cursor-pointer hover:bg-indigo-500/25 dark:hover:bg-indigo-400/35')}>
-                {label}
-            </button>
-        </MemberProfilePopover>
-    )
-}
-
 /**
  * An external image (a pasted GIF link, a markdown image). Same frame as blob
  * images; a URL that never loads falls back to the plain link it came from.
@@ -405,7 +377,7 @@ function ExternalLink({ href, children }: { href: string; children?: ReactNode }
                     if (isTrustedDomain(domain)) open()
                     else setConfirming(true)
                 }}
-                className="cursor-pointer break-words text-blue-600 underline underline-offset-2 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+                className="cursor-pointer break-words text-[var(--stream-link)] no-underline underline-offset-2 hover:underline"
             >
                 {children}
             </a>
@@ -442,14 +414,56 @@ const spaceComponents: StreamdownComponents = {
         return <ExternalImage src={url} alt={alt ?? ''} />
     },
     a: SpaceAnchor,
-    // Mentions arrive as **@Name** (decorateMentions): a strong that IS an
-    // @-handle renders as a Discord-style pill (click = the member's
-    // profile); any other bold stays bold.
-    strong: ({ children }) => {
-        const label = plainLabel(children)
-        if (label?.startsWith('@')) return <MentionPill label={label} />
-        return <strong>{children}</strong>
-    },
+    // decorateMentions renders "@name" as **bold**; the stream dialect shows
+    // those as tinted mention chips (broadcasts get the amber "needs you"
+    // wash). A chip naming a real member also opens their profile on click.
+    strong: MentionStrong,
+}
+
+function MentionStrong({ children, ...props }: ComponentProps<'strong'>) {
+    const names = useMemberNames()
+    const label = plainLabel(children)
+    if (!label?.startsWith('@')) return <strong {...props}>{children}</strong>
+
+    const broadcast = /^@(here|channel|everyone)$/i.test(label)
+    const chip = cn(
+        'rounded-[4px] px-[3px] py-px font-medium',
+        broadcast
+            ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
+            : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
+    )
+    // @here/@channel address the room, not a person — no profile to open.
+    if (broadcast) {
+        return (
+            <strong className={chip} {...props}>
+                {children}
+            </strong>
+        )
+    }
+    // The label carries the display name (decorateMentions), so the id comes
+    // from a reverse lookup; an unmatched name still renders as a chip.
+    const name = label.slice(1)
+    let memberId: string | null = null
+    for (const [id, display] of names) {
+        if (display === name) {
+            memberId = id
+            break
+        }
+    }
+    if (!memberId) {
+        return (
+            <strong className={chip} {...props}>
+                {children}
+            </strong>
+        )
+    }
+    return (
+        <MemberProfilePopover id={memberId}>
+            <button type="button" className={cn(chip, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
+                {children}
+            </button>
+        </MemberProfilePopover>
+    )
 }
 
 function SpaceAnchor({ href, children }: ComponentProps<'a'>) {

@@ -418,13 +418,13 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <FileSpreadsheetIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-medium text-foreground">{fileName}</span>
-        <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
           <EyeIcon className="size-3" />
           View only
         </span>
         <div className="flex-1" />
         {findOpen ? (
-          <div className="flex animate-in items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 fade-in slide-in-from-right-2 duration-200">
+          <div className="flex animate-in items-center gap-1 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-1.5 py-0.5 focus-within:border-border fade-in slide-in-from-right-2 duration-200">
             <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
             <input
               ref={findInputRef}
@@ -525,7 +525,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
             className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             {copied
-              ? <CheckIcon className="size-3.5 animate-in text-green-600 zoom-in-50 duration-200" />
+              ? <CheckIcon className="size-3.5 animate-in text-[var(--rowboat-success)] zoom-in-50 duration-200" />
               : <CopyIcon className="size-3.5" />}
           </button>
         </div>
@@ -623,7 +623,7 @@ export function SpreadsheetFileViewer({ path }: SpreadsheetFileViewerProps) {
                 setGotoValue('')
               }}
               placeholder="#"
-              className="w-14 rounded border border-border bg-background px-1.5 py-0.5 text-xs text-foreground outline-none transition-colors focus:border-ring"
+              className="w-14 rounded border border-transparent bg-[var(--rowboat-wash)] px-1.5 py-0.5 text-xs text-foreground outline-none transition-colors focus:border-border"
             />
           </div>
         )}

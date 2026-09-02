@@ -54,7 +54,7 @@ export type StreamOffset = z.infer<typeof StreamOffset>;
  *
  *   space       https://<org>/s/<spaceId>
  *   asset       https://<org>/s/<spaceId>/f/<assetPath>
- *   topic       https://<org>/s/<spaceId>/t/<topicId>
+ *   message     https://<org>/s/<spaceId>/m/<messageId>   (a thread's link is its root message's)
  *   change-set  https://<org>/s/<spaceId>/c/<changeSetId>
  *   blob        https://<org>/s/<spaceId>/b/<blobHash>[?name=<filename>]
  *   invite      https://<org>/join/<inviteToken>
@@ -69,8 +69,8 @@ export function spaceUrl(orgAddress: string, spaceId: SpaceId): string {
 export function assetUrl(orgAddress: string, spaceId: SpaceId, path: AssetPath): string {
   return `${spaceUrl(orgAddress, spaceId)}/f/${path.split('/').map(encodeURIComponent).join('/')}`;
 }
-export function topicUrl(orgAddress: string, spaceId: SpaceId, topicId: TopicId): string {
-  return `${spaceUrl(orgAddress, spaceId)}/t/${topicId}`;
+export function messageUrl(orgAddress: string, spaceId: SpaceId, messageId: MessageId): string {
+  return `${spaceUrl(orgAddress, spaceId)}/m/${messageId}`;
 }
 export function changeSetUrl(orgAddress: string, spaceId: SpaceId, changeSetId: ChangeSetId): string {
   return `${spaceUrl(orgAddress, spaceId)}/c/${changeSetId}`;

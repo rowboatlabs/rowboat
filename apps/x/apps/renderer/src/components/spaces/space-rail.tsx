@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Bell, BellOff, Bot, Check, FileText, Folder, FolderPlus, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, Pin, Plus, Search, Trash2, Upload } from 'lucide-react'
-import type { spaces } from '@x/shared'
+import { Archive, ArchiveRestore, Bell, BellOff, Bot, Check, FileText, Folder, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, Pencil, PenTool, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub,
@@ -14,19 +14,23 @@ import { toast } from '@/lib/toast'
 import { FileTree } from '@/components/spaces/files-tab'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import type { NotifyLevel, SpaceNotifyHandle } from '@/hooks/use-spaces-notify'
-import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
+import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
+import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
-import { explicitTitle, isGeneralSeedMessage, stripThreadMarker, threadRefOf } from '@/lib/spaces-conventions'
+import { threadRefOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt } from '@/lib/spaces-read-state'
 import type { RailSelection } from '@/lib/spaces-selection'
 
 // The space's edge rail: one collapsible strip carrying the same sidebar on
-// every surface — Messages + topics on top, the file tree below. Two modes:
-// PINNED (default) it is a plain 280px sidebar; unpinned it is a 28px edge
-// that opens on hover and closes right after the cursor leaves (a ~250ms
-// grace absorbs border jitter). The header button flips the mode; a click
-// on the closed edge pins it back open. The surfaces own everything else.
+// every surface — Messages + discussions on top, the file tree below. The
+// Discussions section lists ONLY deliberate topic annotations (annotation
+// model): threads someone gave a goal. Plain reply chains stay behind their
+// chips in the stream — the rail holds intentions, not accidents. It is a
+// plain sticky 280px sidebar (the shell sidebar contracts to the dock while
+// in Spaces, so this is THE sidebar here), collapsible to a 28px edge strip
+// via the header button; clicking the strip reopens it. No hover behavior —
+// the rail moves only on explicit clicks. The surfaces own everything else.
 
 /** Resizable Files section: never shorter than this (header + a couple of rows). */
 const FILES_MIN = 96
@@ -40,15 +44,14 @@ const NOTIFY_CHOICES: { level: NotifyLevel; label: string }[] = [
 ]
 
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, general, topics, threads, changeSets, entries, draftFolders, presence, unreadPaths, notify, onMenuOpenChange, selection, onSelect, onCreateFile, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
-    open, pinned, onHoverChange, onTogglePin,
+    orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, notify, onMenuOpenChange, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    open, onTogglePin,
 }: {
     orgId: string
     spaceId: string
     selfMemberId: string
-    general: GeneralState
-    topics: spaces.Topic[]
-    threads: ThreadIndex
+    stream: StreamState
+    topics: spaces.TopicListing[]
     changeSets: spaces.ChangeSet[]
     entries: spaces.SpacesAssetEntry[]
     /** Local-only empty folders — see SpacePane. */
@@ -62,6 +65,8 @@ export function SpaceRail({
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     onCreateFile: (path: string) => void
+    /** The "+" in Whiteboards: creates the board asset AND opens it (a taken name just opens). */
+    onCreateBoard: (path: string) => void
     /** Picked or dropped files headed for the space's file tree (upload dialog opens in the pane). */
     onUploadFiles: (files: File[]) => void
     /** Opens the space's Trash (deleted files, restorable). */
@@ -69,14 +74,13 @@ export function SpaceRail({
     onAddFolder: (path: string) => void
     onRemoveFolder: (path: string) => void
     open: boolean
-    pinned: boolean
-    onHoverChange: (hovering: boolean) => void
     onTogglePin: () => void
 }) {
     const [query, setQuery] = useState('')
     const [filter, setFilter] = useState<'all' | 'unread' | 'archived'>('all')
     const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
     const [creatingFolder, setCreatingFolder] = useState(false)
+    const [creatingBoard, setCreatingBoard] = useState(false)
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
     // Resizable Files section: null = natural height (grows with the tree,
@@ -115,15 +119,16 @@ export function SpaceRail({
         window.addEventListener('mouseup', onUp)
     }
 
-    // Row-level topic actions. Rename edits inline in the row; the topic event
-    // the server emits updates every other client, the refresh updates this one.
+    // Row-level lifecycle actions. Rename edits inline in the row; the topic
+    // event the server emits updates every other client, the refresh updates
+    // this one. Every action is a one-row op — none can touch a message.
     const [renaming, setRenaming] = useState<{ topicId: string; value: string } | null>(null)
     const manageTopic = async (topicId: string, action: spaces.SpacesManageTopicAction) => {
         try {
             await window.ipc.invoke('spaces:manageTopic', { orgId, spaceId, topicId, action })
             await refreshSpaceFeed(orgId, spaceId)
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not update the topic', 'error')
+            toast(err instanceof Error ? err.message : 'Could not update the discussion', 'error')
         }
     }
     const commitRename = async (topicId: string, title: string) => {
@@ -131,23 +136,21 @@ export function SpaceRail({
         await manageTopic(topicId, { action: 'retitle', title })
     }
 
-    const generalId = general.topic?.id ?? null
-
-    // Per-topic notification levels (the context/⋯ menus set them; the
-    // main-side watcher reads them). 'mute' also earns the row a glyph.
-    const effectiveLevel = (topicId: string): NotifyLevel => notify.topics[topicId] ?? notify.spaceLevel ?? 'mentions'
+    // Per-thread notification levels (the context/⋯ menus set them; the
+    // main-side watcher reads them), keyed by the thread's root message id.
+    // 'mute' also earns the row a glyph.
+    const effectiveLevel = (dest: string): NotifyLevel => notify.topics[dest] ?? notify.spaceLevel ?? 'mentions'
 
     const generalUnread = useMemo(() => {
-        const g = general.topic
-        if (!g || !general.ready) return 0
-        const mark = getTopicLastReadAt(orgId, spaceId, g.id)
-        return general.messages.filter((m, i) => !isGeneralSeedMessage(g, m, i) && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
-    }, [general, orgId, spaceId, selfMemberId])
+        if (!stream.ready) return 0
+        const mark = getTopicLastReadAt(orgId, spaceId, STREAM_READ_KEY)
+        return stream.messages.filter((m) => !m.pending && !m.failed && !m.deletedAt && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
+    }, [stream, orgId, spaceId, selfMemberId])
 
     const artifactFiles = useMemo(() => {
         const counts = new Map<string, Set<string>>()
         for (const cs of changeSets) {
-            const ref = cs.topicId ?? threadRefOf(cs.reason)
+            const ref = cs.threadRootId ?? threadRefOf(cs.reason)
             if (!ref) continue
             const set = counts.get(ref) ?? new Set<string>()
             set.add(cs.assetPath)
@@ -156,52 +159,53 @@ export function SpaceRail({
         return counts
     }, [changeSets])
 
-    const isUnread = (t: spaces.Topic) => {
-        const mark = getTopicLastReadAt(orgId, spaceId, t.id)
-        if (mark && t.lastActivityAt <= mark) return false
-        return t.messageCount > 1 || t.createdBy.memberId !== selfMemberId
+    const isUnread = (t: spaces.TopicListing) => {
+        const mark = getTopicLastReadAt(orgId, spaceId, t.rootMessageId)
+        return !mark || t.lastActivityAt > mark
     }
 
     const memberNames = useMemberNames()
     const q = query.trim().toLowerCase()
     const topicRows = topics
-        .filter((t) => t.id !== generalId)
         .filter((t) => (filter === 'archived' ? t.archived : !t.archived))
-        .filter((t) => (filter === 'unread' ? isUnread(t) && effectiveLevel(t.id) !== 'mute' : true))
-        .map((t) => {
-            const info = threads.byTopic.get(t.id)
-            // A renamed topic shows its name; an auto-titled thread keeps
-            // showing its seed text (its derived title is a noisy quote).
-            // Without the seed prefetch the PARENT message (already loaded in
-            // general) stands in — the seed's first line is the parent's.
-            const parentBody = info?.parentMessageId ? general.messages.find((m) => m.id === info.parentMessageId)?.body : undefined
-            const seedBody = info?.firstMessage ? stripThreadMarker(info.firstMessage.body) : parentBody
-            const named = explicitTitle(t, seedBody)
-            const raw = named ?? (info?.parentMessageId && seedBody ? seedBody.split('\n')[0] ?? t.title : t.title)
-            // Titles resolve before the search filter so searching a person's
-            // name finds the topics that mention them.
-            return { topic: t, title: resolveMentions(raw, memberNames) }
-        })
+        .filter((t) => (filter === 'unread' ? isUnread(t) && effectiveLevel(t.rootMessageId) !== 'mute' : true))
+        // Titles resolve before the search filter so searching a person's
+        // name finds the discussions that mention them.
+        .map((t) => ({ topic: t, title: resolveMentions(t.title, memberNames) }))
         .filter((x) => (q ? x.title.toLowerCase().includes(q) : true))
         .sort((a, b) => b.topic.lastActivityAt.localeCompare(a.topic.lastActivityAt))
 
-    const selectedTopicId = selection.kind === 'topic' ? selection.topicId : null
+    const selectedRootId = selection.kind === 'thread' ? selection.rootMessageId : null
     const selectedPath = selection.kind === 'file' ? selection.path : null
+    const selectedBoard = selection.kind === 'whiteboard' ? selection.path : null
+
+    // Boards live in the same asset namespace but get their own rail section;
+    // the file tree hides them so one thing appears in one place.
+    const boards = entries.filter((e) => spaces.isWhiteboardPath(e.path) && !e.state)
+    const fileEntries = entries.filter((e) => !spaces.isWhiteboardPath(e.path))
+    const createBoard = (name: string) => {
+        setCreatingBoard(false)
+        const path = spaces.whiteboardPathForName(name)
+        if (path) onCreateBoard(path)
+    }
+
+    // The stream mutes under its own key, like any thread.
+    const generalBadge = effectiveLevel(STREAM_READ_KEY) === 'mute' ? 0 : generalUnread
 
     // Muted destinations don't badge here either (same posture as the sidebar).
-    const generalBadge = generalId && effectiveLevel(generalId) !== 'mute' ? generalUnread : 0
     const unreadTopics =
-        topics.filter((t) => t.id !== generalId && !t.archived && isUnread(t) && effectiveLevel(t.id) !== 'mute').length + (generalBadge > 0 ? 1 : 0)
+        topics.filter((t) => !t.archived && isUnread(t) && effectiveLevel(t.rootMessageId) !== 'mute').length + (generalBadge > 0 ? 1 : 0)
     const badge = unreadTopics + unreadPaths.size
 
     return (
         <aside
-            onMouseEnter={() => onHoverChange(true)}
-            onMouseLeave={() => onHoverChange(false)}
             style={{ width: open ? 280 : 28, transition: 'width 200ms cubic-bezier(0.2,0,0,1)' }}
             className={cn(
-                'relative z-10 shrink-0 min-h-0 overflow-hidden border-r border-border flex flex-col',
-                open ? 'bg-muted/20' : 'bg-background',
+                'relative z-10 shrink-0 min-h-0 overflow-hidden flex flex-col',
+                // A step lighter than the main sidebar so the two rails read as
+                // distinct layers; at this subtle a shift the hairline to the
+                // canvas earns its place.
+                open ? 'border-r border-border bg-[var(--rowboat-panel-soft)]' : 'border-r border-border bg-background',
             )}
         >
             {/* Always mounted: an input unmounted mid-pick (the rail toggled
@@ -219,12 +223,12 @@ export function SpaceRail({
                 }}
             />
             {!open ? (
-                // The closed edge: hovering opens the rail; a click pins it
-                // (the strong signal — and the only path on touch screens).
+                // The collapsed edge strip: click to reopen. Deliberately not
+                // hover-triggered — the rail appears only on an explicit act.
                 <button
                     type="button"
                     onClick={onTogglePin}
-                    title="Show topics & files"
+                    title="Show discussions & files"
                     className="flex flex-1 flex-col items-center gap-2.5 py-3.5 hover:bg-accent/50"
                 >
                     <MessagesSquare className="size-[15px] text-muted-foreground" />
@@ -240,19 +244,14 @@ export function SpaceRail({
                 // Inner content is fixed at the open width so text doesn't reflow mid-slide.
                 <div ref={railBodyRef} className="flex h-full w-[280px] flex-col">
                     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1.5">
-                        <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topics &amp; files</span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">Discussions &amp; files</span>
                         <button
                             type="button"
                             onClick={onTogglePin}
-                            title={pinned ? 'Auto-hide — opens on hover, slides away a moment after the cursor leaves' : 'Keep open'}
-                            className={cn(
-                                'flex size-6 shrink-0 items-center justify-center rounded-md',
-                                pinned
-                                    ? 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                                    : 'border border-border bg-background text-muted-foreground hover:text-foreground',
-                            )}
+                            title="Collapse — reopen from the edge strip"
+                            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                         >
-                            {pinned ? <PanelLeftClose className="size-3.5" /> : <Pin className="size-3" />}
+                            <PanelLeftClose className="size-3.5" />
                         </button>
                     </div>
 
@@ -271,12 +270,12 @@ export function SpaceRail({
                                 {generalBadge > 0 && selection.kind !== 'general' && (
                                     <span className="text-[11px] font-semibold tabular-nums">{generalBadge}</span>
                                 )}
-                                {(presence.typing.get(generalId ?? '') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-emerald-500" title="someone is typing" />}
+                                {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" title="someone is typing" />}
                             </button>
                         </div>
 
                         <div className="mt-3 flex items-center gap-2 px-3 pr-2">
-                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Topics</span>
+                            <span className="text-[13px] text-muted-foreground">Discussions</span>
                             <span className="text-[11px] text-muted-foreground/70">{topicRows.length}</span>
                             <span className="flex-1" />
                             <div className="inline-flex items-center rounded-md bg-muted p-0.5 text-[10.5px]">
@@ -292,26 +291,26 @@ export function SpaceRail({
                                 ))}
                             </div>
                         </div>
-                        <label className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus-within:border-foreground/30">
+                        <label className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2 text-xs text-muted-foreground focus-within:border-border">
                             <Search className="size-3" />
                             <input
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                placeholder="Search topics"
+                                placeholder="Search discussions"
                                 className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
                             />
                         </label>
                         <div className="mt-1 flex-1 min-h-0 overflow-y-auto px-2 pb-2">
                             <div className="flex flex-col gap-0.5">
                                 {topicRows.map(({ topic, title }) => {
-                                    const active = topic.id === selectedTopicId
-                                    const muted = effectiveLevel(topic.id) === 'mute'
+                                    const active = topic.rootMessageId === selectedRootId
+                                    const muted = effectiveLevel(topic.rootMessageId) === 'mute'
                                     // Muted topics don't clamor: no bold, no dot,
                                     // greyed like archived (Slack's treatment).
                                     const unread = isUnread(topic) && !muted
-                                    const replies = Math.max(0, topic.messageCount - 1)
-                                    const files = artifactFiles.get(topic.id)
-                                    const working = (presence.working.get(topic.id) ?? []).length > 0
+                                    const replies = topic.rootMessage?.replyCount ?? 0
+                                    const files = artifactFiles.get(topic.rootMessageId)
+                                    const working = (presence.working.get(topic.rootMessageId) ?? []).length > 0
                                     if (renaming?.topicId === topic.id) {
                                         return (
                                             <div key={topic.id} className="rounded-md px-2 py-1.5">
@@ -325,7 +324,7 @@ export function SpaceRail({
                                                     }}
                                                     onBlur={() => setRenaming(null)}
                                                     className="w-full rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-[13px] leading-snug outline-none"
-                                                    placeholder="Topic name"
+                                                    placeholder="Discussion goal"
                                                 />
                                             </div>
                                         )
@@ -336,7 +335,7 @@ export function SpaceRail({
                                                 <ContextMenuTrigger asChild>
                                                     <button
                                                         type="button"
-                                                        onClick={() => onSelect({ kind: 'topic', topicId: topic.id })}
+                                                        onClick={() => onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId })}
                                                         className={cn(
                                                             'flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left',
                                                             active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
@@ -360,7 +359,7 @@ export function SpaceRail({
                                                     </button>
                                                 </ContextMenuTrigger>
                                                 <ContextMenuContent>
-                                                    <ContextMenuItem onSelect={() => onSelect({ kind: 'topic', topicId: topic.id })}>
+                                                    <ContextMenuItem onSelect={() => onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId })}>
                                                         <MessagesSquare className="size-3.5 mr-2" /> Open
                                                     </ContextMenuItem>
                                                     <ContextMenuItem onSelect={() => setRenaming({ topicId: topic.id, value: title })}>
@@ -392,13 +391,16 @@ export function SpaceRail({
                                                             <Archive className="size-3.5 mr-2" /> Archive
                                                         </ContextMenuItem>
                                                     )}
+                                                    <ContextMenuItem onSelect={() => void manageTopic(topic.id, { action: 'remove' })}>
+                                                        <MessageSquareOff className="size-3.5 mr-2" /> Convert back to thread
+                                                    </ContextMenuItem>
                                                 </ContextMenuContent>
                                             </ContextMenu>
                                             <DropdownMenu onOpenChange={onMenuOpenChange}>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
                                                         type="button"
-                                                        aria-label="Topic actions"
+                                                        aria-label="Discussion actions"
                                                         className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/topicrow:inline-flex data-[state=open]:inline-flex"
                                                     >
                                                         <MoreHorizontal className="size-3.5" />
@@ -433,6 +435,9 @@ export function SpaceRail({
                                                             <Archive className="size-3.5 mr-2" /> Archive
                                                         </DropdownMenuItem>
                                                     )}
+                                                    <DropdownMenuItem onClick={() => void manageTopic(topic.id, { action: 'remove' })}>
+                                                        <MessageSquareOff className="size-3.5 mr-2" /> Convert back to thread
+                                                    </DropdownMenuItem>
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
                                         </div>
@@ -440,8 +445,57 @@ export function SpaceRail({
                                 })}
                                 {topicRows.length === 0 && (
                                     <div className="px-2 py-2 text-xs text-muted-foreground">
-                                        {q ? 'No topics match.' : filter === 'unread' ? 'Nothing unread.' : filter === 'archived' ? 'No archived topics.' : 'No topics yet — reply to a message to start one.'}
+                                        {q ? 'No discussions match.' : filter === 'unread' ? 'Nothing unread.' : filter === 'archived' ? 'No archived discussions.' : 'No discussions yet — give a thread a goal to put it here.'}
                                     </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="shrink-0 border-t border-border">
+                        <div className="flex h-8 items-center gap-2 px-3 pr-2 pt-1">
+                            <span className="text-[13px] text-muted-foreground">Whiteboards</span>
+                            <span className="text-[11px] text-muted-foreground/70">{boards.length}</span>
+                            <span className="flex-1" />
+                            <button
+                                type="button"
+                                title="New whiteboard"
+                                onClick={() => setCreatingBoard(true)}
+                                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <Plus className="size-3.5" />
+                            </button>
+                        </div>
+                        <div className="max-h-36 overflow-y-auto px-2 pb-2">
+                            <div className="flex flex-col gap-0.5">
+                                {creatingBoard && (
+                                    <input
+                                        autoFocus
+                                        placeholder="Board name…"
+                                        className="h-7 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-border"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') createBoard(e.currentTarget.value)
+                                            else if (e.key === 'Escape') setCreatingBoard(false)
+                                        }}
+                                        onBlur={(e) => (e.currentTarget.value.trim() ? createBoard(e.currentTarget.value) : setCreatingBoard(false))}
+                                    />
+                                )}
+                                {boards.map((b) => (
+                                    <button
+                                        key={b.path}
+                                        type="button"
+                                        onClick={() => onSelect({ kind: 'whiteboard', path: b.path })}
+                                        className={cn(
+                                            'flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[13px]',
+                                            b.path === selectedBoard ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                                        )}
+                                    >
+                                        <PenTool className="size-3.5 shrink-0 text-muted-foreground" />
+                                        <span className="flex-1 truncate">{spaces.whiteboardDisplayName(b.path)}</span>
+                                    </button>
+                                ))}
+                                {boards.length === 0 && !creatingBoard && (
+                                    <div className="px-2 py-1 text-xs text-muted-foreground">Draw together — boards sync live for everyone here.</div>
                                 )}
                             </div>
                         </div>
@@ -462,8 +516,8 @@ export function SpaceRail({
                             )}
                         />
                         <div className="flex h-8 shrink-0 items-center gap-2 px-3 pr-2 pt-1">
-                            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
-                            <span className="text-[11px] text-muted-foreground/70">{entries.length}</span>
+                            <span className="text-[13px] text-muted-foreground">Files</span>
+                            <span className="text-[11px] text-muted-foreground/70">{fileEntries.length}</span>
                             <span className="flex-1" />
                             <button
                                 type="button"
@@ -511,7 +565,7 @@ export function SpaceRail({
                             <FileTree
                                 orgId={orgId}
                                 spaceId={spaceId}
-                                entries={entries}
+                                entries={fileEntries}
                                 draftFolders={draftFolders}
                                 selectedPath={selectedPath}
                                 unreadPaths={unreadPaths}

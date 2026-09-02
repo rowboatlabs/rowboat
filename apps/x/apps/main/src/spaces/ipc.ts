@@ -47,8 +47,10 @@ type SpacesHandlers = {
   'spaces:assetHistory': InvokeHandler<'spaces:assetHistory'>;
   'spaces:diff': InvokeHandler<'spaces:diff'>;
   'spaces:listTopics': InvokeHandler<'spaces:listTopics'>;
-  'spaces:listMessages': InvokeHandler<'spaces:listMessages'>;
+  'spaces:listStream': InvokeHandler<'spaces:listStream'>;
+  'spaces:listThread': InvokeHandler<'spaces:listThread'>;
   'spaces:postMessage': InvokeHandler<'spaces:postMessage'>;
+  'spaces:createTopic': InvokeHandler<'spaces:createTopic'>;
   'spaces:manageTopic': InvokeHandler<'spaces:manageTopic'>;
   'spaces:reactToMessage': InvokeHandler<'spaces:reactToMessage'>;
   'spaces:deleteMessage': InvokeHandler<'spaces:deleteMessage'>;
@@ -67,6 +69,7 @@ type SpacesHandlers = {
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
   'spaces:unsubscribeSpace': InvokeHandler<'spaces:unsubscribeSpace'>;
   'spaces:presence': InvokeHandler<'spaces:presence'>;
+  'spaces:whiteboard': InvokeHandler<'spaces:whiteboard'>;
   'spaces:bounceLive': InvokeHandler<'spaces:bounceLive'>;
 };
 
@@ -282,24 +285,37 @@ export const spacesIpcHandlers: SpacesHandlers = {
     topics: await orgs.getClient(args.orgId).listTopics(args.spaceId, args.includeArchived ?? false),
   }),
 
-  'spaces:listMessages': async (_event, args) =>
-    orgs.getClient(args.orgId).listMessages(args.spaceId, args.topicId, {
+  'spaces:listStream': async (_event, args) =>
+    orgs.getClient(args.orgId).listStream(args.spaceId, {
+      ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    }),
+
+  'spaces:listThread': async (_event, args) =>
+    orgs.getClient(args.orgId).listThread(args.spaceId, args.rootMessageId, {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
 
   'spaces:postMessage': async (_event, args) =>
     orgs.getClient(args.orgId).postMessage(args.spaceId, {
-      ...(args.topicId ? { topicId: args.topicId } : {}),
+      ...(args.threadRoot ? { threadRoot: args.threadRoot } : {}),
       ...(args.anchorChangeSetId ? { anchorChangeSetId: args.anchorChangeSetId } : {}),
-      ...(args.anchorMessageId ? { anchorMessageId: args.anchorMessageId } : {}),
       body: args.body,
       ...(args.poll ? { poll: args.poll } : {}),
       actingMode: 'direct',
     }),
 
+  'spaces:createTopic': async (_event, args) =>
+    orgs.getClient(args.orgId).createTopic(args.spaceId, {
+      ...(args.rootMessageId ? { rootMessageId: args.rootMessageId } : {}),
+      title: args.title,
+      ...(args.body ? { body: args.body } : {}),
+      actingMode: 'direct',
+    }),
+
   'spaces:manageTopic': async (_event, args) => ({
-    topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, args.action),
+    topic: await orgs.getClient(args.orgId).manageTopic(args.spaceId, args.topicId, { ...args.action, actingMode: 'direct' }),
   }),
 
   'spaces:reactToMessage': async (_event, args) => ({
@@ -340,7 +356,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:invokeRowboat': async (_event, args) => invokeTopicAgent(args),
 
   'spaces:topicSession': async (_event, args) => ({
-    sessionId: topicSessionId(args.orgId, args.spaceId, args.topicId),
+    sessionId: topicSessionId(args.orgId, args.spaceId, args.threadRootId),
   }),
 
   'spaces:getNotifyPrefs': async (_event, args) => getNotifyPrefs(args.orgId, args.spaceId),
@@ -355,7 +371,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
       kind: args.kind,
       orgId: args.orgId,
       spaceId: args.spaceId,
-      topicId: args.topicId,
+      ...(args.threadRootId ? { threadRootId: args.threadRootId } : {}),
       body: args.body,
       at: args.at,
     }).id,
@@ -396,7 +412,14 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:presence': async (_event, args) => {
-    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.topicId);
+    orgs.getLive(args.orgId).presence(args.spaceId, args.state, args.threadRootId);
+    return { success: true };
+  },
+
+  // Fire-and-forget like presence; incoming whiteboard frames ride the same
+  // per-space live subscription and reach the renderer on 'spaces:events'.
+  'spaces:whiteboard': async (_event, args) => {
+    orgs.getLive(args.orgId).whiteboard(args.spaceId, args.boardId, args.payload);
     return { success: true };
   },
 

@@ -98,23 +98,38 @@ export interface SpacesAssetEntry {
   state?: 'deleted';
 }
 
-export interface SpacesTopicWithMessages {
-  topic: Topic;
+/** A stream page: roots only, plus the topic rows annotating this page's roots. */
+export interface SpacesStreamPage {
   messages: Message[];
-  /** Older messages exist below the returned window (listMessages is windowed, newest-first). */
+  topics: Topic[];
+  /** Older roots exist below the returned window (listStream is windowed, newest-first). */
+  hasMore: boolean;
+}
+
+/** One flat thread: the root, its annotation (null = a plain thread), windowed replies. */
+export interface SpacesThreadPage {
+  root: Message;
+  topic: Topic | null;
+  messages: Message[];
   hasMore: boolean;
 }
 
 export interface SpacesPostResult {
-  topic: Topic;
   message: Message;
+}
+
+/** Promote (rootMessageId) or post + annotate (body) — exactly one of the two. */
+export interface SpacesCreateTopicInput {
+  rootMessageId?: string;
+  title: string;
+  body?: string;
 }
 
 export type SpacesManageTopicAction =
   | { action: 'retitle'; title: string }
   | { action: 'archive' }
   | { action: 'unarchive' }
-  | { action: 'merge_into'; targetTopicId: string };
+  | { action: 'remove' };
 
 /**
  * What the renderer may propose. actingMode is deliberately absent: everything
@@ -135,6 +150,78 @@ export interface SpacesProposeInput {
 export interface SpacesBusEvent {
   orgId: string;
   frame: ServerFrame;
+}
+
+// ---------------------------------------------------------------------------
+// Whiteboard — the app-side vocabulary inside the org's opaque `payload`
+// (contract amendment 2026-08-31: the org relays whiteboard frames without
+// inspecting them, so THIS file, not the protocol, owns these shapes and
+// Excalidraw upgrades never touch the Harbor contract).
+//
+// clientId is a random per-pane id: one member can hold the same board open
+// in two windows or on two machines, and the relay echoes every frame back to
+// the sender's own subscription — receivers drop frames whose clientId is
+// their own, and key collaborator presence on clientId, never memberId.
+// ---------------------------------------------------------------------------
+
+/** One collaborator's live pointer, Excalidraw-shaped (`Collaborator.pointer` + selection). */
+export interface SpacesWhiteboardCursor {
+  x: number;
+  y: number;
+  tool: 'pointer' | 'laser';
+  button: 'up' | 'down';
+  /** Excalidraw appState.selectedElementIds — renders remote selection highlights. */
+  selectedElementIds: Record<string, boolean>;
+}
+
+export type SpacesWhiteboardPayload =
+  /**
+   * Scene traffic. Diff frames carry only elements whose version advanced
+   * since the sender's last broadcast; `syncAll` frames carry the full scene
+   * including tombstones (the periodic self-heal, and the answer to
+   * `scene_request`). Elements are Excalidraw's — opaque to every layer but
+   * the whiteboard pane, which restores + reconciles them.
+   */
+  | { t: 'scene'; clientId: string; syncAll: boolean; elements: unknown[] }
+  /** A joiner asking peers for a full scene (Excalidraw's new-user → SCENE_INIT). */
+  | { t: 'scene_request'; clientId: string }
+  | { t: 'cursor'; clientId: string; cursor: SpacesWhiteboardCursor }
+  | { t: 'idle'; clientId: string; state: 'active' | 'idle' | 'away' };
+
+/** Boards live under this asset prefix; the rail and the header button both key on it. */
+export const WHITEBOARD_DIR = 'whiteboards';
+export const WHITEBOARD_EXT = '.excalidraw';
+/** The board the header button opens, created on first use. */
+export const DEFAULT_WHITEBOARD_PATH = `${WHITEBOARD_DIR}/board${WHITEBOARD_EXT}`;
+
+/**
+ * A just-created board's snapshot — the same single-line shape the pane
+ * saves, so creating via the rail's "+" and the pane's first save write
+ * byte-identical content for an empty scene (identical proposes merge clean).
+ */
+export const EMPTY_WHITEBOARD_CONTENT = JSON.stringify({
+  type: 'excalidraw',
+  version: 2,
+  source: 'rowboat',
+  elements: [],
+  appState: {},
+  files: {},
+});
+
+export function isWhiteboardPath(path: string): boolean {
+  return path.startsWith(`${WHITEBOARD_DIR}/`) && path.endsWith(WHITEBOARD_EXT);
+}
+
+/** "whiteboards/roadmap.excalidraw" → "roadmap" (display name for rails/tabs). */
+export function whiteboardDisplayName(path: string): string {
+  const base = path.slice(path.lastIndexOf('/') + 1);
+  return base.endsWith(WHITEBOARD_EXT) ? base.slice(0, -WHITEBOARD_EXT.length) : base;
+}
+
+/** A typed board name → its asset path; null when nothing usable remains. One cleaner for every create surface. */
+export function whiteboardPathForName(name: string): string | null {
+  const cleaned = name.trim().replace(/\//g, '-').replace(/\.excalidraw$/i, '').trim();
+  return cleaned ? `${WHITEBOARD_DIR}/${cleaned}${WHITEBOARD_EXT}` : null;
 }
 
 // ---------------------------------------------------------------------------

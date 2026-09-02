@@ -751,8 +751,10 @@ function ChatInputInner({
     <div
       data-tour-id="chat-composer"
       className={cn(
-        'rowboat-chat-input rounded-lg border bg-background shadow-none',
-        contextChip ? 'border-primary/40 ring-1 ring-primary/25' : 'border-border',
+        // Composer: radius 24, raised surface; the ring is folded into
+        // the shadow (see .rowboat-chat-input in App.css).
+        'rowboat-chat-input rounded-[24px] border bg-background',
+        contextChip ? 'border-primary/40 ring-1 ring-primary/25' : 'border-transparent',
       )}
     >
       {attachments.length > 0 && (
@@ -882,7 +884,8 @@ function ChatInputInner({
           )}
         </div>
       )}
-      <div className="px-4 pt-4 pb-2">
+      {/* Composer: the input line gets real air above the controls row. */}
+      <div className="px-4 pt-5 pb-3">
         <PromptInputTextarea
           placeholder={placeholder ?? 'Type your message...'}
           onKeyDown={handleKeyDown}
@@ -949,11 +952,11 @@ function ChatInputInner({
                   {workDir && (
                     <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
                       <TooltipTrigger asChild>
-                        <div className="mb-1 flex items-center gap-2 rounded-[9px] bg-blue-50/80 px-2.5 py-2 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
-                          <FolderCheck className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />
+                        <div className="mb-1 flex items-center gap-2 rounded-[9px] bg-muted px-2.5 py-2 text-muted-foreground">
+                          <FolderCheck className="size-4 shrink-0" />
                           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                             <span className="truncate text-sm font-medium">{currentWorkDirLabel}</span>
-                            <span className="truncate text-xs text-blue-700/70 dark:text-blue-300/70">
+                            <span className="truncate text-xs text-muted-foreground/70">
                               {currentWorkDirPath}
                             </span>
                           </span>
@@ -974,7 +977,7 @@ function ChatInputInner({
 
                   {visibleRecentWorkDirs.length > 0 && (
                     <>
-                      <div className="px-2.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <div className="px-2.5 pb-1 pt-2 text-[13px] font-normal text-muted-foreground">
                         Recent
                       </div>
                       {visibleRecentWorkDirs.map((entry) => {
@@ -1066,7 +1069,7 @@ function ChatInputInner({
             className={cn(
               'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors duration-150 ease-out',
               searchEnabled
-                ? 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900'
+                ? 'border-transparent bg-secondary text-foreground hover:bg-secondary/80'
                 : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground'
             )}
           >
@@ -1339,7 +1342,7 @@ function ChatInputInner({
           <button
             type="button"
             onClick={onStartRecording}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label="Voice input"
           >
             <Mic className="h-4 w-4" />
@@ -1353,7 +1356,7 @@ function ChatInputInner({
                 onClick={onStop}
                 aria-label={isStopping ? 'Force stop generation' : 'Stop generation'}
                 className={cn(
-                  'h-7 w-7 shrink-0 rounded-full transition-all',
+                  'h-9 w-9 shrink-0 rounded-full transition-all',
                   isStopping
                     ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
                     : 'bg-primary text-primary-foreground hover:bg-primary/90'
@@ -1376,7 +1379,7 @@ function ChatInputInner({
             onClick={handleSubmit}
             disabled={!canSubmit}
             className={cn(
-              'h-7 w-7 shrink-0 rounded-full transition-all',
+              'h-9 w-9 shrink-0 rounded-full transition-all',
               canSubmit
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'bg-muted text-muted-foreground'

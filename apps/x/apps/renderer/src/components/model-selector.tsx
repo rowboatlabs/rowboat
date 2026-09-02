@@ -523,14 +523,14 @@ export function ModelSelector({
       <div
         ref={subPanelRef}
         style={{ position: 'fixed', top: sub.top, left: sub.left, width: SUB_PANEL_WIDTH, pointerEvents: 'auto' }}
-        className="z-50 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        className="z-50 rounded-2xl border-none bg-popover p-2 text-popover-foreground shadow-[var(--rowboat-shadow)]"
         onMouseEnter={() => {
           graceRef.current = null
           cancelSubClose()
         }}
         onMouseLeave={scheduleSubClose}
       >
-        <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="px-2 py-1.5 text-[13px] font-normal text-muted-foreground">
           Effort
         </div>
         {REASONING_EFFORT_OPTIONS.map((option) => (

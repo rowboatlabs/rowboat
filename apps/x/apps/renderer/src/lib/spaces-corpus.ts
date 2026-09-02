@@ -1,11 +1,13 @@
 import type { spaces } from '@x/shared'
 import { getSpaceFeed } from '@/hooks/use-spaces'
+import { threadRootOf } from '@/lib/spaces-conventions'
 import { resolveMentions } from '@/lib/spaces-presentation'
 
-// The search corpus for one space: the newest page of every topic (general
-// included), fetched on demand and cached briefly. The protocol has no search
-// route (a Latitude item), so search — and the pinned-messages panel — work
-// over what a client can reach: the same windows the panes themselves load.
+// The search corpus for one space: the newest page of the stream plus the
+// active discussions' threads, fetched on demand and cached briefly. The
+// protocol has no search route (a Latitude item), so search — and the
+// pinned-messages panel — work over what a client can reach: the same
+// windows the panes themselves load.
 // Results are therefore "recent history", not an archive crawl; honest and
 // cheap. The cache keeps the quick switcher responsive while typing without
 // refetching per keystroke.
@@ -40,14 +42,21 @@ export function loadSpaceCorpus(orgId: string, spaceId: string): Promise<spaces.
     const topics = [...getSpaceFeed(orgId, spaceId).topics]
         .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
         .slice(0, TOPIC_CAP)
-    const loading = Promise.all(
-        topics.map((t) =>
+    // The corpus is the stream's roots plus the replies under the most
+    // active discussions — the annotation model has no per-topic message
+    // list to walk, so one stream page stands in for what listMessages gave.
+    const loading = Promise.all([
+        window.ipc
+            .invoke('spaces:listStream', { orgId, spaceId })
+            .then((res) => res.messages)
+            .catch(() => [] as spaces.Message[]),
+        ...topics.map((t) =>
             window.ipc
-                .invoke('spaces:listMessages', { orgId, spaceId, topicId: t.id })
+                .invoke('spaces:listThread', { orgId, spaceId, rootMessageId: t.rootMessageId })
                 .then((res) => res.messages)
                 .catch(() => [] as spaces.Message[]),
         ),
-    ).then((pages) => {
+    ]).then((pages) => {
         const messages = pages.flat().filter((m) => !m.deletedAt)
         cache.set(k, { at: Date.now(), messages, loading: null })
         return messages
@@ -116,7 +125,7 @@ export function searchMessages(
     messages: readonly spaces.Message[],
     query: string,
     memberNames: ReadonlyMap<string, string>,
-    opts: { limit?: number; topicLabelOf?: (topicId: string) => string; selfName?: string | null } = {},
+    opts: { limit?: number; topicLabelOf?: (rootMessageId: string) => string; selfName?: string | null } = {},
 ): spaces.Message[] {
     const { terms, from, inTopic, has, mentions, filtered } = parseSearchQuery(query)
     if (terms.length === 0 && !filtered) return []
@@ -130,7 +139,7 @@ export function searchMessages(
         if (!from.every((f) => author.includes(nameFor(f)))) continue
         if (!has.every((kind) => hasKind(m.body, kind))) continue
         if (inTopic.length > 0) {
-            const label = opts.topicLabelOf?.(m.topicId).toLowerCase() ?? ''
+            const label = opts.topicLabelOf?.(threadRootOf(m)).toLowerCase() ?? ''
             if (!inTopic.every((f) => label.includes(f))) continue
         }
         const resolved = resolveMentions(m.body, memberNames).toLowerCase()

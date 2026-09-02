@@ -241,7 +241,6 @@ export const EMOJI: EmojiEntry[] = [
     { e: '🕐', n: 'clock1', k: 'time' },
     { e: '📅', n: 'date', k: 'calendar' },
     { e: '📆', n: 'calendar', k: 'schedule' },
-    { e: '📌', n: 'pushpin', k: 'pin location' },
     { e: '📍', n: 'round_pushpin', k: 'pin location' },
     { e: '📎', n: 'paperclip', k: 'attach' },
     { e: '✂️', n: 'scissors', k: 'cut' },

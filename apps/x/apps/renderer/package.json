@@ -18,6 +18,7 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.1",
     "@eigenpal/docx-editor-react": "^1.0.3",
+    "@excalidraw/excalidraw": "^0.18.1",
     "@lezer/highlight": "^1.2.3",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-collapsible": "^1.1.12",
