@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "npm run deps && concurrently -k \"npm:renderer\" \"npm:main\"",
+    "dev:sandbox": "node scripts/dev-sandbox.mjs",
     "renderer": "cd apps/renderer && npm run dev",
     "protocol": "cd ../harbor && pnpm install --filter @rowboat/spaces-protocol && cd packages/protocol && npm run build",
     "shared": "npm run protocol && cd packages/shared && npm run build",

@@ -16,13 +16,25 @@ function configPath(workDir: string): string {
   return path.join(workDir, 'config', 'server.json');
 }
 
+// Per-instance override for sandboxed dev instances (`npm run dev:sandbox`):
+// lets several rowboat-servers coexist on one machine, each on its own port,
+// without touching the workdir's server.json. Explicit opts.port (tests)
+// still wins over this — see createRowboatServer.
+function envPortOverride(): number | undefined {
+  const port = Number(process.env.ROWBOAT_SERVER_PORT);
+  return Number.isInteger(port) && port > 0 ? port : undefined;
+}
+
 export async function loadServerConfig(workDir: string): Promise<ServerConfig> {
+  let config: ServerConfig;
   try {
     const raw = await fs.readFile(configPath(workDir), 'utf8');
-    return ServerConfig.parse(JSON.parse(raw));
+    config = ServerConfig.parse(JSON.parse(raw));
   } catch {
-    return ServerConfig.parse({});
+    config = ServerConfig.parse({});
   }
+  const envPort = envPortOverride();
+  return envPort === undefined ? config : { ...config, port: envPort };
 }
 
 export async function saveServerConfig(workDir: string, config: ServerConfig): Promise<void> {

@@ -1,3 +1,4 @@
+import "./node-guard.js";
 import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
@@ -37,6 +38,7 @@ import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-providers.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import { WorkDir } from "@x/core/dist/config/config.js";
 import { prepareCoreData, initCoreServices } from "@x/core/dist/boot/services.js";
 import { startServerHost, stopServerHost, childServerMode, serverHostMode, whenServerReady } from "./server-host.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
@@ -105,6 +107,15 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   console.error('[Main] Another Rowboat instance is already running; exiting this process.');
   app.quit();
   process.exit(0);
+}
+
+// Sandboxed dev instances (ROWBOAT_WORKDIR set, e.g. via `npm run dev:sandbox`)
+// get their own Electron profile too: concurrent instances sharing the default
+// userData dir fight over Chromium's LevelDB locks and each other's
+// localStorage. Must run before 'ready' — session state is created lazily at
+// app ready, so nothing has touched the default profile yet.
+if (!app.isPackaged && process.env.ROWBOAT_WORKDIR) {
+  app.setPath('userData', path.join(WorkDir, '.electron-data'));
 }
 
 // Register as the OS handler for rowboat:// URLs.
