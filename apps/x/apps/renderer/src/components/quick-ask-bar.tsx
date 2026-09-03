@@ -644,7 +644,7 @@ export function QuickAskBar() {
       {card.mounted && (
       <div
         data-qa-passthrough
-        className={`relative min-w-0 flex-1 ${card.exiting ? 'pointer-events-none' : ''}`}
+        className={`relative min-w-0 flex-1 ${card.exiting ? 'qa-card-out pointer-events-none' : 'qa-card-in'}`}
       >
       {/* Near-white card with a hairline dark border in light; near-black
           with a hairline light one in dark. #810 introduced the light skin as
@@ -653,7 +653,7 @@ export function QuickAskBar() {
           outline the whole transparent frame) — the card draws its own, and
           draws it heavier in dark, where a soft grey haze would just vanish
           into whatever is behind the window. */}
-      <div ref={cardRef} style={dragRegion} className={`qa-card ${card.exiting ? 'qa-card-out' : 'qa-card-in'} relative w-full cursor-grab overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:text-neutral-100 dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)]`}>
+      <div ref={cardRef} style={dragRegion} className="qa-card relative w-full cursor-grab overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:text-neutral-100 dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)]">
         {/* The card is a drag handle, like the mascot: every bit of bare
             surface — the border, the gutters around the action strip, the
             frame around the composer — picks the Skipper up. The CONTROLS
@@ -1193,11 +1193,12 @@ const COMPANION_MOTION_CSS = `
   }
   /* Both halves name their own easing rather than a shared ease: the card
      should LEAVE with gathering speed and ARRIVE with none, which is the
-     difference between a fold that snaps and one that settles. will-change
-     keeps the whole animation on one composited layer — without it the
-     first frame is where the judder came from. */
+     difference between a fold that snaps and one that settles. Both classes
+     sit on the card's WRAPPER, never on the card itself: the card is a drag
+     region, and a region that animates its transform leaves Electron
+     punching the hole where the animation started. */
   .qa-card-in,
-  .qa-card-out { transform-origin: 100% 80%; will-change: transform, opacity; }
+  .qa-card-out { transform-origin: 100% 80%; }
   .qa-card-in { animation: qa-card-in 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
   .qa-card-out { animation: qa-card-out ${CARD_EXIT_MS}ms cubic-bezier(0.4, 0, 0.9, 0.3) forwards; }
   .qa-rise { animation: qa-rise 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
@@ -1425,12 +1426,24 @@ function UnfoldBubble({ onExpand }: { onExpand: () => void }) {
   const shortcutState = useQuickAskShortcut()
   const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
   return (
-    // The wrapper owns the CENTERING transform; the button owns the
-    // animated one. A CSS animation replaces an element's whole transform,
-    // so sharing one element would have the bubble fly in off-centre.
+    // The wrapper is the DRAG-REGION HOLE, and it must never move: Electron
+    // punches holes from the rect Blink last computed for the element, on
+    // style/layout invalidation — not once per composited frame. Put
+    // `no-drag` on something whose transform is animating (as the button's
+    // is) and the hole stays wherever the animation STARTED — a 0.7-scaled
+    // box 10px low — so pressing the bubble where it paints lands on the
+    // drag region instead. On Windows that means HTCAPTION: the window
+    // enters the OS move loop, the click never happens, and the companion
+    // looks frozen until the button comes back up.
+    //
+    // So: the hole is static and transform-free (centred with calc, not
+    // translate — a static transform is one more thing that can go stale),
+    // and it is DELIBERATELY bigger than the art it covers, 40px around a
+    // 28px bubble, the same way the pins carry oversized targets. The motion
+    // lives on the button inside it.
     <span
-      className="absolute left-1/2 z-30 -translate-x-1/2 -translate-y-1/2"
-      style={{ ...noDragRegion, top: '55%' }}
+      className="absolute z-30 flex h-10 w-10 items-center justify-center"
+      style={{ ...noDragRegion, top: 'calc(55% - 20px)', left: 'calc(50% - 20px)' }}
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -1438,7 +1451,6 @@ function UnfoldBubble({ onExpand }: { onExpand: () => void }) {
             type="button"
             onClick={onExpand}
             aria-label="Bring the text back"
-            style={noDragRegion}
             className="qa-bubble flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_4px_14px_rgba(0,0,0,0.18)] transition hover:-translate-y-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_4px_14px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
           >
             <ChevronsLeft className="h-3.5 w-3.5" />
