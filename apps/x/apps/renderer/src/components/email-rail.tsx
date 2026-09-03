@@ -1,4 +1,4 @@
-import { Inbox, Mail, PanelLeftClose, PenLine, Star, Tag } from 'lucide-react'
+import { Inbox, Mail, PanelLeftClose, PenLine, Sparkles, Star, Tag } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { labelNameFor, orderedCategoryIds, type EmailLabelInfo } from '@/lib/email-labels'
 
@@ -13,20 +13,23 @@ import { labelNameFor, orderedCategoryIds, type EmailLabelInfo } from '@/lib/ema
 export type EmailRailSelection =
     | { kind: 'all' }
     | { kind: 'important' }
+    | { kind: 'reply-ready' }
     | { kind: 'other'; category?: string | null }
     | { kind: 'drafts' }
 
 export function EmailRail({
-    view, inboxFilter, otherCategory, categoryCounts, labels, draftCount, open, onTogglePin, onSelect,
+    view, inboxFilter, otherCategory, categoryCounts, labels, draftCount, replyReadyCount, open, onTogglePin, onSelect,
 }: {
     view: 'inbox' | 'drafts'
-    inboxFilter: 'all' | 'important' | 'other'
+    inboxFilter: 'all' | 'important' | 'reply-ready' | 'other'
     otherCategory: string | null
     /** Whole-'other'-section counts from the last backend response (pre-filter). */
     categoryCounts: Record<string, number>
     labels: EmailLabelInfo[]
     /** Drafts are fetched lazily — 0 until the Drafts view first loads. */
     draftCount: number
+    /** Threads with a classifier-drafted reply, across the loaded sections. */
+    replyReadyCount: number
     open: boolean
     onTogglePin: () => void
     onSelect: (selection: EmailRailSelection) => void
@@ -109,6 +112,12 @@ export function EmailRail({
                                 <Star className="size-3.5 shrink-0 text-muted-foreground" />,
                                 'Important', null,
                                 () => onSelect({ kind: 'important' }),
+                            )}
+                            {viewRow(
+                                inInbox && inboxFilter === 'reply-ready',
+                                <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />,
+                                'Reply ready', replyReadyCount,
+                                () => onSelect({ kind: 'reply-ready' }),
                             )}
                             {viewRow(
                                 inInbox && inboxFilter === 'other' && !otherCategory,

@@ -18,6 +18,7 @@ function renderRail(overrides: Partial<Parameters<typeof EmailRail>[0]> = {}) {
       categoryCounts={COUNTS}
       labels={BUILTIN_LABELS}
       draftCount={0}
+      replyReadyCount={0}
       open
       onTogglePin={onTogglePin}
       onSelect={onSelect}
@@ -30,7 +31,7 @@ function renderRail(overrides: Partial<Parameters<typeof EmailRail>[0]> = {}) {
 describe('EmailRail', () => {
   it('renders the fixed views and one row per non-empty category', () => {
     renderRail()
-    for (const label of ['All mail', 'Important', 'Everything else', 'Drafts']) {
+    for (const label of ['All mail', 'Important', 'Reply ready', 'Everything else', 'Drafts']) {
       expect(screen.getByText(label)).toBeTruthy()
     }
     // Registry display names, pill order: News before Direct, Uncategorized last.
@@ -51,6 +52,20 @@ describe('EmailRail', () => {
     expect(onSelect).toHaveBeenLastCalledWith({ kind: 'other' })
     fireEvent.click(screen.getByText('All mail'))
     expect(onSelect).toHaveBeenLastCalledWith({ kind: 'all' })
+  })
+
+  it('shows the Reply ready count and reports its selection', () => {
+    const { onSelect } = renderRail({ replyReadyCount: 4 })
+    const row = screen.getByText('Reply ready').closest('button')
+    expect(row?.textContent).toContain('4')
+    fireEvent.click(screen.getByText('Reply ready'))
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: 'reply-ready' })
+  })
+
+  it('marks Reply ready active only in that inbox filter', () => {
+    renderRail({ inboxFilter: 'reply-ready', replyReadyCount: 2 })
+    expect(screen.getByText('Reply ready').closest('button')?.className).toContain('font-medium')
+    expect(screen.getByText('Important').closest('button')?.className).not.toContain('font-medium')
   })
 
   it('selects a category, and clicking the active category clears it', () => {
