@@ -1471,7 +1471,7 @@ function UnfoldBubble({ onExpand }: { onExpand: () => void }) {
             type="button"
             onClick={onExpand}
             aria-label="Bring the text back"
-            className="qa-bubble flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_4px_14px_rgba(0,0,0,0.18)] transition hover:-translate-y-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_4px_14px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+            className="qa-bubble flex h-7 w-7 items-center justify-center rounded-full bg-white text-neutral-500 shadow-[0_4px_14px_rgba(0,0,0,0.18)] transition hover:-translate-y-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_4px_14px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
           >
             <ChevronsLeft className="h-3.5 w-3.5" />
           </button>
