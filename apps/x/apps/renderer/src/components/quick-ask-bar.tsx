@@ -941,6 +941,8 @@ export function QuickAskBar() {
           className="relative -mb-4"
           style={{ animation: 'skipper-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
         >
+          {/* Tucked: the one way back, over the head. */}
+          {collapsed && <UnfoldBubble onExpand={() => requestCollapsed(false)} />}
           {/* Listening halo — rings pulse around the head while the mic
               gate is open, so "press the talk key and speak" is visibly working in
               both states. */}
@@ -966,12 +968,7 @@ export function QuickAskBar() {
             size={SKIPPER_SIZE}
             hat="cowboy"
             hatOverlay={
-              <SkipperPins
-                state={callState}
-                sendAction={sendAction}
-                textPin={collapsed ? 'expand' : 'collapse'}
-                onTextPin={() => requestCollapsed(!collapsed)}
-              />
+              <SkipperPins state={callState} sendAction={sendAction} />
             }
           />
         </div>
@@ -1139,7 +1136,7 @@ function useDragCursor() {
  * How long the card's fold-away runs. The node has to stay mounted for it
  * (see usePresence), so main and the renderer must agree on one number.
  */
-const CARD_EXIT_MS = 160
+const CARD_EXIT_MS = 200
 
 /**
  * Keep a node on screen for its exit animation.
@@ -1179,22 +1176,36 @@ function usePresence(visible: boolean, exitMs: number) {
  */
 const COMPANION_MOTION_CSS = `
   @keyframes qa-card-in {
-    from { opacity: 0; transform: translateX(22px) scale(0.96); }
+    from { opacity: 0; transform: translateX(28px) scale(0.94); }
     to { opacity: 1; transform: none; }
   }
   @keyframes qa-card-out {
     from { opacity: 1; transform: none; }
-    to { opacity: 0; transform: translateX(22px) scale(0.96); }
+    to { opacity: 0; transform: translateX(28px) scale(0.94); }
   }
   @keyframes qa-rise {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: none; }
   }
-  .qa-card-in { animation: qa-card-in 0.22s cubic-bezier(0.22, 1, 0.36, 1); transform-origin: 100% 80%; }
-  .qa-card-out { animation: qa-card-out ${CARD_EXIT_MS}ms ease-in forwards; transform-origin: 100% 80%; }
-  .qa-rise { animation: qa-rise 0.18s ease-out; }
+  @keyframes qa-bubble-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.7); }
+    to { opacity: 1; transform: none; }
+  }
+  /* Both halves name their own easing rather than a shared ease: the card
+     should LEAVE with gathering speed and ARRIVE with none, which is the
+     difference between a fold that snaps and one that settles. will-change
+     keeps the whole animation on one composited layer — without it the
+     first frame is where the judder came from. */
+  .qa-card-in,
+  .qa-card-out { transform-origin: 100% 80%; will-change: transform, opacity; }
+  .qa-card-in { animation: qa-card-in 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+  .qa-card-out { animation: qa-card-out ${CARD_EXIT_MS}ms cubic-bezier(0.4, 0, 0.9, 0.3) forwards; }
+  .qa-rise { animation: qa-rise 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+  /* Delayed past the fold (backwards = held invisible until then), so the
+     bubble arrives into space the card has already left. */
+  .qa-bubble { animation: qa-bubble-in 0.26s cubic-bezier(0.34, 1.56, 0.64, 1) ${CARD_EXIT_MS}ms backwards; }
   @media (prefers-reduced-motion: reduce) {
-    .qa-card-in, .qa-rise { animation: none; }
+    .qa-card-in, .qa-rise, .qa-bubble { animation: none; }
     .qa-card-out { animation: none; opacity: 0; }
   }
 `
@@ -1230,28 +1241,28 @@ function useHeldLabel(next: string | null, holdMs = 800): string | null {
 /**
  * The Skipper's control pins — ONE cluster for both presentations (text
  * panel open or folded), riding TalkingHead's hatOverlay so they bob with
- * the artwork. Hat = voice: the mic pin, morphing into Stop while a turn is
- * in flight. Boat = surface: the share bow light, the text fold/unfold pin
- * on the left edge, ✕ end on the right. The speaker mute deliberately does
- * NOT live here — with the text folded, voice is the only output channel,
- * so the mute is the text panel's affordance. no-drag sits on EACH button:
- * Electron punches drag-region holes from painted bounds, and a zero-size
- * wrapper excludes nothing.
+ * the artwork.
+ *
+ * They all ride the BOAT now, left to right: the mic (morphing into Stop
+ * while a turn is in flight), the share bow light, ✕ end. The mic used to
+ * sit on the hat band, a reach away from the other two — one row of three
+ * on the deck is the whole control surface at a glance. The text's fold and
+ * unfold are NOT here: folding is the handle on the card's edge, unfolding
+ * the bubble above the head (UnfoldBubble), each living where the gesture
+ * actually points. The speaker mute isn't here either — with the text
+ * folded, voice is the only output channel, so the mute belongs to the text
+ * panel.
+ *
+ * no-drag sits on EACH button: Electron punches drag-region holes from
+ * painted bounds, and a zero-size wrapper excludes nothing.
  */
 function SkipperPins({
   state,
   sendAction,
-  textPin,
-  onTextPin,
 }: {
   state: CallState
   sendAction: (action: PopoutAction) => void
-  /** 'expand' = bring the text back (tucked); 'collapse' = fold it away. */
-  textPin: 'expand' | 'collapse'
-  onTextPin: () => void
 }) {
-  const shortcutState = useQuickAskShortcut()
-  const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
   // The mic and Stop are exclusive states of ONE control: while a turn is
   // in flight the mic is dead anyway, so the hat's single pin morphs.
   const busy = state.status === 'thinking' || state.status === 'speaking'
@@ -1264,7 +1275,7 @@ function SkipperPins({
           aria-label="Stop the assistant"
           title="Stop — cut the reply short (the session keeps going)"
           className="group/pin absolute flex h-[38px] w-[38px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
-          style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
+          style={{ ...noDragRegion, left: '18%', top: '68%' }}
         >
           <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110">
             <Square className="h-3 w-3 fill-current text-white" />
@@ -1287,7 +1298,7 @@ function SkipperPins({
           aria-label="Hold to talk — tap for hands-free"
           title={`Hold to talk (tap for hands-free) — or hold the ${PTT_LABEL} key`}
           className="group/pin absolute flex h-[38px] w-[38px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
-          style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
+          style={{ ...noDragRegion, left: '18%', top: '68%' }}
         >
           <span
             className={`flex h-[22px] w-[22px] select-none items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
@@ -1325,22 +1336,6 @@ function SkipperPins({
         </span>
         <span className="pointer-events-none absolute left-1/2 top-full mt-0.5 -translate-x-1/2 whitespace-nowrap rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover/pin:opacity-100">
           {state.screenSharing ? 'Sharing screen — click to stop' : 'Share your screen'}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={onTextPin}
-        aria-label={textPin === 'expand' ? 'Bring the text back' : 'Tuck the text away'}
-        title={textPin === 'expand' ? `Bring the text back (${shortcutLabel} works too)` : 'Tuck the text away — the session keeps going'}
-        className="group/pin absolute flex h-[32px] w-[32px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
-        style={{ ...noDragRegion, left: '18%', top: '68%' }}
-      >
-        <span className="flex h-[20px] w-[20px] items-center justify-center rounded-full bg-sky-500 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
-          {textPin === 'expand' ? (
-            <ChevronsLeft className="h-3 w-3 text-white" />
-          ) : (
-            <ChevronsRight className="h-3 w-3 text-white" />
-          )}
         </span>
       </button>
       <button
@@ -1405,6 +1400,46 @@ function TurnDivider({ children }: { children: React.ReactNode }) {
       {children}
       <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
     </div>
+  )
+}
+
+/**
+ * The way back, while the text is tucked: a chevron bubble floating just
+ * above the Skipper's head.
+ *
+ * It is the mirror of the card's tuck handle — same circle, same size, the
+ * chevron pointing the other way — so hiding and un-hiding are visibly one
+ * gesture with two directions. It used to be a blue enamel pin on the boat,
+ * which put "where does my text go" in the middle of the DEVICE controls and
+ * left the hull with four things competing for a glance. Above the head it
+ * points at the space the card unfolds into.
+ *
+ * The entry waits out the card's fold (COMPANION_MOTION_CSS delays it), so
+ * the two never animate over each other.
+ */
+function UnfoldBubble({ onExpand }: { onExpand: () => void }) {
+  const shortcutState = useQuickAskShortcut()
+  const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
+  return (
+    // The wrapper owns the CENTERING transform; the button owns the
+    // animated one. A CSS animation replaces an element's whole transform,
+    // so sharing one element would have the bubble fly in off-centre.
+    <span className="absolute -top-2 left-1/2 z-30 -translate-x-1/2" style={noDragRegion}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onExpand}
+            aria-label="Bring the text back"
+            style={noDragRegion}
+            className="qa-bubble flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_4px_14px_rgba(0,0,0,0.18)] transition hover:-translate-y-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_4px_14px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+          >
+            <ChevronsLeft className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Bring the text back ({shortcutLabel} works too)</TooltipContent>
+      </Tooltip>
+    </span>
   )
 }
 
@@ -1894,6 +1929,7 @@ function TuckedMascot({
       {/* -mb pulls the caption/chip up under the boat: the SVG box has dead
           space below the ripples that read as a big gap. */}
       <div className="relative -mb-4" style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+        <UnfoldBubble onExpand={onExpand} />
         {/* Listening halo: expanding green rings around the head while the
             mic gate is open. Peripheral-vision feedback — the user is
             usually looking at their own work, not at the chip's small text. */}
@@ -1918,7 +1954,7 @@ function TuckedMascot({
           size={SKIPPER_SIZE}
           hat="cowboy"
           hatOverlay={
-            <SkipperPins state={state} sendAction={sendAction} textPin="expand" onTextPin={onExpand} />
+            <SkipperPins state={state} sendAction={sendAction} />
           }
         />
       </div>
