@@ -1546,6 +1546,25 @@ export const ipcSchemas = {
     req: z.object({ accelerator: z.string(), registered: z.boolean() }),
     res: z.null(),
   },
+  // --- Theme, across windows ---
+  // The setting itself lives in the renderer's localStorage, which every
+  // window already shares (one origin, one Electron session), so a freshly
+  // loaded utility window paints the right skin with no round trip. These
+  // channels carry only the *changes*: utility windows have no ThemeProvider,
+  // and a localStorage write in the app window raises no cross-window event
+  // they can rely on, so the app window tells main and main tells them.
+  // The raw setting travels, not the resolved one — 'system' must resolve
+  // per window, against that window's own matchMedia.
+  // App window → main, on mount and on every change.
+  'theme:set': {
+    req: z.object({ theme: z.enum(['light', 'dark', 'system']) }),
+    res: z.object({}),
+  },
+  // Push: main → every OTHER window.
+  'theme:changed': {
+    req: z.object({ theme: z.enum(['light', 'dark', 'system']) }),
+    res: z.null(),
+  },
   // --- Ambient meeting detection popup (own always-on-top window) ---
   // Main → popup: the detection to display.
   'meetingDetect:payload': {
