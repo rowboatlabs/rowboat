@@ -139,7 +139,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                                     style={pad}
                                     onClick={() => toggle(node.path)}
                                     className={cn(
-                                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-foreground/90 hover:bg-accent/50',
+                                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-foreground/90 hover:bg-accent/50',
                                         dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
                                     )}
                                 >
@@ -168,7 +168,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                                 <button
                                     type="button"
                                     aria-label="Folder actions"
-                                    className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/dirrow:inline-flex data-[state=open]:inline-flex"
+                                    className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/dirrow:opacity-100 data-[state=open]:opacity-100"
                                 >
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
@@ -245,7 +245,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             onClick={() => onOpenFile(node.path)}
                             title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
                             className={cn(
-                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
+                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-left',
                                 active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
                             )}
                         >
@@ -281,7 +281,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             <button
                                 type="button"
                                 aria-label="File actions"
-                                className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/filerow:inline-flex data-[state=open]:inline-flex"
+                                className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
                             >
                                 <MoreHorizontal className="size-3.5" />
                             </button>

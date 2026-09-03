@@ -283,7 +283,7 @@ export function SpaceRail({
                             <button
                                 type="button"
                                 aria-label="Chat options"
-                                className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground group-hover/section:inline-flex data-[state=open]:inline-flex"
+                                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100 data-[state=open]:opacity-100"
                             >
                                 <MoreHorizontal className="size-3.5" />
                             </button>
@@ -385,7 +385,8 @@ export function SpaceRail({
                                                 ].filter(Boolean).join(' · ')}
                                                 className={cn(
                                                     // One tree step (12px) in from Messages: these nest under it.
-                                                    'flex h-7 w-full items-center gap-2 rounded-md pl-5 pr-2 text-left',
+                                                    // pr-7 keeps the title and indicators clear of the ⋯ slot.
+                                                    'flex h-7 w-full items-center gap-2 rounded-md pl-5 pr-7 text-left',
                                                     active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
                                                     (topic.archived || muted) && 'opacity-60',
                                                 )}
@@ -444,7 +445,7 @@ export function SpaceRail({
                                             <button
                                                 type="button"
                                                 aria-label="Discussion actions"
-                                                className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/topicrow:inline-flex data-[state=open]:inline-flex"
+                                                className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/topicrow:opacity-100 data-[state=open]:opacity-100"
                                             >
                                                 <MoreHorizontal className="size-3.5" />
                                             </button>
@@ -524,7 +525,7 @@ export function SpaceRail({
                                 type="button"
                                 aria-label="Add to files"
                                 title="New file, folder, board, or upload"
-                                className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground group-hover/section:inline-flex data-[state=open]:inline-flex"
+                                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100 data-[state=open]:opacity-100"
                             >
                                 <Plus className="size-3.5" />
                             </button>
@@ -549,7 +550,7 @@ export function SpaceRail({
                             <button
                                 type="button"
                                 aria-label="Files options"
-                                className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground group-hover/section:inline-flex data-[state=open]:inline-flex"
+                                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100 data-[state=open]:opacity-100"
                             >
                                 <MoreHorizontal className="size-3.5" />
                             </button>
