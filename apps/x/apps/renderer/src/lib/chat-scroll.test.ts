@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  ANCHOR_TAIL_HEADROOM_PX,
   AT_BOTTOM_EPSILON_PX,
   ChatScrollController,
   NEAR_BOTTOM_PX,
@@ -453,10 +454,10 @@ function addUserRow(h: Harness, id: string, layoutTop: number): HTMLElement {
 
 describe('ChatScrollController — send anchoring (chat mode)', () => {
   // A message whose layout top is 1800 in a 2000-tall transcript with a
-  // 600-tall viewport: the anchor target is 1800 - PEEK, which needs
-  // (1800 - PEEK) - (2000 - 600) px of spacer slack.
+  // 600-tall viewport: the anchor target is 1800 - PEEK, and the slack keeps
+  // the scroll range reachable to target + tail headroom.
   const TARGET = 1800 - SEND_ANCHOR_PEEK_PX
-  const SLACK = TARGET - 1400
+  const SLACK = TARGET + ANCHOR_TAIL_HEADROOM_PX - 1400
 
   function setupAnchored(messageLayoutTop: number) {
     const h = createHarness()
@@ -496,6 +497,59 @@ describe('ChatScrollController — send anchoring (chat mode)', () => {
     expect(h.spacerHeight()).toBe(0)
   })
 
+  it('a completion tail shrink lands in the headroom — no clamp — and the slack regrows', () => {
+    const { h, controller } = setupAnchored(1800)
+    controller.anchorToMessage('user-1')
+    expect(h.container.scrollTop).toBe(TARGET)
+
+    // Turn completes: the activity indicator row + gap unmount below the
+    // anchor. The browser clamps during layout — emulate by re-clamping
+    // scrollTop against the shrunken range BEFORE any observer runs.
+    h.state.contentHeight -= 90
+    const reclamped = h.container.scrollTop
+    h.container.scrollTop = reclamped
+    // The headroom absorbed the shrink: the reader did not move.
+    expect(h.container.scrollTop).toBe(TARGET)
+
+    triggerResize()
+    // Regrowth gate (target stable, content fell): the cap rises and the
+    // spacer is restored, so the NEXT shrink is covered too.
+    expect(h.spacerHeight()).toBe(SLACK + 90)
+    expect(h.container.scrollTop).toBe(TARGET)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('an above-anchor shift cannot inject slack (target moved, content did not fall)', () => {
+    const { h, controller, message } = setupAnchored(1800)
+    controller.anchorToMessage('user-1')
+    expect(h.spacerHeight()).toBe(SLACK)
+
+    // Content above the anchor grows by 200 while the tail shrinks by 200:
+    // total height unchanged, but the anchor's layout position moved down —
+    // the regrowth gate must stay closed even though required slack rose.
+    message.getBoundingClientRect = () =>
+      ({ top: 2000 - h.container.scrollTop } as DOMRect)
+    triggerResize()
+    expect(h.spacerHeight()).toBe(SLACK)
+  })
+
+  it('a parked reader survives a coalesced completion commit unchanged', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    h.scrollTo(h.maxTop() - 300)
+    expect(controller.snapshot().following).toBe(false)
+    const parked = h.container.scrollTop
+
+    // One merged commit: +40 of durable-message growth and -90 of indicator
+    // removal land as a single net height change.
+    h.state.contentHeight += 40 - 90
+    const reclamped = h.container.scrollTop
+    h.container.scrollTop = reclamped
+    triggerResize()
+    expect(h.container.scrollTop).toBe(parked)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
   it('returns false when the message is not in the DOM yet', () => {
     const h = createHarness()
     const controller = attach(h, { mode: 'chat' })
@@ -526,7 +580,7 @@ describe('ChatScrollController — send repositioning (requestSendAnchor)', () =
 
     controller.requestSendAnchor('user-1')
     expect(h.container.scrollTop).toBe(TARGET)
-    expect(h.spacerHeight()).toBe(TARGET - 1400)
+    expect(h.spacerHeight()).toBe(TARGET + ANCHOR_TAIL_HEADROOM_PX - 1400)
     expect(controller.snapshot().following).toBe(false)
   })
 

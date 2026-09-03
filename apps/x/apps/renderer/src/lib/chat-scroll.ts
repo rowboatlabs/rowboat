@@ -73,6 +73,14 @@ const USER_INPUT_WINDOW_MS = 250
  * the inter-message gap (32px) plus a sliver of the previous turn, so the
  * jump reads as continuous rather than a fresh page. */
 export const SEND_ANCHOR_PEEK_PX = 48
+/** Extra scroll range kept past the anchor target while a send anchor is
+ * active. Turn completion unmounts tail rows (activity indicator + its gap,
+ * tool-output swaps) and the browser clamps scrollTop DURING that layout —
+ * before any ResizeObserver callback could react — so the protection must
+ * be pre-provisioned: with this headroom the shrink lands inside the slack
+ * and the anchored reader's position never clamps. Covers the ~90px
+ * end-of-turn delta with margin. */
+export const ANCHOR_TAIL_HEADROOM_PX = 128
 /** How long a send keeps waiting for its message row to render (the active
  * pane is store-backed: the row lands only after the send's IPC round-trip
  * and turn-event emit). A row that hasn't appeared by then belongs to a
@@ -143,10 +151,17 @@ export class ChatScrollController {
   private lastUserInputAt = Number.NEGATIVE_INFINITY
 
   // Send-anchor state ('chat' mode): while set, resize ticks keep the spacer
-  // slack maintained (shrink-only) so the anchored message stays reachable at
-  // the viewport top without ever introducing new blank space.
+  // slack maintained so the anchored message stays reachable at the viewport
+  // top (plus tail headroom — see ANCHOR_TAIL_HEADROOM_PX). The cap makes
+  // slack shrink-only against above-anchor layout shifts; it may rise again
+  // only for a tail shrink under a stable anchor (the regrowth gate in
+  // maintainAnchorSpacer).
   private anchorId: string | null = null
   private anchorSlackCap = 0
+  // Regrowth-gate baselines: the anchor target and content height as of the
+  // previous maintenance pass.
+  private lastAnchorTargetTop: number | null = null
+  private lastAnchorContentHeight: number | null = null
 
   // A send whose message row hasn't rendered yet (store-backed chats append
   // the row only after the IPC round-trip). Resize ticks — which fire exactly
@@ -344,11 +359,10 @@ export class ChatScrollController {
 
     const targetTop = Math.max(0, this.anchorTopInContent(anchor) - SEND_ANCHOR_PEEK_PX)
     const contentHeight = els.container.scrollHeight - this.spacerHeight
-    const slack = Math.max(
-      0,
-      Math.ceil(targetTop - (contentHeight - els.container.clientHeight))
-    )
+    const slack = anchorSlackRequired(targetTop, contentHeight, els.container.clientHeight)
     this.anchorSlackCap = slack
+    this.lastAnchorTargetTop = targetTop
+    this.lastAnchorContentHeight = contentHeight
     this.setSpacerHeight(slack)
 
     this.write(targetTop)
@@ -535,21 +549,34 @@ export class ChatScrollController {
       // The anchored message left the DOM (conversation replaced) — drop the
       // slack rather than preserving blank space for nothing.
       this.anchorId = null
+      this.lastAnchorTargetTop = null
+      this.lastAnchorContentHeight = null
       this.setSpacerHeight(0)
       return
     }
     const targetTop = Math.max(0, this.anchorTopInContent(anchor) - SEND_ANCHOR_PEEK_PX)
     const contentHeight = els.container.scrollHeight - this.spacerHeight
-    const required = Math.max(
-      0,
-      Math.ceil(targetTop - (contentHeight - els.container.clientHeight))
-    )
-    // Shrink-only: slack is consumed as the response grows and never comes
-    // back, so layout shifts above the anchor can't inject new blank space.
+    const required = anchorSlackRequired(targetTop, contentHeight, els.container.clientHeight)
+    // Slack is consumed as the response grows and normally never comes back
+    // (the cap is shrink-only), so layout shifts above the anchor can't
+    // inject new blank space. The one sanctioned regrowth: a tail shrink
+    // UNDER A STABLE ANCHOR (end-of-turn rows unmounting below the reader) —
+    // the cap rises back to the requirement so the headroom that just
+    // absorbed the shrink is restored for the next one.
+    const anchorStable =
+      this.lastAnchorTargetTop !== null &&
+      Math.abs(targetTop - this.lastAnchorTargetTop) <= 1
+    const contentFell =
+      this.lastAnchorContentHeight !== null &&
+      contentHeight < this.lastAnchorContentHeight
+    if (anchorStable && contentFell && required > this.anchorSlackCap) {
+      this.anchorSlackCap = required
+    }
     const slack = Math.min(required, this.anchorSlackCap)
     this.anchorSlackCap = slack
+    this.lastAnchorTargetTop = targetTop
+    this.lastAnchorContentHeight = contentHeight
     if (slack !== this.spacerHeight) this.setSpacerHeight(slack)
-    if (slack === 0) this.anchorId = null
   }
 
   private setSpacerHeight(height: number): void {
@@ -582,6 +609,19 @@ export class ChatScrollController {
     const snapshot = this.snapshot()
     for (const listener of this.listeners) listener(snapshot)
   }
+}
+
+/** Spacer slack needed to keep the anchor target reachable with tail
+ * headroom to spare (see ANCHOR_TAIL_HEADROOM_PX). */
+function anchorSlackRequired(
+  targetTop: number,
+  contentHeight: number,
+  clientHeight: number
+): number {
+  return Math.max(
+    0,
+    Math.ceil(targetTop + ANCHOR_TAIL_HEADROOM_PX - (contentHeight - clientHeight))
+  )
 }
 
 function now(): number {

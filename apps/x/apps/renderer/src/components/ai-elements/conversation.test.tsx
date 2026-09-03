@@ -5,7 +5,11 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from './conversation'
-import { resetChatScrollMemory, SEND_ANCHOR_PEEK_PX } from '@/lib/chat-scroll'
+import {
+  ANCHOR_TAIL_HEADROOM_PX,
+  resetChatScrollMemory,
+  SEND_ANCHOR_PEEK_PX,
+} from '@/lib/chat-scroll'
 
 class ResizeObserverStub {
   static instances: ResizeObserverStub[] = []
@@ -144,7 +148,7 @@ describe('Conversation scroll wiring', () => {
     const target = 1800 - SEND_ANCHOR_PEEK_PX
     expect(s.scroller.scrollTop).toBe(target)
     const spacer = s.scroller.lastElementChild as HTMLElement
-    expect(spacer.style.height).toBe(`${target - 1400}px`)
+    expect(spacer.style.height).toBe(`${target + ANCHOR_TAIL_HEADROOM_PX - 1400}px`)
     // Streaming growth stays below the fold — no movement.
     s.grow(300)
     expect(s.scroller.scrollTop).toBe(target)
