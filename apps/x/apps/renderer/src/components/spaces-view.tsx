@@ -1,13 +1,13 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BellOff, Check, ChevronDown, Clock, Columns2, FileText, FolderOpen, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus } from 'lucide-react'
+import { Bell, BellOff, Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent,
-    DropdownMenuSubTrigger, DropdownMenuTrigger,
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { AddOrgDialog, AvatarStack, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
+import { AddOrgDialog, MemberAvatar, MemberProfilePopover, OrgMonogram } from '@/components/spaces/atoms'
 import { BookmarksPopover } from '@/components/spaces/bookmarks'
 import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/files-tab'
 import { GeneralStream } from '@/components/spaces/general-stream'
@@ -623,27 +623,68 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         <div className="relative flex-1 min-h-0 flex flex-col">
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
-            <header className="flex items-center gap-3 px-4 h-12 shrink-0 border-b border-border">
-                <OrgMonogram org={org} />
-                <h1 className="text-[15px] font-semibold truncate">{space.name}</h1>
-                <span className="text-xs text-muted-foreground truncate hidden md:inline" title={`${org.address} · you are ${org.memberId}`}>
-                    {org.address}
-                </span>
+            <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+                {/* Left: the org's mark, then # the space. Hover it for what the
+                    old identity card said — org name, address, who you are.
+                    Inviting lives with the members; nothing here repeats it. */}
+                <HoverCard openDelay={200} closeDelay={150}>
+                    <HoverCardTrigger asChild>
+                        <button
+                            type="button"
+                            className="flex h-9 max-w-[320px] shrink-0 items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
+                        >
+                            <OrgMonogram org={org} />
+                            <span className="flex min-w-0 items-center gap-0.5">
+                                <Hash className="size-4 shrink-0 text-muted-foreground" />
+                                <h1 className="truncate text-[15px] font-semibold">{space.name}</h1>
+                            </span>
+                        </button>
+                    </HoverCardTrigger>
+                    <HoverCardContent align="start" sideOffset={4} className="w-72 p-3">
+                        <div className="flex items-center gap-2.5">
+                            <OrgMonogram org={org} />
+                            <div className="min-w-0">
+                                <div className="truncate text-sm font-medium">{org.name}</div>
+                                <div className="truncate text-xs text-muted-foreground">{org.address}</div>
+                            </div>
+                        </div>
+                        <div className="mt-2 truncate text-xs text-muted-foreground">
+                            #{space.name} · you are <span className="font-mono">{org.memberId}</span>
+                        </div>
+                        <div className="mt-2 border-t border-border pt-2">
+                            <button
+                                type="button"
+                                onClick={() => void navigator.clipboard.writeText(org.address).then(() => toast('Address copied', 'success'))}
+                                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                <Copy className="size-3.5" /> Copy address
+                            </button>
+                        </div>
+                    </HoverCardContent>
+                </HoverCard>
+
+                {/* Centre: search gets the room. */}
+                <div className="flex min-w-0 flex-1 justify-center px-2">
+                    <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} className="w-full max-w-[480px]" />
+                </div>
+
+                {/* Right: members as one pill (a dot when anyone is here — the
+                    roster says who), then the tools. */}
                 <Popover>
                     <PopoverTrigger asChild>
                         <button
                             type="button"
-                            className="group flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 hover:bg-accent/60 data-[state=open]:bg-accent/60"
-                            title="See who's in this space"
+                            className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60 data-[state=open]:text-foreground"
+                            title={here.length > 0 ? `${members.length} members · ${here.length} here` : `${members.length} members`}
                         >
-                            <AvatarStack members={members} />
-                            <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                {members.length} {members.length === 1 ? 'member' : 'members'}
+                            <span className="relative">
+                                <Users className="size-3.5" />
+                                {here.length > 0 && <span className="absolute -right-1 -top-1 size-2 rounded-full bg-[var(--rowboat-success)] ring-2 ring-background" />}
                             </span>
-                            <ChevronDown className="-ml-1 size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-data-[state=open]:opacity-100" />
+                            <span className="tabular-nums">{members.length}</span>
                         </button>
                     </PopoverTrigger>
-                    <PopoverContent align="start" className="w-64 p-1.5">
+                    <PopoverContent align="end" className="w-64 p-1.5">
                         <div className="px-2 pb-1 pt-0.5 text-[13px] text-muted-foreground">
                             Members — {members.length}
                         </div>
@@ -681,30 +722,37 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         </div>
                     </PopoverContent>
                 </Popover>
-                {here.length > 0 && (
-                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={here.map((id) => memberNames.get(id) ?? id).join(', ')}>
-                        <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" /> {here.length} here
-                    </span>
-                )}
-                <div className="flex-1" />
-                <SpaceSearch orgId={org.id} spaceId={space.id} selfMemberId={org.memberId} onNavigate={select} />
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <button
                             type="button"
-                            title={dndActive ? `Do not disturb until ${new Date(dndUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Do not disturb'}
+                            title={dndActive
+                                ? `Do not disturb until ${new Date(dndUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+                                : `Notifications — ${notifyChoices.find((c) => c.level === (notify.spaceLevel ?? 'mentions'))?.label ?? 'Mentions only'}`}
                             className={cn(
                                 'inline-flex size-7 items-center justify-center rounded-md hover:bg-accent',
                                 dndActive ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground hover:text-foreground',
                             )}
                         >
-                            {dndActive ? <BellOff className="size-4" /> : <Bell className="size-4" />}
+                            {dndActive || notify.spaceLevel === 'mute' ? <BellOff className="size-4" /> : <Bell className="size-4" />}
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                        {/* The space's level — what reaches you from here. */}
+                        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">This space</DropdownMenuLabel>
+                        {notifyChoices.map((c) => (
+                            <DropdownMenuItem key={c.level} onClick={() => notify.setSpaceLevel(c.level)}>
+                                <Check className={cn('size-3.5 mr-2', (notify.spaceLevel ?? 'mentions') !== c.level && 'opacity-0')} /> {c.label}
+                            </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuSeparator />
+                        {/* Do not disturb — everything, for a while. */}
+                        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                            {dndActive ? `Do not disturb until ${new Date(dndUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Do not disturb'}
+                        </DropdownMenuLabel>
                         {dndActive && (
                             <DropdownMenuItem onClick={() => setDnd(null)}>
-                                <Bell className="size-3.5 mr-2" /> Turn off do not disturb
+                                <Bell className="size-3.5 mr-2" /> Turn off
                             </DropdownMenuItem>
                         )}
                         <DropdownMenuItem onClick={() => setDnd(30)}>For 30 minutes</DropdownMenuItem>
@@ -753,27 +801,12 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         <Button variant="ghost" size="icon" className="size-7 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => void invite()}>
-                            <LinkIcon className="size-3.5 mr-2" /> Copy invite link
-                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={markAllRead}>
                             <Check className="size-3.5 mr-2" /> Mark all read
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setScheduledOpen(true)}>
                             <Clock className="size-3.5 mr-2" /> Scheduled
                         </DropdownMenuItem>
-                        <DropdownMenuSub>
-                            <DropdownMenuSubTrigger>
-                                <Bell className="size-3.5 mr-2" /> Notifications
-                            </DropdownMenuSubTrigger>
-                            <DropdownMenuSubContent>
-                                {notifyChoices.map((c) => (
-                                    <DropdownMenuItem key={c.level} onClick={() => notify.setSpaceLevel(c.level)}>
-                                        <Check className={cn('size-3.5 mr-2', (notify.spaceLevel ?? 'mentions') !== c.level && 'opacity-0')} /> {c.label}
-                                    </DropdownMenuItem>
-                                ))}
-                            </DropdownMenuSubContent>
-                        </DropdownMenuSub>
                     </DropdownMenuContent>
                 </DropdownMenu>
             </header>
