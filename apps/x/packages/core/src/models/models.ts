@@ -12,6 +12,7 @@ import { getGatewayProvider } from "./gateway.js";
 import { getCodexProvider } from "./codex.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "./defaults.js";
 import { getChatModelIds } from "./models-dev.js";
+import { AIMLAPI_BASE_URL, parseAimlapiChatModelIds } from "./aimlapi.js";
 import { withUseCase } from "../analytics/use_case.js";
 import {
     applyLocalModelSettings,
@@ -72,6 +73,16 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
                 name: "openai-compatible",
                 apiKey,
                 baseURL: baseURL || "",
+                headers,
+            });
+        case "aimlapi":
+            // Same transport as openai-compatible; the flavor exists for the
+            // default endpoint, the catalog filtering in listModelsForProvider,
+            // and its own analytics/display identity.
+            return createOpenAICompatible({
+                name: "aimlapi",
+                apiKey,
+                baseURL: baseURL || AIMLAPI_BASE_URL,
                 headers,
             });
         case "openrouter":
@@ -285,6 +296,17 @@ export async function listModelsForProvider(
                 url = `${(baseURL ?? "").replace(/\/$/, "")}/models`;
                 if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
                 break;
+            case "aimlapi":
+                // The catalog is public — it answers 200 with no key, a valid
+                // key, or a garbage one — so listing here can no more tell a
+                // bad key from a good one than OpenRouter's public catalog
+                // can. The key still goes on the request (an account-scoped
+                // catalog may arrive later); what actually validates the
+                // credential is testModelConnection's generateText call,
+                // which the connect flow always runs after this.
+                url = `${(baseURL ?? AIMLAPI_BASE_URL).replace(/\/$/, "")}/models`;
+                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+                break;
             default:
                 throw new Error(`Unsupported provider flavor: ${flavor}`);
         }
@@ -304,6 +326,10 @@ export async function listModelsForProvider(
         } else if (flavor === "ollama") {
             // { models: [{ name: "llama3:latest" }] }
             ids = (data.models ?? []).map((m: { name: string }) => m.name);
+        } else if (flavor === "aimlapi") {
+            // Same OpenAI envelope, but every endpoint type shares it — keep
+            // the chat ones and drop the duplicates. See aimlapi.ts.
+            ids = parseAimlapiChatModelIds(data);
         } else {
             // OpenAI-shaped: { data: [{ id: "..." }] }
             ids = (data.data ?? []).map((m: { id: string }) => m.id);
