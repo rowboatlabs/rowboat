@@ -73,6 +73,11 @@ export interface ChatSessionPaneProps {
   onComposioConnected?: (toolkitSlug: string) => void
   /** Empty-state flavour: 'code' for a chat bound to a coding session. */
   emptyStateVariant?: 'default' | 'code'
+  /**
+   * Chat bound to a coding session: the transcript follows Codex semantics
+   * (sends jump to the live edge) instead of ChatGPT's send-anchoring.
+   */
+  isCodeSession?: boolean
 }
 
 export function ChatSessionPane({
@@ -91,6 +96,7 @@ export function ChatSessionPane({
   onCodePermissionResponse,
   onComposioConnected,
   emptyStateVariant = 'default',
+  isCodeSession = false,
 }: ChatSessionPaneProps) {
   // Content-owned tab meta (see lib/tab-meta.ts). Both live instances of a
   // chat (full-screen App pane + side-pane chat) report the same values, so
@@ -139,6 +145,8 @@ export function ChatSessionPane({
       aria-hidden={!isActive}
     >
       <Conversation
+        scrollMode={isCodeSession ? 'code' : 'chat'}
+        scrollMemoryKey={tab.chatId}
         anchorMessageId={viewportAnchor?.messageId}
         anchorRequestKey={viewportAnchor?.requestKey}
         className="relative flex-1"

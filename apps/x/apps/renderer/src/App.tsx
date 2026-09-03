@@ -2581,7 +2581,6 @@ function App() {
   const [workDirByTab, setWorkDirByTab] = useState<Record<string, string | null>>({})
   const workDirByTabRef = useRef(workDirByTab)
   workDirByTabRef.current = workDirByTab
-  const chatScrollTopByTabRef = useRef(new Map<string, number>())
   const [toolOpenByTab, setToolOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
   const [chatViewportAnchorByTab, setChatViewportAnchorByTab] = useState<Record<string, ChatViewportAnchorState>>({})
   const activeChatTabIdRef = useRef(activeChatTabId)
@@ -2654,29 +2653,6 @@ function App() {
       }
     })
   }, [])
-  const getChatScrollContainer = useCallback((tabId: string): HTMLElement | null => {
-    if (typeof document === 'undefined') return null
-    const panel = document.querySelector<HTMLElement>(
-      `[data-chat-tab-panel="${tabId}"][aria-hidden="false"]`
-    )
-    if (!panel) return null
-    const logRoot = panel.querySelector<HTMLElement>('[role="log"]')
-    if (!logRoot) return null
-    const children = Array.from(logRoot.children) as HTMLElement[]
-    for (const child of children) {
-      const style = window.getComputedStyle(child)
-      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
-        return child
-      }
-    }
-    return null
-  }, [])
-  const saveChatScrollForTab = useCallback((tabId: string) => {
-    const container = getChatScrollContainer(tabId)
-    if (!container) return
-    chatScrollTopByTabRef.current.set(tabId, container.scrollTop)
-  }, [getChatScrollContainer])
-
   const getChatTabTitle = useCallback((tab: ChatTab) => {
     if (!tab.runId) return 'New chat'
     return runs.find(r => r.id === tab.runId)?.title || '(Untitled chat)'
@@ -4540,7 +4516,6 @@ function App() {
     if (active?.runId === rid) return
     // Cancel any active dictation — its transcript belongs to the old chat.
     cancelRecordingIfActive()
-    saveChatScrollForTab(activeChatTabIdRef.current)
     setChatTabs((prev) => prev.map((t) => (
       // Rebinding to a different session = a different chat identity — but a
       // DETERMINISTIC one (the session id), so switching A→B→A restores A's
@@ -4548,7 +4523,7 @@ function App() {
       t.id === activeChatTabIdRef.current ? { ...t, runId: rid, chatId: rid } : t
     )))
     void loadRun(rid)
-  }, [cancelRecordingIfActive, loadRun, saveChatScrollForTab])
+  }, [cancelRecordingIfActive, loadRun])
   bindChatToRunRef.current = bindChatToRun
 
   // A code session was selected in the Code view: bind the chat to it — the
@@ -4584,79 +4559,9 @@ function App() {
   }, [])
   const handleCodeDiffOpened = useCallback(() => setCodeDiffPath(null), [])
 
-  useEffect(() => {
-    let cleanupScrollListener: (() => void) | undefined
-    let pollRaf: number | undefined
-    let restoreRafA: number | undefined
-    let restoreRafB: number | undefined
-    let restoreTimeout: ReturnType<typeof setTimeout> | undefined
-    let cancelled = false
-
-    const restoreScrollTop = (container: HTMLElement, top: number) => {
-      const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight)
-      const clampedTop = clampNumber(top, 0, maxScroll)
-      container.scrollTop = clampedTop
-    }
-
-    const attach = (): boolean => {
-      if (cancelled) return true
-      const container = getChatScrollContainer(activeChatTabId)
-      if (!container) return false
-
-      const savedTop = chatScrollTopByTabRef.current.get(activeChatTabId)
-      if (savedTop !== undefined) {
-        // Reinforce restoration across a couple frames because stick-to-bottom
-        // may schedule scroll adjustments during mount/resize.
-        restoreScrollTop(container, savedTop)
-        restoreRafA = requestAnimationFrame(() => {
-          restoreScrollTop(container, savedTop)
-          restoreRafB = requestAnimationFrame(() => {
-            restoreScrollTop(container, savedTop)
-          })
-        })
-        restoreTimeout = setTimeout(() => {
-          restoreScrollTop(container, savedTop)
-        }, 220)
-      }
-
-      const onScroll = () => {
-        chatScrollTopByTabRef.current.set(activeChatTabId, container.scrollTop)
-      }
-      container.addEventListener('scroll', onScroll, { passive: true })
-      cleanupScrollListener = () => {
-        chatScrollTopByTabRef.current.set(activeChatTabId, container.scrollTop)
-        container.removeEventListener('scroll', onScroll)
-      }
-      return true
-    }
-
-    let attempts = 0
-    const maxAttempts = 60
-    const pollAttach = () => {
-      if (cancelled) return
-      if (attach()) return
-      if (attempts >= maxAttempts) return
-      attempts += 1
-      pollRaf = requestAnimationFrame(pollAttach)
-    }
-    pollAttach()
-
-    return () => {
-      cancelled = true
-      cleanupScrollListener?.()
-      if (pollRaf !== undefined) cancelAnimationFrame(pollRaf)
-      if (restoreRafA !== undefined) cancelAnimationFrame(restoreRafA)
-      if (restoreRafB !== undefined) cancelAnimationFrame(restoreRafB)
-      if (restoreTimeout !== undefined) clearTimeout(restoreTimeout)
-    }
-  }, [
-    activeChatTabId,
-    selectedPath,
-    isGraphOpen,
-    isChatSidebarOpen,
-    isRightPaneMaximized,
-    getChatScrollContainer,
-  ])
+  // Reading-position persistence across pane remounts (view toggles,
+  // dock/full-screen switches, run rebinds) lives inside the conversation
+  // scroll controller now — see lib/chat-scroll.ts (keyed by tab.chatId).
 
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
@@ -7584,6 +7489,7 @@ function App() {
                         activeIsWorking={activeIsWorking}
                         activeIsProcessing={activeIsProcessing}
                         activeIsReasoning={activeIsReasoning}
+                        isCodeSession={!!(tab.runId && codeSessionLocks[tab.runId])}
                       />
                     )
                   })}

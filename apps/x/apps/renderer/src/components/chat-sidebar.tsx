@@ -443,6 +443,7 @@ export function ChatSidebar({
                       onCodePermissionResponse={onCodePermissionResponse}
                       onComposioConnected={onComposioConnected}
                       emptyStateVariant={pinnedToCodeSession ? 'code' : 'default'}
+                      isCodeSession={!!(tab.runId && codeSessionLocks[tab.runId])}
                     />
                   )
                 })}
