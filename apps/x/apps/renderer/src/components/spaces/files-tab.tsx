@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, ChevronRight, Clock, Download, Eye, FileText, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
-import type { spaces } from '@x/shared'
+import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -143,7 +143,9 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                                         dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
                                     )}
                                 >
-                                    <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+                                    {open
+                                        ? <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
+                                        : <Folder className="size-3 shrink-0 text-muted-foreground" />}
                                     <span className="truncate">{node.name}</span>
                                 </button>
                             </ContextMenuTrigger>
@@ -186,10 +188,17 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>
-                    {open && node.children.map((child) => renderNode(child, depth + 1))}
-                    {open && empty && (
-                        <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
-                            empty — files added here keep it
+                    {open && (
+                        <div className="relative">
+                            {/* Indent guide: a faint dotted line under the folder's icon
+                                column, spanning its children — nesting reads without carets. */}
+                            <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${8 + depth * 12 + 6}px` }} />
+                            {node.children.map((child) => renderNode(child, depth + 1))}
+                            {empty && (
+                                <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
+                                    empty — files added here keep it
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -198,6 +207,9 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
         const active = node.path === selectedPath
         const unread = unreadPaths.has(node.path)
         const blob = node.entry?.blob
+        // A board is a file at whiteboards/<name>.excalidraw — same tree,
+        // pen icon, extension dropped from the label.
+        const board = spaces.isWhiteboardPath(node.path)
         if (renaming?.path === node.path && node.entry) {
             const entry = node.entry
             return (
@@ -238,10 +250,11 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             )}
                         >
                             <span className="w-3 shrink-0" />
-                            {blob && (isImageMime(blob.mime)
+                            {board && <PenTool className="size-3 shrink-0 text-muted-foreground" />}
+                            {!board && blob && (isImageMime(blob.mime)
                                 ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
                                 : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
-                            <span className="truncate flex-1">{node.name}</span>
+                            <span className="truncate flex-1">{board ? spaces.whiteboardDisplayName(node.name) : node.name}</span>
                             {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
                         </button>
                     </ContextMenuTrigger>

@@ -52,7 +52,7 @@ const CHAT_FLOOR = 460
 
 /**
  * Below this content width Split falls back to one surface (CHAT_FLOOR of
- * chat + ~466px of document + the 28px rail edge and divider). Kept low on
+ * chat + ~466px of document + the 10px rail edge and divider). Kept low on
  * purpose — a non-maximized laptop window must still get Split; the doc-width
  * clamp handles the squeeze from here up.
  */
@@ -312,7 +312,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // ------------------------------------------------------------------
     // Mode: which surface(s) are on screen. Talk = the stream (default),
     // Read = the document, Split = both. Split declines below SPLIT_FLOOR
-    // (600px document + 480px chat + the 28px rail edge).
+    // (600px document + 480px chat + the 10px rail edge).
     // ------------------------------------------------------------------
     const [mode, setMode] = useState<SpaceMode>(() => (selection.kind === 'file' ? 'read' : 'talk'))
     // The discussions/files rail is a plain sticky sidebar (persisted):
@@ -411,7 +411,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         }).catch(() => {}) // org unreachable — the pane's own first save creates it instead
     }
 
-    /** Auto-hide grace: how long the rail lingers after the cursor leaves. */
+    /** The rail's lock: docked ⇄ edge sliver (the rail peeks on hover by itself). */
     const toggleRailPin = () => {
         const pin = !railPinned
         localStorage.setItem('spaces:railOpen', pin ? '1' : '0')
