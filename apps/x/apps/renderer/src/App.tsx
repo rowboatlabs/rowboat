@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
-import { workspace, quickAskShortcut } from '@x/shared';
+import { workspace, quickAskShortcut, pttKey } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
@@ -123,6 +123,7 @@ import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 import { playAckCue, playAlertCue, playPopCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
+import { isMac } from '@/lib/shortcut'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -145,11 +146,14 @@ const graphPalette = [
   { hue: 0, sat: 72, light: 52 },
 ]
 
-// Push-to-talk gesture timing: a Right-⌘ press shorter than PTT_TAP_MS is a
-// tap (toggles hands-free lock); anything longer is a hold (release
+// Push-to-talk gesture timing: a talk-key press shorter than PTT_TAP_MS is
+// a tap (toggles hands-free lock); anything longer is a hold (release
 // submits). PTT_EDGE_ECHO_MS collapses the same key edge arriving from two
 // sources at once (global uiohook hook + in-window DOM listener).
+// The key is right ⌘ on macOS, right Ctrl elsewhere — shared/ptt-key.ts.
 const PTT_TAP_MS = 350
+const PTT_CODE = pttKey.pttEventCode(isMac)
+const PTT_KEY_LABEL = pttKey.pttKeyLabel(isMac)
 // Mic-ownership token for the Home composer (chat composers use their chatId).
 const HOME_VOICE_HOLDER = 'home-composer'
 const PTT_EDGE_ECHO_MS = 80
@@ -928,7 +932,6 @@ function App() {
   // auto-closes when the active note changes.
   const [liveNotePanelPath, setLiveNotePanelPath] = useState<string | null>(null)
   const [, setActiveShortcutPane] = useState<ShortcutPane>('left')
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
   // In dock mode the fixed toggle button overhangs the pane's left edge
   // (the gutter is narrower than traffic lights + toggle), so top bars pad
   // past it; the expanded panel absorbs the toggle, so ordinary padding.
@@ -1150,7 +1153,7 @@ function App() {
   // because segment consumption freezes while the gate is open.
   const [pttStatus, setPttStatus] = useState<'idle' | 'held' | 'locked'>('idle')
   const pttStatusRef = useRef<'idle' | 'held' | 'locked'>('idle')
-  // Ghostwriter chord (⇧ + right ⌘): the NEXT utterance's result gets
+  // Ghostwriter chord (⇧ + the talk key): the NEXT utterance's result gets
   // pasted at the user's cursor. Set on the down edge, consumed by the
   // utterance callback, cleared on cancel.
   const pttPasteIntentRef = useRef(false)
@@ -1568,7 +1571,7 @@ function App() {
     ttsEnabledRef.current = true
     ttsModeRef.current = 'full'
     // Push-to-talk: the mic + Deepgram socket stay warm for the whole call,
-    // but nothing is heard until the user opens the gate (hold Right ⌘, or
+    // but nothing is heard until the user opens the gate (hold the talk key, or
     // tap it to lock hands-free capture). The key release is the endpoint —
     // no silence detection, no misfires.
     void voiceRef.current
@@ -1857,8 +1860,8 @@ function App() {
   // in one gesture, and the next tap after a stop behaves normally.
   const pttSpokeAtDownRef = useRef(false)
   const pttLastEdgeRef = useRef<{ type: 'down' | 'up'; at: number } | null>(null)
-  // Right ⌘ was used as a modifier (⌘C etc.) during this press — the
-  // matching release must not commit/lock.
+  // The talk key was used as a modifier (⌘C / Ctrl+C etc.) during this
+  // press — the matching release must not commit/lock.
   const pttChordedRef = useRef(false)
 
   const pttEdgeIsEcho = useCallback((type: 'down' | 'up') => {
@@ -1923,7 +1926,7 @@ function App() {
       if (shown < 2) {
         localStorage.setItem('ptt-hold-tip-shown', String(shown + 1))
         toast('No need to keep holding', {
-          description: 'For longer turns, quick-tap right ⌘ instead — talk hands-free, then tap again to send.',
+          description: `For longer turns, quick-tap ${PTT_KEY_LABEL} instead — talk hands-free, then tap again to send.`,
           duration: 6000,
         })
       }
@@ -1961,7 +1964,7 @@ function App() {
       else handlePttChord()
     })
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight') {
+      if (e.code === PTT_CODE) {
         if (!e.repeat) handlePttDown(e.shiftKey)
         return
       }
@@ -1971,10 +1974,10 @@ function App() {
         return
       }
       if (pttStatusRef.current === 'held') handlePttChord()
-      else if (pttStatusRef.current === 'locked' && e.metaKey) handlePttChord()
+      else if (pttStatusRef.current === 'locked' && pttKey.pttModifierHeld(e, isMac)) handlePttChord()
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight') handlePttUp()
+      if (e.code === PTT_CODE) handlePttUp()
     }
     document.addEventListener('keydown', onKeyDown)
     document.addEventListener('keyup', onKeyUp)
@@ -1993,13 +1996,17 @@ function App() {
 
   // Global-PTT onboarding: shortly into a call, if the key hook is running
   // but has seen zero input events, macOS Input Monitoring hasn't taken
-  // effect — explain it instead of letting Right ⌘ silently do nothing from
-  // other apps. At most once per app session: once-ever proved too little
+  // effect — explain it instead of letting the talk key silently do nothing
+  // from other apps. At most once per app session: once-ever proved too little
   // (dismiss without granting and global PTT stayed silently broken), every
   // call would nag. (In-window PTT works regardless.)
   const inputMonitoringPromptedRef = useRef(false)
   useEffect(() => {
     if (!inCall) return
+    // macOS-only: Input Monitoring is a TCC grant with no Windows or Linux
+    // equivalent, so a dead hook there means something else entirely and
+    // this dialog would send the user looking for a switch that isn't there.
+    if (!isMac) return
     if (inputMonitoringPromptedRef.current) return
     const timer = setTimeout(async () => {
       try {
@@ -5926,7 +5933,8 @@ function App() {
 
     document.addEventListener('keydown', handleHistoryKeyDown, true)
     return () => document.removeEventListener('keydown', handleHistoryKeyDown, true)
-  }, [isMac, selectedPath])
+    // isMac is a module constant now (lib/shortcut), not a component value.
+  }, [selectedPath])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {

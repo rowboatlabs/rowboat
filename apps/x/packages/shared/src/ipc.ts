@@ -1278,14 +1278,15 @@ export const ipcSchemas = {
       success: z.literal(true),
     }),
   },
-  // --- Global push-to-talk (Right ⌘) ---
+  // --- Global push-to-talk (right ⌘ on macOS, right Ctrl elsewhere —
+  // see ptt-key.ts) ---
   // Push channel: main → app window, a system-wide PTT key transition.
-  // 'chord' = another key/click while Right ⌘ was held (it's being used as a
+  // 'chord' = another key/click while the talk key was held (it's being used as a
   // modifier, not the talk key) — the renderer cancels the capture.
   'voice:ptt-key': {
     req: z.object({
       type: z.enum(['down', 'up', 'chord']),
-      // Ghostwriter chord (⇧ held when Right ⌘ went down): this capture's
+      // Ghostwriter chord (⇧ held when the talk key went down): this capture's
       // result should be pasted at the user's cursor.
       paste: z.boolean().optional(),
     }),
@@ -1459,6 +1460,15 @@ export const ipcSchemas = {
     req: z.object({ x: z.number(), y: z.number() }),
     res: z.null(),
   },
+  // Main → companion: the window is being dragged right now. A drag region
+  // is a NATIVE affair — on Windows the hit test answers HTCAPTION, on macOS
+  // it is a view layered over the page — so the renderer never sees the
+  // mousedown and `:active` never fires. Main watches its own 'move' instead
+  // and says so, which is what lets the cursor go from grab to grabbing.
+  'quick-ask:dragging': {
+    req: z.object({ dragging: z.boolean() }),
+    res: z.null(),
+  },
   // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
   // whether a reply is SPOKEN now follows the question's modality — spoken
   // questions get spoken replies, typed ones stay silent — plus the
@@ -1543,6 +1553,25 @@ export const ipcSchemas = {
   // hold-to-talk chord detection all follow the one source of truth.
   'quick-ask:shortcut-changed': {
     req: z.object({ accelerator: z.string(), registered: z.boolean() }),
+    res: z.null(),
+  },
+  // --- Theme, across windows ---
+  // The setting itself lives in the renderer's localStorage, which every
+  // window already shares (one origin, one Electron session), so a freshly
+  // loaded utility window paints the right skin with no round trip. These
+  // channels carry only the *changes*: utility windows have no ThemeProvider,
+  // and a localStorage write in the app window raises no cross-window event
+  // they can rely on, so the app window tells main and main tells them.
+  // The raw setting travels, not the resolved one — 'system' must resolve
+  // per window, against that window's own matchMedia.
+  // App window → main, on mount and on every change.
+  'theme:set': {
+    req: z.object({ theme: z.enum(['light', 'dark', 'system']) }),
+    res: z.object({}),
+  },
+  // Push: main → every OTHER window.
+  'theme:changed': {
+    req: z.object({ theme: z.enum(['light', 'dark', 'system']) }),
     res: z.null(),
   },
   // --- Ambient meeting detection popup (own always-on-top window) ---

@@ -173,6 +173,32 @@ export function onAppWindowClosed() {
 let skipperCorner: { x: number; y: number } | null = null;
 let applyingBounds = false;
 
+// --- Drag cursor ---
+// The card and the mascot are drag handles, and a handle should say so under
+// the hand: grab at rest, GRABBING while it moves. The renderer cannot tell
+// on its own — a drag region is native (HTCAPTION on Windows, a layered view
+// on macOS), so no mousedown ever reaches the page and `:active` stays false.
+// Main owns the one witness that always fires — its own 'move' — and pushes
+// the edges of a drag burst: true on the first move, false once the moves
+// stop. The tail is short enough not to linger after the button is released
+// and long enough to survive the gaps between frames of a slow drag.
+const DRAG_IDLE_MS = 180;
+let dragging = false;
+let dragIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function markDragging(win: BrowserWindow) {
+  if (!dragging) {
+    dragging = true;
+    win.webContents.send('quick-ask:dragging', { dragging: true });
+  }
+  if (dragIdleTimer) clearTimeout(dragIdleTimer);
+  dragIdleTimer = setTimeout(() => {
+    dragIdleTimer = null;
+    dragging = false;
+    if (!win.isDestroyed()) win.webContents.send('quick-ask:dragging', { dragging: false });
+  }, DRAG_IDLE_MS);
+}
+
 // --- Click-through ---
 // The frame is far bigger than anything it paints: the card sits at the
 // bottom with a tall transparent stage above it (so popovers open upward
@@ -470,6 +496,7 @@ function createWindow(): BrowserWindow {
     if (applyingBounds || win.isDestroyed() || mode !== 'pinned') return;
     const b = win.getBounds();
     skipperCorner = { x: b.x + b.width, y: b.y + b.height };
+    markDragging(win);
   });
   win.on('closed', () => {
     if (quickAskWin === win) quickAskWin = null;

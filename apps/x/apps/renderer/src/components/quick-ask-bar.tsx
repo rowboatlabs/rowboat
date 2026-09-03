@@ -41,9 +41,12 @@ import {
 import { COMMAND_CENTER_CHAT_SENTINEL } from '@x/shared/src/home-threads.js'
 import { reduceTurn } from '@x/shared/src/turns.js'
 import * as quickAskShortcut from '@x/shared/src/quick-ask-shortcut.js'
+import * as pttKey from '@x/shared/src/ptt-key.js'
 import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
+import { useWindowTheme } from '@/hooks/use-window-theme'
 
 import { TalkingHead } from '@/components/talking-head'
+import { isMac } from '@/lib/shortcut'
 import { isChatMessage } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
 import { buildTurnConversation, stripVoiceTags } from '@/lib/session-chat/turn-view'
@@ -56,11 +59,14 @@ import {
 } from '@/components/chat-input-with-mentions'
 import type { FileMention, PromptInputMessage } from '@/components/ai-elements/prompt-input'
 
-// Hold-to-speak key by platform. macOS: right ⌘. Windows: the same physical
-// position is the right Win key, which the OS owns (a tap opens the Start
-// menu) — right Ctrl is the safe equivalent there.
-const IS_MAC = navigator.platform.startsWith('Mac')
-const PTT_CODE = IS_MAC ? 'MetaRight' : 'ControlRight'
+// Hold-to-speak key by platform (shared/ptt-key.ts is the one place that
+// decides): macOS right ⌘, elsewhere right Ctrl — the same physical position
+// on a PC is the right Win key, which the OS owns (a tap opens the Start
+// menu). The LABELS come from there too: this window used to bind Ctrl and
+// still say ⌘, which is the worst of both.
+const PTT_CODE = pttKey.pttEventCode(isMac)
+const PTT_LABEL = pttKey.pttKeyLabel(isMac)
+const PTT_KEYCAP = pttKey.pttKeycap(isMac)
 
 type CompanionMode = 'hidden' | 'pinned'
 
@@ -77,7 +83,7 @@ type CallState = {
   /** Tool-name-level "what's happening" while a turn runs, else null. */
   activityText: string | null
   interimText: string | null
-  /** A quick ⌘ tap locked hands-free capture (until the next tap). */
+  /** A quick talk-key tap locked hands-free capture (until the next tap). */
   pttLocked: boolean
   /** Latest assistant reply of this call (streams while generating). */
   responseText: string | null
@@ -115,6 +121,29 @@ type PopoutAction =
 const PINNED_BASE_HEIGHT = 320
 const PINNED_RESPONSE_HEIGHT = 560
 
+// The card's chip recipe, in both skins: a translucent tint of the OPPOSITE
+// ink over a translucent card. Tokens can't say that — `bg-accent` is a flat
+// colour, and flattening these would cost the card the frosted look it is
+// built on — so the pairs are spelled out, once, here.
+//
+// Surface and resting ink are separate because the labelled destination chip
+// rests a shade darker than the icon-only buttons beside it. Only that
+// resting shade differs, so the hover and dark inks stay with the surface.
+// The ring WIDTH (`ring-1 ring-inset`) stays at each call site — those
+// controls differ in shape, not in colour.
+const CHIP_SURFACE =
+  'active:scale-95 bg-black/[0.04] ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900' +
+  ' dark:bg-white/[0.06] dark:ring-white/10 dark:hover:bg-white/[0.12] dark:hover:text-neutral-100'
+const CHIP_INK = 'text-neutral-500 dark:text-neutral-400'
+const CHIP_INK_LABELLED = 'text-neutral-600 dark:text-neutral-400'
+const CHIP_IDLE = `${CHIP_SURFACE} ${CHIP_INK}`
+const CHIP_ACTIVE =
+  'active:scale-95 bg-black/[0.08] text-neutral-900 ring-black/15' +
+  ' dark:bg-white/[0.12] dark:text-neutral-100 dark:ring-white/20'
+const CHIP_DISABLED =
+  'cursor-default bg-black/[0.04] text-neutral-300 ring-black/5' +
+  ' dark:bg-white/[0.04] dark:text-neutral-600 dark:ring-white/5'
+
 /**
  * Content of the companion window (global ⌥⇧Space — see main's quick-ask.ts).
  * ONE surface: the SKIPPER — the mascot with its text panel, hosting a live
@@ -134,15 +163,14 @@ const PINNED_RESPONSE_HEIGHT = 560
  * card tucks the text away.
  */
 export function QuickAskBar() {
-  // Transparent window: clear every layer so only the card paints. This
-  // window skips the app's ThemeProvider — claim the LIGHT tokens explicitly
-  // (the light-skin redesign, #810). Removing 'dark' matters: the
-  // pre-light-redesign code added it, and the window persists across HMR, so
-  // a stale 'dark' class left code blocks rendering dark-theme tokens on the
-  // light panel.
+  // This window skips the app's ThemeProvider (main.tsx renders it on a hash
+  // route, outside the tree), so it resolves the shared setting itself and
+  // owns the light/dark class on <html>. It used to hard-force 'light' for
+  // the light-skin redesign (#810) — which meant the theme toggle could never
+  // reach the companion at all.
+  useWindowTheme()
+  // Transparent window: clear every layer so only the card paints.
   useEffect(() => {
-    document.documentElement.classList.remove('dark')
-    document.documentElement.classList.add('light')
     document.documentElement.style.background = 'transparent'
     document.body.style.background = 'transparent'
     // The document must never scroll — a wheel event could shove the whole
@@ -206,6 +234,7 @@ export function QuickAskBar() {
   // The frame is mostly transparent stage — hand the clicks that land on it
   // back to whatever the user has underneath.
   useClickThrough(pinned)
+  useDragCursor()
 
   // Mirrors callState.speakerMuted for the fold callback below (which is
   // deliberately dependency-free).
@@ -225,6 +254,11 @@ export function QuickAskBar() {
     // where every control looks dead) — one IPC round-trip is imperceptible.
     void window.ipc.invoke('quickAsk:setPinnedCollapsed', { collapsed: next }).catch(() => {})
   }, [])
+
+  // The card's fold is animated, so it outlives `collapsed` by the length of
+  // its exit (usePresence) — everything below keys off `card.mounted`, not
+  // `!collapsed`.
+  const card = usePresence(!collapsed, CARD_EXIT_MS)
 
   // The visible card, for hit-testing stage clicks: the window is a tall
   // transparent frame, so "clicked outside" often lands INSIDE its invisible
@@ -477,8 +511,8 @@ export function QuickAskBar() {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === PTT_CODE) sendAction('ptt-up')
     }
-    // Capture phase: right ⌘ must work even while the embedded composer (or
-    // any popover) has focus — "press ⌘ and speak" is promised in BOTH
+    // Capture phase: the talk key must work even while the embedded composer
+    // (or any popover) has focus — "press and speak" is promised in BOTH
     // Skipper states, and bubble-phase listeners can be swallowed below.
     document.addEventListener('keydown', onKeyDown, true)
     document.addEventListener('keyup', onKeyUp, true)
@@ -583,6 +617,7 @@ export function QuickAskBar() {
   // and the mascot never moves, resizes, or replays its entry animation.
   return (
     <div data-qa-passthrough className="flex h-screen w-screen select-none flex-col overflow-hidden">
+      <style>{COMPANION_MOTION_CSS}</style>
       {/* The invisible stage: popovers open into this zone. It is marked
           passthrough, so clicks that land on it go to whatever the user has
           BEHIND this window (useClickThrough) instead of being swallowed by
@@ -606,12 +641,27 @@ export function QuickAskBar() {
           both states — with the corner-anchored window, that pins the
           mascot to the exact same screen pixels across fold/unfold. */}
       <div data-qa-passthrough className="flex shrink-0 items-end justify-end gap-1 px-6 pb-5">
-      {!collapsed && (
-      <div data-qa-passthrough className="relative min-w-0 flex-1">
-      {/* Light skin (#810): near-white card, hairline dark border, dark
-          text. The window's native shadow is off (it would outline the
-          whole transparent frame) — the card draws its own. */}
-      <div ref={cardRef} className="qa-card w-full overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)]">
+      {card.mounted && (
+      <div
+        data-qa-passthrough
+        className={`relative min-w-0 flex-1 ${card.exiting ? 'qa-card-out pointer-events-none' : 'qa-card-in'}`}
+      >
+      {/* Near-white card with a hairline dark border in light; near-black
+          with a hairline light one in dark. #810 introduced the light skin as
+          the only skin — it follows the app's theme setting now (see
+          useWindowTheme above). The window's native shadow is off (it would
+          outline the whole transparent frame) — the card draws its own, and
+          draws it heavier in dark, where a soft grey haze would just vanish
+          into whatever is behind the window. */}
+      <div ref={cardRef} style={dragRegion} className="qa-card relative w-full cursor-grab overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:text-neutral-100 dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)]">
+        {/* The card is a drag handle, like the mascot: every bit of bare
+            surface — the border, the gutters around the action strip, the
+            frame around the composer — picks the Skipper up. The CONTROLS
+            punch holes in it (noDragRegion below): Electron makes children
+            draggable unless they opt out, so each chip, the response panel
+            (its scrollbar rides the card's edge, and a scrollbar that moved
+            the window instead of the text would be a trap) and the composer
+            say so explicitly. */}
         {/* Charcoal code blocks. Streamdown's own dark rule is
             background: var(--shiki-dark-bg) !important inside Tailwind's
             utilities layer — layered !important outranks any override we
@@ -625,6 +675,11 @@ export function QuickAskBar() {
           }
           .qa-card [data-streamdown="code-block"] {
             border-color: rgba(0, 0, 0, 0.3) !important;
+          }
+          /* Same charcoal block, but a dark hairline on a dark card is an
+             invisible one — the edge has to come from the light side. */
+          .dark .qa-card [data-streamdown="code-block"] {
+            border-color: rgba(255, 255, 255, 0.15) !important;
           }
         `}</style>
         {/* Action strip: the destination affordances plus the speaker mute.
@@ -640,7 +695,8 @@ export function QuickAskBar() {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.04] py-1 pl-2.5 pr-2 text-[11px] font-medium text-neutral-600 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                    style={noDragRegion}
+                    className={`flex min-w-0 items-center gap-1.5 rounded-full py-1 pl-2.5 pr-2 text-[11px] font-medium ring-1 ring-inset transition ${CHIP_SURFACE} ${CHIP_INK_LABELLED}`}
                   >
                     <MessageCircle className="h-3 w-3 shrink-0" />
                     <span className="max-w-[220px] truncate">{chatContext?.activeTitle ?? 'New chat'}</span>
@@ -684,9 +740,10 @@ export function QuickAskBar() {
             <TooltipTrigger asChild>
               <button
                 type="button"
+                style={noDragRegion}
                 onClick={newChat}
                 aria-label="New chat"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition ${CHIP_IDLE}`}
               >
                 <Plus className="h-3.5 w-3.5" />
               </button>
@@ -699,15 +756,16 @@ export function QuickAskBar() {
             <TooltipTrigger asChild>
               <button
                 type="button"
+                style={noDragRegion}
                 onClick={activeRunId ? toggleHistory : undefined}
                 aria-label={showHistory ? 'Hide history' : 'Peek at recent history'}
                 aria-disabled={!activeRunId}
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition ${
                   showHistory
-                    ? 'bg-black/[0.08] text-neutral-900 ring-black/15'
+                    ? CHIP_ACTIVE
                     : activeRunId
-                      ? 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
-                      : 'cursor-default bg-black/[0.04] text-neutral-300 ring-black/5'
+                      ? CHIP_IDLE
+                      : CHIP_DISABLED
                 }`}
               >
                 {showHistory ? <ChevronsDown className="h-3.5 w-3.5" /> : <ChevronsUp className="h-3.5 w-3.5" />}
@@ -727,12 +785,13 @@ export function QuickAskBar() {
             <TooltipTrigger asChild>
               <button
                 type="button"
+                style={noDragRegion}
                 onClick={() => sendAction('toggle-speaker')}
                 aria-label={callState.speakerMuted ? 'Unmute spoken replies' : 'Mute spoken replies'}
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition ${
                   callState.speakerMuted
-                    ? 'bg-black/[0.04] text-neutral-500 ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900'
-                    : 'bg-sky-500/15 text-sky-700 ring-sky-500/30'
+                    ? CHIP_IDLE
+                    : 'bg-sky-500/15 text-sky-700 ring-sky-500/30 dark:bg-sky-400/20 dark:text-sky-300 dark:ring-sky-400/30'
                 }`}
               >
                 {callState.speakerMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
@@ -751,9 +810,10 @@ export function QuickAskBar() {
             <TooltipTrigger asChild>
               <button
                 type="button"
+                style={noDragRegion}
                 onClick={openInApp}
                 aria-label="Open in Rowboat"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black/[0.04] text-neutral-500 ring-1 ring-inset ring-black/10 transition-colors hover:bg-black/[0.08] hover:text-neutral-900"
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition ${CHIP_IDLE}`}
               >
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
@@ -765,56 +825,42 @@ export function QuickAskBar() {
         {(panelAsked || panelText || showHistory) && (
           <div
             ref={panelScrollRef}
-            className="max-h-[280px] cursor-text select-text overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800"
+            style={noDragRegion}
+            className="qa-rise max-h-[280px] cursor-text select-text overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800 dark:text-neutral-200"
           >
             {showHistory && historyData === null && (
               <div className="mb-2 animate-pulse text-xs text-neutral-400">Loading history…</div>
             )}
+            {/* Peeked history and the live exchange are the SAME two turn
+                shapes in the same order — the only thing between them is the
+                rule saying where the past stops. (They used to diverge: the
+                history was blanket-dimmed, its questions were bare grey
+                text, and the rule between them was labelled "earlier" while
+                sitting above the newest turn of all.) */}
             {showHistory && earlierItems !== null && (
               <div className="mb-1">
                 {earlierItems.length === 0 ? (
                   <div className="mb-2 text-xs text-neutral-400">No earlier messages in this chat.</div>
                 ) : (
-                  <div className="opacity-75">
-                    {earlierItems.map((m, i) =>
-                      m.role === 'user' ? (
-                        <div key={i} className="mb-1.5 mt-3 text-sm font-medium text-neutral-500 first:mt-0">
-                          {m.content}
-                        </div>
-                      ) : (
-                        <Streamdown
-                          key={i}
-                          className="dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800"
-                        >
-                          {m.content}
-                        </Streamdown>
-                      ),
-                    )}
-                  </div>
+                  earlierItems.map((m, i) =>
+                    m.role === 'user' ? (
+                      <UserTurn key={i}>{m.content}</UserTurn>
+                    ) : (
+                      <AssistantTurn key={i}>{m.content}</AssistantTurn>
+                    ),
+                  )
                 )}
-                {(panelAsked || panelText) && earlierItems.length > 0 && (
-                  <div className="my-2 flex items-center gap-2 text-[13px] text-neutral-400">
-                    <span className="h-px flex-1 bg-black/10" />
-                    earlier
-                    <span className="h-px flex-1 bg-black/10" />
-                  </div>
-                )}
+                {(panelAsked || panelText) && earlierItems.length > 0 && <TurnDivider>now</TurnDivider>}
               </div>
             )}
             {/* Inside the scroll area — the question scrolls away with the
                 answer instead of persisting as a header. */}
-            {panelAsked && <div className="mb-2 text-sm font-medium text-neutral-500">{panelAsked}</div>}
+            {panelAsked && <UserTurn>{panelAsked}</UserTurn>}
             {panelText ? (
-              /* `.dark` scoped to the markdown only: shiki's token colors key
-                 off a .dark ancestor, so this flips code to its dark palette
-                 (matching the charcoal block bg) without darkening the rest
-                 of the light panel — the prose classes here are explicit. */
-              <Streamdown className="dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800">
-                {panelText}
-              </Streamdown>
+              <AssistantTurn>{panelText}</AssistantTurn>
             ) : (
               panelProcessing && (
-                <span className="animate-pulse text-neutral-500">{panelStatusText}</span>
+                <span className="animate-pulse text-neutral-500 dark:text-neutral-400">{panelStatusText}</span>
               )
             )}
             {panelProcessing && panelText && <span className="animate-pulse">▍</span>}
@@ -825,40 +871,71 @@ export function QuickAskBar() {
             attachments, search/code/permissions, model/effort) to the app
             window, which submits into the companion's chat exactly like an
             in-app composer message. */}
-        <div className="border-t border-black/5 p-3">
-          <ChatInputWithMentions
-            knowledgeFiles={knowledgeFiles}
-            recentFiles={[]}
-            visibleFiles={knowledgeFiles}
-            onSubmit={submit}
-            onStop={() => sendAction('stop-speaking')}
-            isProcessing={panelProcessing}
-            runId={null}
-            placeholder="Type instead — @ mentions work too…"
-            focusSignal={focusSignal}
-            onSelectionChange={(sel) => {
-              selectionRef.current = sel ?? null
-            }}
-            voiceAvailable={false}
-          />
+        <div className="p-3">
+          {/* The composer opts out of the card's drag region — the p-3 frame
+              around it stays a grab handle. */}
+          <div style={noDragRegion}>
+            <ChatInputWithMentions
+              knowledgeFiles={knowledgeFiles}
+              recentFiles={[]}
+              visibleFiles={knowledgeFiles}
+              onSubmit={submit}
+              onStop={() => sendAction('stop-speaking')}
+              isProcessing={panelProcessing}
+              runId={null}
+              placeholder="Type instead — @ mentions work too…"
+              focusSignal={focusSignal}
+              onSelectionChange={(sel) => {
+                selectionRef.current = sel ?? null
+              }}
+              voiceAvailable={false}
+            />
+          </div>
         </div>
       </div>
 
       {/* Tuck handle on the card's mascot-side edge: push the text into the
-          mascot → voice-to-voice. The session keeps going. */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => requestCollapsed(true)}
-            aria-label="Tuck the text away"
-            className="absolute -right-3 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-colors hover:bg-neutral-50 hover:text-neutral-900"
-          >
-            <ChevronsRight className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top">Tuck the text away — the session keeps going</TooltipContent>
-      </Tooltip>
+          mascot → voice-to-voice. The session keeps going.
+
+          Built like UnfoldBubble, and for the same reason: this wrapper is
+          the DRAG-REGION HOLE, so it is static and transform-free (placed
+          with calc, not -translate-y-1/2). The button used to BE the hole
+          while carrying three transforms — the centring translate plus
+          hover:translate-x and active:scale — and Electron punches holes
+          from the rect Blink last computed on style/layout invalidation,
+          not once per composited frame. So the hole sat wherever the last
+          animation left it while the art painted elsewhere, and a press on
+          the visible circle landed on the card's drag region instead: on
+          Windows that is HTCAPTION, the window enters the OS move loop and
+          the click never happens. That is the "sometimes it works" report.
+
+          The hole is deliberately bigger than the art — 40px around a 32px
+          circle, the same oversized-target trick as the bubble and pins.
+          But it hangs 18px past the card edge and the gap to the mascot is
+          only 4px, so it reaches 14px into the mascot column — over the
+          left lip of the mic pin's own oversized target (38px at left:18%
+          of 164px starts at 10.5px). Hence pointer-events-none here with
+          the button opting back in: the hole still punches from painted
+          bounds (an app-region concern, not a hit-testing one), while
+          presses over the overlap fall through to the pin underneath. */}
+      <span
+        className="pointer-events-none absolute z-10 flex h-10 w-10 items-center justify-center"
+        style={{ ...noDragRegion, top: 'calc(50% - 20px)', right: '-18px' }}
+      >
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => requestCollapsed(true)}
+              aria-label="Tuck the text away"
+              className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition hover:translate-x-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_2px_8px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+            >
+              <ChevronsRight className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">Tuck the text away — the session keeps going</TooltipContent>
+        </Tooltip>
+      </span>
       </div>
       )}
 
@@ -869,12 +946,12 @@ export function QuickAskBar() {
           on screen, so fold/unfold moves NOTHING here; only the card beside
           it comes and goes. It is the control surface AND the drag
           handle — which is why the column is deliberately NOT marked
-          passthrough (useClickThrough): the whole 132px footprint stays
+          passthrough (useClickThrough): the whole SKIPPER_SIZE footprint stays
           solid so the Skipper can be grabbed anywhere on it, exactly as
           before, instead of only where the artwork happens to paint. */}
       <div
-        className="relative flex w-[132px] shrink-0 cursor-grab select-none flex-col items-center"
-        style={dragRegion}
+        className="relative flex shrink-0 cursor-grab select-none flex-col items-center"
+        style={{ ...dragRegion, width: SKIPPER_SIZE }}
         title="Drag to move your Skipper"
       >
         <style>{`
@@ -891,18 +968,20 @@ export function QuickAskBar() {
           className="relative -mb-4"
           style={{ animation: 'skipper-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
         >
+          {/* Tucked: the one way back, over the head. */}
+          {collapsed && <UnfoldBubble onExpand={() => requestCollapsed(false)} />}
           {/* Listening halo — rings pulse around the head while the mic
-              gate is open, so "press ⌘ and speak" is visibly working in
+              gate is open, so "press the talk key and speak" is visibly working in
               both states. */}
           {!callState.micMuted && (callState.status === 'listening' || callState.pttLocked) && (
             <>
               <span
                 className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
-                style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
+                style={{ top: '42%', width: HALO_SIZE, height: HALO_SIZE, marginLeft: -HALO_SIZE / 2, marginTop: -HALO_SIZE / 2, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
               />
               <span
                 className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
-                style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
+                style={{ top: '42%', width: HALO_SIZE, height: HALO_SIZE, marginLeft: -HALO_SIZE / 2, marginTop: -HALO_SIZE / 2, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
               />
             </>
           )}
@@ -913,30 +992,25 @@ export function QuickAskBar() {
                 : callState.ttsState
             }
             getLevel={synthLevel}
-            size={132}
+            size={SKIPPER_SIZE}
             hat="cowboy"
             hatOverlay={
-              <SkipperPins
-                state={callState}
-                sendAction={sendAction}
-                textPin={collapsed ? 'expand' : 'collapse'}
-                onTextPin={() => requestCollapsed(!collapsed)}
-              />
+              <SkipperPins state={callState} sendAction={sendAction} />
             }
           />
         </div>
         {/* Fixed-height caption + chip slots: present in BOTH states so the
             head never shifts when a caption appears or the text folds. Both
             are single-line and CENTERED on the mascot — wider than the
-            132px column they overflow it symmetrically (the column doesn't
+            mascot column they overflow it symmetrically (the column doesn't
             clip), which reads as a caption under the head instead of a
             squeezed left-ragged wrap. */}
-        <div className="flex h-4 items-center">
+        <div className="flex h-5 items-center">
           {skipperCaption && (
-            <span className="max-w-[176px] truncate whitespace-nowrap rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{skipperCaption}</span>
+            <span className="max-w-[220px] truncate whitespace-nowrap rounded bg-black/70 px-2 py-0.5 text-[11px] text-white/90">{skipperCaption}</span>
           )}
         </div>
-        <div className="flex h-6 items-center">
+        <div className="flex h-7 items-center">
           <SkipperStatusChip state={callState} activity={heldActivity} />
         </div>
       </div>
@@ -947,7 +1021,7 @@ export function QuickAskBar() {
 }
 
 const STATUS_DISPLAY: Record<NonNullable<CallState['status']>, { label: string; dotClass: string }> = {
-  idle: { label: 'Hold right ⌘ to talk', dotClass: 'bg-neutral-500' },
+  idle: { label: `Hold ${PTT_LABEL} to talk`, dotClass: 'bg-neutral-500' },
   listening: { label: 'Listening', dotClass: 'bg-[var(--rowboat-success)] animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
@@ -1045,6 +1119,125 @@ function useClickThrough(active: boolean) {
   }, [active])
 }
 
+/**
+ * The Skipper's rendered size, in design px — shared by BOTH presentations
+ * (card-side column and tucked) so the mascot is the same object either way,
+ * and by the listening halo, whose rings are sized as a fraction of it.
+ */
+const SKIPPER_SIZE = 164
+const HALO_SIZE = Math.round(SKIPPER_SIZE * 0.79)
+
+/**
+ * Grab → GRABBING while the Skipper is actually moving.
+ *
+ * The handles (the card and the mascot column) are drag regions, and a drag
+ * region is native: on Windows the hit test answers HTCAPTION, on macOS it is
+ * a view layered over the page. Neither ever delivers the mousedown, so
+ * `:active` — the obvious way to write this — is never true here. Main
+ * watches the window's own 'move' instead and pushes the edges of the drag
+ * (quick-ask:dragging); this flips a class on <html> that the rule below
+ * turns into the closed-hand cursor everywhere, since during a drag the
+ * pointer is over a handle by definition.
+ *
+ * The rule is injected rather than rendered: the window has several
+ * presentations (card, pill, tucked mascot) and each is an early return, so
+ * a <style> in any one of them would be missing from the others.
+ */
+function useDragCursor() {
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = 'html.qa-dragging, html.qa-dragging * { cursor: grabbing !important; }'
+    document.head.appendChild(style)
+    const off = window.ipc.on('quick-ask:dragging', ({ dragging }) => {
+      document.documentElement.classList.toggle('qa-dragging', dragging)
+    })
+    return () => {
+      off()
+      style.remove()
+      document.documentElement.classList.remove('qa-dragging')
+    }
+  }, [])
+}
+
+/**
+ * How long the card's fold-away runs. The node has to stay mounted for it
+ * (see usePresence), so main and the renderer must agree on one number.
+ */
+const CARD_EXIT_MS = 200
+
+/**
+ * Keep a node on screen for its exit animation.
+ *
+ * The card's `collapsed` comes from MAIN — the renderer never flips it
+ * optimistically, because main owns the window geometry with it — so the
+ * card would otherwise vanish between one commit and the next, with nothing
+ * to animate. This holds the node for `exitMs` after it goes away and says
+ * which half of the motion it is in.
+ */
+function usePresence(visible: boolean, exitMs: number) {
+  const [mounted, setMounted] = useState(visible)
+  // Coming back is instant — remount in the SAME commit that flips visible,
+  // so the entry animation starts on the frame the fold was undone. (Render-
+  // time previous-state adjustment, React's no-effect pattern: an effect here
+  // would cost a blank frame first.)
+  const [prevVisible, setPrevVisible] = useState(visible)
+  if (prevVisible !== visible) {
+    setPrevVisible(visible)
+    if (visible) setMounted(true)
+  }
+  // Going away waits for the animation.
+  useEffect(() => {
+    if (visible) return
+    const t = setTimeout(() => setMounted(false), exitMs)
+    return () => clearTimeout(t)
+  }, [visible, exitMs])
+  return { mounted, exiting: mounted && !visible }
+}
+
+/**
+ * The window's motion, in one place. It is deliberately small and quick:
+ * this thing floats over the user's actual work, so anything showy here is
+ * a distraction rather than a delight. The card folds TOWARD the mascot
+ * (transform-origin at the corner the window is anchored by), which is
+ * where the text is going.
+ */
+const COMPANION_MOTION_CSS = `
+  @keyframes qa-card-in {
+    from { opacity: 0; transform: translateX(28px) scale(0.94); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes qa-card-out {
+    from { opacity: 1; transform: none; }
+    to { opacity: 0; transform: translateX(28px) scale(0.94); }
+  }
+  @keyframes qa-rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes qa-bubble-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.7); }
+    to { opacity: 1; transform: none; }
+  }
+  /* Both halves name their own easing rather than a shared ease: the card
+     should LEAVE with gathering speed and ARRIVE with none, which is the
+     difference between a fold that snaps and one that settles. Both classes
+     sit on the card's WRAPPER, never on the card itself: the card is a drag
+     region, and a region that animates its transform leaves Electron
+     punching the hole where the animation started. */
+  .qa-card-in,
+  .qa-card-out { transform-origin: 100% 80%; }
+  .qa-card-in { animation: qa-card-in 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+  .qa-card-out { animation: qa-card-out ${CARD_EXIT_MS}ms cubic-bezier(0.4, 0, 0.9, 0.3) forwards; }
+  .qa-rise { animation: qa-rise 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+  /* Delayed past the fold (backwards = held invisible until then), so the
+     bubble arrives into space the card has already left. */
+  .qa-bubble { animation: qa-bubble-in 0.26s cubic-bezier(0.34, 1.56, 0.64, 1) ${CARD_EXIT_MS}ms backwards; }
+  @media (prefers-reduced-motion: reduce) {
+    .qa-card-in, .qa-rise, .qa-bubble { animation: none; }
+    .qa-card-out { animation: none; opacity: 0; }
+  }
+`
+
 const dragRegion = { WebkitAppRegion: 'drag' } as React.CSSProperties
 const noDragRegion = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 
@@ -1076,31 +1269,28 @@ function useHeldLabel(next: string | null, holdMs = 800): string | null {
 /**
  * The Skipper's control pins — ONE cluster for both presentations (text
  * panel open or folded), riding TalkingHead's hatOverlay so they bob with
- * the artwork. Hat = voice: the mic pin, morphing into Stop while a turn is
- * in flight. Boat = surface: the share bow light, the text fold/unfold pin
- * on the left edge, ✕ end on the right. The speaker mute deliberately does
- * NOT live here — with the text folded, voice is the only output channel,
- * so the mute is the text panel's affordance. no-drag sits on EACH button:
- * Electron punches drag-region holes from painted bounds, and a zero-size
- * wrapper excludes nothing.
+ * the artwork.
+ *
+ * They all ride the BOAT now, left to right: the mic (morphing into Stop
+ * while a turn is in flight), the share bow light, ✕ end. The mic used to
+ * sit on the hat band, a reach away from the other two — one row of three
+ * on the deck is the whole control surface at a glance. The text's fold and
+ * unfold are NOT here: folding is the handle on the card's edge, unfolding
+ * the bubble above the head (UnfoldBubble), each living where the gesture
+ * actually points. The speaker mute isn't here either — with the text
+ * folded, voice is the only output channel, so the mute belongs to the text
+ * panel.
+ *
+ * no-drag sits on EACH button: Electron punches drag-region holes from
+ * painted bounds, and a zero-size wrapper excludes nothing.
  */
 function SkipperPins({
   state,
   sendAction,
-  textPin,
-  onTextPin,
 }: {
   state: CallState
   sendAction: (action: PopoutAction) => void
-  /** 'expand' = bring the text back (tucked); 'collapse' = fold it away. */
-  textPin: 'expand' | 'collapse'
-  onTextPin: () => void
 }) {
-  const shortcutState = useQuickAskShortcut()
-  const shortcutLabel = quickAskShortcut.formatShortcut(
-    shortcutState.accelerator,
-    typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac'),
-  )
   // The mic and Stop are exclusive states of ONE control: while a turn is
   // in flight the mic is dead anyway, so the hat's single pin morphs.
   const busy = state.status === 'thinking' || state.status === 'speaking'
@@ -1112,11 +1302,11 @@ function SkipperPins({
           onClick={() => sendAction('stop-speaking')}
           aria-label="Stop the assistant"
           title="Stop — cut the reply short (the session keeps going)"
-          className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
-          style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
+          className="group/pin absolute flex h-[38px] w-[38px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
+          style={{ ...noDragRegion, left: '18%', top: '68%' }}
         >
-          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110">
-            <Square className="h-2.5 w-2.5 fill-current text-white" />
+          <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-red-600 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110">
+            <Square className="h-3 w-3 fill-current text-white" />
           </span>
         </button>
       ) : (
@@ -1134,17 +1324,17 @@ function SkipperPins({
             if (!state.micMuted) sendAction('ptt-up')
           }}
           aria-label="Hold to talk — tap for hands-free"
-          title="Hold to talk (tap for hands-free) — or hold the right ⌘ key"
-          className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
-          style={{ ...noDragRegion, left: '50%', top: '17.3%' }}
+          title={`Hold to talk (tap for hands-free) — or hold the ${PTT_LABEL} key`}
+          className="group/pin absolute flex h-[38px] w-[38px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
+          style={{ ...noDragRegion, left: '18%', top: '68%' }}
         >
           <span
-            className={`flex h-[18px] w-[18px] select-none items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
+            className={`flex h-[22px] w-[22px] select-none items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
               state.status === 'listening' || state.pttLocked ? 'bg-[var(--rowboat-success)]' : 'bg-amber-400'
             }`}
           >
             <Mic
-              className={`h-3 w-3 ${
+              className={`h-3.5 w-3.5 ${
                 state.status === 'listening' || state.pttLocked ? 'text-white' : 'text-[#17171B]'
               }`}
             />
@@ -1159,37 +1349,21 @@ function SkipperPins({
         type="button"
         onClick={() => sendAction('toggle-share')}
         aria-label={state.screenSharing ? 'Stop sharing your screen' : 'Share your screen'}
-        className="group/pin absolute flex h-[30px] w-[30px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
+        className="group/pin absolute flex h-[38px] w-[38px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
         style={{ ...noDragRegion, left: '50%', top: '73%' }}
       >
         <span
-          className={`relative flex h-[18px] w-[18px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
+          className={`relative flex h-[22px] w-[22px] items-center justify-center rounded-full shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-110 ${
             state.screenSharing ? 'bg-sky-500' : 'bg-neutral-600'
           }`}
         >
-          <MonitorUp className="h-3 w-3 text-white" />
+          <MonitorUp className="h-3.5 w-3.5 text-white" />
           {state.screenSharing && (
-            <span className="absolute -right-1 -top-1 block h-[7px] w-[7px] animate-pulse rounded-full bg-sky-300 ring-1 ring-[#17171B]" />
+            <span className="absolute -right-1 -top-1 block h-[8px] w-[8px] animate-pulse rounded-full bg-sky-300 ring-1 ring-[#17171B]" />
           )}
         </span>
-        <span className="pointer-events-none absolute left-1/2 top-full mt-0.5 -translate-x-1/2 whitespace-nowrap rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-medium text-white opacity-0 transition-opacity group-hover/pin:opacity-100">
+        <span className="pointer-events-none absolute left-1/2 top-full mt-0.5 -translate-x-1/2 whitespace-nowrap rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover/pin:opacity-100">
           {state.screenSharing ? 'Sharing screen — click to stop' : 'Share your screen'}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={onTextPin}
-        aria-label={textPin === 'expand' ? 'Bring the text back' : 'Tuck the text away'}
-        title={textPin === 'expand' ? `Bring the text back (${shortcutLabel} works too)` : 'Tuck the text away — the session keeps going'}
-        className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
-        style={{ ...noDragRegion, left: '18%', top: '68%' }}
-      >
-        <span className="flex h-[16px] w-[16px] items-center justify-center rounded-full bg-sky-500 shadow-sm ring-2 ring-[#17171B] transition-transform group-hover/pin:scale-125">
-          {textPin === 'expand' ? (
-            <ChevronsLeft className="h-2.5 w-2.5 text-white" />
-          ) : (
-            <ChevronsRight className="h-2.5 w-2.5 text-white" />
-          )}
         </span>
       </button>
       <button
@@ -1197,11 +1371,11 @@ function SkipperPins({
         onClick={() => sendAction('end-call')}
         aria-label="End the voice session and close"
         title="End & close (a live session can't be hidden while it keeps listening)"
-        className="group/pin absolute flex h-[26px] w-[26px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
+        className="group/pin absolute flex h-[32px] w-[32px] appearance-none items-center justify-center border-0 bg-transparent p-0 outline-none -translate-x-1/2 -translate-y-1/2"
         style={{ ...noDragRegion, left: '82%', top: '68%' }}
       >
-        <span className="flex h-[16px] w-[16px] items-center justify-center rounded-full bg-neutral-700 shadow-sm ring-2 ring-[#17171B] transition-colors transition-transform group-hover/pin:scale-125 group-hover/pin:bg-red-600">
-          <X className="h-2.5 w-2.5 text-white" />
+        <span className="flex h-[20px] w-[20px] items-center justify-center rounded-full bg-neutral-700 shadow-sm ring-2 ring-[#17171B] transition-colors transition-transform group-hover/pin:scale-125 group-hover/pin:bg-red-600">
+          <X className="h-3 w-3 text-white" />
         </span>
       </button>
     </div>
@@ -1209,9 +1383,116 @@ function SkipperPins({
 }
 
 /**
+ * One prose recipe for every assistant turn the panel shows — a peeked
+ * message and the reply streaming in are the same object.
+ *
+ * `.dark` is scoped to the markdown only: shiki's token colors key off a
+ * .dark ancestor, so this flips code to its dark palette (matching the
+ * charcoal block bg) whichever skin the card is wearing — the code block is
+ * charcoal in both. It does NOT darken the surrounding panel: the prose
+ * classes are explicit, and Tailwind's `dark:` needs a .dark ANCESTOR, so
+ * the class sitting on this very element doesn't trigger the dark half of
+ * the pairs in it.
+ */
+const PANEL_PROSE =
+  'dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5' +
+  ' [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px]' +
+  ' [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1' +
+  ' [&_:not(pre)>code]:text-neutral-800 dark:[&_:not(pre)>code]:bg-white/[0.10]' +
+  ' dark:[&_:not(pre)>code]:text-neutral-200'
+
+function AssistantTurn({ children }: { children: string }) {
+  return <Streamdown className={PANEL_PROSE}>{children}</Streamdown>
+}
+
+/**
+ * A question the user asked — the same tinted bubble whether it is the one
+ * just spoken or one peeked out of the history, so "mine" is a shape rather
+ * than a shade the reader has to infer.
+ */
+function UserTurn({ children }: { children: string }) {
+  return (
+    <div className="mt-3 mb-2 flex justify-end first:mt-0">
+      <span className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-black/[0.06] px-2.5 py-1.5 text-left text-sm text-neutral-700 dark:bg-white/[0.10] dark:text-neutral-200">
+        {children}
+      </span>
+    </div>
+  )
+}
+
+/** Hairline rule with a word in it — where the peeked past stops. */
+function TurnDivider({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="my-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-neutral-400">
+      <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
+      {children}
+      <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
+    </div>
+  )
+}
+
+/**
+ * The way back, while the text is tucked: a chevron bubble floating just
+ * above the boat, in the gap between the Skipper and the gunwale.
+ *
+ * It is the mirror of the card's tuck handle — same circle, same size, the
+ * chevron pointing the other way — so hiding and un-hiding are visibly one
+ * gesture with two directions. It used to be a blue enamel pin on the boat,
+ * which put "where does my text go" in the middle of the DEVICE controls and
+ * left the hull with four things competing for a glance. Above the head it
+ * points at the space the card unfolds into.
+ *
+ * The entry waits out the card's fold (COMPANION_MOTION_CSS delays it), so
+ * the two never animate over each other.
+ *
+ * 55% is measured off the artwork, not eyeballed: TalkingHead's viewBox is
+ * 200x190 and the hull's rim runs along y=120, so a centred 28px bubble
+ * ends just shy of the planking and clears the share pin below it.
+ */
+function UnfoldBubble({ onExpand }: { onExpand: () => void }) {
+  const shortcutState = useQuickAskShortcut()
+  const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
+  return (
+    // The wrapper is the DRAG-REGION HOLE, and it must never move: Electron
+    // punches holes from the rect Blink last computed for the element, on
+    // style/layout invalidation — not once per composited frame. Put
+    // `no-drag` on something whose transform is animating (as the button's
+    // is) and the hole stays wherever the animation STARTED — a 0.7-scaled
+    // box 10px low — so pressing the bubble where it paints lands on the
+    // drag region instead. On Windows that means HTCAPTION: the window
+    // enters the OS move loop, the click never happens, and the companion
+    // looks frozen until the button comes back up.
+    //
+    // So: the hole is static and transform-free (centred with calc, not
+    // translate — a static transform is one more thing that can go stale),
+    // and it is DELIBERATELY bigger than the art it covers, 40px around a
+    // 28px bubble, the same way the pins carry oversized targets. The motion
+    // lives on the button inside it.
+    <span
+      className="absolute z-30 flex h-10 w-10 items-center justify-center"
+      style={{ ...noDragRegion, top: 'calc(55% - 20px)', left: 'calc(50% - 20px)' }}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onExpand}
+            aria-label="Bring the text back"
+            className="qa-bubble flex h-7 w-7 items-center justify-center rounded-full bg-white text-neutral-500 shadow-[0_4px_14px_rgba(0,0,0,0.18)] transition hover:-translate-y-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_4px_14px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+          >
+            <ChevronsLeft className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Bring the text back ({shortcutLabel} works too)</TooltipContent>
+      </Tooltip>
+    </span>
+  )
+}
+
+/**
  * The Skipper's status line — the same words under the mascot in both
  * presentations. While the mic gate is open it goes loud (green, mic icon):
- * paired with the listening halo, holding right ⌘ is unmistakably working.
+ * paired with the listening halo, holding the talk key is unmistakably working.
  * While a turn runs, the generic "Thinking…" upgrades to the current
  * activity ("Searching the web…") when one is known — flicker-held by the
  * caller via useHeldLabel.
@@ -1221,37 +1502,37 @@ function SkipperStatusChip({ state, activity }: { state: CallState; activity?: s
   const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)
   return (
     <span
-      className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 font-medium text-white shadow-md ${
-        micOpen ? 'bg-[var(--rowboat-success)] text-[11px] font-semibold' : 'bg-black/60 text-[10px]'
+      className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 font-medium text-white shadow-md ${
+        micOpen ? 'bg-[var(--rowboat-success)] text-[12px] font-semibold' : 'bg-black/60 text-[11px]'
       }`}
     >
       {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
         <>
-          <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
+          <span className="block h-2 w-2 rounded-full bg-red-500" />
           Muted
         </>
       ) : state.pttLocked ? (
         <>
-          <Mic className="h-3 w-3 animate-pulse" />
-          Hands-free — tap ⌘ to send
+          <Mic className="h-3.5 w-3.5 animate-pulse" />
+          Hands-free — tap {PTT_KEYCAP} to send
         </>
       ) : state.status === 'listening' ? (
         <>
-          <Mic className="h-3 w-3 animate-pulse" />
+          <Mic className="h-3.5 w-3.5 animate-pulse" />
           Listening — release to send
         </>
       ) : statusDisplay ? (
         <>
-          <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
+          <span className={`block h-2 w-2 rounded-full ${statusDisplay.dotClass}`} />
           {state.status === 'idle'
-            ? 'Hold the mic — or right ⌘'
+            ? `Hold the mic — or ${PTT_LABEL}`
             : state.status === 'thinking' && activity
               ? activity
               : statusDisplay.label}
         </>
       ) : (
         <>
-          <span className="block h-1.5 w-1.5 rounded-full bg-neutral-500" />
+          <span className="block h-2 w-2 rounded-full bg-neutral-500" />
           Connecting…
         </>
       )}
@@ -1405,7 +1686,7 @@ function PinnedPill({
             }
           `}</style>
           {/* Listening halo — same signal as the tucked mascot: while the
-              mic gate is open (right ⌘ held / hands-free), green rings pulse
+              mic gate is open (talk key held / hands-free), green rings pulse
               around the head. The corner chip alone is too easy to miss. */}
           {!state.micMuted && (state.status === 'listening' || state.pttLocked) && (
             <>
@@ -1479,7 +1760,7 @@ function PinnedPill({
       {/* Control bar — actions execute in the main app window */}
       <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>
         {/* Push-to-talk: hold to talk, quick tap to lock hands-free —
-            mirrors the Right ⌘ key. Pointer capture keeps the release edge
+            mirrors the talk key. Pointer capture keeps the release edge
             even if the cursor slides off mid-hold. */}
         <button
           type="button"
@@ -1495,8 +1776,8 @@ function PinnedPill({
               ? 'bg-[var(--rowboat-success)] text-white hover:bg-[var(--rowboat-success)]/85'
               : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
           } ${state.micMuted ? 'opacity-50' : ''}`}
-          aria-label="Hold to talk — or hold the right ⌘ key from any app"
-          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
+          aria-label={`Hold to talk — or hold the ${PTT_LABEL} key from any app`}
+          title={`Hold to talk (tap to go hands-free) — or hold the ${PTT_LABEL} key from any app`}
         >
           <Mic className="h-3 w-3" />
           {state.pttLocked ? 'Tap to send' : state.status === 'listening' ? 'Release to send' : 'Hold to talk'}
@@ -1664,7 +1945,7 @@ function TuckedMascot({
       : ''
   const caption = state.interimText || replyTail
 
-  // Mic gate open (holding right ⌘ / the pin, or hands-free lock): the ONE
+  // Mic gate open (holding the talk key / the pin, or hands-free lock): the ONE
   // state the user must never have to squint for — without visible feedback
   // there is no way to tell a working hold from a dead key hook.
   const micOpen = !state.micMuted && (state.status === 'listening' || state.pttLocked)
@@ -1672,7 +1953,7 @@ function TuckedMascot({
   return (
     <div
       data-qa-passthrough
-      className="group relative flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden pb-2"
+      className="group relative flex h-screen w-screen cursor-grab select-none flex-col items-center justify-end overflow-hidden pb-2"
       style={dragRegion}
     >
       <style>{`
@@ -1689,23 +1970,24 @@ function TuckedMascot({
       {/* On duty = cowboy hat on; the controls are enamel pins on the hat
           band, drawn in the artwork's own ink and always visible. They ride
           inside TalkingHead's bobbing container (hatOverlay) so they never
-          detach from the hat. Pin art is small; each sits in a 26px no-drag
-          hit target that grows on hover. */}
+          detach from the hat. Pin art is small; each sits in an oversized
+          no-drag hit target that grows on hover. */}
       {/* -mb pulls the caption/chip up under the boat: the SVG box has dead
           space below the ripples that read as a big gap. */}
       <div className="relative -mb-4" style={{ animation: 'tucked-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+        <UnfoldBubble onExpand={onExpand} />
         {/* Listening halo: expanding green rings around the head while the
             mic gate is open. Peripheral-vision feedback — the user is
-            usually looking at their own work, not at the chip's 10px text. */}
+            usually looking at their own work, not at the chip's small text. */}
         {micOpen && (
           <>
             <span
               className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
-              style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
+              style={{ top: '42%', width: HALO_SIZE, height: HALO_SIZE, marginLeft: -HALO_SIZE / 2, marginTop: -HALO_SIZE / 2, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) infinite' }}
             />
             <span
               className="pointer-events-none absolute left-1/2 z-10 rounded-full border-[3px] border-[var(--rowboat-success)]/90"
-              style={{ top: '42%', width: 104, height: 104, marginLeft: -52, marginTop: -52, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
+              style={{ top: '42%', width: HALO_SIZE, height: HALO_SIZE, marginLeft: -HALO_SIZE / 2, marginTop: -HALO_SIZE / 2, animation: 'listen-ring 1.5s cubic-bezier(0, 0, 0.2, 1) 0.5s infinite' }}
             />
           </>
         )}
@@ -1715,22 +1997,22 @@ function TuckedMascot({
           // 'synthesizing' state, which renders bubbles + raised eyes.
           ttsState={state.status === 'thinking' && state.ttsState === 'idle' ? 'synthesizing' : state.ttsState}
           getLevel={getLevel}
-          size={132}
+          size={SKIPPER_SIZE}
           hat="cowboy"
           hatOverlay={
-            <SkipperPins state={state} sendAction={sendAction} textPin="expand" onTextPin={onExpand} />
+            <SkipperPins state={state} sendAction={sendAction} />
           }
         />
       </div>
 
       {/* Caption + status chip, readable over any desktop. */}
-      <div data-qa-passthrough className="flex h-4 max-w-full items-center px-2">
+      <div data-qa-passthrough className="flex h-5 max-w-full items-center px-2">
         {caption && (
-          <span className="truncate rounded bg-black/70 px-1.5 py-px text-[10px] text-white/90">{caption}</span>
+          <span className="truncate rounded bg-black/70 px-2 py-0.5 text-[11px] text-white/90">{caption}</span>
         )}
       </div>
       {/* Pure status line — the CONTROLS are the pins. */}
-      <div data-qa-passthrough className="flex h-6 items-center">
+      <div data-qa-passthrough className="flex h-7 items-center">
         <SkipperStatusChip state={state} activity={activity} />
       </div>
     </div>

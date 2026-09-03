@@ -1028,6 +1028,19 @@ export function setupIpcHandlers() {
         }
       }
     },
+    // --- Theme relay ---
+    // The app window owns the setting (localStorage); utility windows have no
+    // ThemeProvider and get told. Relayed through main because renderers have
+    // no channel to each other. Fire-and-forget: a window that has not loaded
+    // yet needs no catch-up push — it reads the same localStorage on mount.
+    'theme:set': async (event, args) => {
+      const sender = BrowserWindow.fromWebContents(event.sender);
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win.isDestroyed() || win === sender) continue;
+        win.webContents.send('theme:changed', args);
+      }
+      return {};
+    },
     // --- Hover companion relays ---
     'quickAsk:getShortcut': async () => {
       return getQuickAskShortcutState();
