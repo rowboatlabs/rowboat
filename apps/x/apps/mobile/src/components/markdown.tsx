@@ -1,5 +1,5 @@
 import { Component, memo, useMemo, type ReactNode } from 'react';
-import { Platform, ScrollView, Text, View } from 'react-native';
+import { Image, Platform, ScrollView, Text, View } from 'react-native';
 import Markdown, { MarkdownIt } from 'react-native-markdown-display';
 // @ts-expect-error no types shipped
 import texmath from 'markdown-it-texmath';
@@ -148,11 +148,24 @@ export function ChatMarkdown({ children, extraRules }: {
     // All four texmath token types — an unregistered type renders as NOTHING
     // (markdown-display's `unknown` rule returns null), which silently eats
     // chat content.
+    // Default image rule: plain RN Image with the key passed directly —
+    // the library's own rule spreads {key} into JSX (React 19 warning).
+    // Screens with authed sources override this via extraRules.
+    const image = (node: { key: string; attributes: { src?: string } }) =>
+      node.attributes.src ? (
+        <Image
+          key={node.key}
+          source={{ uri: node.attributes.src }}
+          style={{ width: '100%', height: 200, borderRadius: 8, marginVertical: 6 }}
+          resizeMode="contain"
+        />
+      ) : null;
     return {
       math_inline: inline,
       math_inline_double: block,
       math_block: block,
       math_block_eqno: block,
+      image,
     };
   }, [colors]);
 
