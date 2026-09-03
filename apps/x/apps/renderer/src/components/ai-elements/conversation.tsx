@@ -19,8 +19,6 @@ import {
   useState,
 } from "react";
 
-const MAX_ANCHOR_RETRIES = 6;
-
 interface ConversationContextValue {
   contentRef: RefObject<HTMLDivElement | null>;
   isAtBottom: boolean;
@@ -104,20 +102,11 @@ export const Conversation = ({
       return;
     }
 
-    // The message element may land a frame later than the state bump.
-    let attempts = 0;
-    let rafId: number | null = null;
-    const tryAnchor = () => {
-      if (controller.anchorToMessage(anchorMessageId)) return;
-      if (attempts >= MAX_ANCHOR_RETRIES) return;
-      attempts += 1;
-      rafId = requestAnimationFrame(tryAnchor);
-    };
-    tryAnchor();
-
-    return () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-    };
+    // The message row usually renders AFTER this bump (the active pane is
+    // store-backed — the row lands with the send's round-trip, under the
+    // store's own id). The controller keeps the request pending and applies
+    // it exactly once when the row appears.
+    controller.requestSendAnchor(anchorMessageId);
   }, [anchorRequestKey, anchorMessageId, scrollMode, controller]);
 
   const scrollToBottom = useCallback(() => {

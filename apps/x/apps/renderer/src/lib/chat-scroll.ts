@@ -16,12 +16,13 @@
  *   jump-to-latest button's visibility.
  *
  * Mode differences ('chat' vs 'code'):
- * - 'chat' (ChatGPT semantics): a send anchors the new user message at the
- *   top of the viewport, padding the scroll range with spacer slack so the
- *   message can reach the top even while the response is still short. The
- *   response streams below the fold without moving the view; the slack is
- *   consumed (shrink-only) as content grows. Following is off after a send
- *   until the user returns to the bottom.
+ * - 'chat' (ChatGPT semantics): a send is explicit navigation — wherever the
+ *   reader had scrolled, the new user message is pinned near the viewport
+ *   top (SEND_ANCHOR_PEEK_PX of the prior turn stays visible), with spacer
+ *   slack below so the position is reachable while the response is still
+ *   short. The response streams below the fold without moving the view; the
+ *   slack is consumed (shrink-only) as content grows. Following is off after
+ *   a send until the user returns to the bottom.
  * - 'code' (Codex transcript semantics): sends jump straight to the live
  *   edge and follow the run's output. No top-anchoring.
  *
@@ -68,6 +69,16 @@ const RESTORE_WINDOW_MS = 1500
  * refresh the window, so trackpad momentum and smooth keyboard scrolling
  * stay attributed for their whole run. */
 const USER_INPUT_WINDOW_MS = 250
+/** A sent message is pinned this far below the viewport top — enough to show
+ * the inter-message gap (32px) plus a sliver of the previous turn, so the
+ * jump reads as continuous rather than a fresh page. */
+export const SEND_ANCHOR_PEEK_PX = 48
+/** How long a send keeps waiting for its message row to render (the active
+ * pane is store-backed: the row lands only after the send's IPC round-trip
+ * and turn-event emit). A row that hasn't appeared by then belongs to a
+ * queued message that will start a later turn — repositioning for it out of
+ * the blue would be a yank, not navigation. */
+const SEND_ANCHOR_DEADLINE_MS = 3000
 
 /** Keys that scroll a container when it (or a non-editable descendant) has
  * focus. */
@@ -136,7 +147,18 @@ export class ChatScrollController {
   // the viewport top without ever introducing new blank space.
   private anchorId: string | null = null
   private anchorSlackCap = 0
-  private anchorPaddingTop = 0
+
+  // A send whose message row hasn't rendered yet (store-backed chats append
+  // the row only after the IPC round-trip). Resize ticks — which fire exactly
+  // when the row lands — retry it; user scroll intent or the deadline cancels
+  // it. `baselineUserRowId` snapshots the last user row at request time so an
+  // id mismatch (optimistic App id vs the store's `${turnId}:user` id) can
+  // still resolve to the row the send actually produced.
+  private pendingSendAnchor: {
+    messageId: string | null
+    baselineUserRowId: string | null
+    deadline: number
+  } | null = null
 
   // In-flight smooth scroll to the live edge (jump button): growth re-targets
   // the animation instead of fighting it with instant writes.
@@ -194,6 +216,7 @@ export class ChatScrollController {
     this.observer = null
     this.els = null
     this.restore = null
+    this.pendingSendAnchor = null
     this.smoothPending = false
   }
 
@@ -214,6 +237,7 @@ export class ChatScrollController {
     const els = this.els
     if (!els) return
     this.restore = null
+    this.pendingSendAnchor = null
     this.following = true
     const top = this.maxTop()
     if (behavior === 'smooth' && typeof els.container.scrollTo === 'function') {
@@ -229,10 +253,33 @@ export class ChatScrollController {
   }
 
   /**
-   * 'chat'-mode send: pin the message at the viewport top, padding the scroll
-   * range with spacer slack so it can get there while the response is still
-   * short. Returns false when the message element isn't in the DOM yet (the
-   * caller may retry on the next frame).
+   * A user send in 'chat' mode: an explicit navigation action that always
+   * repositions — regardless of where the reader had scrolled — pinning the
+   * new message near the viewport top (SEND_ANCHOR_PEEK_PX of the prior turn
+   * stays visible for continuity) with spacer slack below so the position is
+   * reachable while the response is still short.
+   *
+   * The message row may not exist yet: the active pane is store-backed, so
+   * the row renders only after the send's round-trip, and its durable id
+   * (`${turnId}:user…`) never matches the caller's optimistic id. The
+   * request stays pending and resize ticks resolve it — by id when present,
+   * otherwise to the first user row that appears after the request. A user
+   * scroll gesture or the deadline cancels it; exactly one reposition
+   * happens per send.
+   */
+  requestSendAnchor(messageId: string | null): void {
+    if (!this.els) return
+    this.pendingSendAnchor = {
+      messageId,
+      baselineUserRowId: this.lastUserRow()?.getAttribute('data-message-id') ?? null,
+      deadline: now() + SEND_ANCHOR_DEADLINE_MS,
+    }
+    this.trySendAnchor()
+  }
+
+  /**
+   * Pin the given message near the viewport top now. Returns false when the
+   * element isn't in the DOM (see requestSendAnchor for the deferred path).
    */
   anchorToMessage(messageId: string): boolean {
     const els = this.els
@@ -241,13 +288,61 @@ export class ChatScrollController {
       `[data-message-id="${messageId}"]`
     )
     if (!anchor) return false
+    this.applyAnchorToElement(anchor, messageId)
+    return true
+  }
 
+  private trySendAnchor(): void {
+    const pending = this.pendingSendAnchor
+    const els = this.els
+    if (!pending || !els) return
+    if (now() > pending.deadline) {
+      this.pendingSendAnchor = null
+      return
+    }
+    let anchor = pending.messageId
+      ? els.content.querySelector<HTMLElement>(
+          `[data-message-id="${pending.messageId}"]`
+        )
+      : null
+    if (!anchor) {
+      const lastUserRow = this.lastUserRow()
+      if (
+        lastUserRow &&
+        lastUserRow.getAttribute('data-message-id') !== pending.baselineUserRowId
+      ) {
+        anchor = lastUserRow
+      }
+    }
+    if (!anchor) return
+    this.pendingSendAnchor = null
+    this.applyAnchorToElement(
+      anchor,
+      anchor.getAttribute('data-message-id') ?? pending.messageId ?? null
+    )
+  }
+
+  /** The last user message row (`is-user` is the Message component's own
+   * role marker, on the same element as data-message-id). */
+  private lastUserRow(): HTMLElement | null {
+    const els = this.els
+    if (!els) return null
+    const rows = els.content.querySelectorAll<HTMLElement>('[data-message-id]')
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].classList.contains('is-user')) return rows[i]
+    }
+    return null
+  }
+
+  private applyAnchorToElement(anchor: HTMLElement, anchorId: string | null): void {
+    const els = this.els
+    if (!els) return
     this.cancelSmooth()
     this.restore = null
-    this.anchorId = messageId
-    this.anchorPaddingTop = readPaddingTop(els.content)
+    this.pendingSendAnchor = null
+    this.anchorId = anchorId
 
-    const targetTop = Math.max(0, this.anchorTopInContent(anchor) - this.anchorPaddingTop)
+    const targetTop = Math.max(0, this.anchorTopInContent(anchor) - SEND_ANCHOR_PEEK_PX)
     const contentHeight = els.container.scrollHeight - this.spacerHeight
     const slack = Math.max(
       0,
@@ -260,7 +355,6 @@ export class ChatScrollController {
     this.following = false
     this.updateNearBottom()
     this.notify()
-    return true
   }
 
   // --- internals ---
@@ -287,17 +381,24 @@ export class ChatScrollController {
         if (distance > AT_BOTTOM_EPSILON_PX) {
           this.following = false
           this.cancelSmooth()
+          // The reader took over before a pending send reposition landed —
+          // applying it late would be a yank.
+          this.pendingSendAnchor = null
         }
       } else if (attributed && distance <= NEAR_BOTTOM_PX) {
         // A downward user gesture back into the near-bottom band resumes
         // following.
         this.following = true
-      } else if (distance <= AT_BOTTOM_EPSILON_PX) {
+        this.pendingSendAnchor = null
+      } else if (distance <= AT_BOTTOM_EPSILON_PX && this.spacerHeight === 0) {
         // Unattributed downward arrivals engage only at the true live edge:
         // that's a scrollbar dragged to the very end (scrollbars emit no
         // input events). Native anchoring compensations preserve the
         // reader's distance and so can never land here — the end-of-turn
-        // re-engage bug this model exists to prevent.
+        // re-engage bug this model exists to prevent. While send-anchor
+        // slack exists the edge is ambiguous (positions inside the blank
+        // slack also measure distance 0), so only attributed gestures engage
+        // then.
         this.following = true
       }
       // Keep momentum / smooth-keyboard scroll chains attributed to the
@@ -328,6 +429,7 @@ export class ChatScrollController {
     // interleaved follow writes swallowing the scroll event's delta.
     this.following = false
     this.cancelSmooth()
+    this.pendingSendAnchor = null
     this.notify()
   }
 
@@ -358,6 +460,8 @@ export class ChatScrollController {
 
   private handleResize = (): void => {
     if (!this.els) return
+    // A resize tick is exactly when a just-sent message's row lands.
+    this.trySendAnchor()
     this.maintainAnchorSpacer()
     if (this.restore) {
       if (now() > this.restore.deadline) {
@@ -434,7 +538,7 @@ export class ChatScrollController {
       this.setSpacerHeight(0)
       return
     }
-    const targetTop = Math.max(0, this.anchorTopInContent(anchor) - this.anchorPaddingTop)
+    const targetTop = Math.max(0, this.anchorTopInContent(anchor) - SEND_ANCHOR_PEEK_PX)
     const contentHeight = els.container.scrollHeight - this.spacerHeight
     const required = Math.max(
       0,
@@ -478,11 +582,6 @@ export class ChatScrollController {
     const snapshot = this.snapshot()
     for (const listener of this.listeners) listener(snapshot)
   }
-}
-
-function readPaddingTop(el: HTMLElement): number {
-  const value = Number.parseFloat(window.getComputedStyle(el).paddingTop || '0')
-  return Number.isFinite(value) ? value : 0
 }
 
 function now(): number {

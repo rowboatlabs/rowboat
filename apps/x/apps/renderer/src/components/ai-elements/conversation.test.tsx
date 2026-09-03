@@ -5,7 +5,7 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from './conversation'
-import { resetChatScrollMemory } from '@/lib/chat-scroll'
+import { resetChatScrollMemory, SEND_ANCHOR_PEEK_PX } from '@/lib/chat-scroll'
 
 class ResizeObserverStub {
   static instances: ResizeObserverStub[] = []
@@ -141,12 +141,13 @@ describe('Conversation scroll wiring', () => {
       ({ top: 1800 - s.scroller.scrollTop } as DOMRect)
 
     s.rerender(ui({ anchorRequestKey: 1, anchorMessageId: 'm-2' }))
-    expect(s.scroller.scrollTop).toBe(1800)
+    const target = 1800 - SEND_ANCHOR_PEEK_PX
+    expect(s.scroller.scrollTop).toBe(target)
     const spacer = s.scroller.lastElementChild as HTMLElement
-    expect(spacer.style.height).toBe('400px')
+    expect(spacer.style.height).toBe(`${target - 1400}px`)
     // Streaming growth stays below the fold — no movement.
     s.grow(300)
-    expect(s.scroller.scrollTop).toBe(1800)
+    expect(s.scroller.scrollTop).toBe(target)
   })
 
   it('code mode jumps sends to the live edge and follows the run', () => {

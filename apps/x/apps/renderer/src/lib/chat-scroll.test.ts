@@ -3,6 +3,7 @@ import {
   AT_BOTTOM_EPSILON_PX,
   ChatScrollController,
   NEAR_BOTTOM_PX,
+  SEND_ANCHOR_PEEK_PX,
   resetChatScrollMemory,
   type ChatScrollSnapshot,
 } from './chat-scroll'
@@ -439,27 +440,37 @@ describe('ChatScrollController — smooth jump', () => {
   })
 })
 
+function addUserRow(h: Harness, id: string, layoutTop: number): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'is-user'
+  row.setAttribute('data-message-id', id)
+  h.content.appendChild(row)
+  h.container.getBoundingClientRect = () => ({ top: 0 } as DOMRect)
+  row.getBoundingClientRect = () =>
+    ({ top: layoutTop - h.container.scrollTop } as DOMRect)
+  return row
+}
+
 describe('ChatScrollController — send anchoring (chat mode)', () => {
+  // A message whose layout top is 1800 in a 2000-tall transcript with a
+  // 600-tall viewport: the anchor target is 1800 - PEEK, which needs
+  // (1800 - PEEK) - (2000 - 600) px of spacer slack.
+  const TARGET = 1800 - SEND_ANCHOR_PEEK_PX
+  const SLACK = TARGET - 1400
+
   function setupAnchored(messageLayoutTop: number) {
     const h = createHarness()
     const controller = attach(h, { mode: 'chat' })
-    const message = document.createElement('div')
-    message.setAttribute('data-message-id', 'user-1')
-    h.content.appendChild(message)
-    h.container.getBoundingClientRect = () =>
-      ({ top: 0 } as DOMRect)
-    message.getBoundingClientRect = () =>
-      ({ top: messageLayoutTop - h.container.scrollTop } as DOMRect)
+    const message = addUserRow(h, 'user-1', messageLayoutTop)
     return { h, controller, message }
   }
 
-  it('pins the sent message at the viewport top with spacer slack', () => {
+  it('pins the sent message near the viewport top, prior turn peeking above', () => {
     const { h, controller } = setupAnchored(1800)
     expect(controller.anchorToMessage('user-1')).toBe(true)
 
-    // target 1800 needs 400px of slack beyond the 1400 natural max.
-    expect(h.container.scrollTop).toBe(1800)
-    expect(h.spacerHeight()).toBe(400)
+    expect(h.container.scrollTop).toBe(TARGET)
+    expect(h.spacerHeight()).toBe(SLACK)
     expect(controller.snapshot().following).toBe(false)
     // Nothing but blank slack below → nothing to jump to.
     expect(controller.snapshot().nearBottom).toBe(true)
@@ -470,12 +481,12 @@ describe('ChatScrollController — send anchoring (chat mode)', () => {
     controller.anchorToMessage('user-1')
 
     h.grow(300)
-    expect(h.spacerHeight()).toBe(100)
-    expect(h.container.scrollTop).toBe(1800)
+    expect(h.spacerHeight()).toBe(SLACK - 300)
+    expect(h.container.scrollTop).toBe(TARGET)
 
     h.grow(300)
     expect(h.spacerHeight()).toBe(0)
-    expect(h.container.scrollTop).toBe(1800)
+    expect(h.container.scrollTop).toBe(TARGET)
     // Content now extends below the fold → the jump affordance appears.
     expect(controller.snapshot().nearBottom).toBe(false)
 
@@ -500,6 +511,118 @@ describe('ChatScrollController — send anchoring (chat mode)', () => {
     expect(controller.snapshot().following).toBe(true)
     h.grow(120)
     expect(h.container.scrollTop).toBe(h.maxTop())
+  })
+})
+
+describe('ChatScrollController — send repositioning (requestSendAnchor)', () => {
+  const TARGET = 1800 - SEND_ANCHOR_PEEK_PX
+
+  it('a send while far scrolled up overrides the reading position', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    addUserRow(h, 'user-1', 1800)
+    h.scrollTo(200)
+    expect(controller.snapshot().following).toBe(false)
+
+    controller.requestSendAnchor('user-1')
+    expect(h.container.scrollTop).toBe(TARGET)
+    expect(h.spacerHeight()).toBe(TARGET - 1400)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('a send while slightly scrolled up behaves identically', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    addUserRow(h, 'user-1', 1800)
+    h.scrollTo(h.maxTop() - 40)
+    expect(controller.snapshot().following).toBe(false)
+
+    controller.requestSendAnchor('user-1')
+    expect(h.container.scrollTop).toBe(TARGET)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('waits for a store-backed row under a different id and repositions exactly once', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    // A previous turn's user row exists — it must not be mistaken for the
+    // new send.
+    addUserRow(h, 'turn-1:user', 500)
+
+    controller.requestSendAnchor('user-1757000000000') // optimistic App id
+    expect(h.container.scrollTop).toBe(h.maxTop()) // no premature move
+
+    // Streaming/composer ticks before the row lands change nothing.
+    h.grow(40)
+    expect(controller.snapshot().following).toBe(true)
+
+    // The round-trip completes: the row renders under the store's id.
+    addUserRow(h, 'turn-2:user', 1800 + 40)
+    h.grow(30)
+    const target = 1800 + 40 - SEND_ANCHOR_PEEK_PX
+    expect(h.container.scrollTop).toBe(target)
+    expect(controller.snapshot().following).toBe(false)
+
+    // Subsequent growth streams below the fold — no second reposition.
+    h.grow(400)
+    expect(h.container.scrollTop).toBe(target)
+  })
+
+  it('an upward wheel before the row lands cancels the pending reposition', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    controller.requestSendAnchor('user-1')
+    h.wheel(-10)
+    const parked = h.container.scrollTop
+
+    addUserRow(h, 'turn-2:user', 1800)
+    h.grow(200)
+    expect(h.container.scrollTop).toBe(parked)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('a stale send (queued message) expires instead of yanking later', () => {
+    vi.useFakeTimers({ toFake: ['performance', 'Date'] })
+    try {
+      const h = createHarness()
+      const controller = attach(h)
+      h.scrollTo(300)
+      controller.requestSendAnchor('user-1')
+
+      vi.advanceTimersByTime(5000)
+      addUserRow(h, 'turn-9:user', 1800)
+      h.grow(100)
+      expect(h.container.scrollTop).toBe(300)
+      expect(controller.snapshot().following).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('after the send reposition, upward intent still parks and completion cannot snap down', () => {
+    vi.useFakeTimers({ toFake: ['performance', 'Date'] })
+    try {
+      const h = createHarness()
+      const controller = attach(h)
+      addUserRow(h, 'user-1', 1800)
+      controller.requestSendAnchor('user-1')
+      expect(h.container.scrollTop).toBe(TARGET)
+
+      h.wheel(-10)
+      vi.advanceTimersByTime(1000) // generation continues past the gesture
+      h.grow(300)
+      expect(h.container.scrollTop).toBe(TARGET)
+
+      // Turn completion: an input-less anchoring adjustment — landing in
+      // the slack region where distance measures 0 — must not re-engage.
+      h.anchorAdjust(60)
+      expect(controller.snapshot().following).toBe(false)
+      const parked = h.container.scrollTop
+      h.grow(200)
+      expect(h.container.scrollTop).toBe(parked)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
