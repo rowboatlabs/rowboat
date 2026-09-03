@@ -558,6 +558,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     const openFileFromThread = (rootMessageId: string) => (path: string) => select({ kind: 'file', path, fromThreadRootId: rootMessageId })
 
 
+    const selfName = memberNames.get(org.memberId) ?? org.memberId
+
     const here = presence.here.filter((id) => members.some((m) => m.id === id))
     // Roster for the members popover: whoever is here floats up, then A–Z.
     const hereSet = new Set(here)
@@ -640,26 +642,35 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             </span>
                         </button>
                     </HoverCardTrigger>
-                    <HoverCardContent align="start" sideOffset={4} className="w-72 p-3">
-                        <div className="flex items-center gap-2.5">
-                            <OrgMonogram org={org} />
-                            <div className="min-w-0">
-                                <div className="truncate text-sm font-medium">{org.name}</div>
-                                <div className="truncate text-xs text-muted-foreground">{org.address}</div>
+                    <HoverCardContent align="start" sideOffset={4} className="w-80 px-5 pb-5 pt-6">
+                        {/* "About this space", in the shape of About This Mac: the
+                            org's mark as the hero, the space as the title, then a
+                            label/value table — what you're looking at, who it
+                            belongs to, and who you are in it. */}
+                        <div className="flex flex-col items-center text-center">
+                            <OrgMonogram org={org} size="xl" />
+                            <div className="mt-3 flex items-center gap-0.5 text-lg font-semibold leading-tight">
+                                <Hash className="size-4 text-muted-foreground" />
+                                <span className="truncate">{space.name}</span>
                             </div>
+                            <div className="mt-0.5 text-xs text-muted-foreground">A space in {org.name}</div>
                         </div>
-                        <div className="mt-2 truncate text-xs text-muted-foreground">
-                            #{space.name} · you are <span className="font-mono">{org.memberId}</span>
-                        </div>
-                        <div className="mt-2 border-t border-border pt-2">
-                            <button
-                                type="button"
-                                onClick={() => void navigator.clipboard.writeText(org.address).then(() => toast('Address copied', 'success'))}
-                                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                            >
-                                <Copy className="size-3.5" /> Copy address
-                            </button>
-                        </div>
+                        <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px]">
+                            <dt className="text-right font-medium">Organization</dt>
+                            <dd className="truncate text-muted-foreground">{org.name}</dd>
+                            <dt className="text-right font-medium">Server</dt>
+                            <dd className="min-w-0"><CopyLine text={org.address} title="Copy the server address" className="text-[13px]" /></dd>
+                            <dt className="text-right font-medium">Members</dt>
+                            <dd className="truncate text-muted-foreground">
+                                {members.length}{here.length > 0 && <span> · {here.length} here</span>}
+                            </dd>
+                            <dt className="text-right font-medium">You</dt>
+                            <dd className="min-w-0">
+                                <span className="inline-block max-w-full truncate rounded-[4px] bg-[var(--stream-you-wash)] px-[3px] py-px align-middle font-medium text-[var(--stream-you-ink)]">@{selfName}</span>
+                            </dd>
+                            <dt className="text-right font-medium">Member id</dt>
+                            <dd className="min-w-0"><CopyLine text={org.memberId} title="Copy your member id" className="font-mono text-xs" /></dd>
+                        </dl>
                     </HoverCardContent>
                 </HoverCard>
 
@@ -985,5 +996,38 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         </SpaceRefsProvider>
         </SpaceProfilesProvider>
         </SpaceMembersProvider>
+    )
+}
+
+/**
+ * A line of text you click to copy. The copy glyph shows on hover; a check
+ * takes its place for a beat once the clipboard has it, right where you
+ * clicked. A failed write (no focus, no permission) says so.
+ */
+function CopyLine({ text, title, className }: { text: string; title: string; className?: string }) {
+    const [copied, setCopied] = useState(false)
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+    const copy = () =>
+        navigator.clipboard.writeText(text).then(
+            () => {
+                setCopied(true)
+                if (timer.current) clearTimeout(timer.current)
+                timer.current = setTimeout(() => setCopied(false), 1500)
+            },
+            () => toast('Could not copy', 'error'),
+        )
+    return (
+        <button
+            type="button"
+            title={title}
+            onClick={() => void copy()}
+            className="group/copy flex max-w-full items-center gap-1 text-muted-foreground hover:text-foreground"
+        >
+            <span className={cn('truncate', className)}>{text}</span>
+            {copied
+                ? <Check className="size-3 shrink-0 text-[var(--rowboat-success)]" />
+                : <Copy className="size-3 shrink-0 opacity-0 transition-opacity group-hover/copy:opacity-100" />}
+        </button>
     )
 }

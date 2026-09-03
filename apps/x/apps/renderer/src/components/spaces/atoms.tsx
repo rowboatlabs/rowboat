@@ -123,10 +123,12 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
 
 export function OrgMonogram({ org, size = 'md', className }: {
     org: { name: string; address: string }
-    size?: 'sm' | 'md'
+    size?: 'sm' | 'md' | 'xl'
     className?: string
 }) {
-    const dims = size === 'sm' ? 'size-4 text-[8px] rounded-[3px]' : 'size-6 text-[10px] rounded-md'
+    const dims = size === 'sm' ? 'size-4 text-[8px] rounded-[3px]'
+        : size === 'xl' ? 'size-14 text-xl rounded-2xl'
+        : 'size-6 text-[10px] rounded-md'
     return (
         <span
             title={org.address}
