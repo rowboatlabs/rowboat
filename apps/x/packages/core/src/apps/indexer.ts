@@ -99,7 +99,15 @@ export async function listApps(): Promise<AppSummary[]> {
     }
     const out: AppSummary[] = [];
     for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        // A Dirent reports a symlink as a symlink, not a directory, so a linked
+        // app folder (a dev repo linked into ~/.rowboat/apps) was skipped here
+        // while the server — which stats the path — served it fine: an app you
+        // could open by URL but never see in the grid. Resolve links first.
+        let isDir = entry.isDirectory();
+        if (!isDir && entry.isSymbolicLink()) {
+            try { isDir = (await fs.stat(path.join(APPS_DIR, entry.name))).isDirectory(); } catch { isDir = false; }
+        }
+        if (!isDir) continue;
         if (!FOLDER_SLUG_RE.test(entry.name)) {
             if (!entry.name.startsWith('.')) {
                 console.warn(`[Apps] ignoring folder with invalid slug: ${entry.name}`);

@@ -167,6 +167,7 @@ function rebuildMenu(): void {
         ? { accelerator: getQuickAskShortcutState().accelerator }
         : {}),
       registerAccelerator: false,
+      // The same summon the chord performs.
       click: () => toggleQuickAsk(),
     },
     recording

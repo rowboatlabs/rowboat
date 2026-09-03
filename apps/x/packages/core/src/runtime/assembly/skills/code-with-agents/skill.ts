@@ -19,25 +19,7 @@ Code mode is on and the user has selected an agent. Skip directly to Step 2. Do 
 
 ### Case B — "# Code Mode (Active)" is NOT present
 
-Your **very next tool call MUST be \`ask-human\`** with options. Do not write any explanation text first. Do not describe a plan. Do not check the workspace boundary. Just call:
-
-\`\`\`
-ask-human({
-  question: "How should I handle this coding request?",
-  options: [
-    "Use code mode (Claude Code)",
-    "Use code mode (Codex)",
-    "Continue with default Rowboat"
-  ]
-})
-\`\`\`
-
-This is non-negotiable. The user gets clickable buttons. Free-text "which agent?" questions are forbidden here.
-
-**Branch on the response:**
-- "Use code mode (Claude Code)" → proceed to Step 2 with agent = \`claude\`.
-- "Use code mode (Codex)" → proceed to Step 2 with agent = \`codex\`.
-- "Continue with default Rowboat" → ABANDON this skill. Handle the request yourself using your own tools (workspace file tools, \`executeCommand\` shell, etc.). The rest of this skill does not apply for this turn.
+No chip is set, but code mode is enabled (this skill only loads when it is). **Proceed to Step 2 with agent = \`claude\` — do NOT ask.** Coding requests dispatch immediately; a question here is friction, especially on voice. Mention the choice in your one-line narration ("Using Claude Code — toggle the composer's code chip for Codex") and move on. Only if this conversation's earlier coding turns used \`codex\`, stay with \`codex\`.
 
 ---
 
@@ -46,20 +28,20 @@ This is non-negotiable. The user gets clickable buttons. Free-text "which agent?
 **Resolve the workdir** (in this priority order):
 1. A path the user named in their original message (e.g. \`G:/4th sem/CN\`).
 2. The path from a "# User Work Directory" block in your context.
-3. Ask once in plain text: "Which folder should I work in?"
+3. **Neither exists → OMIT \`cwd\` entirely.** The run lands in the user's default code repo (their registered project), isolated on its own branch — this is the normal case when the user just says what they want ("take down the overview tab") without naming a folder. Do NOT ask "which folder?" — only if the tool errors that no default repo exists, relay that error (it tells the user how to set one up).
 
 **Pick the agent** (\`claude\` or \`codex\`): use the agent from the "# Code Mode (Active)" block (the composer chip) / the Step 1 choice. The chip is authoritative — do NOT carry over a different agent from earlier in this thread, and do NOT switch on an in-chat text request ("use codex"); tell the user to toggle the chip instead.
 
 **State your intent in one line, then call the tool immediately — do NOT wait for a "yes".** The tool's own permission cards are the user's confirmation, so an extra in-chat "reply yes to proceed" is redundant friction. Say something like:
 
-> Using [Claude Code / Codex] to [task description] in \`[folder]\`.
+> Using [Claude Code / Codex] to [task description] in \`[folder]\` — or "in your default repo" when cwd is omitted.
 
 …and then immediately call:
 
 \`\`\`
 code_agent_run({
   agent: "<claude|codex>",
-  cwd: "<resolved absolute folder>",
+  cwd: "<resolved absolute folder — OMIT when unresolved, see above>",
   prompt: "<clear, self-contained coding instruction>"
 })
 \`\`\`
@@ -69,7 +51,7 @@ code_agent_run({
 - Mention constraints (language, framework, style).
 - Expand short user requests into clear, actionable instructions.
 
-**Follow-ups:** for every later coding request in this chat, just call \`code_agent_run\` again with the same \`cwd\` and the chip's current agent. The session resumes automatically — do NOT start over or re-explain prior context.
+**Follow-ups:** for every later coding request in this chat, just call \`code_agent_run\` again with the same \`cwd\` (or omitted again, same as the first call) and the chip's current agent. The session resumes automatically — do NOT start over or re-explain prior context.
 
 ---
 

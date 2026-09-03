@@ -1,0 +1,11 @@
+{
+  "name": "checkbox-vs-distant-edit",
+  "description": "A one-tap checkbox tick (spec §11 beat 6) concurrent with an edit elsewhere. Must auto-merge — direct manipulation must never lose to agent edits.",
+  "base": "# Roadmap\n## P1\n- [ ] CSV importer crash\n## P2\n- [ ] Demo prep\n- [ ] Webhook retries\n",
+  "current": "# Roadmap\n## P1\n- [x] CSV importer crash\n## P2\n- [ ] Demo prep\n- [ ] Webhook retries\n",
+  "proposed": "# Roadmap\n## P1\n- [ ] CSV importer crash\n## P2\n- [ ] Demo prep\n- [ ] Webhook retries — flagged stale\n",
+  "expected": {
+    "outcome": "merged",
+    "content": "# Roadmap\n## P1\n- [x] CSV importer crash\n## P2\n- [ ] Demo prep\n- [ ] Webhook retries — flagged stale\n"
+  }
+}

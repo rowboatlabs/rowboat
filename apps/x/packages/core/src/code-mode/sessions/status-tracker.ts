@@ -1,5 +1,7 @@
 import type { TurnBusEvent } from '@x/shared/dist/turns.js';
 import type { ITurnEventBus } from '../../runtime/turns/event-hub.js';
+import type { EmitterSessionBus } from '../../runtime/sessions/bus.js';
+import { transitionLive, type LiveTurnState } from '../../runtime/turns/live-status.js';
 import type { ICodeSessionsRepo } from './repo.js';
 import { notifyIfEnabled } from '../../application/notification/notifier.js';
 import type { CodeSessionStatus, CodeSession } from '@x/shared/dist/code-sessions.js';
@@ -13,6 +15,7 @@ export type StatusListener = (sessionId: string, status: CodeSessionStatus) => v
 export class CodeSessionStatusTracker {
     private readonly turnEventBus: ITurnEventBus;
     private readonly codeSessionsRepo: ICodeSessionsRepo;
+    private readonly sessionBus: EmitterSessionBus;
     private readonly statuses = new Map<string, CodeSessionStatus>();
     private readonly busySince = new Map<string, number>();
     private readonly listeners = new Set<StatusListener>();
@@ -20,14 +23,19 @@ export class CodeSessionStatusTracker {
     // Session ids known to be code sessions; refreshed lazily on unknown ids so
     // sessions created after start() are picked up without explicit wiring.
     private knownSessions = new Set<string>();
-    // Ids confirmed NOT to be code sessions (regular chats). Safe to cache
-    // permanently: a code session's meta file is written before its first
-    // turn, so an id that misses the refresh can never become one later.
+    // Ids confirmed NOT to be code sessions (regular chats). Mostly stable —
+    // but adoption (CodeSessionService.createForSession) is the one path
+    // where a plain chat BECOMES a code session mid-life. The correction
+    // arrives on the session bus ('code-adopted'): entries in this set are
+    // by construction never re-checked, so WITHOUT the event a stale
+    // verdict would stick until restart — there is no self-heal.
     private readonly knownNonSessions = new Set<string>();
+    private busUnsubscribe: (() => void) | null = null;
 
-    constructor({ turnEventBus, codeSessionsRepo }: { turnEventBus: ITurnEventBus; codeSessionsRepo: ICodeSessionsRepo }) {
+    constructor({ turnEventBus, codeSessionsRepo, sessionBus }: { turnEventBus: ITurnEventBus; codeSessionsRepo: ICodeSessionsRepo; sessionBus: EmitterSessionBus }) {
         this.turnEventBus = turnEventBus;
         this.codeSessionsRepo = codeSessionsRepo;
+        this.sessionBus = sessionBus;
     }
 
     // Events are processed strictly in arrival order: handle() awaits repo
@@ -45,11 +53,18 @@ export class CodeSessionStatusTracker {
                 .then(() => this.handle(event))
                 .catch(() => { /* status is best-effort; never break the chain */ });
         });
+        // Identity changes ride the session bus — adoption is the one path
+        // where a cached "not a code session" verdict must be revoked.
+        this.busUnsubscribe = this.sessionBus.subscribe((event) => {
+            if (event.kind === 'code-adopted') this.noteCodeSession(event.sessionId);
+        });
     }
 
     stop(): void {
         this.unsubscribe?.();
         this.unsubscribe = null;
+        this.busUnsubscribe?.();
+        this.busUnsubscribe = null;
     }
 
     onTransition(listener: StatusListener): () => void {
@@ -59,6 +74,14 @@ export class CodeSessionStatusTracker {
 
     getStatuses(): Record<string, CodeSessionStatus> {
         return Object.fromEntries(this.statuses);
+    }
+
+    /** An existing chat was adopted as a code session (meta written after
+     * its first turns) — un-cache the "not a code session" verdict so its
+     * events start counting. */
+    noteCodeSession(sessionId: string): void {
+        this.knownSessions.add(sessionId);
+        this.knownNonSessions.delete(sessionId);
     }
 
     private async refreshKnownSessions(): Promise<void> {
@@ -76,42 +99,22 @@ export class CodeSessionStatusTracker {
         return false;
     }
 
-    // What a spine event means for a code session's status. Returns null for
-    // events that don't move the needle (deltas, tool results, ...).
+    // Projection of THE shared live-status machine (runtime/turns/
+    // live-status.ts): underway→working, clear→idle. The machine also fires
+    // on activity events (model calls, tool starts) that this tracker never
+    // cared about — handle()'s no-op-on-equal check absorbs them, which
+    // makes that check load-bearing (pinned by a test). Keeping one
+    // transition table is the point: fixes like "an answered ask-human
+    // arrives as a tool_result" land once, for every consumer.
     private transition(event: TurnBusEvent, previous: CodeSessionStatus): CodeSessionStatus | null {
-        const e = event.event;
-        switch (e.type) {
-            case 'turn_created':
-                return 'working';
-            // The copilot's own permission gate, and the coding agent's inline
-            // approval card (durable tool_progress) both need the user.
-            case 'tool_permission_required':
-            case 'turn_suspended':
-                return 'needs-you';
-            case 'tool_permission_resolved':
-                return previous === 'needs-you' ? 'working' : null;
-            // An answered ask-human arrives as an async tool_result (there is
-            // no *_resolved event for it) — without this the badge said
-            // "needs your attention" forever after the user replied, and the
-            // completion notification never fired.
-            case 'tool_result':
-                return previous === 'needs-you' ? 'working' : null;
-            case 'tool_progress': {
-                const progress = e.progress;
-                if (progress && typeof progress === 'object' && !Array.isArray(progress)) {
-                    const kind = (progress as { kind?: unknown }).kind;
-                    if (kind === 'code-run-permission-request') return 'needs-you';
-                    if (kind === 'code-run-permission-resolved') return previous === 'needs-you' ? 'working' : null;
-                }
-                return null;
-            }
-            case 'turn_completed':
-            case 'turn_failed':
-            case 'turn_cancelled':
-                return 'idle';
-            default:
-                return null;
-        }
+        const prevLive: LiveTurnState | undefined =
+            previous === 'working' ? { status: 'underway' }
+            : previous === 'needs-you' ? { status: 'needs-you' }
+            : undefined;
+        const next = transitionLive(prevLive, event.event);
+        if (next === null) return null;
+        if (next === 'clear') return 'idle';
+        return next.status === 'needs-you' ? 'needs-you' : 'working';
     }
 
     private async handle(event: TurnBusEvent): Promise<void> {
@@ -137,7 +140,11 @@ export class CodeSessionStatusTracker {
         try {
             const session = await this.codeSessionsRepo.get(sessionId);
             if (!session) return;
-            await this.codeSessionsRepo.save({ ...session, lastActivityAt: new Date().toISOString() });
+            // A new turn on a done session reopens it — work resumed, so it
+            // belongs back in the active list.
+            const reopened = { ...session, lastActivityAt: new Date().toISOString() };
+            delete reopened.doneAt;
+            await this.codeSessionsRepo.save(reopened);
         } catch {
             // Recency sort just stays where it was.
         }
@@ -165,6 +172,9 @@ export class CodeSessionStatusTracker {
                 await notifyIfEnabled('chat_completion', {
                     title,
                     message: 'The coding agent finished its turn.',
+                    // The category's own contract ("while the app is in the
+                    // background") — the session row already shows the settle.
+                    onlyWhenBackground: true,
                 });
             }
         }

@@ -162,7 +162,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
         ) : (
           <div className="space-y-5">
             <section className="space-y-1.5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">App</div>
+              <div className="text-[13px] text-muted-foreground">App</div>
               {app.status === 'invalid' && (
                 <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                   Invalid manifest: {app.manifestError}
@@ -175,7 +175,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
             </section>
 
             <section className="space-y-1.5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Capabilities</div>
+              <div className="text-[13px] text-muted-foreground">Capabilities</div>
               {manifest && manifest.capabilities.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                   {manifest.capabilities.map((c) => (
@@ -188,7 +188,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
             </section>
 
             <section className="space-y-1.5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Source</div>
+              <div className="text-[13px] text-muted-foreground">Source</div>
               {app.kind === 'installed' && app.install ? (
                 <>
                   <InfoRow k="Installed from" v={app.install.repo ?? app.install.sourceUrl ?? 'unknown'} mono />
@@ -247,7 +247,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
             </section>
 
             <section className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Background agents</div>
+              <div className="text-[13px] text-muted-foreground">Background agents</div>
               {agents.length === 0 ? (
                 <p className="text-muted-foreground">No bundled agents.</p>
               ) : agents.map((a) => (
@@ -281,7 +281,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
 
             {readme && (
               <section className="space-y-1.5">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">README</div>
+                <div className="text-[13px] text-muted-foreground">README</div>
                 <pre className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 text-xs leading-relaxed">{readme}</pre>
               </section>
             )}

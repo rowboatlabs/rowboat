@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, Check, ChevronDown, FileText, LayoutGrid, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, ChevronDown, Clock, FileText, ListPlus, Loader2, MessageCircle, Pin, Plus, RotateCcw, Sparkles, Square, SquarePen, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
+import type { HomeThread } from '@x/shared/dist/home-threads.js'
+import { TalkingHead } from '@/components/talking-head'
 
 // ---------------------------------------------------------------------------
 // The home to-do list — one rolling ~/.rowboat/todo.md shared with @rowboat.
@@ -16,7 +18,6 @@ type TodoViewProps = {
   onOpenNote: (path: string) => void
   /** Bind the chat dock to an item's session — the full thread view. */
   onOpenInChat: (sessionId: string) => void
-  onShowOverview: () => void
   /** Start a brand-new chat (the app's canonical new-chat flow). */
   onNewChat?: () => void
   /** Focus the page-bottom composer — the "c" shortcut's landing spot. */
@@ -31,6 +32,20 @@ type TodoViewProps = {
   /** The composer's current destination (from App) — drives the spotlight
    * connecting the source row to the composer while a reply is composed. */
   composeTarget?: ComposeTarget | null
+  /** The composer's live model pick (model + paired effort) — run/retry
+   * chips and inline comments honor it, same as composer-born runs. */
+  getRunModel?: () => { provider: string; model: string; effort?: 'low' | 'medium' | 'high' } | undefined
+  /** A code strip's door: the Code section (diffs, terminal, worktree),
+   * focused on the session. Falls back to the chat dock when absent. */
+  onOpenCodeSession?: (sessionId: string) => void
+  /** Clicking Skipper starts a voice call (the companion flow). Absent when
+   * voice isn't configured — the mascot still keeps the watch. */
+  onSkipperCall?: () => void
+  /** The thread the user is ATTENDING right now (the live call's
+   * conversation). It earns no Deck strip and no counts — the Deck is for
+   * unattended work; without this, the operator channel's own turns pop a
+   * strip in and out on every utterance, bouncing the whole page. */
+  attendedSessionId?: string | null
 }
 
 type ComposeTarget =
@@ -40,7 +55,12 @@ type ComposeTarget =
   | { kind: 'chatReply'; sessionId: string; title: string; quote?: string }
 
 const ROWBOAT_MENTION_RE = /(^|\s)@rowboat\b/i
-const CHIP = 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-4'
+// Notion-idiom chrome: 4px-radius chips, ink-alpha hovers, ≤100ms color
+// transitions, hierarchy by alpha not size. Rows carry NO borders — hover
+// backgrounds and whitespace do the separating.
+const CHIP = 'inline-flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium leading-4'
+const ROW_HOVER = 'rounded-md transition-colors duration-100 hover:bg-foreground/[0.045]'
+const SECTION_LABEL = 'text-[12px] font-medium text-muted-foreground'
 const CALLOUT_KEY = 'todo.firstReceiptCalloutDone'
 
 function mentionsRowboat(text: string): boolean {
@@ -66,7 +86,7 @@ function normKey(text: string): string {
 // ---------------------------------------------------------------------------
 // @rowboat autocomplete — shared by every composer (main, reply, sub-task).
 // A trailing "@" or partial "@row…" offers the completion; Tab or click
-// completes it. Slack/Notion muscle memory, everywhere text is typed.
+// completes it. Chat-app muscle memory, everywhere text is typed.
 // ---------------------------------------------------------------------------
 
 function useMention(text: string, setText: (t: string) => void) {
@@ -94,7 +114,7 @@ function MentionPopup({ onPick }: { onPick: () => void }) {
     <button
       type="button"
       onMouseDown={(e) => { e.preventDefault(); onPick() }}
-      className="absolute bottom-full left-3 z-10 mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-1.5 text-sm shadow-md hover:bg-accent"
+      className="absolute bottom-full left-3 z-10 mb-1.5 flex items-center gap-2 rounded-lg border-none bg-[var(--rowboat-raised)] px-3 py-1.5 text-sm shadow-[var(--rowboat-shadow-soft)] hover:bg-accent"
     >
       <Bot className="size-3.5 text-primary" />
       <span className="font-medium">@rowboat</span>
@@ -183,7 +203,7 @@ function BubbleText({ text, onOpenNote }: { text: string; onOpenNote: (path: str
               type="button"
               title={p}
               onClick={() => onOpenNote(p)}
-              className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
+              className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground ring-1 ring-border hover:bg-accent"
             >
               <FileText className="size-3" /> {p.split('/').pop()}
             </button>
@@ -315,7 +335,7 @@ function CommentComposer({ onSend, onCancel }: {
   const [message, setMessage] = useState('')
   const mention = useMention(message, setMessage)
   return (
-    <div className="relative mt-1.5 flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
+    <div className="relative mt-1.5 flex items-center gap-2 rounded-lg border border-transparent bg-[var(--rowboat-wash)] px-2.5 py-1.5 focus-within:border-border">
       {mention.show && <MentionPopup onPick={mention.complete} />}
       <MessageCircle className="size-3.5 shrink-0 text-muted-foreground" />
       <input
@@ -355,7 +375,7 @@ function Bubble({ b, onOpenNote, onRetry }: {
   onOpenNote: (path: string) => void
   onRetry?: () => void
 }) {
-  // Flat message rows, Slack-style: avatar + name, no chat bubbles.
+  // Flat message rows, stream-style: avatar + name, no chat bubbles.
   const isUser = b.role === 'user'
   return (
     <div className="flex gap-2">
@@ -391,7 +411,7 @@ function Bubble({ b, onOpenNote, onRetry }: {
                 key={j}
                 type="button"
                 onClick={() => openLink(l, onOpenNote)}
-                className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
+                className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground ring-1 ring-border hover:bg-accent"
               >
                 <ArrowUpRight className="size-3" /> {l.label}
               </button>
@@ -504,8 +524,8 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
   const collapsedPreview = isCollapsed && bubbles.length > 0 ? previewLine(bubbles) : null
 
   return (
-    <div className={`group/todo relative flex items-start gap-2.5 px-2 py-2 transition-[opacity,transform,box-shadow] duration-200 hover:bg-accent/30 ${depth === 0 ? 'border-b border-border/40' : 'rounded-lg'} ${dimmed ? 'opacity-35' : ''} ${
-      spotlight ? 'scale-[1.005] bg-card shadow-md ring-1 ring-primary/25 motion-reduce:transform-none' : ''
+    <div data-todo-key={item.key} className={`group/todo relative flex items-start gap-2.5 rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.045] ${dimmed ? 'opacity-35' : ''} ${
+      spotlight ? 'bg-card ring-1 ring-primary/25' : ''
     }`}>
       {changed && (
         <span
@@ -536,7 +556,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
         type="checkbox"
         checked={item.checked}
         onChange={(e) => onToggle(e.target.checked)}
-        className="mt-[3px] size-4 shrink-0 cursor-pointer accent-primary"
+        className="mt-[3px] size-4 shrink-0 cursor-pointer accent-[#2383E2]"
       />
       <div className="min-w-0 flex-1">
         {editing ? (
@@ -572,7 +592,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
             role={item.checked ? undefined : 'button'}
             tabIndex={item.checked ? undefined : 0}
             aria-label={item.checked ? undefined : `Edit to-do: ${item.text}`}
-            className={`cursor-text rounded text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${item.checked ? 'text-muted-foreground line-through' : changed ? 'font-semibold' : ''}`}
+            className={`cursor-text rounded text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${item.checked ? 'text-foreground/40 line-through' : changed ? 'font-semibold' : ''}`}
           >
             <TextWithMentions text={item.text} onOpenLink={(l) => openLink(l, onOpenNote)} />
             {item.proposed && (
@@ -611,14 +631,14 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onStop() }}
                   aria-label="Stop this run"
-                  className={`${CHIP} ml-1 border border-border text-muted-foreground hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400`}
+                  className={`${CHIP} ml-1 bg-foreground/[0.05] text-muted-foreground transition-colors duration-100 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400`}
                 >
                   <Square className="size-2.5 fill-current" /> stop
                 </button>
               </IconTip>
             )}
             {showGoChip && !lastReceipt && (
-              <button type="button" onClick={(e) => { e.stopPropagation(); onRun() }} className={`${CHIP} ml-2 border border-border text-muted-foreground hover:bg-accent hover:text-foreground`}>
+              <button type="button" onClick={(e) => { e.stopPropagation(); onRun() }} className={`${CHIP} ml-2 bg-foreground/[0.05] text-muted-foreground transition-colors duration-100 hover:bg-foreground/[0.09] hover:text-foreground`}>
                 <Bot className="size-3" /> run
               </button>
             )}
@@ -628,7 +648,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onCommitText(`@rowboat ${item.text}`) }}
-                className={`${CHIP} ml-2 border border-border text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/todo:opacity-100`}
+                className={`${CHIP} ml-2 bg-foreground/[0.05] text-muted-foreground opacity-0 transition-opacity duration-100 hover:bg-foreground/[0.09] hover:text-foreground focus-visible:opacity-100 group-hover/todo:opacity-100`}
               >
                 <Bot className="size-3" /> assign
               </button>
@@ -674,11 +694,11 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
           </>
         )}
       </div>
-      {/* One floating action tray on hover or keyboard focus — Slack's
+      {/* One floating action tray on hover or keyboard focus — team-chat
           grammar: zero resting clutter, one surface to learn. Kept inside
           the row's own band so it never reads as the previous row's
           controls. Opacity (not display) so Tab can reach the buttons. */}
-      <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 opacity-0 shadow-md transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/todo:pointer-events-auto group-hover/todo:opacity-100">
+      <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border-none bg-[var(--rowboat-raised)] p-0.5 opacity-0 shadow-[var(--rowboat-shadow-soft)] transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/todo:pointer-events-auto group-hover/todo:opacity-100">
         {!showConversation && (
           <IconTip label="Reply — tell @rowboat something about this">
             <button
@@ -805,7 +825,7 @@ function AddItemRow({ onAdd, onHandoff, focusSignal }: {
     }
   }, [text, onHandoff])
   return (
-    <div className="group/add relative mt-1 flex items-center gap-2.5 rounded-lg px-2 py-1.5 focus-within:bg-accent/30">
+    <div className="group/add relative mt-0.5 flex items-center gap-2.5 rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.03] focus-within:bg-foreground/[0.03]">
       {mention.show && <MentionPopup onPick={mention.complete} />}
       <Plus className="size-4 shrink-0 text-muted-foreground/50" />
       <input
@@ -900,7 +920,7 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   return stripBubbleMarkup(last.text) || links
 }
 
-function ConversationsSection({ threads, total = 0, loaded = false, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onNewChat, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
+function ConversationsSection({ threads, total = 0, loaded = false, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onNewChat, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat, pinnedIds, onTogglePin }: {
   threads: StreamThread[]
   /** Threads that exist beyond the cap — the footer says so when > shown. */
   total?: number
@@ -921,6 +941,9 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
   changedSessionIds?: Set<string>
   /** Hide from Home (attention filter — the session stays in history). */
   onHide?: (sessionId: string) => void
+  /** Threads pinned to the Deck (the watch flag) + its toggle. */
+  pinnedIds?: Set<string>
+  onTogglePin?: (sessionId: string, pinned: boolean) => void
   /** Everything, in the chat history view. */
   onViewAll?: () => void
   /** Start a brand-new chat. */
@@ -937,7 +960,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
   return (
     <div className={`flex flex-col gap-1 transition-opacity duration-200 ${dimAll ? 'opacity-60' : ''}`}>
       <div className="flex items-center justify-between px-1">
-        <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Conversations</div>
+        <div className={SECTION_LABEL}>Conversations</div>
         {onNewChat && (
           <IconTip label="Start a new chat — ⌘N">
             <button
@@ -952,7 +975,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
         )}
       </div>
       {threads.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border/60 px-3 py-3 text-[13px] text-muted-foreground">
+        <div className="px-2 py-2 text-[13px] text-muted-foreground/70">
           No conversations yet — ask anything in the composer below, or start a new chat. Every chat lands here.
         </div>
       ) : (
@@ -967,8 +990,8 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
           return (
             <div
               key={t.sessionId}
-              className={`group/thread relative border-b border-border/40 py-1.5 transition-[opacity,transform,box-shadow] duration-200 last:border-b-0 ${
-                isSpot ? 'scale-[1.005] rounded-lg bg-accent/30 px-2 ring-1 ring-primary/20 motion-reduce:transform-none' : ''
+              className={`group/thread relative rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.045] ${
+                isSpot ? 'bg-card ring-1 ring-primary/20' : ''
               } ${spotlightSessionId && !isSpot ? 'opacity-40' : ''}`}
             >
               <div className="flex items-center gap-2">
@@ -1013,7 +1036,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
                 {/* Same floating tray as items — one grammar everywhere,
                     inside the row's own band (never over the previous row).
                     Opacity (not display) so Tab can reach the buttons. */}
-                <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-background p-0.5 opacity-0 shadow-md transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100">
+                <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border-none bg-[var(--rowboat-raised)] p-0.5 opacity-0 shadow-[var(--rowboat-shadow-soft)] transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100">
                   <IconTip label="Reply">
                     <button
                       type="button"
@@ -1034,6 +1057,18 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
                       <ArrowUpRight className="size-3.5" />
                     </button>
                   </IconTip>
+                  {onTogglePin && (
+                    <IconTip label={pinnedIds?.has(t.sessionId) ? 'Unpin from the Deck' : 'Pin to the Deck — keeps a strip even while idle'}>
+                      <button
+                        type="button"
+                        onClick={() => onTogglePin(t.sessionId, !pinnedIds?.has(t.sessionId))}
+                        aria-label="Pin to the Deck"
+                        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <Pin className={`size-3.5 ${pinnedIds?.has(t.sessionId) ? 'fill-current' : ''}`} />
+                      </button>
+                    </IconTip>
+                  )}
                   {onHide && (
                     <IconTip label="Hide from Home — stays in your chat history">
                       <button
@@ -1051,7 +1086,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
               {isOpen && (
                 <div className="flex flex-col gap-1.5 pb-1 pl-5 pt-1">
                   {/* The last response only — the full thread lives in the
-                      sidebar, like Slack threads opening on the side. */}
+                      sidebar, like chat threads opening on the side. */}
                   {lastResponseTail(bubbles).map((b, i) => (
                     <Bubble key={i} b={b} onOpenNote={onOpenNote} />
                   ))}
@@ -1190,7 +1225,133 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory }: TodoViewProps) {
+// ---------------------------------------------------------------------------
+// The Deck — the operator band above the ledger. Two bays in fixed order:
+// "Needs you" (amber, oldest first — the queue J burns to zero) and
+// "Underway" (live threads with a one-line activity feed). A strip is a
+// projection of a thread — task, code session, or chat — never a second
+// home: clicking one jumps to the item in place or opens the thread in the
+// dock. The whole band collapses to nothing when both bays are empty.
+// ---------------------------------------------------------------------------
+
+/** Stable no-op audio level for the header mascot (no TTS on this surface). */
+const ZERO_LEVEL = () => 0
+
+/** Friendly labels for the registry's raw activity (a builtin tool name). */
+const ACTIVITY_LABELS: Record<string, string> = {
+  starting: 'starting…',
+  thinking: 'thinking…',
+  'web-search': 'searching the web…',
+  'fetch-url': 'reading a page…',
+  code_agent_run: 'coding…',
+  executeCommand: 'running a command…',
+  'file-readText': 'reading files…',
+  'file-write': 'writing…',
+  'file-grep': 'searching files…',
+}
+
+function activityLabel(activity?: string): string {
+  if (!activity) return ''
+  return ACTIVITY_LABELS[activity] ?? `${activity}…`
+}
+
+/** Strip titles are plain text: markdown links and the @rowboat mention
+ * collapse away (the row below renders them properly). */
+function stripTitle(thread: HomeThread): string {
+  return thread.title
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(^|\s)@rowboat\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || 'Untitled'
+}
+
+const STRIP_HOVER_BTN = 'shrink-0 rounded-[4px] p-0.5 text-muted-foreground/70 opacity-0 transition-opacity duration-100 hover:bg-foreground/[0.08] hover:text-foreground focus-visible:opacity-100 group-hover/strip:opacity-100'
+
+function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze, onDismiss }: {
+  thread: HomeThread
+  /** Click: spotlight the source in place (falls back to the dock). */
+  onJump: () => void
+  /** ⏎ / the ↗ button: the full conversation in the sidebar. */
+  onOpen: () => void
+  /** The watch flag — pinned strips stay on the Deck and get a number key. */
+  onTogglePin: () => void
+  /** Needs-you bay only: park it for 4h or until the thread moves. */
+  onSnooze?: () => void
+  /** Needs-you bay only: release the claim entirely — no timer, only new
+   * activity brings it back. The ledger's receipts stay visible. */
+  onDismiss?: () => void
+}) {
+  const needs = thread.status === 'needs-you' || thread.status === 'ready'
+  const live = thread.status === 'underway'
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onJump}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onOpen() } }}
+      className={`group/strip relative flex cursor-pointer items-center gap-2 px-2 py-[5px] ${ROW_HOVER} focus-visible:bg-foreground/[0.045] focus-visible:outline-none`}
+    >
+      <span className={`h-4 w-[2px] shrink-0 rounded-full ${needs ? 'bg-amber-500/80' : live ? 'bg-primary/50' : 'bg-foreground/[0.16]'}`} />
+      <span className="w-9 shrink-0 text-[10.5px] lowercase tracking-[0.02em] text-muted-foreground/60">{thread.kind}</span>
+      {thread.unseen && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
+      <span className="max-w-[40%] shrink-0 truncate text-[13px] font-medium">{stripTitle(thread)}</span>
+      {thread.code && (
+        <span className="shrink-0 rounded bg-accent/60 px-1.5 text-[10px] text-muted-foreground">
+          {thread.code.branch ?? thread.code.projectName} · {thread.code.agent}
+        </span>
+      )}
+      {live && <span className="size-1.5 shrink-0 rounded-full bg-primary motion-safe:animate-pulse" />}
+      <span className={`min-w-0 flex-1 truncate text-[12px] ${needs ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+        {needs ? (thread.attention ?? 'waiting on you') : activityLabel(thread.activity)}
+      </span>
+      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">{relativeTime(thread.startedAt ?? thread.updatedAt)}</span>
+      {thread.pinIndex !== undefined && thread.pinIndex < 9 && (
+        <span
+          title={`Press ${thread.pinIndex + 1} to jump here`}
+          className="shrink-0 rounded border border-border px-1 font-mono text-[9px] leading-4 text-muted-foreground/70"
+        >
+          {thread.pinIndex + 1}
+        </span>
+      )}
+      {onSnooze && (
+        <IconTip label="Snooze 4h — returns early if the thread moves">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onSnooze() }} className={STRIP_HOVER_BTN}>
+            <Clock className="size-3.5" />
+          </button>
+        </IconTip>
+      )}
+      {onDismiss && (
+        <IconTip label="Dismiss — returns only if the thread moves again; receipts stay on the list">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onDismiss() }} className={STRIP_HOVER_BTN}>
+            <X className="size-3.5" />
+          </button>
+        </IconTip>
+      )}
+      <IconTip label={thread.pinned ? 'Unpin — drops off the Deck when idle' : 'Pin to the Deck — stays while idle, gets a number key'}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onTogglePin() }}
+          className={thread.pinned
+            ? 'shrink-0 rounded p-0.5 text-foreground/70 transition-colors hover:bg-accent'
+            : STRIP_HOVER_BTN}
+        >
+          <Pin className={`size-3.5 ${thread.pinned ? 'fill-current' : ''}`} />
+        </button>
+      </IconTip>
+      <IconTip label={thread.kind === 'code' ? 'Open in the Code section — diffs, terminal, worktree' : 'Open the full conversation in the sidebar'}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onOpen() }}
+          className={STRIP_HOVER_BTN}
+        >
+          <ArrowUpRight className="size-3.5" />
+        </button>
+      </IconTip>
+    </div>
+  )
+}
+
+export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession, onSkipperCall, attendedSessionId }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
@@ -1254,6 +1415,10 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
   const sessionSeenAtRef = useRef(sessionSeenAt)
   useEffect(() => { sessionSeenAtRef.current = sessionSeenAt }, [sessionSeenAt])
   const markSessionSeen = useCallback((sessionId: string) => {
+    // Dual-write while the seen-state migrates: the workspace registry is
+    // what the Deck (and later Skipper/notifications) read; localStorage
+    // still drives the row dots until phase 4 retires it.
+    void window.ipc.invoke('home:markSeen', { sessionId }).catch(() => {})
     setSessionSeenAt((m) => {
       const next = { ...m, [sessionId]: new Date().toISOString() }
       // Bounded: drop the oldest marks past 300 — old sessions age out of
@@ -1515,6 +1680,42 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
       } else if (e.key === 'c' && onFocusComposer) {
         e.preventDefault()
         onFocusComposer()
+      } else if (e.key === 'j') {
+        // The idle-worker key: cycle the needs-you queue, oldest first —
+        // each press jumps to the next thread waiting on you.
+        const strips = deckNeedsYouRef.current
+        if (strips.length > 0) {
+          e.preventDefault()
+          const target = strips[deckCycleRef.current % strips.length]
+          deckCycleRef.current += 1
+          lastJumpedRef.current = target
+          jumpToStripRef.current(target)
+        }
+      } else if (e.key >= '1' && e.key <= '9') {
+        // Control groups: pinned strips answer to their number key.
+        const slot = Number(e.key) - 1
+        const target = deckThreadsRef.current.find((t) => t.pinIndex === slot)
+        if (target) {
+          e.preventDefault()
+          lastJumpedRef.current = target
+          jumpToStripRef.current(target)
+        }
+      } else if (e.key === 'h') {
+        // Snooze the J-cursor's last stop (needs-you only) — the tripwire.
+        const target = lastJumpedRef.current
+        if (target && (target.status === 'needs-you' || target.status === 'ready')) {
+          e.preventDefault()
+          snoozeThreadRef.current(target)
+          lastJumpedRef.current = null
+        }
+      } else if (e.key === 'x') {
+        // Dismiss the J-cursor's last stop — release the claim entirely.
+        const target = lastJumpedRef.current
+        if (target && (target.status === 'needs-you' || target.status === 'ready')) {
+          e.preventDefault()
+          dismissThreadRef.current(target)
+          lastJumpedRef.current = null
+        }
       }
     }
     document.addEventListener('keydown', onKey)
@@ -1535,18 +1736,40 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
     }
   }, [refetch])
 
+  // ---- The Deck: fed by the main-process thread registry ----
+  const [deckThreads, setDeckThreads] = useState<HomeThread[]>([])
+  const deckThreadsRef = useRef(deckThreads)
+  deckThreadsRef.current = deckThreads
+  // A strip jump flashes its source row with the spotlight treatment.
+  const [flashKey, setFlashKey] = useState<string | null>(null)
+  const deckCycleRef = useRef(0)
+  useEffect(() => {
+    let cancelled = false
+    const fetchThreads = async () => {
+      try {
+        const res = await window.ipc.invoke('home:threads', {})
+        if (!cancelled) setDeckThreads(res.threads)
+      } catch {
+        // Registry unavailable — the Deck simply stays empty.
+      }
+    }
+    void fetchThreads()
+    const off = window.ipc.on('home:threadsChanged', () => { void fetchThreads() })
+    return () => { cancelled = true; off() }
+  }, [])
+
   const runItem = useCallback((key: string) => {
     setRunning((s) => new Set(s).add(key))
-    void window.ipc.invoke('todo:runItem', { key })
-  }, [])
+    void window.ipc.invoke('todo:runItem', { key, model: getRunModel?.() })
+  }, [getRunModel])
 
   const commentOnItem = useCallback((key: string, message: string) => {
     setCommentKey(null)
     setRunning((s) => new Set(s).add(key))
     // Optimistic bubble; the canonical one arrives with the next refetch.
     setConversations((c) => ({ ...c, [key]: [...(c[key] ?? []), { role: 'user', text: message, links: [] }] }))
-    void window.ipc.invoke('todo:comment', { key, message })
-  }, [])
+    void window.ipc.invoke('todo:comment', { key, message, model: getRunModel?.() })
+  }, [getRunModel])
 
   const toggleThread = useCallback((sessionId: string) => {
     // Opening IS reading — the dot clears the moment the thread expands.
@@ -1562,8 +1785,62 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
   // Every door into a session marks it read — expand, or off to the sidebar.
   const openInChat = useCallback((sessionId: string) => {
     markSessionSeen(sessionId)
+    // Code threads open in the Code section instead of the dock: the
+    // workbench (diffs, terminal, run timeline) carries the SAME
+    // conversation in its right pane — a code session IS a chat session —
+    // so the dock alone would just hide the diff half of the work. Every
+    // Home door (item trays, receipts, approve chips, stream rows) funnels
+    // through here and inherits the routing.
+    if (onOpenCodeSession && deckThreadsRef.current.some((t) => t.sessionId === sessionId && t.kind === 'code')) {
+      onOpenCodeSession(sessionId)
+      return
+    }
     onOpenInChat(sessionId)
-  }, [markSessionSeen, onOpenInChat])
+  }, [markSessionSeen, onOpenInChat, onOpenCodeSession])
+
+  // A Deck strip's click: spotlight the source item in place; threads with
+  // no list row (chats, code sessions) open in the dock instead.
+  const jumpToStrip = useCallback((thread: HomeThread) => {
+    if (thread.todoKey) {
+      const el = document.querySelector(`[data-todo-key="${CSS.escape(thread.todoKey)}"]`)
+      if (el) {
+        el.scrollIntoView({
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+          block: 'center',
+        })
+        const key = thread.todoKey
+        setFlashKey(key)
+        window.setTimeout(() => setFlashKey((k) => (k === key ? null : k)), 1800)
+        return
+      }
+    }
+    openInChat(thread.sessionId)
+  }, [openInChat])
+  const jumpToStripRef = useRef(jumpToStrip)
+  useEffect(() => { jumpToStripRef.current = jumpToStrip }, [jumpToStrip])
+
+  // ⏎ / ↗ on a strip — openInChat is kind-aware, so code strips land in
+  // the Code section and everything else in the dock.
+  const openStrip = useCallback((thread: HomeThread) => {
+    openInChat(thread.sessionId)
+  }, [openInChat])
+
+  const togglePin = useCallback((thread: HomeThread) => {
+    void window.ipc.invoke('home:setPinned', { sessionId: thread.sessionId, pinned: !thread.pinned })
+  }, [])
+  const snoozeThread = useCallback((thread: HomeThread) => {
+    void window.ipc.invoke('home:snooze', { sessionId: thread.sessionId })
+    toast('Snoozed — back in 4h, or sooner if the thread moves')
+  }, [])
+  const snoozeThreadRef = useRef(snoozeThread)
+  useEffect(() => { snoozeThreadRef.current = snoozeThread }, [snoozeThread])
+  const dismissThread = useCallback((thread: HomeThread) => {
+    void window.ipc.invoke('home:dismiss', { sessionId: thread.sessionId })
+    toast('Dismissed — returns only if the thread moves again')
+  }, [])
+  const dismissThreadRef = useRef(dismissThread)
+  useEffect(() => { dismissThreadRef.current = dismissThread }, [dismissThread])
+  const pinnedIds = new Set(deckThreads.filter((t) => t.pinned).map((t) => t.sessionId))
 
   const startChat = useCallback(async (text: string) => {
     const res = await window.ipc.invoke('todo:startChat', { text })
@@ -1668,6 +1945,36 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
   const runningCount = allItems.filter((i) => running.has(i.key)).length
   const doneCount = allItems.filter((i) => i.checked).length
 
+  // ---- Deck bays: projections of the registry, fixed order ----
+  // Needs-you is the queue: oldest first, so J always serves the longest
+  // wait; snoozed threads are parked out of it (they return on time or on
+  // activity). Underway orders by start; pinned idle threads keep their
+  // strip (the watch flag). The attended thread (the live call's own
+  // conversation) is excluded everywhere — the Deck is for unattended work.
+  const deckVisible = deckThreads.filter((t) => t.sessionId !== attendedSessionId)
+  const deckNeedsYou = deckVisible
+    .filter((t) => (t.status === 'needs-you' || t.status === 'ready') && !t.snoozed && !t.dismissed)
+    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+  const deckUnderway = deckVisible
+    .filter((t) => t.status === 'underway' || (t.pinned && (t.snoozed || t.dismissed || t.status === 'idle')))
+    .sort((a, b) => (a.startedAt ?? a.updatedAt).localeCompare(b.startedAt ?? b.updatedAt))
+  const deckNeedsYouRef = useRef(deckNeedsYou)
+  deckNeedsYouRef.current = deckNeedsYou
+  // The J-cursor's last stop — what H snoozes.
+  const lastJumpedRef = useRef<HomeThread | null>(null)
+
+  // Skipper's watch: the fleet state as one glance (and one sentence).
+  // Snoozed and dismissed threads are deliberately parked, and the attended
+  // thread is the user's own conversation — none of them count.
+  const skipperUnderway = deckVisible.filter((t) => t.status === 'underway').length
+  const skipperNeeds = deckVisible.filter((t) => t.status === 'needs-you' && !t.snoozed && !t.dismissed).length
+  const skipperReady = deckVisible.filter((t) => t.status === 'ready' && !t.snoozed && !t.dismissed).length
+  const sitrep = [
+    skipperUnderway > 0 && `${skipperUnderway} underway`,
+    skipperNeeds > 0 && `${skipperNeeds} need${skipperNeeds === 1 ? 's' : ''} you`,
+    skipperReady > 0 && `${skipperReady} ready for review`,
+  ].filter(Boolean).join(' · ') || 'All quiet'
+
   const isChanged = (key: string): boolean => {
     const sid = sessions[key]
     if (!sid) return false
@@ -1701,29 +2008,34 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
       <button
         type="button"
         onClick={() => setTriageFilter(triageFilter === filter ? null : filter)}
-        className={`rounded px-1 text-[12px] transition-colors ${
-          triageFilter === filter ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'
+        className={`rounded-[4px] px-1.5 py-0.5 text-[12px] transition-colors duration-100 ${
+          triageFilter === filter ? 'bg-foreground/[0.08] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
         }`}
       >
-        <span className={`font-semibold ${tone}`}>{count}</span> {label}
+        <span className={`font-medium ${tone}`}>{count}</span> {label}
       </button>
     )
   )
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
-      <div className="flex-1 overflow-y-auto px-9 py-7">
-        <div className="mx-auto flex max-w-[720px] flex-col gap-4">
+      <div className="flex-1 overflow-y-auto px-9 pb-8 pt-12">
+        <div className="mx-auto flex max-w-[720px] flex-col gap-5">
 
-          {/* Header */}
-          <div className="flex items-center gap-3">
-            <h1 className="text-[28px] font-semibold tracking-tight">{todayLabel}</h1>
-            <div className="flex items-center gap-1.5">
-              {triagePill('needs_you', 'need you', needsYouCount, 'text-amber-600 dark:text-amber-400')}
-              {triagePill('running', 'running', runningCount, 'text-primary')}
-              {triagePill('done', 'done', doneCount, 'text-muted-foreground')}
+          {/* Header — Notion page anatomy: the title stands alone; the
+              triage pills sit under it like quiet page properties. */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em]">{todayLabel}</h1>
+              {(needsYouCount > 0 || runningCount > 0 || doneCount > 0) && (
+                <div className="mt-1.5 -ml-1.5 flex items-center gap-0.5">
+                  {triagePill('needs_you', 'need you', needsYouCount, 'text-amber-600 dark:text-amber-400')}
+                  {triagePill('running', 'running', runningCount, 'text-primary')}
+                  {triagePill('done', 'done', doneCount, 'text-muted-foreground')}
+                </div>
+              )}
             </div>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2 pt-1.5">
               {suggestions.length > 0 && (
                 <IconTip label="Suggestions waiting for your accept — jump to them">
                   <button
@@ -1745,7 +2057,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                       type="button"
                       onClick={() => void runPlannerNow()}
                       disabled={suggesting}
-                      className="flex items-center gap-1.5 rounded-l-md border border-r-0 border-border px-2 py-1 text-xs font-medium text-muted-foreground enabled:hover:bg-accent enabled:hover:text-foreground disabled:opacity-60"
+                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors duration-100 enabled:hover:bg-foreground/[0.06] enabled:hover:text-foreground disabled:opacity-40"
                     >
                       {suggesting ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                       Suggest
@@ -1755,12 +2067,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                     type="button"
                     onClick={() => setPlannerMenuOpen((v) => !v)}
                     aria-label="Suggestion settings"
-                    className="rounded-r-md border border-border px-1 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="rounded-md px-1 py-1 text-muted-foreground/70 transition-colors duration-100 hover:bg-foreground/[0.06] hover:text-foreground"
                   >
                     <ChevronDown className="size-3.5" />
                   </button>
                   {plannerMenuOpen && (
-                    <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-border bg-background p-3 shadow-md">
+                    <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-2xl border-none bg-popover p-3 shadow-[var(--rowboat-shadow)]">
                       <div className="text-sm font-medium">Suggest automatically</div>
                       {/* Off is the default — the schedule spends tokens only
                           after an explicit opt-in. ✦ Suggest always works. */}
@@ -1803,24 +2115,90 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                 <button
                   type="button"
                   onClick={() => void clearCompleted()}
-                  className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:bg-foreground/[0.06] hover:text-foreground"
                 >
                   Clear done
                 </button>
               )}
-              <button
-                type="button"
-                onClick={onShowOverview}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <LayoutGrid className="size-3.5" /> Overview
-              </button>
+              {/* Skipper takes the watch — the ambient channel: rowing while
+                  threads are underway, an amber count when something needs
+                  you, a sitrep on hover, voice on click. */}
+              <IconTip label={`${sitrep}${onSkipperCall ? ' — click to talk' : ''}`}>
+                <button
+                  type="button"
+                  onClick={onSkipperCall}
+                  disabled={!onSkipperCall}
+                  aria-label={`Skipper: ${sitrep}`}
+                  className="relative -my-2 shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-default"
+                >
+                  <TalkingHead ttsState="idle" getLevel={ZERO_LEVEL} size={46} rowing={skipperUnderway > 0} />
+                  {skipperNeeds + skipperReady > 0 && (
+                    <span className="absolute -right-0.5 top-0 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[9.5px] font-semibold leading-none text-white">
+                      {skipperNeeds + skipperReady}
+                    </span>
+                  )}
+                </button>
+              </IconTip>
             </div>
           </div>
 
+          {/* The Deck — every thread needing eyes or underway, across the
+              whole app (tasks, code sessions, chats). Collapses to nothing
+              when quiet: a calm morning looks exactly like before. */}
+          {(deckNeedsYou.length > 0 || deckUnderway.length > 0) && (
+            <div className="flex flex-col gap-2.5">
+              {deckNeedsYou.length > 0 && (
+                <div>
+                  <div className="flex items-baseline justify-between px-1 pb-1">
+                    <div className="text-[12px] font-medium text-amber-600/90 dark:text-amber-400/90">
+                      Needs you · {deckNeedsYou.length}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground/50">J cycles the queue</div>
+                  </div>
+                  {deckNeedsYou.map((t) => (
+                    <DeckStrip
+                      key={t.sessionId}
+                      thread={t}
+                      onJump={() => { lastJumpedRef.current = t; jumpToStrip(t) }}
+                      onOpen={() => openStrip(t)}
+                      onTogglePin={() => togglePin(t)}
+                      onSnooze={() => snoozeThread(t)}
+                      onDismiss={() => dismissThread(t)}
+                    />
+                  ))}
+                </div>
+              )}
+              {deckUnderway.length > 0 && (
+                <div>
+                  <div className={`px-1 pb-1 ${SECTION_LABEL}`}>
+                    {/* Count only live threads — a bay holding just pinned
+                        idle strips says "Underway" without the number. */}
+                    Underway{skipperUnderway > 0 ? ` · ${skipperUnderway}` : ''}
+                  </div>
+                  {deckUnderway.map((t) => (
+                    <DeckStrip
+                      key={t.sessionId}
+                      thread={t}
+                      onJump={() => jumpToStrip(t)}
+                      onOpen={() => openStrip(t)}
+                      onTogglePin={() => togglePin(t)}
+                    />
+                  ))}
+                  {/* Little's law, softly: every thread you start joins the
+                      divisor under everything else. Never a cap. */}
+                  {skipperUnderway >= 6 && (
+                    <div className="px-2 pt-1 text-[11px] text-muted-foreground/60">
+                      {skipperUnderway} underway — landing one beats launching one.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* While you were away — dismissable catch-up */}
           {changedItems.length > 0 && (
-            <div className="flex items-center gap-2 border-y border-border/60 px-1 py-2 text-[13px] text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
               <span className="size-1.5 shrink-0 rounded-full bg-foreground" />
               <span className="flex-1">
                 While you were away:
@@ -1842,7 +2220,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
           {/* First-proposals explainer — shown once, ever */}
           {!plannerIntroSeen
             && (suggestions.length > 0 || itemBlocks.some(({ block }) => block.kind === 'item' && block.item.proposed && !block.item.checked)) && (
-            <div className="flex items-center gap-2 border-y border-border/60 px-1 py-2 text-[13px] text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
               <Bot className="size-3.5 shrink-0" />
               <span className="flex-1">Rowboat has suggestions from your mail and calendar — accept the useful ones to add them to your list; declining teaches it what not to suggest. Nothing is added or run without you.</span>
               <button
@@ -1857,7 +2235,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
 
           {/* First-completion callout — shown once, ever */}
           {showCallout && (
-            <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-4 py-2.5 text-sm">
               <Bot className="size-4 shrink-0 text-primary" />
               <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Hit ＋ on the row to refine the work with a comment; 💬 opens the whole conversation in the sidebar.</span>
               <button
@@ -1873,7 +2251,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
           {/* The list */}
           <div className={`transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
             <div className="flex items-center justify-between px-1 pb-1">
-              <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Tasks</div>
+              <div className={SECTION_LABEL}>Tasks</div>
               <IconTip label="New to-do — press N">
                 <button
                   type="button"
@@ -1905,7 +2283,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                     depth={0}
                     changed={isChanged(item.key)}
                     dimmed={(triageFilter !== null && !blockMatches(item)) || (spotKey !== null && !blockContainsSpot(item))}
-                    spotlight={item.key === spotKey}
+                    spotlight={item.key === spotKey || item.key === flashKey}
                     collapsed={collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0}
                     onToggleCollapsed={() => {
                       const wasCollapsed = collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0
@@ -1968,7 +2346,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                             depth={1}
                             changed={isChanged(child.key)}
                             dimmed={triageFilter !== null && !triageMatch(child)}
-                            spotlight={child.key === spotKey}
+                            spotlight={child.key === spotKey || child.key === flashKey}
                             collapsed={collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0}
                             onToggleCollapsed={() => {
                               const wasCollapsed = collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0
@@ -2022,7 +2400,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
               })
             )}
             {blocks !== null && !itemBlocks.some(({ block }) => block.kind === 'item') && (
-              <div className="rounded-lg border border-dashed border-border/60 px-3 py-3 text-[13px] text-muted-foreground">
+              <div className="px-2 py-2 text-[13px] text-muted-foreground/70">
                 <TextWithMentions text="Nothing on the list — add your first to-do below, or mention @rowboat to hand one off." />
               </div>
             )}
@@ -2043,11 +2421,11 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
               surface's "needs your decision" color — the one tinted block
               on the page. */}
           {suggestions.length > 0 && (
-            <div ref={suggestionsRef} className="flex flex-col gap-1 rounded-lg bg-amber-500/[0.06] px-2.5 py-2 ring-1 ring-amber-500/15">
-              <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-amber-600/80 dark:text-amber-400/80">Suggested</div>
+            <div ref={suggestionsRef} className="flex flex-col gap-1 rounded-lg bg-amber-500/[0.06] px-2.5 py-2">
+              <div className="px-1 text-[12px] font-medium text-amber-600/80 dark:text-amber-400/80">Suggested</div>
               <div>
                 {suggestions.map((text) => (
-                  <div key={text} className="group/sugg flex items-center gap-2.5 border-b border-amber-500/10 px-2 py-2 last:border-0">
+                  <div key={text} className="group/sugg flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors duration-100 hover:bg-amber-500/[0.07]">
                     <Sparkles className="size-3.5 shrink-0 text-amber-500/70" />
                     <span className="min-w-0 flex-1 text-sm">
                       <TextWithMentions text={text} onOpenLink={(l) => openLink(l, onOpenNote)} />
@@ -2057,7 +2435,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
                         type="button"
                         onClick={() => void acceptSuggestion(text)}
                         aria-label="Accept suggestion"
-                        className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                        className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:bg-foreground/[0.06] hover:text-foreground"
                       >
                         <Check className="size-3" /> Add
                       </button>
@@ -2095,6 +2473,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
               .filter((t) => t.updatedAt > seenBaseline && t.updatedAt > (sessionSeenAt[t.sessionId] ?? ''))
               .map((t) => t.sessionId))}
             onHide={hideThread}
+            pinnedIds={pinnedIds}
+            onTogglePin={(sessionId, pinned) => void window.ipc.invoke('home:setPinned', { sessionId, pinned })}
             onViewAll={onOpenChatHistory}
             onToggle={toggleThread}
             onReply={(sid) => (onComposeTodo
@@ -2133,7 +2513,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, onNewChat, 
       {/* The assistant composer — pinned to the bottom like any chat
           surface; everything above scrolls. Tasks are born in the list's
           add-row or by @rowboat mention. */}
-      <div className="shrink-0 border-t border-border/40 bg-background px-9 pb-5 pt-3">
+      <div className="shrink-0 border-t border-foreground/[0.06] bg-background px-9 pb-5 pt-3">
         <div className="mx-auto max-w-[720px]">
           {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
         </div>

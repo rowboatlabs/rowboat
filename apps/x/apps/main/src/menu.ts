@@ -150,17 +150,19 @@ function updateMenuItem(): MenuItemConstructorOptions {
   }
 }
 
-/** Ordered as the sidebar is: primary sections first, secondary after. */
+/** Ordered as the dock is. Number keys cover its nine primary destinations. */
 const GO_ITEMS: ReadonlyArray<{ label: string; type: string; accelerator?: string }> = [
   { label: "Home", type: "home", accelerator: "CmdOrCtrl+1" },
-  { label: "Email", type: "email", accelerator: "CmdOrCtrl+2" },
-  { label: "Meetings", type: "meetings", accelerator: "CmdOrCtrl+3" },
-  { label: "Brain", type: "knowledge-view", accelerator: "CmdOrCtrl+4" },
-  { label: "Apps", type: "apps", accelerator: "CmdOrCtrl+5" },
-  { label: "Code", type: "code", accelerator: "CmdOrCtrl+6" },
-  { label: "Live Notes", type: "live-notes", accelerator: "CmdOrCtrl+7" },
-  { label: "Chat History", type: "chat-history", accelerator: "CmdOrCtrl+8" },
-  { label: "Background Tasks", type: "bg-tasks", accelerator: "CmdOrCtrl+9" },
+  { label: "Spaces", type: "spaces", accelerator: "CmdOrCtrl+2" },
+  { label: "Email", type: "email", accelerator: "CmdOrCtrl+3" },
+  { label: "Code", type: "code", accelerator: "CmdOrCtrl+4" },
+  { label: "Meetings", type: "meetings", accelerator: "CmdOrCtrl+5" },
+  { label: "Brain", type: "knowledge-view", accelerator: "CmdOrCtrl+6" },
+  { label: "Apps", type: "apps", accelerator: "CmdOrCtrl+7" },
+  { label: "Background Agents", type: "bg-tasks", accelerator: "CmdOrCtrl+8" },
+  { label: "Workspaces", type: "workspace", accelerator: "CmdOrCtrl+9" },
+  { label: "Chat History", type: "chat-history" },
+  { label: "Live Notes", type: "live-notes" },
   { label: "Graph", type: "graph" },
 ];
 
@@ -204,6 +206,10 @@ function rebuildMenu(): void {
         label: "New Note",
         accelerator: "CmdOrCtrl+Shift+N",
         click: () => sendCommand({ command: "new-note" }),
+      },
+      {
+        label: "New Presentation…",
+        click: () => sendCommand({ command: "new-presentation" }),
       },
       { type: "separator" },
       {
@@ -276,6 +282,10 @@ function rebuildMenu(): void {
         label: "Toggle Sidebar",
         accelerator: "CmdOrCtrl+\\",
         click: () => sendToRenderer("menu:toggleSidebar", null),
+      },
+      {
+        label: "Toggle Browser",
+        click: () => sendCommand({ command: "toggle-browser" }),
       },
       {
         label: "Full-Screen Chat",

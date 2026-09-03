@@ -26,6 +26,7 @@ function input(
         codeCwd: null,
         videoMode: false,
         coachMode: false,
+        commandCenter: false,
         ...overrides,
     };
 }
@@ -42,6 +43,7 @@ const MATRIX: Array<[name: string, overrides: Partial<ComposeSystemInstructionsI
     ["coach mode", { coachMode: true }],
     ["code mode claude with cwd", { codeMode: "claude", codeCwd: "/tmp/project" }],
     ["code mode codex without cwd", { codeMode: "codex" }],
+    ["command center", { commandCenter: true }],
     [
         "everything on",
         {

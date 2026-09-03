@@ -51,6 +51,7 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'LLMParse':
         case 'file-exists':
         case 'file-stat':
+        case 'deck-review':
         case 'transcribe-audio':
             return pathArg ? { operation: 'read', paths: [pathArg] } : null;
         case 'text-to-speech': {
@@ -68,6 +69,13 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         case 'file-writeText':
         case 'file-editText':
         case 'file-mkdir':
+        case 'deck-create':
+        case 'deck-add-slide':
+        case 'deck-edit-slide':
+        case 'deck-restructure':
+        case 'deck-restyle':
+        case 'spreadsheet-create':
+        case 'spreadsheet-edit':
             return pathArg ? { operation: 'write', paths: [pathArg] } : null;
         case 'file-copy':
         case 'file-rename': {

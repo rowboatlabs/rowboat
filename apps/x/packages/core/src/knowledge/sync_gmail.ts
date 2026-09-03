@@ -5,6 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { getMaxEmails } from '../config/gmail_sync_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { gmailRateLimitCooldownMs } from './gmail-rate-limit.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import { formatTimestampForModel } from '@x/shared/dist/time.js';
@@ -1378,6 +1379,30 @@ async function sweepUnclassifiedMarkdown(auth: OAuth2Client, llmBudget: number =
     }
 }
 
+// One Sync Activity notice per rate-limit episode, deduped on the lockout
+// deadline — without it the cooldown silences the feed mid-lockout, which
+// reads as sync having given up. A progress event on a synthetic run: a
+// run_complete would wrongly clear the sidebar's red failed state (any
+// non-error outcome clears it) while Gmail is still locked out.
+let lastCooldownNoticeUntil = 0;
+async function logRateLimitCooldownNotice(cooldownMs: number): Promise<void> {
+    const until = Date.now() + cooldownMs;
+    if (Math.abs(until - lastCooldownNoticeUntil) < 5_000) return;
+    lastCooldownNoticeUntil = until;
+    const at = new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    try {
+        await serviceLogger.log({
+            type: 'progress',
+            service: 'gmail',
+            runId: 'gmail_rate_limit_notice',
+            level: 'warn',
+            message: `Rate limited by Gmail — next sync attempt at ${at}`,
+        });
+    } catch {
+        // Best-effort: the caller's console log still records the skip.
+    }
+}
+
 async function performSync() {
     const LOOKBACK_DAYS = 7; // Default to 1 week
     const ATTACHMENTS_DIR = path.join(SYNC_DIR, 'attachments');
@@ -1386,6 +1411,16 @@ async function performSync() {
     // Ensure directories exist
     if (!fs.existsSync(SYNC_DIR)) fs.mkdirSync(SYNC_DIR, { recursive: true });
     if (!fs.existsSync(ATTACHMENTS_DIR)) fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+
+    // Stand down while Gmail's rate-limit lockout is active — every pass
+    // attempted before the deadline fails anyway, and its partial progress
+    // is exactly what kept the quota permanently tripped.
+    const cooldownMs = gmailRateLimitCooldownMs();
+    if (cooldownMs > 0) {
+        console.log(`[Gmail] rate-limit cooldown active — skipping sync for another ${Math.ceil(cooldownMs / 1000)}s`);
+        await logRateLimitCooldownNotice(cooldownMs);
+        return;
+    }
 
     try {
         const auth = await GoogleClientFactory.getClient();
@@ -2068,9 +2103,14 @@ export async function init() {
             console.error("Error in main loop:", error);
         }
 
-        // Sleep for N minutes before next check (can be interrupted by triggerSync)
-        console.log(`Sleeping for ${SYNC_INTERVAL_MS / 1000} seconds...`);
-        await interruptibleSleep(SYNC_INTERVAL_MS);
+        // Sleep before the next check (can be interrupted by triggerSync).
+        // An active rate-limit cooldown stretches the sleep to Gmail's own
+        // deadline; performSync guards again in case a trigger wakes us early.
+        const cooldownMs = gmailRateLimitCooldownMs();
+        if (cooldownMs > 0) await logRateLimitCooldownNotice(cooldownMs);
+        const sleepMs = Math.max(SYNC_INTERVAL_MS, cooldownMs > 0 ? cooldownMs + 1_000 : 0);
+        console.log(`Sleeping for ${Math.round(sleepMs / 1000)} seconds...`);
+        await interruptibleSleep(sleepMs);
     }
 }
 

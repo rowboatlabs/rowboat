@@ -6,7 +6,7 @@ import {
   connectProvider,
   disconnectProvider,
   listProviders,
-} from './oauth-handler.js';
+} from '@x/core/dist/auth/oauth-flows.js';
 import { watcher as watcherCore, workspace } from '@x/core';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { workspace as workspaceShared } from '@x/shared';
@@ -28,22 +28,23 @@ let caffeinateBlockerId: number | null = null;
 import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
 import {
   getCompanionMode,
+  getModeSeq,
   getExpandedSurface,
   getPopoutState,
   getQuickAskShortcutState,
-  getQuickAskWindow,
-  hideQuickAsk,
+  onAppReady,
+  onModeApplied,
   isPinnedCollapsed,
-  markSummonPending,
+  relaySummon,
   ackSummon,
   pushChatContext,
   pushPopoutState,
   resizeCompanionPinned,
   setCompanionPinned,
   setPinnedCollapsed,
+  setCompanionInteractive,
   setQuickAskShortcut,
   setShortcutCaptureActive,
-  showQuickAsk,
 } from './quick-ask.js';
 import { screenPointerService } from './screen-pointer.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
@@ -53,15 +54,17 @@ import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
+import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';
+import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled, bridgeDeltaSubscribe, bridgeDeltaUnsubscribe, childServerMode, getConnectionInfo, connectRemoteServer, disconnectRemoteServer } from './server-host.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
-import { getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { getImageModelCatalog, getModelCatalog } from '@x/core/dist/models/catalog.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
-import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
+import { signInWithChatGPT, cancelChatGPTSignIn } from '@x/core/dist/auth/chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
@@ -72,10 +75,11 @@ import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js'
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
 import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import { HomeThreadsTracker } from '@x/core/dist/home/threads.js';
 import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
-import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
+import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal, subscribeTerminalEvents } from '@x/core/dist/terminal/terminal.js';
 import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/runtime/assembly/copilot/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
@@ -90,7 +94,6 @@ import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/confi
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
 import { loadRetentionSettings, saveRetentionSettings } from '@x/core/dist/config/retention.js';
-import { runRetentionSweep } from '@x/core/dist/runtime/sessions/retention.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
@@ -107,7 +110,9 @@ let voiceCallActive = false;
 function updateSelfCaptureState() {
   setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
 }
-import * as composioHandler from './composio-handler.js';
+import * as composioHandler from '@x/core/dist/composio/flows.js';
+import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
+import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
@@ -136,6 +141,7 @@ import { readPrepNoteForEvent } from '@x/core/dist/knowledge/meeting_prep_brief.
 import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
+import { editSlide, generateDeckOutline, generateSlide } from '@x/core/dist/knowledge/deck_outline.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
@@ -148,7 +154,7 @@ import { loadEmailInstructions, saveEmailInstructions } from '@x/core/dist/knowl
 import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/knowledge/email_labels.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
-import { startManagedGooglePick } from './google-picker-managed.js';
+import { startManagedGooglePick } from '@x/core/dist/knowledge/google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -190,33 +196,6 @@ import {
   readRunIds as readTaskRunIds,
 } from '@x/core/dist/background-tasks/fileops.js';
 
-type SlackHomeChannel = {
-  id: string;
-  name: string;
-  workspaceUrl?: string;
-  workspaceName?: string;
-};
-
-type SlackHomeMessage = {
-  id: string;
-  workspaceName?: string;
-  workspaceUrl?: string;
-  channelId?: string;
-  channelName?: string;
-  author?: string;
-  text: string;
-  ts: string;
-  url?: string;
-};
-
-function parseWhoamiWorkspaces(data: unknown): Array<{ url: string; name: string }> {
-  const parsed = (data ?? {}) as { workspaces?: Array<{ workspace_url?: string; workspace_name?: string }> };
-  return (parsed.workspaces || []).map((w) => ({
-    url: w.workspace_url || '',
-    name: w.workspace_name || '',
-  }));
-}
-
 type SlackAuthResult = {
   ok: boolean;
   workspaces: Array<{ url: string; name: string }>;
@@ -255,125 +234,19 @@ async function quitSlackIfWindows(): Promise<void> {
   // Give Windows a moment to release the file handles before we copy them.
   await new Promise(resolve => setTimeout(resolve, 800));
 }
-
-function extractArrayPayload(parsed: unknown): unknown[] {
-  if (Array.isArray(parsed)) return parsed;
-  if (parsed && typeof parsed === 'object') {
-    const obj = parsed as Record<string, unknown>;
-    for (const key of ['messages', 'channels', 'items', 'results', 'data']) {
-      if (Array.isArray(obj[key])) return obj[key] as unknown[];
-    }
-  }
-  return [];
-}
-
-function slackMessageText(message: Record<string, unknown>): string {
-  const value = message.text ?? message.body ?? message.content;
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function slackMessageAuthor(message: Record<string, unknown>): string | undefined {
-  const value = message.username ?? message.user ?? message.author;
-  return typeof value === 'string' ? value : undefined;
-}
-
-function extractSlackUserName(raw: unknown): string | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const obj = raw as Record<string, unknown>;
-  const profile = obj.profile && typeof obj.profile === 'object' ? obj.profile as Record<string, unknown> : undefined;
-  const user = obj.user && typeof obj.user === 'object' ? obj.user as Record<string, unknown> : undefined;
-  const userProfile = user?.profile && typeof user.profile === 'object' ? user.profile as Record<string, unknown> : undefined;
-
-  const candidates = [
-    profile?.display_name,
-    profile?.real_name,
-    userProfile?.display_name,
-    userProfile?.real_name,
-    obj.display_name,
-    obj.displayName,
-    obj.real_name,
-    obj.realName,
-    user?.display_name,
-    user?.displayName,
-    user?.real_name,
-    user?.realName,
-    obj.name,
-    user?.name,
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-
-  return null;
-}
-
-async function resolveSlackUserName(
-  userId: string,
-  workspaceUrl: string | undefined,
-  cache: Map<string, string>,
-): Promise<string | null> {
-  const key = `${workspaceUrl ?? ''}:${userId}`;
-  if (cache.has(key)) return cache.get(key) ?? null;
-
-  const args = ['user', 'get', userId];
-  if (workspaceUrl) {
-    args.push('--workspace', workspaceUrl);
-  }
-
-  const result = await runAgentSlack(args, { timeoutMs: 10000, maxBuffer: 512 * 1024 });
-  if (result.ok) {
-    const name = extractSlackUserName(result.data ?? {});
-    if (name) {
-      cache.set(key, name);
-      return name;
-    }
-  } else {
-    console.warn(`[Slack] Failed to resolve user ${userId}: ${result.message}`);
-  }
-
-  cache.set(key, userId);
-  return null;
-}
-
-async function resolveSlackMessageText(
-  text: string,
-  workspaceUrl: string | undefined,
-  cache: Map<string, string>,
-): Promise<string> {
-  const matches = Array.from(text.matchAll(/<@([UW][A-Z0-9]+)(?:\|([^>]+))?>|@([UW][A-Z0-9]{6,})\b/g));
-  if (matches.length === 0) return text;
-
-  let resolved = text;
-  for (const match of matches) {
-    const userId = match[1] ?? match[3];
-    if (!userId) continue;
-    const fallback = match[2] ?? match[0];
-    const name = await resolveSlackUserName(userId, workspaceUrl, cache);
-    resolved = resolved.replaceAll(match[0], name ?? fallback);
-  }
-  return resolved;
-}
-
-async function resolveSlackAuthor(
-  author: string | undefined,
-  workspaceUrl: string | undefined,
-  cache: Map<string, string>,
-): Promise<string | undefined> {
-  if (!author) return undefined;
-  if (!/^[UW][A-Z0-9]{6,}$/.test(author)) return author;
-  return await resolveSlackUserName(author, workspaceUrl, cache) ?? author;
-}
-
-function slackMessageUrl(message: Record<string, unknown>, workspaceUrl: string | undefined, channelId: string | undefined, ts: string): string | undefined {
-  const direct = message.permalink ?? message.url;
-  if (typeof direct === 'string' && direct) return direct;
-  if (!workspaceUrl || !channelId) return undefined;
-  return `${workspaceUrl.replace(/\/$/, '')}/archives/${channelId}/p${ts.replace('.', '')}`;
-}
+import {
+  parseWhoamiWorkspaces,
+  extractArrayPayload,
+  slackMessageText,
+  slackMessageAuthor,
+  resolveSlackMessageText,
+  resolveSlackAuthor,
+  slackMessageUrl,
+  type SlackHomeChannel,
+  type SlackHomeMessage,
+} from '@x/core/dist/slack/home-parse.js';
 import { browserIpcHandlers } from './browser/ipc.js';
+import { spacesIpcHandlers } from './spaces/ipc.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -477,7 +350,7 @@ const activeTtsStreams = new Map<string, AbortController>();
 // Match only real app windows — getAllWindows() can also contain the
 // companion window and hidden utility windows (e.g. PDF-export renderers),
 // which must not be shown, focused, or sent app events.
-function findMainAppWindow(): BrowserWindow | undefined {
+export function findMainAppWindow(): BrowserWindow | undefined {
   return BrowserWindow.getAllWindows().find((w) => {
     if (w.isDestroyed()) return false;
     const url = w.webContents.getURL();
@@ -512,12 +385,16 @@ export function registerIpcHandlers(handlers: InvokeHandlers) {
     InvokeChannels,
     InvokeHandler<InvokeChannels>
   ][]) {
+    // Strangler-fig: channels migrated to rowboat-server cross localhost HTTP
+    // instead of calling their in-process handler (which stays in the map as
+    // the ROWBOAT_FORWARD_MIGRATED=0 kill switch).
+    const forwarded = shouldForwardChannel(channel);
     ipcMain.handle(channel, async (event, rawArgs) => {
       // Validate request payload
       const args = ipc.validateRequest(channel, rawArgs);
 
-      // Call handler
-      const result = await handler(event, args);
+      // Call handler (or the migrated channel's HTTP twin)
+      const result = forwarded ? await forwardRpc(channel, args) : await handler(event, args);
 
       // Validate response payload
       return ipc.validateResponse(channel, result);
@@ -564,6 +441,19 @@ function emitKnowledgeCommitEvent(): void {
  */
 function emitWorkspaceChangeEvent(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): void {
   broadcastToWindows('workspace:didChange', event);
+  for (const listener of workspaceChangeListeners) {
+    listener(event);
+  }
+}
+
+// Non-window consumers of workspace:didChange — today the rowboat-server WS
+// hub, which relays it to paired phones.
+const workspaceChangeListeners = new Set<(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>) => void>();
+export function onWorkspaceChange(
+  listener: (event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>) => void,
+): () => void {
+  workspaceChangeListeners.add(listener);
+  return () => workspaceChangeListeners.delete(listener);
 }
 
 /**
@@ -684,12 +574,19 @@ export function stopWorkspaceWatcher(): void {
 // The one renderer fan-out: send a payload to every live window on a channel.
 // All broadcast feeds (runs, services, sessions, turns, code runs, agent
 // status) go through here.
-function broadcastToWindows(channel: string, payload: unknown): void {
+export function broadcastToWindows(channel: string, payload: unknown): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {
       win.webContents.send(channel, payload);
     }
+  }
+}
+
+/** Reload every window — used after switching servers, so all renderer state refetches. */
+export function broadcastReload(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents) win.webContents.reload();
   }
 }
 
@@ -701,17 +598,23 @@ function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
   broadcastToWindows('services:events', event);
 }
 
-export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
-  // Native connection status (e.g. Google) is baked into the Copilot system
-  // prompt, so any OAuth state change must rebuild it.
-  invalidateCopilotInstructionsCache();
-  broadcastToWindows('oauth:didConnect', event);
-  // Email connect (Google BYOK, Google rowboat-mode, and Microsoft all funnel
-  // through here) is the "connected email" first-time reward. The stored
-  // credit key keeps its historical name — renaming would double-grant.
-  if ((event.provider === 'google' || event.provider === 'microsoft') && event.success) {
-    void maybeActivateCredit('first_gmail_connected');
-  }
+// Connector state pushes now originate in core (oauth-flows/composio/chatgpt
+// buses); this watcher relays them to renderer windows.
+let terminalEventsWatcher = false;
+export function startTerminalEventsWatcher(): void {
+  if (terminalEventsWatcher) return;
+  terminalEventsWatcher = true;
+  subscribeTerminalEvents((e) => broadcastToWindows(e.channel, e.payload));
+}
+
+let connectorEventsWatcher = false;
+export function startConnectorEventsWatcher(): void {
+  if (connectorEventsWatcher) return;
+  connectorEventsWatcher = true;
+  oauthConnectBus.subscribe((event) => broadcastToWindows('oauth:didConnect', event));
+  composioConnectBus.subscribe((event) => broadcastToWindows('composio:didConnect', event));
+  chatgptStatusBus.subscribe((event) => broadcastToWindows('chatgpt:statusChanged', event));
+  subscribeTtsChunks((event) => broadcastToWindows('voice:tts-chunk', event));
 }
 
 async function requireCodeSession(sessionId: string): Promise<CodeSession> {
@@ -732,6 +635,20 @@ export async function startCodeSessionStatusWatcher(): Promise<void> {
   await tracker.start();
   codeSessionStatusWatcher = tracker.onTransition((sessionId, status) => {
     broadcastToWindows('codeSession:status', { sessionId, status });
+  });
+}
+
+// Home thread registry (the Deck): live status from the turn spine → a
+// debounced ping; the renderer refetches home:threads on it.
+let homeThreadsWatcher: (() => void) | null = null;
+export function startHomeThreadsWatcher(): void {
+  if (homeThreadsWatcher) {
+    return;
+  }
+  const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+  tracker.start();
+  homeThreadsWatcher = tracker.onChange(() => {
+    broadcastToWindows('home:threadsChanged', {});
   });
 }
 
@@ -837,7 +754,9 @@ export function startCodeRunFeedWatcher(): void {
 // sessions:list awaits this deferred; main.ts resolves it when the scan
 // settles (success or failure, so the list never hangs).
 let resolveSessionsIndexReady: () => void;
-const sessionsIndexReady = new Promise<void>((resolve) => {
+// Exported for the rowboat-server host, whose sessions:list handler shares
+// this gate (main and the hosted transport run on the same core instance).
+export const sessionsIndexReady = new Promise<void>((resolve) => {
   resolveSessionsIndexReady = resolve;
 });
 export function markSessionsIndexReady(): void {
@@ -849,31 +768,6 @@ export function markSessionsIndexReady(): void {
 // delayed so it never competes with startup. The first launch with retention
 // enabled only arms the one-time notice (retention:consumeFirstRunNotice) —
 // sweeping begins on the next launch, after the user has seen it.
-let retentionSweepStarted = false;
-export function startRetentionSweep(): void {
-  if (retentionSweepStarted) return;
-  retentionSweepStarted = true;
-  const sweep = async () => {
-    try {
-      const settings = await loadRetentionSettings();
-      if (!settings.enabled || !settings.noticeShown) return;
-      const result = await runRetentionSweep({
-        sessions: container.resolve<ISessions>('sessions'),
-        turnsRootDir: container.resolve<string>('turnsRootDir'),
-        settings,
-      });
-      if (result.deletedSessions > 0 || result.deletedTurnFiles > 0) {
-        console.log(
-          `[Retention] sweep: deleted ${result.deletedSessions} session(s), ${result.deletedTurnFiles} turn file(s)`,
-        );
-      }
-    } catch (error) {
-      console.error('[Retention] sweep failed:', error);
-    }
-  };
-  setTimeout(() => { void sweep(); }, 90_000);
-  setInterval(() => { void sweep(); }, 24 * 60 * 60 * 1000);
-}
 
 let servicesWatcher: (() => void) | null = null;
 export async function startServicesWatcher(): Promise<void> {
@@ -1136,7 +1030,7 @@ export function setupIpcHandlers() {
         }
       }
     },
-    // --- Quick-ask bar relays ---
+    // --- Hover companion relays ---
     'quickAsk:getShortcut': async () => {
       return getQuickAskShortcutState();
     },
@@ -1151,23 +1045,28 @@ export function setupIpcHandlers() {
       findMainAppWindow()?.webContents.send('quick-ask:submit', args);
       return {};
     },
-    'quickAsk:stop': async () => {
-      findMainAppWindow()?.webContents.send('quick-ask:stop', null);
-      return {};
-    },
     'quickAsk:getMode': async () => {
       return {
+        seq: getModeSeq(),
         mode: getCompanionMode(),
         collapsed: isPinnedCollapsed(),
         surface: getExpandedSurface(),
       };
     },
+    'quickAsk:modeApplied': async (_event, args) => {
+      onModeApplied(args.seq);
+      return {};
+    },
+    'quickAsk:appReady': async () => {
+      onAppReady();
+      return {};
+    },
     'quickAsk:tuck': async () => {
-      // The next pin gets focus (the user asked for their companion); the
-      // app window decides HOW to get there (start a voice call, or
-      // minimize a live call to the floating surface).
-      markSummonPending();
-      findMainAppWindow()?.webContents.send('quick-ask:tuck', null);
+      // The card's tuck handle: the SAME relay as the chord (the next pin
+      // gets focus; the app window decides HOW to get there — start a voice
+      // call, or minimize a live call to the floating surface; a missing or
+      // loading app window is waited for; nothing answering falls back).
+      relaySummon();
       return {};
     },
     'quickAsk:tuckAck': async () => {
@@ -1178,6 +1077,10 @@ export function setupIpcHandlers() {
       setPinnedCollapsed(args.collapsed);
       return {};
     },
+    'quickAsk:setInteractive': async (_event, args) => {
+      setCompanionInteractive(args.interactive);
+      return {};
+    },
     'quickAsk:chatContext': async (_event, args) => {
       pushChatContext(args);
       return {};
@@ -1186,24 +1089,8 @@ export function setupIpcHandlers() {
       findMainAppWindow()?.webContents.send('quick-ask:select-chat', args);
       return {};
     },
-    'quickAsk:hide': async () => {
-      hideQuickAsk();
-      return {};
-    },
-    'quickAsk:show': async () => {
-      showQuickAsk();
-      return {};
-    },
     'quickAsk:newChat': async () => {
       findMainAppWindow()?.webContents.send('quick-ask:new-chat', null);
-      return {};
-    },
-    'quickAsk:setOptions': async (_event, args) => {
-      findMainAppWindow()?.webContents.send('quick-ask:set-options', args);
-      return {};
-    },
-    'quickAsk:optionsState': async (_event, args) => {
-      getQuickAskWindow()?.webContents.send('quick-ask:options-state', args);
       return {};
     },
     'quickAsk:openChat': async () => {
@@ -1215,10 +1102,6 @@ export function setupIpcHandlers() {
         app.focus({ steal: true });
         main.webContents.send('quick-ask:open-chat', null);
       }
-      return {};
-    },
-    'quickAsk:state': async (_event, args) => {
-      getQuickAskWindow()?.webContents.send('quick-ask:state', args);
       return {};
     },
     'meeting:notifyNotesReady': async (_event, args) => {
@@ -1333,6 +1216,33 @@ export function setupIpcHandlers() {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to export a copy';
         return { saved: false, error: message };
+      }
+    },
+    'deck:generateOutline': async (_event, args) => {
+      try {
+        const outline = await generateDeckOutline(args);
+        return { outline };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to generate the deck outline';
+        return { error: message };
+      }
+    },
+    'deck:generateSlide': async (_event, args) => {
+      try {
+        const slide = await generateSlide(args);
+        return { slide };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to generate the slide';
+        return { error: message };
+      }
+    },
+    'deck:editSlide': async (_event, args) => {
+      try {
+        const slide = await editSlide(args);
+        return { slide };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to edit the slide';
+        return { error: message };
       }
     },
     'gmail:getImportant': async (_event, args) => {
@@ -1535,15 +1445,32 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'sessions:delete': async (_event, args) => {
-      await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      // An ADOPTED chat is a code session under a plain-chat door: deleting
+      // it through the runtime alone would orphan its code meta, stored ACP
+      // conversation, workdir sidecar — and leave a ghost row in the Code
+      // rail. Route through CodeSessionService.delete, which cleans all of
+      // that up (the runtime layer stays ignorant of code-mode). The
+      // worktree checkout is deliberately KEPT on disk — an unmerged
+      // worktree may hold the only copy of the work; explicit removal
+      // stays a Code-rail decision.
+      const codeMeta = await container.resolve<ICodeSessionsRepo>('codeSessionsRepo').get(args.sessionId).catch(() => null);
+      if (codeMeta) {
+        await container.resolve<CodeSessionService>('codeSessionService').delete(args.sessionId, { removeWorktree: false });
+      } else {
+        await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      }
       return { success: true };
     },
     'turns:subscribe': async (event, args) => {
       subscribeTurnDeltas(event.sender, args.turnId);
+      // Child-server mode: deltas arrive over the WS feed, so mirror the
+      // window's interest onto the wire subscription.
+      if (childServerMode()) bridgeDeltaSubscribe(args.turnId);
       return { success: true };
     },
     'turns:unsubscribe': async (event, args) => {
       unsubscribeTurnDeltas(event.sender, args.turnId);
+      if (childServerMode()) bridgeDeltaUnsubscribe(args.turnId);
       return { success: true };
     },
     'sessions:downloadLog': async (event, args) => {
@@ -1609,6 +1536,9 @@ export function setupIpcHandlers() {
     'models:list': async (_event, args) => {
       return await getModelCatalog({ refreshProvider: args?.refreshProvider });
     },
+    'models:listImageModels': async () => {
+      return await getImageModelCatalog();
+    },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
     },
@@ -1651,6 +1581,7 @@ export function setupIpcHandlers() {
           backgroundTask: tasks.backgroundTask ?? null,
           subagent: tasks.subagent ?? null,
         },
+        imageModel: cfg?.imageModel ?? null,
         deferBackgroundTasks: cfg?.deferBackgroundTasks === true,
       };
     },
@@ -1694,7 +1625,7 @@ export function setupIpcHandlers() {
       if (result.signedIn) {
         // Model lists gate on sign-in state (composer picker, models:list) —
         // push the change so they refresh without polling.
-        broadcastToWindows('chatgpt:statusChanged', { signedIn: true });
+        chatgptStatusBus.publish({ signedIn: true });
         captureProviderConnected('codex');
       }
       return result;
@@ -1706,7 +1637,7 @@ export function setupIpcHandlers() {
     'chatgpt:signOut': async () => {
       try {
         await signOutChatGPT();
-        broadcastToWindows('chatgpt:statusChanged', { signedIn: false });
+        chatgptStatusBus.publish({ signedIn: false });
         captureProviderDisconnected('codex');
         return { success: true };
       } catch (error) {
@@ -1740,11 +1671,11 @@ export function setupIpcHandlers() {
     'codeMode:getConfig': async () => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
       const config = await repo.getConfig();
-      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy };
+      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy, defaultProjectId: config.defaultProjectId };
     },
     'codeMode:setConfig': async (_event, args) => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
-      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy });
+      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy, defaultProjectId: args.defaultProjectId });
       invalidateCopilotInstructionsCache();
       return { success: true };
     },
@@ -1810,6 +1741,10 @@ export function setupIpcHandlers() {
     'codeMode:listModelOptions': async (_event, args) => {
       const manager = container.resolve<CodeModeManager>('codeModeManager');
       return manager.listModelOptions(args.agent);
+    },
+    'codeSession:setDone': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return { session: await service.setDone(args.sessionId, args.done) };
     },
     'codeSession:delete': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
@@ -2404,6 +2339,27 @@ export function setupIpcHandlers() {
       const mimeType = mimeMap[ext] || 'application/octet-stream';
       return { data: buffer.toString('base64'), mimeType, size: stat.size };
     },
+    'spreadsheet:load': async (_event, args) => {
+      const { loadSheetWindow } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
+      const result = await loadSheetWindow(args.path, args.sheet, args.offset, args.limit);
+      return {
+        format: result.meta.format,
+        sheets: result.meta.sheets,
+        activeSheet: result.activeSheet,
+        rows: result.rows,
+        display: result.display,
+        firstRow: result.firstRow,
+        firstRowDisplay: result.firstRowDisplay,
+        offset: result.offset,
+        totalRows: result.totalRows,
+        totalColumns: result.totalColumns,
+        etag: result.meta.etag,
+      };
+    },
+    'spreadsheet:find': async (_event, args) => {
+      const { findInSheet } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
+      return await findInSheet(args.path, args.sheet, args.query, args.maxMatches);
+    },
     'dialog:openDirectory': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);
       const defaultPath = args.defaultPath ? resolveShellPath(args.defaultPath) : os.homedir();
@@ -2848,7 +2804,7 @@ export function setupIpcHandlers() {
         const text = links.length > 0 ? `${args.text} ${todoLinksToText(links)}` : args.text;
         const item = await addTodoItem(text);
         if (args.run || item.delegated) {
-          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
+          void runTodoItem(item.key, undefined, { model: args.model, autoPermission: args.permissionMode !== 'manual', code: args.code }).catch(() => {});
         }
         todoBus.publish({ type: 'list_changed' });
         return { success: true };
@@ -2858,11 +2814,56 @@ export function setupIpcHandlers() {
     },
     'todo:runItem': async (_event, args) => {
       try {
-        void runTodoItem(args.key, args.context).catch(() => {});
+        void runTodoItem(args.key, args.context, { model: args.model, autoPermission: args.permissionMode !== 'manual' }).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    'home:threads': async () => {
+      const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+      return { threads: await tracker.snapshot() };
+    },
+    'home:markSeen': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.markSeen(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:setPinned': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.setPinned(args.sessionId, args.pinned);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:snooze': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.snooze(args.sessionId, args.hours);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:dismiss': async (_event, args) => {
+      try {
+        const tracker = container.resolve<HomeThreadsTracker>('homeThreadsTracker');
+        await tracker.dismiss(args.sessionId);
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    'home:commandCenter': async () => {
+      const { ensureCommandCenterSession } = await import('@x/core/dist/home/command-center.js');
+      const sessionId = await ensureCommandCenterSession(container.resolve<ISessions>('sessions'));
+      return { sessionId };
     },
     'todo:stopRun': async (_event, args) => {
       try {
@@ -3086,7 +3087,41 @@ export function setupIpcHandlers() {
       }
       return { show: false, chatDays: settings.chatDays };
     },
+    // Rowboat server (phone pairing) — client-local: answered by main, which
+    // hosts the transport.
+    'server:getPairingInfo': async () => {
+      return getPairingInfo();
+    },
+    'server:setLanEnabled': async (_event, args) => {
+      await setServerLanEnabled(args.enabled);
+      return { success: true };
+    },
+    'server:rotateKey': async () => {
+      await rotateServerKey();
+      return { success: true };
+    },
+    'server:getConnection': async () => getConnectionInfo(),
+    'server:connectRemote': async (_event, args) => {
+      const result = await connectRemoteServer(args.url, args.token);
+      // The renderer's caches all describe the old server — reload every
+      // window once the reply has been delivered.
+      if (result.success) setTimeout(() => broadcastReload(), 400);
+      return result;
+    },
+    'server:disconnectRemote': async () => {
+      const result = await disconnectRemoteServer();
+      if (result.success) setTimeout(() => broadcastReload(), 400);
+      return result;
+    },
+    // Server-only channel: the client's relay listener calls it over HTTP
+    // (see server-host.ts) — it always forwards, this local stub is
+    // unreachable unless forwarding is killed, where the relay can't work
+    // anyway.
+    'oauth:deliverLoopbackCallback': async () => {
+      throw new Error('oauth:deliverLoopbackCallback is served by rowboat-server');
+    },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,
+    ...spacesIpcHandlers,
   });
 }

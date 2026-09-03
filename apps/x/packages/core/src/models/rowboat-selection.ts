@@ -15,14 +15,30 @@ import { capture } from "../analytics/posthog.js";
  *   recommendation if the gateway lists it, else the first listed model)
  *   and save it. A saved assistant is NEVER replaced — recommendations only
  *   ever choose the initial model.
+ * - Connect with no saved image model → seed the gateway's image model.
+ *   Its own guard, not the assistant's: the image model cannot inherit the
+ *   assistant (a text model), so a BYOK user who already has an assistant
+ *   still gets an image model from signing in. Never replaced either.
  * - Disconnect → drop the selections that reference the provider (same
  *   dangling-reference cleanup as removing any provider).
  */
 
+// The gateway's image model, seeded as the generate-image default. The
+// gateway's image allowlist (GET /v1/llm/models?output_modalities=image) is
+// the source of truth for what it serves; this is its official default.
+export const ROWBOAT_IMAGE_MODEL = "google/gemini-2.5-flash-image";
+
 export async function applyRowboatInitialSelection(): Promise<void> {
     const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
+    const cfg = await repo.getConfig().catch(() => null);
+    await seedAssistantModel(repo, cfg);
+    await seedImageModel(repo, cfg);
+}
+
+type Config = Awaited<ReturnType<IModelConfigRepo["getConfig"]>>;
+
+async function seedAssistantModel(repo: IModelConfigRepo, cfg: Config | null): Promise<void> {
     try {
-        const cfg = await repo.getConfig().catch(() => null);
         if (cfg?.assistantModel) return; // saved choice — never replaced
         const catalog = await listGatewayModels();
         const ids = catalog.providers[0]?.models.map((m) => m.id) ?? [];
@@ -56,6 +72,19 @@ export async function applyRowboatInitialSelection(): Promise<void> {
         // Best-effort: a failed initial selection must never break sign-in.
         // The picker copes with an unset assistant (shows the connect hint).
         console.warn("[models] Initial selection after Rowboat sign-in failed:", error);
+    }
+}
+
+async function seedImageModel(repo: IModelConfigRepo, cfg: Config | null): Promise<void> {
+    try {
+        if (cfg?.imageModel) return; // saved choice — never replaced
+        await repo.updateConfig({
+            imageModel: { provider: "rowboat", model: ROWBOAT_IMAGE_MODEL },
+        });
+    } catch (error) {
+        // Best-effort, same as the assistant: generate-image stays
+        // unavailable until a model is picked in settings.
+        console.warn("[models] Seeding the image model after Rowboat sign-in failed:", error);
     }
 }
 

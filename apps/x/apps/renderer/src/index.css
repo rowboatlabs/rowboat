@@ -1,1 +1,10 @@
 @import "tailwindcss";
+
+/*
+ * Keep the desktop UI comfortably readable at its default window size. Most
+ * of the renderer uses Tailwind's rem-based typography scale, so setting the
+ * root size here raises text consistently without per-component overrides.
+ */
+html {
+  font-size: 17px;
+}

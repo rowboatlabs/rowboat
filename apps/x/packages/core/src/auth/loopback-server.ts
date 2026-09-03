@@ -1,0 +1,350 @@
+import { createServer, Server } from 'http';
+import { URL } from 'url';
+
+const OAUTH_CALLBACK_PATH = '/oauth/callback';
+export const DEFAULT_PORT = 8080;
+export const PORT_RANGE_SIZE = 10;
+
+/** Escape HTML special characters to prevent XSS */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+export interface AuthServerResult {
+  server: Server;
+  port: number;
+}
+
+interface CallbackHandlingOpts {
+  callbackPath: string;
+  /** Invoked when the provider redirects back with an `error` param. */
+  onError?: (error: string) => void;
+  /**
+   * Gatekeeper run BEFORE the error/callback handling. Return a message to
+   * reject the request with a polite close-this-tab error page — without
+   * invoking onCallback/onError. Lets a caller drop stale callbacks (e.g. the
+   * browser tab of a cancelled sign-in attempt carrying an old `state`)
+   * without disturbing the live flow.
+   */
+  validateCallback?: (url: URL) => string | null;
+  /**
+   * Relay mode (remote-server client): every hit on callbackPath is shipped
+   * verbatim to the machine that owns the flow, which runs the validate /
+   * error / callback logic itself and answers with what page to render.
+   * When set, validateCallback/onError/onCallback are bypassed locally.
+   */
+  relay?: (url: URL) => Promise<{ accepted: boolean; message?: string }>;
+}
+
+function renderSuccessPage(res: import('http').ServerResponse): void {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Authorization Successful</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          .success { color: #2e7d32; }
+        </style>
+      </head>
+      <body>
+        <h1 class="success">Authorization Successful</h1>
+        <p>You can close this window.</p>
+        <script>setTimeout(() => window.close(), 2000);</script>
+      </body>
+    </html>
+  `);
+}
+
+function renderErrorPage(res: import('http').ServerResponse, message: string): void {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>OAuth Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          .error { color: #d32f2f; }
+        </style>
+      </head>
+      <body>
+        <h1 class="error">Authorization Failed</h1>
+        <p>${escapeHtml(message)}</p>
+        <p>You can close this window.</p>
+        <script>setTimeout(() => window.close(), 3000);</script>
+      </body>
+    </html>
+  `);
+}
+
+function tryBindPort(
+  port: number,
+  onCallback: (callbackUrl: URL) => void | Promise<void>,
+  opts: CallbackHandlingOpts,
+): Promise<AuthServerResult> {
+  return new Promise((resolve, reject) => {
+    const handler = (req: import('http').IncomingMessage, res: import('http').ServerResponse): void => {
+      // No keep-alive, ever. These servers are per-flow and short-lived; a
+      // pooled connection outlives server.close() (close() only stops
+      // listening) and the browser then delivers the NEXT flow's callback to
+      // this DEAD flow's handler. Seen live: Chrome reused the Rowboat
+      // sign-in's socket for the Microsoft connect redirect minutes later.
+      res.setHeader('Connection', 'close');
+      if (!req.url) {
+        res.writeHead(400);
+        res.end('Bad Request');
+        return;
+      }
+
+      const url = new URL(req.url, `http://localhost:${port}`);
+
+      if (url.pathname === opts.callbackPath) {
+        if (opts.relay) {
+          opts
+            .relay(url)
+            .then((r) => {
+              if (r.accepted) renderSuccessPage(res);
+              else renderErrorPage(res, r.message ?? 'Sign-in failed');
+            })
+            .catch((err: unknown) => {
+              console.error('[OAuth] Callback relay failed:', err);
+              renderErrorPage(res, err instanceof Error ? err.message : 'Callback relay failed');
+            });
+          return;
+        }
+
+        // Gatekeeper first: stale/foreign requests must not reach onError or
+        // onCallback (a stale tab's redirect must never settle a live flow).
+        const rejection = opts.validateCallback?.(url) ?? null;
+        if (rejection) {
+          console.warn(`[OAuth] Callback server rejected ${req.method} ${url.pathname} (state=${url.searchParams.get('state') ?? '<none>'}): ${rejection}`);
+          renderErrorPage(res, rejection);
+          return;
+        }
+
+        const error = url.searchParams.get('error');
+
+        if (error) {
+          // Surface the provider error (e.g. access_denied when the user
+          // cancels consent) so the caller can settle its flow instead of
+          // waiting for the timeout. Callers that don't opt in keep the old
+          // behaviour: the error page renders and the flow times out.
+          console.warn(`[OAuth] Callback carried provider error: ${error}`);
+          opts.onError?.(error);
+          renderErrorPage(res, `Error: ${error}`);
+          return;
+        }
+
+        console.log(`[OAuth] Callback server handling ${req.method} ${url.pathname} (state=${url.searchParams.get('state') ?? '<none>'})`);
+
+        // Await the handler before responding: the browser tab must reflect
+        // what actually happened. Rendering "Authorization Successful" while
+        // the handler failed hides the failure from the user and leaves the
+        // app-side flow spinning with no visible cause.
+        Promise.resolve(onCallback(url)).then(() => {
+          renderSuccessPage(res);
+        }).catch((err: unknown) => {
+          console.error('[OAuth] Callback handling failed:', err);
+          renderErrorPage(res, err instanceof Error ? err.message : 'Callback handling failed');
+        });
+      } else {
+        console.log(`[OAuth] Callback server ignoring ${req.method} ${url.pathname} (404)`);
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    };
+
+    const server = createServer(handler);
+
+    // Bind both loopback families. Browsers deliver the localhost redirect on
+    // whichever family they pick (Happy Eyeballs), and a single-family bind
+    // leaves the other one connection-refused — the redirect then dies before
+    // the app ever sees it. IPv4 is the primary bind (port availability is
+    // judged on it); ::1 is best-effort, mirroring apps/server.ts.
+    server.listen(port, '127.0.0.1', () => {
+      const twin = createServer(handler);
+      let twinListening = false;
+      let closed = false;
+      twin.on('listening', () => {
+        twinListening = true;
+        if (closed) twin.close();
+      });
+      twin.on('error', (err: NodeJS.ErrnoException) => {
+        console.warn(`[OAuth] IPv6 loopback bind failed on port ${port} (${err.code}); continuing IPv4-only`);
+      });
+      twin.listen(port, '::1');
+
+      // Callers hold only the primary server; closing it must tear down the
+      // twin too, or the port stays half-occupied for the next flow. Also
+      // destroy IDLE accepted sockets (e.g. browser preconnects that never
+      // carried a request): close() alone leaves them alive with this flow's
+      // (now dead) handler attached. Idle-only, NOT closeAllConnections —
+      // callers close from inside onCallback, before the awaited success page
+      // has flushed, and killing that in-flight socket makes the browser show
+      // a connection error instead of the page. The socket that served the
+      // callback can't be reused later anyway: every response carries
+      // Connection: close (see handler above).
+      const originalClose = server.close.bind(server);
+      server.close = ((cb?: (err?: Error) => void) => {
+        closed = true;
+        if (twinListening) {
+          twin.close();
+          twin.closeIdleConnections();
+        }
+        const result = originalClose(cb);
+        server.closeIdleConnections();
+        // closeIdleConnections spares sockets that never carried a request
+        // (browser preconnects), which would otherwise linger attached to
+        // this dead handler. Destroy all stragglers once the in-flight
+        // response has had ample time to flush.
+        setTimeout(() => {
+          server.closeAllConnections();
+          twin.closeAllConnections();
+        }, 5000).unref();
+        return result;
+      }) as typeof server.close;
+
+      resolve({ server, port });
+    });
+
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      server.close();
+      if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
+        // Signal caller to try next port
+        reject(Object.assign(new Error(err.code), { code: err.code }));
+      } else {
+        reject(err);
+      }
+    });
+  });
+}
+
+/**
+ * Create a local HTTP server to handle OAuth callback.
+ *
+ * Defaults to fixed-port behaviour: only `port` is tried, and a clear error is
+ * thrown if it cannot be bound. This is the right behaviour for any provider
+ * whose redirect URI is pre-registered (Google BYOK, Composio, etc.) — those
+ * callers must keep using the exact port they've handed to the provider.
+ *
+ * Opt into `{ fallback: true }` only when the caller is prepared to use the
+ * port returned in `AuthServerResult` (i.e. the redirect URI is built from the
+ * actual bound port, not hard-coded). With fallback enabled, scans `port`
+ * through `port + PORT_RANGE_SIZE - 1` and binds the first available, handling
+ * both EADDRINUSE and EACCES (the latter is common on Windows when
+ * Hyper-V/WSL2 reserve the port).
+ *
+ * `callbackPath` overrides the served path for providers whose registered
+ * redirect URI differs (ChatGPT/Codex uses /auth/callback). `onError` is
+ * invoked when the provider redirects back with an `error` param (e.g.
+ * access_denied), letting the caller settle instead of waiting for timeout.
+ * `validateCallback` runs before both — see CallbackHandlingOpts.
+ */
+export async function createAuthServer(
+  port: number = DEFAULT_PORT,
+  onCallback: (callbackUrl: URL) => void | Promise<void>,
+  opts: { fallback?: boolean } & Partial<CallbackHandlingOpts> = {},
+): Promise<AuthServerResult> {
+  const fallback = opts.fallback === true;
+  const handlingOpts: CallbackHandlingOpts = {
+    callbackPath: opts.callbackPath ?? OAUTH_CALLBACK_PATH,
+    onError: opts.onError,
+    validateCallback: opts.validateCallback,
+    relay: opts.relay,
+  };
+  const limit = fallback ? port + PORT_RANGE_SIZE - 1 : port;
+
+  for (let p = port; p <= limit; p++) {
+    try {
+      return await tryBindPort(p, onCallback, handlingOpts);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (fallback && (code === 'EADDRINUSE' || code === 'EACCES') && p < limit) {
+        console.warn(`[OAuth] Port ${p} unavailable (${code}), trying ${p + 1}…`);
+        continue;
+      }
+      if (!fallback) {
+        const reason = code === 'EACCES' || code === 'EADDRINUSE'
+          ? `Port ${port} is unavailable (${code}). This port must be free for sign-in to work — close any app using it and try again.`
+          : (err instanceof Error ? err.message : String(err));
+        throw new Error(reason);
+      }
+      throw new Error(
+        `No available port found in range ${port}–${limit}. Free a port in that range and try again.`
+      );
+    }
+  }
+
+  // Unreachable — loop always returns or throws — but satisfies TypeScript
+  throw new Error(`No available port found in range ${port}–${limit}.`);
+}
+
+
+// ============================================================================
+// Loopback host seam (Phase 8b — SEPARATION_PLAN.md)
+// ============================================================================
+//
+// OAuth redirects land on 127.0.0.1 of whatever machine runs the BROWSER —
+// which, with a remote rowboat-server, is the client's machine, not this one.
+// A registered LoopbackHost lets the standalone server delegate "listen on
+// loopback port N and hand me the callback" to a connected client over the
+// WS reverse-call channel. Flows call openLoopback() instead of
+// createAuthServer(); with no host registered (Electron in-process mode,
+// tests) or no capable client connected, it binds locally — the pre-8b
+// behaviour, byte for byte.
+
+export interface LoopbackHandle {
+  port: number;
+  /** Resolves (when a promise) once the listener has released the port. */
+  close(): void | Promise<void>;
+}
+
+export type LoopbackHost = (
+  port: number,
+  onCallback: (callbackUrl: URL) => void | Promise<void>,
+  opts: { fallback?: boolean } & Partial<Omit<CallbackHandlingOpts, 'relay'>>,
+) => Promise<LoopbackHandle | null>;
+
+let loopbackHost: LoopbackHost | null = null;
+
+export function registerLoopbackHost(host: LoopbackHost): void {
+  loopbackHost = host;
+}
+
+/** What every OAuth flow calls: delegates to the registered host, falls back to a local bind. */
+export async function openLoopback(
+  port: number,
+  onCallback: (callbackUrl: URL) => void | Promise<void>,
+  opts: { fallback?: boolean } & Partial<Omit<CallbackHandlingOpts, 'relay'>> = {},
+): Promise<LoopbackHandle> {
+  if (loopbackHost) {
+    const handle = await loopbackHost(port, onCallback, opts);
+    if (handle) return handle;
+  }
+  const { server, port: boundPort } = await createAuthServer(port, onCallback, opts);
+  return {
+    port: boundPort,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+/**
+ * The client half of the relay: a real local listener whose every callback
+ * hit is shipped verbatim to the flow's owner (the server), which answers
+ * with what page to render. Used by the desktop app when it receives a
+ * `loopback-bind` reverse call.
+ */
+export async function createRelayAuthServer(
+  port: number,
+  relay: (callbackUrl: URL) => Promise<{ accepted: boolean; message?: string }>,
+  opts: { fallback?: boolean; callbackPath?: string } = {},
+): Promise<AuthServerResult> {
+  return createAuthServer(port, () => {}, { ...opts, relay });
+}

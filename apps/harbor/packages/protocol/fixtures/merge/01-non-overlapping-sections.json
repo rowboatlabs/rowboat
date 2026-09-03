@@ -1,0 +1,11 @@
+{
+  "name": "non-overlapping-sections",
+  "description": "Two writers touch different sections. The everyday case (spec §11 beats 3–4): must auto-merge with both edits intact.",
+  "base": "# Roadmap\n## P1\n- [ ] Migration prep\n## P2\n- [ ] Webhook retries\n",
+  "current": "# Roadmap\n## P1\n- [ ] Migration prep\n- [ ] SSO scoping\n## P2\n- [ ] Webhook retries\n",
+  "proposed": "# Roadmap\n## P1\n- [ ] Migration prep\n## P2\n- [ ] Webhook retries\n- [ ] Retro actions\n",
+  "expected": {
+    "outcome": "merged",
+    "content": "# Roadmap\n## P1\n- [ ] Migration prep\n- [ ] SSO scoping\n## P2\n- [ ] Webhook retries\n- [ ] Retro actions\n"
+  }
+}

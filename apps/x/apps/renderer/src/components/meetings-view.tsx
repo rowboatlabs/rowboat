@@ -542,7 +542,7 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
       ) : null}
       <div className="flex items-center gap-1.5 px-5 pb-1 pt-2.5">
         <UsersRound className="size-3.5 text-muted-foreground" />
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">People</span>
+        <span className="text-[13px] text-muted-foreground">People</span>
       </div>
       {matched.map((att, idx) => (
         <PrepAttendeeNote key={att.note!.path + idx} attendee={att} onOpenNote={onOpenNote} />
@@ -551,7 +551,7 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
       {prep.organizations.length > 0 ? (
         <>
           <div className="px-5 pb-1 pt-2.5">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <span className="text-[13px] text-muted-foreground">
               {prep.organizations.length === 1 ? 'Company' : 'Companies'}
             </span>
           </div>
@@ -720,7 +720,7 @@ function UpcomingEvents({ onOpenNote }: { onOpenNote: (path: string) => void }) 
             Coming up
           </h3>
           {loading && events.length === 0 ? null : (
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            <span className="text-[13px] text-muted-foreground">
               {totalVisible} {totalVisible === 1 ? 'event' : 'events'}
             </span>
           )}
@@ -779,7 +779,7 @@ function UpcomingDayCard({ day, isToday, prepEventId, onOpenNote }: { day: DayGr
             {month} · {weekday}
           </span>
           {isToday ? (
-            <span className="shrink-0 rounded-md bg-foreground px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-background">
+            <span className="shrink-0 rounded-md bg-foreground px-1.5 py-0.5 text-[10px] font-semibold text-background">
               Today
             </span>
           ) : null}
@@ -810,7 +810,7 @@ function UpcomingDayCard({ day, isToday, prepEventId, onOpenNote }: { day: DayGr
 
 function NowBadge() {
   return (
-    <span className="shrink-0 rounded bg-green-600 px-1.5 py-px text-[10px] font-bold uppercase leading-[1.5] tracking-wide text-white">
+    <span className="shrink-0 rounded bg-[var(--rowboat-success)] px-1.5 py-px text-[10px] font-bold leading-[1.5] text-white">
       Now
     </span>
   )
@@ -1096,13 +1096,13 @@ function SplitJoinButton({ onJoinAndNotes, onNotesOnly }: {
             <div
               ref={menuRef}
               style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 60 }}
-              className="min-w-36 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
+              className="min-w-36 overflow-hidden rounded-2xl border-none bg-popover p-2 text-popover-foreground shadow-[var(--rowboat-shadow)]"
             >
               <button
                 type="button"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); setOpen(false); onNotesOnly() }}
-                className="flex w-full items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
+                className="flex w-full items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
               >
                 <Mic className="size-3" />
                 Take notes only
@@ -1300,9 +1300,9 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
               </colgroup>
               <thead>
                 <tr className="border-b border-border/60 bg-muted/30 text-left">
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Note</th>
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</th>
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Updated</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Note</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Date</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Updated</th>
                 </tr>
               </thead>
               <tbody>

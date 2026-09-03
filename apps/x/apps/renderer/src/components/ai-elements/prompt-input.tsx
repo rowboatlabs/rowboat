@@ -1177,7 +1177,7 @@ export const PromptInputTextarea = ({
           ref={highlightRef}
           aria-hidden="true"
           dir="auto"
-          className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-sm text-transparent"
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-[15px] leading-6 text-transparent"
         >
           {mentionHighlights.segments.map((segment, index) =>
             segment.highlighted ? (
@@ -1196,7 +1196,13 @@ export const PromptInputTextarea = ({
       <InputGroupTextarea
         ref={textareaRef}
         dir="auto"
-        className={cn("relative z-10 !p-0 field-sizing-content max-h-48 min-h-10", className)}
+        className={cn(
+          // composer text matches message prose (15px). The highlight
+          // overlay above must keep identical font metrics or mention boxes
+          // drift from the caret.
+          "relative z-10 !p-0 field-sizing-content max-h-48 min-h-10 text-[15px] leading-6",
+          className
+        )}
         name="message"
         onCompositionEnd={() => setIsComposing(false)}
         onCompositionStart={() => setIsComposing(true)}

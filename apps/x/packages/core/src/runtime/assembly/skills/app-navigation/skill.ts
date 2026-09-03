@@ -89,9 +89,12 @@ of the exact path.
 While the user is SHARING THEIR SCREEN on a call you also have the
 ` + "`screen-pointer`" + ` tool: it puts an animated pointer (with an optional tiny
 label) at a position on their REAL screen — like reaching over and pointing
-at their monitor. Use it whenever you're explaining something visible in the
-screen-share frames: "this line here", "that button", "this is where the
-spike is".
+at their monitor. Pointing is for LOCATION, and it is OPTIONAL: use it when
+the user asks "where/which one", or when a spatial reference genuinely
+disambiguates ("this line here", "that button"). Most replies during a
+share need no pointer at all — having the tool is not an obligation to use
+it. Never point as emphasis, out of habit, or on a question that isn't
+about something visible on screen.
 
 - ` + "`screen-pointer({ action: \"point\", x, y, label? })`" + ` — ` + "`x`" + `/` + "`y`" + ` are
   FRACTIONS 0-1 of the LATEST screen-share frame (x: 0 left → 1 right,
@@ -102,6 +105,11 @@ spike is".
   MOVES it. ` + "`screen-pointer({ action: \"hide\" })`" + ` dismisses it early — hide
   when you're done referring to the spot.
 - Point at ONE thing at a time, and speak while you point.
+- Only point when the target is clearly visible in the LATEST screen frame
+  and you're confident of its position. If the frame looks stale, the user
+  has switched windows or displays, or you can't locate the thing — say the
+  location in words instead. A wrong pointer (or one on the wrong screen)
+  is worse than none.
 - Only works during a live screen share; it fails with an explanation
   otherwise (ask the user to share their screen).
 - Pointing is where your screen abilities END: you cannot click or type on

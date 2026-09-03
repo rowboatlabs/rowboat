@@ -10,7 +10,7 @@ export type QuickAskShortcutState = {
 /**
  * The current global quick-ask chord, live: seeded via quickAsk:getShortcut
  * and updated on every rebind through the quick-ask:shortcut-changed push.
- * Works in any window (app, quick-ask bar) — same preload bridge.
+ * Works in any window (app, companion) — same preload bridge.
  */
 export function useQuickAskShortcut(): QuickAskShortcutState {
   const [state, setState] = useState<QuickAskShortcutState>({

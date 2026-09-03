@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UseCase } from './analytics.js';
+import { DeckOutline, DeckOutlineSlide, EditSlideRequest, GenerateDeckOutlineRequest, GenerateSlideRequest } from './deck.js';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
@@ -9,6 +10,7 @@ import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
 import { TodoChatBubbleSchema, TodoEvent, TodoItemSchema, TodoListSchema } from './todo.js';
+import { HomeThreadSchema } from './home-threads.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -31,6 +33,17 @@ import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { RetentionSettingsSchema, RetentionSettingsUpdateSchema } from './retention.js';
 import { CodeProject, CodeSession, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
+import {
+    SpacesOrgSummary,
+    type SpacesAssetEntry,
+    type SpacesBusEvent,
+    type SpacesManageTopicAction,
+    type SpacesPostResult,
+    type SpacesProposeInput,
+    type SpacesStreamPage,
+    type SpacesThreadPage,
+} from './spaces.js';
+import type * as SpacesTypes from './spaces.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -124,7 +137,7 @@ const UpdaterStatusSchema = z.object({
   lastCheckedAt: z.number().optional(),
 });
 
-const ipcSchemas = {
+export const ipcSchemas = {
   'app:getVersions': {
     req: z.null(),
     res: z.object({
@@ -249,6 +262,34 @@ const ipcSchemas = {
   'workspace:didChange': {
     req: WorkspaceChangeEvent,
     res: z.null(),
+  },
+  // One-shot deck outline generation for the AI deck builder. Soft errors,
+  // like workspace:exportCopy: failures come back as { error } rather than a
+  // rejected invoke.
+  'deck:generateOutline': {
+    req: GenerateDeckOutlineRequest,
+    res: z.object({
+      outline: DeckOutline.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Generate ONE slide to insert into an existing deck (Gamma's sparkle).
+  // Soft errors like the outline channel: failures come back as { error }.
+  'deck:generateSlide': {
+    req: GenerateSlideRequest,
+    res: z.object({
+      slide: DeckOutlineSlide.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Apply an instruction to ONE existing slide; the response is the slide
+  // AFTER the edit, in the same outline schema. Soft errors as above.
+  'deck:editSlide': {
+    req: EditSlideRequest,
+    res: z.object({
+      slide: DeckOutlineSlide.optional(),
+      error: z.string().optional(),
+    }),
   },
   'gmail:getImportant': {
     req: z.object({
@@ -768,6 +809,52 @@ const ipcSchemas = {
     req: TodoEvent,
     res: z.null(),
   },
+  // ── Home thread registry (the Deck) ──────────────────────────────────────
+  // One main-process snapshot of every thread through the attention lens:
+  // kind (task/code/chat), status (underway/needs-you/ready/idle), live
+  // activity, seen marks and pins. Derived in core/home/threads.ts; the
+  // Deck, triage pills, and Skipper's sitrep all read this one feed.
+  'home:threads': {
+    req: z.object({}),
+    res: z.object({ threads: z.array(HomeThreadSchema) }),
+  },
+  'home:markSeen': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // The operator's watch flag — a pinned thread keeps its Deck strip even
+  // while idle, and takes a 1–9 recall slot.
+  'home:setPinned': {
+    req: z.object({ sessionId: z.string(), pinned: z.boolean() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Snooze a needs-you thread out of the bay. It returns at the chosen time
+  // or on new session activity, whichever comes first — a tripwire, never a
+  // mute. Default 4 hours.
+  'home:snooze': {
+    req: z.object({ sessionId: z.string(), hours: z.number().positive().max(168).optional() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Dismiss a needs-you thread's claim entirely: no timer, only the
+  // activity tripwire returns it. Attention-state only — receipts and the
+  // thread itself are untouched.
+  'home:dismiss': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Push ping: the registry changed — refetch home:threads. Debounced in
+  // the tracker; carries no payload by design (the snapshot is the truth).
+  'home:threadsChanged': {
+    req: z.object({}),
+    res: z.null(),
+  },
+  // The Command Center session — get-or-create the ONE persistent operator
+  // conversation. Any turn on it is command-center-framed server-side
+  // (sessionCompositionPins), whatever surface sends it.
+  'home:commandCenter': {
+    req: z.object({}),
+    res: z.object({ sessionId: z.string() }),
+  },
   // The unified model catalog (core/models/catalog.ts): every connected
   // provider — Rowboat gateway, ChatGPT subscription (codex), BYOK keys,
   // local/custom endpoints — listed the same way, with per-provider status.
@@ -800,6 +887,23 @@ const ipcSchemas = {
       // The effective runtime default (what runs when nothing is picked),
       // effort included — it seeds new chats' composer state.
       defaultModel: ModelSelection.nullable(),
+    }),
+  },
+  // The image-model catalog for the settings "Image model" picker: the
+  // connected providers that can generate images, each with the models it
+  // lists. Every image flavor lists (see getImageModelCatalog for where
+  // each one's list comes from) — the picker only ever offers reported
+  // models, so a provider that can't list reports status 'error'.
+  'models:listImageModels': {
+    req: z.null(),
+    res: z.object({
+      providers: z.array(z.object({
+        id: z.string(),
+        flavor: z.string(),
+        status: z.enum(['ok', 'error']),
+        error: z.string().optional(),
+        models: z.array(z.string()),
+      })),
     }),
   },
   'models:test': {
@@ -895,6 +999,9 @@ const ipcSchemas = {
         backgroundTask: ModelSelection.nullable(),
         subagent: ModelSelection.nullable(),
       }),
+      // The generate-image model — a bare ref (image models take no
+      // effort). Null = unset: image generation is unavailable.
+      imageModel: ModelRef.nullable(),
       deferBackgroundTasks: z.boolean(),
     }),
   },
@@ -913,6 +1020,7 @@ const ipcSchemas = {
         backgroundTask: ModelSelection.nullable().optional(),
         subagent: ModelSelection.nullable().optional(),
       }).optional(),
+      imageModel: ModelRef.nullable().optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({
@@ -1110,9 +1218,11 @@ const ipcSchemas = {
     req: z.discriminatedUnion('command', [
       z.object({ command: z.literal('new-chat') }),
       z.object({ command: z.literal('new-note') }),
+      z.object({ command: z.literal('new-presentation') }),
       z.object({ command: z.literal('undo') }),
       z.object({ command: z.literal('redo') }),
       z.object({ command: z.literal('open-search') }),
+      z.object({ command: z.literal('toggle-browser') }),
       z.object({ command: z.literal('toggle-full-screen-chat') }),
       z.object({ command: z.literal('go-back') }),
       z.object({ command: z.literal('go-forward') }),
@@ -1120,7 +1230,7 @@ const ipcSchemas = {
         command: z.literal('open-settings'),
         // Mirrors the renderer's settings-dialog ConfigTab union.
         tab: z.enum([
-          'account', 'connections', 'mobile', 'models', 'mcp', 'security',
+          'account', 'connections', 'mobile', 'phone', 'models', 'mcp', 'security',
           'code-mode', 'appearance', 'shortcuts', 'notifications',
           'permissions', 'note-tagging', 'advanced', 'help',
         ]).optional(),
@@ -1137,6 +1247,20 @@ const ipcSchemas = {
   // dispatcher sits.
   'menu:toggleSidebar': {
     req: z.null(),
+    res: z.null(),
+  },
+  // The ⌥/⌃+Tab section switcher, forwarded from the main process when an
+  // embedded page (e.g. the browser <webview>) holds keyboard focus — its
+  // keystrokes go to the guest and never reach the app renderer's listeners.
+  'shortcuts:switcherKey': {
+    req: z.object({
+      type: z.enum(['keyDown', 'keyUp']),
+      key: z.string(),
+      code: z.string(),
+      alt: z.boolean(),
+      control: z.boolean(),
+      shift: z.boolean(),
+    }),
     res: z.null(),
   },
   // Launch-at-login (resident app). The OS login-item registry is the source
@@ -1200,6 +1324,9 @@ const ipcSchemas = {
   'voice:ptt-key': {
     req: z.object({
       type: z.enum(['down', 'up', 'chord']),
+      // Ghostwriter chord (⇧ held when Right ⌘ went down): this capture's
+      // result should be pasted at the user's cursor.
+      paste: z.boolean().optional(),
     }),
     res: z.null(),
   },
@@ -1268,8 +1395,8 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
-  // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
-  // Bar → main: relay a composer submit into the app window's chat.
+  // --- Hover companion (global ⌥⇧Space, own always-on-top window) ---
+  // Companion → main: relay a composer submit into the companion's chat.
   'quickAsk:submit': {
     req: QuickAskSubmitPayload,
     res: z.object({}),
@@ -1279,38 +1406,19 @@ const ipcSchemas = {
     req: QuickAskSubmitPayload,
     res: z.null(),
   },
-  // Bar → main → app window: stop the in-flight turn (the bar composer's
-  // send button becomes Stop while processing, same as in the app).
-  'quickAsk:stop': {
-    req: z.null(),
-    res: z.object({}),
-  },
-  'quick-ask:stop': {
-    req: z.null(),
-    res: z.null(),
-  },
-  // Bar → main: dismiss the bar (Esc).
-  'quickAsk:hide': {
-    req: z.null(),
-    res: z.object({}),
-  },
-  // Main → bar: the window was just summoned. viaShortcut distinguishes the
-  // global chord (⌥⇧Space — hold-to-talk starts capturing immediately) from
-  // programmatic shows (the discoverability toast), which must not touch
-  // the mic.
-  'quick-ask:summoned': {
-    req: z.object({ viaShortcut: z.boolean() }),
-    res: z.null(),
-  },
-  // The companion window's current role: summoned Spotlight bar, pinned
-  // call pill, or hidden. `collapsed` is the pinned pill tucked down to just
-  // the mascot (voice-to-voice). Pushed on every transition; the invoke
-  // covers the load race (the window may finish loading after a transition
-  // fired).
+  // The companion window's current role: `pinned` (the Skipper — the ONE
+  // hover surface) or `hidden`. `collapsed` is the Skipper tucked down to
+  // just the mascot (voice-to-voice). Pushed on every transition; the
+  // invoke covers the load race (the window may finish loading after a
+  // transition fired).
   'quickAsk:getMode': {
     req: z.null(),
     res: z.object({
-      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      // Monotonic per push — the renderer echoes it back over
+      // quickAsk:modeApplied once that role has PAINTED, and main reveals
+      // the window only then (never with the previous role still on screen).
+      seq: z.number(),
+      mode: z.enum(['hidden', 'pinned']),
       collapsed: z.boolean(),
       // Which surface the pinned role expands to: untuck returns you to the
       // surface you tucked FROM — 'card' (the bar-style text card, for
@@ -1322,11 +1430,28 @@ const ipcSchemas = {
   },
   'quick-ask:mode': {
     req: z.object({
-      mode: z.enum(['hidden', 'summoned', 'pinned']),
+      seq: z.number(),
+      mode: z.enum(['hidden', 'pinned']),
       collapsed: z.boolean(),
       surface: z.enum(['card', 'pill']),
     }),
     res: z.null(),
+  },
+  // Companion window → main: the role carried by `seq` is on screen (painted)
+  // — main may now show/focus/resize the window for it. Without this ack the
+  // window could be revealed mid-transition: the summoned bar's layout for a
+  // frame (or, on first creation, for the whole page load) before the
+  // Skipper replaced it.
+  'quickAsk:modeApplied': {
+    req: z.object({ seq: z.number() }),
+    res: z.object({}),
+  },
+  // App window → main: the hover relay listener is registered — a summon
+  // that arrived while the app window was (re)loading (or didn't exist: the
+  // user closed it, the shortcut recreated it hidden) is delivered now.
+  'quickAsk:appReady': {
+    req: z.null(),
+    res: z.object({}),
   },
   // Bar → main → app window: tuck the text into the mascot. The app starts
   // the voice-preset call (mascot-only floating surface) — or, if a call is
@@ -1352,15 +1477,31 @@ const ipcSchemas = {
     req: z.object({ collapsed: z.boolean() }),
     res: z.object({}),
   },
+  // Companion → main: per-region click-through. The companion frame is far
+  // bigger than anything it paints (a tall transparent stage above the card
+  // so popovers can open upward), and transparency is only PAINT — the OS
+  // routes a click by the window rect — so the window is click-through by
+  // default and the renderer flips it solid while the cursor is actually
+  // over painted UI. Without this the invisible stage swallowed every click
+  // that landed on it.
+  'quickAsk:setInteractive': {
+    req: z.object({ interactive: z.boolean() }),
+    res: z.object({}),
+  },
+  // Main → companion: where the cursor is, in the window's own CSS pixels.
+  // Main polls it from the OS because mouse events are NOT a reliable
+  // witness here: macOS drag regions (the mascot IS one — it's the drag
+  // handle) are native views layered over the page, so moves across them
+  // never reach the renderer at all. The renderer hit-tests this point and
+  // answers on quickAsk:setInteractive.
+  'quick-ask:cursor': {
+    req: z.object({ x: z.number(), y: z.number() }),
+    res: z.null(),
+  },
   // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
   // whether a reply is SPOKEN now follows the question's modality — spoken
   // questions get spoken replies, typed ones stay silent — plus the
   // explicit speaker mute on the Skipper.)
-  // App window → main: open the bar (the discoverability toast's "Try it").
-  'quickAsk:show': {
-    req: z.null(),
-    res: z.object({}),
-  },
   // Bar → main: jump to the conversation in the app — focuses the app
   // window and tells it to show the chat full-view (no middle pane).
   'quickAsk:openChat': {
@@ -1370,42 +1511,6 @@ const ipcSchemas = {
   // Push channel: main → app window for the jump above.
   'quick-ask:open-chat': {
     req: z.null(),
-    res: z.null(),
-  },
-  // Bar → main → app window: the bar's optional toggles. voiceOutput speaks
-  // the answers aloud; screenShare turns on the existing screen capture so
-  // frames ride along with bar submits (the bar owns the share indicator —
-  // no floating pill outside calls).
-  'quickAsk:setOptions': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenShare: z.boolean(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → app window with the toggles above.
-  'quick-ask:set-options': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenShare: z.boolean(),
-    }),
-    res: z.null(),
-  },
-  // App window → main → bar: the ACTUAL state (share can fail on the macOS
-  // permission; the bar must never show a "sharing" badge that lies).
-  'quickAsk:optionsState': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenSharing: z.boolean(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → bar for the state above.
-  'quick-ask:options-state': {
-    req: z.object({
-      voiceOutput: z.boolean(),
-      screenSharing: z.boolean(),
-    }),
     res: z.null(),
   },
   // App window → main → bar: the destination-chat context (see
@@ -1437,29 +1542,6 @@ const ipcSchemas = {
   // Push channel: main → app window for the reset above.
   'quick-ask:new-chat': {
     req: z.null(),
-    res: z.null(),
-  },
-  // App window → main: mirror of the in-flight answer for the bar
-  // (streaming text while processing, final text when done).
-  'quickAsk:state': {
-    req: z.object({
-      processing: z.boolean(),
-      responseText: z.string().nullable(),
-      // What the agent is doing right now ("Reasoning…", "Web search…") —
-      // shown blinking in the bar until the answer starts streaming.
-      statusText: z.string().nullable(),
-    }),
-    res: z.object({}),
-  },
-  // Push channel: main → bar with the latest answer state.
-  'quick-ask:state': {
-    req: z.object({
-      processing: z.boolean(),
-      responseText: z.string().nullable(),
-      // What the agent is doing right now ("Reasoning…", "Web search…") —
-      // shown blinking in the bar until the answer starts streaming.
-      statusText: z.string().nullable(),
-    }),
     res: z.null(),
   },
   // Any window → main: the current global quick-ask chord and whether the
@@ -1545,12 +1627,17 @@ const ipcSchemas = {
     res: z.object({
       enabled: z.boolean(),
       approvalPolicy: ApprovalPolicy.optional(),
+      // The repo coding work defaults into when none is named — set once in
+      // Settings → Code. With exactly one registered project, that project
+      // is the implicit default and this stays unset.
+      defaultProjectId: z.string().optional(),
     }),
   },
   'codeMode:setConfig': {
     req: z.object({
       enabled: z.boolean(),
       approvalPolicy: ApprovalPolicy.optional(),
+      defaultProjectId: z.string().optional(),
     }),
     res: z.object({
       success: z.literal(true),
@@ -1633,7 +1720,9 @@ const ipcSchemas = {
       projectId: z.string(),
       title: z.string().optional(),
       agent: CodingAgent,
-      policy: ApprovalPolicy,
+      // Only an explicit user choice; a quick-created session omits it and
+      // follows the composer chip / global setting ("Auto").
+      policy: ApprovalPolicy.optional(),
       isolation: z.enum(['in-repo', 'worktree']),
       // The coding agent's own model + reasoning effort (ACP engine),
       // re-applied each turn so they stay editable. The copilot LLM is
@@ -1666,6 +1755,12 @@ const ipcSchemas = {
   'codeMode:listModelOptions': {
     req: z.object({ agent: CodingAgent }),
     res: CodeAgentModelOptions,
+  },
+  // Done is a flag, not a lifecycle change: the worktree, branch and chat are
+  // untouched. `done: false` reopens.
+  'codeSession:setDone': {
+    req: z.object({ sessionId: z.string(), done: z.boolean() }),
+    res: z.object({ session: CodeSession }),
   },
   'codeSession:delete': {
     req: z.object({
@@ -2283,6 +2378,48 @@ const ipcSchemas = {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
   },
+  // Spreadsheet viewer: windowed read of a local .xlsx/.xls/.csv/.tsv file
+  'spreadsheet:load': {
+    req: z.object({
+      path: z.string(),
+      sheet: z.string().optional(),
+      offset: z.number().int().min(0),
+      limit: z.number().int().min(1).max(1000),
+    }),
+    res: z.object({
+      format: z.enum(['xlsx', 'xls', 'csv', 'tsv']),
+      sheets: z.array(z.object({
+        name: z.string(),
+        rowCount: z.number(),
+        columnCount: z.number(),
+      })),
+      activeSheet: z.string(),
+      rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+      // Formatted text per cell (dates/currency/percent as Excel shows them)
+      display: z.array(z.array(z.string().nullable())),
+      // Row 1 of the sheet, for the viewer's pinned-header mode
+      firstRow: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])).nullable(),
+      firstRowDisplay: z.array(z.string().nullable()).nullable(),
+      offset: z.number(),
+      totalRows: z.number(),
+      totalColumns: z.number(),
+      etag: z.string(),
+    }),
+  },
+  // Spreadsheet viewer: locate cells matching a query in one sheet
+  'spreadsheet:find': {
+    req: z.object({
+      path: z.string(),
+      sheet: z.string().optional(),
+      query: z.string(),
+      maxMatches: z.number().int().min(1).max(5000).optional(),
+    }),
+    res: z.object({
+      activeSheet: z.string(),
+      matches: z.array(z.object({ row: z.number(), col: z.number() })),
+      total: z.number(),
+    }),
+  },
   // Native dialog channels
   'dialog:openDirectory': {
     req: z.object({
@@ -2848,15 +2985,25 @@ const ipcSchemas = {
         path: z.string(),
         name: z.string(),
       })).optional(),
-      // Composer model selection — overrides the todo agent's model when
-      // the item runs now.
+      // Composer model selection (with its paired reasoning effort) —
+      // overrides the todo agent's model when the item runs now.
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
       permissionMode: z.enum(['auto', 'manual']).optional(),
+      // Code dispatch (the Helm): materialize a real code session on the
+      // item's thread before it runs — worktree lane by default, a row in
+      // the Code section, status tracking. The agent's code_agent_run then
+      // resolves the pin server-side.
+      code: z.object({
+        projectId: z.string(),
+        agent: z.enum(['claude', 'codex']).optional(),
+        isolation: z.enum(['in-repo', 'worktree']).optional(),
+      }).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2865,10 +3012,19 @@ const ipcSchemas = {
   },
   // Fire a run for one item, identified by its normalized line text.
   // Fire-and-forget: progress and completion arrive on todo:events.
+  // Carries the same model/permission overrides as todo:addItem so the run
+  // and retry chips honor the composer's picker instead of silently falling
+  // back to the default model.
   'todo:runItem': {
     req: z.object({
       key: z.string(),
       context: z.string().optional(),
+      model: z.object({
+        provider: z.string(),
+        model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
+      }).optional(),
+      permissionMode: z.enum(['auto', 'manual']).optional(),
     }),
     res: z.object({
       success: z.boolean(),
@@ -2911,6 +3067,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2943,6 +3100,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -2978,6 +3136,7 @@ const ipcSchemas = {
       model: z.object({
         provider: z.string(),
         model: z.string(),
+        effort: z.enum(['low', 'medium', 'high']).optional(),
       }).optional(),
       // Chat-parity permission posture for the run: 'auto' (default) uses
       // the permission judge; 'manual' suspends for the user's approval.
@@ -3385,6 +3544,549 @@ const ipcSchemas = {
       chatDays: z.number().nullable(),
     }),
   },
+  // Rowboat server (phone pairing) channels — client-local: answered by main,
+  // which hosts the HTTP/WS transport for external clients.
+  'server:getPairingInfo': {
+    req: z.null(),
+    res: z.object({
+      running: z.boolean(),
+      // Hostname shown on the phone during pairing.
+      name: z.string(),
+      port: z.number().nullable(),
+      lanEnabled: z.boolean(),
+      // Reachable base URLs, loopback first; LAN/Tailscale entries only when
+      // lanEnabled.
+      urls: z.array(z.string()),
+      token: z.string().nullable(),
+    }),
+  },
+  'server:setLanEnabled': {
+    req: z.object({ enabled: z.boolean() }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Mints a new server key and rebinds — every paired phone is revoked and
+  // must re-pair. This is the recovery path for a leaked QR/token.
+  'server:rotateKey': {
+    req: z.null(),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Remote-server connection (client-local, never forwarded): where this
+  // desktop's client points — the local child by default, or a remote
+  // rowboat-server saved from Settings. Env vars override and lock the UI.
+  'server:getConnection': {
+    req: z.null(),
+    res: z.object({
+      mode: z.enum(['in-process', 'child', 'remote']),
+      url: z.string().nullable(),
+      fromEnv: z.boolean(),
+    }),
+  },
+  'server:connectRemote': {
+    req: z.object({ url: z.string(), token: z.string() }),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
+  'server:disconnectRemote': {
+    req: z.null(),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
+  // OAuth loopback relay (Phase 8b): a loopback-capable client hosting the
+  // 127.0.0.1 callback listener for a remote server ships each callback hit
+  // here; the response says which page to render in the browser tab. Called
+  // by the client's relay listener, never by the renderer.
+  'oauth:deliverLoopbackCallback': {
+    req: z.object({
+      bindingId: z.string(),
+      url: z.string(),
+    }),
+    res: z.object({
+      accepted: z.boolean(),
+      message: z.string().optional(),
+    }),
+  },
+
+  // ==========================================================================
+  // Spaces — shared containers on orgs speaking the spaces protocol.
+  // Wire contract: @rowboat/spaces-protocol (apps/harbor/CONTRACT.md).
+  // Protocol-shaped payloads cross as z.custom<T>() (see spaces.ts header).
+  // ==========================================================================
+  'spaces:listOrgs': {
+    req: z.null(),
+    res: z.object({ orgs: z.array(SpacesOrgSummary) }),
+  },
+  // Dev auth (stub Harbor / Tailscale dogfood): base URL + member id.
+  'spaces:addOrg': {
+    req: z.object({ baseUrl: z.string(), memberId: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // The OAuth journey (spec §4). Paste an invite link → resolve pre-auth →
+  // join (system-browser dance if this install has no auth on the org, then
+  // the server-side bind ceremony). signInOrg reruns the dance for a
+  // needs-relogin org. policy_refused / not_a_member surface as error
+  // messages verbatim — they are the honest states.
+  'spaces:resolveInviteLink': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ baseUrl: z.string(), resolved: z.custom<SpacesTypes.ResolveInviteResult>() }),
+  },
+  'spaces:joinInvite': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ org: SpacesOrgSummary, space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:signInOrg': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // Self-serve org creation on the managed deployment's apex (free for now —
+  // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
+  // caller is the org's first admin at <slug>.spaces.rowboatlabs.com.
+  'spaces:createOrg': {
+    req: z.object({ name: z.string(), slug: z.string() }),
+    res: z.object({ org: SpacesOrgSummary }),
+  },
+  // Where the Create button makes orgs (from /v1/config via core). null =
+  // no spaces fleet for this environment; the dialog says so honestly.
+  'spaces:apexInfo': {
+    req: z.null(),
+    res: z.object({ apexDomain: z.string().nullable() }),
+  },
+  'spaces:removeOrg': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:listSpaces': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
+  },
+  'spaces:createSpace': {
+    req: z.object({ orgId: z.string(), name: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  'spaces:listMembers': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+  },
+  'spaces:createInvite': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), expiresInHours: z.number().optional() }),
+    res: z.custom<SpacesTypes.CreateInviteResult>(),
+  },
+  // Pre-auth by design (spec §4): resolvable before the org has been added,
+  // so the app can show what's being joined. baseUrl, not orgId.
+  'spaces:resolveInvite': {
+    req: z.object({ baseUrl: z.string(), token: z.string() }),
+    res: z.custom<SpacesTypes.ResolveInviteResult>(),
+  },
+  'spaces:acceptInvite': {
+    req: z.object({ orgId: z.string(), token: z.string() }),
+    res: z.custom<SpacesTypes.AcceptInviteResult>(),
+  },
+  'spaces:listAssets': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), includeDeleted: z.boolean().optional() }),
+    res: z.object({ entries: z.array(z.custom<SpacesAssetEntry>()) }),
+  },
+  // Namespace ops (inode model server-side): move/rename, delete-to-trash,
+  // restore. Conflict outcomes return as values, same as proposeChange.
+  'spaces:moveAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      fromPath: z.string(),
+      toPath: z.string(),
+      baseVersion: z.number(),
+      reason: z.string().optional(),
+    }),
+    res: z.custom<SpacesTypes.MoveAssetResult>(),
+  },
+  'spaces:deleteAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      baseVersion: z.number(),
+      reason: z.string().optional(),
+    }),
+    res: z.custom<SpacesTypes.DeleteAssetResult>(),
+  },
+  'spaces:restoreAsset': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), path: z.string() }),
+    res: z.custom<SpacesTypes.RestoreAssetResult>(),
+  },
+  'spaces:readAsset': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      version: z.number().optional(),
+    }),
+    res: z.custom<SpacesTypes.ReadAssetResult>(),
+  },
+  // All three outcomes (applied | merged | conflict) return as values — a
+  // conflict is a normal result of merge-then-correct, not an error.
+  'spaces:proposeChange': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), input: z.custom<SpacesProposeInput>() }),
+    res: z.custom<SpacesTypes.ProposeChangeResult>(),
+  },
+  'spaces:assetHistory': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string().optional(),
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.object({ changeSets: z.array(z.custom<SpacesTypes.ChangeSet>()) }),
+  },
+  'spaces:diff': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      path: z.string(),
+      from: z.number(),
+      to: z.number(),
+    }),
+    res: z.object({ unified: z.string() }),
+  },
+  'spaces:listTopics': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), includeArchived: z.boolean().optional() }),
+    res: z.object({ topics: z.array(z.custom<SpacesTypes.TopicListing>()) }),
+  },
+  // Space search: categorized top-N (messages / topics / assets), served by
+  // the org's GET /v1/spaces/:spaceId/search. Snippets arrive raw — resolve
+  // mentions renderer-side like any message body.
+  'spaces:search': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      q: z.string(),
+      kinds: z.array(z.enum(['messages', 'topics', 'assets'])).optional(),
+      /** Per-category cap (org default 10, max 50). */
+      limit: z.number().optional(),
+    }),
+    res: z.custom<SpacesTypes.SearchResults>(),
+  },
+  // The space's one stream: ROOT messages only, windowed newest-first, with
+  // the topic rows annotating this page's roots riding along.
+  'spaces:listStream': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      /** Page back: only roots below this offset. Absent = the latest page. */
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.custom<SpacesStreamPage>(),
+  },
+  // One flat thread: root + topic annotation (null = plain thread) + windowed
+  // replies. A reply id resolves to its root on the org.
+  'spaces:listThread': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      rootMessageId: z.string(),
+      beforeOffset: z.number().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.custom<SpacesThreadPage>(),
+  },
+  // actingMode is set by main ('direct' — the renderer is the human surface;
+  // agents write through the org's MCP face, never through IPC). Posting never
+  // creates a topic; threadRoot present = a reply, absent = a stream root.
+  'spaces:postMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      threadRoot: z.string().optional(),
+      anchorChangeSetId: z.string().optional(),
+      body: z.string(),
+      /** Present = the message carries a poll; body must be its markdown fallback. */
+      poll: z.custom<SpacesTypes.SpacesNewPollInput>().optional(),
+    }),
+    res: z.custom<SpacesPostResult>(),
+  },
+  // The deliberate ceremony: promote a thread (rootMessageId) or post a new
+  // root + annotate it (body) — exactly one of the two, org-enforced.
+  'spaces:createTopic': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      rootMessageId: z.string().optional(),
+      title: z.string(),
+      body: z.string().optional(),
+    }),
+    res: z.object({ topic: z.custom<SpacesTypes.Topic>(), rootMessage: z.custom<SpacesTypes.Message>() }),
+  },
+  // One-row lifecycle ops on the annotation ('remove' = convert back to
+  // thread; the conversation is untouched).
+  'spaces:manageTopic': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      topicId: z.string(),
+      action: z.custom<SpacesManageTopicAction>(),
+    }),
+    res: z.object({ topic: z.custom<SpacesTypes.Topic>() }),
+  },
+  // Slack-style reaction toggle — any member, any message. Idempotent on the
+  // org (re-add / re-remove is a no-op); actingMode is stamped 'direct' by
+  // main like postMessage. Returns the message with reactions folded.
+  'spaces:reactToMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      emoji: z.string(),
+      action: z.enum(['add', 'remove']),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // Author-only tombstone — the org enforces caller == author; actingMode is
+  // stamped 'direct' by main. Returns the tombstone (body '', deletedAt set).
+  'spaces:deleteMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // Author-only body rewrite — the org enforces caller == author; identical
+  // bodies no-op. Returns the message with editedAt set.
+  'spaces:editMessage': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      body: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // Poll vote toggle — reaction semantics on the org (idempotent; single-
+  // select add MOVES the member's vote); actingMode is stamped 'direct' by
+  // main, which is also the rule (agents cannot vote). Returns the message
+  // with the poll's votes folded.
+  'spaces:votePoll': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+      answerId: z.number(),
+      action: z.enum(['add', 'remove']),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // End a poll early — author-only on the org; idempotent once closed.
+  'spaces:endPoll': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      messageId: z.string(),
+    }),
+    res: z.object({ message: z.custom<SpacesTypes.Message>() }),
+  },
+  // @rowboat in a thread (spec §8): the renderer detected an addressed message
+  // it just posted; main routes it into the thread's session (keyed on the
+  // permanent root message id, creating one on first use — the queue/steer
+  // machinery handles the rest). messageId is the posted feed message,
+  // stamped into the turn input as provenance.
+  'spaces:invokeRowboat': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      threadRootId: z.string(),
+      threadLabel: z.string(),
+      spaceName: z.string(),
+      messageId: z.string(),
+      body: z.string(),
+      // Per-turn agent options from the space composer's agent strip (shown
+      // when the draft addresses @rowboat). Absent = the assistant's defaults.
+      options: z
+        .object({
+          model: z.object({ provider: z.string(), model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() }).optional(),
+          permissionMode: z.enum(['auto', 'manual']).optional(),
+          searchEnabled: z.boolean().optional(),
+          codeMode: z.enum(['claude', 'codex']).optional(),
+        })
+        .optional(),
+    }),
+    res: z.object({ sessionId: z.string(), queued: z.boolean() }),
+  },
+  // The thread's session, if any — powers the invoker-only "open the turn"
+  // affordance on the presence chip.
+  'spaces:topicSession': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string() }),
+    res: z.object({ sessionId: z.string().nullable() }),
+  },
+  // Upload phase 1 (spec §6): bytes in, {hash, size, mime} out. Bytes travel
+  // either inline (clipboard pastes — ArrayBuffer over structured clone) or as
+  // an absolute file path (drag-drop / picker via electronUtils.getPathForFile)
+  // so a 100MB file never crosses IPC — main reads it from disk.
+  'spaces:uploadBlob': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      // Base64 — bytes must survive the JSON /rpc hop to the server (a raw
+      // ArrayBuffer stringifies to '{}' and uploads an empty blob).
+      bytes: z.string().optional(),
+      filePath: z.string().optional(),
+      /** Display filename (drives the markdown label / mime fallback); never storage. */
+      name: z.string(),
+      mime: z.string().optional(),
+    }),
+    res: z.object({ blob: z.custom<SpacesTypes.BlobInfo>() }),
+  },
+  // Explicit download: main pulls through the content-addressed cache and
+  // shows the save dialog. saved:false = the person cancelled.
+  'spaces:saveBlob': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      hash: z.string(),
+      suggestedName: z.string().optional(),
+    }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
+  // Save an external image (a pasted GIF/image link) to disk. Main fetches
+  // the URL — the renderer can't (CORS) — after the save dialog, so a
+  // cancel never downloads. https only. saved:false = the person cancelled.
+  'spaces:saveImageUrl': {
+    req: z.object({ url: z.string() }),
+    res: z.object({ saved: z.boolean(), path: z.string().optional() }),
+  },
+  // OpenGraph metadata for a link card. Main fetches the page — the renderer
+  // can't (CORS) — with a size cap and timeout. null preview = nothing
+  // usable (not html, too slow, no tags). https only.
+  'spaces:linkPreview': {
+    req: z.object({ url: z.string() }),
+    res: z.object({
+      preview: z
+        .object({
+          url: z.string(),
+          title: z.string().optional(),
+          description: z.string().optional(),
+          imageUrl: z.string().optional(),
+          siteName: z.string().optional(),
+        })
+        .nullable(),
+    }),
+  },
+  // Live: renderer subscribes per space; frames arrive on 'spaces:events'
+  // wrapped with their orgId. Offset resume mirrors the turn-event spine.
+  'spaces:subscribeSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), afterOffset: z.number().optional() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:unsubscribeSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Notification levels for the mention watcher: a space-wide level plus
+  // per-thread overrides. null = inherit (thread → space → the 'mentions'
+  // default). Stored main-side (the watcher runs there, screen or no screen).
+  // `topicId` is the thread's ROOT MESSAGE id, never a Topic row id: the
+  // watcher resolves a message to `threadRoot ?? id` and looks up by that.
+  'spaces:getNotifyPrefs': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({
+      spaceLevel: z.enum(['all', 'mentions', 'mute']).nullable(),
+      topics: z.record(z.string(), z.enum(['all', 'mentions', 'mute'])),
+    }),
+  },
+  'spaces:setNotifyPref': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      /** Absent = set the space-wide level. */
+      topicId: z.string().optional(),
+      /** null clears the override back to inherit. */
+      level: z.enum(['all', 'mentions', 'mute']).nullable(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Scheduled sends and reminders — the main-side queue (core scheduler).
+  // 'message' posts to the topic at `at`; 'reminder' notifies the member.
+  'spaces:schedule': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      /** The thread to post into; absent = the space's stream. */
+      threadRootId: z.string().optional(),
+      body: z.string(),
+      /** ISO instant to fire at. */
+      at: z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'at must be an ISO instant'),
+      kind: z.enum(['message', 'reminder']),
+    }),
+    res: z.object({ id: z.string() }),
+  },
+  'spaces:listScheduled': {
+    req: z.object({ orgId: z.string(), spaceId: z.string() }),
+    res: z.object({
+      items: z.array(
+        z.object({
+          id: z.string(),
+          kind: z.enum(['message', 'reminder']),
+          orgId: z.string(),
+          spaceId: z.string(),
+          /** The thread the send targets; absent = the space's stream. */
+          threadRootId: z.string().optional(),
+          body: z.string(),
+          at: z.string(),
+          createdAt: z.string(),
+        }),
+      ),
+    }),
+  },
+  'spaces:cancelScheduled': {
+    req: z.object({ id: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Do-not-disturb: one global until-instant gating the mention watcher.
+  'spaces:getDnd': {
+    req: z.null(),
+    res: z.object({ until: z.string().nullable() }),
+  },
+  'spaces:setDnd': {
+    req: z.object({ until: z.string().nullable() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Ephemeral presence from the human surface (viewing / typing / idle), scoped
+  // to a thread when set. agent_working is only ever sent by the thread agent.
+  // Client wake signal: sleep leaves spaces WebSockets half-open; the desktop
+  // calls this on powerMonitor resume so the server bounces every stream.
+  'spaces:bounceLive': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:presence': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      state: z.enum(['viewing', 'typing', 'idle']),
+      threadRootId: z.string().optional(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Ephemeral whiteboard traffic (scene diffs, cursors, idle) — fire-and-forget
+  // like presence: a frame sent while the org socket is down is silently
+  // dropped, and the collab loop's periodic full-scene rebroadcast heals the
+  // gap. The payload is opaque to the org (contract amendment 2026-08-31);
+  // its app-side vocabulary lives in shared/spaces.ts. Incoming whiteboard
+  // frames arrive on 'spaces:events' like every other live frame.
+  'spaces:whiteboard': {
+    req: z.object({
+      orgId: z.string(),
+      spaceId: z.string(),
+      /** The board's asset path — a board IS an asset (whiteboards/<name>.excalidraw). */
+      boardId: z.string(),
+      payload: z.custom<SpacesTypes.SpacesWhiteboardPayload>(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'spaces:events': {
+    req: z.custom<SpacesBusEvent>(),
+    res: z.null(),
+  },
 } as const;
 
 // ============================================================================
@@ -3434,4 +4136,12 @@ export function validateResponse<K extends keyof IPCChannels>(
 ): IPCChannels[K]['res'] {
   const schema = ipcSchemas[channel].res;
   return schema.parse(data) as IPCChannels[K]['res'];
+}
+
+/**
+ * Push channels (res schema is z.null()) flow server→client and map to the
+ * WebSocket event feed; invoke channels map to POST /rpc/{channel}.
+ */
+export function isPushChannel(channel: keyof IPCChannels): boolean {
+  return ipcSchemas[channel].res instanceof z.ZodNull;
 }

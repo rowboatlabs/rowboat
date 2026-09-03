@@ -124,6 +124,7 @@ export type AppView =
   | 'code'
   | 'bg-tasks'
   | 'apps'
+  | 'spaces'
 
 // Views that count as "using a feature" — first visit sets a person property
 // so PostHog cohorts can answer "how many people have ever used meetings".
@@ -134,6 +135,7 @@ const FIRST_USE_VIEWS: Partial<Record<AppView, string>> = {
   'bg-tasks': 'has_used_bg_agents',
   apps: 'has_used_apps',
   code: 'has_used_code',
+  spaces: 'has_used_spaces',
 }
 
 export function viewOpened(view: AppView) {
@@ -201,6 +203,32 @@ export function emailSyncTriggered() {
 }
 
 // --- Meetings ---
+
+// --- Spaces (chat-first, push-1 spike) --------------------------------------
+
+export function spacesMessagePosted(props: { kind: 'general' | 'topic'; mentionsRowboat: boolean }) {
+  posthog.capture('spaces_message_posted', { kind: props.kind, mentions_rowboat: props.mentionsRowboat })
+}
+
+export function spacesReactionToggled(props: { action: 'add' | 'remove' }) {
+  posthog.capture('spaces_reaction_toggled', { action: props.action })
+}
+
+export function spacesMessageDeleted() {
+  posthog.capture('spaces_message_deleted')
+}
+
+export function spacesTopicStarted() {
+  posthog.capture('spaces_topic_started')
+}
+
+export function spacesFoldRequested() {
+  posthog.capture('spaces_fold_requested')
+}
+
+export function spacesTabViewed(tab: 'general' | 'topics' | 'files' | 'whiteboard') {
+  posthog.capture('spaces_tab_viewed', { tab })
+}
 
 export function meetingRecordingStarted(hasCalendarEvent: boolean) {
   posthog.capture('meeting_recording_started', { has_calendar_event: hasCalendarEvent })

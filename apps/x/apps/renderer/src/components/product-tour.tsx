@@ -680,7 +680,7 @@ export function ProductTour({
           <div
             key={step.id}
             className={cn(
-              'pointer-events-auto absolute top-0 z-10 rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-lg',
+              'pointer-events-auto absolute top-0 z-10 rounded-2xl border-none bg-popover p-4 text-popover-foreground shadow-[var(--rowboat-shadow)]',
               bubbleSide === 'right' ? 'left-full ml-3' : 'right-full mr-3'
             )}
             style={{

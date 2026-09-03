@@ -1,0 +1,21 @@
+{
+  "name": "@x/client",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "dev": "tsc -w -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@x/shared": "workspace:*",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

@@ -1,12 +1,17 @@
-import { app, BrowserWindow, desktopCapturer, dialog, protocol, net, shell, session, safeStorage, type Session } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, powerMonitor, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
+import fsPromises from "node:fs/promises";
 import os from "node:os";
 import {
   setupIpcHandlers,
-  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady, startRetentionSweep,
+  startConnectorEventsWatcher,
+  startTerminalEventsWatcher,
+  findMainAppWindow,
+  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady,
   startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
+  startHomeThreadsWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
@@ -16,56 +21,40 @@ import {
   stopServicesWatcher,
   stopWorkspaceWatcher
 } from "./ipc.js";
-import { disposeAllTerminals } from "./terminal.js";
+import { disposeAllTerminals } from "@x/core/dist/terminal/terminal.js";
+import * as spaceBlobCache from "./spaces/blob-cache.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
-import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
-import { init as initOutlookSync } from "@x/core/dist/knowledge/sync_outlook.js";
-import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
-import { init as initOutlookCalendarSync } from "@x/core/dist/knowledge/sync_outlook_calendar.js";
-import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
-import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
-import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
-import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
-import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
-import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { DEV_SERVER_URL } from "./dev-server.js";
-import { init as initChannels } from "@x/core/dist/channels/service.js";
-import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
-import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
-import { init as initMeetingPrep } from "@x/core/dist/knowledge/meeting_prep_scheduler.js";
-import { init as initLiveNoteScheduler } from "@x/core/dist/knowledge/live-note/scheduler.js";
-import { init as initEventProcessor, registerConsumer } from "@x/core/dist/events/init.js";
-import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
-import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
-import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
-import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/runtime/assembly/skills/watcher.js";
-import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
+import { stopSkillsWatcher } from "@x/core/dist/runtime/assembly/skills/watcher.js";
+import { shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
 import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-providers.js";
-import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import { prepareCoreData, initCoreServices } from "@x/core/dist/boot/services.js";
+import { startServerHost, stopServerHost, childServerMode, serverHostMode, whenServerReady } from "./server-host.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService } from "@x/core/dist/di/container.js";
+import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
+import { forwardRpc } from "./rpc-forwarder.js";
+import { bounceAllLive } from "@x/core/dist/spaces/orgs.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
-import type { CodeSessionService } from "@x/core/dist/code-mode/sessions/service.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { setupBrowserExtensions } from "./browser/extensions.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { screenPointerService } from "./screen-pointer.js";
+import { textInsertService } from "./text-insert.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
   DEEP_LINK_SCHEME,
@@ -73,7 +62,7 @@ import {
   extractDeepLinkFromArgv,
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
-import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
+import { registerUrlOpener } from "@x/core/dist/auth/url-opener.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { ensureLoginItemRegistration } from "./login_item.js";
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
@@ -81,7 +70,7 @@ import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNote
 import { installAppMenu } from "./menu.js";
 import { setupZoomShortcuts } from "./zoom.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
-import { initQuickAsk } from "./quick-ask.js";
+import { initQuickAsk, onAppWindowClosed } from "./quick-ask.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -194,20 +183,69 @@ console.log("rendererPath", rendererPath);
 // AND for serving local workspace files to the renderer (images, PDFs, video).
 //
 //   app://workspace/<rel-path>  → workspace file (path-traversal guarded)
+//   app://space-blob/<orgId>/<spaceId>/<hash>[?thumb=<w>] → space upload,
+//     via the authed org client + content-addressed disk cache (blob-cache.ts).
+//     This is how <img> tags in space messages render: the renderer holds no
+//     org tokens, so blob bytes must resolve in main.
 //   app://<anything-else>/...   → renderer SPA (existing behavior)
 function registerAppProtocol() {
-  protocol.handle("app", (request) => {
+  protocol.handle("app", async (request) => {
     const url = new URL(request.url);
 
     // Workspace files: app://workspace/<rel-path>
     if (url.host === "workspace") {
+      return (async () => {
+        try {
+          const relPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+          if (!relPath) return new Response("Not Found", { status: 404 });
+          // Remote server: the workspace lives on the server's disk — proxy
+          // to its authenticated /workspace route instead of reading locally.
+          if (serverHostMode() === "remote") {
+            const { baseUrl, key } = await whenServerReady();
+            const headers = new Headers({ authorization: `Bearer ${key}` });
+            const range = request.headers.get("range");
+            if (range) headers.set("range", range);
+            return fetch(`${baseUrl}/workspace/${relPath.split("/").map(encodeURIComponent).join("/")}`, { headers });
+          }
+          const absPath = resolveWorkspacePath(relPath);
+          // Parity with the server's /workspace route: `..` is guarded above,
+          // but a symlink inside the workspace can still point out of it —
+          // realpath both sides and require containment.
+          const realRoot = await fsPromises.realpath(resolveWorkspacePath(""));
+          const realTarget = await fsPromises.realpath(absPath);
+          if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) {
+            return new Response("Forbidden", { status: 403 });
+          }
+          return net.fetch(pathToFileURL(realTarget).toString());
+        } catch {
+          return new Response("Forbidden", { status: 403 });
+        }
+      })();
+    }
+
+    // Space blobs: app://space-blob/<orgId>/<spaceId>/<hash>
+    if (url.host === "space-blob") {
       try {
-        const relPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
-        if (!relPath) return new Response("Not Found", { status: 404 });
-        const absPath = resolveWorkspacePath(relPath);
-        return net.fetch(pathToFileURL(absPath).toString());
-      } catch {
-        return new Response("Forbidden", { status: 403 });
+        const [orgId, spaceId, hash] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        if (!orgId || !spaceId || !hash) return new Response("Not Found", { status: 404 });
+        const thumb = url.searchParams.get("thumb");
+        const headers = {
+          // Content-addressed → immutable; let Chromium keep it forever.
+          "cache-control": "private, max-age=31536000, immutable",
+          "x-content-type-options": "nosniff",
+        };
+        if (thumb) {
+          const png = await spaceBlobCache.getThumbnail(orgId, spaceId, hash, Number(thumb));
+          if (png) {
+            return new Response(new Uint8Array(png), { headers: { ...headers, "content-type": "image/png" } });
+          }
+          // Not an image — fall through to the full blob.
+        }
+        const blob = await spaceBlobCache.getBlob(orgId, spaceId, hash);
+        return new Response(new Uint8Array(blob.bytes), { headers: { ...headers, "content-type": blob.mime } });
+      } catch (err) {
+        console.error("[space-blob] failed to serve", request.url, err);
+        return new Response("Not Found", { status: 404 });
       }
     }
 
@@ -384,6 +422,8 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
     setMainWindowForDeepLinks(null);
+    // The call engine lived in this window — take its floating surface down.
+    onAppWindowClosed();
   });
 
   // Show window when content is ready to prevent blank screen.
@@ -495,17 +535,52 @@ app.whenReady().then(async () => {
     console.error('[Analytics] Failed to sync provider properties:', error);
   });
 
+  // Interactive sign-in flows run in core now (client-server separation,
+  // Phase 3b) — the browser they open is a client capability.
+  registerUrlOpener({
+    open: (url) => shell.openExternal(url),
+    focusClient: () => {
+      const win = findMainAppWindow();
+      if (win) {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+      }
+    },
+  });
   registerBrowserControlService(new ElectronBrowserControlService());
   registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
   registerScreenPointerService(screenPointerService);
+  registerTextInsertService(textInsertService);
+
+  // Space mentions now start with the rest of core services (boot/services.ts)
+  // — in-process or inside the child/remote server, wherever core runs.
+
+  // Sleep leaves spaces WebSockets half-open (no close ever fires; see
+  // SpacesLive's liveness notes). Bounce them on wake so every stream
+  // reconnects and replays immediately instead of waiting out the watchdog.
+  // The sockets live where core runs — bounce through the transport when
+  // that's the child/remote server.
+  powerMonitor.on("resume", () => {
+    if (childServerMode()) {
+      forwardRpc('spaces:bounceLive', null).catch(() => {});
+    } else {
+      bounceAllLive();
+    }
+  });
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
   setupBrowserExtensions();
 
-  // Quick-ask bar: global ⌥⇧Space summons a Spotlight-style ask-anything
-  // window over whatever app the user is in.
-  initQuickAsk();
+  // Quick-ask / hover companion: global ⌥⇧Space summons the Skipper over
+  // whatever app the user is in. The app window owns the call engine it
+  // relays to — if the user closed that window, the summon recreates it
+  // hidden so the shortcut keeps working from anywhere.
+  initQuickAsk({
+    ensureAppWindow: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) createWindow({ startHidden: true });
+    },
+  });
 
   // Start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) BEFORE
   // the window and the long service-init chain below. The Apps view is
@@ -513,7 +588,7 @@ app.whenReady().then(async () => {
   // every app iframe hit connection-refused (blank app) for the first ~10s of
   // each launch. Route registration and the token cipher are synchronous;
   // the listen itself is fire-and-forget.
-  registerAppsHostApi();
+  if (!childServerMode()) registerAppsHostApi();
   // GitHub publish token at rest: encrypt via the OS keychain when available
   // (core stays electron-free; the cipher is injected here).
   setGithubTokenCipher({
@@ -526,9 +601,6 @@ app.whenReady().then(async () => {
     isAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
-  });
-  initAppsServer().catch((error) => {
-    console.error('[Apps] Failed to start:', error);
   });
 
   // Resident app (Granola-style): register as an OS login item once, on the
@@ -613,65 +685,67 @@ app.whenReady().then(async () => {
   // - Changes made via IPC handlers (workspace:writeFile, etc.)
   // - External changes (terminal, git, other editors)
   // Only starts once (guarded in startWorkspaceWatcher)
-  startWorkspaceWatcher();
+  // In child/remote mode the watcher runs inside rowboat-server and its
+  // events arrive over the WS relay — a local watcher would double-fire
+  // (or, remote, watch the wrong machine's disk).
+  if (!childServerMode()) startWorkspaceWatcher();
 
   // start runs watcher
   startRunsWatcher();
 
-  // One-time: port legacy runs/*.jsonl into the new turn/session runtime.
-  // Must run BEFORE the session index is built so migrated sessions are picked
-  // up by the startup scan. Fully defensive — never blocks boot.
-  try {
-    const migration = migrateRuns();
-    if (migration.scanned > 0) {
-      console.log(
-        `[runs-migration] migrated ${migration.migratedTurns} turn(s) across ` +
-        `${migration.migratedSessions} session(s) from ${migration.scanned} run(s) ` +
-        `(${migration.skipped} skipped, ${migration.failed.length} failed)`,
-      );
-      for (const failure of migration.failed) {
-        console.warn(`[runs-migration] left in place (failed): ${failure.file} — ${failure.error}`);
-      }
-    }
-  } catch (error) {
-    console.error('[runs-migration] pass failed:', error);
-  }
-
-  // Code sessions created before code mode moved onto the turns runtime have
-  // meta files but no chat-session file — backfill them BEFORE the index scan
-  // so they open in the chat pane like any other session.
-  try {
-    await container.resolve<CodeSessionService>('codeSessionService').backfillChatSessions();
-  } catch (error) {
-    console.error('[code-sessions] backfill failed:', error);
+  if (!childServerMode()) {
+    // One-time data repairs (legacy runs migration, code-session chat
+    // backfill) — shared with the standalone server boot.
+    await prepareCoreData();
   }
   // New runtime: build the in-memory session index (startup scan), then
   // forward the session bus to windows. The renderer window is already up and
   // may have called sessions:list — that handler blocks on
   // markSessionsIndexReady, which must fire even if the scan throws so the
   // list never hangs.
-  try {
-    await container.resolve<ISessions>('sessions').initialize();
-  } finally {
+  if (childServerMode()) {
+    // The child owns the session index; main's in-process gate is moot.
     markSessionsIndexReady();
+  } else {
+    try {
+      await container.resolve<ISessions>('sessions').initialize();
+    } finally {
+      markSessionsIndexReady();
+    }
   }
   startSessionsWatcher();
-  // Daily auto-delete of old chats & task transcripts (delayed first run).
-  startRetentionSweep();
+  startConnectorEventsWatcher();
+  startTerminalEventsWatcher();
+  // Daily auto-delete of old chats & task transcripts (delayed first run) —
+  // started inside initCoreServices() below.
   // Turn event spine: durable events of every turn (session, headless,
   // sub-agent) → renderer, for turnId-keyed live views.
   startTurnEventsWatcher();
   startCodeRunFeedWatcher();
 
-  // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
-  // start after initialize(). Failures must never block boot.
-  startChannelsWatcher();
-  initChannels().catch((error) => {
-    console.error('[Channels] Failed to start mobile channels:', error);
+  // rowboat-server transport (phone/API clients + the strangler-fig channel
+  // forwarder), hosted in-process on this same core instance. Needs the
+  // session index gate above; must never block boot.
+  startServerHost().catch((error) => {
+    console.error('[server-host] failed to start rowboat-server:', error);
   });
+
+  // Mobile channels status → renderer; the service itself starts inside
+  // initCoreServices() below.
+  startChannelsWatcher();
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
+
+  // start the Home thread registry (the Deck's underway/needs-you feed)
+  startHomeThreadsWatcher();
+
+  // Self-heal: strip any code-session meta that leaked onto the Command
+  // Center session before the never-adopt guard existed (its worktree, if
+  // any, is left on disk — see detachCodeMeta).
+  import('@x/core/dist/home/command-center.js')
+    .then((m) => m.repairCommandCenterSession())
+    .catch(() => {});
 
   // start services watcher
   startServicesWatcher();
@@ -685,72 +759,12 @@ app.whenReady().then(async () => {
   // start todo event watcher (forwards bus → renderer)
   startTodoWatcher();
 
-  // seed the morning planner background task (once, best-effort)
-  void import("@x/core/dist/todo/planner-task.js").then((m) => m.ensureMorningPlannerTask());
-
-  // start live-note scheduler (cron / window)
-  initLiveNoteScheduler();
-
-  // start bg-task scheduler (cron / window)
-  initBackgroundTaskScheduler();
-
-  // start disk-skills watcher: live-reload skills dropped into
-  // ~/.rowboat/skills or ~/.agents/skills without an app restart
-  startSkillsWatcher();
-
-  // register event consumers and start the shared event processor
-  // (consumes $WorkDir/events/pending/, routes events to all consumers
-  // concurrently for Pass-1, then fires each consumer's candidates in parallel)
-  registerConsumer(liveNoteEventConsumer);
-  registerConsumer(backgroundTaskEventConsumer);
-  initEventProcessor();
-
-  // If the stored Google grant predates a scope change (only old scopes),
-  // disconnect it now so the user re-connects with the current scopes before
-  // any Google sync runs against the stale grant.
-  await disconnectGoogleIfScopesStale();
-
-  // start gmail sync
-  initGmailSync();
-
-  // start outlook sync (idles unless Microsoft is connected)
-  initOutlookSync();
-
-  // start calendar sync
-  initCalendarSync();
-
-  // start outlook calendar sync (idles unless Microsoft is connected)
-  initOutlookCalendarSync();
-
-  // start fireflies sync
-  initFirefliesSync();
-
-  // start granola sync
-  initGranolaSync();
-
-  // start knowledge graph builder
-  initGraphBuilder();
-
-  // start note tagging service
-  initNoteTagging();
-
-  // start inline task service (@rowboat: mentions)
-  initInlineTasks();
-
-  // start background agent runner (scheduled agents)
-  initAgentRunner();
-
-  // start agent notes learning service
-  initAgentNotes();
-
-  // start calendar meeting notification service (fires 1-minute warnings)
-  initCalendarNotifications();
-
-  // start meeting prep scheduler (generates prep notes ~6h before a meeting)
-  void initMeetingPrep();
-
-  // start chrome extension sync server
-  initChromeSync();
+  // Schedulers, sync services, event processor, background agents — the
+  // headless-safe half of boot, shared with the standalone rowboat-server
+  // (Phase 6, SEPARATION_PLAN.md). In child-server mode the child runs them.
+  if (!childServerMode()) {
+    await initCoreServices();
+  }
 
   app.on("activate", () => {
     // Reveal the hidden/closed main window (login launches start hidden).
@@ -783,6 +797,9 @@ stopSkillsWatcher();
   disposeAllTerminals();
   shutdownAppsServer().catch((error) => {
     console.error('[Apps] Failed to shut down cleanly:', error);
+  });
+  stopServerHost().catch((error) => {
+    console.error('[server-host] Failed to shut down cleanly:', error);
   });
   shutdownAnalytics().catch((error) => {
     console.error('[Analytics] Failed to flush on quit:', error);

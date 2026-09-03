@@ -1,4 +1,0 @@
-export const sectionHeaderStyles = "block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2";
-export const sectionDescriptionStyles = "text-sm text-gray-500 dark:text-gray-400 mb-4";
-export const textareaStyles = "rounded-lg p-3 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20 placeholder:text-gray-400 dark:placeholder:text-gray-500";
-export const inputStyles = "rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 focus:shadow-inner focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/20"; 

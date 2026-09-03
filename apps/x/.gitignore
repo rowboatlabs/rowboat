@@ -1,3 +1,6 @@
 node_modules/
 test-fixtures/
 *.tsbuildinfo
+
+# Local pnpm settings (e.g. script-shell on Windows) — never for CI
+.npmrc

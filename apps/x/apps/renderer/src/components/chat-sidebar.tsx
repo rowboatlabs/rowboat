@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Pin } from 'lucide-react'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
+import { CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { type ChatTab } from '@/components/tab-bar'
@@ -101,7 +102,9 @@ interface ChatSidebarProps {
    * Set while a Rowboat-mode code session owns this pane: the chat is pinned to
    * the session, so the chat switcher / new-chat / history affordances hide.
    */
-  pinnedToCodeSession?: { title: string } | null
+  // Set while the chat is bound to a coding session: the header becomes the
+  // session's (title, settings, drawer toggles) instead of the chat switcher.
+  pinnedToCodeSession?: CodeSessionHeaderProps | null
   onWorkDirChangeForTab?: (tabId: string, value: string | null) => void
   pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
@@ -113,6 +116,7 @@ interface ChatSidebarProps {
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
   onOpenKnowledgeFile?: (path: string) => void
+  onOpenFile?: (path: string) => void
   onActivate?: () => void
   collapsedLeftPaddingPx?: number
   // Voice / TTS props
@@ -187,6 +191,7 @@ export function ChatSidebar({
   isToolOpenForTab,
   onToolOpenChangeForTab,
   onOpenKnowledgeFile,
+  onOpenFile,
   onActivate,
   collapsedLeftPaddingPx = 196,
   isRecording,
@@ -377,20 +382,7 @@ export function ChatSidebar({
             }}
           >
             {pinnedToCodeSession ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-1.5 px-3 py-2 text-sm font-medium">
-                    <Pin className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 truncate">{pinnedToCodeSession.title}</span>
-                    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                      Coding session
-                    </span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  This chat drives the selected coding session — pick another session (or leave Code) to switch chats.
-                </TooltipContent>
-              </Tooltip>
+              <CodeSessionHeader {...pinnedToCodeSession} />
             ) : (
               <ChatHeader
                 activeTitle={(() => {
@@ -426,7 +418,7 @@ export function ChatSidebar({
             )}
           </header>
 
-          <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})}>
+          <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})} onOpenFile={onOpenFile}>
             <div className="flex min-h-0 flex-1 flex-col">
               {/* Pane padding lives here, on the container — the shared chat pane renders identically on every surface. */}
               <div className="relative min-h-0 flex-1 px-3">
@@ -450,6 +442,7 @@ export function ChatSidebar({
                       activeIsReasoning={isReasoning}
                       onCodePermissionResponse={onCodePermissionResponse}
                       onComposioConnected={onComposioConnected}
+                      emptyStateVariant={pinnedToCodeSession ? 'code' : 'default'}
                     />
                   )
                 })}

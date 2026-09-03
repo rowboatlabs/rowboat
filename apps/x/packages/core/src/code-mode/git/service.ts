@@ -30,7 +30,7 @@ export function isGitAvailable(): Promise<boolean> {
 }
 
 export async function repoInfo(cwd: string): Promise<GitRepoInfo> {
-    const none: GitRepoInfo = { isGitRepo: false, branch: null, hasCommits: false, dirtyCount: 0 };
+    const none: GitRepoInfo = { isGitRepo: false, branch: null, hasCommits: false, dirtyCount: 0, root: null, subpath: null };
     if (!await isGitAvailable()) return none;
     try {
         const inside = (await git(cwd, ['rev-parse', '--is-inside-work-tree'])).trim();
@@ -64,7 +64,21 @@ export async function repoInfo(cwd: string): Promise<GitRepoInfo> {
     } catch {
         dirtyCount = 0;
     }
-    return { isGitRepo: true, branch, hasCommits, dirtyCount };
+    // Root + subpath on REAL paths: git reports the resolved top level, and a
+    // project registered through a symlink (/tmp vs /private/tmp on macOS)
+    // must still land inside it.
+    let root: string | null = null;
+    let subpath: string | null = null;
+    try {
+        root = await fs.realpath((await git(cwd, ['rev-parse', '--show-toplevel'])).trim());
+        const real = await fs.realpath(cwd);
+        subpath = real === root ? '' : real.startsWith(root + path.sep) ? real.slice(root.length + 1) : null;
+        if (subpath === null) root = null;
+    } catch {
+        root = null;
+        subpath = null;
+    }
+    return { isGitRepo: true, branch, hasCommits, dirtyCount, root, subpath };
 }
 
 // git status/diff report paths relative to the REPO ROOT, which is not the

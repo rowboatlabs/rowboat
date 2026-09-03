@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, Keyboard } from "lucide-react"
+import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, Keyboard, QrCode } from "lucide-react"
 
 import {
   Dialog,
@@ -20,7 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
+import { cn, compactPath, parentPath } from "@/lib/utils"
+import { SPACES_ENABLED } from "@/lib/feature-flags"
 import * as analytics from "@/lib/analytics"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
@@ -28,6 +29,8 @@ import { AnthropicIcon, DiscordIcon, GitHubIcon, OpenAIIcon } from "@/components
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
+import { PhonePairingSettings } from "@/components/settings/phone-pairing-settings"
+import { RemoteServerSettings } from "@/components/settings/remote-server-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
@@ -38,7 +41,7 @@ import { ShortcutSettings } from "@/components/settings/shortcut-settings"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
 
-export type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
+export type ConfigTab = "account" | "connections" | "mobile" | "phone" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -66,6 +69,12 @@ const tabs: TabConfig[] = [
     label: "Mobile",
     icon: Smartphone,
     description: "Chat with Rowboat from WhatsApp or Telegram",
+  },
+  {
+    id: "phone",
+    label: "Phone app",
+    icon: QrCode,
+    description: "Pair the Rowboat phone app with this Mac",
   },
   {
     id: "models",
@@ -141,7 +150,7 @@ const tabs: TabConfig[] = [
 
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
-  { label: null, ids: ["account", "connections", "mobile"] },
+  { label: null, ids: ["account", "connections", "mobile", "phone"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
   { label: "App", ids: ["appearance", "shortcuts", "notifications", "permissions", "help"] },
 ]
@@ -253,7 +262,7 @@ function UpdateSettings() {
               idle + lastCheckedAt genuinely means "on the latest version". */}
           {status.lastCheckedAt !== undefined && (
             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-              <CheckCircle2 className="size-3.5 text-green-500 shrink-0" />
+              <CheckCircle2 className="size-3.5 text-[var(--rowboat-success)] shrink-0" />
               <span>
                 {`You're up to date! Rowboat v${status.version} is the latest version.`}
                 <span className="text-muted-foreground/60">
@@ -655,10 +664,10 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
       {/* Section A: API Key (only in BYOK mode) */}
       {!rowboatConnected && (
         <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Composio API Key</span>
+          <span className="text-[13px] text-muted-foreground">Composio API Key</span>
           {apiKeyConfigured && !showApiKeyInput ? (
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 text-sm text-green-600">
+              <div className="flex items-center gap-1.5 text-sm text-[var(--rowboat-success)]">
                 <CheckCircle2 className="size-4" />
                 API key configured
               </div>
@@ -718,7 +727,7 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
       {apiKeyConfigured && (
         <>
           <div className="space-y-2">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Available Toolkits</span>
+            <span className="text-[13px] text-muted-foreground">Available Toolkits</span>
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
@@ -763,7 +772,7 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-medium truncate">{toolkit.name}</span>
                           {isConnected && (
-                            <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
+                            <span className="rounded-full bg-[var(--rowboat-success)]/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--rowboat-success)]">
                               Connected
                             </span>
                           )}
@@ -872,7 +881,7 @@ function TagGroupTable({
       <div className="flex items-center justify-between mb-1.5">
         <button
           onClick={onToggle}
-          className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronRight className={cn("size-3.5 transition-transform", !collapsed && "rotate-90")} />
           {group.label}
@@ -891,7 +900,7 @@ function TagGroupTable({
       {!collapsed && group.tags.length > 0 && (
         <div className="border rounded-md overflow-hidden">
           <div className={cn(
-            "gap-1 bg-muted/50 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider grid",
+            "gap-1 bg-muted/50 px-2 py-1 text-[13px] text-muted-foreground grid",
             isEmail ? "grid-cols-[100px_1fr_1fr_60px_24px]" : "grid-cols-[100px_1fr_1fr_24px]"
           )}>
             <div>Label</div>
@@ -1209,7 +1218,7 @@ function AgentStatusRow({
           <span
             className={cn(
               "size-2 rounded-full shrink-0",
-              active ? "bg-green-500" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
+              active ? "bg-[var(--rowboat-success)]" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
             )}
           />
           <span className="truncate">
@@ -1249,6 +1258,10 @@ function AgentStatusRow({
 function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [enabled, setEnabled] = useState(false)
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>('ask')
+  // The repo coding work defaults into when none is named. undefined = Auto:
+  // a single registered project is the implicit default.
+  const [defaultProjectId, setDefaultProjectId] = useState<string | undefined>(undefined)
+  const [projects, setProjects] = useState<{ id: string; name: string; path: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
@@ -1276,9 +1289,16 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         if (!cancelled) {
           setEnabled(result.enabled)
           setApprovalPolicy(result.approvalPolicy ?? 'ask')
+          setDefaultProjectId(result.defaultProjectId)
         }
       } catch {
         if (!cancelled) setEnabled(false)
+      }
+      try {
+        const res = await window.ipc.invoke("codeProject:list", null)
+        if (!cancelled) setProjects(res.projects.map((p) => ({ id: p.project.id, name: p.project.name, path: p.project.path })))
+      } catch {
+        if (!cancelled) setProjects([])
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -1292,7 +1312,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     setEnabled(next)
     try {
-      await window.ipc.invoke("codeMode:setConfig", { enabled: next, approvalPolicy })
+      await window.ipc.invoke("codeMode:setConfig", { enabled: next, approvalPolicy, defaultProjectId })
       window.dispatchEvent(new Event("code-mode-config-changed"))
       toast.success(next ? "Code mode enabled" : "Code mode disabled")
     } catch {
@@ -1301,14 +1321,14 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [approvalPolicy])
+  }, [approvalPolicy, defaultProjectId])
 
   const handlePolicyChange = useCallback(async (next: ApprovalPolicy) => {
     const prev = approvalPolicy
     setSaving(true)
     setApprovalPolicy(next)
     try {
-      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy: next })
+      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy: next, defaultProjectId })
       window.dispatchEvent(new Event("code-mode-config-changed"))
     } catch {
       setApprovalPolicy(prev)
@@ -1316,7 +1336,22 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [enabled, approvalPolicy])
+  }, [enabled, approvalPolicy, defaultProjectId])
+
+  const handleDefaultRepoChange = useCallback(async (next: string | undefined) => {
+    const prev = defaultProjectId
+    setSaving(true)
+    setDefaultProjectId(next)
+    try {
+      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy, defaultProjectId: next })
+      window.dispatchEvent(new Event("code-mode-config-changed"))
+    } catch {
+      setDefaultProjectId(prev)
+      toast.error("Failed to update the default repo")
+    } finally {
+      setSaving(false)
+    }
+  }, [enabled, approvalPolicy, defaultProjectId])
 
   const anyReady = status?.claude.installed && status?.claude.signedIn
     || status?.codex.installed && status?.codex.signedIn
@@ -1351,7 +1386,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Agent status</span>
+          <span className="text-[13px] text-muted-foreground">Agent status</span>
           <button
             onClick={() => { void loadStatus() }}
             disabled={statusLoading}
@@ -1422,6 +1457,49 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         </div>
       )}
 
+      {enabled && (
+        <div className="rounded-md border px-3 py-3 space-y-2">
+          <div className="text-sm font-medium">Default repo</div>
+          <div className="text-xs text-muted-foreground">
+            Where coding work lands when you don&apos;t name a folder — say &quot;fix the login bug&quot; anywhere
+            (Home, chat, voice) and it runs here on its own isolated branch. Repos are registered in the Code section.
+          </div>
+          <Select
+            value={defaultProjectId ?? 'auto'}
+            onValueChange={(v) => handleDefaultRepoChange(v === 'auto' ? undefined : v)}
+            disabled={saving || projects.length === 0}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">
+                {projects.length === 1 ? `Auto — ${projects[0].name} (only repo)` : 'Auto — the only registered repo'}
+              </SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                  {/* Same-named repos elsewhere — say where this one lives. */}
+                  {projects.some((o) => o.id !== p.id && o.name === p.name) && (
+                    <span className="ml-1.5 text-muted-foreground">{compactPath(parentPath(p.path), 24)}</span>
+                  )}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {projects.length === 0 && (
+            <div className="text-xs text-muted-foreground">
+              No repos registered yet — add one in the Code section first.
+            </div>
+          )}
+          {projects.length > 1 && !defaultProjectId && (
+            <div className="text-xs text-muted-foreground">
+              Several repos are registered — pick one, or unnamed coding requests will ask.
+            </div>
+          )}
+        </div>
+      )}
+
       {enabled && status && !anyReady && (
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
           <AlertTriangle className="size-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
@@ -1437,9 +1515,9 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Notification Settings ---
 
-type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "meeting_detection" | "meeting_notes_ready"
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "todo" | "meeting_detection" | "meeting_notes_ready" | "space_mention"
 
-const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
+const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
     key: "chat_completion",
     label: "Chat responses",
@@ -1461,6 +1539,11 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     description: "When a background agent you've set up has something to surface. Click to open it on the background tasks page.",
   },
   {
+    key: "todo",
+    label: "To-do list",
+    description: "When a to-do you delegated finishes or has something ready for review. Click to open Home.",
+  },
+  {
     key: "meeting_detection",
     label: "Meeting detection",
     description: "A popup offering to take notes when Rowboat notices you're in a call or meeting. Nothing records until you accept.",
@@ -1470,7 +1553,16 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     label: "Meeting notes ready",
     description: "When your meeting notes finish generating after a call. Click to open the note. Only shown while the app is in the background.",
   },
+  {
+    key: "space_mention",
+    label: "Space mentions",
+    description: "When a teammate @mentions you in a space. Click to open the conversation. Only shown while the app is in the background.",
+  },
 ]
+
+// With Spaces dark, its notification category stays out of the settings UI
+// (the mention watcher that emits it is gated on the same flag in main).
+const NOTIFICATION_CATEGORIES = ALL_NOTIFICATION_CATEGORIES.filter((cat) => SPACES_ENABLED || cat.key !== "space_mention")
 
 function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [categories, setCategories] = useState<Record<NotificationCategoryKey, boolean> | null>(null)
@@ -1964,7 +2056,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 return (
                   <div key={section.label ?? "main"} className="flex flex-col gap-0.5">
                     {section.label ? (
-                      <div className="px-2 pb-1 pt-4 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                      <div className="px-2 pb-1 pt-4 text-[13px] font-normal text-muted-foreground">
                         {section.label}
                       </div>
                     ) : null}
@@ -1975,7 +2067,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                         className={cn(
                           "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors text-left",
                           activeTab === tab.id
-                            ? "bg-background text-foreground shadow-sm"
+                            ? "bg-background text-foreground"
                             : "text-muted-foreground hover:text-foreground hover:bg-background/50"
                         )}
                       >
@@ -2022,6 +2114,15 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 </div>
               ) : activeTab === "mobile" ? (
                 <MobileChannelsSettings dialogOpen={open} />
+              ) : activeTab === "phone" ? (
+                <div className="space-y-6">
+                  <PhonePairingSettings dialogOpen={open} />
+                  <Separator />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Connect to a server</h4>
+                    <RemoteServerSettings dialogOpen={open} />
+                  </div>
+                </div>
               ) : activeTab === "models" ? (
                 // ONE model-selection surface for signed-in and BYOK alike:
                 // the Assistant model + per-task overrides, then provider
