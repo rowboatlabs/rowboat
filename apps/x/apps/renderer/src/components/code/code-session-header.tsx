@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronDown, GitBranch, RotateCcw, SlidersHorizontal } from 'lucide-react'
+import { Check, ChevronDown, Copy, GitBranch, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
 import type { ApprovalPolicy, CodingAgent } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
@@ -59,6 +59,47 @@ function StatusPill({ status }: { status: CodeSessionStatus }) {
   )
 }
 
+// Branch chip for a session working in an isolated worktree. Hovering reveals
+// a copy button so the worktree path can be pasted into a terminal or editor
+// without hunting for it.
+function WorktreeChip({ branch, path }: { branch: string; path: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(path)
+      setCopied(true)
+      toast.success('Worktree path copied')
+      window.setTimeout(() => setCopied(false), 1200)
+    } catch {
+      toast.error('Could not copy the path')
+    }
+  }
+  return (
+    <span
+      className="group/wt hidden max-w-56 shrink items-center gap-1 rounded-full bg-muted py-0.5 pl-2 pr-1 text-[11px] text-muted-foreground @[520px]:flex"
+    >
+      <GitBranch className="size-3 shrink-0" />
+      <span className="truncate" title={`${branch}\n${path}`}>{branch}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => void copy()}
+            aria-label="Copy worktree path"
+            className={cn(
+              'flex size-4 shrink-0 items-center justify-center rounded-full opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/wt:opacity-100',
+              copied && 'opacity-100 text-[var(--rowboat-git)]',
+            )}
+          >
+            {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{copied ? 'Copied' : 'Copy worktree path'}</TooltipContent>
+      </Tooltip>
+    </span>
+  )
+}
+
 // Header of the chat while it is bound to a coding session — the chat is the
 // main surface, so this is where the session lives: its title and branch,
 // the agent's model / effort / approvals in one menu, and the doors to the
@@ -104,14 +145,8 @@ export function CodeSessionHeader({ session, status, changedCount, panel, onTogg
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span className="min-w-0 truncate text-sm font-medium" title={session.title}>{session.title}</span>
         <StatusPill status={status} />
-        {worktreeActive && (
-          <span
-            className="hidden max-w-48 shrink items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground @[520px]:flex"
-            title={session.worktree?.branch}
-          >
-            <GitBranch className="size-3 shrink-0" />
-            <span className="truncate">{session.worktree?.branch}</span>
-          </span>
+        {worktreeActive && session.worktree && (
+          <WorktreeChip branch={session.worktree.branch} path={session.worktree.path} />
         )}
       </div>
 
