@@ -1405,7 +1405,7 @@ function TurnDivider({ children }: { children: React.ReactNode }) {
 
 /**
  * The way back, while the text is tucked: a chevron bubble floating just
- * above the Skipper's head.
+ * above the boat, in the gap between the Skipper and the gunwale.
  *
  * It is the mirror of the card's tuck handle — same circle, same size, the
  * chevron pointing the other way — so hiding and un-hiding are visibly one
@@ -1416,6 +1416,10 @@ function TurnDivider({ children }: { children: React.ReactNode }) {
  *
  * The entry waits out the card's fold (COMPANION_MOTION_CSS delays it), so
  * the two never animate over each other.
+ *
+ * 55% is measured off the artwork, not eyeballed: TalkingHead's viewBox is
+ * 200x190 and the hull's rim runs along y=120, so a centred 28px bubble
+ * ends just shy of the planking and clears the share pin below it.
  */
 function UnfoldBubble({ onExpand }: { onExpand: () => void }) {
   const shortcutState = useQuickAskShortcut()
@@ -1424,7 +1428,10 @@ function UnfoldBubble({ onExpand }: { onExpand: () => void }) {
     // The wrapper owns the CENTERING transform; the button owns the
     // animated one. A CSS animation replaces an element's whole transform,
     // so sharing one element would have the bubble fly in off-centre.
-    <span className="absolute -top-2 left-1/2 z-30 -translate-x-1/2" style={noDragRegion}>
+    <span
+      className="absolute left-1/2 z-30 -translate-x-1/2 -translate-y-1/2"
+      style={{ ...noDragRegion, top: '55%' }}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <button
