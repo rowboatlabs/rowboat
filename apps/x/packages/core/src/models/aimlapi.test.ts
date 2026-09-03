@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AIMLAPI_BASE_URL, parseAimlapiChatModelIds } from "./aimlapi.js";
+import { AIMLAPI_BASE_URL, AIMLAPI_PARTNER_ID, aimlapiRequestHeaders, parseAimlapiChatModelIds } from "./aimlapi.js";
 import { listModelsForProvider } from "./models.js";
 
 /**
@@ -133,5 +133,60 @@ describe("listModelsForProvider (aimlapi)", () => {
         await listModelsForProvider({ flavor: "aimlapi" });
         const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
         expect(init.headers).not.toHaveProperty("Authorization");
+    });
+});
+
+describe("aimlapiRequestHeaders", () => {
+    it("sends the calling app's identity, not the provider's", () => {
+        // HTTP-Referer / X-Title are OpenRouter's convention and name the
+        // app making the call — Rowboat. Getting this backwards makes the
+        // analytics on the other side useless.
+        const headers = aimlapiRequestHeaders({});
+        expect(headers).toMatchObject({
+            "HTTP-Referer": "https://github.com/rowboatlabs/rowboat",
+            "X-Title": "Rowboat",
+            "X-AIMLAPI-Source": "agent/rowboat",
+        });
+    });
+
+    it("keeps the partner id well-formed, or absent", () => {
+        // A malformed id is dropped by the receiving service without an
+        // error, so the request succeeds and the attribution vanishes. This
+        // assertion is the only thing that would catch a typo in it.
+        expect(AIMLAPI_PARTNER_ID === "" || /^part_[A-Za-z0-9]{1,64}$/.test(AIMLAPI_PARTNER_ID)).toBe(true);
+        const headers = aimlapiRequestHeaders({}) ?? {};
+        if (AIMLAPI_PARTNER_ID === "") {
+            expect(headers).not.toHaveProperty("X-AIMLAPI-Partner-ID");
+        } else {
+            expect(headers["X-AIMLAPI-Partner-ID"]).toBe(AIMLAPI_PARTNER_ID);
+        }
+    });
+
+    it("never attaches attribution to another origin", () => {
+        // A provider entry can be pointed at a proxy or a compatible peer.
+        // Attribution must not ride to someone else's service.
+        const own = { "X-Custom": "mine" };
+        expect(aimlapiRequestHeaders({ baseURL: "https://proxy.example/v1", headers: own })).toEqual(own);
+        expect(aimlapiRequestHeaders({ baseURL: "https://proxy.example/v1" })).toBeUndefined();
+        expect(aimlapiRequestHeaders({ baseURL: "not a url" })).toBeUndefined();
+    });
+
+    it("still attributes a path override on our own origin", () => {
+        expect(aimlapiRequestHeaders({ baseURL: "https://api.aimlapi.com/v2" }))
+            .toHaveProperty("X-AIMLAPI-Source", "agent/rowboat");
+    });
+
+    it("merges rather than assigns — a user's header wins", () => {
+        const headers = aimlapiRequestHeaders({ headers: { "X-Title": "My Fork", "X-Extra": "1" } });
+        expect(headers).toMatchObject({ "X-Title": "My Fork", "X-Extra": "1" });
+        expect(headers).toHaveProperty("X-AIMLAPI-Source", "agent/rowboat");
+    });
+
+    it("builds a fresh object per call and never mutates the shared defaults", () => {
+        const first = aimlapiRequestHeaders({}) as Record<string, string>;
+        first["X-Title"] = "mutated";
+        const second = aimlapiRequestHeaders({}) as Record<string, string>;
+        expect(second).not.toBe(first);
+        expect(second["X-Title"]).toBe("Rowboat");
     });
 });

@@ -12,7 +12,7 @@ import { getGatewayProvider } from "./gateway.js";
 import { getCodexProvider } from "./codex.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "./defaults.js";
 import { getChatModelIds } from "./models-dev.js";
-import { AIMLAPI_BASE_URL, parseAimlapiChatModelIds } from "./aimlapi.js";
+import { AIMLAPI_BASE_URL, aimlapiRequestHeaders, parseAimlapiChatModelIds } from "./aimlapi.js";
 import { withUseCase } from "../analytics/use_case.js";
 import {
     applyLocalModelSettings,
@@ -83,7 +83,7 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
                 name: "aimlapi",
                 apiKey,
                 baseURL: baseURL || AIMLAPI_BASE_URL,
-                headers,
+                headers: aimlapiRequestHeaders(config),
             });
         case "openrouter":
             return createOpenRouter({

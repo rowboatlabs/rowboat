@@ -80,3 +80,60 @@ export function parseAimlapiChatModelIds(payload: unknown): string[] {
 
     return chat.length > 0 ? chat : all;
 }
+
+/**
+ * Attribution headers, the same pair of conventions this provider's peers
+ * already use: HTTP-Referer / X-Title are OpenRouter's (they name the
+ * CALLING app — Rowboat — not the provider), and X-AIMLAPI-Source is the
+ * provider's own channel tag.
+ *
+ * Frozen and never sent directly: aimlapiRequestHeaders builds a fresh
+ * object per provider so nothing downstream can edit the shared constant.
+ */
+const ATTRIBUTION_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+    "HTTP-Referer": "https://github.com/rowboatlabs/rowboat",
+    "X-Title": "Rowboat",
+    "X-AIMLAPI-Source": "agent/rowboat",
+});
+
+/**
+ * Partner id, format ^part_[A-Za-z0-9]{1,64}$ — asserted in aimlapi.test.ts,
+ * because a malformed one is DROPPED by the receiving service rather than
+ * rejected: the request succeeds and the attribution silently goes nowhere.
+ *
+ * Empty on purpose. No id has been issued for Rowboat, and a made-up value
+ * is worse than none. When one is issued this constant is the only edit;
+ * while it is empty the header is not sent at all.
+ */
+export const AIMLAPI_PARTNER_ID: string = "";
+
+/** Attribution rides only to this origin — never to a proxy or a peer. */
+const ATTRIBUTION_ORIGIN = "https://api.aimlapi.com";
+
+function isAimlapiOrigin(baseURL: string | undefined): boolean {
+    try {
+        return new URL(baseURL || AIMLAPI_BASE_URL).origin === ATTRIBUTION_ORIGIN;
+    } catch {
+        // An unparseable override is not our origin.
+        return false;
+    }
+}
+
+/**
+ * The headers an aimlapi provider sends: the user's own, plus attribution
+ * when — and only when — the request is actually going to aimlapi.com. A
+ * provider entry may point at a proxy or a compatible peer; attribution must
+ * not ride along to someone else's service, so the origin is checked rather
+ * than trusting the flavor alone.
+ *
+ * Merges, never assigns: a user's configured header wins on a key clash, and
+ * the returned object is new every call.
+ */
+export function aimlapiRequestHeaders(
+    config: { baseURL?: string; headers?: Record<string, string> },
+): Record<string, string> | undefined {
+    if (!isAimlapiOrigin(config.baseURL)) return config.headers;
+    const headers: Record<string, string> = { ...ATTRIBUTION_HEADERS };
+    if (AIMLAPI_PARTNER_ID) headers["X-AIMLAPI-Partner-ID"] = AIMLAPI_PARTNER_ID;
+    return { ...headers, ...(config.headers ?? {}) };
+}
