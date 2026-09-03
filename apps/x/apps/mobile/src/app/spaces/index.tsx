@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useState } from 'react';
@@ -124,7 +125,7 @@ function OrgSection({ org }: { org: SpacesOrg }) {
           key={space.id}
           onPress={() => {
             if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-            // S2: router.push to the space chat.
+            router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title: space.name, me: org.memberId } });
           }}
           style={({ pressed }) => ({
             flexDirection: 'row', alignItems: 'center', gap: 10,

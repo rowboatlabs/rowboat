@@ -41,7 +41,7 @@ export default function RootLayout() {
                 headerLeft: () => <GlassHamburger onPress={() => navigation.openDrawer()} />,
               })}
             />
-            <Drawer.Screen name="spaces/index" options={{ title: 'Spaces' }} />
+            <Drawer.Screen name="spaces" options={{ title: 'Spaces', headerShown: false }} />
             <Drawer.Screen name="pairing" options={{ title: 'Pair with your Mac', swipeEnabled: false, headerShown: true }} />
             <Drawer.Screen name="notes" options={{ title: 'Brain', headerShown: false }} />
             <Drawer.Screen name="pair-dev" options={{ title: 'Dev pairing', headerShown: false }} />
