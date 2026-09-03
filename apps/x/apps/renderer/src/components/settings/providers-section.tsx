@@ -55,16 +55,16 @@ const TASK_LABELS: Record<string, string> = {
 }
 
 const BYOK_CATALOG: Array<{ flavor: ByokFlavor; name: string; tagline: string; icon: React.ElementType; needsKey: boolean; needsEndpoint: boolean; optionalKey?: boolean; manualModel?: boolean }> = [
+  // manualModel: the catalog is ~350 chat models deep and its order is the
+  // provider's, so auto-select (first listed) is close to arbitrary — the
+  // optional box lets someone name the model they came for at connect time.
+  { flavor: "aimlapi", name: "aimlapi.com", tagline: "One key, 350+ chat models", icon: AimlapiIcon, needsKey: true, needsEndpoint: false, manualModel: true },
   { flavor: "openai", name: "OpenAI", tagline: "GPT models", icon: OpenAIIcon, needsKey: true, needsEndpoint: false },
   { flavor: "anthropic", name: "Anthropic", tagline: "Claude models", icon: AnthropicIcon, needsKey: true, needsEndpoint: false },
   { flavor: "google", name: "Gemini", tagline: "Google AI Studio", icon: GoogleIcon, needsKey: true, needsEndpoint: false },
   { flavor: "ollama", name: "Ollama", tagline: "Run models locally", icon: OllamaIcon, needsKey: false, needsEndpoint: true },
   { flavor: "openrouter", name: "OpenRouter", tagline: "One key, many models", icon: OpenRouterIcon, needsKey: true, needsEndpoint: false },
   { flavor: "aigateway", name: "AI Gateway (Vercel)", tagline: "Vercel's AI Gateway", icon: VercelIcon, needsKey: true, needsEndpoint: false },
-  // manualModel: the catalog is ~350 chat models deep and its order is the
-  // provider's, so auto-select (first listed) is close to arbitrary — the
-  // optional box lets someone name the model they came for at connect time.
-  { flavor: "aimlapi", name: "aimlapi.com", tagline: "One key, 350+ chat models", icon: AimlapiIcon, needsKey: true, needsEndpoint: false, manualModel: true },
   { flavor: "openai-compatible", name: "OpenAI-Compatible", tagline: "Custom OpenAI-compatible endpoint", icon: GenericApiIcon, needsKey: true, optionalKey: true, needsEndpoint: true, manualModel: true },
 ]
 
