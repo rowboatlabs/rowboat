@@ -10,6 +10,7 @@ import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub,
     ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/lib/toast'
 import { FileTree } from '@/components/spaces/files-tab'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
@@ -37,9 +38,10 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // goal. Plain reply chains stay behind their chips in the stream — the rail
 // holds intentions, not accidents.
 //
-// Open/close follows Notion. Docked: a 280px sidebar in the flow (the shell
-// sidebar contracts to the dock while in Spaces, so this is THE sidebar
-// here); its header button closes it to a sliver at the edge. Collapsed:
+// Open/close follows Notion. Docked: a sidebar in the flow (280px until its
+// right edge is dragged; the shell sidebar contracts to the dock while in
+// Spaces, so this is THE sidebar here); its header button closes it to a
+// sliver at the edge. Collapsed:
 // hovering the sliver slides the whole rail out as a drawer OVER the
 // surfaces — nothing shifts — and it slides back once the cursor leaves
 // (an open row menu holds it). The drawer's header button is the lock:
@@ -62,6 +64,11 @@ const FILES_MIN = 96
 const CHAT_MIN = 120
 /** The collapsed rail: a sliver you hover, not a strip you read. */
 const EDGE_W = 10
+/** Docked width: 280 until the right edge is dragged (persisted), within these. */
+const WIDTH_KEY = 'spaces:railWidth'
+const WIDTH_DEFAULT = 280
+const WIDTH_MIN = 220
+const WIDTH_MAX = 480
 
 export function SpaceRail({
     orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, notify, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
@@ -111,6 +118,31 @@ export function SpaceRail({
         return Number.isFinite(stored) && stored >= FILES_MIN ? stored : null
     })
     const [resizing, setResizing] = useState(false)
+    // Docked width: drag the rail's right edge. The drawer uses the same width.
+    const [width, setWidth] = useState<number>(() => {
+        const stored = Number(localStorage.getItem(WIDTH_KEY))
+        return Number.isFinite(stored) && stored >= WIDTH_MIN && stored <= WIDTH_MAX ? stored : WIDTH_DEFAULT
+    })
+    const [resizingWidth, setResizingWidth] = useState(false)
+    const startWidthResize = (e: React.MouseEvent) => {
+        e.preventDefault()
+        const start = { x: e.clientX, width }
+        setResizingWidth(true)
+        const onMove = (ev: MouseEvent) => {
+            setWidth(Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, start.width + (ev.clientX - start.x))))
+        }
+        const onUp = () => {
+            window.removeEventListener('mousemove', onMove)
+            window.removeEventListener('mouseup', onUp)
+            setResizingWidth(false)
+            setWidth((w) => {
+                localStorage.setItem(WIDTH_KEY, String(w))
+                return w
+            })
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+    }
     const bodyRef = useRef<HTMLDivElement | null>(null)
     const filesRef = useRef<HTMLElement | null>(null)
     const startResize = (e: React.MouseEvent) => {
@@ -275,7 +307,7 @@ export function SpaceRail({
     // The rail's content, rendered docked or inside the peek drawer. Fixed at
     // the open width so text doesn't reflow mid-slide.
     const body = (
-        <div ref={bodyRef} className={cn('flex h-full min-h-0 w-[280px] flex-col', resizing && 'select-none')}>
+        <div ref={bodyRef} style={{ width }} className={cn('flex h-full min-h-0 flex-col', (resizing || resizingWidth) && 'select-none')}>
             <section style={chatStyle} className="group/section flex min-h-0 flex-col">
                 <SectionHeader label="Chat" collapsed={chatCollapsed} count={liveRows.length} onToggle={() => toggleSection('chat')}>
                     <DropdownMenu onOpenChange={onMenuOpenChange}>
@@ -371,34 +403,43 @@ export function SpaceRail({
                             return (
                                 <div key={topic.id} className="group/topicrow relative">
                                     <ContextMenu onOpenChange={onMenuOpenChange}>
-                                        <ContextMenuTrigger asChild>
-                                            <button
-                                                type="button"
-                                                onClick={() => onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId })}
-                                                // The row shows only what changes what you do next: unread,
-                                                // a Rowboat at work, muted. Replies, recency and touched files
-                                                // ride the tooltip — the list is already sorted by activity.
-                                                title={[
-                                                    `${replies} ${replies === 1 ? 'reply' : 'replies'}`,
-                                                    formatFeedTime(topic.lastActivityAt),
-                                                    files && files.size > 0 ? `${files.size} ${files.size === 1 ? 'file' : 'files'} changed: ${[...files].join(', ')}` : null,
-                                                ].filter(Boolean).join(' · ')}
-                                                className={cn(
-                                                    // One tree step (12px) in from Messages: these nest under it.
-                                                    // pr-7 keeps the title and indicators clear of the ⋯ slot.
-                                                    'flex h-7 w-full items-center gap-2 rounded-md pl-5 pr-7 text-left',
-                                                    active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
-                                                    (topic.archived || muted) && 'opacity-60',
-                                                )}
-                                            >
-                                                {/* In the Messages icon column: a discussion branches off the stream. */}
-                                                <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
-                                                <span className={cn('min-w-0 flex-1 truncate text-[13px]', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
-                                                {working && <Bot className="size-3 shrink-0 text-muted-foreground" aria-label="a Rowboat is working here" />}
-                                                {muted && <BellOff className="size-3 shrink-0 text-muted-foreground" aria-label="muted" />}
-                                                {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" aria-label="unread" />}
-                                            </button>
-                                        </ContextMenuTrigger>
+                                        {/* Both triggers are slots on the one button: tooltip outside so the
+                                            context menu's right-click reaches the element unchanged. */}
+                                        <Tooltip delayDuration={400}>
+                                            <TooltipTrigger asChild>
+                                                <ContextMenuTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId })}
+                                                        // The row shows only what changes what you do next: unread,
+                                                        // a Rowboat at work, muted. The full title, replies, recency
+                                                        // and touched files ride the tooltip — the list is already
+                                                        // sorted by activity.
+                                                        className={cn(
+                                                            // One tree step (12px) in from Messages: these nest under it.
+                                                            // pr-7 keeps the title and indicators clear of the ⋯ slot.
+                                                            'flex h-7 w-full items-center gap-2 rounded-md pl-5 pr-7 text-left',
+                                                            active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
+                                                            (topic.archived || muted) && 'opacity-60',
+                                                        )}
+                                                    >
+                                                        {/* In the Messages icon column: a discussion branches off the stream. */}
+                                                        <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
+                                                        <span className={cn('min-w-0 flex-1 truncate text-[13px]', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
+                                                        {working && <Bot className="size-3 shrink-0 text-muted-foreground" aria-label="a Rowboat is working here" />}
+                                                        {muted && <BellOff className="size-3 shrink-0 text-muted-foreground" aria-label="muted" />}
+                                                        {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" aria-label="unread" />}
+                                                    </button>
+                                                </ContextMenuTrigger>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="right" align="start" sideOffset={6} className="max-w-[320px] text-left text-wrap break-words">
+                                                <div className="font-medium">{title}</div>
+                                                <div className="opacity-70">
+                                                    {replies} {replies === 1 ? 'reply' : 'replies'} · {formatFeedTime(topic.lastActivityAt)}
+                                                    {files && files.size > 0 && ` · ${files.size} ${files.size === 1 ? 'file' : 'files'} changed: ${[...files].join(', ')}`}
+                                                </div>
+                                            </TooltipContent>
+                                        </Tooltip>
                                         <ContextMenuContent>
                                             <ContextMenuItem onSelect={() => onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId })}>
                                                 <MessagesSquare className="size-3.5 mr-2" /> Open
@@ -613,7 +654,8 @@ export function SpaceRail({
             ref={asideRef}
             onMouseEnter={onEdgeEnter}
             onMouseLeave={onEdgeLeave}
-            style={{ width: open ? 280 : EDGE_W, transition: 'width 200ms cubic-bezier(0.2,0,0,1)' }}
+            // No slide while the edge is being dragged — the width must track the cursor.
+            style={{ width: open ? width : EDGE_W, transition: resizingWidth ? undefined : 'width 200ms cubic-bezier(0.2,0,0,1)' }}
             className={cn(
                 'relative flex min-h-0 shrink-0 flex-col border-r border-border',
                 // A step lighter than the main sidebar so the two rails read as
@@ -638,7 +680,20 @@ export function SpaceRail({
                     e.target.value = ''
                 }}
             />
-            {open ? body : (
+            {open ? (
+                <>
+                    {body}
+                    {/* Docked: drag the right edge to resize. */}
+                    <div
+                        onMouseDown={startWidthResize}
+                        title="Drag to resize"
+                        className={cn(
+                            'absolute inset-y-0 -right-px z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/20',
+                            resizingWidth && 'bg-primary/30',
+                        )}
+                    />
+                </>
+            ) : (
                 <>
                     {/* The edge sliver: hover slides the drawer out. It says one
                         thing at rest — a dot when something here is unread. */}
@@ -650,11 +705,12 @@ export function SpaceRail({
                         the left so the slide never shows over the shell dock, and is
                         wide enough to leave the shadow alone. Inert while hidden so
                         its rows never catch focus. */}
-                    <div className="pointer-events-none absolute inset-y-0 left-0 w-[330px] overflow-hidden">
+                    <div style={{ width: width + 50 }} className="pointer-events-none absolute inset-y-0 left-0 overflow-hidden">
                         <div
                             inert={!peek}
+                            style={{ width }}
                             className={cn(
-                                'absolute bottom-1.5 left-0 top-1.5 w-[280px] overflow-hidden rounded-r-xl border border-border bg-[var(--rowboat-panel-soft)] shadow-2xl transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
+                                'absolute bottom-1.5 left-0 top-1.5 overflow-hidden rounded-r-xl border border-border bg-[var(--rowboat-panel-soft)] shadow-2xl transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
                                 peek ? 'pointer-events-auto translate-x-0' : '-translate-x-full',
                             )}
                         >

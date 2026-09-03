@@ -19,7 +19,7 @@ import {
     type FileTreeNode,
 } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
-import { MemberAvatar } from '@/components/spaces/atoms'
+import { ClippedText, MemberAvatar } from '@/components/spaces/atoms'
 import { uploadInputFor } from '@/lib/spaces-upload'
 
 // Files: the tree (README first) and the file column — rendered file
@@ -146,7 +146,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                                     {open
                                         ? <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
                                         : <Folder className="size-3 shrink-0 text-muted-foreground" />}
-                                    <span className="truncate">{node.name}</span>
+                                    <ClippedText text={node.name} />
                                 </button>
                             </ContextMenuTrigger>
                             <ContextMenuContent>
@@ -243,7 +243,6 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             }}
                             onDragEnd={() => setDropTarget(null)}
                             onClick={() => onOpenFile(node.path)}
-                            title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
                             className={cn(
                                 'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-left',
                                 active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
@@ -254,7 +253,11 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             {!board && blob && (isImageMime(blob.mime)
                                 ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
                                 : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
-                            <span className="truncate flex-1">{board ? spaces.whiteboardDisplayName(node.name) : node.name}</span>
+                            <ClippedText
+                                text={board ? spaces.whiteboardDisplayName(node.name) : node.name}
+                                detail={blob ? `${blob.mime} · ${formatBytes(blob.size)}` : null}
+                                className="flex-1"
+                            />
                             {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
                         </button>
                     </ContextMenuTrigger>
