@@ -3760,19 +3760,9 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
               </button>
             )}
           </div>
+          {/* Inbox vs Drafts moved to the filter rail — the topbar keeps only
+              the icon actions. */}
           <div className="gmail-topbar-actions">
-            <div className="flex items-center rounded-md border border-border p-0.5 text-xs font-medium">
-              <button
-                type="button"
-                className={cn('rounded px-2.5 py-1 transition-colors', view === 'inbox' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-                onClick={() => setView('inbox')}
-              >Inbox</button>
-              <button
-                type="button"
-                className={cn('rounded px-2.5 py-1 transition-colors', view === 'drafts' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-                onClick={() => setView('drafts')}
-              >Drafts{drafts.length > 0 ? ` (${drafts.length})` : ''}</button>
-            </div>
             <button
               type="button"
               className="gmail-icon-button"
