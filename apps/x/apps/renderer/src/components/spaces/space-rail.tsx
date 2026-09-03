@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { Archive, ArchiveRestore, ArrowLeft, Bell, BellOff, Bot, Check, CornerDownRight, FileText, FolderPlus, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/lib/toast'
+import { SecondaryRail, type SecondaryRailContext } from '@/components/secondary-rail'
 import { FileTree } from '@/components/spaces/files-tab'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import type { NotifyLevel, SpaceNotifyHandle } from '@/hooks/use-spaces-notify'
@@ -38,14 +39,11 @@ import type { RailSelection } from '@/lib/spaces-selection'
 // goal. Plain reply chains stay behind their chips in the stream — the rail
 // holds intentions, not accidents.
 //
-// Open/close follows Notion. Docked: a sidebar in the flow (280px until its
-// right edge is dragged; the shell sidebar contracts to the dock while in
-// Spaces, so this is THE sidebar here); its header button closes it to a
-// sliver at the edge. Collapsed:
-// hovering the sliver slides the whole rail out as a drawer OVER the
-// surfaces — nothing shifts — and it slides back once the cursor leaves
-// (an open row menu holds it). The drawer's header button is the lock:
-// clicking it docks the rail, the only act that moves the content.
+// The rail chrome (docked width + drag-resize, the collapsed sliver, the
+// hover peek drawer) is the shared SecondaryRail shell — Email's filter
+// rail uses the same one. This file owns only what's IN the rail. The
+// shell sidebar contracts to the dock while in Spaces, so this is THE
+// sidebar here.
 
 const NOTIFY_CHOICES: { level: NotifyLevel; label: string }[] = [
     { level: 'all', label: 'All messages' },
@@ -62,13 +60,6 @@ const FILES_HEIGHT_KEY = 'spaces:filesHeight'
 const FILES_MIN = 96
 /** ...or Chat shorter than this (label + Messages + a discussion). */
 const CHAT_MIN = 120
-/** The collapsed rail: a sliver you hover, not a strip you read. */
-const EDGE_W = 10
-/** Docked width: 280 until the right edge is dragged (persisted), within these. */
-const WIDTH_KEY = 'spaces:railWidth'
-const WIDTH_DEFAULT = 280
-const WIDTH_MIN = 220
-const WIDTH_MAX = 480
 
 export function SpaceRail({
     orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, notify, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
@@ -118,31 +109,6 @@ export function SpaceRail({
         return Number.isFinite(stored) && stored >= FILES_MIN ? stored : null
     })
     const [resizing, setResizing] = useState(false)
-    // Docked width: drag the rail's right edge. The drawer uses the same width.
-    const [width, setWidth] = useState<number>(() => {
-        const stored = Number(localStorage.getItem(WIDTH_KEY))
-        return Number.isFinite(stored) && stored >= WIDTH_MIN && stored <= WIDTH_MAX ? stored : WIDTH_DEFAULT
-    })
-    const [resizingWidth, setResizingWidth] = useState(false)
-    const startWidthResize = (e: React.MouseEvent) => {
-        e.preventDefault()
-        const start = { x: e.clientX, width }
-        setResizingWidth(true)
-        const onMove = (ev: MouseEvent) => {
-            setWidth(Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, start.width + (ev.clientX - start.x))))
-        }
-        const onUp = () => {
-            window.removeEventListener('mousemove', onMove)
-            window.removeEventListener('mouseup', onUp)
-            setResizingWidth(false)
-            setWidth((w) => {
-                localStorage.setItem(WIDTH_KEY, String(w))
-                return w
-            })
-        }
-        window.addEventListener('mousemove', onMove)
-        window.addEventListener('mouseup', onUp)
-    }
     const bodyRef = useRef<HTMLDivElement | null>(null)
     const filesRef = useRef<HTMLElement | null>(null)
     const startResize = (e: React.MouseEvent) => {
@@ -256,40 +222,6 @@ export function SpaceRail({
         topics.filter((t) => !t.archived && isUnread(t) && effectiveLevel(t.rootMessageId) !== 'mute').length + (generalBadge > 0 ? 1 : 0)
     const badge = unreadTopics + unreadPaths.size
 
-    // Peek: with the rail collapsed, hovering the edge slides the drawer out;
-    // leaving slides it back after a beat, unless a row menu is holding it
-    // (menus portal outside the rail, so the cursor "leaves" while using one).
-    const [peek, setPeek] = useState(false)
-    const [menuOpen, setMenuOpen] = useState(false)
-    const asideRef = useRef<HTMLElement | null>(null)
-    const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const clearPeekTimer = () => {
-        if (peekTimer.current) clearTimeout(peekTimer.current)
-        peekTimer.current = null
-    }
-    const scheduleClose = () => {
-        clearPeekTimer()
-        peekTimer.current = setTimeout(() => setPeek(false), 220)
-    }
-    const onEdgeEnter = () => {
-        if (open) return
-        clearPeekTimer()
-        peekTimer.current = setTimeout(() => setPeek(true), 120)
-    }
-    const onEdgeLeave = () => {
-        if (menuOpen) clearPeekTimer()
-        else scheduleClose()
-    }
-    const onMenuOpenChange = (isOpen: boolean) => {
-        setMenuOpen(isOpen)
-        // The menu closed with the cursor already gone: slide back now.
-        if (!isOpen && !open && !asideRef.current?.matches(':hover')) scheduleClose()
-    }
-    useEffect(() => {
-        if (open) setPeek(false)
-    }, [open])
-    useEffect(() => clearPeekTimer, [])
-
     const chatCollapsed = collapsed.has('chat')
     const filesCollapsed = collapsed.has('files')
     const bothOpen = !chatCollapsed && !filesCollapsed
@@ -304,10 +236,10 @@ export function SpaceRail({
                 ? { flex: `0 0 ${filesHeight}px`, maxHeight: `calc(100% - ${CHAT_MIN}px)` }
                 : { flex: '40 1 0%' }
 
-    // The rail's content, rendered docked or inside the peek drawer. Fixed at
-    // the open width so text doesn't reflow mid-slide.
-    const body = (
-        <div ref={bodyRef} style={{ width }} className={cn('flex h-full min-h-0 flex-col', (resizing || resizingWidth) && 'select-none')}>
+    // The rail's content — the shell renders it docked or inside the peek
+    // drawer at the fixed open width.
+    const renderBody = ({ togglePin, onMenuOpenChange }: SecondaryRailContext) => (
+        <div ref={bodyRef} className={cn('flex h-full min-h-0 flex-col', resizing && 'select-none')}>
             <section style={chatStyle} className="group/section flex min-h-0 flex-col">
                 <SectionHeader label="Chat" collapsed={chatCollapsed} count={liveRows.length} onToggle={() => toggleSection('chat')}>
                     <DropdownMenu onOpenChange={onMenuOpenChange}>
@@ -335,7 +267,7 @@ export function SpaceRail({
                     {/* Docked: close. Peeked: the lock — dock it. Same spot, flipped glyph. */}
                     <button
                         type="button"
-                        onClick={() => { setPeek(false); onTogglePin() }}
+                        onClick={togglePin}
                         title={open ? 'Close sidebar' : 'Lock sidebar open'}
                         className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                     >
@@ -650,76 +582,30 @@ export function SpaceRail({
     )
 
     return (
-        <aside
-            ref={asideRef}
-            onMouseEnter={onEdgeEnter}
-            onMouseLeave={onEdgeLeave}
-            // No slide while the edge is being dragged — the width must track the cursor.
-            style={{ width: open ? width : EDGE_W, transition: resizingWidth ? undefined : 'width 200ms cubic-bezier(0.2,0,0,1)' }}
-            className={cn(
-                'relative flex min-h-0 shrink-0 flex-col border-r border-border',
-                // A step lighter than the main sidebar so the two rails read as
-                // distinct layers; at this subtle a shift the hairline to the
-                // canvas earns its place.
-                open ? 'z-10 overflow-hidden bg-[var(--rowboat-panel-soft)]' : 'overflow-visible bg-background',
-                // The drawer rides over the surfaces' own sticky layers (z-20).
-                !open && (peek ? 'z-30' : 'z-10'),
-            )}
+        <SecondaryRail
+            open={open}
+            onTogglePin={onTogglePin}
+            widthStorageKey="spaces:railWidth"
+            edgeDot={badge > 0}
+            persistent={
+                // Always mounted: an input unmounted mid-pick (the rail toggled
+                // closed while the OS file dialog is up) never delivers its
+                // change event.
+                <input
+                    ref={uploadInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                        const files = Array.from(e.target.files ?? [])
+                        if (files.length > 0) onUploadFiles(files)
+                        e.target.value = ''
+                    }}
+                />
+            }
         >
-            {/* Always mounted: an input unmounted mid-pick (the rail toggled
-                closed while the OS file dialog is up) never delivers its
-                change event. */}
-            <input
-                ref={uploadInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                    const files = Array.from(e.target.files ?? [])
-                    if (files.length > 0) onUploadFiles(files)
-                    e.target.value = ''
-                }}
-            />
-            {open ? (
-                <>
-                    {body}
-                    {/* Docked: drag the right edge to resize. */}
-                    <div
-                        onMouseDown={startWidthResize}
-                        title="Drag to resize"
-                        className={cn(
-                            'absolute inset-y-0 -right-px z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/20',
-                            resizingWidth && 'bg-primary/30',
-                        )}
-                    />
-                </>
-            ) : (
-                <>
-                    {/* The edge sliver: hover slides the drawer out. It says one
-                        thing at rest — a dot when something here is unread. */}
-                    <div aria-hidden className={cn('relative flex-1 transition-colors', peek ? 'bg-accent/60' : 'hover:bg-accent/60')}>
-                        {badge > 0 && <span className="absolute left-1/2 top-3 size-1 -translate-x-1/2 rounded-full bg-foreground" />}
-                    </div>
-                    {/* The drawer: the same rail, sliding out over the surfaces from
-                        the edge — nothing underneath moves. The outer box clips on
-                        the left so the slide never shows over the shell dock, and is
-                        wide enough to leave the shadow alone. Inert while hidden so
-                        its rows never catch focus. */}
-                    <div style={{ width: width + 50 }} className="pointer-events-none absolute inset-y-0 left-0 overflow-hidden">
-                        <div
-                            inert={!peek}
-                            style={{ width }}
-                            className={cn(
-                                'absolute bottom-1.5 left-0 top-1.5 overflow-hidden rounded-r-xl border border-border bg-[var(--rowboat-panel-soft)] shadow-2xl transition-transform duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
-                                peek ? 'pointer-events-auto translate-x-0' : '-translate-x-full',
-                            )}
-                        >
-                            {body}
-                        </div>
-                    </div>
-                </>
-            )}
-        </aside>
+            {renderBody}
+        </SecondaryRail>
     )
 }
 

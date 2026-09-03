@@ -9,6 +9,9 @@ import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { prepareEmailHtml, splitPlainTextQuote, stripQuotedReplyText, QUOTED_CLASS } from '@/lib/email-quotes'
+import { BUILTIN_LABELS, labelNameFor, orderedCategoryIds, type EmailLabelInfo } from '@/lib/email-labels'
+import { replyReadyThreads } from '@/lib/email-reply-ready'
+import { EmailRail, type EmailRailSelection } from '@/components/email-rail'
 import { useTheme } from '@/contexts/theme-context'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Button } from '@/components/ui/button'
@@ -147,46 +150,9 @@ function withDateDividers(threads: GmailThread[], renderThread: (thread: GmailTh
   return out
 }
 
-// The label set (chips, filter pills, correction dropdown) comes from the
-// backend label registry: built-ins (display names follow Superhuman's Auto
-// Label vocabulary — Marketing / Pitch / News / Calendar) plus any labels the
-// user defined in their agent instructions. This static copy of the built-ins
-// is the fallback used until the registry loads, and for ids the registry no
-// longer knows (a custom label the user later removed).
+// The label set (chips, filter pills, rail rows, correction dropdown) lives in
+// lib/email-labels — shared with the filter rail.
 type EmailCategory = string
-
-interface EmailLabelInfo {
-  id: string
-  name: string
-  kind: 'builtin' | 'custom'
-}
-
-const BUILTIN_LABELS: EmailLabelInfo[] = [
-  { id: 'correspondence', name: 'Direct', kind: 'builtin' },
-  { id: 'meeting', name: 'Calendar', kind: 'builtin' },
-  { id: 'notification', name: 'Notification', kind: 'builtin' },
-  { id: 'newsletter', name: 'News', kind: 'builtin' },
-  { id: 'promotion', name: 'Marketing', kind: 'builtin' },
-  { id: 'cold_outreach', name: 'Pitch', kind: 'builtin' },
-  { id: 'receipt', name: 'Receipt', kind: 'builtin' },
-]
-
-// Pill order in the "Everything else" filter row: noise first (that's what
-// gets bulk-archived), then the rest of the built-ins; custom labels are
-// appended in registry order at render time. 'unclassified' (threads the
-// classifier hasn't reached yet) is always last and unarchivable.
-const BUILTIN_PILL_ORDER = ['newsletter', 'promotion', 'notification', 'cold_outreach', 'receipt', 'meeting', 'correspondence']
-
-// Fallback for ids the registry doesn't know: "portfolio_updates" → "Portfolio updates".
-function prettifyLabelId(id: string): string {
-  const words = id.replace(/_/g, ' ').trim()
-  return words ? words[0].toUpperCase() + words.slice(1) : id
-}
-
-function labelNameFor(labels: EmailLabelInfo[], category: string): string {
-  if (category === 'unclassified') return 'Uncategorized'
-  return labels.find((l) => l.id === category)?.name ?? prettifyLabelId(category)
-}
 
 // The user sent the latest message and someone else is in the conversation —
 // the ball is in their court. Derived from the messages on every render (never
@@ -2742,12 +2708,41 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const closeCompose = useCallback(() => setComposeOpen(false), [])
   // Inbox vs Drafts. Drafts are fetched live (they're not in the inbox cache).
   const [view, setView] = useState<'inbox' | 'drafts'>('inbox')
+  // Which inbox sections the rail shows: both, Important only, Reply ready
+  // (threads with a classifier-drafted reply, across both sections), or
+  // Everything else only. Purely a render subset — both sections stay loaded
+  // either way.
+  const [inboxFilter, setInboxFilter] = useState<'all' | 'important' | 'reply-ready' | 'other'>('all')
+  // Filter rail collapse, persisted like the Spaces rail.
+  const [railOpen, setRailOpen] = useState(() => localStorage.getItem('email:railOpen') !== '0')
+  const toggleRail = useCallback(() => {
+    setRailOpen((prev) => {
+      localStorage.setItem('email:railOpen', prev ? '0' : '1')
+      return !prev
+    })
+  }, [])
   // Category filter for "Everything else" (null = all) + whole-section counts
   // from the last backend response, which drive the filter pills.
   const [otherCategory, setOtherCategory] = useState<string | null>(null)
   const otherCategoryRef = useRef<string | null>(null)
   otherCategoryRef.current = otherCategory
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
+  // Rail clicks map onto the existing view/filter state — the list re-subsets
+  // immediately (category changes refetch via the otherCategory effect below).
+  const selectRail = useCallback((sel: EmailRailSelection) => {
+    if (sel.kind === 'drafts') {
+      setView('drafts')
+      return
+    }
+    setView('inbox')
+    if (sel.kind === 'other') {
+      setInboxFilter('other')
+      setOtherCategory(sel.category ?? null)
+      return
+    }
+    setInboxFilter(sel.kind)
+    setOtherCategory(null)
+  }, [])
   const [bulkArchiving, setBulkArchiving] = useState(false)
   const [drafts, setDrafts] = useState<GmailThread[]>(() => persistedDrafts ?? [])
   const [draftsLoading, setDraftsLoading] = useState(false)
@@ -3380,6 +3375,24 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     [visibleImportant, selfEmail],
   )
 
+  // "Reply ready" spans both loaded sections. The rail count ignores the
+  // search box (like the drafts count); the visible list respects it. Both
+  // recompute whenever the watcher reloads a section, so a draft appearing,
+  // being sent, or vanishing after re-classification updates them in place.
+  const replyReadyCount = useMemo(
+    () => replyReadyThreads(important.threads, other.threads).length,
+    [important.threads, other.threads],
+  )
+  const visibleReplyReady = useMemo(
+    () => replyReadyThreads(visibleImportant, visibleOther),
+    [visibleImportant, visibleOther],
+  )
+  // Row actions (category correction) need each thread's home section.
+  const importantThreadIds = useMemo(
+    () => new Set(important.threads.map((t) => t.threadId)),
+    [important.threads],
+  )
+
   // ── Keyboard shortcuts (Superhuman-style) ───────────────────────────────────
   // EmailView only mounts while the email tab is open, so these are naturally
   // scoped to that view. Single-letter keys stay inert while typing in any
@@ -3400,9 +3413,24 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const visibleList = useMemo<GmailThread[]>(() => {
     if (query.trim()) return searchResults
     if (view === 'drafts') return visibleDrafts
-    if (other.threads.length > 0) return [...visibleNeedsYou, ...visibleWaiting, ...visibleOther]
-    return [...visibleNeedsYou, ...visibleWaiting]
-  }, [query, searchResults, view, visibleDrafts, visibleNeedsYou, visibleWaiting, visibleOther, other.threads.length])
+    if (inboxFilter === 'reply-ready') return visibleReplyReady
+    const importantRows = inboxFilter === 'other' ? [] : [...visibleNeedsYou, ...visibleWaiting]
+    const otherRows = inboxFilter === 'important' || other.threads.length === 0 ? [] : visibleOther
+    return [...importantRows, ...otherRows]
+  }, [query, searchResults, view, inboxFilter, visibleDrafts, visibleReplyReady, visibleNeedsYou, visibleWaiting, visibleOther, other.threads.length])
+
+  // Narrowing to a different rail subset re-anchors the j/k cursor at the top
+  // (same posture as switching between inbox / search / drafts). Skipped on
+  // mount so a deep-linked thread's focus isn't clobbered.
+  const inboxFilterMounted = useRef(false)
+  useEffect(() => {
+    if (!inboxFilterMounted.current) {
+      inboxFilterMounted.current = true
+      return
+    }
+    lastFocusedIndexRef.current = 0
+    setFocusedThreadId(null)
+  }, [inboxFilter])
 
   // Keep the cursor valid as the list changes: switching between inbox,
   // search, and drafts resets it; if the focused row vanished (archived,
@@ -3714,6 +3742,18 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
 
   return (
     <div className="gmail-shell" ref={rootRef}>
+      <EmailRail
+        view={view}
+        inboxFilter={inboxFilter}
+        otherCategory={otherCategory}
+        categoryCounts={categoryCounts}
+        labels={emailLabels}
+        draftCount={drafts.length}
+        replyReadyCount={replyReadyCount}
+        open={railOpen}
+        onTogglePin={toggleRail}
+        onSelect={selectRail}
+      />
       <div className="gmail-main">
         <div className="gmail-topbar">
           <div className="gmail-search">
@@ -3743,19 +3783,9 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
               </button>
             )}
           </div>
+          {/* Inbox vs Drafts moved to the filter rail — the topbar keeps only
+              the icon actions. */}
           <div className="gmail-topbar-actions">
-            <div className="flex items-center rounded-md border border-border p-0.5 text-xs font-medium">
-              <button
-                type="button"
-                className={cn('rounded px-2.5 py-1 transition-colors', view === 'inbox' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-                onClick={() => setView('inbox')}
-              >Inbox</button>
-              <button
-                type="button"
-                className={cn('rounded px-2.5 py-1 transition-colors', view === 'drafts' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-                onClick={() => setView('drafts')}
-              >Drafts{drafts.length > 0 ? ` (${drafts.length})` : ''}</button>
-            </div>
             <button
               type="button"
               className="gmail-icon-button"
@@ -3819,7 +3849,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
           <div className="gmail-empty-state">Could not load mail: {error}</div>
         ) : hasAny ? (
           <div className="gmail-list" aria-label="Recent emails">
-            {visibleNeedsYou.length > 0 ? (
+            {(inboxFilter === 'all' || inboxFilter === 'important') && (visibleNeedsYou.length > 0 ? (
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Needs you</span>
@@ -3831,8 +3861,8 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
               </section>
             ) : important.hasReachedEnd && !important.loadingPage ? (
               <div className="gmail-caughtup">You’re caught up — nothing needs a reply.</div>
-            ) : null}
-            {visibleWaiting.length > 0 && (
+            ) : null)}
+            {(inboxFilter === 'all' || inboxFilter === 'important') && visibleWaiting.length > 0 && (
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Waiting on them</span>
@@ -3845,7 +3875,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
             )}
             {/* Pages of "Important" feed both sections above, so the sentinel
                 lives after them rather than inside either one. */}
-            {important.threads.length > 0 && !important.hasReachedEnd && (
+            {(inboxFilter === 'all' || inboxFilter === 'important') && important.threads.length > 0 && !important.hasReachedEnd && (
               <SectionSentinel
                 disabled={important.loadingPage || important.hasReachedEnd}
                 onIntersect={() => loadNextPage('important')}
@@ -3856,7 +3886,27 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                 loaded the section never unmounts: silent live reloads reset
                 Important to page 1 (hasReachedEnd → false), and gating the
                 render on it made this whole section vanish on every sync. */}
-            {(other.threads.length > 0 || otherCategory !== null) && (
+            {inboxFilter === 'reply-ready' && (
+              <section className="gmail-section">
+                <div className="gmail-list-header">
+                  <span>Reply ready</span>
+                  <span>{visibleReplyReady.length} thread{visibleReplyReady.length === 1 ? '' : 's'}</span>
+                </div>
+                {visibleReplyReady.length === 0 && !important.loadingPage && !other.loadingPage && (
+                  <div className="gmail-caughtup">No drafted replies right now.</div>
+                )}
+                {withDateDividers(visibleReplyReady, (t) => renderRow(t, importantThreadIds.has(t.threadId) ? 'important' : 'other'))}
+                {/* Deeper pages of either section may hold more drafted replies. */}
+                {(!important.hasReachedEnd || !other.hasReachedEnd) && (
+                  <SectionSentinel
+                    disabled={important.loadingPage || other.loadingPage}
+                    onIntersect={() => loadNextPage(important.hasReachedEnd ? 'other' : 'important')}
+                    loading={important.loadingPage || other.loadingPage}
+                  />
+                )}
+              </section>
+            )}
+            {(inboxFilter === 'all' || inboxFilter === 'other') && (other.threads.length > 0 || otherCategory !== null || inboxFilter === 'other') && (
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Everything else</span>
@@ -3866,13 +3916,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                 </div>
                 {Object.keys(categoryCounts).length > 0 && (
                   <div className="gmail-category-pills">
-                    {[
-                      ...BUILTIN_PILL_ORDER,
-                      ...emailLabels.filter((l) => l.kind === 'custom').map((l) => l.id),
-                      // Stale custom ids still present in counts render too.
-                      ...Object.keys(categoryCounts).filter((c) => c !== 'unclassified' && !BUILTIN_PILL_ORDER.includes(c) && !emailLabels.some((l) => l.id === c)),
-                      'unclassified',
-                    ].filter((c) => (categoryCounts[c] ?? 0) > 0).map((cat) => (
+                    {orderedCategoryIds(emailLabels, categoryCounts).map((cat) => (
                       <button
                         key={cat}
                         type="button"
@@ -3896,9 +3940,11 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                     )}
                   </div>
                 )}
-                {other.threads.length === 0 && otherCategory !== null && !other.loadingPage && (
+                {other.threads.length === 0 && !other.loadingPage && (otherCategory !== null ? (
                   <div className="gmail-caughtup">Nothing filed as {labelNameFor(emailLabels, otherCategory).toLowerCase()}.</div>
-                )}
+                ) : inboxFilter === 'other' ? (
+                  <div className="gmail-caughtup">Nothing here yet.</div>
+                ) : null)}
                 {visibleOther.map((t) => renderRow(t, 'other'))}
                 {!other.hasReachedEnd && (
                   <SectionSentinel
