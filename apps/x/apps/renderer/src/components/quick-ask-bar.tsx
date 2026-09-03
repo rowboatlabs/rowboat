@@ -132,13 +132,13 @@ const PINNED_RESPONSE_HEIGHT = 560
 // The ring WIDTH (`ring-1 ring-inset`) stays at each call site — those
 // controls differ in shape, not in colour.
 const CHIP_SURFACE =
-  'bg-black/[0.04] ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900' +
+  'active:scale-95 bg-black/[0.04] ring-black/10 hover:bg-black/[0.08] hover:text-neutral-900' +
   ' dark:bg-white/[0.06] dark:ring-white/10 dark:hover:bg-white/[0.12] dark:hover:text-neutral-100'
 const CHIP_INK = 'text-neutral-500 dark:text-neutral-400'
 const CHIP_INK_LABELLED = 'text-neutral-600 dark:text-neutral-400'
 const CHIP_IDLE = `${CHIP_SURFACE} ${CHIP_INK}`
 const CHIP_ACTIVE =
-  'bg-black/[0.08] text-neutral-900 ring-black/15' +
+  'active:scale-95 bg-black/[0.08] text-neutral-900 ring-black/15' +
   ' dark:bg-white/[0.12] dark:text-neutral-100 dark:ring-white/20'
 const CHIP_DISABLED =
   'cursor-default bg-black/[0.04] text-neutral-300 ring-black/5' +
@@ -254,6 +254,11 @@ export function QuickAskBar() {
     // where every control looks dead) — one IPC round-trip is imperceptible.
     void window.ipc.invoke('quickAsk:setPinnedCollapsed', { collapsed: next }).catch(() => {})
   }, [])
+
+  // The card's fold is animated, so it outlives `collapsed` by the length of
+  // its exit (usePresence) — everything below keys off `card.mounted`, not
+  // `!collapsed`.
+  const card = usePresence(!collapsed, CARD_EXIT_MS)
 
   // The visible card, for hit-testing stage clicks: the window is a tall
   // transparent frame, so "clicked outside" often lands INSIDE its invisible
@@ -612,6 +617,7 @@ export function QuickAskBar() {
   // and the mascot never moves, resizes, or replays its entry animation.
   return (
     <div data-qa-passthrough className="flex h-screen w-screen select-none flex-col overflow-hidden">
+      <style>{COMPANION_MOTION_CSS}</style>
       {/* The invisible stage: popovers open into this zone. It is marked
           passthrough, so clicks that land on it go to whatever the user has
           BEHIND this window (useClickThrough) instead of being swallowed by
@@ -635,8 +641,11 @@ export function QuickAskBar() {
           both states — with the corner-anchored window, that pins the
           mascot to the exact same screen pixels across fold/unfold. */}
       <div data-qa-passthrough className="flex shrink-0 items-end justify-end gap-1 px-6 pb-5">
-      {!collapsed && (
-      <div data-qa-passthrough className="relative min-w-0 flex-1">
+      {card.mounted && (
+      <div
+        data-qa-passthrough
+        className={`relative min-w-0 flex-1 ${card.exiting ? 'pointer-events-none' : ''}`}
+      >
       {/* Near-white card with a hairline dark border in light; near-black
           with a hairline light one in dark. #810 introduced the light skin as
           the only skin — it follows the app's theme setting now (see
@@ -644,7 +653,7 @@ export function QuickAskBar() {
           outline the whole transparent frame) — the card draws its own, and
           draws it heavier in dark, where a soft grey haze would just vanish
           into whatever is behind the window. */}
-      <div ref={cardRef} style={dragRegion} className="qa-card relative w-full cursor-grab overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:text-neutral-100 dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)]">
+      <div ref={cardRef} style={dragRegion} className={`qa-card ${card.exiting ? 'qa-card-out' : 'qa-card-in'} relative w-full cursor-grab overflow-hidden rounded-[26px] border border-black/10 bg-white/[0.97] text-neutral-900 shadow-[0_12px_32px_rgba(0,0,0,0.18),0_2px_10px_rgba(0,0,0,0.10)] dark:border-white/15 dark:bg-neutral-900/[0.97] dark:text-neutral-100 dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_2px_10px_rgba(0,0,0,0.4)]`}>
         {/* The card is a drag handle, like the mascot: every bit of bare
             surface — the border, the gutters around the action strip, the
             frame around the composer — picks the Skipper up. The CONTROLS
@@ -687,7 +696,7 @@ export function QuickAskBar() {
                   <button
                     type="button"
                     style={noDragRegion}
-                    className={`flex min-w-0 items-center gap-1.5 rounded-full py-1 pl-2.5 pr-2 text-[11px] font-medium ring-1 ring-inset transition-colors ${CHIP_SURFACE} ${CHIP_INK_LABELLED}`}
+                    className={`flex min-w-0 items-center gap-1.5 rounded-full py-1 pl-2.5 pr-2 text-[11px] font-medium ring-1 ring-inset transition ${CHIP_SURFACE} ${CHIP_INK_LABELLED}`}
                   >
                     <MessageCircle className="h-3 w-3 shrink-0" />
                     <span className="max-w-[220px] truncate">{chatContext?.activeTitle ?? 'New chat'}</span>
@@ -734,7 +743,7 @@ export function QuickAskBar() {
                 style={noDragRegion}
                 onClick={newChat}
                 aria-label="New chat"
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${CHIP_IDLE}`}
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition ${CHIP_IDLE}`}
               >
                 <Plus className="h-3.5 w-3.5" />
               </button>
@@ -751,7 +760,7 @@ export function QuickAskBar() {
                 onClick={activeRunId ? toggleHistory : undefined}
                 aria-label={showHistory ? 'Hide history' : 'Peek at recent history'}
                 aria-disabled={!activeRunId}
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition ${
                   showHistory
                     ? CHIP_ACTIVE
                     : activeRunId
@@ -779,7 +788,7 @@ export function QuickAskBar() {
                 style={noDragRegion}
                 onClick={() => sendAction('toggle-speaker')}
                 aria-label={callState.speakerMuted ? 'Unmute spoken replies' : 'Mute spoken replies'}
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition ${
                   callState.speakerMuted
                     ? CHIP_IDLE
                     : 'bg-sky-500/15 text-sky-700 ring-sky-500/30 dark:bg-sky-400/20 dark:text-sky-300 dark:ring-sky-400/30'
@@ -804,7 +813,7 @@ export function QuickAskBar() {
                 style={noDragRegion}
                 onClick={openInApp}
                 aria-label="Open in Rowboat"
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition-colors ${CHIP_IDLE}`}
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition ${CHIP_IDLE}`}
               >
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
@@ -817,57 +826,38 @@ export function QuickAskBar() {
           <div
             ref={panelScrollRef}
             style={noDragRegion}
-            className="max-h-[280px] cursor-text select-text overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800 dark:text-neutral-200"
+            className="qa-rise max-h-[280px] cursor-text select-text overflow-y-auto px-6 pb-3 pt-2 text-sm leading-relaxed text-neutral-800 dark:text-neutral-200"
           >
             {showHistory && historyData === null && (
               <div className="mb-2 animate-pulse text-xs text-neutral-400">Loading history…</div>
             )}
+            {/* Peeked history and the live exchange are the SAME two turn
+                shapes in the same order — the only thing between them is the
+                rule saying where the past stops. (They used to diverge: the
+                history was blanket-dimmed, its questions were bare grey
+                text, and the rule between them was labelled "earlier" while
+                sitting above the newest turn of all.) */}
             {showHistory && earlierItems !== null && (
               <div className="mb-1">
                 {earlierItems.length === 0 ? (
                   <div className="mb-2 text-xs text-neutral-400">No earlier messages in this chat.</div>
                 ) : (
-                  <div className="opacity-75">
-                    {earlierItems.map((m, i) =>
-                      m.role === 'user' ? (
-                        <div key={i} className="mb-1.5 mt-3 text-sm font-medium text-neutral-500 first:mt-0 dark:text-neutral-400">
-                          {m.content}
-                        </div>
-                      ) : (
-                        <Streamdown
-                          key={i}
-                          className="dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800 dark:[&_:not(pre)>code]:bg-white/[0.10] dark:[&_:not(pre)>code]:text-neutral-200"
-                        >
-                          {m.content}
-                        </Streamdown>
-                      ),
-                    )}
-                  </div>
+                  earlierItems.map((m, i) =>
+                    m.role === 'user' ? (
+                      <UserTurn key={i}>{m.content}</UserTurn>
+                    ) : (
+                      <AssistantTurn key={i}>{m.content}</AssistantTurn>
+                    ),
+                  )
                 )}
-                {(panelAsked || panelText) && earlierItems.length > 0 && (
-                  <div className="my-2 flex items-center gap-2 text-[13px] text-neutral-400">
-                    <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
-                    earlier
-                    <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
-                  </div>
-                )}
+                {(panelAsked || panelText) && earlierItems.length > 0 && <TurnDivider>now</TurnDivider>}
               </div>
             )}
             {/* Inside the scroll area — the question scrolls away with the
                 answer instead of persisting as a header. */}
-            {panelAsked && <div className="mb-2 text-sm font-medium text-neutral-500 dark:text-neutral-400">{panelAsked}</div>}
+            {panelAsked && <UserTurn>{panelAsked}</UserTurn>}
             {panelText ? (
-              /* `.dark` scoped to the markdown only: shiki's token colors key
-                 off a .dark ancestor, so this flips code to its dark palette
-                 (matching the charcoal block bg) whichever skin the card is
-                 wearing — the code block is charcoal in both. It does NOT
-                 darken the surrounding panel: the prose classes here are
-                 explicit, and Tailwind's `dark:` needs a .dark ANCESTOR, so
-                 the class sitting on this very element doesn't trigger the
-                 dark half of the pairs below. */
-              <Streamdown className="dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-800 dark:[&_:not(pre)>code]:bg-white/[0.10] dark:[&_:not(pre)>code]:text-neutral-200">
-                {panelText}
-              </Streamdown>
+              <AssistantTurn>{panelText}</AssistantTurn>
             ) : (
               panelProcessing && (
                 <span className="animate-pulse text-neutral-500 dark:text-neutral-400">{panelStatusText}</span>
@@ -912,7 +902,7 @@ export function QuickAskBar() {
             type="button"
             onClick={() => requestCollapsed(true)}
             aria-label="Tuck the text away"
-            className="absolute -right-3 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition-colors hover:bg-neutral-50 hover:text-neutral-900 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_2px_8px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+            className="absolute -right-3 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition hover:translate-x-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_2px_8px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
           >
             <ChevronsRight className="h-3.5 w-3.5" />
           </button>
@@ -1145,6 +1135,70 @@ function useDragCursor() {
   }, [])
 }
 
+/**
+ * How long the card's fold-away runs. The node has to stay mounted for it
+ * (see usePresence), so main and the renderer must agree on one number.
+ */
+const CARD_EXIT_MS = 160
+
+/**
+ * Keep a node on screen for its exit animation.
+ *
+ * The card's `collapsed` comes from MAIN — the renderer never flips it
+ * optimistically, because main owns the window geometry with it — so the
+ * card would otherwise vanish between one commit and the next, with nothing
+ * to animate. This holds the node for `exitMs` after it goes away and says
+ * which half of the motion it is in.
+ */
+function usePresence(visible: boolean, exitMs: number) {
+  const [mounted, setMounted] = useState(visible)
+  // Coming back is instant — remount in the SAME commit that flips visible,
+  // so the entry animation starts on the frame the fold was undone. (Render-
+  // time previous-state adjustment, React's no-effect pattern: an effect here
+  // would cost a blank frame first.)
+  const [prevVisible, setPrevVisible] = useState(visible)
+  if (prevVisible !== visible) {
+    setPrevVisible(visible)
+    if (visible) setMounted(true)
+  }
+  // Going away waits for the animation.
+  useEffect(() => {
+    if (visible) return
+    const t = setTimeout(() => setMounted(false), exitMs)
+    return () => clearTimeout(t)
+  }, [visible, exitMs])
+  return { mounted, exiting: mounted && !visible }
+}
+
+/**
+ * The window's motion, in one place. It is deliberately small and quick:
+ * this thing floats over the user's actual work, so anything showy here is
+ * a distraction rather than a delight. The card folds TOWARD the mascot
+ * (transform-origin at the corner the window is anchored by), which is
+ * where the text is going.
+ */
+const COMPANION_MOTION_CSS = `
+  @keyframes qa-card-in {
+    from { opacity: 0; transform: translateX(22px) scale(0.96); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes qa-card-out {
+    from { opacity: 1; transform: none; }
+    to { opacity: 0; transform: translateX(22px) scale(0.96); }
+  }
+  @keyframes qa-rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  .qa-card-in { animation: qa-card-in 0.22s cubic-bezier(0.22, 1, 0.36, 1); transform-origin: 100% 80%; }
+  .qa-card-out { animation: qa-card-out ${CARD_EXIT_MS}ms ease-in forwards; transform-origin: 100% 80%; }
+  .qa-rise { animation: qa-rise 0.18s ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    .qa-card-in, .qa-rise { animation: none; }
+    .qa-card-out { animation: none; opacity: 0; }
+  }
+`
+
 const dragRegion = { WebkitAppRegion: 'drag' } as React.CSSProperties
 const noDragRegion = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 
@@ -1301,6 +1355,55 @@ function SkipperPins({
           <X className="h-3 w-3 text-white" />
         </span>
       </button>
+    </div>
+  )
+}
+
+/**
+ * One prose recipe for every assistant turn the panel shows — a peeked
+ * message and the reply streaming in are the same object.
+ *
+ * `.dark` is scoped to the markdown only: shiki's token colors key off a
+ * .dark ancestor, so this flips code to its dark palette (matching the
+ * charcoal block bg) whichever skin the card is wearing — the code block is
+ * charcoal in both. It does NOT darken the surrounding panel: the prose
+ * classes are explicit, and Tailwind's `dark:` needs a .dark ANCESTOR, so
+ * the class sitting on this very element doesn't trigger the dark half of
+ * the pairs in it.
+ */
+const PANEL_PROSE =
+  'dark prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5' +
+  ' [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px]' +
+  ' [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-black/[0.06] [&_:not(pre)>code]:px-1' +
+  ' [&_:not(pre)>code]:text-neutral-800 dark:[&_:not(pre)>code]:bg-white/[0.10]' +
+  ' dark:[&_:not(pre)>code]:text-neutral-200'
+
+function AssistantTurn({ children }: { children: string }) {
+  return <Streamdown className={PANEL_PROSE}>{children}</Streamdown>
+}
+
+/**
+ * A question the user asked — the same tinted bubble whether it is the one
+ * just spoken or one peeked out of the history, so "mine" is a shape rather
+ * than a shade the reader has to infer.
+ */
+function UserTurn({ children }: { children: string }) {
+  return (
+    <div className="mt-3 mb-2 flex justify-end first:mt-0">
+      <span className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-black/[0.06] px-2.5 py-1.5 text-left text-sm text-neutral-700 dark:bg-white/[0.10] dark:text-neutral-200">
+        {children}
+      </span>
+    </div>
+  )
+}
+
+/** Hairline rule with a word in it — where the peeked past stops. */
+function TurnDivider({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="my-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-neutral-400">
+      <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
+      {children}
+      <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
     </div>
   )
 }
