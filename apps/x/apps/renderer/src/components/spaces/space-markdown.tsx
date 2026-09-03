@@ -9,7 +9,7 @@ import { ZoomableImage } from '@/components/image-lightbox'
 import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
 import { toast } from '@/lib/toast'
 import { MemberProfilePopover } from '@/components/spaces/atoms'
-import { useMemberNames } from '@/components/spaces/member-text'
+import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import {
     decorateMentions,
     imageDimsFromUrl,
@@ -415,20 +415,35 @@ const spaceComponents: StreamdownComponents = {
     },
     a: SpaceAnchor,
     // decorateMentions renders "@name" as **bold**; the stream dialect shows
-    // those as tinted mention chips (broadcasts get the amber "needs you"
-    // wash). A chip naming a real member also opens their profile on click.
+    // those as tinted mention chips. Slack treatment: only the chip is
+    // tinted, never the row — amber when it addresses you (@you, @here),
+    // blue for anyone else. A chip naming a real member opens their profile.
     strong: MentionStrong,
 }
 
 function MentionStrong({ children, ...props }: ComponentProps<'strong'>) {
     const names = useMemberNames()
+    const { selfId } = useSpaceProfiles()
     const label = plainLabel(children)
     if (!label?.startsWith('@')) return <strong {...props}>{children}</strong>
 
     const broadcast = /^@(here|channel|everyone)$/i.test(label)
+    // The label carries the display name (decorateMentions), so the id comes
+    // from a reverse lookup; an unmatched name still renders as a chip.
+    const name = label.slice(1)
+    let memberId: string | null = null
+    if (!broadcast) {
+        for (const [id, display] of names) {
+            if (display === name) {
+                memberId = id
+                break
+            }
+        }
+    }
+    const addressesMe = broadcast || (!!selfId && memberId === selfId)
     const chip = cn(
         'rounded-[4px] px-[3px] py-px font-medium',
-        broadcast
+        addressesMe
             ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
             : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
     )
@@ -439,16 +454,6 @@ function MentionStrong({ children, ...props }: ComponentProps<'strong'>) {
                 {children}
             </strong>
         )
-    }
-    // The label carries the display name (decorateMentions), so the id comes
-    // from a reverse lookup; an unmatched name still renders as a chip.
-    const name = label.slice(1)
-    let memberId: string | null = null
-    for (const [id, display] of names) {
-        if (display === name) {
-            memberId = id
-            break
-        }
     }
     if (!memberId) {
         return (
