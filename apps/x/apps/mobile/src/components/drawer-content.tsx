@@ -9,6 +9,7 @@ import type { sessions as sessionsShared } from '@x/shared';
 
 import * as analytics from '@/lib/analytics';
 import { useConnection } from '@/lib/connection';
+import { FLAGS } from '@/lib/flags';
 import { useColors } from '@/theme/colors';
 
 type Entry = sessionsShared.SessionIndexEntry;
@@ -62,7 +63,8 @@ export function DrawerContent(props: DrawerContentComponentProps) {
 
   return (
     <View style={{ flex: 1, paddingTop: insets.top + 8, backgroundColor: colors.background }}>
-      {/* Search + new chat */}
+      {/* Search + new chat (legacy chat, hidden when the flag is off) */}
+      {FLAGS.legacyChatBrain ? (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingBottom: 8 }}>
         <View
           style={{
@@ -85,8 +87,10 @@ export function DrawerContent(props: DrawerContentComponentProps) {
           <Image source="sf:square.and.pencil" style={{ width: 22, height: 22 }} tintColor={colors.label} />
         </Pressable>
       </View>
+      ) : null}
 
       {/* History */}
+      {FLAGS.legacyChatBrain ? (
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.sessionId}
@@ -110,9 +114,13 @@ export function DrawerContent(props: DrawerContentComponentProps) {
           </Text>
         }
       />
+      ) : (
+        <View style={{ flex: 1 }} />
+      )}
 
       {/* Foot: Brain, then the connection row */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: colors.separator, paddingTop: 6, paddingBottom: insets.bottom + 8, paddingHorizontal: 8, gap: 2 }}>
+        {FLAGS.legacyChatBrain ? (
         <FootRow
           icon="sf:brain"
           label="Brain"
@@ -121,6 +129,7 @@ export function DrawerContent(props: DrawerContentComponentProps) {
             props.navigation.closeDrawer();
           }}
         />
+        ) : null}
         <FootRow
           icon={connected ? 'sf:laptopcomputer' : 'sf:wifi.slash'}
           label={connected ? (pairing?.name ?? 'Connected') : 'Reconnecting…'}

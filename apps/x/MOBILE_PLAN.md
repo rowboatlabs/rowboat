@@ -1,77 +1,102 @@
 # Rowboat Mobile v1 — Execution Plan
 
-**Goal:** an iOS app that feels like the best chat apps (Claude, ChatGPT):
-end-to-end chat working, clean minimal UI, and read-only Brain (knowledge)
-browsing. Full peer — new chats, model picking — against the same
-rowboat-server the desktop uses, paired over QR on the local network.
-Same-machine server only for now (remote/AWS is future scope).
+**Goal (pivoted 2026-09-03):** the next mobile release is **Spaces only**.
+The user signs in with their Rowboat account, the app lists the orgs/spaces
+they belong to, and they get the space's chat (stream + discussions:
+read/post/react) and a read-only files view. No QR pairing — Spaces are
+hosted by Rowboat (Harbor), so the phone talks to Harbor directly.
 
-**How this runs:** same rhythm as SEPARATION_PLAN.md — every phase is one PR
-against `main`, verified in the simulator before it ships, merged by Gagan.
-The app lives in `apps/x/apps/mobile` (Expo SDK 57, expo-router); it reuses
-`@x/shared` turn logic verbatim and speaks the server's HTTP `/rpc` + WS
-`/events` protocol — no server changes expected in this plan (the protocol
-is the one the desktop client exercises daily).
+The earlier chat + Brain build (M1–M3 below, done) stays in the codebase
+behind the `legacyChatBrain` feature flag — hidden in the release, one
+switch to bring back.
 
-**Design direction:** minimal and clean. System font, white/near-black
-grounds, one accent, generous spacing, native feel (safe areas, gestures,
-haptics). Skills installed for reference: `expo-native-ui`,
-`sleek-design-mobile-apps`, `vercel-react-native-skills`.
+**How this runs:** every phase is one PR against `main`, verified in the
+simulator before it ships, merged by Gagan. App lives in
+`apps/x/apps/mobile` (Expo SDK 57, expo-router).
+
+**Design direction:** minimal and clean, native iOS feel, copy the best
+apps (Slack/Discord for the space chat, Files app for files) — don't
+reinvent.
+
+---
+
+## Architecture (settled in discussion)
+
+- **Phone = direct Harbor client.** Reuse/port `packages/core/src/spaces/`
+  (`client.ts` SpacesClient REST, `live.ts` SpacesLive WS) — both are
+  near-portable fetch/WS code.
+- **Login = Supabase Auth** (the same project behind Rowboat accounts).
+  Harbor is only a resource server; the OAuth dance is DCR + PKCE against
+  the org's pinned issuer. Mobile uses a deep-link redirect
+  (`rowboat://oauth-callback`) instead of the desktop's loopback —
+  needs a quick test that Supabase's DCR accepts custom schemes; fallback
+  is a bounce page on the apex.
+- **Org discovery:** apex `GET /v1/orgs` (already on main) — sign in once,
+  get every org you're a member of with address + role.
+- **Tokens** live in the iOS keychain (SecureStore), like pairing did.
+- **New spaces model from main (2026-09):** every space has one `general`
+  stream topic; other topics are `discussion`s that can anchor to any
+  message; flat topic list; topic merges (refetch on merge events). Polls,
+  server-side search, whiteboards exist in the protocol — v1 renders polls
+  read-only, skips search/whiteboards.
+
+## S1 — Login + orgs + flag
+
+- `legacyChatBrain` feature flag (added 2026-09-03): gates the chat home,
+  drawer history, and Brain. Stays ON in dev until S3 lands, then flips
+  OFF for release.
+- OAuth deep-link sign-in (expo-auth-session, PKCE, keychain tokens);
+  verify the `rowboat://` redirect against Supabase DCR, fall back to an
+  apex bounce page if refused.
+- After sign-in: apex `/v1/orgs` → org list; pick org → space list.
+- **Verify:** simulator signs in with a real Rowboat account and lists the
+  user's actual orgs + spaces.
+
+## S2 — Space chat
+
+- Stream (general topic): message list with authors, live over SpacesLive
+  WS, send messages.
+- Discussions: flat topic list, open one, read/post; anchored-message
+  context shown; refetch on merge events.
+- Reactions (add/remove), polls rendered read-only.
+- **Verify:** two-way chat between phone and desktop in the same space,
+  live both directions.
+
+## S3 — Files view (read-only)
+
+- Space assets browser; tap a markdown file → rendered with the existing
+  ChatMarkdown (LaTeX and all); images/blobs via authed Harbor routes.
+- Live refresh on changesets.
+- **Verify:** edit a file on desktop → phone view updates. Then flip
+  `legacyChatBrain` OFF — app is Spaces-only.
+
+## S4 — On the iPhone + release polish
+
+- Dev build on the physical iPhone (`npx expo run:ios --device`).
+- App icon, splash, final UX pass; demo script.
+- **Verify (exit criteria):** on a real iPhone — sign in, read/post in a
+  space, browse files. Clean enough to demo.
 
 ---
 
-## M1 — Revive + app shell
+## Done (pre-pivot, behind the flag)
 
-The parked app predates the separation's later phases. Bring it up against
-today's server and give it the chat-first shape:
-
-- Verify pairing (QR + manual + `pair-dev` deep link), RPC, WS resync
-  against the current server; fix drift.
-- Restructure navigation: app opens into a chat; left drawer with chat
-  history + search + New chat; Brain and Settings entries at the drawer
-  foot. Minimal theme pass (light + dark).
-- **Verify:** simulator pairs with the Mac's server, opens an existing
-  session, streams a live reply.
-
-## M2 — Chat, end to end
-
-- New chat from the drawer; title appears when the server names it.
-- Model picker in the chat header (models:list / models:getConfig — same
-  catalog as desktop).
-- Reconnect catch-up (app background → foreground refetch), send-failure
-  states, keyboard/scroll behavior, streaming indicator, stop button.
-- **Verify:** full conversation lifecycle on simulator incl. app
-  backgrounding mid-turn; desktop shows the same session in sync.
-
-## M3 — Brain (read-only)
-
-- Drawer → Brain: the knowledge folder tree (folders collapsible, notes
-  listed), tap → rendered markdown.
-- Images/attachments in notes load via the server's authed `/workspace`
-  route.
-- Live updates: `workspace:didChange` / `knowledge:didCommit` over the WS
-  refresh the tree and open note.
-- **Verify:** edit a note on desktop → phone view updates; images render.
-
-## M4 — On the iPhone + demo polish
-
-- Dev build on the physical iPhone (`npx expo run:ios --device`, free
-  Apple ID) — fixes the Expo Go SDK mismatch that blocked this before.
-- QR pairing scanned with the real camera against the Mac (LAN toggle on).
-- App icon, splash, final UX pass; demo script for the team.
-- **Verify (exit criteria):** on a real iPhone — pair by camera, hold a
-  conversation, browse the Brain. Clean enough to demo.
-
----
+- **M1** — chat-first shell: drawer history + search, pairing, minimal
+  theme (2bbcad73).
+- **M2** — chat e2e: model pill, polished markdown + LaTeX (0c4b1792).
+- **M3** — Brain: knowledge tree, note view, live updates (6e419969).
 
 ## Not in this plan (future scope)
 
-Remote/AWS servers from the phone, push notifications, voice PTT,
-knowledge editing, TestFlight distribution, Android.
+QR/remote pairing back-compat, space search UI, whiteboards, file editing,
+push notifications, voice, TestFlight, Android.
 
 ## Standing gotchas
 
 - Expo Go from the App Store can't run SDK 57 — simulator uses the bundled
-  Expo Go; the physical phone needs the M4 dev build.
-- One server = one user; the phone acts as the paired Mac's user.
-- The Mac must be awake with the app (or standalone server) running.
+  Expo Go; a physical phone needs the S4 dev build.
+- reanimated/worklets crash in Expo Go → `npx expo install --fix`; worklets
+  babel plugin needs @babel/* grafts in `pnpm-workspace.yaml`
+  packageExtensions.
+- Core `workspace:readdir` allowedExtensions skips dirs (recursion broken)
+  — client filters instead; core fix pending.

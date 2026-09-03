@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -7,6 +7,7 @@ import type { z } from 'zod';
 import type { workspace as workspaceShared } from '@x/shared';
 
 import { useConnection } from '@/lib/connection';
+import { FLAGS } from '@/lib/flags';
 import { useColors } from '@/theme/colors';
 
 type DirEntry = z.infer<typeof workspaceShared.DirEntry>;
@@ -61,7 +62,13 @@ function buildTree(entries: DirEntry[]): TreeNode[] {
   return sortNodes(root);
 }
 
+// Legacy surface: behind the flag while the release is Spaces-only.
 export default function BrainScreen() {
+  if (!FLAGS.legacyChatBrain) return <Redirect href="/" />;
+  return <BrainTree />;
+}
+
+function BrainTree() {
   const colors = useColors();
   const { rpc, events } = useConnection();
   const [entries, setEntries] = useState<DirEntry[]>([]);

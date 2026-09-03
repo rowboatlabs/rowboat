@@ -16,6 +16,7 @@ import type { sessions as sessionsShared } from '@x/shared';
 import type { DrawerNavigationProp } from 'expo-router/drawer';
 
 import * as analytics from '@/lib/analytics';
+import { FLAGS } from '@/lib/flags';
 import { ModelPill } from '@/components/model-picker';
 import { TurnView } from '@/components/turn-view';
 import { useConnection } from '@/lib/connection';
@@ -64,7 +65,23 @@ function Turn({ turnId, isLatest, onStreaming }: { turnId: string; isLatest: boo
   );
 }
 
-export default function ChatScreen() {
+// Home. Legacy chat lives behind the flag; with it off the home is the
+// Spaces surface (placeholder until S1 lands — see MOBILE_PLAN.md).
+export default function HomeScreen() {
+  if (!FLAGS.legacyChatBrain) return <SpacesPlaceholder />;
+  return <ChatScreen />;
+}
+
+function SpacesPlaceholder() {
+  const colors = useColors();
+  return (
+    <SafeAreaView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
+      <Text style={{ fontSize: 15, color: colors.tertiaryLabel }}>Spaces coming soon</Text>
+    </SafeAreaView>
+  );
+}
+
+function ChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const models = useModels();
