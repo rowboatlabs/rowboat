@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AtSign, Copy, Loader2, Mail } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,7 @@ import {
     Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import { requestComposeInsert } from '@/lib/spaces-compose'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
@@ -424,3 +425,29 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
     )
 }
 
+/**
+ * A single-line label that truncates, with a quick tooltip carrying the full
+ * text — but only when the text is actually clipped, so rows that fit stay
+ * silent on hover. `detail` adds a muted second line (e.g. a blob's size).
+ */
+export function ClippedText({ text, detail, className, side = 'right' }: {
+    text: string
+    detail?: string | null
+    className?: string
+    side?: 'top' | 'right' | 'bottom' | 'left'
+}) {
+    const ref = useRef<HTMLSpanElement | null>(null)
+    const [open, setOpen] = useState(false)
+    const clipped = () => !!ref.current && ref.current.scrollWidth > ref.current.clientWidth
+    return (
+        <Tooltip open={open} onOpenChange={(next) => setOpen(next && (clipped() || !!detail))} delayDuration={300}>
+            <TooltipTrigger asChild>
+                <span ref={ref} className={cn('min-w-0 truncate', className)}>{text}</span>
+            </TooltipTrigger>
+            <TooltipContent side={side} align="start" sideOffset={6} className="max-w-[320px] text-left text-wrap break-words">
+                <div className="font-medium">{text}</div>
+                {detail && <div className="opacity-70">{detail}</div>}
+            </TooltipContent>
+        </Tooltip>
+    )
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, Check, ChevronRight, Clock, Download, Eye, FileText, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
-import type { spaces } from '@x/shared'
+import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,7 @@ import {
     type FileTreeNode,
 } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
-import { MemberAvatar } from '@/components/spaces/atoms'
+import { ClippedText, MemberAvatar } from '@/components/spaces/atoms'
 import { uploadInputFor } from '@/lib/spaces-upload'
 
 // Files: the tree (README first) and the file column — rendered file
@@ -139,12 +139,14 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                                     style={pad}
                                     onClick={() => toggle(node.path)}
                                     className={cn(
-                                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-foreground/90 hover:bg-accent/50',
+                                        'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-foreground/90 hover:bg-accent/50',
                                         dropTarget === node.path && 'bg-accent ring-1 ring-inset ring-foreground/40',
                                     )}
                                 >
-                                    <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
-                                    <span className="truncate">{node.name}</span>
+                                    {open
+                                        ? <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
+                                        : <Folder className="size-3 shrink-0 text-muted-foreground" />}
+                                    <ClippedText text={node.name} />
                                 </button>
                             </ContextMenuTrigger>
                             <ContextMenuContent>
@@ -166,7 +168,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                                 <button
                                     type="button"
                                     aria-label="Folder actions"
-                                    className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/dirrow:inline-flex data-[state=open]:inline-flex"
+                                    className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/dirrow:opacity-100 data-[state=open]:opacity-100"
                                 >
                                     <MoreHorizontal className="size-3.5" />
                                 </button>
@@ -186,10 +188,17 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>
-                    {open && node.children.map((child) => renderNode(child, depth + 1))}
-                    {open && empty && (
-                        <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
-                            empty — files added here keep it
+                    {open && (
+                        <div className="relative">
+                            {/* Indent guide: a faint dotted line under the folder's icon
+                                column, spanning its children — nesting reads without carets. */}
+                            <span aria-hidden className="pointer-events-none absolute bottom-1 top-0 border-l border-dotted border-foreground/25" style={{ left: `${8 + depth * 12 + 6}px` }} />
+                            {node.children.map((child) => renderNode(child, depth + 1))}
+                            {empty && (
+                                <div style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }} className="py-0.5 pr-2 text-[11px] italic text-muted-foreground/70">
+                                    empty — files added here keep it
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -198,6 +207,9 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
         const active = node.path === selectedPath
         const unread = unreadPaths.has(node.path)
         const blob = node.entry?.blob
+        // A board is a file at whiteboards/<name>.excalidraw — same tree,
+        // pen icon, extension dropped from the label.
+        const board = spaces.isWhiteboardPath(node.path)
         if (renaming?.path === node.path && node.entry) {
             const entry = node.entry
             return (
@@ -231,17 +243,21 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             }}
                             onDragEnd={() => setDropTarget(null)}
                             onClick={() => onOpenFile(node.path)}
-                            title={blob ? `${node.name} · ${blob.mime} · ${formatBytes(blob.size)}` : undefined}
                             className={cn(
-                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-[13px] text-left',
+                                'flex h-7 w-full items-center gap-1.5 rounded-md pr-7 text-[13px] text-left',
                                 active ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
                             )}
                         >
                             <span className="w-3 shrink-0" />
-                            {blob && (isImageMime(blob.mime)
+                            {board && <PenTool className="size-3 shrink-0 text-muted-foreground" />}
+                            {!board && blob && (isImageMime(blob.mime)
                                 ? <ImageIcon className="size-3 shrink-0 text-muted-foreground" />
                                 : <FileText className="size-3 shrink-0 text-muted-foreground" />)}
-                            <span className="truncate flex-1">{node.name}</span>
+                            <ClippedText
+                                text={board ? spaces.whiteboardDisplayName(node.name) : node.name}
+                                detail={blob ? `${blob.mime} · ${formatBytes(blob.size)}` : null}
+                                className="flex-1"
+                            />
                             {unread && !active && <span className="size-1.5 rounded-full bg-foreground shrink-0" aria-label="updated since you last read" />}
                         </button>
                     </ContextMenuTrigger>
@@ -268,7 +284,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
                             <button
                                 type="button"
                                 aria-label="File actions"
-                                className="absolute right-1 top-1 hidden size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground group-hover/filerow:inline-flex data-[state=open]:inline-flex"
+                                className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover/filerow:opacity-100 data-[state=open]:opacity-100"
                             >
                                 <MoreHorizontal className="size-3.5" />
                             </button>
