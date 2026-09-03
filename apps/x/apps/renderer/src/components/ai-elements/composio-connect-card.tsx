@@ -86,7 +86,7 @@ export function ComposioConnectCard({
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium truncate">{displayName}</span>
           {connectionState === "connected" && (
-            <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
+            <span className="rounded-full bg-[var(--rowboat-success)]/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--rowboat-success)]">
               Connected
             </span>
           )}
@@ -101,7 +101,7 @@ export function ComposioConnectCard({
 
       {/* Action area */}
       {connectionState === "connected" ? (
-        <CheckCircleIcon className="size-4 text-green-600 flex-shrink-0" />
+        <CheckCircleIcon className="size-4 text-[var(--rowboat-success)] flex-shrink-0" />
       ) : connectionState === "connecting" ? (
         <Button size="sm" disabled className="text-xs h-7 flex-shrink-0">
           <LoaderIcon className="size-3 animate-spin mr-1" />

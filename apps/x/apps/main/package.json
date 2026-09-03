@@ -7,7 +7,7 @@
     "main": ".package/dist/main.cjs",
     "license": "Apache-2.0",
     "scripts": {
-        "start": "electron .",
+        "start": "env -u ELECTRON_RUN_AS_NODE electron .",
         "build": "rm -rf dist && tsc && node bundle.mjs",
         "package": "electron-forge package",
         "make": "electron-forge make"

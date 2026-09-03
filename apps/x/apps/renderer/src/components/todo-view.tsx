@@ -86,7 +86,7 @@ function normKey(text: string): string {
 // ---------------------------------------------------------------------------
 // @rowboat autocomplete — shared by every composer (main, reply, sub-task).
 // A trailing "@" or partial "@row…" offers the completion; Tab or click
-// completes it. Slack/Notion muscle memory, everywhere text is typed.
+// completes it. Chat-app muscle memory, everywhere text is typed.
 // ---------------------------------------------------------------------------
 
 function useMention(text: string, setText: (t: string) => void) {
@@ -114,7 +114,7 @@ function MentionPopup({ onPick }: { onPick: () => void }) {
     <button
       type="button"
       onMouseDown={(e) => { e.preventDefault(); onPick() }}
-      className="absolute bottom-full left-3 z-10 mb-1.5 flex items-center gap-2 rounded-lg border border-border bg-popover px-3 py-1.5 text-sm shadow-md hover:bg-accent"
+      className="absolute bottom-full left-3 z-10 mb-1.5 flex items-center gap-2 rounded-lg border-none bg-[var(--rowboat-raised)] px-3 py-1.5 text-sm shadow-[var(--rowboat-shadow-soft)] hover:bg-accent"
     >
       <Bot className="size-3.5 text-primary" />
       <span className="font-medium">@rowboat</span>
@@ -203,7 +203,7 @@ function BubbleText({ text, onOpenNote }: { text: string; onOpenNote: (path: str
               type="button"
               title={p}
               onClick={() => onOpenNote(p)}
-              className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
+              className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground ring-1 ring-border hover:bg-accent"
             >
               <FileText className="size-3" /> {p.split('/').pop()}
             </button>
@@ -335,7 +335,7 @@ function CommentComposer({ onSend, onCancel }: {
   const [message, setMessage] = useState('')
   const mention = useMention(message, setMessage)
   return (
-    <div className="relative mt-1.5 flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
+    <div className="relative mt-1.5 flex items-center gap-2 rounded-lg border border-transparent bg-[var(--rowboat-wash)] px-2.5 py-1.5 focus-within:border-border">
       {mention.show && <MentionPopup onPick={mention.complete} />}
       <MessageCircle className="size-3.5 shrink-0 text-muted-foreground" />
       <input
@@ -375,7 +375,7 @@ function Bubble({ b, onOpenNote, onRetry }: {
   onOpenNote: (path: string) => void
   onRetry?: () => void
 }) {
-  // Flat message rows, Slack-style: avatar + name, no chat bubbles.
+  // Flat message rows, stream-style: avatar + name, no chat bubbles.
   const isUser = b.role === 'user'
   return (
     <div className="flex gap-2">
@@ -411,7 +411,7 @@ function Bubble({ b, onOpenNote, onRetry }: {
                 key={j}
                 type="button"
                 onClick={() => openLink(l, onOpenNote)}
-                className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
+                className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground ring-1 ring-border hover:bg-accent"
               >
                 <ArrowUpRight className="size-3" /> {l.label}
               </button>
@@ -525,7 +525,7 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
 
   return (
     <div data-todo-key={item.key} className={`group/todo relative flex items-start gap-2.5 rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.045] ${dimmed ? 'opacity-35' : ''} ${
-      spotlight ? 'bg-card shadow-md ring-1 ring-primary/25' : ''
+      spotlight ? 'bg-card ring-1 ring-primary/25' : ''
     }`}>
       {changed && (
         <span
@@ -694,11 +694,11 @@ function ItemRow({ item, isRunning, needsApproval = null, commentOpen, sessionId
           </>
         )}
       </div>
-      {/* One floating action tray on hover or keyboard focus — Slack's
+      {/* One floating action tray on hover or keyboard focus — team-chat
           grammar: zero resting clutter, one surface to learn. Kept inside
           the row's own band so it never reads as the previous row's
           controls. Opacity (not display) so Tab can reach the buttons. */}
-      <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-popover p-0.5 opacity-0 shadow-[0_0_0_1px_rgba(15,15,15,0.06),0_3px_6px_rgba(15,15,15,0.08),0_9px_24px_rgba(15,15,15,0.14)] transition-opacity duration-100 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4)] focus-within:pointer-events-auto focus-within:opacity-100 group-hover/todo:pointer-events-auto group-hover/todo:opacity-100">
+      <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border-none bg-[var(--rowboat-raised)] p-0.5 opacity-0 shadow-[var(--rowboat-shadow-soft)] transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/todo:pointer-events-auto group-hover/todo:opacity-100">
         {!showConversation && (
           <IconTip label="Reply — tell @rowboat something about this">
             <button
@@ -991,7 +991,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
             <div
               key={t.sessionId}
               className={`group/thread relative rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.045] ${
-                isSpot ? 'bg-card shadow-md ring-1 ring-primary/20' : ''
+                isSpot ? 'bg-card ring-1 ring-primary/20' : ''
               } ${spotlightSessionId && !isSpot ? 'opacity-40' : ''}`}
             >
               <div className="flex items-center gap-2">
@@ -1036,7 +1036,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
                 {/* Same floating tray as items — one grammar everywhere,
                     inside the row's own band (never over the previous row).
                     Opacity (not display) so Tab can reach the buttons. */}
-                <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-popover p-0.5 opacity-0 shadow-[0_0_0_1px_rgba(15,15,15,0.06),0_3px_6px_rgba(15,15,15,0.08),0_9px_24px_rgba(15,15,15,0.14)] transition-opacity duration-100 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4)] focus-within:pointer-events-auto focus-within:opacity-100 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100">
+                <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border-none bg-[var(--rowboat-raised)] p-0.5 opacity-0 shadow-[var(--rowboat-shadow-soft)] transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100">
                   <IconTip label="Reply">
                     <button
                       type="button"
@@ -1086,7 +1086,7 @@ function ConversationsSection({ threads, total = 0, loaded = false, running, nee
               {isOpen && (
                 <div className="flex flex-col gap-1.5 pb-1 pl-5 pt-1">
                   {/* The last response only — the full thread lives in the
-                      sidebar, like Slack threads opening on the side. */}
+                      sidebar, like chat threads opening on the side. */}
                   {lastResponseTail(bubbles).map((b, i) => (
                     <Bubble key={i} b={b} onOpenNote={onOpenNote} />
                   ))}
@@ -2072,7 +2072,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
                     <ChevronDown className="size-3.5" />
                   </button>
                   {plannerMenuOpen && (
-                    <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-md bg-popover p-3 shadow-[0_0_0_1px_rgba(15,15,15,0.05),0_3px_6px_rgba(15,15,15,0.1),0_9px_24px_rgba(15,15,15,0.2)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_4px_12px_rgba(0,0,0,0.4)]">
+                    <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-2xl border-none bg-popover p-3 shadow-[var(--rowboat-shadow)]">
                       <div className="text-sm font-medium">Suggest automatically</div>
                       {/* Off is the default — the schedule spends tokens only
                           after an explicit opt-in. ✦ Suggest always works. */}

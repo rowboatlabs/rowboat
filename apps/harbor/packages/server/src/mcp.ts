@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, type ActingMode } from '@rowboat/spaces-protocol';
+import { mcpTools, type ActingMode, type SearchKind } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import type { AuthDriver } from './auth.js';
 import { HarborError } from './errors.js';
@@ -136,15 +136,23 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
         ),
       };
     }
-    case 'read_topic': {
-      const a = args as { spaceId: string; topicId: string; beforeOffset?: number; limit?: number };
-      const { topic, messages, hasMore } = await service.listMessages(ctx, a.spaceId, a.topicId, {
+    case 'read_stream': {
+      const a = args as { spaceId: string; beforeOffset?: number; limit?: number };
+      const { messages, topics, hasMore } = await service.listStream(ctx, a.spaceId, {
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
         limit: a.limit ?? 50,
       });
       // Truncation is stated, never silent: the tool description tells the
-      // agent to page back with beforeOffset before summarising a whole topic.
-      return { topic, messages, truncated: hasMore };
+      // agent to page back with beforeOffset before summarising.
+      return { messages, topics, truncated: hasMore };
+    }
+    case 'read_thread': {
+      const a = args as { spaceId: string; rootMessageId: string; beforeOffset?: number; limit?: number };
+      const { root, topic, messages, hasMore } = await service.listThread(ctx, a.spaceId, a.rootMessageId, {
+        ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
+        limit: a.limit ?? 50,
+      });
+      return { root, topic, messages, truncated: hasMore };
     }
     case 'read_asset': {
       const a = args as { spaceId: string; path: string };
@@ -193,39 +201,61 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
     }
-    case 'post_to_topic': {
-      const a = args as { spaceId: string; topicId?: string; body: string };
-      const { topic, message } = await service.postMessage(ctx, a.spaceId, {
-        ...(a.topicId ? { topicId: a.topicId } : {}),
+    case 'post_message': {
+      const a = args as { spaceId: string; threadRoot?: string; body: string };
+      const { message } = await service.postMessage(ctx, a.spaceId, {
+        ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
         body: a.body,
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
-      return { topicId: topic.id, messageId: message.id };
+      return { messageId: message.id, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}) };
     }
-    case 'search_feed': {
-      const a = args as { spaceId: string; query: string; limit?: number };
-      return { results: await service.searchFeed(ctx, a.spaceId, a.query, a.limit) };
+    case 'list_topics': {
+      const a = args as { spaceId: string; includeArchived?: boolean };
+      return { topics: await service.listTopics(ctx, a.spaceId, a.includeArchived ?? false) };
+    }
+    case 'create_topic': {
+      const a = args as { spaceId: string; rootMessageId?: string; title: string; body?: string };
+      // One-of lives here rather than in the JSON schema (kept plain on purpose).
+      if ((a.rootMessageId === undefined) === (a.body === undefined)) {
+        throw new HarborError('invalid_request', 'provide exactly one of rootMessageId (promote a thread) or body (post + annotate)');
+      }
+      const { topic, rootMessage } = await service.createTopic(ctx, a.spaceId, {
+        ...(a.rootMessageId !== undefined ? { rootMessageId: a.rootMessageId } : {}),
+        title: a.title,
+        ...(a.body !== undefined ? { body: a.body } : {}),
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
+      });
+      return { topic, rootMessageId: rootMessage.id };
     }
     case 'manage_topic': {
       const a = args as {
         spaceId: string;
         topicId: string;
-        action: 'retitle' | 'archive' | 'unarchive' | 'merge_into';
+        action: 'retitle' | 'archive' | 'unarchive' | 'remove';
         title?: string;
-        targetTopicId?: string;
+      };
+      const attribution = {
+        actingMode: actor.actingMode,
+        ...(actor.agentName ? { agentName: actor.agentName } : {}),
       };
       let action: Parameters<HarborService['manageTopic']>[3];
       if (a.action === 'retitle') {
         if (!a.title) throw new HarborError('invalid_request', 'retitle needs a title');
-        action = { action: 'retitle', title: a.title };
-      } else if (a.action === 'merge_into') {
-        if (!a.targetTopicId) throw new HarborError('invalid_request', 'merge_into needs targetTopicId');
-        action = { action: 'merge_into', targetTopicId: a.targetTopicId };
+        action = { action: 'retitle', title: a.title, ...attribution };
       } else {
-        action = { action: a.action };
+        action = { action: a.action, ...attribution };
       }
       return { topic: await service.manageTopic(ctx, a.spaceId, a.topicId, action) };
+    }
+    case 'search_space': {
+      const a = args as { spaceId: string; query: string; kinds?: SearchKind[]; limit?: number };
+      return service.search(ctx, a.spaceId, a.query, {
+        ...(a.kinds !== undefined ? { kinds: a.kinds } : {}),
+        ...(a.limit !== undefined ? { limit: a.limit } : {}),
+      });
     }
     default:
       throw new HarborError('invalid_request', `unknown tool ${name}`);

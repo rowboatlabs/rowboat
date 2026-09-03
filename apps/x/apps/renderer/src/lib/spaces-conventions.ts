@@ -1,112 +1,39 @@
 import type { spaces } from '@x/shared'
 
-// Chat-first conventions. The contract now carries the real fields —
-// Topic.kind, Topic.anchorMessageId, ChangeSet.topicId (Harbor migration 004
-// backfilled pre-contract data from exactly the legacy shapes parsed here).
-// The legacy parsers below remain as fallbacks for topics minted by pre-004
-// servers (a teammate's stale local Harbor); delete them once none are left.
+// Chat conventions under the annotation model (spec §7, 2026-09-01): one
+// stream of root messages per space, flat threads behind reply chips
+// (Message.threadRoot), topics as archivable annotation rows on threads.
+// Nothing here invents structure — these are display folds and the
+// provenance-suffix grammar shared with the agent prompt.
 
-// ---------------------------------------------------------------------------
-// Messages — the space's open stream (internally still "general")
-// ---------------------------------------------------------------------------
-
-/** The stream topic's title. "general" was the first spike build's name; still recognised. */
-export const GENERAL_TITLE = 'messages'
-const LEGACY_GENERAL_TITLES = new Set(['messages', 'general'])
-/** Body of the seed message that creates the stream topic (its first line becomes the title). Hidden in the UI. */
-export const GENERAL_SEED_BODY = 'messages'
-
-/**
- * The space's stream: the topic the server marked kind 'general' (seeded at
- * space creation, unique per space). Fallback for pre-004 servers: the oldest
- * open topic titled "messages"/"general" — ties (a seed race) resolve older.
- */
-export function findGeneralTopic(topics: spaces.Topic[]): spaces.Topic | null {
-    const marked = topics.find((t) => t.kind === 'general' && !t.archived)
-    if (marked) return marked
-    const candidates = topics.filter((t) => !t.archived && LEGACY_GENERAL_TITLES.has(t.title.trim().toLowerCase()))
-    if (candidates.length === 0) return null
-    candidates.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
-    return candidates[0] ?? null
+/** The thread a message lives in: its root's id — its own when it IS a root. */
+export function threadRootOf(message: spaces.Message): string {
+    return message.threadRoot ?? message.id
 }
 
-/** The seed message is scaffolding, never shown. */
-export function isGeneralSeedMessage(general: spaces.Topic, message: spaces.Message, index: number): boolean {
-    return index === 0 && message.topicId === general.id && LEGACY_GENERAL_TITLES.has(message.body.trim().toLowerCase())
-}
-
-// ---------------------------------------------------------------------------
-// Topics born from a message in the stream ("reply"). The first message
-// is the parent's text (so the server-derived title is the parent text) plus a
-// marker the client reads. deriveTitle strips headings/bullets but not ">",
-// so the parent text goes in as a plain first line, never a blockquote.
-// ---------------------------------------------------------------------------
-
-export interface ThreadMarker {
-    parentMessageId: string
-    parentAuthorId: string
-    parentPostedAt: string
-}
-
-// Reads both spellings: "topic" is current, "thread" was the first spike build.
-const MARKER_RE = /<!--\s*rowboat:(?:topic|thread)\s+parent=msg:([0-9A-Za-z_-]+)\s+by=(\S+)\s+at=(\S+)\s*-->/
-
-export function buildThreadSeed(parent: spaces.Message): string {
-    const text = parent.body.trim()
-    return `${text}\n\n<!-- rowboat:topic parent=msg:${parent.id} by=${parent.author.memberId} at=${parent.postedAt} -->`
-}
-
-export function parseThreadMarker(body: string): ThreadMarker | null {
-    const m = MARKER_RE.exec(body)
-    if (!m) return null
-    return { parentMessageId: m[1]!, parentAuthorId: m[2]!, parentPostedAt: m[3]! }
-}
-
-/** The first message without its marker — what the parent card renders. */
-export function stripThreadMarker(body: string): string {
-    return body.replace(MARKER_RE, '').trimEnd()
-}
-
-/**
- * Mirror of the server's title derivation at topic creation (service.ts
- * deriveTitle): first non-empty line, markdown heading/bullet prefixes
- * stripped, 256-capped. Exists so clients can tell an auto-derived title
- * from an explicit rename — renaming never touches the first message, it
- * only overwrites the title property, so "was it renamed?" is exactly
- * "does the title still equal what creation would have derived?".
- */
-export function deriveTopicTitle(body: string): string {
-    const firstLine = body
+/** What to call a thread when no topic annotates it: the root's first line, trimmed. */
+export function threadLabelOf(rootBody: string, max = 80): string {
+    const firstLine = rootBody
         .split('\n')
         .map((l) => l.trim())
         .find((l) => l.length > 0)
-    if (!firstLine) return 'Untitled'
-    const stripped = firstLine.replace(/^#{1,6}\s+/, '').replace(/^[-*]\s+/, '').trim()
-    const title = stripped.length > 0 ? stripped : firstLine
-    return title.length > 256 ? `${title.slice(0, 255)}…` : title
-}
-
-/**
- * The topic's explicit name — set by a human retitle or an agent's
- * housekeeping — or null while it still wears its auto-derived title.
- * Unnamed threads stay compact everywhere (chip shows "N replies", rail
- * shows the seed text); a real name is worth showing in all those places.
- */
-export function explicitTitle(topic: spaces.Topic, firstMessageBody: string | null | undefined): string | null {
-    if (!firstMessageBody) return null
-    return topic.title === deriveTopicTitle(firstMessageBody) ? null : topic.title
+    if (!firstLine) return 'Thread'
+    const stripped = firstLine.replace(/^#{1,6}\s+/, '').replace(/^[-*]\s+/, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+    const label = stripped.length > 0 ? stripped : 'Thread'
+    return label.length > max ? `${label.slice(0, max - 1)}…` : label
 }
 
 // ---------------------------------------------------------------------------
-// Artifacts — change-sets made from a topic carry its id at the end of the
-// reason. Two producers only: the Fold gesture and the topic agent's prompt.
+// Artifacts — change-sets made from a thread carry its root id at the end of
+// the reason ("· thread:<id>"; the legacy spelling "topic:<id>" still parses).
+// Two producers only: the Fold gesture and the thread agent's prompt.
 // ---------------------------------------------------------------------------
 
 const THREAD_REF_RE = /\s*·\s*(?:topic|thread):([0-9A-Za-z_-]+)\s*$/
 
-export function withThreadRef(reason: string, topicId: string): string {
+export function withThreadRef(reason: string, threadRootId: string): string {
     const base = stripThreadRef(reason).trim()
-    return base ? `${base} · topic:${topicId}` : `topic:${topicId}`
+    return base ? `${base} · thread:${threadRootId}` : `thread:${threadRootId}`
 }
 
 export function threadRefOf(reason: string | undefined): string | null {
@@ -132,9 +59,9 @@ export interface ArtifactGroup {
     changeSets: spaces.ChangeSet[]
 }
 
-/** Change-sets made from this topic, grouped by file, newest group first. */
-export function artifactsForThread(changeSets: spaces.ChangeSet[], topicId: string): ArtifactGroup[] {
-    const mine = changeSets.filter((c) => (c.topicId ?? threadRefOf(c.reason)) === topicId)
+/** Change-sets made from this thread, grouped by file, newest group first. */
+export function artifactsForThread(changeSets: spaces.ChangeSet[], threadRootId: string): ArtifactGroup[] {
+    const mine = changeSets.filter((c) => (c.threadRootId ?? threadRefOf(c.reason)) === threadRootId)
     const byPath = new Map<string, spaces.ChangeSet[]>()
     for (const cs of mine) {
         const list = byPath.get(cs.assetPath) ?? []

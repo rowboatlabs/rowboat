@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { AtSign, Copy, Loader2, Mail } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,9 @@ import { Input } from '@/components/ui/input'
 import {
     Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
+import { requestComposeInsert } from '@/lib/spaces-compose'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
@@ -20,17 +23,100 @@ import { toast } from '@/lib/toast'
 export function MemberAvatar({ id, name, size = 'md', className }: {
     id: string
     name: string
-    size?: 'sm' | 'md' | 'lg'
+    size?: 'sm' | 'md' | 'lg' | 'xl'
     className?: string
 }) {
-    const dims = size === 'sm' ? 'size-5 text-[9px]' : size === 'lg' ? 'size-8 text-xs' : 'size-7 text-[10.5px]'
+    // Stream dialect: people are near-square tiles; circles stay reserved for AI.
+    const dims = size === 'sm' ? 'size-5 rounded-[4px] text-[9px]'
+        : size === 'lg' ? 'size-8 rounded-[5px] text-xs'
+        : size === 'xl' ? 'size-9 rounded-md text-[13px]'
+        : 'size-7 rounded-[5px] text-[10.5px]'
     return (
         <span
             title={name}
-            className={cn('inline-flex shrink-0 items-center justify-center rounded-full font-semibold leading-none select-none', dims, avatarColorClass(id), className)}
+            className={cn('inline-flex shrink-0 items-center justify-center font-semibold leading-none select-none', dims, avatarColorClass(id), className)}
         >
             {initials(name)}
         </span>
+    )
+}
+
+/**
+ * Click-a-face profile: wraps any avatar/name in a popover with what the org
+ * actually knows about the member — name, role, presence, id. Email renders
+ * only if the wire record ever carries one (it doesn't today; the IdP claim
+ * is discarded at invite binding), so the row lights up the day it exists.
+ */
+export function MemberProfilePopover({ id, children }: { id: string; children: ReactNode }) {
+    const names = useMemberNames()
+    const { byId, here, selfId } = useSpaceProfiles()
+    const [open, setOpen] = useState(false)
+    const member = byId.get(id)
+    const name = member?.displayName ?? names.get(id) ?? id
+    const email = (member as (spaces.Member & { email?: string }) | undefined)?.email
+    const isHere = here.has(id)
+    const copyId = () => {
+        void navigator.clipboard.writeText(id).then(
+            () => toast('Member id copied', 'success'),
+            () => toast('Could not copy', 'error'),
+        )
+    }
+    const mention = () => {
+        setOpen(false)
+        requestComposeInsert(`@${name} `)
+    }
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>{children}</PopoverTrigger>
+            <PopoverContent align="start" className="w-64 p-0">
+                <div className="flex items-center gap-3 border-b border-border p-3">
+                    <span className="relative shrink-0">
+                        <MemberAvatar id={id} name={name} size="lg" />
+                        {isHere && <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-emerald-500 ring-2 ring-popover" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                            <span className="truncate text-sm font-semibold">{name}</span>
+                            {id === selfId && <span className="shrink-0 text-xs text-muted-foreground">(you)</span>}
+                            {member?.role === 'admin' && (
+                                <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">admin</span>
+                            )}
+                        </div>
+                        <div className={cn('text-xs', isHere ? 'text-emerald-600' : 'text-muted-foreground')}>
+                            {isHere ? 'Here now' : 'Away'}
+                        </div>
+                    </div>
+                </div>
+                <div className="flex flex-col gap-1 p-2 text-xs text-muted-foreground">
+                    {email && (
+                        <div className="flex items-center gap-2 px-1 py-0.5">
+                            <Mail className="size-3 shrink-0" />
+                            <span className="truncate select-text">{email}</span>
+                        </div>
+                    )}
+                    {id !== selfId && (
+                        <button
+                            type="button"
+                            onClick={mention}
+                            title="Insert an @-mention into the composer"
+                            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                        >
+                            <AtSign className="size-3 shrink-0" />
+                            <span className="truncate">Mention</span>
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        onClick={copyId}
+                        title="Copy member id"
+                        className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent hover:text-foreground"
+                    >
+                        <Copy className="size-3 shrink-0" />
+                        <span className="truncate font-mono">{id}</span>
+                    </button>
+                </div>
+            </PopoverContent>
+        </Popover>
     )
 }
 
@@ -58,7 +144,7 @@ export function AvatarStack({ members, max = 5 }: { members: spaces.Member[]; ma
                 <MemberAvatar key={m.id} id={m.id} name={m.displayName} size="md" className="ring-2 ring-background" />
             ))}
             {members.length > max && (
-                <span className="inline-flex size-7 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">
+                <span className="inline-flex size-7 items-center justify-center rounded-[5px] bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">
                     +{members.length - max}
                 </span>
             )}

@@ -31,6 +31,7 @@ import { init as initAppsServer } from '../apps/server.js';
 import { registerAppsHostApi } from '../apps/host-api.js';
 import { cleanInstallTmp } from '../apps/installer.js';
 import { startSpaceMentionWatch } from '../spaces/mention-watch.js';
+import { startSpacesScheduler } from '../spaces/scheduler.js';
 import { flags } from '@x/shared';
 
 // The headless-safe half of Rowboat's boot: everything that runs schedulers,
@@ -121,7 +122,12 @@ export async function initCoreServices(): Promise<void> {
   // Space mentions: watch every space of every org and notify on @<me> (over
   // the notification service seam — OS notifications in-process, the WS
   // reverse call from the standalone server). Gated with the Spaces UI flag.
-  if (flags.spacesEnabled(process.env)) startSpaceMentionWatch();
+  if (flags.spacesEnabled(process.env)) {
+    startSpaceMentionWatch();
+    // Scheduled sends + reminders ride the same gate — a persisted queue
+    // against the workdir, exactly this file's kind of service.
+    startSpacesScheduler();
+  }
 
   initChannels().catch((error) => {
     console.error('[Channels] Failed to start mobile channels:', error);

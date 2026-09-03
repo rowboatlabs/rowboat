@@ -238,10 +238,10 @@ export function LiveNotesView({ onOpenNote, onAddNewLiveNote }: LiveNotesViewPro
               </colgroup>
               <thead>
                 <tr className="border-b border-border/60 bg-muted/30 text-left">
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Note</th>
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Created</th>
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Last ran</th>
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">State</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Note</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Created</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Last ran</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">State</th>
                 </tr>
               </thead>
               <tbody>

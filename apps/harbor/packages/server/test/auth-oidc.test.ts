@@ -84,15 +84,15 @@ describe('oidc auth driver', () => {
     const agent = await agentClient(harbor, await as.mint({}), { agentName: 'Test Agent' });
     const listed = await callStructured<{ spaces: Array<{ id: string; name: string }> }>(agent, 'list_spaces', {});
     const spaceId = listed.spaces[0]!.id;
-    const posted = await callStructured<{ topicId: string }>(agent, 'post_to_topic', {
+    const posted = await callStructured<{ messageId: string }>(agent, 'post_message', {
       spaceId,
       body: 'hello from oidc',
     });
     const thread = await callStructured<{
-      messages: Array<{ author: { memberId: string; agentName?: string } }>;
-    }>(agent, 'read_topic', { spaceId, topicId: posted.topicId });
-    expect(thread.messages[0]!.author.memberId).toBe('ramnique');
-    expect(thread.messages[0]!.author.agentName).toBe('Test Agent');
+      root: { author: { memberId: string; agentName?: string } };
+    }>(agent, 'read_thread', { spaceId, rootMessageId: posted.messageId });
+    expect(thread.root.author.memberId).toBe('ramnique');
+    expect(thread.root.author.agentName).toBe('Test Agent');
     await agent.close();
   });
 

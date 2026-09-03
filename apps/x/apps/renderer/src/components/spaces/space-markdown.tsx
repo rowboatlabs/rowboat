@@ -8,7 +8,8 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ZoomableImage } from '@/components/image-lightbox'
 import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
 import { toast } from '@/lib/toast'
-import { useMemberNames } from '@/components/spaces/member-text'
+import { MemberProfilePopover } from '@/components/spaces/atoms'
+import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import {
     decorateMentions,
     imageDimsFromUrl,
@@ -124,7 +125,7 @@ function ImageLightbox({ src, alt, open, onOpenChange, children }: {
 }
 
 /** An uploaded image in a message: inline preview, click to view, download from the viewer. */
-// Chat images render as Slack-style tiles: one consistent height, side by
+// Chat images render as uniform tiles: one consistent height, side by
 // side on a line (wrapping), very wide shots cropped to a max tile width —
 // the lightbox has the full image. Small images keep their natural size
 // (tiles never upscale).
@@ -376,7 +377,7 @@ function ExternalLink({ href, children }: { href: string; children?: ReactNode }
                     if (isTrustedDomain(domain)) open()
                     else setConfirming(true)
                 }}
-                className="cursor-pointer break-words text-blue-600 underline underline-offset-2 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+                className="cursor-pointer break-words text-[var(--stream-link)] no-underline underline-offset-2 hover:underline"
             >
                 {children}
             </a>
@@ -413,6 +414,61 @@ const spaceComponents: StreamdownComponents = {
         return <ExternalImage src={url} alt={alt ?? ''} />
     },
     a: SpaceAnchor,
+    // decorateMentions renders "@name" as **bold**; the stream dialect shows
+    // those as tinted mention chips. Slack treatment: only the chip is
+    // tinted, never the row — amber when it addresses you (@you, @here),
+    // blue for anyone else. A chip naming a real member opens their profile.
+    strong: MentionStrong,
+}
+
+function MentionStrong({ children, ...props }: ComponentProps<'strong'>) {
+    const names = useMemberNames()
+    const { selfId } = useSpaceProfiles()
+    const label = plainLabel(children)
+    if (!label?.startsWith('@')) return <strong {...props}>{children}</strong>
+
+    const broadcast = /^@(here|channel|everyone)$/i.test(label)
+    // The label carries the display name (decorateMentions), so the id comes
+    // from a reverse lookup; an unmatched name still renders as a chip.
+    const name = label.slice(1)
+    let memberId: string | null = null
+    if (!broadcast) {
+        for (const [id, display] of names) {
+            if (display === name) {
+                memberId = id
+                break
+            }
+        }
+    }
+    const addressesMe = broadcast || (!!selfId && memberId === selfId)
+    const chip = cn(
+        'rounded-[4px] px-[3px] py-px font-medium',
+        addressesMe
+            ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
+            : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
+    )
+    // @here/@channel address the room, not a person — no profile to open.
+    if (broadcast) {
+        return (
+            <strong className={chip} {...props}>
+                {children}
+            </strong>
+        )
+    }
+    if (!memberId) {
+        return (
+            <strong className={chip} {...props}>
+                {children}
+            </strong>
+        )
+    }
+    return (
+        <MemberProfilePopover id={memberId}>
+            <button type="button" className={cn(chip, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
+                {children}
+            </button>
+        </MemberProfilePopover>
+    )
 }
 
 function SpaceAnchor({ href, children }: ComponentProps<'a'>) {

@@ -85,6 +85,10 @@ export class CodeSessionService {
         this.codeSessionsRepo = codeSessionsRepo;
         this.codeProjectsRepo = codeProjectsRepo;
         this.sessionBus = sessionBus;
+        this.sessionBus.subscribe((event) => {
+            if (event.kind !== 'index-changed' || !event.entry?.title) return;
+            void this.adoptChatTitle(event.sessionId, event.entry.title);
+        });
     }
 
     // Sessions created before code mode moved onto the turns runtime have meta
@@ -128,9 +132,30 @@ export class CodeSessionService {
         // The session is a real chat session, created first so its id becomes
         // the code session id. Everything chat (messaging, stop, permission
         // cards, history) works on it with no code-mode special casing.
-        const title = args.title?.trim() || `${project.name} session`;
-        const sessionId = await this.sessions.createSession({ title });
-        return this.createForSession(sessionId, { ...args, title });
+        //
+        // No name given → the chat is created UNTITLED so the runtime titles
+        // it from the first message (a placeholder, then a generated title);
+        // the index-changed subscription in the constructor carries that into
+        // the meta. Until then the meta wears a project-name placeholder so
+        // the rail has something to show.
+        const explicit = args.title?.trim();
+        const sessionId = await this.sessions.createSession(explicit ? { title: explicit } : undefined);
+        return this.createForSession(sessionId, { ...args, title: explicit || `${project.name} session` });
+    }
+
+    // Code sessions show the CHAT's title (rail, chat header). The runtime
+    // titles untitled chats from their first message and renames flow through
+    // the index; mirror those into the meta so every list of code sessions
+    // stays in step. A rename made here (update → sessions.setTitle) comes
+    // back as an equal title and is a no-op.
+    private async adoptChatTitle(sessionId: string, title: string): Promise<void> {
+        try {
+            const meta = await this.codeSessionsRepo.get(sessionId);
+            if (!meta || meta.title === title) return;
+            await this.codeSessionsRepo.save({ ...meta, title });
+        } catch {
+            // Observational — a missed title never affects the session.
+        }
     }
 
     /**
@@ -284,11 +309,32 @@ export class CodeSessionService {
         const session = await this.codeSessionsRepo.get(sessionId);
         if (!session) throw new Error(`Unknown session: ${sessionId}`);
         const updated: CodeSession = { ...session, ...patch };
+        // Model and effort are ids of ONE engine's catalog — a Codex model on
+        // a Claude Code session is nonsense. Switching agents drops them back
+        // to the engine default unless the same patch chooses new ones.
+        if (patch.agent && patch.agent !== session.agent) {
+            if (patch.agentModel === undefined) delete updated.agentModel;
+            if (patch.agentEffort === undefined) delete updated.agentEffort;
+        }
         await this.codeSessionsRepo.save(updated);
         if (patch.title && patch.title !== session.title) {
             // Keep the chat session's title (history list, notifications) in sync.
             await this.sessions.setTitle(sessionId, patch.title).catch(() => {});
         }
+        return updated;
+    }
+
+    // Done is the user's own verdict on a session (or the natural end of a
+    // merge-back). It touches nothing on disk: worktree, branch and chat all
+    // stay, so reopening is just clearing the flag. Activity clears it too
+    // (status tracker) so a done session that gets a message comes back.
+    async setDone(sessionId: string, done: boolean): Promise<CodeSession> {
+        const session = await this.codeSessionsRepo.get(sessionId);
+        if (!session) throw new Error(`Unknown session: ${sessionId}`);
+        const updated: CodeSession = { ...session };
+        if (done) updated.doneAt = new Date().toISOString();
+        else delete updated.doneAt;
+        await this.codeSessionsRepo.save(updated);
         return updated;
     }
 
@@ -317,9 +363,13 @@ export class CodeSessionService {
         }
         const result = await gitService.mergeBack(project.path, session.worktree.branch);
         if (result.ok) {
+            // Merging back is the natural end of a session: file it under
+            // Done as well. Reopen is one click if the user wasn't finished.
+            const now = new Date().toISOString();
             await this.codeSessionsRepo.save({
                 ...session,
-                worktree: { ...session.worktree, mergedAt: new Date().toISOString() },
+                worktree: { ...session.worktree, mergedAt: now },
+                doneAt: session.doneAt ?? now,
             });
         }
         return result;

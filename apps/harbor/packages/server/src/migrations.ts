@@ -302,6 +302,186 @@ export const MIGRATIONS: Migration[] = [
       `alter table messages add column if not exists edited_at text`,
     ],
   },
+  {
+    id: '011-annotation-model',
+    statements: [
+      // The annotation model (spec §7, decided 2026-09-01): one stream per
+      // space; a reply is a write-once thread_root pointer on the message; a
+      // topic is one row pointing at a root (title + archived), holding no
+      // messages. This migration REINTERPRETS the old container world — the
+      // event log is untouched (old-shape events go inert; projections and
+      // contract change).
+      //
+      // Conversion map:
+      //   general topic            → gone; its messages are the stream's roots
+      //   anchored thread topics   → replies re-point at the anchor message
+      //     (pre-004 threads' machine copy of the parent is dropped)
+      //   other discussion topics  → oldest message becomes the root
+      //   explicitly-retitled ones → survive as annotation rows (title kept)
+      //   first-line-titled ones   → plain threads; the rail empties of accidents
+      `alter table messages add column if not exists thread_root text`,
+      `alter table messages add column if not exists reply_count int not null default 0`,
+      `alter table messages add column if not exists last_reply_at text`,
+      `alter table messages add column if not exists anchor_change_set_id text`,
+      // Anchored threads ("reply became a thread"): every message in the topic
+      // is a reply to the anchor, which lives in the stream already.
+      `update messages m set thread_root = t.anchor_message_id
+        from topics t
+        where m.topic_id = t.id and t.kind = 'discussion' and t.anchor_message_id is not null
+          and m.id <> t.anchor_message_id`,
+      // Pre-004 threads opened with a machine COPY of the parent (marker
+      // comment) as their first message. The original stays in the stream —
+      // the copy would render as a stray first reply, so it goes. Its stored
+      // message event stays in the log, inert.
+      `delete from messages where thread_root is not null
+        and body ~ '<!--\\s*rowboat:(topic|thread)\\s+parent=msg:'`,
+      // Un-anchored topics (standalone, or anchored to a change-set): the
+      // oldest message becomes the thread root and joins the stream at its
+      // existing offset; the rest become its replies.
+      `update messages m set thread_root = f.first_id
+        from topics t,
+          (select distinct on (topic_id) topic_id, id as first_id
+            from messages order by topic_id, stream_offset asc) f
+        where m.topic_id = t.id and t.kind = 'discussion' and t.anchor_message_id is null
+          and f.topic_id = m.topic_id and m.id <> f.first_id`,
+      // Change-set-anchored topics: the anchor rides the new root as message
+      // provenance (reply-to-activity-row).
+      `update messages m set anchor_change_set_id = t.anchor_change_set_id
+        from topics t
+        where m.topic_id = t.id and t.kind = 'discussion'
+          and t.anchor_change_set_id is not null and t.anchor_message_id is null
+          and m.thread_root is null`,
+      // Flatten: a topic could anchor on a message that is itself a reply
+      // (thread grown from inside a thread). thread_root must always name a
+      // ROOT — two passes cover any depth real data can have.
+      `update messages m set thread_root = r.thread_root
+        from messages r
+        where m.thread_root = r.id and r.thread_root is not null`,
+      `update messages m set thread_root = r.thread_root
+        from messages r
+        where m.thread_root = r.id and r.thread_root is not null`,
+      // Reply denorm on roots: live replies + newest reply stamp.
+      `update messages r set reply_count = s.cnt, last_reply_at = s.last_at
+        from (select thread_root, count(*) filter (where deleted_at is null) as cnt,
+                     max(posted_at) as last_at
+              from messages where thread_root is not null group by thread_root) s
+        where r.id = s.thread_root`,
+      // The topics table becomes the annotation table: one row per DELIBERATE
+      // topic, pointing at its thread root. A topic is deliberate when its
+      // title is not just the root's first line (i.e. someone retitled it) —
+      // everything else was an accident of the reply gesture and dissolves
+      // into a plain thread. Root resolution mirrors the message backfills,
+      // flattened the same way.
+      `alter table topics add column if not exists root_message_id text`,
+      `update topics t set root_message_id = roots.root_id
+        from (select t2.id as topic_id,
+                coalesce(
+                  (select coalesce(a.thread_root, a.id) from messages a where a.id = t2.anchor_message_id),
+                  (select m.id from messages m where m.topic_id = t2.id and m.thread_root is null
+                    order by m.stream_offset asc limit 1))
+                as root_id
+              from topics t2 where t2.kind = 'discussion') roots
+        where t.id = roots.topic_id`,
+      // Change-set provenance maps through EVERY old topic (dissolved ones
+      // included — their threads survive even though their rows don't), so
+      // this runs before the trim. General-topic provenance had no thread —
+      // it nulls out.
+      `alter table change_sets add column if not exists thread_root_id text`,
+      `update change_sets c set thread_root_id = t.root_message_id
+        from topics t where c.topic_id = t.id and t.root_message_id is not null`,
+      `alter table change_sets drop column if exists topic_id`,
+      `delete from topics t
+        where t.kind <> 'discussion' or t.root_message_id is null
+          or exists (select 1 from messages r where r.id = t.root_message_id
+                      and position(lower(left(t.title, 64)) in lower(left(coalesce(r.body, ''), 512))) > 0)`,
+      // Two annotations can resolve to one root only via pathological legacy
+      // data; keep the oldest, the invariant is one topic per thread.
+      `delete from topics t using topics other
+        where t.root_message_id = other.root_message_id and t.id > other.id`,
+      `alter table topics alter column root_message_id set not null`,
+      `alter table topics drop column if exists kind`,
+      `alter table topics drop column if exists anchor_change_set_id`,
+      `alter table topics drop column if exists anchor_message_id`,
+      `alter table topics drop column if exists last_activity_at`,
+      `alter table topics drop column if exists message_count`,
+      `drop index if exists topics_one_general_per_space`,
+      `drop index if exists topics_anchor_message`,
+      `drop index if exists topics_space`,
+      `create unique index if not exists topics_root on topics (root_message_id)`,
+      `create index if not exists topics_space_archived on topics (space_id, archived)`,
+      // The stream's and threads' read paths, then the container key retires.
+      `create index if not exists messages_stream on messages (space_id, stream_offset) where thread_root is null`,
+      `create index if not exists messages_thread on messages (space_id, thread_root, stream_offset) where thread_root is not null`,
+      `drop index if exists messages_topic`,
+      `alter table messages drop column if exists topic_id`,
+    ],
+  },
+  {
+    id: '012-search',
+    statements: [
+      // Space search (search.ts). Messages and topics index via GENERATED
+      // columns — a formula cell, not a hook: Postgres recomputes the tsvector
+      // whenever the source column changes, in the same transaction, so the
+      // tombstone (body blanked) and edit (body rewritten) semantics apply to
+      // search with zero code and zero drift. Adding a STORED generated column
+      // rewrites the table, so every EXISTING row is indexed right here — the
+      // message/topic backfill IS this migration. 'simple' config on purpose:
+      // no stemming, language-neutral, predictable for names/code/ids; the
+      // query side compensates with last-term prefix matching. Mention ids
+      // ("@<ulid>") tokenize to the bare id, which is what makes query-time
+      // mention expansion (search.ts) an index no-op.
+      `alter table messages add column if not exists body_tsv tsvector
+        generated always as (to_tsvector('simple', coalesce(body, ''))) stored`,
+      `create index if not exists messages_search on messages using gin (body_tsv)`,
+      `alter table topics add column if not exists title_tsv tsvector
+        generated always as (to_tsvector('simple', title)) stored`,
+      `create index if not exists topics_search on topics using gin (title_tsv)`,
+      // Assets need a side table because what's searchable is an EXTRACTION
+      // (an Excalidraw board is geometry JSON wrapping the words on it) and
+      // extraction is TypeScript, which a generated column can't call. The
+      // TS-maintained part is only `extracted` (upserted in the same
+      // transaction as each version write); tsv still derives in-database.
+      // One row per live head per asset — keyed by asset_id (the inode
+      // model), so moves/renames never touch it; deletion is filtered at
+      // query time via assets.state. No SQL backfill (extraction is code):
+      // PgStore.init() fills missing rows on boot, idempotently — which is
+      // also the standing repair path.
+      `create table if not exists asset_search (
+        space_id text not null,
+        asset_id text not null,
+        extracted text not null,
+        tsv tsvector generated always as (to_tsvector('simple', extracted)) stored,
+        updated_at text not null,
+        primary key (space_id, asset_id)
+      )`,
+      `create index if not exists asset_search_gin on asset_search using gin (tsv)`,
+    ],
+  },
+  {
+    // Runs AFTER the annotation model (011) and search (012) by necessity, not preference:
+    // that migration deletes the pre-004 machine parent-copies and re-points
+    // thread_root, so anything keyed on message ids must land once the ids
+    // have settled. Polls never shipped before this, so there is nothing to
+    // backfill and nothing 011 can orphan.
+    id: '013-polls',
+    statements: [
+      // Discord-model polls: the poll definition (question, answers, expiry,
+      // multiselect, endedAt) rides the message row as jsonb — immutable
+      // content except endedAt. Votes mirror reactions: one row per
+      // (message, answer, member) — the primary key IS the toggle invariant.
+      `alter table messages add column if not exists poll jsonb`,
+      `create table if not exists poll_votes (
+        space_id text not null,
+        message_id text not null,
+        answer_id int not null,
+        member_id text not null,
+        attribution jsonb not null,
+        at text not null,
+        primary key (space_id, message_id, answer_id, member_id)
+      )`,
+      `create index if not exists poll_votes_space_message on poll_votes (space_id, message_id)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

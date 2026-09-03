@@ -21,6 +21,12 @@ export const GitRepoInfo = z.object({
     branch: z.string().nullable(),
     hasCommits: z.boolean(),
     dirtyCount: z.number(),
+    // The repository's top-level directory (real path) and where the project
+    // sits inside it ("" when the project IS the root; "apps/x" for a package
+    // in a monorepo). Both null outside a repo. Lets a project be labelled
+    // "rowboat/apps/x" instead of a bare "x".
+    root: z.string().nullable(),
+    subpath: z.string().nullable(),
 });
 export type GitRepoInfo = z.infer<typeof GitRepoInfo>;
 
@@ -57,6 +63,10 @@ export const CodeSession = z.object({
     // The coding agent's own model + reasoning effort (applied to the ACP engine,
     // not the Rowboat-mode LLM). Values come from CODE_AGENT_MODELS /
     // CODE_AGENT_EFFORTS; unset (or 'default') leaves the engine's own default.
+    // Set when the user marks the session done (rail check, menus). Nothing
+    // on disk changes — worktree, branch and chat stay; the rail just files
+    // the session under Done. Cleared by activity (a new turn) or Reopen.
+    doneAt: z.iso.datetime().optional(),
     agentModel: z.string().optional(),
     agentEffort: z.string().optional(),
     createdAt: z.iso.datetime(),

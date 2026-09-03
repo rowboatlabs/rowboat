@@ -38,19 +38,22 @@ async function mcpClient(token: string, headers: Record<string, string> = {}): P
 }
 
 describe('agent face (MCP)', () => {
-  it('lists exactly the nine protocol tools, with JSON schemas', async () => {
+  it('lists exactly the twelve protocol tools, with JSON schemas', async () => {
     const client = await mcpClient('dev-harsh');
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'create_topic',
       'delete_asset',
       'list_spaces',
+      'list_topics',
       'manage_topic',
       'move_asset',
-      'post_to_topic',
+      'post_message',
       'propose_change',
       'read_asset',
-      'read_topic',
-      'search_feed',
+      'read_stream',
+      'read_thread',
+      'search_space',
     ]);
     const propose = tools.find((t) => t.name === 'propose_change')!;
     expect(propose.inputSchema.required).toContain('reason'); // required on this face only
@@ -223,61 +226,96 @@ describe('agent face (MCP)', () => {
     await client.close();
   });
 
-  it('read_topic returns the thread with attribution, windowed from the tail', async () => {
+  it('read_thread returns the flat thread with attribution, windowed from the tail', async () => {
     const client = await mcpClient('dev-harsh');
     const started = (
-      await client.callTool({ name: 'post_to_topic', arguments: { spaceId, body: 'Thread to read' } })
-    ).structuredContent as { topicId: string };
+      await client.callTool({ name: 'post_message', arguments: { spaceId, body: 'Thread to read' } })
+    ).structuredContent as { messageId: string };
     for (const body of ['first reply', 'second reply', 'third reply']) {
-      await client.callTool({ name: 'post_to_topic', arguments: { spaceId, topicId: started.topicId, body } });
+      await client.callTool({ name: 'post_message', arguments: { spaceId, threadRoot: started.messageId, body } });
     }
 
     const full = (
-      await client.callTool({ name: 'read_topic', arguments: { spaceId, topicId: started.topicId } })
-    ).structuredContent as { topic: { title: string }; messages: Array<{ body: string; author: { actingMode: string } }>; truncated: boolean };
-    expect(full.topic.title).toBe('Thread to read');
-    expect(full.messages.map((m) => m.body)).toEqual(['Thread to read', 'first reply', 'second reply', 'third reply']);
-    expect(full.messages[0]!.author.actingMode).toBe('agent');
+      await client.callTool({ name: 'read_thread', arguments: { spaceId, rootMessageId: started.messageId } })
+    ).structuredContent as {
+      root: { body: string; replyCount: number; author: { actingMode: string } };
+      topic: unknown;
+      messages: Array<{ body: string }>;
+      truncated: boolean;
+    };
+    expect(full.root.body).toBe('Thread to read');
+    expect(full.root.replyCount).toBe(3);
+    expect(full.root.author.actingMode).toBe('agent');
+    expect(full.topic).toBeNull(); // a plain thread — nobody gave it a goal
+    expect(full.messages.map((m) => m.body)).toEqual(['first reply', 'second reply', 'third reply']);
     expect(full.truncated).toBe(false);
 
     const tail = (
-      await client.callTool({ name: 'read_topic', arguments: { spaceId, topicId: started.topicId, limit: 2 } })
+      await client.callTool({ name: 'read_thread', arguments: { spaceId, rootMessageId: started.messageId, limit: 2 } })
     ).structuredContent as { messages: Array<{ body: string }>; truncated: boolean };
     expect(tail.messages.map((m) => m.body)).toEqual(['second reply', 'third reply']);
     expect(tail.truncated).toBe(true);
     await client.close();
   });
 
-  it('post_to_topic starts topics and threads; search_feed finds them; manage_topic tidies', async () => {
+  it('post_message replies flat; create_topic annotates; list_topics and search_space navigate; manage_topic tidies', async () => {
     const client = await mcpClient('dev-harsh');
     const started = (
       await client.callTool({
-        name: 'post_to_topic',
+        name: 'post_message',
         arguments: { spaceId, body: 'Webhook retries: exponential backoff or fixed?' },
       })
-    ).structuredContent as { topicId: string; messageId: string };
-    expect(started.topicId).toBeTruthy();
+    ).structuredContent as { messageId: string; threadRoot?: string };
+    expect(started.messageId).toBeTruthy();
+    expect(started.threadRoot).toBeUndefined();
 
     const reply = (
       await client.callTool({
-        name: 'post_to_topic',
-        arguments: { spaceId, topicId: started.topicId, body: 'Exponential, capped at 10m.' },
+        name: 'post_message',
+        arguments: { spaceId, threadRoot: started.messageId, body: 'Exponential, capped at 10m.' },
       })
-    ).structuredContent as { topicId: string };
-    expect(reply.topicId).toBe(started.topicId);
+    ).structuredContent as { threadRoot?: string };
+    expect(reply.threadRoot).toBe(started.messageId);
+
+    const annotated = (
+      await client.callTool({
+        name: 'create_topic',
+        arguments: { spaceId, rootMessageId: started.messageId, title: 'Decide: webhook retry policy' },
+      })
+    ).structuredContent as { topic: { id: string; title: string }; rootMessageId: string };
+    expect(annotated.rootMessageId).toBe(started.messageId);
+
+    const rail = (
+      await client.callTool({ name: 'list_topics', arguments: { spaceId } })
+    ).structuredContent as { topics: Array<{ id: string; rootMessage: { replyCount: number } | null }> };
+    const row = rail.topics.find((t) => t.id === annotated.topic.id);
+    expect(row?.rootMessage?.replyCount).toBe(1);
 
     const search = (
-      await client.callTool({ name: 'search_feed', arguments: { spaceId, query: 'webhook retries' } })
-    ).structuredContent as { results: Array<{ topicId: string }> };
-    expect(search.results.map((r) => r.topicId)).toContain(started.topicId);
+      await client.callTool({ name: 'search_space', arguments: { spaceId, query: 'webhook retries' } })
+    ).structuredContent as { messages: Array<{ threadRootId: string; topicTitle?: string }> };
+    const hit = search.messages.find((r) => r.threadRootId === started.messageId);
+    expect(hit).toBeDefined();
+    expect(hit!.topicTitle).toBe('Decide: webhook retry policy');
 
     const managed = (
       await client.callTool({
         name: 'manage_topic',
-        arguments: { spaceId, topicId: started.topicId, action: 'retitle', title: 'Webhook retry policy' },
+        arguments: { spaceId, topicId: annotated.topic.id, action: 'retitle', title: 'Decide: webhook retry policy (v2)' },
       })
     ).structuredContent as { topic: { title: string } };
-    expect(managed.topic.title).toBe('Webhook retry policy');
+    expect(managed.topic.title).toBe('Decide: webhook retry policy (v2)');
+
+    // remove converts back to a thread — the messages stay readable.
+    await client.callTool({
+      name: 'manage_topic',
+      arguments: { spaceId, topicId: annotated.topic.id, action: 'remove' },
+    });
+    const after = (
+      await client.callTool({ name: 'read_thread', arguments: { spaceId, rootMessageId: started.messageId } })
+    ).structuredContent as { topic: unknown; messages: Array<{ body: string }> };
+    expect(after.topic).toBeNull();
+    expect(after.messages).toHaveLength(1);
     await client.close();
   });
 

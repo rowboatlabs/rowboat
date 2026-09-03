@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
 import { Attribution, ActingMode } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, ChangeSetId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MessageId, SpaceId, StreamOffset } from './ids.js';
 
 // Decision 1 (CONTRACT.md): a proposal is full new content against a declared
 // base version; the org performs a line-level three-way merge. No operation
@@ -24,8 +24,8 @@ export const ChangeSet = z.object({
   attribution: Attribution,
   /** Commit-message-style reasoning. Optional for humans; the MCP face requires it (mcp.ts). */
   reason: z.string().max(1_000).optional(),
-  /** The topic the change was made from, when it was made from one (provenance). */
-  topicId: TopicId.optional(),
+  /** The thread the change was made from (its root message id), when it was made from one (provenance). */
+  threadRootId: MessageId.optional(),
   /** Present when the change produced a binary version (proposeChange's blob variant). */
   blob: BlobInfo.optional(),
   /**
@@ -50,8 +50,8 @@ export const ProposeChange = z.object({
   /** Binary variant: the address of bytes already uploaded to this space (uploadBlob). Exactly one of newContent/blob. */
   blob: BlobHash.optional(),
   reason: z.string().max(1_000).optional(),
-  /** Provenance: the topic this change was made from. Omitted by prompt-driven agents, which append "· topic:<id>" to the reason instead — the org derives topicId from that suffix (topicIdFromReason). */
-  topicId: TopicId.optional(),
+  /** Provenance: the thread this change was made from (root message id). Omitted by prompt-driven agents, which append "· thread:<id>" to the reason instead — the org derives threadRootId from that suffix (threadRootFromReason). */
+  threadRootId: MessageId.optional(),
   actingMode: ActingMode,
   agentName: z.string().max(64).optional(),
 }).superRefine((v, ctx) => {
@@ -63,11 +63,12 @@ export type ProposeChange = z.infer<typeof ProposeChange>;
 
 /**
  * The reason-suffix convention, owned here so both faces parse it identically:
- * a change made from a topic may carry "· topic:<id>" at the end of its reason
- * (legacy spelling "thread:"). Servers newer than migration 004 stamp the
- * parsed value into ChangeSet.topicId at commit time.
+ * a change made from a thread may carry "· thread:<root message id>" at the
+ * end of its reason (legacy spelling "topic:<id>", which pre-011 servers
+ * stamped as a topic id). The org stamps the parsed value into
+ * ChangeSet.threadRootId at commit time.
  */
-export function topicIdFromReason(reason: string | undefined): string | null {
+export function threadRootFromReason(reason: string | undefined): string | null {
   if (!reason) return null;
   const suffixed = /\s*·\s*(?:topic|thread):([0-9A-Za-z_-]+)\s*$/.exec(reason);
   if (suffixed) return suffixed[1]!;

@@ -3,43 +3,24 @@ import type { spaces } from '@x/shared'
 import {
     applyReaction,
     artifactsForThread,
-    buildThreadSeed,
-    deriveTopicTitle,
-    explicitTitle,
-    findGeneralTopic,
     formatDayLabel,
     isContinuation,
-    isGeneralSeedMessage,
     mergeMessages,
-    parseThreadMarker,
-    stripThreadMarker,
     stripThreadRef,
+    threadLabelOf,
     threadRefOf,
+    threadRootOf,
     withThreadRef,
 } from './spaces-conventions'
 
-function topic(over: Partial<spaces.Topic> & { id: string }): spaces.Topic {
-    return {
-        spaceId: 's1',
-        title: 'general',
-        kind: 'discussion',
-        createdBy: { memberId: 'arjun', actingMode: 'direct' },
-        createdAt: '2026-08-19T09:00:00Z',
-        archived: false,
-        lastActivityAt: '2026-08-19T09:00:00Z',
-        messageCount: 1,
-        ...over,
-    }
-}
-
 function msg(over: Partial<spaces.Message> & { id: string }): spaces.Message {
     return {
-        topicId: 't-general',
         spaceId: 's1',
         author: { memberId: 'gagan', actingMode: 'direct' },
         body: 'hello',
         postedAt: '2026-08-19T10:20:00Z',
         offset: 1,
+        replyCount: 0,
         reactions: [],
         ...over,
     }
@@ -58,100 +39,47 @@ function cs(over: Partial<spaces.ChangeSet> & { id: string }): spaces.ChangeSet 
     }
 }
 
-describe('general', () => {
-    it('picks the oldest open stream topic ("messages", or the legacy "general"), ignoring archived ones and case', () => {
-        const topics = [
-            topic({ id: 'b', createdAt: '2026-08-19T09:01:00Z', title: 'messages' }),
-            topic({ id: 'a', createdAt: '2026-08-19T09:00:00Z', title: 'General' }),
-            topic({ id: 'old-archived', createdAt: '2026-08-18T09:00:00Z', archived: true }),
-            topic({ id: 'other', title: 'roadmap' }),
-        ]
-        expect(findGeneralTopic(topics)?.id).toBe('a')
-        expect(findGeneralTopic([topic({ id: 'x', title: 'not general' })])).toBeNull()
+describe('thread identity', () => {
+    it('a message lives in its root’s thread — its own when it IS a root', () => {
+        expect(threadRootOf(msg({ id: 'root' }))).toBe('root')
+        expect(threadRootOf(msg({ id: 'reply', threadRoot: 'root' }))).toBe('root')
     })
-    it('prefers the server-marked stream (kind general) over any legacy title match', () => {
-        const topics = [
-            topic({ id: 'legacy-titled', createdAt: '2026-08-19T09:00:00Z', title: 'messages' }),
-            topic({ id: 'marked', createdAt: '2026-08-19T09:05:00Z', title: 'messages', kind: 'general' }),
-        ]
-        expect(findGeneralTopic(topics)?.id).toBe('marked')
-    })
-    it('recognises the seed message only as the first message of general', () => {
-        const general = topic({ id: 't-general' })
-        expect(isGeneralSeedMessage(general, msg({ id: 'm1', body: 'messages' }), 0)).toBe(true)
-        expect(isGeneralSeedMessage(general, msg({ id: 'm1b', body: 'general' }), 0)).toBe(true)
-        expect(isGeneralSeedMessage(general, msg({ id: 'm2', body: 'general' }), 3)).toBe(false)
-        expect(isGeneralSeedMessage(general, msg({ id: 'm3', body: 'hi' }), 0)).toBe(false)
-    })
-})
-
-describe('topic-from-message marker', () => {
-    const parent = msg({ id: '01J9PARENT', body: 'Standup — Wed. Shipped the copy pass.\nBlocked on SSO.', postedAt: '2026-08-19T10:20:00Z' })
-    it('puts the parent text first (so the title derives from it) and the marker after', () => {
-        const seed = buildThreadSeed(parent)
-        expect(seed.startsWith('Standup — Wed. Shipped the copy pass.')).toBe(true)
-        expect(seed).toContain('<!-- rowboat:topic parent=msg:01J9PARENT by=gagan at=2026-08-19T10:20:00Z -->')
-    })
-    it('round-trips and strips cleanly', () => {
-        const seed = buildThreadSeed(parent)
-        expect(parseThreadMarker(seed)).toEqual({ parentMessageId: '01J9PARENT', parentAuthorId: 'gagan', parentPostedAt: '2026-08-19T10:20:00Z' })
-        expect(stripThreadMarker(seed)).toBe('Standup — Wed. Shipped the copy pass.\nBlocked on SSO.')
-        expect(parseThreadMarker('just a message')).toBeNull()
-        expect(stripThreadMarker('just a message')).toBe('just a message')
-    })
-})
-
-describe('topic titles — derived vs explicitly renamed', () => {
-    it('deriveTopicTitle mirrors the server: first non-empty line, heading/bullet stripped, capped', () => {
-        expect(deriveTopicTitle('# Ship it\ndetails')).toBe('Ship it')
-        expect(deriveTopicTitle('\n\n- first bullet\nmore')).toBe('first bullet')
-        expect(deriveTopicTitle('   ')).toBe('Untitled')
-        const long = 'x'.repeat(300)
-        expect(deriveTopicTitle(long)).toBe(`${'x'.repeat(255)}…`)
-    })
-
-    it('a topic still wearing its auto-derived title has no explicit name', () => {
-        const seed = buildThreadSeed(msg({ id: '01J9PARENT', body: 'Standup — Wed. Shipped the copy pass.' }))
-        const t = topic({ id: '01J9TOPIC', title: deriveTopicTitle(seed) })
-        expect(explicitTitle(t, seed)).toBeNull()
-        // No first message loaded yet → stay compact rather than guessing.
-        expect(explicitTitle(t, null)).toBeNull()
-    })
-
-    it('a renamed topic surfaces its name — and renaming never touches the message body', () => {
-        const seed = buildThreadSeed(msg({ id: '01J9PARENT', body: 'Standup — Wed. Shipped the copy pass.' }))
-        const renamed = topic({ id: '01J9TOPIC', title: 'SSO rollout' })
-        expect(explicitTitle(renamed, seed)).toBe('SSO rollout')
-        // The seed (the first message) is an input, never an output: unchanged.
-        expect(stripThreadMarker(seed)).toBe('Standup — Wed. Shipped the copy pass.')
+    it('labels a plain thread by its root’s first line, markdown scaffolding stripped', () => {
+        expect(threadLabelOf('# Ship it\ndetails')).toBe('Ship it')
+        expect(threadLabelOf('\n\n- first bullet\nmore')).toBe('first bullet')
+        expect(threadLabelOf('![shot](https://x/b/abc)')).toBe('Thread')
+        expect(threadLabelOf('   ')).toBe('Thread')
+        expect(threadLabelOf('x'.repeat(100))).toBe(`${'x'.repeat(79)}…`)
     })
 })
 
 describe('artifact provenance', () => {
-    it('appends, reads and strips the thread ref on reasons', () => {
-        expect(withThreadRef('Folded SSO decision under P1', 'T1')).toBe('Folded SSO decision under P1 · topic:T1')
-        expect(withThreadRef('', 'T1')).toBe('topic:T1')
-        expect(withThreadRef('x · topic:OLD', 'T2')).toBe('x · topic:T2')
-        expect(threadRefOf('Folded SSO decision under P1 · topic:T1')).toBe('T1')
-        expect(threadRefOf('topic:T1')).toBe('T1')
+    it('appends, reads and strips the thread ref on reasons (legacy "topic:" still parses)', () => {
+        expect(withThreadRef('Folded SSO decision under P1', 'M1')).toBe('Folded SSO decision under P1 · thread:M1')
+        expect(withThreadRef('', 'M1')).toBe('thread:M1')
+        expect(withThreadRef('x · thread:OLD', 'M2')).toBe('x · thread:M2')
+        expect(withThreadRef('x · topic:OLD', 'M2')).toBe('x · thread:M2')
+        expect(threadRefOf('Folded SSO decision under P1 · thread:M1')).toBe('M1')
+        expect(threadRefOf('legacy · topic:T1')).toBe('T1')
+        expect(threadRefOf('thread:M1')).toBe('M1')
         expect(threadRefOf('no ref here')).toBeNull()
         expect(threadRefOf(undefined)).toBeNull()
-        expect(stripThreadRef('Folded · topic:T1')).toBe('Folded')
-        expect(stripThreadRef('topic:T1')).toBe('')
+        expect(stripThreadRef('Folded · thread:M1')).toBe('Folded')
+        expect(stripThreadRef('thread:M1')).toBe('')
     })
-    it('groups a thread’s change-sets by file with the version span, newest group first', () => {
+    it('groups a thread’s change-sets by file with the version span, newest group first — contract field first, suffix as fallback', () => {
         const groups = artifactsForThread([
-            cs({ id: 'c1', baseVersion: 31, resultVersion: 32, committedAt: '2026-08-19T11:44:00Z', reason: 'Folded SSO under P1 · topic:T1' }),
-            cs({ id: 'c2', baseVersion: 32, resultVersion: 33, committedAt: '2026-08-19T11:46:00Z', reason: 'tidy · topic:T1' }),
-            cs({ id: 'c3', assetPath: 'decisions/sso.md', baseVersion: 0, resultVersion: 1, committedAt: '2026-08-19T11:45:00Z', reason: 'SOW wording · topic:T1' }),
-            cs({ id: 'other', committedAt: '2026-08-19T12:00:00Z', reason: 'unrelated · topic:T9' }),
+            cs({ id: 'c1', baseVersion: 31, resultVersion: 32, committedAt: '2026-08-19T11:44:00Z', threadRootId: 'M1', reason: 'Folded SSO under P1' }),
+            cs({ id: 'c2', baseVersion: 32, resultVersion: 33, committedAt: '2026-08-19T11:46:00Z', reason: 'tidy · thread:M1' }),
+            cs({ id: 'c3', assetPath: 'decisions/sso.md', baseVersion: 0, resultVersion: 1, committedAt: '2026-08-19T11:45:00Z', reason: 'SOW wording · thread:M1' }),
+            cs({ id: 'other', committedAt: '2026-08-19T12:00:00Z', reason: 'unrelated · thread:M9' }),
             cs({ id: 'cold', committedAt: '2026-08-19T12:01:00Z', reason: 'edited in Files' }),
-        ], 'T1')
+        ], 'M1')
         expect(groups.map((g) => g.assetPath)).toEqual(['roadmap.md', 'decisions/sso.md'])
         expect(groups[0]).toMatchObject({ fromVersion: 31, toVersion: 33 })
         expect(groups[0]!.changeSets.map((c) => c.id)).toEqual(['c2', 'c1'])
         expect(groups[1]).toMatchObject({ fromVersion: 0, toVersion: 1 })
-        expect(artifactsForThread([], 'T1')).toEqual([])
+        expect(artifactsForThread([], 'M1')).toEqual([])
     })
 })
 

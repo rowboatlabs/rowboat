@@ -8,8 +8,8 @@ import { pgliteDb } from './pglite.js';
 
 // Store-level paths the §11 day doesn't walk, exercised on real Postgres
 // through the real service (no HTTP — this is the storage contract, not the
-// wire one): history pagination, merge_into reassignment, invite expiry,
-// archived filtering, search over jsonb-backed rows.
+// wire one): history pagination, thread pointers + reply denorm, topic
+// lifecycle, invite expiry, search over jsonb-backed rows.
 
 let db: SqlDb;
 let store: PgStore;
@@ -71,34 +71,49 @@ describe('PgStore through the service', () => {
     expect(v3.recentHistory.every((cs) => cs.resultVersion <= 3)).toBe(true);
   });
 
-  it('merge_into repoints messages in order, archives the source, survives round-trip', async () => {
-    const a = await service.postMessage(ram, spaceId, { body: 'Topic A', actingMode: 'direct' });
-    const b = await service.postMessage(gagan, spaceId, { body: 'Topic B', actingMode: 'direct' });
-    await service.postMessage(gagan, spaceId, { topicId: b.topic.id, body: 'B follow-up', actingMode: 'direct' });
+  it('thread pointers and the reply denorm hold on Postgres; topic lifecycle is one-row', async () => {
+    const a = await service.postMessage(ram, spaceId, { body: 'Root A', actingMode: 'direct' });
+    const reply = await service.postMessage(gagan, spaceId, { threadRoot: a.message.id, body: 'A follow-up', actingMode: 'direct' });
+    expect(reply.message.threadRoot).toBe(a.message.id);
 
-    const merged = await service.manageTopic(ram, spaceId, b.topic.id, {
-      action: 'merge_into',
-      targetTopicId: a.topic.id,
+    const root = await store.getMessage(spaceId, a.message.id);
+    expect(root?.replyCount).toBe(1);
+    expect(root?.lastReplyAt).toBe(reply.message.postedAt);
+
+    const { topic } = await service.createTopic(ram, spaceId, {
+      rootMessageId: a.message.id,
+      title: 'Decide: root A things',
+      actingMode: 'direct',
     });
-    expect(merged.id).toBe(a.topic.id);
-    expect(merged.messageCount).toBe(3);
-
-    const thread = await service.listMessages(ram, spaceId, a.topic.id);
-    expect(thread.messages.map((m) => m.body)).toEqual(['Topic A', 'Topic B', 'B follow-up']);
-
     const visible = await service.listTopics(ram, spaceId, false);
-    expect(visible.map((t) => t.id)).not.toContain(b.topic.id);
-    const all = await service.listTopics(ram, spaceId, true);
-    expect(all.find((t) => t.id === b.topic.id)?.archived).toBe(true);
+    expect(visible.map((t) => t.id)).toContain(topic.id);
+
+    await service.manageTopic(ram, spaceId, topic.id, { action: 'archive', actingMode: 'direct' });
+    expect((await service.listTopics(ram, spaceId, false)).map((t) => t.id)).not.toContain(topic.id);
+    expect((await service.listTopics(ram, spaceId, true)).find((t) => t.id === topic.id)?.archived).toBe(true);
+
+    // Remove: the row goes, the thread is untouched, on real Postgres.
+    await service.manageTopic(ram, spaceId, topic.id, { action: 'remove', actingMode: 'direct' });
+    expect(await store.getTopicByRoot(spaceId, a.message.id)).toBeUndefined();
+    const thread = await service.listThread(ram, spaceId, a.message.id);
+    expect(thread.topic).toBeNull();
+    expect(thread.messages.map((m) => m.body)).toEqual(['A follow-up']);
   });
 
-  it('search finds title and body matches across jsonb-backed rows', async () => {
-    await service.postMessage(ram, spaceId, { body: 'Webhook retry strategy\nexponential backoff', actingMode: 'direct' });
-    const byTitle = await service.searchFeed(ram, spaceId, 'webhook retry');
-    expect(byTitle.length).toBe(1);
-    const byBody = await service.searchFeed(ram, spaceId, 'exponential');
-    expect(byBody.length).toBe(1);
-    expect(byBody[0]!.snippet).toContain('exponential');
+  it('search finds topic-title and body matches across jsonb-backed rows', async () => {
+    const posted = await service.postMessage(ram, spaceId, { body: 'exponential backoff, capped', actingMode: 'direct' });
+    await service.createTopic(ram, spaceId, {
+      rootMessageId: posted.message.id,
+      title: 'Decide: webhook retry strategy',
+      actingMode: 'direct',
+    });
+    const byTitle = await service.search(ram, spaceId, 'webhook retry');
+    expect(byTitle.topics.length).toBe(1);
+    expect(byTitle.topics[0]!.topic.rootMessageId).toBe(posted.message.id);
+    const byBody = await service.search(ram, spaceId, 'exponential');
+    expect(byBody.messages.length).toBe(1);
+    expect(byBody.messages[0]!.snippet).toContain('exponential');
+    expect(byBody.messages[0]!.topicTitle).toBe('Decide: webhook retry strategy');
   });
 
   it('invite expiry round-trips through storage', async () => {
@@ -124,7 +139,7 @@ describe('PgStore through the service', () => {
     expect(reread?.attribution).toEqual({ memberId: 'gagan', actingMode: 'agent', agentName: 'Claude Code' });
   });
 
-  it('reactions toggle on Postgres and follow a message across merge_into', async () => {
+  it('reactions toggle on Postgres and fold on windowed reads', async () => {
     const posted = await service.postMessage(ram, spaceId, { body: 'React to me', actingMode: 'direct' });
     const messageId = posted.message.id;
 
@@ -141,14 +156,9 @@ describe('PgStore through the service', () => {
     const stored = await store.getReaction(spaceId, messageId, '👍', 'ramnique');
     expect(stored?.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'Rowboat' });
 
-    // The reaction rides the message into the target topic (join, not a topic_id column).
-    const target = await service.postMessage(gagan, spaceId, { body: 'Merge target', actingMode: 'direct' });
-    await service.manageTopic(ram, spaceId, posted.topic.id, {
-      action: 'merge_into',
-      targetTopicId: target.topic.id,
-    });
-    const merged = await service.listMessages(ram, spaceId, target.topic.id);
-    expect(merged.messages.find((m) => m.id === messageId)?.reactions).toEqual([
+    // Windowed stream reads fold the same state in.
+    const stream = await service.listStream(ram, spaceId);
+    expect(stream.messages.find((m) => m.id === messageId)?.reactions).toEqual([
       { emoji: '👍', memberIds: ['gagan', 'ramnique'] },
     ]);
 
@@ -178,13 +188,53 @@ describe('PgStore through the service', () => {
     expect(messageEvent.event).toMatchObject({ message: { body: '', deletedAt: deleted.deletedAt } });
     const deletion = events.find((e) => e.event.type === 'message_deleted')!;
     expect(deletion.event).toMatchObject({
-      deletion: { messageId, topicId: posted.topic.id, by: { memberId: 'ramnique', actingMode: 'direct' } },
+      deletion: { messageId, by: { memberId: 'ramnique', actingMode: 'direct' } },
     });
 
     // Idempotent: re-deleting writes nothing new.
     const head = await service.headOffset(spaceId);
     await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
     expect(await service.headOffset(spaceId)).toBe(head);
+  });
+
+  it('polls round-trip through jsonb: definition on the row, votes fold, single-select move, early end', async () => {
+    const posted = await service.postMessage(ram, spaceId, {
+      body: '📊 **Where to?**',
+      poll: { question: 'Where to?', answers: [{ text: 'A' }, { text: 'B', emoji: '🅱️' }], durationHours: 2 },
+      actingMode: 'direct',
+    });
+    const messageId = posted.message.id;
+    expect(posted.message.poll?.answers).toEqual([
+      { id: 1, text: 'A' },
+      { id: 2, text: 'B', emoji: '🅱️' },
+    ]);
+
+    // Votes fold from the poll_votes table; the single-select move rewrites in one lock.
+    await service.votePoll(gagan, spaceId, messageId, { answerId: 1, action: 'add', actingMode: 'direct' });
+    const moved = await service.votePoll(gagan, spaceId, messageId, { answerId: 2, action: 'add', actingMode: 'direct' });
+    expect(moved.poll?.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
+    const listed = await service.listStream(ram, spaceId);
+    expect(listed.messages.find((m) => m.id === messageId)?.poll?.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
+
+    // Early end stamps the row's poll jsonb; the stored message event keeps its at-post poll.
+    const ended = await service.endPoll(ram, spaceId, messageId, { actingMode: 'direct' });
+    expect(ended.poll?.endedAt).toBeTruthy();
+    expect((await store.getMessage(spaceId, messageId))?.poll?.endedAt).toBe(ended.poll?.endedAt);
+    const events = await service.eventsAfter(spaceId, 0);
+    const messageEvent = events.find((e) => e.event.type === 'message' && e.event.message.id === messageId)!;
+    expect((messageEvent.event as { message: { poll?: { endedAt?: string } } }).message.poll?.endedAt).toBeUndefined();
+    expect(events.some((e) => e.event.type === 'poll_ended')).toBe(true);
+
+    // Deletion redacts the poll from the row and the stored event alike, and
+    // the poll_votes rows go with it — gagan's vote on B must not outlive the poll.
+    expect(await store.listPollVotesForMessages(spaceId, [messageId])).toHaveLength(1);
+    const deleted = await service.deleteMessage(ram, spaceId, messageId, { actingMode: 'direct' });
+    expect(deleted.poll).toBeUndefined();
+    expect(await store.listPollVotesForMessages(spaceId, [messageId])).toEqual([]);
+    const redacted = (await service.eventsAfter(spaceId, 0)).find(
+      (e) => e.event.type === 'message' && e.event.message.id === messageId,
+    )!;
+    expect((redacted.event as { message: { poll?: unknown } }).message.poll).toBeUndefined();
   });
 
   it('identity mapping: (iss, sub) → member, upsert repoints, unmapped is undefined', async () => {

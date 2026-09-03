@@ -1,11 +1,11 @@
 import * as React from 'react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
+import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace, quickAskShortcut } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
@@ -19,6 +19,7 @@ import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './compo
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
+import { VoiceNoteButton } from '@/components/voice-note-button'
 import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
@@ -33,6 +34,7 @@ import {
   reloadCleanActiveMarkdownAfterExternalChange,
 } from '@/lib/active-markdown-external-change';
 import { useDebounce } from './hooks/use-debounce';
+import { DockSidebar, DOCK_GUTTER_PX, LAST_SPACE_STORAGE_KEY } from '@/components/dock-sidebar';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
@@ -50,6 +52,12 @@ import { ChatHistoryView } from '@/components/chat-history-view';
 import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
+import { CodeWorkspaceDrawer } from '@/components/code/workspace-drawer';
+import type { CodePanel } from '@/components/code/code-panels';
+import { CODE_RAIL_WIDTH } from '@/components/code/session-rail';
+import { useCodeGitStatus } from '@/components/code/use-code-git-status';
+import { refreshCodeSessions } from '@/components/code/use-code-sessions';
+import { CodeDiffOpenerProvider } from '@/contexts/code-diff-context';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   type PromptInputMessage,
@@ -125,7 +133,6 @@ interface TreeNode extends DirEntry {
   loaded?: boolean
 }
 
-const DEFAULT_SIDEBAR_WIDTH = 256
 const DEFAULT_CHAT_PANE_WIDTH = 460
 const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
 const graphPalette = [
@@ -173,13 +180,24 @@ function toSpeakableText(markdown: string): string {
   return lastStop > 200 ? cut.slice(0, lastStop + 1) : cut
 }
 
+// Everything the middle pane can show, in the precedence order of the old
+// view ternary. Section views in KEEP_ALIVE_SECTIONS stay mounted inside an
+// <Activity> once visited — hidden ones keep state and DOM (instant switches,
+// scroll preserved) while React pauses their effects. The rest (overlays,
+// file editors, the full-screen chat) mount and unmount as before.
+type MiddleView =
+  | 'browser' | 'home' | 'suggested-topics' | 'meetings' | 'code' | 'live-notes'
+  | 'bg-tasks' | 'apps' | 'spaces' | 'email' | 'workspace' | 'knowledge'
+  | 'chat-history' | 'bases' | 'graph' | 'file' | 'task' | 'chat'
+
+const KEEP_ALIVE_SECTIONS: ReadonlySet<MiddleView> = new Set<MiddleView>([
+  'home', 'meetings', 'code', 'bg-tasks', 'apps', 'spaces', 'email', 'workspace', 'knowledge',
+])
+
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
-const TITLEBAR_BUTTON_PX = 32
-const TITLEBAR_BUTTON_GAP_PX = 4
-const TITLEBAR_HEADER_GAP_PX = 8
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
-const TITLEBAR_BUTTONS_COLLAPSED = 1
-const TITLEBAR_BUTTON_GAPS_COLLAPSED = 0
+// The expanded/collapsed sidebar choice, persisted per machine.
+const SIDEBAR_VIEW_STORAGE_KEY = 'x:sidebar-view'
 const WORKSPACE_ROOT = 'knowledge/Workspace'
 // Sentinel path for the default Bases view (a virtual "file" the bases table
 // renders under). The other __rowboat_* sentinel tab paths died with the tab
@@ -712,39 +730,57 @@ function parseDeepLink(input: string): ViewState | null {
       const orgId = params.get('orgId')
       const spaceId = params.get('spaceId')
       if (!orgId || !spaceId) return { type: 'spaces' }
-      const topicId = params.get('topicId')
-      return { type: 'spaces', orgId, spaceId, ...(topicId ? { rail: { kind: 'topic' as const, topicId } } : {}) }
+      const threadRootId = params.get('threadRootId')
+      return { type: 'spaces', orgId, spaceId, ...(threadRootId ? { rail: { kind: 'thread' as const, rootMessageId: threadRootId } } : {}) }
     }
     default:
       return null
   }
 }
 
-/** Sidebar toggle (fixed position, top-left) */
+/** Sidebar toggle (fixed position, top-left) — one persistent control that
+    swaps between the expanded panel and the dock, in both directions. */
 function FixedSidebarToggle({
   leftInsetPx,
+  onNewChat,
+  onVoiceNoteCreated,
 }: {
   leftInsetPx: number
+  onNewChat?: () => void
+  onVoiceNoteCreated?: (path: string) => void
 }) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, state } = useSidebar()
   return (
     <div className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
-      {/* Sidebar toggle */}
       <button
         type="button"
         onClick={toggleSidebar}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
-        aria-label="Toggle Sidebar"
+        aria-label="Toggle sidebar"
+        title={state === 'collapsed' ? 'Expand sidebar' : 'Collapse to dock'}
       >
-        <PanelLeftIcon className="size-5" />
+        <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
       </button>
+      {onNewChat && (
+        <button
+          type="button"
+          onClick={onNewChat}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          aria-label="New chat"
+          title="New chat"
+        >
+          <SquarePen className="size-[17px]" strokeWidth={1.5} />
+        </button>
+      )}
+      <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} variant="action" />
     </div>
   )
 }
 
-/** Main content header that adjusts padding based on sidebar state */
+/** Main content header. The traffic lights live over the expanded panel or
+    the dock gutter, so a small constant left padding is enough. */
 function ContentHeader({
   children,
   onNavigateBack,
@@ -761,12 +797,11 @@ function ContentHeader({
   collapsedLeftPaddingPx?: number
 }) {
   const { state } = useSidebar()
-  const isCollapsed = state === "collapsed"
   return (
     <header
-      className="rowboat-titlebar titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar overflow-hidden"
+      className="rowboat-titlebar titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-background overflow-hidden"
       style={{
-        paddingLeft: isCollapsed ? (collapsedLeftPaddingPx ?? 196) : 12,
+        paddingLeft: state === 'collapsed' ? (collapsedLeftPaddingPx ?? 12) : 12,
         paddingRight: 12,
         transition: 'padding-left 200ms linear',
       }}
@@ -832,14 +867,16 @@ function App() {
   const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [isAppsOpen, setIsAppsOpen] = useState(false)
   const [isSpacesOpen, setIsSpacesOpen] = useState(false)
-  // Spaces keeps its view mounted after the first open (hidden, not torn
-  // down) — reopening must be instant, not a full remount of the pane.
-  const [spacesEverOpened, setSpacesEverOpened] = useState(false)
-  useEffect(() => {
-    if (isSpacesOpen) setSpacesEverOpened(true)
-  }, [isSpacesOpen])
   // The space open in the Spaces view (org + space); the sidebar highlights it.
   const [spaceSelection, setSpaceSelection] = useState<SpaceSelection>(null)
+  // Remember the last space opened (any route in) — the ⌥Tab switcher lands
+  // there directly instead of opening the spaces flyout.
+  useEffect(() => {
+    if (!spaceSelection) return
+    try {
+      window.localStorage.setItem(LAST_SPACE_STORAGE_KEY, JSON.stringify(spaceSelection))
+    } catch { /* ignore */ }
+  }, [spaceSelection])
   // What's selected inside the open space (general / topic / file) — part of the history.
   const [railSelection, setRailSelection] = useState<RailSelection>({ kind: 'general' })
   const [isEmailOpen, setIsEmailOpen] = useState(false)
@@ -892,12 +929,29 @@ function App() {
   const [liveNotePanelPath, setLiveNotePanelPath] = useState<string | null>(null)
   const [, setActiveShortcutPane] = useState<ShortcutPane>('left')
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
-  const collapsedLeftPaddingPx =
+  // In dock mode the fixed toggle button overhangs the pane's left edge
+  // (the gutter is narrower than traffic lights + toggle), so top bars pad
+  // past it; the expanded panel absorbs the toggle, so ordinary padding.
+  const collapsedLeftPaddingPx = Math.max(
+    12,
     (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) +
-    TITLEBAR_TOGGLE_MARGIN_LEFT_PX +
-    TITLEBAR_BUTTON_PX * TITLEBAR_BUTTONS_COLLAPSED +
-    TITLEBAR_BUTTON_GAP_PX * TITLEBAR_BUTTON_GAPS_COLLAPSED +
-    TITLEBAR_HEADER_GAP_PX
+      TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 32 + 8 - DOCK_GUTTER_PX,
+  )
+  // Expanded panel vs. collapsed dock — the collapse button swaps between
+  // them; the choice persists per machine.
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY) !== 'dock'
+    } catch {
+      return true
+    }
+  })
+  const handleSidebarOpenChange = useCallback((open: boolean) => {
+    setSidebarOpen(open)
+    try {
+      window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, open ? 'panel' : 'dock')
+    } catch { /* keep in-memory behavior */ }
+  }, [])
 
   // Keep the latest selected path in a ref (avoids stale async updates when switching rapidly)
   const selectedPathRef = useRef<string | null>(null)
@@ -2631,8 +2685,14 @@ function App() {
   // Deep-link into the Code section (a Home Deck strip's door): select this
   // session when the view opens, then clear.
   const [codeFocusSessionId, setCodeFocusSessionId] = useState<string | null>(null)
-  // A file the code chat asked to review — consumed by the workspace pane.
+  // A file the code chat asked to review — consumed by the workspace drawer.
   const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
+  // Which workspace panel (changes / files / terminal) is open beside the
+  // code chat, if any. The chat is the main surface; these are a button away.
+  const [codePanel, setCodePanel] = useState<CodePanel | null>(null)
+  // Working-tree status of the selected code session — the chat header shows
+  // the changed-file count even while the drawer is closed.
+  const codeGit = useCodeGitStatus(activeCodeSession?.session.id ?? null, activeCodeSession?.status ?? 'idle')
   // Composer locks for runs that are code sessions: the session's cwd + agent
   // are frozen in the chat input (the backend pins them server-side anyway).
   // Kept after the Code view unmounts — the chat stays bound to the session.
@@ -4501,6 +4561,17 @@ function App() {
     // The conversation lives in the dock — selecting a session must show it.
     setIsChatSidebarOpen(true)
   }, [bindChatToRun])
+
+  // Chat-header doors to the workspace drawer: clicking the open one closes it.
+  const toggleCodePanel = useCallback((panel: CodePanel) => {
+    setCodePanel((prev) => (prev === panel ? null : panel))
+  }, [])
+  // A changed file clicked inside a coding run: open the drawer on its diff.
+  const openCodeDiff = useCallback((path: string) => {
+    setCodeDiffPath(path)
+    setCodePanel('changes')
+  }, [])
+  const handleCodeDiffOpened = useCallback(() => setCodeDiffPath(null), [])
 
   useEffect(() => {
     let cleanupScrollListener: (() => void) | undefined
@@ -6617,11 +6688,20 @@ function App() {
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
   const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isSpacesOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || isBrowserOpen)
-  const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
+  // Code mode with a session selected: the chat is the main surface — the
+  // middle pane is just the session rail and the chat fills the rest, with
+  // the workspace drawer at its edge. Before a session is picked the empty
+  // state owns the pane and the chat stays out of the way.
+  const codeChatMain = isCodeOpen && activeCodeSession !== null
+  const chatPaneOpen = isCodeOpen ? codeChatMain : isChatSidebarOpen
+  const isRightPaneOnlyMode = isRightPaneContext && chatPaneOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
-    if (!isRightPaneContext || !isChatSidebarOpen || isRightPaneMaximized) return style
+    if (!isRightPaneContext || !chatPaneOpen || isRightPaneMaximized) return style
+    if (codeChatMain) {
+      return { ...style, width: CODE_RAIL_WIDTH, flex: '0 0 auto' }
+    }
     if (chatPaneSize === 'chat-equal') {
       return { ...style, width: 0, flex: '1 1 0' }
     }
@@ -6629,7 +6709,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [chatPaneSize, insetMaxWidth, isChatSidebarOpen, isRightPaneContext, isRightPaneMaximized])
+  }, [chatPaneSize, codeChatMain, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -6651,6 +6731,94 @@ function App() {
     })
     return () => cancelAnimationFrame(id)
   }, [shouldCollapseLeftPane, insetCollapseFromPx])
+  // What the middle pane shows right now — same precedence the old view
+  // ternary had. Keep-alive sections stay mounted (hidden) once visited.
+  const activeMiddle: MiddleView =
+    isBrowserOpen ? 'browser'
+    : isHomeOpen ? 'home'
+    : isSuggestedTopicsOpen ? 'suggested-topics'
+    : isMeetingsOpen ? 'meetings'
+    : isCodeOpen ? 'code'
+    : isLiveNotesOpen ? 'live-notes'
+    : isBgTasksOpen ? 'bg-tasks'
+    : isAppsOpen ? 'apps'
+    : isSpacesOpen ? 'spaces'
+    : isEmailOpen ? 'email'
+    : isWorkspaceOpen ? 'workspace'
+    : isKnowledgeViewOpen ? 'knowledge'
+    : isChatHistoryOpen ? 'chat-history'
+    : selectedPath && isBaseFilePath(selectedPath) ? 'bases'
+    : isGraphOpen ? 'graph'
+    : selectedPath ? 'file'
+    : selectedTask ? 'task'
+    : 'chat'
+  const [visitedSections, setVisitedSections] = useState<ReadonlySet<MiddleView>>(() => new Set())
+  useEffect(() => {
+    if (!KEEP_ALIVE_SECTIONS.has(activeMiddle)) return
+    setVisitedSections((prev) => {
+      if (prev.has(activeMiddle)) return prev
+      const next = new Set(prev)
+      next.add(activeMiddle)
+      return next
+    })
+  }, [activeMiddle])
+  /** Mounted = visited at least once (or showing now); visible = showing now. */
+  const sectionMounted = (key: MiddleView) => activeMiddle === key || visitedSections.has(key)
+
+  // Everything the left navigation needs, shared by its two forms: the
+  // expanded panel sidebar and the collapsed floating dock.
+  const sidebarNavProps = {
+    tree,
+    knowledgeActions,
+    bgTaskSummaries,
+    activeNav: (
+      // The browser overlay covers whatever section is open underneath — while
+      // it's up, only the Browser tile should read as active (its own
+      // browserOpen dot), not the hidden section.
+      isBrowserOpen ? null
+      : isHomeOpen ? 'home'
+      : isEmailOpen ? 'email'
+      : isMeetingsOpen ? 'meetings'
+      : isCodeOpen ? 'code'
+      : (isKnowledgeViewOpen || isGraphOpen || (selectedPath != null && selectedPath.startsWith('knowledge/'))) ? 'knowledge'
+      : isBgTasksOpen ? 'agents'
+      : isAppsOpen ? 'apps'
+      : isSpacesOpen ? 'spaces'
+      : isWorkspaceOpen ? 'workspaces'
+      // Full-screen chat (no section, file, or task open) is the Assistant's
+      // own surface — it carries the dock dot and the switcher's MRU rank.
+      : isFullScreenChat ? 'assistant'
+      : null
+    ) as 'assistant' | 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'spaces' | 'workspaces' | null,
+    onOpenMeetings: openMeetingsView,
+    onOpenCode: openCodeView,
+    onOpenBgTasks: () => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() },
+    onOpenApps: openAppsGrid,
+    onOpenApp: (folder: string) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() },
+    onOpenSpace: openSpace,
+    activeSpace: isSpacesOpen ? spaceSelection : null,
+    recentRuns: runs,
+    onOpenRun: (rid: string) => void navigateToView({ type: 'chat', runId: rid }),
+    onRenameRun: (rid: string, title: string) => {
+      void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
+        .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
+        .catch((err) => console.error('Failed to rename chat:', err))
+    },
+    onDeleteRun: (rid: string) => {
+      void window.ipc.invoke('sessions:delete', { sessionId: rid })
+        .then(() => handleRunDeleted(rid))
+        .catch((err) => console.error('Failed to delete chat:', err))
+    },
+    onOpenChatHistory: () => void navigateToView({ type: 'chat-history' }),
+    onOpenEmail: (threadId?: string) => openEmailView(threadId),
+    onOpenHome: () => void navigateToView({ type: 'home' }),
+    onNewChat: handleNewChatTab,
+    onToggleBrowser: handleToggleBrowser,
+    onStartTour: () => setTourActive(true),
+    meetingRecordingState: meetingTranscription.state,
+    recordingMeetingSource,
+    onToggleMeetingRecording: () => { void handleToggleMeeting() },
+  }
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
@@ -6659,59 +6827,31 @@ function App() {
         }
       }}>
         <div className="rowboat-shell flex h-svh w-full overflow-hidden">
-          {/* Content sidebar with SidebarProvider for collapse functionality */}
+          {/* Left navigation, two forms: expanded = the panel sidebar,
+              collapsed = the floating dock. The collapse button (fixed
+              top-left) and the dock's expand button swap between them; the
+              gutter padding clears the dock when it's showing. */}
           <SidebarProvider
+            open={sidebarOpen}
+            onOpenChange={handleSidebarOpenChange}
             style={{
-              "--sidebar-width": `${DEFAULT_SIDEBAR_WIDTH}px`,
-            } as React.CSSProperties}
+              paddingLeft: sidebarOpen ? 0 : DOCK_GUTTER_PX,
+              transition: 'padding-left 200ms linear',
+            }}
           >
             <SidebarContentPanel
-              tree={tree}
+              {...sidebarNavProps}
               onSelectFile={toggleExpand}
-              knowledgeActions={knowledgeActions}
-              bgTaskSummaries={bgTaskSummaries}
-              activeNav={
-                isHomeOpen ? 'home'
-                : isEmailOpen ? 'email'
-                : isMeetingsOpen ? 'meetings'
-                : isCodeOpen ? 'code'
-                : (isKnowledgeViewOpen || isGraphOpen || (selectedPath != null && selectedPath.startsWith('knowledge/'))) ? 'knowledge'
-                : isBgTasksOpen ? 'agents'
-                : isAppsOpen ? 'apps'
-                : isSpacesOpen ? 'spaces'
-                : isWorkspaceOpen ? 'workspaces'
-                : null
-              }
-              onOpenMeetings={openMeetingsView}
-              onOpenCode={openCodeView}
-              onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-              onOpenApps={openAppsGrid}
-              onOpenApp={(folder) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() }}
-              onOpenSpace={openSpace}
-              activeSpace={isSpacesOpen ? spaceSelection : null}
-              recentRuns={runs}
-              onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-              onRenameRun={(rid, title) => {
-                void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
-                  .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
-                  .catch((err) => console.error('Failed to rename chat:', err))
-              }}
-              onDeleteRun={(rid) => {
-                void window.ipc.invoke('sessions:delete', { sessionId: rid })
-                  .then(() => handleRunDeleted(rid))
-                  .catch((err) => console.error('Failed to delete chat:', err))
-              }}
-              onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
-              onOpenEmail={(threadId) => openEmailView(threadId)}
-              onOpenHome={() => void navigateToView({ type: 'home' })}
-              onNewChat={handleNewChatTab}
-              onToggleBrowser={handleToggleBrowser}
               onVoiceNoteCreated={handleVoiceNoteCreated}
-              onStartTour={() => setTourActive(true)}
-              meetingRecordingState={meetingTranscription.state}
-              recordingMeetingSource={recordingMeetingSource}
-              onToggleMeetingRecording={() => { void handleToggleMeeting() }}
+            />
+            {/* Always mounted: renders the tray when collapsed, and only the
+                ⌥/⌃+Tab switcher while the panel is expanded (so the MRU order
+                survives toggling between the two). */}
+            <DockSidebar
+              {...sidebarNavProps}
+              browserOpen={isBrowserOpen}
+              switcherOnly={sidebarOpen}
             />
             <SidebarInset
               className={cn(
@@ -6725,7 +6865,7 @@ function App() {
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}
             >
-              {/* Header - also serves as titlebar drag region, adjusts padding when sidebar collapsed */}
+              {/* Header - also serves as titlebar drag region */}
               <ContentHeader
                 onNavigateBack={() => { void navigateBack() }}
                 onNavigateForward={() => { void navigateForward() }}
@@ -6821,9 +6961,10 @@ function App() {
                   const viewOpen = !isFullScreenChat
                   const action = isFullScreenChat
                     ? { onClick: pushChatToSidePane, icon: <ArrowRight className="size-5" />, label: 'Dock chat to side pane' }
-                    : (viewOpen && !isChatSidebarOpen)
+                    : (viewOpen && !chatPaneOpen && !isCodeOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
-                      : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
+                      // In Code mode the chat IS the section — nothing to expand into.
+                      : (viewOpen && chatPaneOpen && !isRightPaneMaximized && !codeChatMain)
                         ? {
                             onClick: () => setIsChatSidebarOpen(false),
                             icon: isChatPaneInMiddle ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />,
@@ -6853,32 +6994,18 @@ function App() {
                 })()}
               </ContentHeader>
 
-              {/* Spaces stays mounted once opened (Slack-style keep-alive):
-                  hiding instead of unmounting makes reopening instant. The
-                  active flag gates presence + read marks while hidden. */}
-              {(isSpacesOpen || spacesEverOpened) && (
-                <div className={isSpacesOpen && !isBrowserOpen ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'hidden'}>
-                  <SpacesView
-                    active={isSpacesOpen && !isBrowserOpen}
-                    selection={spaceSelection}
-                    onSelect={setSpaceSelection}
-                    railSelection={railSelection}
-                    onRailSelect={(rail) => {
-                      // In-space navigation is real navigation: each selection is a history entry,
-                      // so the top ‹ › retrace general → topic → file.
-                      if (spaceSelection) void navigateToView({ type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail })
-                      else setRailSelection(rail)
-                    }}
-                    onOpenSession={(sessionId) => void navigateToView({ type: 'chat', runId: sessionId })}
-                  />
-                </div>
-              )}
-              {isBrowserOpen ? (
+{/* Middle pane. Section views wrapped in <Activity> stay
+                  mounted once visited — hidden = state+DOM kept, effects
+                  paused — so section switches are instant. The other branches
+                  mount/unmount exactly as before. */}
+              {activeMiddle === 'browser' && (
                 <BrowserPane
                   onClose={handleCloseBrowser}
                   forceHidden={isSearchOpen || showMeetingPermissions}
                 />
-              ) : isHomeOpen ? (
+              )}
+              {sectionMounted('home') && (
+                <Activity mode={activeMiddle === 'home' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                     <TodoView
                       composer={
@@ -6994,7 +7121,9 @@ function App() {
                       attendedSessionId={inCall ? hoverRunId : null}
                     />
                 </div>
-              ) : isSuggestedTopicsOpen ? (
+                </Activity>
+              )}
+              {activeMiddle === 'suggested-topics' && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <SuggestedTopicsView
                     onExploreTopic={(topic) => {
@@ -7003,7 +7132,9 @@ function App() {
                     }}
                   />
                 </div>
-              ) : isMeetingsOpen ? (
+              )}
+              {sectionMounted('meetings') && (
+                <Activity mode={activeMiddle === 'meetings' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <MeetingsView
                     onOpenNote={(path) => navigateToFile(path)}
@@ -7012,17 +7143,20 @@ function App() {
                     meetingSummarizing={meetingSummarizing}
                   />
                 </div>
-              ) : isCodeOpen ? (
+                </Activity>
+              )}
+              {sectionMounted('code') && (
+                <Activity mode={activeMiddle === 'code' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <CodeView
                     onSessionSelected={handleCodeSessionSelected}
-                    openDiffPath={codeDiffPath}
-                    onDiffOpened={() => setCodeDiffPath(null)}
                     focusSessionId={codeFocusSessionId}
                     onFocusConsumed={() => setCodeFocusSessionId(null)}
                   />
                 </div>
-              ) : isLiveNotesOpen ? (
+                </Activity>
+              )}
+              {activeMiddle === 'live-notes' && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <LiveNotesView
                     onOpenNote={(path) => navigateToFile(path)}
@@ -7031,7 +7165,9 @@ function App() {
                     }}
                   />
                 </div>
-              ) : isBgTasksOpen ? (
+              )}
+              {sectionMounted('bg-tasks') && (
+                <Activity mode={activeMiddle === 'bg-tasks' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BgTasksView
                     initialSlug={bgTaskInitialSlug}
@@ -7044,7 +7180,10 @@ function App() {
                     }}
                   />
                 </div>
-              ) : isAppsOpen ? (
+                </Activity>
+              )}
+              {sectionMounted('apps') && (
+                <Activity mode={activeMiddle === 'apps' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <AppsView
                     initialAppFolder={appInitialId}
@@ -7052,14 +7191,36 @@ function App() {
                     onNewApp={() => prefillChat('Build me an app that ')}
                   />
                 </div>
-              ) : isSpacesOpen ? (
-                // Rendered by the keep-alive container above the chain.
-                null
-              ) : isEmailOpen ? (
+                </Activity>
+              )}
+              {sectionMounted('spaces') && (
+                <Activity mode={activeMiddle === 'spaces' ? 'visible' : 'hidden'}>
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <SpacesView
+                    active={activeMiddle === 'spaces'}
+                    selection={spaceSelection}
+                    onSelect={setSpaceSelection}
+                    railSelection={railSelection}
+                    onRailSelect={(rail) => {
+                      // In-space navigation is real navigation: each selection is a history entry,
+                      // so the top ‹ › retrace general → topic → file.
+                      if (spaceSelection) void navigateToView({ type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail })
+                      else setRailSelection(rail)
+                    }}
+                    onOpenSession={(sessionId) => void navigateToView({ type: 'chat', runId: sessionId })}
+                  />
+                </div>
+                </Activity>
+              )}
+              {sectionMounted('email') && (
+                <Activity mode={activeMiddle === 'email' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} onOpenNote={openNoteFromEmail} />
                 </div>
-              ) : isWorkspaceOpen ? (
+                </Activity>
+              )}
+              {sectionMounted('workspace') && (
+                <Activity mode={activeMiddle === 'workspace' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <WorkspaceView
                     tree={tree}
@@ -7079,7 +7240,10 @@ function App() {
                     onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                   />
                 </div>
-              ) : isKnowledgeViewOpen ? (
+                </Activity>
+              )}
+              {sectionMounted('knowledge') && (
+                <Activity mode={activeMiddle === 'knowledge' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <KnowledgeView
                     tree={tree}
@@ -7133,7 +7297,9 @@ function App() {
                     onVoiceNoteCreated={handleVoiceNoteCreated}
                   />
                 </div>
-              ) : isChatHistoryOpen ? (
+                </Activity>
+              )}
+              {activeMiddle === 'chat-history' && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <ChatHistoryView
                     runs={runs}
@@ -7158,7 +7324,8 @@ function App() {
                     onOpenSearch={() => setIsSearchOpen(true)}
                   />
                 </div>
-              ) : selectedPath && isBaseFilePath(selectedPath) ? (
+              )}
+              {activeMiddle === 'bases' && selectedPath && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BasesView
                     tree={tree}
@@ -7177,7 +7344,8 @@ function App() {
                     }}
                   />
                 </div>
-              ) : isGraphOpen ? (
+              )}
+              {activeMiddle === 'graph' && (
                 <div className="flex-1 min-h-0">
                   <GraphView
                     nodes={graphData.nodes}
@@ -7189,7 +7357,8 @@ function App() {
                     }}
                   />
                 </div>
-              ) : selectedPath ? (
+              )}
+              {activeMiddle === 'file' && selectedPath && (
                 <>
                 {/* Always-mounted persistent cache for HTML/PDF — hidden when active file is something else, so iframes preserve scroll/page/zoom across switches. */}
                 <div
@@ -7350,7 +7519,8 @@ function App() {
                 )
                 )}
                 </>
-              ) : selectedTask ? (
+              )}
+              {activeMiddle === 'task' && selectedTask && (
                 <div className="flex-1 min-h-0 overflow-hidden">
                   <BackgroundTaskDetail
                     name={selectedTask.name}
@@ -7365,7 +7535,8 @@ function App() {
                     onToggleEnabled={(enabled) => handleToggleBackgroundTask(selectedTask.name, enabled)}
                   />
                 </div>
-              ) : (
+              )}
+              {activeMiddle === 'chat' && (
               <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }} onOpenFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="relative min-h-0 flex-1">
@@ -7396,7 +7567,7 @@ function App() {
                   })}
                 </div>
 
-                <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
+                <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-2 shadow-lg">
                   <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
                     {chatTabs.map((tab) => {
@@ -7480,12 +7651,14 @@ function App() {
                 bind this same assistant chat (a code session IS a chat
                 session) — there is no separate code chat surface. */}
             {isRightPaneContext && (
+              <CodeDiffOpenerProvider onOpenDiff={codeChatMain ? openCodeDiff : null}>
               <ChatSidebar
                 placement={chatPanePlacement}
-                paneSize={chatPaneSize}
+                // Code mode: the chat fills whatever the rail and drawer leave.
+                paneSize={codeChatMain ? 'chat-bigger' : chatPaneSize}
                 className={isChatPaneInMiddle ? "order-2" : undefined}
                 defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
-                isOpen={isChatSidebarOpen}
+                isOpen={chatPaneOpen}
                 isMaximized={isRightPaneMaximized}
                 chatTabs={chatTabs}
                 activeChatTabId={activeChatTabId}
@@ -7535,12 +7708,18 @@ function App() {
                 onWorkDirChangeForTab={setTabWorkDir}
                 codeSessionLocks={codeSessionLocks}
                 pinnedToCodeSession={
-                  isCodeOpen
+                  codeChatMain
                     && activeCodeSession
                     // Only while the pane is actually bound to the session — a
                     // palette-initiated fresh chat, for example, unbinds it.
                     && chatTabs.find((t) => t.id === activeChatTabId)?.runId === activeCodeSession.session.id
-                    ? { title: activeCodeSession.session.title }
+                    ? {
+                        session: activeCodeSession.session,
+                        status: activeCodeSession.status,
+                        changedCount: codeGit.gitStatus?.isRepo ? codeGit.gitStatus.files.length : null,
+                        panel: codePanel,
+                        onTogglePanel: toggleCodePanel,
+                      }
                     : null
                 }
                 pendingAskHumanRequests={activeChatTabState.pendingAskHumanRequests}
@@ -7574,6 +7753,24 @@ function App() {
                 onEndCall={endCall}
                 callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
+              />
+              </CodeDiffOpenerProvider>
+            )}
+            {/* Workspace drawer beside the code chat: changes, files or a
+                terminal — one of the chat header's buttons opens it. */}
+            {codeChatMain && activeCodeSession && codePanel && (
+              <CodeWorkspaceDrawer
+                session={activeCodeSession.session}
+                panel={codePanel}
+                onPanelChange={setCodePanel}
+                onClose={() => setCodePanel(null)}
+                gitStatus={codeGit.gitStatus}
+                onRefreshGit={() => void codeGit.refresh()}
+                openDiffPath={codeDiffPath}
+                onDiffOpened={handleCodeDiffOpened}
+                onSessionChanged={() => void refreshCodeSessions()}
+                placement={chatPanePlacement}
+                className={isChatPaneInMiddle ? "order-2" : undefined}
               />
             )}
             {/* Full-screen call: user tile + animated mascot tile. Shown only
@@ -7623,9 +7820,21 @@ function App() {
                 getLevel={tts.getLevel}
               />
             )}
-            {/* Rendered last so its no-drag region paints over the sidebar drag region */}
+            {/* Top-left dock gutter strip: keeps the traffic-light corner
+                draggable while no panel covers it. */}
+            {!sidebarOpen && (
+              <div
+                aria-hidden="true"
+                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
+                style={{ width: DOCK_GUTTER_PX }}
+              />
+            )}
+            {/* Sidebar toggle — always present (both directions), rendered
+                last so its no-drag region paints over the drag regions. */}
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
+              onNewChat={handleNewChat}
+              onVoiceNoteCreated={handleVoiceNoteCreated}
             />
           </SidebarProvider>
         </div>

@@ -75,11 +75,11 @@ export function CreditRewards({ store }: CreditRewardsProps) {
                 <div
                   className={cn(
                     "flex size-8 shrink-0 items-center justify-center rounded-full",
-                    activity.claimed ? "bg-emerald-500/15" : "bg-muted",
+                    activity.claimed ? "bg-[var(--rowboat-success)]/15" : "bg-muted",
                   )}
                 >
                   {activity.claimed ? (
-                    <Check className="size-4 text-emerald-600" />
+                    <Check className="size-4 text-[var(--rowboat-success)]" />
                   ) : (
                     <Icon className="size-4 text-muted-foreground" />
                   )}
@@ -96,7 +96,7 @@ export function CreditRewards({ store }: CreditRewardsProps) {
                   className={cn(
                     "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums",
                     activity.claimed
-                      ? "bg-emerald-500/15 text-emerald-600"
+                      ? "bg-[var(--rowboat-success)]/15 text-[var(--rowboat-success)]"
                       : "bg-primary/10 text-primary",
                   )}
                 >
@@ -110,11 +110,11 @@ export function CreditRewards({ store }: CreditRewardsProps) {
               <div
                 className={cn(
                   "flex size-8 shrink-0 items-center justify-center rounded-full",
-                  inviteSlotsLeft === 0 ? "bg-emerald-500/15" : "bg-muted",
+                  inviteSlotsLeft === 0 ? "bg-[var(--rowboat-success)]/15" : "bg-muted",
                 )}
               >
                 {inviteSlotsLeft === 0 ? (
-                  <Check className="size-4 text-emerald-600" />
+                  <Check className="size-4 text-[var(--rowboat-success)]" />
                 ) : (
                   <UserPlus className="size-4 text-muted-foreground" />
                 )}
@@ -138,7 +138,7 @@ export function CreditRewards({ store }: CreditRewardsProps) {
                       onClick={copyInviteCode}
                       className="flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     >
-                      {copied ? <Check className="size-3 text-emerald-600" /> : <Copy className="size-3" />}
+                      {copied ? <Check className="size-3 text-[var(--rowboat-success)]" /> : <Copy className="size-3" />}
                       {copied ? "Copied" : "Copy"}
                     </button>
                   </div>
@@ -148,7 +148,7 @@ export function CreditRewards({ store }: CreditRewardsProps) {
                 className={cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums",
                   inviteSlotsLeft === 0
-                    ? "bg-emerald-500/15 text-emerald-600"
+                    ? "bg-[var(--rowboat-success)]/15 text-[var(--rowboat-success)]"
                     : "bg-primary/10 text-primary",
                 )}
               >

@@ -1077,6 +1077,8 @@
 }
 
 @theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -1117,99 +1119,132 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Design language tokens — see DESIGN_LANGUAGE.md.
+   Layering: canvas (#fff) is the floor; the sidebar sits beside it one step
+   darker with no border (the value shift is the border); floating surfaces are
+   raised white with hairline ring + shadow; inputs recess with no border.
+   Black is the action color; blue is links/toggles/focus only. */
 :root {
-  --radius: 0.5rem;
-  --background: var(--bg-color, oklch(1 0 0));
-  --foreground: var(--text-color, oklch(0.145 0 0));
-  --card: var(--bg-color, oklch(1 0 0));
-  --card-foreground: var(--text-color, oklch(0.145 0 0));
-  --popover: var(--bg-color, oklch(1 0 0));
-  --popover-foreground: var(--text-color, oklch(0.145 0 0));
-  --primary: var(--main-color, oklch(0.205 0 0));
-  --primary-foreground: var(--bg-color, oklch(0.985 0 0));
-  --secondary: var(--sub-alt-color, oklch(0.97 0 0));
-  --secondary-foreground: var(--text-color, oklch(0.205 0 0));
-  --muted: var(--sub-alt-color, oklch(0.97 0 0));
-  --muted-foreground: var(--sub-color, oklch(0.556 0 0));
-  --accent: var(--sub-color, oklch(0.97 0 0));
-  --accent-foreground: var(--text-color, oklch(0.205 0 0));
-  --destructive: var(--error-color, oklch(0.577 0.245 27.325));
-  --border: var(--sub-alt-color, oklch(0.922 0 0));
-  --input: var(--sub-alt-color, oklch(0.922 0 0));
-  --ring: var(--main-color, oklch(0.708 0 0));
+  --radius: 0.625rem; /* 10px — shadcn xl→18 popovers, 2xl→24 composer */
+  --background: #ffffff;
+  --foreground: #0d0d0d;
+  --card: #ffffff;
+  --card-foreground: #0d0d0d;
+  --popover: #ffffff;
+  --popover-foreground: #0d0d0d;
+  --primary: #0d0d0d;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0f0;
+  --secondary-foreground: #0d0d0d;
+  --muted: #f1f1f1;
+  --muted-foreground: #8f8f8f;
+  --accent: rgba(0, 0, 0, 0.05);
+  --accent-foreground: #0d0d0d;
+  --destructive: #e5484d;
+  --border: rgba(0, 0, 0, 0.07);
+  --input: rgba(0, 0, 0, 0.12);
+  --ring: #3478f6;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: var(--bg-color, oklch(0.985 0 0));
-  --sidebar-foreground: var(--text-color, oklch(0.145 0 0));
-  --sidebar-primary: var(--main-color, oklch(0.205 0 0));
-  --sidebar-primary-foreground: var(--bg-color, oklch(0.985 0 0));
-  --sidebar-accent: var(--sub-color, oklch(0.9 0 0));
-  --sidebar-accent-foreground: var(--text-color, oklch(0.205 0 0));
-  --sidebar-border: var(--sub-alt-color, oklch(0.922 0 0));
-  --sidebar-ring: var(--main-color, oklch(0.708 0 0));
-  --scrollbar-track: oklch(0.95 0 0);
-  --scrollbar-thumb: oklch(0.75 0 0);
-  --scrollbar-thumb-hover: oklch(0.65 0 0);
+  --sidebar: #f4f4f4;
+  --sidebar-foreground: #0d0d0d;
+  --sidebar-primary: #0d0d0d;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(0, 0, 0, 0.06);
+  --sidebar-accent-foreground: #0d0d0d;
+  --sidebar-border: transparent;
+  --sidebar-ring: #3478f6;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.18);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
   /* Subtle raised-card surface: tints toward foreground, so it reads a hair
      darker than the background in light mode and a hair lighter in dark mode.
      Shared by the web search card and tool-call group. */
   --card-surface: color-mix(in oklab, var(--background) 98.5%, var(--foreground));
-  --rowboat-panel: oklch(0.97 0 0);
-  --rowboat-raised: oklch(1 0 0);
-  --rowboat-wash: color-mix(in oklab, var(--background) 88%, var(--primary) 12%);
-  --rowboat-hairline: color-mix(in oklab, var(--border) 78%, var(--foreground) 22%);
-  --rowboat-command: oklch(0.205 0 0);
-  --rowboat-attention: oklch(0.646 0.222 41.116);
-  --rowboat-shadow: 0 1px 2px rgb(31 38 48 / 0.07), 0 18px 40px rgb(31 38 48 / 0.08);
-  --rowboat-shadow-soft: 0 1px 2px rgb(31 38 48 / 0.05), 0 8px 24px rgb(31 38 48 / 0.06);
+  --rowboat-panel: #f4f4f4;
+  /* Second-level rail (e.g. the Spaces topics rail): one step lighter than
+     the main sidebar so adjacent rails read as distinct layers. */
+  --rowboat-panel-soft: #fafafa;
+  --rowboat-raised: #ffffff;
+  --rowboat-wash: #ebebeb;
+  --rowboat-hairline: rgba(0, 0, 0, 0.12);
+  --rowboat-command: #0d0d0d;
+  --rowboat-attention: #e5484d;
+  --rowboat-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --rowboat-shadow-soft: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+  /* Language extensions */
+  --rowboat-link: #3478f6;
+  --rowboat-success: #1ea446;
+  --rowboat-git: #8b5cf6;
+  --rowboat-bubble: #0d0d0d;
+  --rowboat-bubble-foreground: #ffffff;
+  --rowboat-ink-secondary: #5d5d5d;
+  /* Spaces stream — the multiplayer dialect (team chat only). Its link ink
+     is a teal-leaning navy, not the app-wide blue. */
+  --stream-link: #1264a3;
+  --stream-mention-wash: rgba(29, 155, 209, 0.13);
+  --stream-you-wash: rgba(242, 199, 68, 0.3);
+  --stream-you-ink: #97620f;
 }
 
 .dark {
-  --background: var(--bg-color, oklch(0.145 0 0));
-  --foreground: var(--text-color, oklch(0.985 0 0));
-  --card: var(--bg-color, oklch(0.205 0 0));
-  --card-foreground: var(--text-color, oklch(0.985 0 0));
-  --popover: var(--bg-color, oklch(0.205 0 0));
-  --popover-foreground: var(--text-color, oklch(0.985 0 0));
-  --primary: var(--main-color, oklch(0.922 0 0));
-  --primary-foreground: var(--bg-color, oklch(0.205 0 0));
-  --secondary: var(--sub-alt-color, oklch(0.269 0 0));
-  --secondary-foreground: var(--text-color, oklch(0.985 0 0));
-  --muted: var(--sub-alt-color, oklch(0.269 0 0));
-  --muted-foreground: var(--sub-color, oklch(0.708 0 0));
-  --accent: var(--sub-color, oklch(0.269 0 0));
-  --accent-foreground: var(--text-color, oklch(0.985 0 0));
-  --destructive: var(--error-color, oklch(0.704 0.191 22.216));
-  --border: var(--sub-alt-color, oklch(1 0 0 / 10%));
-  --input: var(--sub-alt-color, oklch(1 0 0 / 15%));
-  --ring: var(--main-color, oklch(0.556 0 0));
+  --background: #212121;
+  --foreground: #ececec;
+  --card: #2a2a2a;
+  --card-foreground: #ececec;
+  --popover: #2a2a2a;
+  --popover-foreground: #ececec;
+  --primary: #ececec;
+  --primary-foreground: #0d0d0d;
+  --secondary: #303030;
+  --secondary-foreground: #ececec;
+  --muted: #2e2e2e;
+  --muted-foreground: #8a8a8a;
+  --accent: rgba(255, 255, 255, 0.06);
+  --accent-foreground: #ececec;
+  --destructive: #f2555a;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #5b94ff;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: var(--bg-color, oklch(0.205 0 0));
-  --sidebar-foreground: var(--text-color, oklch(0.985 0 0));
-  --sidebar-primary: var(--main-color, oklch(0.488 0.243 264.376));
-  --sidebar-primary-foreground: var(--bg-color, oklch(0.985 0 0));
-  --sidebar-accent: var(--sub-color, oklch(0.35 0 0));
-  --sidebar-accent-foreground: var(--text-color, oklch(0.985 0 0));
-  --sidebar-border: var(--sub-alt-color, oklch(1 0 0 / 10%));
-  --sidebar-ring: var(--main-color, oklch(0.556 0 0));
-  --scrollbar-track: oklch(0.2 0 0);
-  --scrollbar-thumb: oklch(0.4 0 0);
-  --scrollbar-thumb-hover: oklch(0.5 0 0);
-  --rowboat-panel: oklch(0.269 0 0);
-  --rowboat-raised: oklch(0.205 0 0);
-  --rowboat-wash: color-mix(in oklab, var(--background) 80%, var(--primary) 20%);
-  --rowboat-hairline: color-mix(in oklab, var(--border) 70%, var(--foreground) 30%);
-  --rowboat-command: oklch(0.922 0 0);
-  --rowboat-attention: oklch(0.769 0.188 70.08);
-  --rowboat-shadow: 0 1px 2px rgb(0 0 0 / 0.24), 0 22px 44px rgb(0 0 0 / 0.28);
-  --rowboat-shadow-soft: 0 1px 2px rgb(0 0 0 / 0.2), 0 12px 28px rgb(0 0 0 / 0.18);
+  --sidebar: #171717;
+  --sidebar-foreground: #ececec;
+  --sidebar-primary: #ececec;
+  --sidebar-primary-foreground: #0d0d0d;
+  --sidebar-accent: rgba(255, 255, 255, 0.09);
+  --sidebar-accent-foreground: #ececec;
+  --sidebar-border: transparent;
+  --sidebar-ring: #5b94ff;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  --card-surface: #2a2a2a;
+  --rowboat-panel: #171717;
+  --rowboat-panel-soft: #1c1c1c;
+  --rowboat-raised: #2a2a2a;
+  --rowboat-wash: #303030;
+  --rowboat-hairline: rgba(255, 255, 255, 0.14);
+  --rowboat-command: #ececec;
+  --rowboat-attention: #f2555a;
+  --rowboat-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --rowboat-shadow-soft: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --rowboat-link: #5b94ff;
+  --rowboat-success: #3dcb70;
+  --rowboat-git: #a78bfa;
+  --rowboat-bubble: #303030;
+  --rowboat-bubble-foreground: #ececec;
+  --rowboat-ink-secondary: #a6a6a6;
+  --stream-link: #1d9bd1;
+  --stream-mention-wash: rgba(29, 155, 209, 0.2);
+  --stream-you-wash: rgba(242, 199, 68, 0.22);
+  --stream-you-ink: #e8c25e;
 }
 
 @layer base {
@@ -1221,9 +1256,10 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    /* The system font is the identity — SF Pro on macOS. */
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
     text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
 
   ::-webkit-scrollbar {
@@ -1249,21 +1285,158 @@
   background: var(--background);
 }
 
-.rowboat-sidebar [data-sidebar="sidebar"] {
-  background: var(--sidebar);
-  border-right: 1px solid var(--sidebar-border);
+/* ---- Dock sidebar (design: "Rowboat Dock Sidebar" handoff) ---- */
+
+.rowboat-dock {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  box-sizing: border-box;
+  /* Floating surface: solid raised ground, hairline ring folded into
+     the shadow token — no frosted glass. Tokens flip for dark mode. */
+  border-radius: 18px;
+  background: var(--rowboat-raised);
+  border: 1px solid transparent;
+  box-shadow: var(--rowboat-shadow);
+  overflow: visible;
 }
 
+.rowboat-dock-tile {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Off-white faces need definition the old saturated tiles didn't: a soft
+     drop, a bright inner top edge, and a hairline border. */
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
+}
+
+.rowboat-dock-sep {
+  width: 70%;
+  height: 1px;
+  background: var(--border);
+  margin: 0 auto;
+}
+
+.rowboat-dock-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 8px;
+  background: var(--rowboat-attention);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3.5px;
+  border: 1.5px solid var(--rowboat-raised);
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+.rowboat-dock-badge-amber {
+  background: #d97706;
+}
+
+.rowboat-dock-dot {
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rowboat-ink-secondary);
+}
+
+.rowboat-dock-tip {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--rowboat-bubble);
+  color: var(--rowboat-bubble-foreground);
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  z-index: 40;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rowboat-dock-tip-status {
+  font-size: 11px;
+  font-weight: 400;
+  color: color-mix(in oklab, var(--rowboat-bubble-foreground) 72%, transparent);
+  white-space: nowrap;
+}
+
+.rowboat-dock-tip-status-alert {
+  color: #ff9d94;
+}
+
+.rowboat-dock-flyout {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 296px;
+  max-height: 70%;
+  overflow: auto;
+  background: var(--rowboat-raised);
+  border: 1px solid transparent;
+  border-radius: 18px;
+  box-shadow: var(--rowboat-shadow);
+  padding: 12px;
+  z-index: 35;
+  animation: rowboat-dock-flyin 0.18s ease-out;
+}
+
+@keyframes rowboat-dock-flyin {
+  from {
+    opacity: 0;
+    transform: translateX(-14px) translateY(-50%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(-50%);
+  }
+}
+
+.rowboat-dock-switcher {
+  display: flex;
+  gap: 4px;
+  padding: 14px;
+  background: var(--rowboat-raised);
+  border: 1px solid transparent;
+  border-radius: 18px;
+  box-shadow: var(--rowboat-shadow);
+}
+
+/* The sidebar carries no internal borders — spacing does the separating. */
 .rowboat-sidebar [data-sidebar="header"] {
   gap: 0.625rem;
-  border-bottom: 1px solid color-mix(in oklab, var(--sidebar-border) 76%, transparent);
+  border-bottom: none;
   background: var(--sidebar);
 }
 
 .rowboat-section-switcher {
-  border: 1px solid color-mix(in oklab, var(--sidebar-border) 78%, transparent);
-  background: color-mix(in oklab, var(--sidebar-accent) 58%, var(--sidebar) 42%);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent);
+  border: none;
+  background: var(--rowboat-wash);
+  box-shadow: none;
 }
 
 .rowboat-section-switcher button {
@@ -1272,7 +1445,7 @@
 
 .rowboat-section-switcher button[class*="shadow-sm"] {
   background: var(--rowboat-raised);
-  box-shadow: var(--rowboat-shadow-soft);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .rowboat-quick-actions button {
@@ -1284,12 +1457,12 @@
 }
 
 .rowboat-tabbar {
-  background: color-mix(in oklab, var(--background) 78%, var(--muted) 22%);
+  background: var(--background);
 }
 
 .rowboat-titlebar {
   background: var(--background);
-  border-bottom-color: color-mix(in oklab, var(--border) 82%, transparent);
+  border-bottom-color: var(--border);
 }
 
 .rowboat-tab {
@@ -1300,37 +1473,43 @@
 .rowboat-tab[class*="bg-background"] {
   border-bottom-color: var(--primary);
   background: var(--rowboat-raised);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 8%, transparent);
+  box-shadow: none;
 }
 
 .rowboat-composer-dock {
-  box-shadow: 0 -20px 44px color-mix(in oklab, var(--background) 78%, transparent);
+  box-shadow: none;
 }
 
+/* Composer: raised surface, real hairline border (a ring-in-shadow gets
+   painted over by the dock's scroll-fade gradient at the top seam) plus a soft
+   blur. No blue focus ring — the caret is the focus signal. */
 .rowboat-chat-input {
-  border-color: color-mix(in oklab, var(--border) 74%, var(--primary) 26%);
+  border-color: var(--border);
   background: var(--rowboat-raised);
-  box-shadow: var(--rowboat-shadow);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.06);
 }
 
 .rowboat-chat-input:focus-within {
-  border-color: color-mix(in oklab, var(--ring) 76%, var(--border) 24%);
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--ring) 38%, transparent),
-    var(--rowboat-shadow);
+  border-color: var(--border);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.06);
 }
 
 [data-slot="message-content"] {
   line-height: 1.62;
 }
 
-.is-user [data-slot="message-content"] {
-  background: color-mix(in oklab, var(--secondary) 88%, var(--rowboat-wash) 12%);
-  border: 1px solid color-mix(in oklab, var(--border) 68%, transparent);
-}
+/* User messages are ink-dark bubbles (radius 22, no border) and
+   assistant messages are plain prose on the canvas. Both are styled by the
+   MessageContent component classes (ai-elements/message.tsx) so callers can
+   still opt out (e.g. transparent attachment-only messages). */
 
-.is-assistant [data-slot="message-content"] {
-  color: color-mix(in oklab, var(--foreground) 94%, var(--muted-foreground) 6%);
+/* Inside the ink-dark user bubble, inline code keeps the bubble's light ink
+   over a faint overlay — per the reference, not a light chip. Unlayered on
+   purpose: Streamdown puts bg-muted on inline code as a utility class, which
+   outranks any @layer components rule. */
+.is-user [data-slot="message-content"] code:not(pre code) {
+  background: rgba(255, 255, 255, 0.09);
+  color: inherit;
 }
 
 /* Markdown content base styles for Streamdown/MessageResponse */
@@ -1367,7 +1546,7 @@
     @apply my-2 font-semibold first:mt-0;
   }
   [data-slot="message-content"] code:not(pre code) {
-    @apply rounded bg-muted px-1.5 py-0.5 font-mono text-sm;
+    @apply rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[13px];
   }
   [data-slot="message-content"] pre {
     @apply my-3 overflow-x-auto rounded-lg;
@@ -1379,7 +1558,8 @@
     @apply my-4 border-border;
   }
   [data-slot="message-content"] a {
-    @apply text-primary underline underline-offset-2 hover:text-primary/80;
+    color: var(--rowboat-link);
+    @apply no-underline underline-offset-2 hover:underline;
   }
   [data-slot="message-content"] table {
     @apply my-3 w-full border-collapse;
@@ -1403,12 +1583,8 @@
 }
 
 .graph-view {
-  background-color: #f8f8f9;
+  background-color: var(--rowboat-panel-soft);
   user-select: none;
-}
-
-.dark .graph-view {
-  background-color: #0b0b0d;
 }
 
 .graph-view::before {
@@ -1509,4 +1685,58 @@
 [data-turn-usage]:has([data-state="open"]),
 *:hover + [data-turn-usage] {
   opacity: 1;
+}
+
+/* Code rail: the session that is currently working wears an outline that
+   orbits its row — a comet travelling a faint ring — so the live session is
+   findable at a glance even when it isn't the selected one. The gradient's
+   start angle is a registered property so it can animate. */
+@property --code-orbit {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes code-orbit-spin {
+  to { --code-orbit: 360deg; }
+}
+.code-working-outline {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--rowboat-git) 28%, transparent);
+}
+.code-working-outline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--code-orbit),
+    transparent 0deg,
+    transparent 230deg,
+    color-mix(in oklab, var(--rowboat-git) 35%, transparent) 300deg,
+    var(--rowboat-git) 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: code-orbit-spin 2.4s linear infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-working-outline::after { animation: none; }
+}
+
+
+/* Code session empty state: the block cursor after the display line. A
+   stepped blink like a real terminal's — it snaps, never fades. Reduced
+   motion keeps it solid. */
+@keyframes code-cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.code-cursor-blink {
+  animation: code-cursor-blink 1.06s step-end infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-cursor-blink { animation: none; }
 }

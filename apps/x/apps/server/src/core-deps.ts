@@ -1442,6 +1442,10 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
       const service = container.resolve<CodeSessionService>('codeSessionService');
       return { session: await service.update(args.sessionId, args.patch) };
     },
+    'codeSession:setDone': async (args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return { session: await service.setDone(args.sessionId, args.done) };
+    },
     'codeSession:delete': async (args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       disposeTerminal(args.sessionId);

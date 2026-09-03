@@ -46,34 +46,39 @@ export const Membership = z.object({
 });
 export type Membership = z.infer<typeof Membership>;
 
+/**
+ * The deliberate conversation object (spec §7, annotation model 2026-09-01):
+ * one row POINTING AT a thread's root message, carrying the stated goal
+ * (title) and the archived flag. It contains no messages — deleting it
+ * ("convert back to thread") loses nothing, archiving it hides nothing.
+ * At most one topic per root; durable identity (agent sessions, presence,
+ * unread) keys on the root message, never on this row. "Topic" is the wire
+ * and storage name on purpose — the UI label ("Discussions" today) may drift
+ * without a contract round. A plain reply chain with no row is a "thread".
+ */
 export const Topic = z.object({
   id: TopicId,
   spaceId: SpaceId,
-  /** First message becomes the title (spec §7); agents may retitle later. */
+  /** The thread this annotates: a stream root message (never a reply). */
+  rootMessageId: MessageId,
+  /** The stated goal, required at creation — the one deliberate ceremony. */
   title: z.string().min(1).max(256),
-  /**
-   * 'general' = the space's open message stream, exactly one per space, seeded
-   * at space creation. Everything else is 'discussion'. The default exists only
-   * so new clients can parse pre-004 servers (which omit the field); servers
-   * always set it explicitly.
-   */
-  kind: z.enum(['general', 'discussion']).default('discussion'),
   createdBy: Attribution,
   createdAt: z.iso.datetime(),
+  /** Off the rail. Nothing else anywhere changes; a new reply revives (un-archives). */
   archived: z.boolean(),
-  /** Set when the topic was born by replying to an activity row (spec §7). */
-  anchorChangeSetId: ChangeSetId.optional(),
-  /**
-   * Set when the topic grew out of a message ("reply becomes a thread").
-   * Provenance, not hierarchy: at most one topic per message, the anchored
-   * message may live in any topic, and clients render a flat topic list with
-   * a breadcrumb — never a tree.
-   */
-  anchorMessageId: MessageId.optional(),
-  lastActivityAt: z.iso.datetime(),
-  messageCount: z.number().int().nonnegative(),
 });
 export type Topic = z.infer<typeof Topic>;
+
+/** The payload of `topic_removed`: the row is gone, the thread is untouched. */
+export const TopicRemoval = z.object({
+  spaceId: SpaceId,
+  topicId: TopicId,
+  rootMessageId: MessageId,
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type TopicRemoval = z.infer<typeof TopicRemoval>;
 
 /** The emoji itself ("👍", ZWJ sequences included), rendered verbatim — never a :name:. */
 export const ReactionEmoji = z
@@ -86,14 +91,14 @@ export type ReactionEmoji = z.infer<typeof ReactionEmoji>;
 /**
  * One member's reaction to one message — a per-(member, emoji) toggle, Slack
  * semantics. Attribution follows the contract's one rule (principle 4): the
- * act belongs to a member, `by.actingMode` says how it happened. `topicId` is
- * where the message lived when the reaction happened (merge_into may repoint
- * the message later; reactions follow it by messageId).
+ * act belongs to a member, `by.actingMode` says how it happened. `threadRoot`
+ * mirrors the message's (absent = a stream root) so live clients route the
+ * event without a lookup.
  */
 export const Reaction = z.object({
   spaceId: SpaceId,
-  topicId: TopicId,
   messageId: MessageId,
+  threadRoot: MessageId.optional(),
   emoji: ReactionEmoji,
   by: Attribution,
   at: z.iso.datetime(),
@@ -108,15 +113,79 @@ export const ReactionGroup = z.object({
 export type ReactionGroup = z.infer<typeof ReactionGroup>;
 
 /**
+ * One poll answer, immutable once posted. `id` is server-assigned (1..n in
+ * creation order) — votes and events key on it, never on array position.
+ */
+export const PollAnswer = z.object({
+  id: z.number().int().min(1),
+  text: z.string().min(1).max(55),
+  emoji: ReactionEmoji.optional(),
+});
+export type PollAnswer = z.infer<typeof PollAnswer>;
+
+/** Display aggregate: who voted for one answer. Votes are visible by design (the Discord posture). */
+export const PollVoteGroup = z.object({
+  answerId: z.number().int().min(1),
+  memberIds: z.array(MemberId).min(1),
+});
+export type PollVoteGroup = z.infer<typeof PollVoteGroup>;
+
+/**
+ * A poll riding on a message (the Discord model: a field, not a message
+ * kind). The definition — question, answers, expiry, multiselect — is
+ * immutable once posted; only `endedAt` (early close) and the folded `votes`
+ * move. A poll is closed when `endedAt` is set OR `expiresAt` has passed —
+ * expiry is lazy, no server job fires; clients and the vote route both
+ * compute it from data already on the wire. Like `reactions`, `votes` is
+ * folded live state on reads; the copy inside a stored `message` event is
+ * the at-post snapshot (empty).
+ */
+export const Poll = z.object({
+  question: z.string().min(1).max(300),
+  answers: z.array(PollAnswer).min(2).max(10),
+  allowMultiselect: z.boolean().default(false),
+  expiresAt: z.iso.datetime(),
+  /** Set when the author ended the poll early; natural expiry never sets it. */
+  endedAt: z.iso.datetime().optional(),
+  votes: z.array(PollVoteGroup).default([]),
+});
+export type Poll = z.infer<typeof Poll>;
+
+/**
+ * One member's vote toggle on one poll answer — the payload of `poll_vote`.
+ * Per-(member, answer), reaction semantics; on single-select polls the org
+ * moves a vote by emitting a `removed` then an `added` under one lock.
+ */
+export const PollVote = z.object({
+  spaceId: SpaceId,
+  threadRoot: MessageId.optional(),
+  messageId: MessageId,
+  answerId: z.number().int().min(1),
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type PollVote = z.infer<typeof PollVote>;
+
+/** The author closing their poll early — the payload of `poll_ended`. */
+export const PollEnd = z.object({
+  spaceId: SpaceId,
+  threadRoot: MessageId.optional(),
+  messageId: MessageId,
+  by: Attribution,
+  at: z.iso.datetime(),
+});
+export type PollEnd = z.infer<typeof PollEnd>;
+
+/**
  * The author tombstoning their own message — the one act the content plane
  * restricts to a single member (deleter == author always; admin powers are
- * membership/policy, never content — spec §4). Like Reaction, `topicId` is
- * where the message lived when it happened.
+ * membership/policy, never content — spec §4). Like Reaction, `threadRoot`
+ * mirrors the message's, for event routing.
  */
 export const MessageDeletion = z.object({
   spaceId: SpaceId,
-  topicId: TopicId,
   messageId: MessageId,
+  threadRoot: MessageId.optional(),
   by: Attribution,
   at: z.iso.datetime(),
 });
@@ -125,8 +194,8 @@ export type MessageDeletion = z.infer<typeof MessageDeletion>;
 /** An author's in-place rewrite of a message body — the payload of `message_edited`. */
 export const MessageEdit = z.object({
   spaceId: SpaceId,
-  topicId: TopicId,
   messageId: MessageId,
+  threadRoot: MessageId.optional(),
   body: z.string().min(1).max(65_536),
   by: Attribution,
   at: z.iso.datetime(),
@@ -135,8 +204,14 @@ export type MessageEdit = z.infer<typeof MessageEdit>;
 
 export const Message = z.object({
   id: MessageId,
-  topicId: TopicId,
   spaceId: SpaceId,
+  /**
+   * The write-once reply pointer (annotation model): absent = a root message
+   * in the space's one stream; present = a reply in the flat thread under
+   * that root. Always a ROOT's id — never a reply's (the org normalizes), so
+   * threads are flat by shape, not convention. Set at post time, immutable.
+   */
+  threadRoot: MessageId.optional(),
   author: Attribution,
   /**
    * Markdown. The link grammar (ids.ts) is valid inside message bodies.
@@ -147,6 +222,17 @@ export const Message = z.object({
   body: z.string().max(65_536),
   postedAt: z.iso.datetime(),
   offset: StreamOffset,
+  /**
+   * Reply denorm on ROOT messages: live (non-tombstoned) replies in this
+   * message's thread, so every listing can render the reply chip without a
+   * reverse lookup. Maintained by the org; 0 on replies and on stored
+   * message events (reads carry the current truth, like reactions).
+   */
+  replyCount: z.number().int().nonnegative().default(0),
+  /** When the newest reply landed (roots with replies only) — chip recency + rail sorting. */
+  lastReplyAt: z.iso.datetime().optional(),
+  /** Provenance when this root was posted in reply to an activity row (a change-set). */
+  anchorChangeSetId: ChangeSetId.optional(),
   /** Set when the author deleted the message (deleter == author, so no separate attribution). */
   deletedAt: z.iso.datetime().optional(),
   /** Set when the author last edited the body (editor == author, like deletion). */
@@ -157,5 +243,13 @@ export const Message = z.object({
    * fold live state in, so the field is current wherever messages are listed.
    */
   reactions: z.array(ReactionGroup).default([]),
+  /**
+   * Present on poll messages. `body` still carries a plain-markdown fallback
+   * rendering of the poll (clients that predate the field show something
+   * sensible; body semantics — min 1, tombstone = empty — stay untouched);
+   * poll-aware clients render the card instead of the body. Deletion redacts
+   * the poll along with the body.
+   */
+  poll: Poll.optional(),
 });
 export type Message = z.infer<typeof Message>;

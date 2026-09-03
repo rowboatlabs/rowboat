@@ -60,10 +60,10 @@ export function UpdateCard() {
   return (
     <div
       role="status"
-      className="fixed bottom-4 left-4 z-50 w-[340px] rounded-xl border border-border/60 bg-popover/95 backdrop-blur-xl p-4 shadow-xl shadow-black/10 animate-in fade-in slide-in-from-bottom-4 duration-300"
+      className="fixed bottom-4 left-4 z-50 w-[340px] rounded-2xl border-none bg-popover p-4 shadow-[var(--rowboat-shadow)] animate-in fade-in slide-in-from-bottom-4 duration-300"
     >
       <div className="flex items-center gap-2">
-        <span className="size-2 rounded-full bg-blue-500 shrink-0" aria-hidden />
+        <span className="size-2 rounded-full bg-[var(--rowboat-attention)] shrink-0" aria-hidden />
         <h4 className="text-sm font-semibold">Update available</h4>
         <div className="ml-auto flex items-center gap-1.5">
           {version && <Badge variant="secondary">v{version}</Badge>}

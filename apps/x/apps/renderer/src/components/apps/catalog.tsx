@@ -34,7 +34,7 @@ function InstallConfirmDialog({ preview, busy, onConfirm, onCancel }: {
   const agents = preview.agents ?? []
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl border-none bg-popover p-5 shadow-[var(--rowboat-shadow)]">
         <div className="mb-1 text-base font-semibold">Install {preview.name} v{preview.version}?</div>
         {preview.description && <p className="mb-3 text-sm text-muted-foreground">{preview.description}</p>}
 
@@ -96,7 +96,7 @@ function EnableAgentsDialog({ appName, names, defaultModel, busy, onEnable, onSk
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl border-none bg-popover p-5 shadow-[var(--rowboat-shadow)]">
         <div className="mb-1 flex items-center gap-2 text-base font-semibold">
           <Bot className="size-5" /> Turn on {names.length === 1 ? 'its background agent' : 'its background agents'}?
         </div>
@@ -297,7 +297,7 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
             value={query}
             onChange={(e) => void search(e.target.value)}
             placeholder="Search the catalog…"
-            className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-3 text-sm outline-none focus:border-foreground/30"
+            className="w-full rounded-lg border border-transparent bg-[var(--rowboat-wash)] py-2 pl-8 pr-3 text-sm outline-none focus:border-border"
           />
         </div>
         <button type="button" title="Install from URL"
@@ -358,7 +358,7 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
                   {installedFolder ? (
                     <button type="button" title="Installed — open it"
                       onClick={(e) => { e.stopPropagation(); onInstalled(installedFolder) }}
-                      className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-green-600 hover:bg-green-500/10 dark:text-green-500">
+                      className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-[var(--rowboat-success)] hover:bg-[var(--rowboat-success)]/10">
                       <BadgeCheck className="size-4" /> Open
                     </button>
                   ) : (
@@ -377,14 +377,14 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
 
       {urlDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl">
+          <div className="w-full max-w-md rounded-2xl border-none bg-popover p-5 shadow-[var(--rowboat-shadow)]">
             <div className="mb-2 text-base font-semibold">Install from URL</div>
             <p className="mb-3 text-sm text-muted-foreground">Paste a direct https link to a <code>.rowboat-app</code> bundle (e.g. a GitHub release asset).</p>
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://github.com/owner/repo/releases/download/v1.0.0/name.rowboat-app"
-              className="mb-3 w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-foreground/30"
+              className="mb-3 w-full rounded-lg border border-transparent bg-[var(--rowboat-wash)] px-3 py-2 font-mono text-xs outline-none focus:border-border"
             />
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setUrlDialog(false)}

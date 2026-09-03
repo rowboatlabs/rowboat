@@ -1075,7 +1075,7 @@ function RecipientField({
         />
         {showSuggestions && (
           <ul
-            className="absolute left-0 top-[calc(100%+6px)] z-30 m-0 max-h-[296px] w-max min-w-[280px] max-w-[min(440px,100%)] list-none overflow-y-auto overscroll-contain rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+            className="absolute left-0 top-[calc(100%+6px)] z-30 m-0 max-h-[296px] w-max min-w-[280px] max-w-[min(440px,100%)] list-none overflow-y-auto overscroll-contain rounded-2xl border-none bg-popover p-2 text-popover-foreground shadow-[var(--rowboat-shadow)]"
             role="listbox"
             ref={listRef}
           >
@@ -2600,7 +2600,7 @@ function ShortcutRow({ combo, alt, label }: { combo: string[]; alt?: string[]; l
 function ShortcutSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</div>
+      <div className="mb-1.5 text-[13px] text-muted-foreground">{title}</div>
       {children}
     </div>
   )
@@ -2708,7 +2708,13 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const hadPersistedDataOnMount = useRef(persistedImportant !== null)
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialThreadId ?? null)
   const [openedThreadIds, setOpenedThreadIds] = useState<string[]>(initialThreadId ? [initialThreadId] : [])
+  // Guarded by the applied version, not effect identity: the view is kept
+  // alive in an <Activity> while hidden, and effects re-run on every re-show —
+  // the deep link must apply once per version bump, not once per re-show.
+  const appliedThreadVersionRef = useRef<number | null>(null)
   useEffect(() => {
+    if (appliedThreadVersionRef.current === (threadIdVersion ?? 0)) return
+    appliedThreadVersionRef.current = threadIdVersion ?? 0
     setSelectedThreadId(initialThreadId ?? null)
     setFocusedThreadId(initialThreadId ?? null)
     if (initialThreadId) {
@@ -2724,7 +2730,10 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   // Externally-driven search (assistant read-view email query): load it into
   // the search box so the debounced full-mailbox search below runs — matched
   // threads get real rows even when they're not in the synced inbox.
+  const appliedSearchVersionRef = useRef<number | null>(null)
   useEffect(() => {
+    if (appliedSearchVersionRef.current === (searchQueryVersion ?? 0)) return
+    appliedSearchVersionRef.current = searchQueryVersion ?? 0
     const q = initialSearchQuery?.trim()
     if (q) setQuery(q)
   }, [initialSearchQuery, searchQueryVersion])

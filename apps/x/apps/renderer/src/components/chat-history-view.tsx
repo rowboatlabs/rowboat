@@ -129,7 +129,7 @@ export function ChatHistoryView({
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-              <div className="flex items-center border-b border-border/60 bg-muted/30 px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="flex items-center border-b border-border/60 bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
                 <div className="min-w-0 flex-1">Title</div>
                 <div className="w-28 shrink-0 text-right">Last modified</div>
                 <div className="w-7 shrink-0" />
@@ -163,7 +163,7 @@ export function ChatHistoryView({
                                 }
                               }}
                               onBlur={() => commitRename(run.id)}
-                              className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                              className="h-7 min-w-0 flex-1 rounded-md border border-transparent bg-[var(--rowboat-wash)] px-2 text-sm outline-none focus:border-border focus:ring-1 focus:ring-ring"
                             />
                           </div>
                         ) : (

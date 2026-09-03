@@ -314,13 +314,42 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listTopics.response, { topics });
   });
 
-  app.get('/v1/spaces/:spaceId/topics/:topicId/messages', async (c) => {
-    const { spaceId, topicId } = parseWith(routes.listMessages.params, c.req.param());
-    const q = parseWith(routes.listMessages.query, {
+  app.get('/v1/spaces/:spaceId/search', async (c) => {
+    const { spaceId } = parseWith(routes.search.params, c.req.param());
+    const q = parseWith(routes.search.query, {
+      q: c.req.query('q'),
+      ...(c.req.query('kinds') !== undefined ? { kinds: c.req.query('kinds') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    const results = await service.search(actor(c), spaceId, q.q, {
+      ...(q.kinds !== undefined ? { kinds: q.kinds } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
+    });
+    return reply(c, routes.search.response, results);
+  });
+
+  app.get('/v1/spaces/:spaceId/stream', async (c) => {
+    const { spaceId } = parseWith(routes.listStream.params, c.req.param());
+    const q = parseWith(routes.listStream.query, {
       ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
       ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
     });
-    return reply(c, routes.listMessages.response, await service.listMessages(actor(c), spaceId, topicId, q));
+    return reply(c, routes.listStream.response, await service.listStream(actor(c), spaceId, q));
+  });
+
+  app.get('/v1/spaces/:spaceId/threads/:rootMessageId', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.listThread.params, c.req.param());
+    const q = parseWith(routes.listThread.query, {
+      ...(c.req.query('beforeOffset') !== undefined ? { beforeOffset: c.req.query('beforeOffset') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.listThread.response, await service.listThread(actor(c), spaceId, rootMessageId, q));
+  });
+
+  app.post('/v1/spaces/:spaceId/topics', async (c) => {
+    const { spaceId } = parseWith(routes.createTopic.params, c.req.param());
+    const input = await body(c, routes.createTopic.request);
+    return reply(c, routes.createTopic.response, await service.createTopic(actor(c), spaceId, input));
   });
 
   app.post('/v1/spaces/:spaceId/messages', async (c) => {
@@ -348,6 +377,20 @@ export function buildHttpApp(deps: {
     const input = await body(c, routes.reactToMessage.request);
     const message = await service.reactToMessage(actor(c), spaceId, messageId, input);
     return reply(c, routes.reactToMessage.response, { message });
+  });
+
+  app.post('/v1/spaces/:spaceId/messages/:messageId/poll/votes', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.votePoll.params, c.req.param());
+    const input = await body(c, routes.votePoll.request);
+    const message = await service.votePoll(actor(c), spaceId, messageId, input);
+    return reply(c, routes.votePoll.response, { message });
+  });
+
+  app.post('/v1/spaces/:spaceId/messages/:messageId/poll/end', async (c) => {
+    const { spaceId, messageId } = parseWith(routes.endPoll.params, c.req.param());
+    const input = await body(c, routes.endPoll.request);
+    const message = await service.endPoll(actor(c), spaceId, messageId, input);
+    return reply(c, routes.endPoll.response, { message });
   });
 
   app.post('/v1/spaces/:spaceId/topics/:topicId', async (c) => {

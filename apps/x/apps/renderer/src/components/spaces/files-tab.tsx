@@ -923,7 +923,7 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
     return (
         <aside className="w-72 shrink-0 border-l border-border flex flex-col min-h-0">
             <div className="flex items-center justify-between pl-3 pr-1.5 h-9 shrink-0">
-                <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                <span className="text-[13px] text-muted-foreground flex items-center gap-1">
                     History
                 </span>
                 <Button variant="ghost" size="icon" className="size-6" onClick={onClose}><X className="size-3.5" /></Button>
@@ -940,7 +940,7 @@ function HistoryPanel({ org, space, path, memberNames, refreshTick, onClose, onS
                             <div className="text-xs font-medium truncate">{attributionLabel(cs.attribution, memberNames)}</div>
                         </div>
                         {cs.op && (
-                            <div className="mt-1 pl-7 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground">
+                            <div className="mt-1 pl-7 text-[12px] text-muted-foreground">
                                 {cs.op === 'move' ? `moved from ${cs.movedFrom ?? '…'}` : cs.op === 'delete' ? 'deleted' : 'restored'}
                             </div>
                         )}
@@ -1192,7 +1192,7 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
                                 {row.status === 'uploading' ? (
                                     <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                                 ) : row.status === 'done' ? (
-                                    <Check className="size-3.5 shrink-0 text-emerald-600" />
+                                    <Check className="size-3.5 shrink-0 text-[var(--rowboat-success)]" />
                                 ) : row.status === 'error' ? (
                                     <X className="size-3.5 shrink-0 text-red-500" />
                                 ) : (

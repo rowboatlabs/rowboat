@@ -8,6 +8,11 @@ interface ChatEmptyStateProps {
   onPickPrompt: (prompt: string) => void
   /** Use a wider column — for the full-screen chat where the narrow column looks cramped. */
   wide?: boolean
+  /**
+   * 'code': the chat is a coding session. One line, no starter cards — the
+   * email/agent/research suggestions don't apply, and the work is the code.
+   */
+  variant?: 'default' | 'code'
 }
 
 const SUGGESTED_ACTIONS: { icon: typeof Mail; title: string; sub: string; prompt: string }[] = [
@@ -15,6 +20,35 @@ const SUGGESTED_ACTIONS: { icon: typeof Mail; title: string; sub: string; prompt
   { icon: Zap, title: 'Set up a background agent', sub: 'that automates tasks', prompt: 'Set up a background agent that automates [task]' },
   { icon: BookOpen, title: 'Research a topic', sub: 'create a local wiki for me', prompt: 'Research [topic] and create a local wiki for me' },
 ]
+
+const CODE_LINE = 'What should we build together?'
+
+// A coding session's empty state: one display line with a block cursor that
+// keeps blinking after it while the session sits empty — the one detail
+// that says "terminal" without a badge. Clicking it focuses the composer,
+// since a cursor invites typing.
+function CodeEmptyState({ wide }: { wide: boolean }) {
+  return (
+    <div
+      className={cn('mx-auto flex w-full flex-col items-center py-6 text-center', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}
+      onClick={(e) => {
+        const root = e.currentTarget.closest<HTMLElement>('[data-chat-sidebar-root]') ?? document
+        root.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+      }}
+    >
+      {/* Regular weight in the system face: the look of a title without the
+          weight of one. Baseline-aligned block cursor, blinking with a
+          stepped cycle (a fade would read as loading). */}
+      <div className={cn('cursor-default font-normal leading-tight tracking-[-0.01em] text-foreground', wide ? 'text-[30px]' : 'text-xl')}>
+        <span>{CODE_LINE}</span>
+        <span
+          aria-hidden
+          className="code-cursor-blink ml-[0.08em] inline-block h-[0.9em] w-[0.5ch] translate-y-[0.1em] bg-foreground"
+        />
+      </div>
+    </div>
+  )
+}
 
 /**
  * Empty-state body for the chat surface: greeting and starter action cards.
@@ -24,7 +58,9 @@ const SUGGESTED_ACTIONS: { icon: typeof Mail; title: string; sub: string; prompt
 export function ChatEmptyState({
   onPickPrompt,
   wide = false,
+  variant = 'default',
 }: ChatEmptyStateProps) {
+  if (variant === 'code') return <CodeEmptyState wide={wide} />
   return (
     <div className={cn('mx-auto flex w-full flex-col gap-5 py-6', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
       <div>

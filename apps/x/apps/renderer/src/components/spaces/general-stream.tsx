@@ -1,26 +1,34 @@
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, Bot, Loader2, ShieldAlert } from 'lucide-react'
+import { ArrowDown, ArrowUp, Loader2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
-import { MemberName } from '@/components/spaces/member-text'
+import { ForwardDialog } from '@/components/spaces/forward-dialog'
 import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData } from '@/components/spaces/message-row'
-import type { GeneralState, SpacePresence, ThreadIndex } from '@/hooks/use-space-chat'
-import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
+import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
-    buildPendingMessage, failPendingGeneralMessage, ingestGeneralMessage, loadOlderGeneralMessages,
-    removeGeneralMessage, resolvePendingGeneralMessage, updateGeneralMessage, usePresenceSender,
+    STREAM_READ_KEY, buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, loadOlderStreamMessages,
+    removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
-import { applyReaction, dayKey, explicitTitle, formatDayLabel, isContinuation, isGeneralSeedMessage } from '@/lib/spaces-conventions'
+import { subscribeComposeInsert } from '@/lib/spaces-compose'
+import { applyReaction, dayKey, formatDayLabel, isContinuation, threadLabelOf } from '@/lib/spaces-conventions'
+import { consumeJump, requestJump, scrollToMessage, subscribeJump } from '@/lib/spaces-jump'
+import { pinnedMessages } from '@/lib/spaces-corpus'
+import { PinnedBanner } from '@/components/spaces/pinned-banner'
+import { PollDialogHost } from '@/components/spaces/poll-dialog'
+import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
+import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markRead, markTopicRead } from '@/lib/spaces-read-state'
+import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 
-// Messages — the space's open stream. What people say, in order; a message
-// that gets replies becomes a topic (shown as a row under it here).
+// The space's one stream: ROOT messages in order; each message's flat thread
+// lives behind its reply chip (annotation model — replying creates nothing,
+// a Discussion is a deliberate annotation on a thread).
 
 /** The first frame renders a short tail — markdown is the paint cost; the full window follows right after. */
 const FIRST_PAINT_CAP = 16
@@ -32,61 +40,39 @@ const RENDER_CAP = 100
 const NEW_LINGER_MS = 5_000
 /** Clear delay after the fade starts — must outlast the divider's duration-700. */
 const NEW_FADE_MS = 800
+/** The pinned strip shows the newest pins, stepped through with a chevron. */
+const PIN_BANNER_MAX = 3
 
 export function GeneralStream({
-    org, space, general, threads, topics, presence, members, memberNames, entries = [], onOpenThread, onStartThread, onOpenSession, visible = true,
+    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
-    general: GeneralState
-    threads: ThreadIndex
-    topics: spaces.Topic[]
+    stream: StreamState
     presence: SpacePresence
     members: spaces.Member[]
     memberNames: Map<string, string>
     /** The space's files — the composer's @ typeahead offers them as links. */
     entries?: spaces.SpacesAssetEntry[]
-    onOpenThread: (topicId: string) => void
-    /** Reply on a message with no thread yet — open a draft pane (no topic until first send). */
-    onStartThread: (parent: spaces.Message) => void
-    onOpenSession?: (sessionId: string) => void
+    /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
+    onOpenThread: (rootMessageId: string) => void
     /**
-     * The keep-alive flag: the stream stays MOUNTED while a topic, a file, or
+     * The keep-alive flag: the stream stays MOUNTED while a thread, a file, or
      * another app section covers it, and this goes false. Hidden means no
      * presence lease, no read marks — the reader isn't actually looking.
      */
     visible?: boolean
 }) {
-    const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null)
+    const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
-    const generalId = general.topic?.id ?? null
-    const { onType } = usePresenceSender(org.id, space.id, generalId ?? undefined, visible)
+    const { onType } = usePresenceSender(org.id, space.id, undefined, visible)
 
-    // Agents invoked straight from the stream hold their working lease on the
-    // stream's own topic — surface it here, typing-indicator position.
-    const workingHere = presence.working.get(generalId ?? '') ?? []
-    // Your own agent, blocked mid-turn on a tool permission: surface it here
-    // instead of letting it idle behind a "working…" spinner (or silence).
-    const permissionWait = useTopicAgentPermissionWait(org.id, space.id, generalId, visible)
-    // While blocked, the amber pill replaces the own-agent spinner.
-    const spinningHere = permissionWait.length > 0 ? workingHere.filter((id) => id !== org.memberId) : workingHere
-    const openStreamSession = async () => {
-        if (!generalId) return
-        try {
-            const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, topicId: generalId })
-            if (sessionId && onOpenSession) onOpenSession(sessionId)
-            else if (!sessionId) toast('No agent session here yet', 'info')
-        } catch {
-            toast('Could not open the agent session', 'error')
-        }
-    }
-
-    // "New" divider: snapshot the read mark when general opens; mark read from
-    // then on — but only while actually on screen. A kept-alive hidden stream
-    // must not mark messages read as they arrive; the flip back to visible
-    // re-runs this and marks the catch-up read.
-    const [newSince, setNewSince] = useState<string | null>(() => (generalId ? getTopicLastReadAt(org.id, space.id, generalId) : null))
+    // "New" divider: snapshot the read mark when the stream opens; mark read
+    // from then on — but only while actually on screen. A kept-alive hidden
+    // stream must not mark messages read as they arrive; the flip back to
+    // visible re-runs this and marks the catch-up read.
+    const [newSince, setNewSince] = useState<string | null>(() => getTopicLastReadAt(org.id, space.id, STREAM_READ_KEY))
     const [newFading, setNewFading] = useState(false)
     // Each return to the stream re-arms the line at the catch-up point: the
     // read mark as it stood while hidden. Declared BEFORE the mark-read
@@ -95,14 +81,14 @@ export function GeneralStream({
     useEffect(() => {
         const was = newArmedVisibleRef.current
         newArmedVisibleRef.current = visible
-        if (!visible || was || !generalId) return
+        if (!visible || was) return
         setNewFading(false)
-        setNewSince(getTopicLastReadAt(org.id, space.id, generalId))
-    }, [visible, org.id, space.id, generalId])
+        setNewSince(getTopicLastReadAt(org.id, space.id, STREAM_READ_KEY))
+    }, [visible, org.id, space.id])
     useEffect(() => {
-        if (!visible || !generalId || !general.ready) return
-        markTopicRead(org.id, space.id, generalId)
-    }, [org.id, space.id, generalId, general.ready, general.messages.length, visible])
+        if (!visible || !stream.ready) return
+        markTopicRead(org.id, space.id, STREAM_READ_KEY)
+    }, [org.id, space.id, stream.ready, stream.messages.length, visible])
 
     // First paint: start at the bottom — the newest messages, always. After
     // that: keep the tail in view when new messages land, unless the reader
@@ -132,7 +118,7 @@ export function GeneralStream({
     // Layout effect: the anchor lands before paint — no flash of the top.
     useLayoutEffect(() => {
         const el = scrollRef.current
-        if (!el || !general.ready) return
+        if (!el || !stream.ready) return
         if (!restoredRef.current) {
             restoredRef.current = true
             el.scrollTop = el.scrollHeight
@@ -140,7 +126,7 @@ export function GeneralStream({
         }
         const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
         if (nearBottom) bottomRef.current?.scrollIntoView({ block: 'end' })
-    }, [general.ready, general.messages.length, presence.typing, workingHere.length, permissionWait.length])
+    }, [stream.ready, stream.messages.length, presence.typing])
     // The "jump to latest" pill: shown once the reader is meaningfully away
     // from the tail, with a count of messages that arrived below since they
     // left it. lastSeen tracks the newest offset that was ever on screen at
@@ -154,12 +140,12 @@ export function GeneralStream({
     // Once the reader is with the new messages (on screen, at the tail) the
     // line has done its job: linger a beat, fade, drop. Keep-alive means no
     // remount ever resets it — without this it would sit in history forever.
-    const hasNewLine = !!newSince && general.messages.some((m) => m.postedAt > newSince && m.author.memberId !== org.memberId)
+    const hasNewLine = !!newSince && stream.messages.some((m) => m.postedAt > newSince && m.author.memberId !== org.memberId)
     useEffect(() => {
-        if (!visible || !general.ready || awayFromBottom || !hasNewLine || newFading) return
+        if (!visible || !stream.ready || awayFromBottom || !hasNewLine || newFading) return
         const t = window.setTimeout(() => setNewFading(true), NEW_LINGER_MS)
         return () => window.clearTimeout(t)
-    }, [visible, general.ready, awayFromBottom, hasNewLine, newFading])
+    }, [visible, stream.ready, awayFromBottom, hasNewLine, newFading])
     useEffect(() => {
         if (!newFading) return
         const t = window.setTimeout(() => {
@@ -180,69 +166,60 @@ export function GeneralStream({
         el.scrollTop = lastScrollTopRef.current ?? el.scrollHeight
     }, [visible])
 
-    const topicsById = useMemo(() => new Map(topics.map((t) => [t.id, t])), [topics])
-
     const threadRowFor = (message: spaces.Message): ThreadRowData | null => {
-        const topicId = threads.byParent.get(message.id)
-        if (!topicId) return null
-        const topic = topicsById.get(topicId)
-        if (!topic) return null
-        const mark = getTopicLastReadAt(org.id, space.id, topicId)
-        // Archived threads never read as unread — consistent with the rail
-        // badge and countSpaceUnread, which both skip archived topics.
-        const hasNew = !topic.archived && (!mark || topic.lastActivityAt > mark)
-        // A renamed thread shows its name on the chip; auto-titled ones stay
-        // compact. Without the seed prefetch the parent message stands in —
-        // the seed's first line IS the parent's, so the comparison holds.
-        const named = explicitTitle(topic, threads.byTopic.get(topicId)?.firstMessage?.body ?? message.body)
+        const topic = stream.topicsByRoot.get(message.id) ?? null
+        const replyCount = message.replyCount ?? 0
+        const workingAgents = presence.working.get(message.id) ?? []
+        if (replyCount === 0 && !topic && workingAgents.length === 0) return null
+        const lastActivityAt = message.lastReplyAt ?? message.postedAt
+        const mark = getTopicLastReadAt(org.id, space.id, message.id)
+        // Archived topics never read as unread — consistent with the rail
+        // badge and countSpaceUnread, which both skip archived ones.
+        const hasNew = !topic?.archived && !!message.lastReplyAt && (!mark || message.lastReplyAt > mark)
         return {
-            topicId,
-            archived: topic.archived,
-            replyCount: Math.max(0, topic.messageCount - 1),
-            lastActivityAt: topic.lastActivityAt,
+            rootMessageId: message.id,
+            archived: topic?.archived ?? false,
+            replyCount,
+            lastActivityAt,
             // Count isn't known without the thread's messages; 1 reads as "has new" on the row.
-            unreadCount: hasNew && topic.messageCount > 1 ? 1 : 0,
-            workingAgents: presence.working.get(topicId) ?? [],
-            title: named ? resolveMentions(named, memberNames) : null,
+            unreadCount: hasNew && replyCount > 0 ? 1 : 0,
+            workingAgents,
+            title: topic ? resolveMentions(topic.title, memberNames) : null,
         }
     }
 
-    // Optimistic send (the Slack pattern): the message renders the moment
+    // Optimistic send (standard team-chat pattern): the message renders the moment
     // Enter lands, dimmed as pending; the org's write confirms — or fails,
     // leaving a retry/discard row — in the background. The composer never
     // waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
-        if (!generalId) return
-        const pending = buildPendingMessage(space.id, generalId, org.memberId, body)
-        ingestGeneralMessage(org.id, space.id, pending)
-        markTopicRead(org.id, space.id, generalId)
+        const pending = buildPendingMessage(space.id, org.memberId, body)
+        ingestStreamMessage(org.id, space.id, pending)
+        markTopicRead(org.id, space.id, STREAM_READ_KEY)
         void window.ipc
-            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, topicId: generalId, body })
+            .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body })
             .then((result) => {
-                resolvePendingGeneralMessage(org.id, space.id, pending.id, result.message)
-                markTopicRead(org.id, space.id, generalId)
+                resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
+                markTopicRead(org.id, space.id, STREAM_READ_KEY)
                 analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
-                maybeInvokeRowboat(org, space, result.topic, result.message.id, body, agent)
+                // @rowboat on a fresh stream message: the agent works the thread
+                // under it — its receipt lands as the first reply.
+                maybeInvokeRowboat(org, space, { rootMessageId: result.message.id, label: threadLabelOf(body) }, result.message.id, body, agent)
             })
             .catch(() => {
-                failPendingGeneralMessage(org.id, space.id, pending.id)
+                failPendingStreamMessage(org.id, space.id, pending.id)
             })
     }
 
     const retryFailed = (message: spaces.Message) => {
-        removeGeneralMessage(org.id, space.id, message.id)
+        removeStreamMessage(org.id, space.id, message.id)
         void post(message.body)
     }
-    const discardFailed = (message: spaces.Message) => removeGeneralMessage(org.id, space.id, message.id)
+    const discardFailed = (message: spaces.Message) => removeStreamMessage(org.id, space.id, message.id)
 
-    // Reply creates NOTHING: an existing thread opens (even a 0-reply one left
-    // by an older build), otherwise a draft pane — the topic is created only
-    // when the first reply is actually sent (DraftThreadPane).
-    const replyInThread = (parent: spaces.Message) => {
-        const existing = threads.byParent.get(parent.id)
-        if (existing) onOpenThread(existing)
-        else onStartThread(parent)
-    }
+    // Reply creates NOTHING: the thread pane opens on the message itself —
+    // a thread with zero replies is just a thread (annotation model).
+    const replyInThread = (parent: spaces.Message) => onOpenThread(parent.id)
 
     const askRowboat = (message: spaces.Message) => {
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
@@ -251,13 +228,117 @@ export function GeneralStream({
         setSeed({ text: `@rowboat \n\n${quote}\n— ${name}`, nonce: Date.now() })
     }
 
+    // Quote-reply (the Discord gesture): the quoted copy seeds the composer,
+    // the reply lands in the stream beside it — plain markdown on the wire.
+    // Image embeds drop (a quote is text); names, not wire ids, like askRowboat.
+    const quoteReply = (message: spaces.Message) => {
+        const name = memberNames.get(message.author.memberId) ?? message.author.memberId
+        const text = resolveMentions(message.body, memberNames).replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim()
+        if (!text) return
+        const quote = text.split('\n').map((l) => `> ${l}`).join('\n')
+        setSeed({ text: `${quote}\n> — ${name}\n\n`, nonce: Date.now() })
+    }
+
+    // The profile popover's "Mention" lands in whichever composer is visible.
+    useEffect(() => {
+        if (!visible) return
+        return subscribeComposeInsert((insert) => setSeed({ text: insert.text, nonce: Date.now(), append: true }))
+    }, [visible])
+
+    // Saved-for-later is personal and local; the row's menu label needs to
+    // know which messages are in it.
+    const savedList = useSaved(org.id, space.id)
+    const savedIds = useMemo(() => new Set(savedList.map((s) => s.messageId)), [savedList])
+    const toggleSave = (message: spaces.Message) => {
+        const nowSaved = toggleSaved(org.id, space.id, message)
+        toast(nowSaved ? 'Saved for later' : 'Removed from saved', 'success')
+    }
+
+    /** The message being forwarded — non-null renders the destination dialog. */
+    const [forwarding, setForwarding] = useState<spaces.Message | null>(null)
+
+    /** Opens the poll dialog (state lives in PollDialogHost — see its doc). */
+    const openPollRef = useRef<(() => void) | null>(null)
+    const createPoll = async (input: spaces.SpacesNewPollInput) => {
+        try {
+            const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, input })
+            ingestStreamMessage(org.id, space.id, posted)
+            markTopicRead(org.id, space.id, STREAM_READ_KEY)
+            analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: false })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
+            throw err
+        }
+    }
+
+    // Poll votes, the reactions pattern: fold optimistically, confirm with the
+    // org's folded answer, put the old state back on failure. Multiselect
+    // submits one toggle per picked answer; the last response wins the fold.
+    const votePoll = async (message: spaces.Message, answerIds: number[]) => {
+        if (!message.poll || answerIds.length === 0) return
+        let optimistic = message.poll
+        for (const answerId of answerIds) {
+            optimistic = applyPollVote(optimistic, { answerId, memberId: org.memberId, action: 'added' })
+        }
+        updateStreamMessage(org.id, space.id, { ...message, poll: optimistic })
+        try {
+            let updated: spaces.Message | undefined
+            for (const answerId of answerIds) {
+                const res = await window.ipc.invoke('spaces:votePoll', {
+                    orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'add',
+                })
+                updated = res.message
+            }
+            if (updated) updateStreamMessage(org.id, space.id, updated)
+        } catch (err) {
+            updateStreamMessage(org.id, space.id, message)
+            toast(err instanceof Error ? err.message : 'Could not vote', 'error')
+        }
+    }
+
+    const removePollVote = async (message: spaces.Message) => {
+        if (!message.poll) return
+        const mine = myPollVotes(message.poll, org.memberId)
+        if (mine.length === 0) return
+        let optimistic = message.poll
+        for (const answerId of mine) {
+            optimistic = applyPollVote(optimistic, { answerId, memberId: org.memberId, action: 'removed' })
+        }
+        updateStreamMessage(org.id, space.id, { ...message, poll: optimistic })
+        try {
+            let updated: spaces.Message | undefined
+            for (const answerId of mine) {
+                const res = await window.ipc.invoke('spaces:votePoll', {
+                    orgId: org.id, spaceId: space.id, messageId: message.id, answerId, action: 'remove',
+                })
+                updated = res.message
+            }
+            if (updated) updateStreamMessage(org.id, space.id, updated)
+        } catch (err) {
+            updateStreamMessage(org.id, space.id, message)
+            toast(err instanceof Error ? err.message : 'Could not remove the vote', 'error')
+        }
+    }
+
+    const endPoll = async (message: spaces.Message) => {
+        if (!window.confirm('End this poll now? Voting stops immediately.')) return
+        try {
+            const { message: updated } = await window.ipc.invoke('spaces:endPoll', {
+                orgId: org.id, spaceId: space.id, messageId: message.id,
+            })
+            updateStreamMessage(org.id, space.id, updated)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not end the poll', 'error')
+        }
+    }
+
     // Toggle: add when the viewer isn't in the group yet, remove when they are.
     // Optimistic — the chip moves the instant it's clicked; the org's answer
     // replaces it right behind, and a failure puts the old state back.
     const toggleReaction = async (message: spaces.Message, emoji: string) => {
         const mine = (message.reactions ?? []).find((g) => g.emoji === emoji)?.memberIds.includes(org.memberId)
         const action = mine ? 'remove' : 'add'
-        updateGeneralMessage(org.id, space.id, {
+        updateStreamMessage(org.id, space.id, {
             ...message,
             reactions: applyReaction(message.reactions, { emoji, memberId: org.memberId, action: action === 'add' ? 'added' : 'removed' }),
         })
@@ -265,17 +346,17 @@ export function GeneralStream({
             const { message: updated } = await window.ipc.invoke('spaces:reactToMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, emoji, action,
             })
-            updateGeneralMessage(org.id, space.id, updated)
+            updateStreamMessage(org.id, space.id, updated)
             analytics.spacesReactionToggled({ action })
         } catch (err) {
-            updateGeneralMessage(org.id, space.id, message)
+            updateStreamMessage(org.id, space.id, message)
             toast(err instanceof Error ? err.message : 'Could not react', 'error')
         }
     }
 
     const copyLink = async (message: spaces.Message) => {
         try {
-            await navigator.clipboard.writeText(`https://${org.address}/s/${space.id}/t/${message.topicId}#${message.id}`)
+            await navigator.clipboard.writeText(`https://${org.address}/s/${space.id}/m/${message.id}`)
             toast('Link copied', 'success')
         } catch {
             toast('Could not copy the link', 'error')
@@ -285,14 +366,14 @@ export function GeneralStream({
     // Optimistic rewrite, same shape as reactions: the new body renders on
     // save; the org's answer (or a failure revert) reconciles right behind.
     const editMessage = async (message: spaces.Message, body: string) => {
-        updateGeneralMessage(org.id, space.id, { ...message, body, editedAt: new Date().toISOString() })
+        updateStreamMessage(org.id, space.id, { ...message, body, editedAt: new Date().toISOString() })
         try {
             const { message: updated } = await window.ipc.invoke('spaces:editMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id, body,
             })
-            updateGeneralMessage(org.id, space.id, updated)
+            updateStreamMessage(org.id, space.id, updated)
         } catch (err) {
-            updateGeneralMessage(org.id, space.id, message)
+            updateStreamMessage(org.id, space.id, message)
             toast(err instanceof Error ? err.message : 'Could not edit', 'error')
         }
     }
@@ -303,7 +384,7 @@ export function GeneralStream({
             const { message: deleted } = await window.ipc.invoke('spaces:deleteMessage', {
                 orgId: org.id, spaceId: space.id, messageId: message.id,
             })
-            updateGeneralMessage(org.id, space.id, deleted)
+            updateStreamMessage(org.id, space.id, deleted)
             analytics.spacesMessageDeleted()
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not delete', 'error')
@@ -313,10 +394,8 @@ export function GeneralStream({
     // Long histories: render only the tail — every message is markdown through
     // Streamdown, so an uncapped list makes the first paint crawl. "Show
     // earlier" just lifts the cap; the messages are already in memory.
-    const streamMessages = useMemo(
-        () => general.messages.filter((m, i) => !(general.topic && isGeneralSeedMessage(general.topic, m, i))),
-        [general.messages, general.topic],
-    )
+    const streamMessages = stream.messages
+    const pinned = useMemo(() => pinnedMessages(streamMessages).slice(0, PIN_BANNER_MAX), [streamMessages])
     const [renderCap, setRenderCap] = useState(FIRST_PAINT_CAP)
     useEffect(() => setRenderCap(FIRST_PAINT_CAP), [memoryKey])
     // The short tail is on screen — widen to the full window right after, as
@@ -325,12 +404,12 @@ export function GeneralStream({
     // viewport; the tail pin below keeps the bottom in view, so the reader
     // never sees the reflow.
     useEffect(() => {
-        if (!general.ready) return
+        if (!stream.ready) return
         const raf = requestAnimationFrame(() => {
             startTransition(() => setRenderCap((c) => Math.max(c, RENDER_CAP)))
         })
         return () => cancelAnimationFrame(raf)
-    }, [general.ready, memoryKey])
+    }, [stream.ready, memoryKey])
     const hiddenCount = Math.max(0, streamMessages.length - renderCap)
     const visibleMessages = hiddenCount > 0 ? streamMessages.slice(hiddenCount) : streamMessages
 
@@ -345,13 +424,13 @@ export function GeneralStream({
         if (hiddenCount > 0) {
             pendingRestoreRef.current = { height: el.scrollHeight, top: el.scrollTop }
             setRenderCap((c) => c + 200)
-        } else if (general.hasMore && !general.loadingOlder) {
-            const oldest = general.messages.find((m) => !m.pending && !m.failed)?.offset
+        } else if (stream.hasMore && !stream.loadingOlder) {
+            const oldest = stream.messages.find((m) => !m.pending && !m.failed)?.offset
             if (oldest === undefined) return
             pendingRestoreRef.current = { height: el.scrollHeight, top: el.scrollTop, oldest }
             // The fetched page must also render: lift the cap along with it.
             setRenderCap((c) => c + 200)
-            void loadOlderGeneralMessages(org.id, space.id)
+            void loadOlderStreamMessages(org.id, space.id)
         }
     }
     // A reveal restores immediately — the rows are local.
@@ -368,16 +447,74 @@ export function GeneralStream({
         const el = scrollRef.current
         const pending = pendingRestoreRef.current
         if (!el || !pending || pending.oldest === undefined) return
-        const oldestNow = general.messages.find((m) => !m.pending && !m.failed)?.offset
+        const oldestNow = stream.messages.find((m) => !m.pending && !m.failed)?.offset
         if (oldestNow !== undefined && oldestNow < pending.oldest) {
             el.scrollTop = el.scrollHeight - pending.height + pending.top
             lastScrollTopRef.current = el.scrollTop
             pendingRestoreRef.current = null
-        } else if (!general.loadingOlder) {
+        } else if (!stream.loadingOlder) {
             // Settled without a prepend (failed, or raced empty).
             pendingRestoreRef.current = null
         }
-    }, [general.messages, general.loadingOlder])
+    }, [stream.messages, stream.loadingOlder])
+
+    // Jump-to-message (search, pinned, saved): consume the pending jump once
+    // visible, lift the render cap so the row is in the DOM, then scroll +
+    // flash. The landing position counts as a reader scroll (tail pin lets go).
+    const [jumpMid, setJumpMid] = useState<string | null>(null)
+    useEffect(() => {
+        if (!visible) return
+        const attempt = () => {
+            const mid = consumeJump(STREAM_READ_KEY)
+            if (mid) setJumpMid(mid)
+        }
+        attempt()
+        return subscribeJump(attempt)
+    }, [visible])
+    useLayoutEffect(() => {
+        if (!jumpMid) return
+        const el = scrollRef.current
+        if (!el) return
+        if (scrollToMessage(el, jumpMid)) {
+            lastScrollTopRef.current = el.scrollTop
+            setJumpMid(null)
+            return
+        }
+        // Row not in the DOM: a cap hiding settled rows lifts and retries on
+        // the next commit; a fully-rendered window without the row is a real
+        // miss (the corpus only holds loaded pages) — give up, don't spin.
+        if (streamMessages.length > renderCap) setRenderCap(streamMessages.length + 10)
+        else if (stream.ready) setJumpMid(null)
+    }, [jumpMid, renderCap, stream.ready, streamMessages.length])
+
+    // Jump-to-unread: the stream always opens at the bottom, so when the New
+    // line sits above the fold a pill at the top scrolls to it. Dismissed by
+    // use; re-arms whenever the divider re-arms (adjust-on-change).
+    const [newJumpNonce, setNewJumpNonce] = useState(0)
+    const [newJumped, setNewJumped] = useState(false)
+    const [lastNewSince, setLastNewSince] = useState(newSince)
+    if (newSince !== lastNewSince) {
+        setLastNewSince(newSince)
+        setNewJumped(false)
+    }
+    const newCount = newSince
+        ? stream.messages.filter((m) => !m.deletedAt && !m.pending && !m.failed && m.postedAt > newSince && m.author.memberId !== org.memberId).length
+        : 0
+    const jumpToNew = () => {
+        setRenderCap((c) => Math.max(c, stream.messages.length + 10))
+        setNewJumped(true)
+        setNewJumpNonce((n) => n + 1)
+    }
+    useLayoutEffect(() => {
+        if (newJumpNonce === 0) return
+        const el = scrollRef.current
+        if (!el) return
+        const divider = el.querySelector<HTMLElement>('[data-new-divider]')
+        if (divider) {
+            divider.scrollIntoView({ block: 'center' })
+            lastScrollTopRef.current = el.scrollTop
+        }
+    }, [newJumpNonce])
 
     // The bottom anchor is not one-shot: message bodies keep growing after
     // first layout (lazy images have no reserved height, code highlighting and
@@ -404,16 +541,16 @@ export function GeneralStream({
     let prev: spaces.Message | undefined
     let prevDay = ''
     let newShown = false
-    if (hiddenCount > 0 || general.hasMore) {
+    if (hiddenCount > 0 || stream.hasMore) {
         rows.push(
             <div key="earlier" className="flex justify-center py-2">
                 <button
                     type="button"
                     onClick={loadEarlier}
-                    disabled={general.loadingOlder}
+                    disabled={stream.loadingOlder}
                     className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground disabled:opacity-60"
                 >
-                    {general.loadingOlder
+                    {stream.loadingOlder
                         ? 'Loading earlier messages…'
                         : hiddenCount > 0
                           ? `Show earlier messages (${hiddenCount} more)`
@@ -453,23 +590,35 @@ export function GeneralStream({
                 onReact={(m, emoji) => void toggleReaction(m, emoji)}
                 onDelete={(m) => void deleteMessage(m)}
                 onEdit={(m, body) => void editMessage(m, body)}
+                onQuoteReply={quoteReply}
+                onForward={setForwarding}
+                onToggleSave={toggleSave}
+                saved={savedIds.has(message.id)}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
+                onVotePoll={(m, answerIds) => void votePoll(m, answerIds)}
+                onRemovePollVote={(m) => void removePollVote(m)}
+                onEndPoll={(m) => void endPoll(m)}
             />,
         )
         prev = message
     })
 
-    const typingNames = (presence.typing.get(generalId ?? '') ?? []).map((id) => memberNames.get(id) ?? id)
+    const typingNames = (presence.typing.get('') ?? []).map((id) => memberNames.get(id) ?? id)
 
     return (
         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
             <div className="flex items-center gap-2.5 px-5 h-9 shrink-0">
-                <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Messages</span>
-                <span className="text-xs text-muted-foreground truncate">What the team says, in order. Reply to one to start a topic.</span>
+                <span className="text-[13px] text-muted-foreground">Messages</span>
+                <span className="text-xs text-muted-foreground truncate">What the team says, in order. Reply to one to start a thread.</span>
                 <span className="flex-1" />
-                {general.error && <span className="text-xs text-destructive truncate" title={general.error}>messages unavailable</span>}
+                {stream.error && <span className="text-xs text-destructive truncate" title={stream.error}>messages unavailable</span>}
             </div>
+            <PinnedBanner
+                pinned={pinned}
+                memberNames={memberNames}
+                onJump={(messageId) => requestJump({ topicId: STREAM_READ_KEY, messageId })}
+            />
             <div className="relative flex-1 min-h-0 flex flex-col">
             <div
                 ref={scrollRef}
@@ -491,8 +640,8 @@ export function GeneralStream({
                     if (fromBottom < 8) {
                         // At the bottom = "follow the tail" — and everything
                         // settled so far counts as seen.
-                        for (let i = general.messages.length - 1; i >= 0; i--) {
-                            const m = general.messages[i]!
+                        for (let i = stream.messages.length - 1; i >= 0; i--) {
+                            const m = stream.messages[i]!
                             if (m.pending || m.failed) continue
                             lastSeenOffsetRef.current = Math.max(lastSeenOffsetRef.current, m.offset)
                             break
@@ -515,47 +664,27 @@ export function GeneralStream({
             >
                 {/* One measurable child — the tail pin observes its size. */}
                 <div ref={contentRef}>
-                {!general.ready && (
+                {!stream.ready && (
                     <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
                 )}
-                {general.ready && rows.length === 0 && (
+                {stream.ready && rows.length === 0 && (
                     <div className="px-2 py-6 text-sm text-muted-foreground">Nothing here yet — say hello, or @rowboat to ask your agent.</div>
                 )}
                 {rows}
-                {/* Your agent is stopped, not working — it wants an answer. */}
-                {permissionWait.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2 pl-10 pt-1">
-                        <button
-                            type="button"
-                            onClick={() => void openStreamSession()}
-                            title="Open the agent session to review the request"
-                            className="flex items-center gap-1.5 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
-                        >
-                            <ShieldAlert className="size-3" />
-                            Your Rowboat needs permission — {permissionWait[0]}
-                            {permissionWait.length > 1 ? ` +${permissionWait.length - 1} more` : ''} · Review
-                        </button>
-                    </div>
-                )}
-                {spinningHere.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2 pl-10 pt-1">
-                        {spinningHere.map((memberId) => {
-                            const own = memberId === org.memberId
-                            const label = own ? 'Your Rowboat is working…' : <><MemberName id={memberId} />’s Rowboat is working…</>
-                            return own ? (
-                                <button key={memberId} className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent session" onClick={() => void openStreamSession()}>
-                                    <Loader2 className="size-3 animate-spin" />{label}
-                                </button>
-                            ) : (
-                                <span key={memberId} className="flex items-center gap-1.5 rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground"><Bot className="size-3" />{label}</span>
-                            )
-                        })}
-                    </div>
-                )}
                 <TypingIndicator names={typingNames} />
                 <div ref={bottomRef} />
                 </div>
             </div>
+            {hasNewLine && newCount > 0 && !newJumped && (
+                <button
+                    type="button"
+                    onClick={jumpToNew}
+                    className="absolute top-2 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-top-2 items-center gap-1.5 rounded-full border border-orange-500/40 bg-background/95 px-3 py-1 text-xs font-medium text-orange-600 shadow-md hover:bg-accent"
+                >
+                    <ArrowUp className="size-3" />
+                    {newCount} new — jump to unread
+                </button>
+            )}
             {awayFromBottom && (() => {
                 const unseen = streamMessages.filter(
                     (m) => m.offset > lastSeenOffsetRef.current && !m.pending && !m.failed && m.author.memberId !== org.memberId,
@@ -564,7 +693,7 @@ export function GeneralStream({
                     <button
                         type="button"
                         onClick={jumpToLatest}
-                        className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border border-border bg-background/95 px-3 py-1 text-xs font-medium shadow-md hover:bg-accent"
+                        className="absolute bottom-3 left-1/2 z-20 inline-flex -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 items-center gap-1.5 rounded-full border-none bg-[var(--rowboat-raised)] px-3 py-1 text-xs font-medium shadow-[var(--rowboat-shadow-soft)] hover:bg-accent"
                     >
                         {unseen > 0 ? `${unseen} new ${unseen === 1 ? 'message' : 'messages'}` : 'Latest'}
                         <ArrowDown className="size-3" />
@@ -572,11 +701,22 @@ export function GeneralStream({
                 )
             })()}
             </div>
+            {forwarding && (
+                <ForwardDialog org={org} space={space} message={forwarding} memberNames={memberNames} onClose={() => setForwarding(null)} />
+            )}
+            <PollDialogHost openRef={openPollRef} onSubmit={createPoll} />
             <Composer
                 placeholder={`Message ${space.name} — @rowboat to ask your agent`}
-                busy={!generalId}
+                busy={false}
                 draftKey={memoryKey}
                 onSend={post}
+                onSchedule={async (body, at) => {
+                    await window.ipc.invoke('spaces:schedule', {
+                        orgId: org.id, spaceId: space.id, body, at: at.toISOString(), kind: 'message',
+                    })
+                    toast(`Scheduled — sends ${formatScheduleTime(at)}`, 'success')
+                }}
+                onCreatePoll={() => openPollRef.current?.()}
                 onType={onType}
                 seed={seed}
                 members={members}
@@ -597,12 +737,40 @@ export function GeneralStream({
                         },
                     },
                     {
+                        name: 'poll',
+                        hint: 'Create a poll — pick answers, votes tally live',
+                        run: () => openPollRef.current?.(),
+                    },
+                    {
+                        name: 'remind',
+                        args: '<when> <text>',
+                        hint: 'Set a reminder — 20m, 2h, 9:30, tomorrow',
+                        run: async (args) => {
+                            const parsed = parseRemindArgs(args)
+                            if (typeof parsed === 'string') {
+                                toast(parsed, 'info')
+                                return
+                            }
+                            try {
+                                await window.ipc.invoke('spaces:schedule', {
+                                    orgId: org.id, spaceId: space.id, body: parsed.text, at: parsed.at.toISOString(), kind: 'reminder',
+                                })
+                                toast(`Reminder set for ${formatScheduleTime(parsed.at)}`, 'success')
+                            } catch (err) {
+                                toast(err instanceof Error ? err.message : 'Could not set the reminder', 'error')
+                            }
+                        },
+                    },
+                    {
                         name: 'read',
                         hint: 'Mark everything in this space read',
                         run: () => {
                             markRead(org.id, space.id)
-                            if (general.topic) markTopicRead(org.id, space.id, general.topic.id)
-                            for (const t of topics) markTopicRead(org.id, space.id, t.id)
+                            markTopicRead(org.id, space.id, STREAM_READ_KEY)
+                            for (const m of stream.messages) {
+                                if (!m.pending && !m.failed && (m.replyCount ?? 0) > 0) markTopicRead(org.id, space.id, m.id)
+                            }
+                            for (const root of stream.topicsByRoot.keys()) markTopicRead(org.id, space.id, root)
                             toast('Marked read', 'success')
                         },
                     },

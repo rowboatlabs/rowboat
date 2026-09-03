@@ -6,7 +6,19 @@ import type {
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
-import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredInvite, StoredReaction, StoredSpaceBlob } from './store.js';
+import { extractSearchText, matchesAllTerms, snippetAround, type SearchQuery } from './search.js';
+import type {
+  AssetRecord,
+  AssetSearchRow,
+  AssetVersionData,
+  MessageSearchRow,
+  Store,
+  StoredEvent,
+  StoredInvite,
+  StoredPollVote,
+  StoredReaction,
+  StoredSpaceBlob,
+} from './store.js';
 
 interface SpaceState {
   space: Space;
@@ -18,9 +30,11 @@ interface SpaceState {
   blobs: Map<string, StoredSpaceBlob>; // hash → registration (first write wins)
   changeSets: ChangeSet[]; // append order == offset order
   changeSetsById: Map<string, ChangeSet>;
-  topics: Map<string, Topic>;
-  messages: Map<string, Message[]>; // topicId → oldest first
+  topics: Map<string, Topic>; // annotation rows (id → row); messages never reference them
+  messages: Message[]; // the one stream, roots and replies interleaved, oldest first
+  messagesById: Map<string, Message>;
   reactions: Map<string, StoredReaction[]>; // messageId → oldest first
+  pollVotes: Map<string, StoredPollVote[]>; // messageId → oldest first
   events: StoredEvent[]; // offsets start at 1; events[i].offset === i + 1
   lock: Promise<void>;
 }
@@ -75,8 +89,10 @@ export class MemoryStore implements Store {
       changeSets: [],
       changeSetsById: new Map(),
       topics: new Map(),
-      messages: new Map(),
+      messages: [],
+      messagesById: new Map(),
       reactions: new Map(),
+      pollVotes: new Map(),
       events: [],
       lock: Promise.resolve(),
     });
@@ -232,56 +248,116 @@ export class MemoryStore implements Store {
     this.must(topic.spaceId).topics.set(topic.id, topic);
   }
 
-  async listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]> {
-    return [...this.must(spaceId).topics.values()]
-      .filter((t) => includeArchived || !t.archived)
-      .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+  async deleteTopic(spaceId: string, topicId: string): Promise<void> {
+    this.must(spaceId).topics.delete(topicId);
   }
 
-  async getTopicByAnchor(spaceId: string, anchorMessageId: string): Promise<Topic | undefined> {
-    return [...this.must(spaceId).topics.values()].find((t) => t.anchorMessageId === anchorMessageId);
+  async listTopics(spaceId: string, includeArchived: boolean): Promise<Topic[]> {
+    return [...this.must(spaceId).topics.values()].filter((t) => includeArchived || !t.archived);
+  }
+
+  async getTopicByRoot(spaceId: string, rootMessageId: string): Promise<Topic | undefined> {
+    return [...this.must(spaceId).topics.values()].find((t) => t.rootMessageId === rootMessageId);
   }
 
   async getMessage(spaceId: string, messageId: string): Promise<Message | undefined> {
-    return [...this.must(spaceId).messages.values()].flat().find((m) => m.id === messageId);
+    return this.must(spaceId).messagesById.get(messageId);
   }
 
-  async listMessages(spaceId: string, topicId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
-    let list = this.must(spaceId).messages.get(topicId) ?? [];
+  private window(list: Message[], opts?: { beforeOffset?: number; limit?: number }): Message[] {
     if (opts?.beforeOffset !== undefined) list = list.filter((m) => m.offset < opts.beforeOffset!);
     if (opts?.limit !== undefined) list = list.slice(-opts.limit);
     return [...list];
   }
 
-  async getFirstMessages(spaceId: string): Promise<Map<string, Message>> {
-    const out = new Map<string, Message>();
-    for (const [topicId, list] of this.must(spaceId).messages) {
-      if (list[0]) out.set(topicId, list[0]);
-    }
-    return out;
+  async listStream(spaceId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+    return this.window(this.must(spaceId).messages.filter((m) => m.threadRoot === undefined), opts);
+  }
+
+  async listThread(spaceId: string, rootMessageId: string, opts?: { beforeOffset?: number; limit?: number }): Promise<Message[]> {
+    return this.window(this.must(spaceId).messages.filter((m) => m.threadRoot === rootMessageId), opts);
   }
 
   async listMessagesBySpace(spaceId: string): Promise<Message[]> {
-    return [...this.must(spaceId).messages.values()].flat().sort((a, b) => a.offset - b.offset);
+    return [...this.must(spaceId).messages];
   }
 
   async appendMessage(message: Message): Promise<void> {
     const s = this.must(message.spaceId);
-    const list = s.messages.get(message.topicId) ?? [];
-    list.push(message);
-    s.messages.set(message.topicId, list);
+    s.messages.push(message);
+    s.messagesById.set(message.id, message);
+  }
+
+  // --- search ----------------------------------------------------------------
+  // Scan-based (the stub keeps API parity, not index parity). Matching goes
+  // through the same shared matcher/snippet helpers as the pg driver's
+  // TS-side, so both stores agree on what a term means.
+
+  async searchMessages(spaceId: string, query: SearchQuery, limit: number): Promise<MessageSearchRow[]> {
+    if (query.terms.length === 0) return [];
+    const out: MessageSearchRow[] = [];
+    const messages = this.must(spaceId).messages;
+    for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
+      const m = messages[i]!;
+      if (m.deletedAt !== undefined) continue;
+      if (matchesAllTerms(m.body, query)) out.push({ message: m, snippet: snippetAround(m.body, query) });
+    }
+    return out;
+  }
+
+  async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
+    if (query.terms.length === 0) return [];
+    return [...this.must(spaceId).topics.values()]
+      .filter((t) => matchesAllTerms(t.title, query))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, limit);
+  }
+
+  async searchAssets(spaceId: string, query: SearchQuery, limit: number): Promise<AssetSearchRow[]> {
+    if (query.terms.length === 0) return [];
+    const s = this.must(spaceId);
+    const hits: Array<AssetSearchRow & { pathHit: boolean }> = [];
+    for (const record of s.assets.values()) {
+      if (record.state !== 'live') continue;
+      const pathLower = record.path.toLowerCase();
+      const pathHit = query.terms.every((t) => pathLower.includes(t.text));
+      const content = s.assetVersions.get(`${record.id}@${record.version}`)?.content;
+      const extracted = content != null ? extractSearchText(record.path, content) : '';
+      const contentHit = extracted !== '' && matchesAllTerms(extracted, query);
+      if (!pathHit && !contentHit) continue;
+      hits.push({ record, ...(contentHit ? { snippet: snippetAround(extracted, query) } : {}), pathHit });
+    }
+    return hits
+      .sort((a, b) => Number(b.pathHit) - Number(a.pathHit) || b.record.updatedAt.localeCompare(a.record.updatedAt))
+      .slice(0, limit)
+      .map(({ pathHit: _pathHit, ...hit }) => hit);
+  }
+
+  async refreshReplyStats(spaceId: string, rootMessageId: string): Promise<void> {
+    const s = this.must(spaceId);
+    const root = s.messagesById.get(rootMessageId);
+    if (!root) return;
+    const replies = s.messages.filter((m) => m.threadRoot === rootMessageId);
+    const live = replies.filter((m) => !m.deletedAt);
+    const last = replies[replies.length - 1];
+    this.replace(s, {
+      ...root,
+      replyCount: live.length,
+      ...(last ? { lastReplyAt: last.postedAt } : {}),
+    });
+  }
+
+  /** Swap a message everywhere it lives (array + id index), keeping order. */
+  private replace(s: SpaceState, message: Message): void {
+    const idx = s.messages.findIndex((m) => m.id === message.id);
+    if (idx !== -1) s.messages[idx] = message;
+    s.messagesById.set(message.id, message);
   }
 
   async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void> {
     const s = this.must(spaceId);
-    for (const [topicId, list] of s.messages) {
-      const idx = list.findIndex((m) => m.id === messageId);
-      if (idx === -1) continue;
-      const next = [...list];
-      next[idx] = { ...next[idx]!, body, editedAt };
-      s.messages.set(topicId, next);
-      break;
-    }
+    const existing = s.messagesById.get(messageId);
+    if (existing) this.replace(s, { ...existing, body, editedAt });
     // Rewrite the stored message event too — replay must serve the edit.
     for (let i = 0; i < s.events.length; i++) {
       const e = s.events[i]!;
@@ -294,33 +370,25 @@ export class MemoryStore implements Store {
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     const s = this.must(spaceId);
-    for (const [topicId, list] of s.messages) {
-      const idx = list.findIndex((m) => m.id === messageId);
-      if (idx === -1) continue;
-      const next = [...list];
-      next[idx] = { ...next[idx]!, body: '', deletedAt };
-      s.messages.set(topicId, next);
-      break;
+    const existing = s.messagesById.get(messageId);
+    if (existing) {
+      // A poll is content the way a body is: deletion redacts both.
+      const { poll: _poll, ...rest } = existing;
+      this.replace(s, { ...rest, body: '', deletedAt });
     }
-    // Redact the stored message event too — replay must never resurrect the body.
+    // Votes are content too: they were cast on a poll that no longer exists,
+    // and a member-attributed row must not outlive what it attributed.
+    s.pollVotes.delete(messageId);
+    // Redact the stored message event too — replay must never resurrect the
+    // body (nor a poll, which is content the same way).
     for (let i = 0; i < s.events.length; i++) {
       const e = s.events[i]!;
       if (e.event.type === 'message' && e.event.message.id === messageId) {
-        s.events[i] = { ...e, event: { type: 'message', message: { ...e.event.message, body: '', deletedAt } } };
+        const { poll: _poll, ...rest } = e.event.message;
+        s.events[i] = { ...e, event: { type: 'message', message: { ...rest, body: '', deletedAt } } };
         break;
       }
     }
-  }
-
-  async reassignMessages(spaceId: string, fromTopicId: string, toTopicId: string): Promise<number> {
-    const s = this.must(spaceId);
-    const moving = (s.messages.get(fromTopicId) ?? []).map((m) => ({ ...m, topicId: toTopicId }));
-    if (moving.length === 0) return 0;
-    const target = s.messages.get(toTopicId) ?? [];
-    const combined = [...target, ...moving].sort((a, b) => a.offset - b.offset);
-    s.messages.set(toTopicId, combined);
-    s.messages.delete(fromTopicId);
-    return moving.length;
   }
 
   async getReaction(
@@ -358,11 +426,60 @@ export class MemoryStore implements Store {
     );
   }
 
-  async listReactionsByTopic(spaceId: string, topicId: string): Promise<StoredReaction[]> {
+  async listReactionsForMessages(spaceId: string, messageIds: string[]): Promise<StoredReaction[]> {
     const s = this.must(spaceId);
-    return (s.messages.get(topicId) ?? [])
-      .flatMap((m) => s.reactions.get(m.id) ?? [])
+    return messageIds
+      .flatMap((id) => s.reactions.get(id) ?? [])
       .sort((a, b) => a.at.localeCompare(b.at) || a.by.memberId.localeCompare(b.by.memberId));
+  }
+
+  async getPollVote(
+    spaceId: string,
+    messageId: string,
+    answerId: number,
+    memberId: string,
+  ): Promise<StoredPollVote | undefined> {
+    return this.state(spaceId)?.pollVotes
+      .get(messageId)
+      ?.find((v) => v.answerId === answerId && v.by.memberId === memberId);
+  }
+
+  async putPollVote(vote: StoredPollVote): Promise<void> {
+    const s = this.must(vote.spaceId);
+    const list = (s.pollVotes.get(vote.messageId) ?? []).filter(
+      (v) => !(v.answerId === vote.answerId && v.by.memberId === vote.by.memberId),
+    );
+    list.push(vote);
+    s.pollVotes.set(vote.messageId, list);
+  }
+
+  async deletePollVote(spaceId: string, messageId: string, answerId: number, memberId: string): Promise<void> {
+    const s = this.must(spaceId);
+    const list = (s.pollVotes.get(messageId) ?? []).filter(
+      (v) => !(v.answerId === answerId && v.by.memberId === memberId),
+    );
+    if (list.length === 0) s.pollVotes.delete(messageId);
+    else s.pollVotes.set(messageId, list);
+  }
+
+  async listPollVotesByMessage(spaceId: string, messageId: string): Promise<StoredPollVote[]> {
+    return [...(this.must(spaceId).pollVotes.get(messageId) ?? [])].sort(
+      (a, b) => a.at.localeCompare(b.at) || a.by.memberId.localeCompare(b.by.memberId),
+    );
+  }
+
+  async listPollVotesForMessages(spaceId: string, messageIds: string[]): Promise<StoredPollVote[]> {
+    const s = this.must(spaceId);
+    return messageIds
+      .flatMap((id) => s.pollVotes.get(id) ?? [])
+      .sort((a, b) => a.at.localeCompare(b.at) || a.by.memberId.localeCompare(b.by.memberId));
+  }
+
+  async markPollEnded(spaceId: string, messageId: string, endedAt: string): Promise<void> {
+    const s = this.must(spaceId);
+    const message = s.messagesById.get(messageId);
+    if (!message?.poll) return;
+    this.replace(s, { ...message, poll: { ...message.poll, endedAt } });
   }
 
   async putInvite(invite: StoredInvite): Promise<void> {

@@ -35,6 +35,9 @@ export const browserIpcHandlers: BrowserHandlers = {
     browserViewManager.setBounds(args);
     return { ok: true };
   },
+  // Deliberately synchronous: any async work (e.g. a frame capture) before
+  // the hide lets a show/hide pair race and strand the native view on top of
+  // the app. A blank viewport under overlays is the accepted trade-off.
   'browser:setVisible': async (_event, args) => {
     browserViewManager.setVisible(args.visible);
     return { ok: true };

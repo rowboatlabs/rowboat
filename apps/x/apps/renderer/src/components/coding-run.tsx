@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
 import { getToolErrorText, toToolState, type ToolCall } from '@/lib/chat-conversation'
 import { clearCodeRunBuffer, useCodeRunFeed } from '@/lib/code-run-feed'
+import { useCodeDiffOpener } from '@/contexts/code-diff-context'
 
 // ── Timeline reduction ──────────────────────────────────────────────
 // The raw ACP stream is a flat list of events; collapse it into ordered rows,
@@ -104,8 +105,8 @@ function toolKindIcon(kind?: string, title?: string) {
 }
 
 function planMarker(status?: string) {
-  if (status === 'completed') return <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />
-  if (status === 'in_progress') return <CircleDot className="size-3.5 shrink-0 text-blue-500" />
+  if (status === 'completed') return <CheckCircle2 className="size-3.5 shrink-0 text-[var(--rowboat-success)]" />
+  if (status === 'in_progress') return <CircleDot className="size-3.5 shrink-0 text-[var(--rowboat-git)]" />
   return <Circle className="size-3.5 shrink-0 text-muted-foreground" />
 }
 
@@ -156,7 +157,7 @@ export function CodingRunTimeline({
                 ) : failed ? (
                   <AlertCircle className="size-3.5 shrink-0 text-destructive" />
                 ) : (
-                  <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />
+                  <CheckCircle2 className="size-3.5 shrink-0 text-[var(--rowboat-success)]" />
                 )}
                 {toolKindIcon(row.toolKind, row.title)}
                 <span className="truncate text-foreground/90">{row.title ?? row.toolKind ?? 'Tool call'}</span>
@@ -202,7 +203,7 @@ export function CodingRunTimeline({
         // resolved permission
         const denied = row.decision === 'reject' || row.decision === 'cancelled'
         return (
-          <div key={row.id} className={cn('flex items-center gap-2 text-xs', denied ? 'text-red-600' : 'text-green-600')}>
+          <div key={row.id} className={cn('flex items-center gap-2 text-xs', denied ? 'text-red-600' : 'text-[var(--rowboat-success)]')}>
             {denied ? '✕' : '✓'}
             <span className="truncate">{denied ? 'Denied' : 'Allowed'}: {row.title}</span>
           </div>
@@ -287,6 +288,9 @@ export function CodingRunBlock({
   // batch, or the legacy path's inline accumulation) wins; while it's absent
   // the live CodeRunFeed buffer streams the run in real time.
   const liveEvents = useCodeRunFeed(item.id)
+  // Changed-file names open the Code drawer's diff when the chat is bound to
+  // a code session; elsewhere they stay plain text.
+  const openDiff = useCodeDiffOpener()
   const durableEvents = item.codeRunEvents
   const events = durableEvents?.length ? durableEvents : liveEvents
   // Once the durable batch has landed the buffer is redundant — drop it.
@@ -302,7 +306,7 @@ export function CodingRunBlock({
           state={toToolState(item.status)}
         />
         <ToolContent>
-          <CodingRunTimeline events={events} error={error} />
+          <CodingRunTimeline events={events} error={error} onOpenDiff={openDiff ?? undefined} />
         </ToolContent>
       </Tool>
       {item.pendingCodePermission && (

@@ -314,6 +314,9 @@ export class HomeThreadsTracker {
             const item = todoKey ? items.get(todoKey) : undefined;
             const code = codeById.get(entry.sessionId);
             const live = this.live.get(entry.sessionId);
+            // Finished work stays out of the deck; a live turn on it means
+            // it is being reopened (the tracker clears the flag as it runs).
+            if (code?.doneAt && !live) continue;
 
             let status: HomeThreadStatus;
             let attention: string | undefined;

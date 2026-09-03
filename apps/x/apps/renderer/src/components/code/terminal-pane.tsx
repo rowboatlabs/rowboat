@@ -55,6 +55,12 @@ export function TerminalPane({ terminalId, cwd }: { terminalId: string; cwd: str
       if (disposed) return
       if (backlog) term.write(backlog)
       term.focus()
+    }).catch((err: unknown) => {
+      // A shell that failed to start must say so — a silent black pane
+      // reads as "the terminal is broken" with nothing to go on.
+      if (disposed) return
+      const message = err instanceof Error ? err.message : String(err)
+      term.write(`\r\n\x1b[31mCould not start a shell:\x1b[0m ${message.replace(/\n/g, '\r\n')}\r\n\x1b[2mPress Enter to retry.\x1b[0m\r\n`)
     })
 
     const dataDisposable = term.onData((data) => {
@@ -72,11 +78,15 @@ export function TerminalPane({ terminalId, cwd }: { terminalId: string; cwd: str
     // Restart the shell on Enter after it exited (ensure() respawns dead PTYs).
     const keyDisposable = term.onKey(({ domEvent }) => {
       if (domEvent.key !== 'Enter') return
-      void window.ipc.invoke('terminal:ensure', {
+      window.ipc.invoke('terminal:ensure', {
         id: terminalId,
         cwd,
         cols: term.cols,
         rows: term.rows,
+      }).catch((err: unknown) => {
+        if (disposed) return
+        const message = err instanceof Error ? err.message : String(err)
+        term.write(`\r\n\x1b[31mCould not start a shell:\x1b[0m ${message.replace(/\n/g, '\r\n')}\r\n`)
       })
     })
 

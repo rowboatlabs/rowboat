@@ -97,48 +97,75 @@ describe('SpacesClient', () => {
     expect((await ramnique.listAssets(spaceId)).map((e) => e.path)).toEqual(['notes.md']);
   });
 
-  it('feed round-trip: topic from first message, reply, retitle', async () => {
+  it('feed round-trip: root into the stream, flat reply, promote + retitle', async () => {
     const started = await ramnique.postMessage(spaceId, { body: 'Ship it this week?', actingMode: 'direct' });
-    expect(started.topic.title).toBe('Ship it this week?');
+    expect(started.message.threadRoot).toBeUndefined();
     const replied = await gagan.postMessage(spaceId, {
-      topicId: started.topic.id,
+      threadRoot: started.message.id,
       body: 'Yes.',
       actingMode: 'direct',
     });
-    expect(replied.topic.messageCount).toBe(2);
-    const { messages } = await ramnique.listMessages(spaceId, started.topic.id);
-    expect(messages).toHaveLength(2);
-    const retitled = await ramnique.manageTopic(spaceId, started.topic.id, {
-      action: 'retitle',
-      title: 'Ship date',
+    expect(replied.message.threadRoot).toBe(started.message.id);
+    const thread = await ramnique.listThread(spaceId, started.message.id);
+    expect(thread.root.replyCount).toBe(1);
+    expect(thread.topic).toBeNull();
+    expect(thread.messages).toHaveLength(1);
+
+    const { topic } = await ramnique.createTopic(spaceId, {
+      rootMessageId: started.message.id,
+      title: 'Decide: ship date',
+      actingMode: 'direct',
     });
-    expect(retitled.title).toBe('Ship date');
+    const retitled = await ramnique.manageTopic(spaceId, topic.id, {
+      action: 'retitle',
+      title: 'Decide: ship date (v2)',
+      actingMode: 'direct',
+    });
+    expect(retitled.title).toBe('Decide: ship date (v2)');
     const listed = await ramnique.listTopics(spaceId);
-    expect(listed.map((t) => t.id)).toContain(started.topic.id);
-    // listTopics always carries the immutable first message (no per-topic fetch).
-    expect(listed.find((t) => t.id === started.topic.id)?.firstMessage?.id).toBe(started.message.id);
+    expect(listed.map((t) => t.id)).toContain(topic.id);
+    // listTopics always carries the root message (no per-topic fetch).
+    expect(listed.find((t) => t.id === topic.id)?.rootMessage?.id).toBe(started.message.id);
   });
 
-  it('messages window newest-first and page back by offset', async () => {
-    const started = await ramnique.postMessage(spaceId, { body: 'p1', actingMode: 'direct' });
-    for (const body of ['p2', 'p3', 'p4', 'p5']) {
-      await ramnique.postMessage(spaceId, { topicId: started.topic.id, body, actingMode: 'direct' });
+  it('search returns categorized hits with mention expansion over the wire', async () => {
+    await ramnique.postMessage(spaceId, { body: 'hey @gagan the quarterly numbers landed', actingMode: 'direct' });
+    await ramnique.proposeChange(spaceId, {
+      assetPath: 'finance/quarterly.md',
+      baseVersion: 0,
+      newContent: 'Quarterly numbers: all green.',
+      actingMode: 'direct',
+    });
+
+    const results = await ramnique.search(spaceId, { q: 'quarterly' });
+    expect(results.messages.length).toBe(1);
+    expect(results.messages[0]!.snippet).toContain('quarterly numbers');
+    expect(results.assets.map((a) => a.path)).toContain('finance/quarterly.md');
+    expect(results.truncated.messages).toBe(false);
+
+    // "gagan" is a display name — the hit is the @-mention of the member id.
+    const byName = await ramnique.search(spaceId, { q: 'gagan numbers', kinds: ['messages'] });
+    expect(byName.messages.length).toBe(1);
+    expect(byName.assets).toEqual([]);
+  });
+
+  it('the stream windows newest-first and pages back by offset, roots only', async () => {
+    const roots: string[] = [];
+    for (const body of ['p1', 'p2', 'p3', 'p4', 'p5']) {
+      const posted = await ramnique.postMessage(spaceId, { body, actingMode: 'direct' });
+      roots.push(posted.message.id);
     }
-    const latest = await ramnique.listMessages(spaceId, started.topic.id, { limit: 2 });
+    // A reply must never appear in the stream window.
+    await ramnique.postMessage(spaceId, { threadRoot: roots[0]!, body: 'a reply', actingMode: 'direct' });
+    const latest = await ramnique.listStream(spaceId, { limit: 2 });
     expect(latest.messages.map((m) => m.body)).toEqual(['p4', 'p5']);
     expect(latest.hasMore).toBe(true);
-    const older = await ramnique.listMessages(spaceId, started.topic.id, {
+    const older = await ramnique.listStream(spaceId, {
       limit: 2,
       beforeOffset: latest.messages[0]!.offset,
     });
     expect(older.messages.map((m) => m.body)).toEqual(['p2', 'p3']);
     expect(older.hasMore).toBe(true);
-    const first = await ramnique.listMessages(spaceId, started.topic.id, {
-      limit: 2,
-      beforeOffset: older.messages[0]!.offset,
-    });
-    expect(first.messages.map((m) => m.body)).toEqual(['p1']);
-    expect(first.hasMore).toBe(false);
   });
 
   it('reactions toggle and fold into message reads', async () => {
@@ -150,7 +177,7 @@ describe('SpacesClient', () => {
     const two = await ramnique.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'add', actingMode: 'direct' });
     expect(two.reactions).toEqual([{ emoji: '👍', memberIds: ['gagan', 'ramnique'] }]);
 
-    const { messages } = await gagan.listMessages(spaceId, started.topic.id);
+    const { messages } = await gagan.listStream(spaceId);
     expect(messages.find((m) => m.id === messageId)?.reactions).toEqual(two.reactions);
 
     const removed = await gagan.reactToMessage(spaceId, messageId, { emoji: '👍', action: 'remove', actingMode: 'direct' });
@@ -170,7 +197,7 @@ describe('SpacesClient', () => {
     expect(deleted.body).toBe('');
     expect(deleted.deletedAt).toBeTruthy();
 
-    const { messages } = await gagan.listMessages(spaceId, started.topic.id);
+    const { messages } = await gagan.listStream(spaceId);
     const tombstone = messages.find((m) => m.id === messageId);
     expect(tombstone?.body).toBe('');
     expect(tombstone?.deletedAt).toBe(deleted.deletedAt);
@@ -259,11 +286,11 @@ describe('SpacesLive', () => {
       0,
     );
 
-    await waitFor(() => seen.filter((f) => f.kind === 'event').length >= 3, 'replay');
-    // Replay: membership joined, the seeded stream topic, the a.md change.
+    await waitFor(() => seen.filter((f) => f.kind === 'event').length >= 2, 'replay');
+    // Replay: membership joined, the a.md change (the stream is not an object).
     expect(seen[0]!.kind).toBe('subscribed');
     const replayOffsets = seen.filter((f) => f.kind === 'event').map((f) => f.offset);
-    expect(replayOffsets).toEqual([1, 2, 3]);
+    expect(replayOffsets).toEqual([1, 2]);
 
     // Live event arrives on the same subscription.
     await ramnique.proposeChange(space.id, {
@@ -272,10 +299,37 @@ describe('SpacesLive', () => {
       newContent: 'a\nb\n',
       actingMode: 'direct',
     });
-    await waitFor(() => seen.filter((f) => f.kind === 'event').length >= 4, 'live event');
-    expect(seen.filter((f) => f.kind === 'event').map((f) => f.offset)).toEqual([1, 2, 3, 4]);
+    await waitFor(() => seen.filter((f) => f.kind === 'event').length >= 3, 'live event');
+    expect(seen.filter((f) => f.kind === 'event').map((f) => f.offset)).toEqual([1, 2, 3]);
 
     live.close();
+  });
+
+  it('whiteboard frames round-trip: opaque payload out, sender-stamped frame in', async () => {
+    const space = await ramnique.createSpace('Board Space');
+    const invite = await ramnique.createInvite(space.id);
+    await gagan.acceptInvite(invite.token);
+
+    const watcher = new SpacesLive({ baseUrl: harbor.url, token: 'dev-ramnique' });
+    const frames: Array<{ boardId: string; memberId: string; payload: unknown }> = [];
+    watcher.subscribe(space.id, (frame) => {
+      if (frame.kind === 'whiteboard') frames.push({ boardId: frame.boardId, memberId: frame.memberId, payload: frame.payload });
+    });
+    await waitFor(() => watcher.status === 'open', 'watcher socket open');
+
+    const drawer = new SpacesLive({ baseUrl: harbor.url, token: 'dev-gagan' });
+    drawer.subscribe(space.id, () => {});
+    await waitFor(() => drawer.status === 'open', 'drawer socket open');
+
+    // The payload is app vocabulary the org must relay untouched.
+    const payload = { t: 'scene', clientId: 'pane-1', syncAll: false, elements: [{ id: 'rect', version: 2 }] };
+    drawer.whiteboard(space.id, 'whiteboards/board.excalidraw', payload);
+
+    await waitFor(() => frames.length >= 1, 'whiteboard frame');
+    expect(frames[0]).toEqual({ boardId: 'whiteboards/board.excalidraw', memberId: 'gagan', payload });
+
+    watcher.close();
+    drawer.close();
   });
 });
 

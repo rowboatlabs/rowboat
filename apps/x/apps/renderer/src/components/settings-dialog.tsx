@@ -262,7 +262,7 @@ function UpdateSettings() {
               idle + lastCheckedAt genuinely means "on the latest version". */}
           {status.lastCheckedAt !== undefined && (
             <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-              <CheckCircle2 className="size-3.5 text-green-500 shrink-0" />
+              <CheckCircle2 className="size-3.5 text-[var(--rowboat-success)] shrink-0" />
               <span>
                 {`You're up to date! Rowboat v${status.version} is the latest version.`}
                 <span className="text-muted-foreground/60">
@@ -664,10 +664,10 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
       {/* Section A: API Key (only in BYOK mode) */}
       {!rowboatConnected && (
         <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Composio API Key</span>
+          <span className="text-[13px] text-muted-foreground">Composio API Key</span>
           {apiKeyConfigured && !showApiKeyInput ? (
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 text-sm text-green-600">
+              <div className="flex items-center gap-1.5 text-sm text-[var(--rowboat-success)]">
                 <CheckCircle2 className="size-4" />
                 API key configured
               </div>
@@ -727,7 +727,7 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
       {apiKeyConfigured && (
         <>
           <div className="space-y-2">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Available Toolkits</span>
+            <span className="text-[13px] text-muted-foreground">Available Toolkits</span>
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
@@ -772,7 +772,7 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-medium truncate">{toolkit.name}</span>
                           {isConnected && (
-                            <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
+                            <span className="rounded-full bg-[var(--rowboat-success)]/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--rowboat-success)]">
                               Connected
                             </span>
                           )}
@@ -881,7 +881,7 @@ function TagGroupTable({
       <div className="flex items-center justify-between mb-1.5">
         <button
           onClick={onToggle}
-          className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronRight className={cn("size-3.5 transition-transform", !collapsed && "rotate-90")} />
           {group.label}
@@ -900,7 +900,7 @@ function TagGroupTable({
       {!collapsed && group.tags.length > 0 && (
         <div className="border rounded-md overflow-hidden">
           <div className={cn(
-            "gap-1 bg-muted/50 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider grid",
+            "gap-1 bg-muted/50 px-2 py-1 text-[13px] text-muted-foreground grid",
             isEmail ? "grid-cols-[100px_1fr_1fr_60px_24px]" : "grid-cols-[100px_1fr_1fr_24px]"
           )}>
             <div>Label</div>
@@ -1218,7 +1218,7 @@ function AgentStatusRow({
           <span
             className={cn(
               "size-2 rounded-full shrink-0",
-              active ? "bg-green-500" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
+              active ? "bg-[var(--rowboat-success)]" : installed ? "bg-amber-500" : "bg-muted-foreground/30",
             )}
           />
           <span className="truncate">
@@ -1386,7 +1386,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Agent status</span>
+          <span className="text-[13px] text-muted-foreground">Agent status</span>
           <button
             onClick={() => { void loadStatus() }}
             disabled={statusLoading}
@@ -2056,7 +2056,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 return (
                   <div key={section.label ?? "main"} className="flex flex-col gap-0.5">
                     {section.label ? (
-                      <div className="px-2 pb-1 pt-4 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                      <div className="px-2 pb-1 pt-4 text-[13px] font-normal text-muted-foreground">
                         {section.label}
                       </div>
                     ) : null}
@@ -2067,7 +2067,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                         className={cn(
                           "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors text-left",
                           activeTab === tab.id
-                            ? "bg-background text-foreground shadow-sm"
+                            ? "bg-background text-foreground"
                             : "text-muted-foreground hover:text-foreground hover:bg-background/50"
                         )}
                       >

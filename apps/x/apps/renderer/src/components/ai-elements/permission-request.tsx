@@ -42,7 +42,7 @@ const truncateMiddle = (value: string, max = 64): string => {
 
 const DetailSection = ({ label, children }: { label: string; children: ReactNode }) => (
   <div className="min-w-0">
-    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+    <p className="mb-0.5 text-[13px] text-muted-foreground">
       {label}
     </p>
     <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
