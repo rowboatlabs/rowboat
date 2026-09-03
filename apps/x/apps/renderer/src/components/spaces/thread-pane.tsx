@@ -43,7 +43,7 @@ const NEW_FADE_MS = 800
 
 export function ThreadPane({
     org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, members, memberNames, refreshTick,
-    showBack, onBack, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
+    showBack, onBack, onCloseColumn, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -60,6 +60,8 @@ export function ThreadPane({
     refreshTick: number
     showBack: boolean
     onBack: () => void
+    /** Set while a doc column sits beside the chat: closes the chat column, the doc takes the width. */
+    onCloseColumn?: () => void
     onOpenFile: (path: string) => void
     onOpenSession?: (sessionId: string) => void
     /** Whether the artifacts rail is showing; the summary line under the opener toggles it. */
@@ -629,6 +631,11 @@ export function ThreadPane({
                 </DropdownMenu>
                 {!showBack && (
                     <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={onBack} aria-label="Close thread">
+                        <X className="size-4" />
+                    </Button>
+                )}
+                {onCloseColumn && (
+                    <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={onCloseColumn} title="Close the chat — the file takes the width" aria-label="Close chat">
                         <X className="size-4" />
                     </Button>
                 )}

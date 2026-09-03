@@ -778,7 +778,7 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
                 {onDismiss && !draft && (
                     <button
                         type="button"
-                        title="Close the file — back to Talk"
+                        title="Close the file — the chat takes the width"
                         onClick={onDismiss}
                         className="inline-flex size-5 shrink-0 items-center justify-center rounded hover:bg-accent hover:text-foreground"
                     >

@@ -1740,3 +1740,9 @@
 @media (prefers-reduced-motion: reduce) {
   .code-cursor-blink { animation: none; }
 }
+
+/* Spaces columns: a column opening grows from 0 to its width (content is
+   fixed at that width and anchored to the far edge, so it slides in rather
+   than wipes); closing runs the same in reverse. --rb-col-w is set inline. */
+@keyframes rb-column-in { from { width: 0; } to { width: var(--rb-col-w); } }
+@keyframes rb-column-out { from { width: var(--rb-col-w); } to { width: 0; } }
