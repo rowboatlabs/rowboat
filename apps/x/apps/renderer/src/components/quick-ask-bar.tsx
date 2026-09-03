@@ -910,9 +910,16 @@ export function QuickAskBar() {
           the click never happens. That is the "sometimes it works" report.
 
           The hole is deliberately bigger than the art — 40px around a 32px
-          circle, the same oversized-target trick as the bubble and pins. */}
+          circle, the same oversized-target trick as the bubble and pins.
+          But it hangs 18px past the card edge and the gap to the mascot is
+          only 4px, so it reaches 14px into the mascot column — over the
+          left lip of the mic pin's own oversized target (38px at left:18%
+          of 164px starts at 10.5px). Hence pointer-events-none here with
+          the button opting back in: the hole still punches from painted
+          bounds (an app-region concern, not a hit-testing one), while
+          presses over the overlap fall through to the pin underneath. */}
       <span
-        className="absolute z-10 flex h-10 w-10 items-center justify-center"
+        className="pointer-events-none absolute z-10 flex h-10 w-10 items-center justify-center"
         style={{ ...noDragRegion, top: 'calc(50% - 20px)', right: '-18px' }}
       >
         <Tooltip>
@@ -921,7 +928,7 @@ export function QuickAskBar() {
               type="button"
               onClick={() => requestCollapsed(true)}
               aria-label="Tuck the text away"
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition hover:translate-x-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_2px_8px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+              className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white text-neutral-500 shadow-[0_2px_8px_rgba(0,0,0,0.15)] transition hover:translate-x-0.5 hover:bg-neutral-50 hover:text-neutral-900 active:scale-90 dark:border-white/15 dark:bg-neutral-800 dark:text-neutral-400 dark:shadow-[0_2px_8px_rgba(0,0,0,0.5)] dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
             >
               <ChevronsRight className="h-4 w-4" />
             </button>
