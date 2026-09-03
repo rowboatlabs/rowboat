@@ -85,7 +85,7 @@ export async function danceForTokens(issuer: string): Promise<{ issuer: string; 
 
   const verifier = base64url(Crypto.getRandomBytes(32));
   const challenge = base64url(
-    new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, new TextEncoder().encode(verifier).buffer as ArrayBuffer)),
+    new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, new TextEncoder().encode(verifier))),
   );
   const state = base64url(Crypto.getRandomBytes(16));
 
