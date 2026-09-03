@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, Plus, RotateCw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, RotateCw, X } from 'lucide-react'
 
 // Custom element provided by electron-chrome-extensions (injected via the
 // preload script): a row of extension action icons for the given session
@@ -21,7 +21,7 @@ declare module 'react' {
 
 import type { DisplayMediaRequest, DisplayMediaSource, HttpAuthRequest } from '@x/shared/dist/browser-control.js'
 
-import { TabBar } from '@/components/tab-bar'
+import { BrowserTabRail } from '@/components/browser-pane/browser-tab-rail'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -48,6 +48,7 @@ interface BrowserTabState {
   id: string
   url: string
   title: string
+  favicon: string | null
   canGoBack: boolean
   canGoForward: boolean
   loading: boolean
@@ -104,19 +105,6 @@ const hasBlockingOverlay = (doc: Document) => {
     if (!slot || !BLOCKING_OVERLAY_SLOTS.has(slot)) return false
     return isVisibleOverlayElement(el)
   })
-}
-
-const getBrowserTabTitle = (tab: BrowserTabState) => {
-  const title = tab.title.trim()
-  if (title) return title
-  const url = tab.url.trim()
-  if (!url) return 'New tab'
-  try {
-    const parsed = new URL(url)
-    return parsed.hostname || parsed.href
-  } catch {
-    return url.replace(/^https?:\/\//i, '') || 'New tab'
-  }
 }
 
 /**
@@ -310,6 +298,10 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
   const [addressValue, setAddressValue] = useState('')
   const [authQueue, setAuthQueue] = useState<HttpAuthRequest[]>([])
   const [displayMediaQueue, setDisplayMediaQueue] = useState<DisplayMediaRequest[]>([])
+  // The vertical-tabs rail: starts collapsed, opens on an explicit click on
+  // the edge strip, and the choice sticks per machine — the same persisted
+  // pattern as the Spaces rail (see spaces-view.tsx).
+  const [railOpen, setRailOpen] = useState(() => localStorage.getItem('browser:railOpen') === '1')
 
   const activeTabIdRef = useRef<string | null>(null)
   const addressFocusedRef = useRef(false)
@@ -602,6 +594,12 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
     void window.ipc.invoke('browser:closeTab', { tabId })
   }, [])
 
+  const toggleRail = useCallback(() => {
+    const next = !railOpen
+    localStorage.setItem('browser:railOpen', next ? '1' : '0')
+    setRailOpen(next)
+  }, [railOpen])
+
   const handleSubmitAddress = useCallback((e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = addressValue.trim()
@@ -627,115 +625,107 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
   }, [])
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <div className="flex h-9 shrink-0 items-stretch border-b border-border bg-sidebar">
-        <TabBar
-          tabs={state.tabs}
-          activeTabId={state.activeTabId ?? ''}
-          getTabTitle={getBrowserTabTitle}
-          getTabId={(tab) => tab.id}
-          onSwitchTab={handleSwitchTab}
-          onCloseTab={handleCloseTab}
-          layout="scroll"
-        />
-        <button
-          type="button"
-          onClick={handleNewTab}
-          className="flex h-9 w-9 shrink-0 items-center justify-center border-l border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="New browser tab"
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
-
-      <div
-        className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-sidebar px-2"
-        style={{ minHeight: CHROME_HEIGHT }}
-      >
-        <button
-          type="button"
-          onClick={handleBack}
-          disabled={!activeTab?.canGoBack}
-          className={cn(
-            'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-            activeTab?.canGoBack ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
-          )}
-          aria-label="Back"
-        >
-          <ArrowLeft className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={handleForward}
-          disabled={!activeTab?.canGoForward}
-          className={cn(
-            'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-            activeTab?.canGoForward ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
-          )}
-          aria-label="Forward"
-        >
-          <ArrowRight className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={handleReload}
-          disabled={!activeTab}
-          className={cn(
-            'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-            activeTab ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
-          )}
-          aria-label="Reload"
-        >
-          {activeTab?.loading ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <RotateCw className="size-4" />
-          )}
-        </button>
-        <form onSubmit={handleSubmitAddress} className="flex-1 min-w-0">
-          <input
-            type="text"
-            value={addressValue}
-            onChange={(e) => setAddressValue(e.target.value)}
-            onFocus={(e) => {
-              addressFocusedRef.current = true
-              e.currentTarget.select()
-            }}
-            onBlur={() => {
-              addressFocusedRef.current = false
-              setAddressValue(activeTab?.url ?? '')
-            }}
-            placeholder="Enter URL or search..."
-            className={cn(
-              'h-7 w-full rounded-md border border-transparent bg-background px-3 text-sm text-foreground',
-              'placeholder:text-muted-foreground/60',
-              'focus:border-border focus:outline-hidden',
-            )}
-            spellCheck={false}
-            autoCorrect="off"
-            autoCapitalize="off"
-          />
-        </form>
-        <browser-action-list
-          partition="persist:rowboat-browser"
-          alignment="bottom right"
-          className="ml-1 flex shrink-0 items-center"
-        />
-        <button
-          type="button"
-          onClick={onClose}
-          className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="Close browser"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
-
-      <div
-        ref={viewportRef}
-        className="relative min-h-0 min-w-0 flex-1"
-        data-browser-viewport
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+      <BrowserTabRail
+        tabs={state.tabs}
+        activeTabId={state.activeTabId}
+        open={railOpen}
+        onTogglePin={toggleRail}
+        onSwitchTab={handleSwitchTab}
+        onCloseTab={handleCloseTab}
+        onNewTab={handleNewTab}
       />
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div
+          className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-sidebar px-2"
+          style={{ minHeight: CHROME_HEIGHT }}
+        >
+          <button
+            type="button"
+            onClick={handleBack}
+            disabled={!activeTab?.canGoBack}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+              activeTab?.canGoBack ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
+            )}
+            aria-label="Back"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleForward}
+            disabled={!activeTab?.canGoForward}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+              activeTab?.canGoForward ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
+            )}
+            aria-label="Forward"
+          >
+            <ArrowRight className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleReload}
+            disabled={!activeTab}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+              activeTab ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
+            )}
+            aria-label="Reload"
+          >
+            {activeTab?.loading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RotateCw className="size-4" />
+            )}
+          </button>
+          <form onSubmit={handleSubmitAddress} className="flex-1 min-w-0">
+            <input
+              type="text"
+              value={addressValue}
+              onChange={(e) => setAddressValue(e.target.value)}
+              onFocus={(e) => {
+                addressFocusedRef.current = true
+                e.currentTarget.select()
+              }}
+              onBlur={() => {
+                addressFocusedRef.current = false
+                setAddressValue(activeTab?.url ?? '')
+              }}
+              placeholder="Enter URL or search..."
+              className={cn(
+                'h-7 w-full rounded-md border border-transparent bg-background px-3 text-sm text-foreground',
+                'placeholder:text-muted-foreground/60',
+                'focus:border-border focus:outline-hidden',
+              )}
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+            />
+          </form>
+          <browser-action-list
+            partition="persist:rowboat-browser"
+            alignment="bottom right"
+            className="ml-1 flex shrink-0 items-center"
+          />
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            aria-label="Close browser"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div
+          ref={viewportRef}
+          className="relative min-h-0 min-w-0 flex-1"
+          data-browser-viewport
+        />
+      </div>
 
       {activeAuthRequest && (
         <BrowserHttpAuthDialog
