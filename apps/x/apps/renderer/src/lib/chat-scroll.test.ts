@@ -37,6 +37,9 @@ interface Harness {
   wheel(deltaY: number): void
   /** Content growth (streaming, images, expansion) → resize tick. */
   grow(by: number): void
+  /** Browser scroll-anchoring compensation: growth above the reader with a
+   * position-preserving scrollTop adjustment and its scroll event. */
+  anchorAdjust(by: number): void
   /** Content shrink with the browser's clamp of scrollTop + scroll event. */
   shrinkAtBottom(by: number): void
   /** Max scrollTop excluding spacer slack (the content's live edge). */
@@ -93,6 +96,16 @@ function createHarness(
     },
     grow(by: number) {
       state.contentHeight += by
+      triggerResize()
+    },
+    anchorAdjust(by: number) {
+      // Native scroll anchoring compensating for growth above the reader's
+      // anchor node: content and scrollTop grow together (distance from the
+      // bottom is preserved), and the browser fires a scroll event with no
+      // accompanying input event.
+      state.contentHeight += by
+      container.scrollTop = container.scrollTop + by
+      container.dispatchEvent(new Event('scroll'))
       triggerResize()
     },
     shrinkAtBottom(by: number) {
@@ -190,12 +203,14 @@ describe('ChatScrollController — following the live edge', () => {
     expect(fitsController.snapshot().following).toBe(true)
   })
 
-  it('re-engages following when the user scrolls back into the near-bottom band', () => {
+  it('re-engages when a wheel gesture scrolls back into the near-bottom band', () => {
     const h = createHarness()
     const controller = attach(h)
     h.scrollTo(h.maxTop() - 500)
     expect(controller.snapshot().following).toBe(false)
 
+    // Trackpad: the wheel event attributes the scroll that follows it.
+    h.wheel(40)
     h.scrollTo(h.maxTop() - NEAR_BOTTOM_PX + 10)
     expect(controller.snapshot().following).toBe(true)
     expect(controller.snapshot().nearBottom).toBe(true)
@@ -235,6 +250,150 @@ describe('ChatScrollController — following the live edge', () => {
 
     h.grow(150)
     expect(h.container.scrollTop).toBe(h.maxTop())
+  })
+})
+
+describe('ChatScrollController — user-intent attribution', () => {
+  it('end-of-turn repro: a browser anchoring adjustment near the bottom does not re-engage a parked reader', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    // Streaming, pinned. The reader scrolls up a small amount (scrollbar —
+    // no input event) and parks 40px above the live edge.
+    h.scrollTo(h.maxTop() - 40)
+    expect(controller.snapshot().following).toBe(false)
+
+    // A little more streams in below the fold — nothing moves.
+    h.grow(20)
+    const readingTop = h.container.scrollTop
+    expect(h.container.scrollTop).toBe(readingTop)
+
+    // Turn completes: the streaming bubble is replaced by the taller durable
+    // message above/at the reader's anchor node, and native scroll anchoring
+    // compensates — a downward scroll event, no user input, landing inside
+    // the near-bottom band.
+    h.anchorAdjust(60)
+    expect(controller.snapshot().following).toBe(false)
+
+    // Follow-up height changes (usage row, next paint) must not pin the
+    // reader back to the bottom.
+    const parkedTop = h.container.scrollTop
+    h.grow(300)
+    expect(h.container.scrollTop).toBe(parkedTop)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('a small upward wheel latches the disengage even when follow writes mask the scroll event', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    const bottom = h.container.scrollTop
+
+    // The wheel latches before any scroll event can be observed…
+    h.wheel(-5)
+    expect(controller.snapshot().following).toBe(false)
+
+    // …so an immediately-interleaved streaming tick no longer writes,
+    // and the masked (zero-delta) scroll echo cannot undo the latch.
+    h.grow(120)
+    expect(h.container.scrollTop).toBe(bottom)
+    h.container.dispatchEvent(new Event('scroll'))
+    expect(controller.snapshot().following).toBe(false)
+
+    // Turn completion: growth then a shrink-clamp — still parked.
+    h.grow(200)
+    expect(h.container.scrollTop).toBe(bottom)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('programmatic write echoes neither disengage nor engage', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    // Pinned: a follow write plus its echo keeps following.
+    h.grow(100)
+    h.container.dispatchEvent(new Event('scroll'))
+    expect(controller.snapshot().following).toBe(true)
+
+    // Parked: a zero-delta echo changes nothing.
+    h.scrollTo(h.maxTop() - 300)
+    expect(controller.snapshot().following).toBe(false)
+    h.container.dispatchEvent(new Event('scroll'))
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('a scrollbar return engages only at the true live edge', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    h.scrollTo(h.maxTop() - 500)
+    expect(controller.snapshot().following).toBe(false)
+
+    // Unattributed downward movement into the band could be a browser
+    // adjustment — it does not engage…
+    h.scrollTo(h.maxTop() - 40)
+    expect(controller.snapshot().following).toBe(false)
+
+    // …but dragging the thumb to the very end is unambiguous.
+    h.scrollTo(h.maxTop())
+    expect(controller.snapshot().following).toBe(true)
+    h.grow(150)
+    expect(h.container.scrollTop).toBe(h.maxTop())
+  })
+
+  it('touch gestures attribute the scroll events they cause', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    h.scrollTo(h.maxTop() - 500)
+    expect(controller.snapshot().following).toBe(false)
+
+    h.container.dispatchEvent(new Event('touchmove'))
+    h.scrollTo(h.maxTop() - 60)
+    expect(controller.snapshot().following).toBe(true)
+  })
+
+  it('scroll keys attribute the scroll events they cause', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    h.scrollTo(h.maxTop() - 500)
+    expect(controller.snapshot().following).toBe(false)
+
+    h.container.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'End', bubbles: true })
+    )
+    h.scrollTo(h.maxTop() - 50)
+    expect(controller.snapshot().following).toBe(true)
+  })
+
+  it('keys pressed inside an editable are not scroll gestures', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    h.scrollTo(h.maxTop() - 500)
+    expect(controller.snapshot().following).toBe(false)
+
+    const input = document.createElement('input')
+    h.content.appendChild(input)
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true })
+    )
+    // The band arrival stays unattributed → no engage.
+    h.scrollTo(h.maxTop() - 50)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('the attribution window expires — later browser adjustments are not the user', () => {
+    vi.useFakeTimers({ toFake: ['performance', 'Date'] })
+    try {
+      const h = createHarness()
+      const controller = attach(h)
+      h.wheel(-10)
+      h.scrollTo(h.maxTop() - 40)
+      expect(controller.snapshot().following).toBe(false)
+
+      // Well past the wheel's attribution window, completion-time anchoring
+      // fires an input-less downward scroll event inside the band.
+      vi.advanceTimersByTime(2000)
+      h.anchorAdjust(60)
+      expect(controller.snapshot().following).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

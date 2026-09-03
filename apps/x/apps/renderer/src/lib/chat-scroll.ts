@@ -25,13 +25,24 @@
  * - 'code' (Codex transcript semantics): sends jump straight to the live
  *   edge and follow the run's output. No top-anchoring.
  *
- * Programmatic scrolls are distinguished from user scrolls by updating the
- * internal `lastTop` bookkeeping immediately after every write, so the echoed
- * scroll event reads as a zero-delta and never flips user intent. Native CSS
- * scroll anchoring stays enabled: its adjustments preserve the reading
- * position when content above the viewport changes, and the delta rules below
- * are ordered so a clamp/anchor adjustment at the bottom cannot break
- * following.
+ * Intent is latched from direct user input, not inferred from scroll
+ * geometry alone. Wheel, touch, and scroll-key listeners stamp a short
+ * attribution window; scroll events inside the window count as the user's
+ * (and refresh it, so momentum and smooth-keyboard chains stay attributed).
+ * An upward wheel latches "scrolled away" immediately — even if an
+ * interleaved follow write swallows the resulting scroll event's delta, the
+ * disengage sticks. Scroll events OUTSIDE the window (our own write echoes —
+ * lastTop is pre-updated on every write — browser clamps after content
+ * shrinks, and native scroll-anchoring compensations around end-of-turn DOM
+ * churn) can never re-engage following: without this, a completion-time
+ * anchoring adjustment landing inside the near-bottom band yanked readers
+ * who had deliberately parked slightly above the live edge back to the
+ * bottom. The one unattributed engage is a downward arrival at the true live
+ * edge (scrollbar dragged to the very end — Chromium scrollbars emit no
+ * input events); anchoring compensations preserve the reader's distance and
+ * clamps move upward, so neither can land there. Native CSS scroll anchoring
+ * stays enabled: its adjustments keep the reading position stable while
+ * content above changes.
  *
  * A module-level memory map (keyed by chat identity) preserves the reading
  * position across pane remounts (view toggles, dock/full-screen switches).
@@ -52,6 +63,23 @@ export const AT_BOTTOM_EPSILON_PX = 2
 /** A restored reading position keeps re-asserting itself for this long while
  * the remounted transcript's content is still growing back underneath it. */
 const RESTORE_WINDOW_MS = 1500
+/** How long after direct user input (wheel, touch, scroll keys) a scroll
+ * event is still attributed to that gesture. Attributed scroll events
+ * refresh the window, so trackpad momentum and smooth keyboard scrolling
+ * stay attributed for their whole run. */
+const USER_INPUT_WINDOW_MS = 250
+
+/** Keys that scroll a container when it (or a non-editable descendant) has
+ * focus. */
+const SCROLL_KEYS = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  ' ',
+])
 
 export interface ChatScrollSnapshot {
   nearBottom: boolean
@@ -99,6 +127,9 @@ export class ChatScrollController {
   private nearBottom = true
   private lastTop = 0
   private spacerHeight = 0
+  // Timestamp of the last direct user input (wheel, touch, scroll key) —
+  // scroll events within USER_INPUT_WINDOW_MS of it are the user's.
+  private lastUserInputAt = Number.NEGATIVE_INFINITY
 
   // Send-anchor state ('chat' mode): while set, resize ticks keep the spacer
   // slack maintained (shrink-only) so the anchored message stays reachable at
@@ -129,6 +160,9 @@ export class ChatScrollController {
 
     els.container.addEventListener('scroll', this.handleScroll, { passive: true })
     els.container.addEventListener('wheel', this.handleWheel, { passive: true })
+    els.container.addEventListener('touchstart', this.handleTouch, { passive: true })
+    els.container.addEventListener('touchmove', this.handleTouch, { passive: true })
+    els.container.addEventListener('keydown', this.handleKeyDown)
 
     if (typeof ResizeObserver !== 'undefined') {
       this.observer = new ResizeObserver(this.handleResize)
@@ -153,6 +187,9 @@ export class ChatScrollController {
     this.saveMemory()
     this.els.container.removeEventListener('scroll', this.handleScroll)
     this.els.container.removeEventListener('wheel', this.handleWheel)
+    this.els.container.removeEventListener('touchstart', this.handleTouch)
+    this.els.container.removeEventListener('touchmove', this.handleTouch)
+    this.els.container.removeEventListener('keydown', this.handleKeyDown)
     this.observer?.disconnect()
     this.observer = null
     this.els = null
@@ -236,23 +273,36 @@ export class ChatScrollController {
     this.lastTop = top
 
     // Echoes of our own writes (lastTop is pre-updated on every write) and
-    // sub-pixel noise carry no user intent: only genuine movement may change
-    // follow state or take over from a pending restore.
+    // sub-pixel noise carry no state changes at all.
     if (Math.abs(delta) > 1) {
       this.restore = null
+      const attributed = this.isUserAttributed()
       const distance = this.distanceFromBottom()
-      if (distance <= AT_BOTTOM_EPSILON_PX) {
-        // At the live edge — includes clamp/anchoring adjustments when
-        // content shrinks while pinned, which must not break following.
+      if (delta < 0) {
+        // The view moved up past the live-edge tolerance: scrollbar drag,
+        // touch, keyboard or wheel — stop following, never yank back down.
+        // AT the tolerance this is a browser clamp after content shrank
+        // (end-of-turn card collapses) and carries no intent: pinned readers
+        // stay pinned, parked readers stay parked.
+        if (distance > AT_BOTTOM_EPSILON_PX) {
+          this.following = false
+          this.cancelSmooth()
+        }
+      } else if (attributed && distance <= NEAR_BOTTOM_PX) {
+        // A downward user gesture back into the near-bottom band resumes
+        // following.
         this.following = true
-      } else if (delta < 0) {
-        // Deliberate upward movement: stop following, never yank back down.
-        this.following = false
-        this.cancelSmooth()
-      } else if (distance <= NEAR_BOTTOM_PX) {
-        // Scrolled back down into the near-bottom band: resume following.
+      } else if (distance <= AT_BOTTOM_EPSILON_PX) {
+        // Unattributed downward arrivals engage only at the true live edge:
+        // that's a scrollbar dragged to the very end (scrollbars emit no
+        // input events). Native anchoring compensations preserve the
+        // reader's distance and so can never land here — the end-of-turn
+        // re-engage bug this model exists to prevent.
         this.following = true
       }
+      // Keep momentum / smooth-keyboard scroll chains attributed to the
+      // gesture that started them.
+      if (attributed) this.lastUserInputAt = now()
     }
     // A settling smooth animation ends in sub-pixel deltas — check outside
     // the intent gate.
@@ -268,14 +318,42 @@ export class ChatScrollController {
   private handleWheel = (event: WheelEvent): void => {
     const els = this.els
     if (!els) return
+    this.lastUserInputAt = now()
     if (event.deltaY >= 0) return
     if (els.container.scrollHeight <= els.container.clientHeight) return
     // Any upward wheel over the transcript is review intent — including one
     // consumed by a nested scrollable (terminal output, code block), whose
     // reader would otherwise be yanked along by the following transcript.
+    // Latching here (before any scroll event) makes the disengage immune to
+    // interleaved follow writes swallowing the scroll event's delta.
     this.following = false
     this.cancelSmooth()
     this.notify()
+  }
+
+  private handleTouch = (): void => {
+    this.lastUserInputAt = now()
+  }
+
+  private handleKeyDown = (event: KeyboardEvent): void => {
+    if (!SCROLL_KEYS.has(event.key)) return
+    const target = event.target
+    if (
+      target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT')
+    ) {
+      // Typing/caret movement in an editable inside the transcript is not a
+      // scroll gesture.
+      return
+    }
+    this.lastUserInputAt = now()
+  }
+
+  private isUserAttributed(): boolean {
+    return now() - this.lastUserInputAt <= USER_INPUT_WINDOW_MS
   }
 
   private handleResize = (): void => {
