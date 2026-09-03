@@ -5,12 +5,14 @@
   "dependencies": {
     "@expo/ui": "~57.0.14",
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@rowboat/spaces-protocol": "link:../../../harbor/packages/protocol",
     "@x/client": "workspace:*",
     "@x/shared": "workspace:*",
     "expo": "~57.0.18",
     "expo-blur": "~57.0.2",
     "expo-camera": "~57.0.2",
     "expo-constants": "~57.0.16",
+    "expo-crypto": "~15.0.2",
     "expo-device": "~57.0.1",
     "expo-font": "~57.0.2",
     "expo-glass-effect": "~57.0.1",
@@ -38,7 +40,7 @@
     "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.10.1",
-    "zod": "^4.4.3"
+    "zod": "4.2.1"
   },
   "devDependencies": {
     "@babel/generator": "^7.29.8",

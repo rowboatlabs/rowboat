@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { DrawerContent } from '@/components/drawer-content';
 import { ConnectionProvider } from '@/lib/connection';
+import { SpacesAccountProvider } from '@/lib/spaces/account';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -20,6 +21,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <ConnectionProvider>
+          <SpacesAccountProvider>
           <Drawer
             drawerContent={(props) => <DrawerContent {...props} />}
             screenOptions={{
@@ -39,10 +41,12 @@ export default function RootLayout() {
                 headerLeft: () => <GlassHamburger onPress={() => navigation.openDrawer()} />,
               })}
             />
+            <Drawer.Screen name="spaces/index" options={{ title: 'Spaces' }} />
             <Drawer.Screen name="pairing" options={{ title: 'Pair with your Mac', swipeEnabled: false, headerShown: true }} />
             <Drawer.Screen name="notes" options={{ title: 'Brain', headerShown: false }} />
             <Drawer.Screen name="pair-dev" options={{ title: 'Dev pairing', headerShown: false }} />
           </Drawer>
+          </SpacesAccountProvider>
         </ConnectionProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

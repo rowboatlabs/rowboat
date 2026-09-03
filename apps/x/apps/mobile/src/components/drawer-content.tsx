@@ -120,6 +120,14 @@ export function DrawerContent(props: DrawerContentComponentProps) {
 
       {/* Foot: Brain, then the connection row */}
       <View style={{ borderTopWidth: 0.5, borderTopColor: colors.separator, paddingTop: 6, paddingBottom: insets.bottom + 8, paddingHorizontal: 8, gap: 2 }}>
+        <FootRow
+          icon="sf:person.2"
+          label="Spaces"
+          onPress={() => {
+            router.push('/spaces');
+            props.navigation.closeDrawer();
+          }}
+        />
         {FLAGS.legacyChatBrain ? (
         <FootRow
           icon="sf:brain"
