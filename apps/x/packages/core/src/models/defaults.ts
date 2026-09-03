@@ -1,6 +1,7 @@
 import z from "zod";
-import { LlmModelConfig, LlmProvider, ModelSelection as ModelSelectionSchema, type TaskModelKey } from "@x/shared/dist/models.js";
+import { LlmModelConfig, LlmProvider, ModelSelection as ModelSelectionSchema, isAutoModel, type TaskModelKey } from "@x/shared/dist/models.js";
 import { IModelConfigRepo } from "./repo.js";
+import { resolveAutoSelection } from "./auto.js";
 import container from "../di/container.js";
 
 // THE canonical selection: provider + model + the effort picked with them,
@@ -30,6 +31,9 @@ export async function getDefaultModelAndProvider(): Promise<ModelSelection> {
     const assistant = cfg?.assistantModel;
     if (!assistant) {
         throw new Error("No assistant model configured (connect a provider or sign in)");
+    }
+    if (isAutoModel(assistant.model)) {
+        return resolveAutoSelection(assistant.provider, "assistant");
     }
     return {
         model: assistant.model,
@@ -94,16 +98,29 @@ export async function resolveProviderConfig(name: string): Promise<z.infer<typeo
  * effort stored on it), else the assistant model+effort pair. No hidden
  * per-task defaults — the v2 migration materialized the historical curated
  * models as visible overrides.
+ *
+ * Auto stays category-aware through inheritance: a task inheriting from an
+ * Auto assistant resolves against the TASK's recommendation slot first, so
+ * always-on background work keeps running on the recommended lite-tier
+ * models (the credit economics that per-task recommendations exist for)
+ * instead of whatever the assistant resolves to.
  */
 async function getCategoryModel(category: TaskModelKey): Promise<ModelSelection> {
     const cfg = await readConfig();
     const override = cfg?.taskModels?.[category];
     if (override) {
+        if (isAutoModel(override.model)) {
+            return resolveAutoSelection(override.provider, category);
+        }
         return {
             model: override.model,
             provider: override.provider,
             ...(override.effort ? { effort: override.effort } : {}),
         };
+    }
+    const assistant = cfg?.assistantModel;
+    if (assistant && isAutoModel(assistant.model)) {
+        return resolveAutoSelection(assistant.provider, category);
     }
     return getDefaultModelAndProvider();
 }
@@ -149,5 +166,12 @@ export async function getBackgroundTaskAgentModel(): Promise<ModelSelection> {
  */
 export async function getSubagentModelOverride(): Promise<ModelSelection | null> {
     const cfg = await readConfig();
-    return cfg?.taskModels?.subagent ?? null;
+    const override = cfg?.taskModels?.subagent ?? null;
+    if (override && isAutoModel(override.model)) {
+        // An EXPLICIT Auto override resolves like any task slot; the
+        // absent-override default stays the parent turn's model (which is
+        // already concrete by the time a subagent spawns).
+        return resolveAutoSelection(override.provider, "subagent");
+    }
+    return override;
 }

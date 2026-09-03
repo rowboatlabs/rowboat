@@ -885,8 +885,10 @@ export const ipcSchemas = {
         })),
       })),
       // The effective runtime default (what runs when nothing is picked),
-      // effort included — it seeds new chats' composer state.
-      defaultModel: ModelSelection.nullable(),
+      // effort included — it seeds new chats' composer state. Always a
+      // CONCRETE model: an Auto assistant arrives resolved, with isAuto set
+      // so pickers can present it as "Auto" rather than a plain choice.
+      defaultModel: ModelSelection.extend({ isAuto: z.boolean().optional() }).nullable(),
     }),
   },
   // The image-model catalog for the settings "Image model" picker: the

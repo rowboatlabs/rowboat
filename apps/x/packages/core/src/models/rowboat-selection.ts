@@ -3,6 +3,7 @@ import { IModelConfigRepo } from "./repo.js";
 import { listGatewayModels } from "./gateway.js";
 import { getRowboatConfig } from "../config/rowboat.js";
 import { selectInitialModel, selectInitialTaskModels } from "./initial-selection.js";
+import { AUTO_MODEL_ID } from "@x/shared/dist/models.js";
 import { normalizeModelRecommendation } from "@x/shared/dist/rowboat-account.js";
 import { capture } from "../analytics/posthog.js";
 
@@ -13,8 +14,10 @@ import { capture } from "../analytics/posthog.js";
  *
  * - Connect with no saved assistant → pick an initial model (backend
  *   recommendation if the gateway lists it, else the first listed model)
- *   and save it. A saved assistant is NEVER replaced — recommendations only
- *   ever choose the initial model.
+ *   and save it. When the backend's autoModelDefault rollout flag is on,
+ *   the initial pick is the Auto sentinel instead — resolved per run by
+ *   core/models/auto.ts. A saved assistant is NEVER replaced —
+ *   recommendations only ever choose the initial model.
  * - Connect with no saved image model → seed the gateway's image model.
  *   Its own guard, not the assistant's: the image model cannot inherit the
  *   assistant (a text model), so a BYOK user who already has an assistant
@@ -40,9 +43,28 @@ type Config = Awaited<ReturnType<IModelConfigRepo["getConfig"]>>;
 async function seedAssistantModel(repo: IModelConfigRepo, cfg: Config | null): Promise<void> {
     try {
         if (cfg?.assistantModel) return; // saved choice — never replaced
+        const rowboatConfig = await getRowboatConfig().catch(() => null);
+        if (rowboatConfig?.features?.autoModelDefault) {
+            // Rollout-flagged Auto default: seed the sentinel instead of a
+            // pinned model, and skip materializing task overrides — Auto
+            // resolution is category-aware, so the per-task recommendations
+            // keep steering background work without frozen copies. An older
+            // backend (no features block) keeps the pinning path below.
+            await repo.updateConfig({
+                assistantModel: { provider: "rowboat", model: AUTO_MODEL_ID },
+            });
+            capture("llm_initial_model_selected", {
+                flavor: "rowboat",
+                model: AUTO_MODEL_ID,
+                auto_default: true,
+                task_overrides_seeded: 0,
+                source: "sign_in",
+            });
+            return;
+        }
         const catalog = await listGatewayModels();
         const ids = catalog.providers[0]?.models.map((m) => m.id) ?? [];
-        const recommendations = (await getRowboatConfig().catch(() => null))?.modelRecommendations;
+        const recommendations = rowboatConfig?.modelRecommendations;
         const choice = selectInitialModel("rowboat", ids, recommendations);
         if (choice) {
             // Task recommendations ride along the seeding moment: the
