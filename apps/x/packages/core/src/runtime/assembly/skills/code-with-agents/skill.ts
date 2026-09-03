@@ -42,14 +42,14 @@ No chip is set, but code mode is enabled (this skill only loads when it is). **P
 code_agent_run({
   agent: "<claude|codex>",
   cwd: "<resolved absolute folder — OMIT when unresolved, see above>",
-  prompt: "<clear, self-contained coding instruction>"
+  prompt: "<the user's request, forwarded almost verbatim>"
 })
 \`\`\`
 
-**Writing good prompts for the agent:**
-- Be specific: file names, function signatures, expected behavior.
-- Mention constraints (language, framework, style).
-- Expand short user requests into clear, actionable instructions.
+**Writing \`prompt\` — forward, don't rewrite.** Pass the user's coding request through nearly verbatim:
+- Fix only speech-to-text / transcription artifacts, obvious typos, and minor grammar; light formatting (e.g. breaking a run-on spoken sentence into lines) is fine.
+- Do NOT expand, rephrase, or reinterpret the request, and do NOT add speculative implementation details, file guesses, or constraints the user never stated — the coding agent explores the repo itself and is better placed to interpret the request in context.
+- ONE exception: when the user explicitly asks you to gather outside context first ("fetch the error from my email and send it to Claude Code", "pull the spec from my knowledge base for Codex"), collect that context, then send their verbatim request followed by the gathered material under a clearly labeled section (e.g. "Context the user asked me to include:").
 
 **Follow-ups:** for every later coding request in this chat, just call \`code_agent_run\` again with the same \`cwd\` (or omitted again, same as the first call) and the chip's current agent. The session resumes automatically — do NOT start over or re-explain prior context.
 
@@ -58,7 +58,8 @@ code_agent_run({
 ## STEP 3 — Report results
 
 After \`code_agent_run\` returns:
-- Pass through the agent's \`summary\` as-is. Do not rewrite it.
+- **Reply in ~2 lines, nothing more.** The agent's ENTIRE output — every message, plan step, tool call, and file diff — is directly visible to the user, fully formatted, in the run card right above your reply; the user reads the results THERE. On success your reply is exactly: (1) one line stating what was done — "I used Claude Code to implement [task]." — and (2) at most one more line with a key outcome the user needs, when applicable: a PR link (if the run created one), or the changes' status / next step.
+- **STRICTLY FORBIDDEN:** re-summarizing or reiterating what the agent said, listing the files it touched, explaining implementation details, or repeating diffs — the user can already read all of that in the card, and repeating it is pure noise.
 - Refer to file paths as plain text. Do NOT use \`\`\`file:path\`\`\` reference blocks. (This overrides the global "always wrap paths in filepath blocks" rule — for code-mode output, plain text.)
 - Only add your own explanation if it failed:
   - A tool error with a message — surface the message. If it mentions the agent isn't installed or signed in, tell the user to install or sign in via **Settings → Code Mode**.

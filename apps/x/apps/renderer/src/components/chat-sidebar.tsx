@@ -113,7 +113,7 @@ interface ChatSidebarProps {
   onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse) => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
   onCodePermissionResponse?: (toolCallId: string, requestId: string, decision: PermissionDecision) => void | Promise<void>
-  isToolOpenForTab?: (tabId: string, toolId: string) => boolean
+  isToolOpenForTab?: (tabId: string, toolId: string) => boolean | undefined
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
   onOpenKnowledgeFile?: (path: string) => void
   onOpenFile?: (path: string) => void
@@ -433,7 +433,7 @@ export function ChatSidebar({
                       tabState={getTabState(tab.id)}
                       viewportAnchor={viewportAnchors[tab.id]}
                       onPickPrompt={setLocalPresetMessage}
-                      isToolOpenForTab={(tabId, toolId) => isToolOpenForTab?.(tabId, toolId) ?? false}
+                      isToolOpenForTab={(tabId, toolId) => isToolOpenForTab?.(tabId, toolId)}
                       setToolOpenForTab={(tabId, toolId, open) => onToolOpenChangeForTab?.(tabId, toolId, open)}
                       onPermissionResponse={onPermissionResponse}
                       onAskHumanResponse={onAskHumanResponse}

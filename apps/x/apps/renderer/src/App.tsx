@@ -2624,8 +2624,10 @@ function App() {
     const runId = chatTabsRef.current.find((t) => t.id === tabId)?.runId
     if (runId) void persistRunWorkDir(runId, value)
   }, [persistRunWorkDir])
-  const isToolOpenForTab = useCallback((tabId: string, toolId: string): boolean => {
-    return toolOpenByTab[tabId]?.[toolId] ?? false
+  // `undefined` = no explicit user choice — TurnConversation then applies the
+  // per-tool default (coding-run cards open, everything else closed).
+  const isToolOpenForTab = useCallback((tabId: string, toolId: string): boolean | undefined => {
+    return toolOpenByTab[tabId]?.[toolId]
   }, [toolOpenByTab])
   const setToolOpenForTab = useCallback((tabId: string, toolId: string, open: boolean) => {
     setToolOpenByTab((prev) => {
@@ -3826,7 +3828,9 @@ function App() {
             return next
           })
 
-          if (event.toolCallId) {
+          // Coding-run cards stay expanded after the run settles — the card is
+          // the primary output surface (the assistant only confirms in a line).
+          if (event.toolCallId && event.toolName !== 'code_agent_run') {
             setToolOpenForTab(activeChatTabIdRef.current, event.toolCallId, false)
           }
 
