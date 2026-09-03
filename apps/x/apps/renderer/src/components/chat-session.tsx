@@ -57,7 +57,8 @@ export interface ChatSessionPaneProps {
   tabState: ChatTabViewState
   viewportAnchor: ChatViewportAnchorState | undefined
   onPickPrompt: (prompt: string) => void
-  isToolOpenForTab: (tabId: string, toolId: string) => boolean
+  /** `undefined` = no explicit choice; TurnConversation applies the per-tool default. */
+  isToolOpenForTab: (tabId: string, toolId: string) => boolean | undefined
   setToolOpenForTab: (tabId: string, toolId: string, open: boolean) => void
   /** Optional: without it, pending permission requests render no approve/deny card (side-pane chat may omit the handler). */
   onPermissionResponse?: (toolCallId: string, subflow: string[], response: 'approve' | 'deny') => void | Promise<void>

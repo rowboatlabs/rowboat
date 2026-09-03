@@ -95,8 +95,10 @@ export interface TurnConversationProps {
   /**
    * Tool-row open state. Chat panes lift this to the tab store so it survives
    * tab switches; omit both for local per-mount state (transcript surfaces).
+   * Return `undefined` for "no explicit user choice" — the renderer then
+   * applies the per-tool default (coding runs open, everything else closed).
    */
-  isToolOpen?: (toolId: string) => boolean
+  isToolOpen?: (toolId: string) => boolean | undefined
   onToolOpenChange?: (toolId: string, open: boolean) => void
   /** Live-chat permission state (from ChatTabViewState); omitted on read-only surfaces. */
   permissionRequests?: ChatTabViewState['allPermissionRequests']
@@ -126,16 +128,20 @@ export function TurnConversation({
   onComposioConnected,
   className,
 }: TurnConversationProps) {
-  // Local fallback open state for surfaces that don't lift it.
-  const [localOpenTools, setLocalOpenTools] = React.useState<ReadonlySet<string>>(() => new Set())
-  const isToolOpen = isToolOpenProp ?? ((toolId: string) => localOpenTools.has(toolId))
+  // Local fallback open state for surfaces that don't lift it. A Map (not a
+  // Set) so "never toggled" stays distinct from an explicit collapse — the
+  // per-tool default below only applies while there's no explicit choice.
+  const [localOpenTools, setLocalOpenTools] = React.useState<ReadonlyMap<string, boolean>>(() => new Map())
+  const isToolOpenExplicit = isToolOpenProp ?? ((toolId: string) => localOpenTools.get(toolId))
+  // Explicit user choice wins; otherwise coding-run cards default open (the
+  // run card is the primary output surface) and everything else stays closed.
+  const isToolOpen = (toolId: string, defaultOpen = false) => isToolOpenExplicit(toolId) ?? defaultOpen
   const onToolOpenChange =
     onToolOpenChangeProp ??
     ((toolId: string, open: boolean) => {
       setLocalOpenTools((prev) => {
-        const next = new Set(prev)
-        if (open) next.add(toolId)
-        else next.delete(toolId)
+        const next = new Map(prev)
+        next.set(toolId, open)
         return next
       })
     })
@@ -218,7 +224,7 @@ export function TurnConversation({
           <CodingRunBlock
             key={item.id}
             item={item}
-            open={isToolOpen(item.id)}
+            open={isToolOpen(item.id, true)}
             onOpenChange={(open) => onToolOpenChange(item.id, open)}
             onPermissionDecision={(decision) => {
               if (item.pendingCodePermission) {
