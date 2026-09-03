@@ -105,7 +105,7 @@ const ATTRIBUTION_HEADERS: Readonly<Record<string, string>> = Object.freeze({
  * is worse than none. When one is issued this constant is the only edit;
  * while it is empty the header is not sent at all.
  */
-export const AIMLAPI_PARTNER_ID: string = "";
+export const AIMLAPI_PARTNER_ID: string = "part_VGDbk3ZJHZ1bi3eoaLNwToNC";
 
 /** Attribution rides only to this origin — never to a proxy or a peer. */
 const ATTRIBUTION_ORIGIN = "https://api.aimlapi.com";
