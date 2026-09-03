@@ -213,22 +213,12 @@ function MessageRowImpl({
     const canQuote = !!onQuoteReply && !deleted && !unconfirmed && !!messageText
     const canForward = !!onForward && !deleted && !unconfirmed
 
-    // A ping: the wire body addresses you (@<yourId>) or everyone (@here).
-    // Discord treatment — amber wash + left accent bar, no layout shift.
-    const pingsMe =
-        !deleted &&
-        !!selfMemberId &&
-        message.author.memberId !== selfMemberId &&
-        new RegExp(`@(?:${selfMemberId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|here)(?![\\w.-])`).test(message.body)
-
     const row = (
         <div
             data-mid={message.id}
             className={cn(
                 'group/msg relative flex items-start gap-3 px-3 hover:bg-accent',
                 continuation ? 'py-0.5' : 'py-1.5',
-                // A message that pings you carries the dialect's "needs you" wash.
-                pingsMe && 'bg-[var(--stream-you-wash)] shadow-[inset_3px_0_0] shadow-[var(--stream-you-ink)]',
             )}
         >
             {continuation ? (
