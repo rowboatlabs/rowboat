@@ -92,10 +92,14 @@ describe('EmailRail', () => {
     expect(screen.getByText('Drafts').closest('button')?.className).toContain('font-medium')
   })
 
-  it('collapses to an edge strip that reopens on click', () => {
-    const { onTogglePin } = renderRail({ open: false })
-    expect(screen.queryByText('All mail')).toBeNull()
-    fireEvent.click(screen.getByTitle('Show mail filters'))
+  it('collapsed: the rows wait inert in the hover drawer', () => {
+    renderRail({ open: false })
+    expect(screen.getByText('All mail').closest('[inert]')).toBeTruthy()
+  })
+
+  it('docked: the header button reports the collapse', () => {
+    const { onTogglePin } = renderRail()
+    fireEvent.click(screen.getByTitle('Close sidebar'))
     expect(onTogglePin).toHaveBeenCalled()
   })
 })
