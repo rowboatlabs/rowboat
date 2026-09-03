@@ -1460,6 +1460,15 @@ export const ipcSchemas = {
     req: z.object({ x: z.number(), y: z.number() }),
     res: z.null(),
   },
+  // Main → companion: the window is being dragged right now. A drag region
+  // is a NATIVE affair — on Windows the hit test answers HTCAPTION, on macOS
+  // it is a view layered over the page — so the renderer never sees the
+  // mousedown and `:active` never fires. Main watches its own 'move' instead
+  // and says so, which is what lets the cursor go from grab to grabbing.
+  'quick-ask:dragging': {
+    req: z.object({ dragging: z.boolean() }),
+    res: z.null(),
+  },
   // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
   // whether a reply is SPOKEN now follows the question's modality — spoken
   // questions get spoken replies, typed ones stay silent — plus the

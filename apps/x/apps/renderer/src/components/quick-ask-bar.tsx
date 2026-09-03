@@ -234,6 +234,7 @@ export function QuickAskBar() {
   // The frame is mostly transparent stage — hand the clicks that land on it
   // back to whatever the user has underneath.
   useClickThrough(pinned)
+  useDragCursor()
 
   // Mirrors callState.speakerMuted for the fold callback below (which is
   // deliberately dependency-free).
@@ -1112,6 +1113,38 @@ function useClickThrough(active: boolean) {
 const SKIPPER_SIZE = 164
 const HALO_SIZE = Math.round(SKIPPER_SIZE * 0.79)
 
+/**
+ * Grab → GRABBING while the Skipper is actually moving.
+ *
+ * The handles (the card and the mascot column) are drag regions, and a drag
+ * region is native: on Windows the hit test answers HTCAPTION, on macOS it is
+ * a view layered over the page. Neither ever delivers the mousedown, so
+ * `:active` — the obvious way to write this — is never true here. Main
+ * watches the window's own 'move' instead and pushes the edges of the drag
+ * (quick-ask:dragging); this flips a class on <html> that the rule below
+ * turns into the closed-hand cursor everywhere, since during a drag the
+ * pointer is over a handle by definition.
+ *
+ * The rule is injected rather than rendered: the window has several
+ * presentations (card, pill, tucked mascot) and each is an early return, so
+ * a <style> in any one of them would be missing from the others.
+ */
+function useDragCursor() {
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = 'html.qa-dragging, html.qa-dragging * { cursor: grabbing !important; }'
+    document.head.appendChild(style)
+    const off = window.ipc.on('quick-ask:dragging', ({ dragging }) => {
+      document.documentElement.classList.toggle('qa-dragging', dragging)
+    })
+    return () => {
+      off()
+      style.remove()
+      document.documentElement.classList.remove('qa-dragging')
+    }
+  }, [])
+}
+
 const dragRegion = { WebkitAppRegion: 'drag' } as React.CSSProperties
 const noDragRegion = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 
@@ -1736,7 +1769,7 @@ function TuckedMascot({
   return (
     <div
       data-qa-passthrough
-      className="group relative flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden pb-2"
+      className="group relative flex h-screen w-screen cursor-grab select-none flex-col items-center justify-end overflow-hidden pb-2"
       style={dragRegion}
     >
       <style>{`
