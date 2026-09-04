@@ -32,6 +32,8 @@ import { useSessionTitle } from '@/lib/session-title'
 import {
   type ChatTabViewState,
   type ChatViewportAnchorState,
+  isChatMessage,
+  isReasoningMessage,
 } from '@/lib/chat-conversation'
 
 function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
@@ -73,6 +75,11 @@ export interface ChatSessionPaneProps {
   onComposioConnected?: (toolkitSlug: string) => void
   /** Empty-state flavour: 'code' for a chat bound to a coding session. */
   emptyStateVariant?: 'default' | 'code'
+  /**
+   * Chat bound to a coding session: the transcript follows Codex semantics
+   * (sends jump to the live edge) instead of ChatGPT's send-anchoring.
+   */
+  isCodeSession?: boolean
 }
 
 export function ChatSessionPane({
@@ -91,6 +98,7 @@ export function ChatSessionPane({
   onCodePermissionResponse,
   onComposioConnected,
   emptyStateVariant = 'default',
+  isCodeSession = false,
 }: ChatSessionPaneProps) {
   // Content-owned tab meta (see lib/tab-meta.ts). Both live instances of a
   // chat (full-screen App pane + side-pane chat) report the same values, so
@@ -122,6 +130,17 @@ export function ChatSessionPane({
   const currentAsk = pendingAsks[0]
 
   const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
+  // Store-backed chats stream through synthetic conversation items that carry
+  // their durable ids (turn-view.ts), so completion updates the mounted nodes
+  // in place. The fallback slots below render only when no such item exists:
+  // legacy (non-store) runs, and edge states like a failed turn's unflushed
+  // overlay tail.
+  const hasLiveReasoningItem = tabState.conversation.some(
+    (item) => isReasoningMessage(item) && item.streaming === true
+  )
+  const hasLiveAssistantItem = tabState.conversation.some(
+    (item) => isChatMessage(item) && item.streaming === true
+  )
   const tabConversationContentClassName = cn(
     'mx-auto w-full max-w-[820px] px-6',
     tabHasConversation ? 'pb-28' : 'pb-0',
@@ -139,6 +158,8 @@ export function ChatSessionPane({
       aria-hidden={!isActive}
     >
       <Conversation
+        scrollMode={isCodeSession ? 'code' : 'chat'}
+        scrollMemoryKey={tab.chatId}
         anchorMessageId={viewportAnchor?.messageId}
         anchorRequestKey={viewportAnchor?.requestKey}
         className="relative flex-1"
@@ -182,18 +203,16 @@ export function ChatSessionPane({
                 />
               )}
 
-              {/* In-flight model call's thought stream: open with a
-                  "Thinking..." shimmer while reasoning streams, auto-collapses
-                  once the model moves on to its answer. Replaced by the
-                  durable (collapsed) reasoning item when the call completes. */}
-              {tabState.currentReasoning && (
+              {/* Legacy fallback: in-flight thought stream for runs whose
+                  transcript doesn't carry the synthetic streaming items. */}
+              {tabState.currentReasoning && !hasLiveReasoningItem && (
                 <ReasoningRow
                   content={tabState.currentReasoning}
                   isStreaming={isActive && activeIsReasoning}
                 />
               )}
 
-              {tabState.currentAssistantMessage && (
+              {tabState.currentAssistantMessage && !hasLiveAssistantItem && (
                 <Message from="assistant">
                   <MessageContent>
                     <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
