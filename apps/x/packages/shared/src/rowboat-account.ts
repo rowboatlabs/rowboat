@@ -37,14 +37,15 @@ export const RowboatApiConfig = z.object({
   // task key = inherit the assistant — task recs exist only where the
   // intended model differs; for rowboat they reproduce the pre-v2 curated
   // lite-tier task models so plan credits aren't burned by background
-  // services). Hints for the INITIAL selection when a provider is first
-  // connected — never a catalog, and never applied over a saved choice
-  // (see shared/initial-selection.ts). The bare-string form is the legacy
-  // wire shape, accepted so backend deploy order and rollback are
-  // non-events. Local/custom flavors are intentionally absent: the API
-  // can't know which models exist in a user's environment. Optional so
-  // older API deployments and failed fetches never break parsing —
-  // recommendations are best-effort by design.
+  // services). Two consumers, same rule — never applied over a concrete
+  // saved choice: they steer the INITIAL selection when a provider is first
+  // connected (see shared/initial-selection.ts), and they are what a saved
+  // "auto" sentinel selection resolves to at run time (core/models/auto.ts).
+  // The bare-string form is the legacy wire shape, accepted so backend
+  // deploy order and rollback are non-events. Local/custom flavors are
+  // intentionally absent: the API can't know which models exist in a user's
+  // environment. Optional so older API deployments and failed fetches never
+  // break parsing — recommendations are best-effort by design.
   modelRecommendations: z.record(z.string(), z.union([
     z.string(),
     z.object({
@@ -52,6 +53,16 @@ export const RowboatApiConfig = z.object({
       taskModels: z.record(z.string(), RecommendedChoice).optional(),
     }),
   ])).optional(),
+  // App rollout flags. Additive by contract: absent (older API deployments,
+  // failed fetches) reads the same as all-false, and each flag is parsed
+  // leniently — a backend experimenting with non-boolean values must
+  // degrade the flag, never fail the /v1/config parse that auth and
+  // billing also ride on. autoModelDefault: fresh Rowboat sign-ins seed
+  // the assistant as the Auto selection instead of pinning a concrete
+  // model (core/models/rowboat-selection.ts).
+  features: z.object({
+    autoModelDefault: z.unknown().transform((v) => v === true).optional(),
+  }).optional(),
 });
 
 export type ModelRecommendations = NonNullable<z.infer<typeof RowboatApiConfig>['modelRecommendations']>;

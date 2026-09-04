@@ -41,6 +41,20 @@ export const ModelRef = z.object({
   model: z.string(),
 });
 
+// The reserved model id for the Auto selection: "whatever Rowboat currently
+// recommends for this provider". Provider-scoped — the provider on the ref
+// is real and never switched; only the model resolves dynamically, at run
+// creation (core/models/auto.ts), against the /v1/config recommendations.
+// The sentinel is a valid ModelRef.model string on purpose: it persists in
+// models.json and crosses IPC without schema changes, and resolution is the
+// job of the core selection funnels — it must never reach a provider SDK.
+export const AUTO_MODEL_ID = "auto";
+
+/** True when a ref/selection is the Auto sentinel rather than a concrete model. */
+export function isAutoModel(model: string | null | undefined): boolean {
+  return model === AUTO_MODEL_ID;
+}
+
 // Stored effort is lenient on read: missing, null, and "auto" all mean Auto
 // (send nothing; provider default) and normalize to `undefined`. Writers
 // emit the canonical form — the key omitted when Auto.

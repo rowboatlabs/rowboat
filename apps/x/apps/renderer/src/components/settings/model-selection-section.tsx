@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { ModelSelector, providerDisplayNames, type ModelRef, type ModelSelection } from "@/components/model-selector"
 import { useModels, type ModelPickerGroup } from "@/hooks/use-models"
+import { AUTO_MODEL_ID } from "@x/shared/dist/models.js"
 
 // The unified model-selection surface (signed-in and BYOK alike): ONE
 // required Assistant model plus per-task overrides that default to
-// "Same as Assistant". No "Auto" rows — every choice is an explicit model;
-// recommendation logic only ever picks INITIAL models at provider-connect
-// time, never appears as a dropdown option. The Image model is the one
-// slot outside that inheritance: it can't inherit the assistant (a text
-// model), so it's its own explicit pick — or unset, which turns image
-// generation off.
+// "Same as Assistant". Every choice is explicit — a concrete model, or the
+// provider-scoped "Auto" row, which persists the sentinel and follows
+// Rowboat's current recommendation at run time (task inheritance from an
+// Auto assistant resolves per task, so background work stays on the
+// recommended lite tier). The Image model is the one slot outside that
+// inheritance: it can't inherit the assistant (a text model), so it's its
+// own explicit pick — or unset, which turns image generation off.
 
 // One provider in the image-model catalog (models:listImageModels). Every
 // image-capable provider lists its own models; a provider whose listing
@@ -43,12 +45,13 @@ const TASKS: Array<{ key: TaskKey; label: string; description: string }> = [
 ]
 
 function refLabel(ref: ModelRef): string {
-  return `${providerDisplayNames[ref.provider] || ref.provider} · ${ref.model}`
+  const model = ref.model === AUTO_MODEL_ID ? "Auto" : ref.model
+  return `${providerDisplayNames[ref.provider] || ref.provider} · ${model}`
 }
 
 export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
   // The effective assistant model — the same value every picker shows.
-  const { defaultModel, defaultEffort, groups } = useModels()
+  const { defaultModel, defaultIsAuto, defaultEffort, groups } = useModels()
   const [taskModels, setTaskModels] = useState<Partial<Record<TaskKey, ModelSelection | null>>>({})
   const [imageModel, setImageModel] = useState<ModelRef | null>(null)
   const [imageProviders, setImageProviders] = useState<ImageProviderEntry[]>([])
@@ -62,17 +65,22 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
     ...(p.error ? { error: p.error } : {}),
   })), [imageProviders])
   // The assistant field's value: the stored pair, reassembled from the two
-  // snapshot fields the models store exposes.
+  // snapshot fields the models store exposes. An Auto assistant reads back
+  // as the sentinel (the STORED choice), not the model it resolved to —
+  // the picker's Auto row shows the resolution as secondary text.
   const assistantSelection: ModelSelection | null = defaultModel
-    ? { ...defaultModel, ...(defaultEffort ? { effort: defaultEffort } : {}) }
+    ? defaultIsAuto
+      ? { provider: defaultModel.provider, model: AUTO_MODEL_ID }
+      : { ...defaultModel, ...(defaultEffort ? { effort: defaultEffort } : {}) }
     : null
 
   // Retired-model detection: the saved assistant no longer appears in its
   // provider's live list. Only trusted lists count — a failed fetch or an
   // openai-compatible endpoint (whose /models is often unreliable) must not
-  // flag a working model.
+  // flag a working model. Auto never flags: it's a selection policy, not a
+  // model that can retire — resolution already prefers listed models.
   const assistantUnavailable = (() => {
-    if (!defaultModel) return false
+    if (!defaultModel || defaultIsAuto) return false
     const group = groups.find((g) => g.id === defaultModel.provider)
     if (!group || group.status !== "ok" || group.models.length === 0) return false
     if (group.flavor === "openai-compatible") return false
@@ -197,11 +205,16 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           {TASKS.map(({ key, label, description }) => {
             const override = taskModels[key] ?? null
+            // Under an Auto assistant, inheritance is category-aware (each
+            // task resolves against its own recommendation slot), so don't
+            // claim the assistant's resolved model runs here.
             const inheritText = key === "subagent"
               ? "Uses the spawning chat's model"
-              : defaultModel
-                ? `Currently uses ${refLabel(defaultModel)}`
-                : "Uses the Assistant model"
+              : defaultIsAuto
+                ? "Auto — uses Rowboat's recommendation for this task"
+                : defaultModel
+                  ? `Currently uses ${refLabel(defaultModel)}`
+                  : "Uses the Assistant model"
             return (
               <div key={key} className="space-y-1.5 min-w-0">
                 <div className="flex items-baseline justify-between gap-2">
@@ -226,7 +239,11 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
                   triggerTitle={label}
                 />
                 <p className="text-[11px] text-muted-foreground truncate" title={override ? refLabel(override) : inheritText}>
-                  {override ? "Uses a different model from the Assistant" : inheritText}
+                  {override
+                    ? override.model === AUTO_MODEL_ID
+                      ? "Auto — uses Rowboat's recommendation for this task"
+                      : "Uses a different model from the Assistant"
+                    : inheritText}
                 </p>
                 <p className="sr-only">{description}</p>
               </div>
