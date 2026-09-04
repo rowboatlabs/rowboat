@@ -23,6 +23,7 @@ import { TokenUsageMenu } from '@/components/token-usage-menu'
 import { matchBillingError } from '@/lib/billing-error'
 import { wikiLabel } from '@/lib/wiki-links'
 import { streamdownComponents, userMessageRemarkPlugins } from '@/lib/markdown-render'
+import { useSmoothedText } from '@/hooks/useSmoothedText'
 import type { PermissionDecision } from '@x/shared/src/code-mode.js'
 import {
   type ChatTabViewState,
@@ -60,6 +61,21 @@ import {
  * state lifted to the tab store) is optional: read-only transcript surfaces
  * pass just `items` and get self-contained collapsible tool rows.
  */
+
+function AssistantMessageBody({ text, streaming }: { text: string; streaming: boolean }) {
+  // ONE MessageResponse (Streamdown) instance renders both phases of an
+  // assistant message: the live stream (smoothed reveal) and its durable
+  // replacement, which shares the item id. Keeping the same element across
+  // the flip preserves Streamdown's per-block highlight memoization and any
+  // mermaid/chart output — a conditional component swap here would remount
+  // the subtree and bring back the end-of-generation flash.
+  const smoothed = useSmoothedText(streaming ? text : '')
+  return (
+    <MessageResponse components={streamdownComponents}>
+      {streaming ? smoothed : text}
+    </MessageResponse>
+  )
+}
 
 function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
   const ref = React.useRef<HTMLPreElement>(null)
@@ -206,16 +222,23 @@ export function TurnConversation({
       return (
         <Message key={item.id} from={item.role} data-message-id={item.id}>
           <MessageContent>
-            <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
+            <AssistantMessageBody text={item.content} streaming={item.streaming === true} />
           </MessageContent>
         </Message>
       )
     }
 
     if (isReasoningMessage(item)) {
-      // Settled thoughts start collapsed; the live streaming row in
-      // ChatSessionPane is what shows reasoning expanded while it happens.
-      return <ReasoningRow key={item.id} content={item.content} />
+      // The live thought stream renders here too (streaming flag → shimmer,
+      // auto-expand); when the call completes, the durable item keeps the
+      // same id and ReasoningRow's own falling-edge handling collapses it.
+      return (
+        <ReasoningRow
+          key={item.id}
+          content={item.content}
+          isStreaming={item.streaming === true}
+        />
+      )
     }
 
     if (isToolCall(item)) {
