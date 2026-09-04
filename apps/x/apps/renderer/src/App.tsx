@@ -4677,6 +4677,14 @@ function App() {
     return { type: 'chat', runId }
   }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSpacesOpen, spaceSelection, railSelection, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
+  // Navigation handlers can be invoked from closures frozen in older renders
+  // (Spaces' MessageRow memoizes by data and ignores handler identity), so
+  // dedupe/history logic must read the view state through this render-filled
+  // ref — a captured `currentViewState` can be stale, making "already there"
+  // checks eat real navigations.
+  const currentViewStateRef = useRef(currentViewState)
+  currentViewStateRef.current = currentViewState
+
   // applyViewState is declared further down (it needs the chat-binding
   // helpers); handlers above it reach it through this render-filled ref.
   const applyViewStateRef = useRef<((view: ViewState) => Promise<void>) | null>(null)
@@ -5216,7 +5224,7 @@ function App() {
   applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
-    const current = currentViewState
+    const current = currentViewStateRef.current
     if (viewStatesEqual(current, nextView)) {
       if (isBrowserOpen) {
         dismissBrowserOverlay()
@@ -5231,7 +5239,7 @@ function App() {
     }
     setHistory(nextHistory)
     await applyViewState(nextView)
-  }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory, isBrowserOpen, dismissBrowserOverlay])
+  }, [appendUnique, applyViewState, cancelRecordingIfActive, setHistory, isBrowserOpen, dismissBrowserOverlay])
 
   // Move the maximized/full-screen chat into the right side pane: restore the
   // view we expanded from (or fall back to Home) and dock the chat on the right.
@@ -5284,11 +5292,12 @@ function App() {
   }, [navigateToView])
 
   const navigateBack = useCallback(async () => {
+    const current = currentViewStateRef.current
     const { back, forward } = historyRef.current
     if (back.length === 0) return
 
     let i = back.length - 1
-    while (i >= 0 && viewStatesEqual(back[i], currentViewState)) i -= 1
+    while (i >= 0 && viewStatesEqual(back[i], current)) i -= 1
     if (i < 0) {
       setHistory({ back: [], forward })
       return
@@ -5297,18 +5306,19 @@ function App() {
     const target = back[i]
     const nextHistory = {
       back: back.slice(0, i),
-      forward: appendUnique(forward, currentViewState),
+      forward: appendUnique(forward, current),
     }
     setHistory(nextHistory)
     await applyViewState(target)
-  }, [appendUnique, applyViewState, currentViewState, setHistory])
+  }, [appendUnique, applyViewState, setHistory])
 
   const navigateForward = useCallback(async () => {
+    const current = currentViewStateRef.current
     const { back, forward } = historyRef.current
     if (forward.length === 0) return
 
     let i = forward.length - 1
-    while (i >= 0 && viewStatesEqual(forward[i], currentViewState)) i -= 1
+    while (i >= 0 && viewStatesEqual(forward[i], current)) i -= 1
     if (i < 0) {
       setHistory({ back, forward: [] })
       return
@@ -5316,12 +5326,12 @@ function App() {
 
     const target = forward[i]
     const nextHistory = {
-      back: appendUnique(back, currentViewState),
+      back: appendUnique(back, current),
       forward: forward.slice(0, i),
     }
     setHistory(nextHistory)
     await applyViewState(target)
-  }, [appendUnique, applyViewState, currentViewState, setHistory])
+  }, [appendUnique, applyViewState, setHistory])
 
   const canNavigateBack = React.useMemo(() => {
     for (let i = viewHistory.back.length - 1; i >= 0; i--) {
@@ -5801,16 +5811,17 @@ function App() {
   }, [sessionChat.chatState?.conversation, runId, navigateToView])
 
   const navigateToFullScreenChat = useCallback(() => {
+    const current = currentViewStateRef.current
     // Only treat this as navigation when coming from another view
-    if (currentViewState.type !== 'chat') {
+    if (current.type !== 'chat') {
       const nextHistory = {
-        back: appendUnique(historyRef.current.back, currentViewState),
+        back: appendUnique(historyRef.current.back, current),
         forward: [] as ViewState[],
       }
       setHistory(nextHistory)
     }
     handleOpenFullScreenChat()
-  }, [appendUnique, currentViewState, handleOpenFullScreenChat, setHistory])
+  }, [appendUnique, handleOpenFullScreenChat, setHistory])
 
   // Handle image upload for the markdown editor
   const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
