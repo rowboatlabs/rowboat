@@ -2223,13 +2223,14 @@ function App() {
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
       else if (action === 'ptt-up') handlePttUp()
+      else if (action === 'ptt-cancel') handlePttCancel()
       else if (action === 'end-call') endCall()
       else if (action === 'expand') {
         if (video.screenState === 'live') video.stopScreenShare()
         setCallMinimized(false)
       }
     })
-  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
+  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, handlePttCancel, endCall, video])
 
   // Discoverability: nothing else in the UI reveals the global quick-ask
   // shortcut. One toast, once per install, shortly after launch. The chord
