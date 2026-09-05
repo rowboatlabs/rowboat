@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 // The shared shell for a section's secondary sidebar (Spaces' rail, Email's
@@ -33,7 +33,7 @@ export interface SecondaryRailContext {
     onMenuOpenChange: (open: boolean) => void
 }
 
-export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = false, persistent, children }: {
+export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = false, persistent, onWidthChange, className, children }: {
     /** Docked (in the flow, pushing the content). False = the edge sliver + hover drawer. */
     open: boolean
     /** The lock: docks a peeked rail, closes a docked one. */
@@ -45,6 +45,12 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
     /** Rendered directly in the <aside>, mounted in BOTH modes — for hidden
      *  inputs that must survive the dock/collapse remount of the body. */
     persistent?: ReactNode
+    /** Reports the docked width — on mount and live through an edge drag —
+     *  for a parent whose own pane must track the rail (Code's middle pane). */
+    onWidthChange?: (width: number) => void
+    /** Extra classes for the aside — e.g. `border-r-0` when the neighboring
+     *  pane draws the divider itself. */
+    className?: string
     children: (ctx: SecondaryRailContext) => ReactNode
 }) {
     // Docked width: drag the rail's right edge. The drawer uses the same width.
@@ -52,6 +58,8 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
         const stored = Number(localStorage.getItem(widthStorageKey))
         return Number.isFinite(stored) && stored >= WIDTH_MIN && stored <= WIDTH_MAX ? stored : WIDTH_DEFAULT
     })
+    // Layout effect so a tracking parent resizes in the same paint.
+    useLayoutEffect(() => { onWidthChange?.(width) }, [width, onWidthChange])
     const [resizingWidth, setResizingWidth] = useState(false)
     const startWidthResize = (e: React.MouseEvent) => {
         e.preventDefault()
@@ -139,6 +147,7 @@ export function SecondaryRail({ open, onTogglePin, widthStorageKey, edgeDot = fa
                 open ? 'z-10 overflow-hidden bg-[var(--rowboat-panel-soft)]' : 'overflow-visible bg-background',
                 // The drawer rides over the content's own sticky layers (z-20).
                 !open && (peek ? 'z-30' : 'z-10'),
+                className,
             )}
         >
             {persistent}

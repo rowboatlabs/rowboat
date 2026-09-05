@@ -53,7 +53,6 @@ import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
 import { CodeWorkspaceDrawer } from '@/components/code/workspace-drawer';
 import type { CodePanel } from '@/components/code/code-panels';
-import { CODE_RAIL_WIDTH } from '@/components/code/session-rail';
 import { useCodeGitStatus } from '@/components/code/use-code-git-status';
 import { refreshCodeSessions } from '@/components/code/use-code-sessions';
 import { CodeDiffOpenerProvider } from '@/contexts/code-diff-context';
@@ -2646,6 +2645,10 @@ function App() {
   // Deep-link into the Code section (a Home Deck strip's door): select this
   // session when the view opens, then clear.
   const [codeFocusSessionId, setCodeFocusSessionId] = useState<string | null>(null)
+  // The code rail's width (drag-resizable, persisted by its SecondaryRail
+  // shell) — the middle pane hugs it while a session's chat is the main
+  // surface. The rail reports before first paint, so the default never shows.
+  const [codeRailWidth, setCodeRailWidth] = useState(280)
   // A file the code chat asked to review — consumed by the workspace drawer.
   const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
   // Which workspace panel (changes / files / terminal) is open beside the
@@ -6604,7 +6607,7 @@ function App() {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
     if (!isRightPaneContext || !chatPaneOpen || isRightPaneMaximized) return style
     if (codeChatMain) {
-      return { ...style, width: CODE_RAIL_WIDTH, flex: '0 0 auto' }
+      return { ...style, width: codeRailWidth, flex: '0 0 auto' }
     }
     if (chatPaneSize === 'chat-equal') {
       return { ...style, width: 0, flex: '1 1 0' }
@@ -6613,7 +6616,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [chatPaneSize, codeChatMain, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized])
+  }, [chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -7052,6 +7055,7 @@ function App() {
                     onSessionSelected={handleCodeSessionSelected}
                     focusSessionId={codeFocusSessionId}
                     onFocusConsumed={() => setCodeFocusSessionId(null)}
+                    onRailWidthChange={setCodeRailWidth}
                   />
                 </div>
                 </Activity>
