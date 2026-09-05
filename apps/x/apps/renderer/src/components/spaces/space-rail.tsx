@@ -17,7 +17,7 @@ import { FileTree } from '@/components/spaces/files-tab'
 import { refreshSpaceFeed } from '@/hooks/use-spaces'
 import type { NotifyLevel, SpaceNotifyHandle } from '@/hooks/use-spaces-notify'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
-import { STREAM_READ_KEY } from '@/hooks/use-space-chat'
+import { prefetchThread, STREAM_READ_KEY } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
 import { threadRefOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
@@ -343,6 +343,8 @@ export function SpaceRail({
                                                     <button
                                                         type="button"
                                                         onClick={() => onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId })}
+                                                        // Hover = intent: warm the replies so the click paints instantly.
+                                                        onMouseEnter={() => prefetchThread(orgId, spaceId, topic.rootMessageId)}
                                                         // The row shows only what changes what you do next: unread,
                                                         // a Rowboat at work, muted. The full title, replies, recency
                                                         // and touched files ride the tooltip — the list is already

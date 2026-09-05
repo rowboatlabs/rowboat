@@ -361,8 +361,14 @@ function wireBus(): void {
         if (!state) return
         if (frame.event.type === 'message') {
             const message = frame.event.message
-            if (message.threadRoot === undefined) ingestStreamMessage(event.orgId, frame.spaceId, message)
-            else noteReplyActivity(event.orgId, frame.spaceId, message)
+            if (message.threadRoot === undefined) {
+                ingestStreamMessage(event.orgId, frame.spaceId, message)
+            } else {
+                // Cache the body first (while the chip denorm still reflects
+                // the count BEFORE this reply), then bump the chip.
+                ingestThreadReply(event.orgId, frame.spaceId, message)
+                noteReplyActivity(event.orgId, frame.spaceId, message)
+            }
         } else if (frame.event.type === 'topic') {
             ingestTopic(event.orgId, frame.spaceId, frame.event.topic)
         } else if (frame.event.type === 'topic_removed') {
@@ -489,6 +495,172 @@ export function useStream(orgId: string, spaceId: string): StreamState {
         }
     }, [orgId, spaceId])
     return state.get(key(orgId, spaceId)) ?? EMPTY_STREAM
+}
+
+// ---------------------------------------------------------------------------
+// Thread cache — the replies behind each chip. ThreadPane owns its working
+// copy (optimistic sends, edits and votes fold into its local state), so this
+// is not a live store: it is what lets a thread PAINT before its fetch lands.
+// The pane seeds from here on mount and writes back what it settles; live
+// replies land here even while no pane is open (they used to be dropped after
+// bumping the chip, and re-fetched on every open); hovering a chip warms it.
+// Persisted per space (bounded) like the stream's tail.
+// ---------------------------------------------------------------------------
+
+export interface ThreadSnapshot {
+    root: spaces.Message
+    topic: spaces.Topic | null
+    /** Settled replies only — pending/failed rows never cache. */
+    messages: spaces.Message[]
+    hasMore: boolean
+    /** Grafted from live replies without a full fetch — earlier replies may be missing. */
+    partial?: boolean
+}
+
+const THREAD_CACHE_VERSION = 1
+/** Most-recently-touched threads persisted per space. */
+const THREAD_CACHE_MAX = 10
+/** Newest replies kept per persisted thread. */
+const THREAD_CACHE_TAIL = 30
+/** Hover fires often — one warm fetch per thread per half-minute is plenty. */
+const THREAD_PREFETCH_MIN_MS = 30_000
+
+interface ThreadCacheEntry { snapshot: ThreadSnapshot; touchedAt: number }
+interface ThreadsCache { v: number; threads: Record<string, ThreadCacheEntry> }
+
+function threadCacheKey(k: string): string {
+    return `spaces:threads:${k}`
+}
+
+/** `${orgId}/${spaceId}` → rootMessageId → cached thread. */
+const threadCaches = new Map<string, Map<string, ThreadCacheEntry>>()
+const threadsHydrated = new Set<string>()
+const threadPrefetching = new Set<string>()
+const threadFetchedAt = new Map<string, number>()
+
+/** Seed a space's thread cache from the persisted copy. Render-safe: no emits, idempotent. */
+function hydrateThreads(k: string): void {
+    if (threadsHydrated.has(k)) return
+    threadsHydrated.add(k)
+    try {
+        const raw = window.localStorage.getItem(threadCacheKey(k))
+        if (!raw) return
+        const cached = JSON.parse(raw) as ThreadsCache
+        if (cached.v !== THREAD_CACHE_VERSION || typeof cached.threads !== 'object' || cached.threads === null) return
+        threadCaches.set(k, new Map(Object.entries(cached.threads)))
+    } catch {
+        // A corrupt entry paints nothing; opens just fetch.
+    }
+}
+
+function threadSpaceCache(k: string): Map<string, ThreadCacheEntry> {
+    hydrateThreads(k)
+    let cache = threadCaches.get(k)
+    if (!cache) {
+        cache = new Map()
+        threadCaches.set(k, cache)
+    }
+    return cache
+}
+
+function persistThreads(k: string): void {
+    const cache = threadCaches.get(k)
+    if (!cache) return
+    const kept = [...cache.entries()].sort((a, b) => b[1].touchedAt - a[1].touchedAt).slice(0, THREAD_CACHE_MAX)
+    const threads: Record<string, ThreadCacheEntry> = {}
+    for (const [rootId, entry] of kept) {
+        const tail = entry.snapshot.messages.slice(-THREAD_CACHE_TAIL)
+        threads[rootId] = {
+            touchedAt: entry.touchedAt,
+            snapshot: {
+                ...entry.snapshot,
+                messages: tail,
+                // A truncated tail reaches less deep than what was loaded.
+                hasMore: entry.snapshot.hasMore || tail.length < entry.snapshot.messages.length,
+            },
+        }
+    }
+    try {
+        window.localStorage.setItem(threadCacheKey(k), JSON.stringify({ v: THREAD_CACHE_VERSION, threads } satisfies ThreadsCache))
+    } catch {
+        // Best-effort (quota, private mode) — cold opens just fetch.
+    }
+}
+
+/** The cached thread behind a chip, if any — ThreadPane seeds from this so opening paints instantly. */
+export function getThreadSnapshot(orgId: string, spaceId: string, rootMessageId: string): ThreadSnapshot | undefined {
+    return threadSpaceCache(key(orgId, spaceId)).get(rootMessageId)?.snapshot
+}
+
+/** ThreadPane writes back what it settled (prefetch writes too); the next open paints from it. */
+export function putThreadSnapshot(orgId: string, spaceId: string, rootMessageId: string, snapshot: ThreadSnapshot): void {
+    const k = key(orgId, spaceId)
+    threadSpaceCache(k).set(rootMessageId, { snapshot, touchedAt: Date.now() })
+    // A full snapshot counts as a fetch for the hover-prefetch throttle.
+    if (!snapshot.partial) threadFetchedAt.set(`${k}/${rootMessageId}`, Date.now())
+    persistThreads(k)
+}
+
+/**
+ * Warm a thread before it opens (hovering its chip calls this): fetch the
+ * newest page into the cache, so the click that follows paints everything.
+ * Throttled — hover is a noisy signal.
+ */
+export function prefetchThread(orgId: string, spaceId: string, rootMessageId: string): void {
+    const k = key(orgId, spaceId)
+    const tk = `${k}/${rootMessageId}`
+    if (threadPrefetching.has(tk)) return
+    if (Date.now() - (threadFetchedAt.get(tk) ?? 0) < THREAD_PREFETCH_MIN_MS) return
+    threadPrefetching.add(tk)
+    void window.ipc
+        .invoke('spaces:listThread', { orgId, spaceId, rootMessageId })
+        .then((res) => {
+            putThreadSnapshot(orgId, spaceId, rootMessageId, {
+                root: res.root,
+                topic: res.topic ?? null,
+                messages: res.messages,
+                hasMore: res.hasMore,
+            })
+        })
+        .catch(() => {})
+        .finally(() => threadPrefetching.delete(tk))
+}
+
+/**
+ * A reply streamed in over the live bus: keep the body. Into the cached
+ * snapshot when the thread has one; otherwise grafted onto the stream's copy
+ * of the root as a PARTIAL snapshot, so even a first open paints this reply
+ * while its fetch runs.
+ */
+function ingestThreadReply(orgId: string, spaceId: string, reply: spaces.Message): void {
+    const rootId = reply.threadRoot
+    if (!rootId) return
+    const k = key(orgId, spaceId)
+    const cache = threadSpaceCache(k)
+    const entry = cache.get(rootId)
+    if (entry) {
+        if (entry.snapshot.messages.some((m) => m.id === reply.id)) return
+        cache.set(rootId, {
+            touchedAt: Date.now(),
+            snapshot: { ...entry.snapshot, messages: mergeMessages(entry.snapshot.messages, [reply]) },
+        })
+    } else {
+        const state = streamState.get(k)
+        const root = state?.messages.find((m) => m.id === rootId)
+        if (!root || root.pending || root.failed) return
+        cache.set(rootId, {
+            touchedAt: Date.now(),
+            snapshot: {
+                root,
+                topic: state?.topicsByRoot.get(rootId) ?? null,
+                messages: [reply],
+                // Replies before this one may exist below the graft.
+                hasMore: (root.replyCount ?? 0) > 0,
+                partial: true,
+            },
+        })
+    }
+    persistThreads(k)
 }
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import { MemberName, MemberText } from '@/components/spaces/member-text'
 import { SpaceMarkdown } from '@/components/spaces/space-markdown'
 import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/message-row'
 import type { ChatMessage, SpacePresence } from '@/hooks/use-space-chat'
-import { buildPendingMessage, ingestTopic, removeTopicByRoot, updateStreamMessage, usePresenceSender } from '@/hooks/use-space-chat'
+import { buildPendingMessage, getThreadSnapshot, ingestTopic, putThreadSnapshot, removeTopicByRoot, updateStreamMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
@@ -72,15 +72,22 @@ export function ThreadPane({
     /** False while kept mounted but off screen (read mode, hidden Spaces view) — no presence, no read marks. */
     visible?: boolean
 }) {
-    const [root, setRoot] = useState<spaces.Message | null>(rootFromStream ?? null)
-    const [topic, setTopic] = useState<spaces.Topic | null>(topicFromStream ?? null)
-    const [messages, setMessages] = useState<ChatMessage[]>([])
-    const [loaded, setLoaded] = useState(false)
-    const [hasMore, setHasMore] = useState(false)
+    // The cached copy from the last open — plus any replies that streamed in
+    // live while the pane was closed. Seeding paints the whole thread in the
+    // first frame; the fetch below reconciles right behind it. A PARTIAL
+    // snapshot (live replies grafted without a full fetch) paints too, but
+    // doesn't count as loaded — earlier replies may still be missing.
+    const [seeded] = useState(() => getThreadSnapshot(org.id, space.id, rootMessageId))
+    const [root, setRoot] = useState<spaces.Message | null>(rootFromStream ?? seeded?.root ?? null)
+    const [topic, setTopic] = useState<spaces.Topic | null>(topicFromStream ?? seeded?.topic ?? null)
+    const [messages, setMessages] = useState<ChatMessage[]>(seeded?.messages ?? [])
+    const [loaded, setLoaded] = useState(!!seeded && !seeded.partial)
+    const [hasMore, setHasMore] = useState(seeded?.hasMore ?? false)
     const [loadingOlder, setLoadingOlder] = useState(false)
     // The deepest (oldest) offset any fetch has reached — a refetch of the
     // newest page must not reset hasMore after the reader paged further back.
-    const oldestLoadedRef = useRef<number | null>(null)
+    // Starts at the cache's depth: hasMore above describes exactly that.
+    const oldestLoadedRef = useRef<number | null>(seeded?.messages[0]?.offset ?? null)
     const [folding, setFolding] = useState(false)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -159,6 +166,17 @@ export function ThreadPane({
             cancelled = true
         }
     }, [org.id, space.id, rootMessageId, refreshTick])
+    // Write the settled thread back to the cache: the next open (and live
+    // replies arriving while it is closed) paints from it, no round trip.
+    useEffect(() => {
+        if (!loaded || !root) return
+        putThreadSnapshot(org.id, space.id, rootMessageId, {
+            root,
+            topic,
+            messages: messages.filter((m) => !m.pending && !m.failed),
+            hasMore,
+        })
+    }, [org.id, space.id, rootMessageId, loaded, root, topic, messages, hasMore])
     // Refetches that landed while hidden left the thread unread on purpose —
     // becoming visible again is the moment the reader actually sees them.
     useEffect(() => {
