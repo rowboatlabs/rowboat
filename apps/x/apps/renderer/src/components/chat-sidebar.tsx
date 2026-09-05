@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -67,6 +67,12 @@ interface ChatSidebarProps {
   onSelectRun?: (runId: string) => void
   onOpenChatHistory?: () => void
   onOpenFullScreen?: () => void
+  /** History navigation, shown in the header only while maximized — the pane
+      then covers the main ContentHeader that normally carries these. */
+  onNavigateBack?: () => void
+  onNavigateForward?: () => void
+  canNavigateBack?: boolean
+  canNavigateForward?: boolean
   conversation: ConversationItem[]
   currentAssistantMessage: string
   currentReasoning?: string
@@ -151,6 +157,10 @@ export function ChatSidebar({
   onSelectRun,
   onOpenChatHistory,
   onOpenFullScreen,
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack = false,
+  canNavigateForward = false,
   conversation,
   currentAssistantMessage,
   currentReasoning = '',
@@ -376,11 +386,39 @@ export function ChatSidebar({
           <header
             className="titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar"
             style={{
-              paddingLeft: isMaximized && sidebarState === 'collapsed' ? collapsedLeftPaddingPx : undefined,
+              paddingLeft: isMaximized ? (sidebarState === 'collapsed' ? collapsedLeftPaddingPx : 12) : undefined,
               paddingRight: isMaximized ? 12 : undefined,
               transition: isMaximized ? 'padding-left 200ms linear' : undefined,
             }}
           >
+            {/* Maximized, the pane covers the main ContentHeader — carry the
+                same back/forward pair so history navigation stays reachable
+                (navigating restores the underlying view and un-maximizes). */}
+            {isMaximized && onNavigateBack && onNavigateForward && (
+              <>
+                <div className="titlebar-no-drag flex items-center gap-1 pr-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={onNavigateBack}
+                    disabled={!canNavigateBack}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                    aria-label="Go back"
+                  >
+                    <ChevronLeft className="size-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onNavigateForward}
+                    disabled={!canNavigateForward}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                    aria-label="Go forward"
+                  >
+                    <ChevronRight className="size-5" />
+                  </button>
+                </div>
+                <div className="titlebar-no-drag self-stretch w-px bg-border/70" aria-hidden="true" />
+              </>
+            )}
             {pinnedToCodeSession ? (
               <CodeSessionHeader {...pinnedToCodeSession} />
             ) : (

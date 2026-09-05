@@ -742,17 +742,30 @@ function parseDeepLink(input: string): ViewState | null {
 }
 
 /** Sidebar toggle (fixed position, top-left) — one persistent control that
-    swaps between the expanded panel and the icon rail, in both directions. */
+    swaps between the expanded panel and the icon rail, in both directions.
+    Reports its rendered width so collapsed-mode headers can pad past the
+    whole cluster (its contents vary: new chat, caffeinate). */
 function FixedSidebarToggle({
   leftInsetPx,
   onNewChat,
+  onWidthChange,
 }: {
   leftInsetPx: number
   onNewChat?: () => void
+  onWidthChange?: (px: number) => void
 }) {
   const { toggleSidebar, state } = useSidebar()
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el || !onWidthChange) return
+    onWidthChange(el.offsetWidth)
+    const observer = new ResizeObserver(() => onWidthChange(el.offsetWidth))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [onWidthChange])
   return (
-    <div className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
       <button
         type="button"
@@ -783,8 +796,9 @@ function FixedSidebarToggle({
   )
 }
 
-/** Main content header. The traffic lights live over the expanded panel or
-    the dock gutter, so a small constant left padding is enough. */
+/** Main content header. Expanded, the panel absorbs the fixed toggle cluster
+    so ordinary padding works; collapsed, the header pads past the cluster's
+    measured width (collapsedLeftPaddingPx) so back/forward never sit under it. */
 function ContentHeader({
   children,
   onNavigateBack,
@@ -932,14 +946,16 @@ function App() {
   // auto-closes when the active note changes.
   const [liveNotePanelPath, setLiveNotePanelPath] = useState<string | null>(null)
   const [, setActiveShortcutPane] = useState<ShortcutPane>('left')
-  // In dock mode the fixed toggle button overhangs the pane's left edge
-  // (the gutter is narrower than traffic lights + toggle), so top bars pad
-  // past it; the expanded panel absorbs the toggle, so ordinary padding.
-  const collapsedLeftPaddingPx = Math.max(
-    12,
-    (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) +
-      TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 32 + 8 - DOCK_GUTTER_PX,
+  // In collapsed mode the fixed toggle cluster (traffic lights + toggle +
+  // new chat + caffeinate) overhangs the pane's left edge (the rail gutter
+  // is narrower than it), so top bars pad past its MEASURED width — the
+  // cluster's contents vary; the expanded panel absorbs it, so ordinary
+  // padding there. Initial estimate covers first paint until the observer
+  // reports.
+  const [titlebarControlsWidthPx, setTitlebarControlsWidthPx] = useState(
+    (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) + TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 3 * 32,
   )
+  const collapsedLeftPaddingPx = Math.max(12, titlebarControlsWidthPx + 8 - DOCK_GUTTER_PX)
   // Expanded panel vs. collapsed dock — the collapse button swaps between
   // them; the choice persists per machine.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -7596,6 +7612,10 @@ function App() {
                 onSelectRun={bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
+                onNavigateBack={() => { void navigateBack() }}
+                onNavigateForward={() => { void navigateForward() }}
+                canNavigateBack={canNavigateBack}
+                canNavigateForward={canNavigateForward}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
                 currentReasoning={activeChatTabState.currentReasoning}
@@ -7764,6 +7784,7 @@ function App() {
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
               onNewChat={handleNewChat}
+              onWidthChange={setTitlebarControlsWidthPx}
             />
           </SidebarProvider>
         </div>
