@@ -14,6 +14,7 @@ import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions
 import type { CodingAgent } from '@x/shared/src/code-mode.js'
 import { cn, compactPath, parentPath } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relative-time'
+import { SecondaryRail } from '@/components/secondary-rail'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -26,8 +27,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { projectLabel, type ProjectRow } from './use-code-sessions'
 import { AGENT_LABEL, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
-export const CODE_RAIL_WIDTH = 272
-
 // The Done pile shows this many before asking for "Show all" — a display
 // cap, never a deletion policy.
 const DONE_VISIBLE_LIMIT = 25
@@ -38,31 +37,30 @@ function readDoneOpen(): boolean {
   return window.localStorage.getItem(DONE_OPEN_STORAGE_KEY) === '1'
 }
 
-// Inline status prefix: a dot plus a word, only when there is something to
-// say. Idle rows carry no prefix so the list stays quiet.
-function StatusPrefix({ status }: { status: CodeSessionStatus }) {
-  if (status === 'working') {
-    return (
-      <span className="flex shrink-0 items-center gap-1.5 text-[12px] font-medium text-[var(--rowboat-git)]">
-        <span className="size-1.5 rounded-full bg-current" />
-        Working
-      </span>
-    )
-  }
-  if (status === 'needs-you') {
-    return (
-      <span className="flex shrink-0 items-center gap-1.5 text-[12px] font-medium text-[var(--rowboat-attention)]">
-        <span className="size-1.5 animate-pulse rounded-full bg-current" />
-        Needs you
-      </span>
-    )
-  }
-  return null
+// The dot in each card's gutter carries the session's state: quiet grey at
+// rest, the git accent rippling softly while an agent works (see
+// `.code-working-dot` in App.css), the attention color pulsing when the
+// session waits on the user. Color and motion do the talking — no words,
+// and nothing lights the card itself.
+function StatusDot({ status }: { status: CodeSessionStatus }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'mt-1.5 size-2 shrink-0 rounded-full',
+        status === 'working' && 'code-working-dot bg-[var(--rowboat-git)]',
+        status === 'needs-you' && 'animate-pulse bg-[var(--rowboat-attention)]',
+        status === 'idle' && 'bg-muted-foreground/40',
+      )}
+    />
+  )
 }
 
-// One session row. Active rows show the time and, on hover, a check (mark
-// done) beside the menu; done rows show when they were finished and a
-// reopen arrow instead. Rows keep their looks in either pile — only the
+// One session card: two lines — the title, then the branch the session
+// works on (or the agent, when it runs without a worktree) — behind a
+// status dot. Active cards show the time and, on hover, a check (mark
+// done) beside the menu; done cards show when they were finished and a
+// reopen arrow instead. Cards keep their looks in either pile — only the
 // heading above them changes.
 function SessionRow({
   session,
@@ -86,20 +84,22 @@ function SessionRow({
   onSetDone: (done: boolean) => void
   onDelete: () => void
 }) {
-  const worktree = session.worktree && !session.worktree.removedAt
+  const worktree = session.worktree && !session.worktree.removedAt ? session.worktree : undefined
   const when = formatRelativeTime((done && session.doneAt) || session.lastActivityAt || session.createdAt)
+  // The second line: the branch, or the agent when there is none — every
+  // card keeps its two-line shape.
+  const detail = worktree?.branch ?? AGENT_LABEL[session.agent] ?? session.agent
   const ToggleIcon = done ? RotateCcw : Check
   const toggleLabel = done ? 'Reopen' : 'Mark as done'
   return (
     <div
       role="button"
       tabIndex={0}
-      title={`${session.title}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${session.worktree?.branch}` : ''}`}
+      title={`${session.title}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${worktree.branch}` : ''}`}
       className={cn(
-        'group relative mt-0.5 flex h-8 cursor-pointer items-center gap-2 rounded-lg pl-2 pr-1.5',
+        'group relative mt-0.5 flex cursor-pointer items-start gap-2.5 rounded-lg py-1.5 pl-2.5 pr-1.5',
         indent && 'ml-3',
         selected ? 'bg-accent text-foreground' : 'hover:bg-accent/60',
-        status === 'working' && !done && 'code-working-outline',
       )}
       onClick={onSelect}
       onKeyDown={(e) => {
@@ -109,16 +109,21 @@ function SessionRow({
         }
       }}
     >
-      {!done && <StatusPrefix status={status} />}
-      <span className={cn('min-w-0 flex-1 truncate text-[13px]', selected ? 'font-medium' : 'text-foreground/90')}>
-        {prefix && <span className="text-muted-foreground">{prefix} · </span>}
-        {session.title}
-      </span>
-      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0">
-        {when}
-      </span>
-      {/* Hover actions sit over the time so the row never reflows. */}
-      <div className="absolute right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
+      <StatusDot status={done ? 'idle' : status} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className={cn('min-w-0 flex-1 truncate text-[13px] leading-5', selected ? 'font-medium' : 'text-foreground/90')}>
+            {prefix && <span className="text-muted-foreground">{prefix} · </span>}
+            {session.title}
+          </span>
+          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0">
+            {when}
+          </span>
+        </div>
+        <div className="truncate text-[11px] leading-4 text-muted-foreground/70">{detail}</div>
+      </div>
+      {/* Hover actions sit over the time so the card never reflows. */}
+      <div className="absolute right-1 top-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -163,10 +168,13 @@ function SessionRow({
 }
 
 // Left rail of the Code section: registered projects with their active
-// sessions, attention-first, and a Done pile pinned to the bottom. The
-// session that is currently working wears an orbiting outline (see
-// `.code-working-outline` in App.css) so it can be found at a glance even
-// when it is not the selected one.
+// sessions as two-line cards (title, then branch), attention-first, and a
+// Done pile pinned to the bottom. Status lives in each card's gutter dot —
+// the working session's ripples (see `.code-working-dot` in App.css) so it
+// can be found at a glance even when it is not the selected one. The rail
+// chrome (docked width + drag-resize, persisted) is the shared
+// SecondaryRail shell that Spaces and Email use; this file owns only
+// what's IN the rail.
 export function SessionRail({
   projects,
   sessions,
@@ -179,6 +187,8 @@ export function SessionRail({
   onNewSession,
   onSetDone,
   onDeleteSession,
+  onWidthChange,
+  className,
 }: {
   projects: ProjectRow[]
   sessions: CodeSession[]
@@ -193,6 +203,12 @@ export function SessionRail({
   onNewSession: (projectId: string, agent?: CodingAgent) => void
   onSetDone: (session: CodeSession, done: boolean) => void
   onDeleteSession: (session: CodeSession) => void
+  /** The shell reports the rail's (drag-resizable, persisted) width here so
+   *  App can size the code middle pane to it. */
+  onWidthChange?: (width: number) => void
+  /** Extra classes for the shell's aside — CodeView drops the right border
+   *  while the chat pane beside it draws the divider. */
+  className?: string
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const toggleCollapsed = (projectId: string) => {
@@ -218,8 +234,9 @@ export function SessionRail({
   const visibleDone = showAllDone ? done : done.slice(0, DONE_VISIBLE_LIMIT)
   const labelByProject = new Map(projects.map((row) => [row.project.id, projectLabel(row)]))
 
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--rowboat-panel-soft)]">
+  // The rail's content — the shell renders it at the docked width.
+  const body = (
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border pl-3 pr-1.5">
         <span className="text-[13px] text-muted-foreground">Projects</span>
         <Tooltip>
@@ -421,5 +438,14 @@ export function SessionRail({
         </div>
       )}
     </div>
+  )
+
+  return (
+    // Always docked: the middle pane above this rail (header + chat binding)
+    // sizes itself to the rail, so the collapsed-sliver/peek mode the shell
+    // offers Spaces and Email has nowhere to go here yet.
+    <SecondaryRail open onTogglePin={() => {}} widthStorageKey="code:railWidth" onWidthChange={onWidthChange} className={className}>
+      {() => body}
+    </SecondaryRail>
   )
 }
