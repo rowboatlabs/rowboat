@@ -3944,9 +3944,9 @@ export const ipcSchemas = {
     req: z.object({ url: z.string() }),
     res: z.object({ saved: z.boolean(), path: z.string().optional() }),
   },
-  // OpenGraph metadata for a link card. Main fetches the page — the renderer
-  // can't (CORS) — with a size cap and timeout. null preview = nothing
-  // usable (not html, too slow, no tags). https only.
+  // OpenGraph metadata for a link card. The host fetches the page — the
+  // renderer can't (CORS) — with a size cap and timeout. null preview =
+  // nothing usable (not html, too slow, no tags). https only.
   'spaces:linkPreview': {
     req: z.object({ url: z.string() }),
     res: z.object({
@@ -3957,6 +3957,7 @@ export const ipcSchemas = {
           description: z.string().optional(),
           imageUrl: z.string().optional(),
           siteName: z.string().optional(),
+          favicon: z.string().optional(),
         })
         .nullable(),
     }),
