@@ -90,6 +90,7 @@ import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { toast } from "@/lib/toast"
+import { compareMeetingStarts, formatMeetingTime } from "@/lib/sidebar-meeting-preview"
 import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
@@ -554,10 +555,7 @@ export function SidebarContentPanel({
         }))
         const items: UpcomingMeeting[] = []
         for (const r of settled) if (r.status === 'fulfilled' && r.value) items.push(r.value)
-        items.sort((a, b) => {
-          if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1
-          return a.start.getTime() - b.start.getTime()
-        })
+        items.sort(compareMeetingStarts)
         if (!cancelled) setMeetings(items.slice(0, 1))
       } catch { /* ignore */ }
     }
@@ -1485,21 +1483,6 @@ function normalizeUpcomingMeeting(raw: RawCalendarEvent, sourcePath: string): Up
     rawStart: raw.start,
     rawEnd: raw.end,
   }
-}
-
-function isSameLocalDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-}
-
-function formatMeetingTime(event: UpcomingMeeting): string {
-  if (event.isAllDay) return 'All day'
-  const now = new Date()
-  const tomorrow = new Date(now)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  const time = event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  if (isSameLocalDay(event.start, now)) return time
-  if (isSameLocalDay(event.start, tomorrow)) return `Tmrw ${time}`
-  return event.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' })
 }
 
 function triggerMeetingCapture(event: UpcomingMeeting, openConference: boolean) {
