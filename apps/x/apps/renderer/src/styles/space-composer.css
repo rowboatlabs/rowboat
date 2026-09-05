@@ -1,0 +1,111 @@
+/* Spaces composer body — TipTap content, chat-sized to the old textarea's
+   metrics (text-sm, min-h-9, px-3) and styled to match how SpaceMarkdown
+   renders the posted message, so the draft looks like what it becomes. */
+
+.space-composer {
+  max-height: 10rem; /* the textarea's max-h-40 */
+  overflow-y: auto;
+}
+
+.space-composer .ProseMirror {
+  outline: none;
+  min-height: 2.25rem;
+  padding: 6px 12px 4px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.space-composer .ProseMirror p {
+  margin: 2px 0;
+}
+
+.space-composer .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.space-composer .ProseMirror h1,
+.space-composer .ProseMirror h2,
+.space-composer .ProseMirror h3 {
+  margin: 4px 0 2px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.space-composer .ProseMirror ul,
+.space-composer .ProseMirror ol {
+  margin: 2px 0;
+  padding-left: 22px;
+}
+
+.space-composer .ProseMirror ul {
+  list-style: disc;
+}
+
+.space-composer .ProseMirror ol {
+  list-style: decimal;
+}
+
+.space-composer .ProseMirror li {
+  margin: 1px 0;
+}
+
+.space-composer .ProseMirror li > p {
+  margin: 0;
+}
+
+.space-composer .ProseMirror blockquote {
+  margin: 2px 0;
+  padding-left: 12px;
+  border-left: 4px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.space-composer .ProseMirror a {
+  color: var(--stream-link, var(--primary));
+  text-decoration: underline;
+}
+
+.space-composer .ProseMirror s {
+  opacity: 0.8;
+}
+
+.space-composer .ProseMirror code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+}
+
+.space-composer .ProseMirror pre {
+  margin: 4px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.space-composer .ProseMirror pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+
+.space-composer .ProseMirror img {
+  max-height: 8rem;
+  border-radius: 6px;
+}
+
+.space-composer .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--ring);
+}
