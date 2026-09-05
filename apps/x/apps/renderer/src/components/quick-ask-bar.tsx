@@ -67,7 +67,6 @@ import type { FileMention, PromptInputMessage } from '@/components/ai-elements/p
 // still say ⌘, which is the worst of both.
 const PTT_CODE = pttKey.pttEventCode(isMac)
 const PTT_LABEL = pttKey.pttKeyLabel(isMac)
-const PTT_KEYCAP = pttKey.pttKeycap(isMac)
 
 type CompanionMode = 'hidden' | 'pinned'
 
@@ -531,12 +530,20 @@ export function QuickAskBar() {
 
   // Hold the platform PTT key to speak: the app's PTT machine owns the mic,
   // so relay the key edges to it (this works even without the Input
-  // Monitoring grant, since this window has focus). Esc never ends a
-  // session — it tucks the text back into the mascot.
+  // Monitoring grant, since this window has focus). While the mic gate is
+  // open, Enter sends and Escape discards — the same keys the app
+  // composer's dictation binds — and only otherwise does Esc tuck the text
+  // (it never ends a session).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === PTT_CODE && !e.repeat) {
         sendAction('ptt-down')
+      } else if (micOpen && e.key === 'Enter') {
+        e.preventDefault()
+        sendAction('ptt-up')
+      } else if (micOpen && e.key === 'Escape') {
+        e.preventDefault()
+        sendAction('ptt-cancel')
       } else if (e.key === 'Escape' && callCard) {
         e.preventDefault()
         requestCollapsed(true)
@@ -554,7 +561,7 @@ export function QuickAskBar() {
       document.removeEventListener('keydown', onKeyDown, true)
       document.removeEventListener('keyup', onKeyUp, true)
     }
-  }, [callCard, requestCollapsed, sendAction])
+  }, [callCard, micOpen, requestCollapsed, sendAction])
 
   // --- Derived values for the card layout. Computed BEFORE the early
   // returns below: the useMemo is a hook, and a hook after a conditional
@@ -944,7 +951,7 @@ export function QuickAskBar() {
               onStop={() => sendAction('stop-speaking')}
               isProcessing={panelProcessing}
               runId={null}
-              placeholder={`Ask anything — @ mentions work · hold ${PTT_LABEL} to speak`}
+              placeholder={`Ask anything. Hold ${PTT_LABEL} to speak`}
               focusSignal={focusSignal}
               onSelectionChange={(sel) => {
                 selectionRef.current = sel ?? null
@@ -1861,16 +1868,6 @@ function StatusLane({
   )
 }
 
-/** Markdown-stripped tail of the reply while it streams or speaks. */
-function replyTail(state: CallState): string {
-  if (state.ttsState === 'idle' && state.status !== 'thinking') return ''
-  return (state.responseText ?? '')
-    .replace(/[#*_`>[\]]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(-90)
-}
-
 /**
  * The share toggle — the bow light, relocated from the mascot's hull to the
  * footer dock: lit sky + pulsing dot = broadcasting (the lit button IS the
@@ -1917,10 +1914,14 @@ function ShareButton({
 
 /**
  * The talk control — mic, stop, and mute-aware, in one button (the mascot's
- * mic pin, relocated). While a turn is in flight the mic is dead anyway, so
- * it morphs into Stop; while the gate is open it shows Stop too ("tap to
- * send" / "release to send" — the pointer edges drive the same PTT machine
- * as the talk key); muted it becomes the unmute affordance.
+ * mic pin, relocated). Clicking it works exactly like the app composer's
+ * mic: one click starts the capture (a programmatic tap — down+up — locks
+ * the PTT machine's hands-free mode, so the mic stays open with the
+ * recording bar showing), then the bar's ↑ (or this button again, or
+ * Enter) sends and its ✕ (or Esc) discards. Holding the talk key is the
+ * other route into the same capture. While a turn is in flight the mic is
+ * dead anyway, so it morphs into Stop; muted it becomes the unmute
+ * affordance.
  */
 function TalkButton({
   state,
@@ -1958,20 +1959,25 @@ function TalkButton({
           type="button"
           style={noDragRegion}
           onClick={() => {
-            if (state.micMuted) sendAction('toggle-mic')
-          }}
-          onPointerDown={(e) => {
-            if (state.micMuted) return
-            e.currentTarget.setPointerCapture(e.pointerId)
+            if (state.micMuted) {
+              sendAction('toggle-mic')
+              return
+            }
+            if (micOpen) {
+              // Same as the recording bar's ↑ — finish and send.
+              sendAction('ptt-up')
+              return
+            }
+            // Click-to-record: a programmatic tap. The PTT machine reads a
+            // sub-tap-threshold down→up as "lock hands-free", which is
+            // exactly the open-until-sent capture the app composer's mic
+            // gives.
             sendAction('ptt-down')
+            sendAction('ptt-up')
           }}
-          onPointerUp={() => {
-            if (!state.micMuted) sendAction('ptt-up')
-          }}
-          onPointerCancel={() => {
-            if (!state.micMuted) sendAction('ptt-up')
-          }}
-          aria-label={state.micMuted ? 'Unmute the mic' : 'Hold to talk — tap for hands-free'}
+          aria-label={
+            micOpen ? 'Send voice input' : state.micMuted ? 'Unmute the mic' : 'Voice input'
+          }
           className={`flex flex-none select-none items-center justify-center rounded-full ring-1 ring-inset transition active:scale-95 ${
             micOpen
               ? 'bg-sky-500 text-white ring-sky-500'
@@ -1991,12 +1997,10 @@ function TalkButton({
       </TooltipTrigger>
       <TooltipContent side="top">
         {micOpen
-          ? state.pttLocked
-            ? `Hands-free — tap to send (${PTT_KEYCAP} works too)`
-            : 'Release to send'
+          ? 'Listening — click to send (✕ or Esc cancels)'
           : state.micMuted
             ? 'Mic muted — click to unmute'
-            : `Hold to talk (tap for hands-free) — or hold the ${PTT_LABEL} key`}
+            : `Voice input — click and speak, or hold the ${PTT_LABEL} key`}
       </TooltipContent>
     </Tooltip>
   )
@@ -2036,9 +2040,9 @@ function EndButton({
  * input, mirroring the card's » tuck handle. The lane keeps narrating
  * while folded — waveform while the user speaks, the running activity
  * while a turn thinks, the rolling speak wave while the reply is read
- * aloud, a dotted resting line otherwise. Interim speech and the spoken
- * reply's tail run as a caption above it, readable over any desktop (the
- * old under-mascot caption, relocated).
+ * aloud, a dotted resting line otherwise — and the MOTION is the whole
+ * story: the pill deliberately shows no transcript in either direction
+ * (the user tucked the text away; unfold to read).
  */
 function TuckedDock({
   state,
@@ -2054,15 +2058,8 @@ function TuckedDock({
   const shortcutState = useQuickAskShortcut()
   const shortcutLabel = quickAskShortcut.formatShortcut(shortcutState.accelerator, isMac)
   const expandTip = `Bring the text back (${shortcutLabel} works too)`
-  const caption = state.interimText || replyTail(state)
   return (
-    <div data-qa-passthrough className="qa-pop flex min-w-0 flex-col items-end gap-1.5">
-      {/* Caption, readable over any desktop. */}
-      {caption && (
-        <span className="max-w-[320px] truncate rounded-full bg-black/70 px-2.5 py-1 text-[11px] text-white/90">
-          {caption}
-        </span>
-      )}
+    <div data-qa-passthrough className="qa-pop flex min-w-0 flex-col items-end">
       <div className="relative">
         <div
           style={dragRegion}
