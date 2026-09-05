@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 // node-pty is a NATIVE module: it stays external to the esbuild bundle and is
 // shipped alongside it in .package/node_modules (see bundle.mjs).
 import * as pty from 'node-pty';
+import { killProcessTree } from './kill-tree.js';
 
 // One PTY per coding session, kept alive while the app runs so the terminal
 // survives pane collapses and session switches. The renderer view re-attaches
@@ -145,6 +146,14 @@ export function disposeTerminal(id: string): void {
   const entry = terminals.get(id);
   if (!entry) return;
   terminals.delete(id);
+  // Dispose means nothing in this terminal keeps running. proc.kill() alone
+  // only SIGHUPs the shell — every job lives in its own process group and
+  // anything trapping SIGHUP (most dev servers) survives it. The tree kill
+  // snapshots descendants BEFORE the shell dies (they become untraceable
+  // orphans after), TERMs them, and SIGKILLs survivors after a grace. Only
+  // for a live shell: after it exits on its own, its pid may be reused and
+  // leftover grandchildren are already unfindable.
+  if (entry.running) killProcessTree(entry.proc.pid);
   try {
     entry.proc.kill();
   } catch {
