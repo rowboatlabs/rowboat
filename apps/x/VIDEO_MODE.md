@@ -63,12 +63,10 @@ hands-free" when idle, "Listening — release to send" while capturing,
 "Hands-free — tap ⌘ to send" while locked. The popout additionally embeds
 the REAL chat composer (`ChatInputWithMentions`) as its typed input —
 @-mentions, attachments, and per-turn config all work mid-call, and
-messages land in the chat like composer messages, frames riding along —
-and a collapsible **response panel**: the latest assistant reply of the
-call streams into the pill (auto-opens on each new turn,
-`video:popoutResize` grows the window), so a typed question can be
-read right there without switching back to the app. Replies are spoken
-too; the panel is the readable half. **Mute is a full input
+messages land in the chat like composer messages, frames riding along.
+NO transcript renders in the pill (in either direction) — minimized
+surfaces show none; replies are spoken aloud, and expanding is how you
+read. **Mute is a full input
 pause**, not just audio — mic audio stops reaching Deepgram
 (`useVoiceMode.setPaused`, OR'd with the automatic thinking/speaking pause)
 AND camera/screen frame capture stops (`useVideoMode.setCapturePaused`;
@@ -229,8 +227,9 @@ speak"). There is no separate popout window, and no second "ask bar" role.
 - Pinned iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
   Renderer asks `video:setPopout {show}`; main repositions the companion
   window (Skipper card at its anchor corner, or the old popout geometry
-  top-right for camera calls; `video:popoutResize` grows the pill for the
-  response panel) and reveals it — focused when a summon is pending,
+  top-right for camera calls; the `video:popoutResize` channel remains for
+  renderer-driven pill heights but nothing drives it since the response
+  panel was removed) and reveals it — focused when a summon is pending,
   `showInactive()` otherwise so it never steals focus. Blur does NOTHING
   (a companion you work next to must not vanish when you click away), Esc
   tucks the text rather than dismissing, and ⌥⇧Space folds/unfolds the

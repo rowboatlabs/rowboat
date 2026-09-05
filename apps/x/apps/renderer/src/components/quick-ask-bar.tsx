@@ -7,7 +7,6 @@ import {
   ChevronsDown,
   Anchor,
   ChevronsUp,
-  ChevronUp,
   Loader,
   Maximize2,
   MessageCircle,
@@ -116,11 +115,6 @@ type PopoutAction =
   | 'ptt-cancel'
   | 'end-call'
   | 'expand'
-
-// Pill window heights the renderer asks main for (design px, clamped by
-// main): the base pill, and with the response panel expanded.
-const PINNED_BASE_HEIGHT = 320
-const PINNED_RESPONSE_HEIGHT = 560
 
 // The card's chip recipe, in both skins: a translucent tint of the OPPOSITE
 // ink over a translucent card. Tokens can't say that — `bg-accent` is a flat
@@ -1369,8 +1363,9 @@ function TurnDivider({ children }: { children: React.ReactNode }) {
 /**
  * The pinned role's layout: the Meet-style floating mini-call pill (absorbed
  * from the old #video-popout window) — camera tile when on + mascot tile,
- * live caption, control bar, collapsible response panel, and the REAL
- * composer as its typed input. All call state arrives over
+ * control bar, and the REAL composer as its typed input. NO transcript
+ * renders here — minimized surfaces show none, in either direction (the
+ * reply is spoken aloud; expand to read). All call state arrives over
  * `video:popout-state`; control actions round-trip through
  * `video:popoutAction` to the app window, which owns the devices. Captures
  * its own webcam preview — MediaStreams can't cross windows.
@@ -1393,33 +1388,6 @@ function PinnedPill({
   composer: React.ReactNode
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  // Response panel: auto-opens when a new turn starts generating, user can
-  // fold it away. The reply is also spoken — this is the readable half.
-  const [responseOpen, setResponseOpen] = useState(true)
-  const responseRef = useRef<HTMLDivElement | null>(null)
-
-  // A new turn re-opens the panel and rewinds to the top — the reply reads
-  // from its beginning, not wherever the last one left off. The re-open is
-  // a render-time state adjustment (React's sanctioned previous-state
-  // pattern); the scroll rewind is a DOM mutation, so it stays in an effect.
-  const [prevStatus, setPrevStatus] = useState(state.status)
-  if (prevStatus !== state.status) {
-    setPrevStatus(state.status)
-    if (state.status === 'thinking') setResponseOpen(true)
-  }
-  useEffect(() => {
-    if (state.status === 'thinking' && responseRef.current) {
-      responseRef.current.scrollTop = 0
-    }
-  }, [state.status])
-
-  // Grow/shrink the window with the panel (design px; main clamps).
-  const showResponse = Boolean(state.responseText || state.questionText) && responseOpen
-  useEffect(() => {
-    void window.ipc
-      .invoke('video:popoutResize', { height: showResponse ? PINNED_RESPONSE_HEIGHT : PINNED_BASE_HEIGHT })
-      .catch(() => {})
-  }, [showResponse])
 
   // Own camera feed, following the app window's camera-on/off state.
   useEffect(() => {
@@ -1573,14 +1541,6 @@ function PinnedPill({
             </button>
           )}
         </div>
-        {/* Live caption of the in-progress utterance, floating over the tiles */}
-        {state.interimText && (
-          <div className="pointer-events-none absolute inset-x-1.5 bottom-9 flex justify-center">
-            <span className="max-w-full truncate rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/90">
-              {state.interimText}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Control bar — actions execute in the main app window */}
@@ -1689,45 +1649,11 @@ function PinnedPill({
         </button>
       </div>
 
-      {/* The current exchange, readable in the pill: the question plus its
-          streaming reply. Auto-opens each turn, collapsible, sits between
-          the controls and the composer. */}
-      {(state.responseText || state.questionText) && (
-        <div className="flex min-h-0 shrink-0 flex-col gap-1" style={noDragRegion}>
-          <button
-            type="button"
-            onClick={() => setResponseOpen((v) => !v)}
-            className="flex items-center gap-1 self-start text-[10px] font-medium text-neutral-400 transition-colors hover:text-white"
-          >
-            {responseOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            {responseOpen ? 'Hide response' : 'Show response'}
-          </button>
-          {responseOpen && (
-            <div
-              ref={responseRef}
-              className="h-[150px] cursor-text select-text overflow-y-auto rounded-md bg-neutral-800 px-2 py-1.5 text-[11px] leading-relaxed"
-            >
-              {state.questionText && (
-                <div className="mb-1.5 whitespace-pre-wrap border-l-2 border-sky-500/70 pl-1.5 text-neutral-400">
-                  {state.questionText}
-                </div>
-              )}
-              <div className="text-neutral-100">
-                {state.responseText && (
-                  <Streamdown className="prose prose-sm prose-invert max-w-none text-[11px] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_pre]:my-1.5 [&_pre]:text-[10px] [&_code]:text-[10px]">
-                    {state.responseText}
-                  </Streamdown>
-                )}
-                {state.status === 'thinking' && <span className="animate-pulse">▍</span>}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* The real composer as the pill's typed input — messages land in the
           chat exactly like composer messages, current frames riding along
-          (the app attaches them to any submit while a call is live). */}
+          (the app attaches them to any submit while a call is live). No
+          transcript renders in this pill — minimized surfaces show none
+          (the reply is spoken; expand to read it). */}
       <div className="shrink-0" style={noDragRegion}>
         {composer}
       </div>
