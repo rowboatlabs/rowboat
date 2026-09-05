@@ -33,6 +33,8 @@ import { shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
 import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
+import { migrateKeychainTokens } from "@x/core/dist/migrations/keychain-token-migration.js";
+import { createFileCipher } from "@x/server";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-providers.js";
@@ -643,6 +645,34 @@ app.whenReady().then(async () => {
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
   });
+
+  // One-time migration: re-encrypt any tokens that were stored by the pre-
+  // separation app using safeStorage (OS keychain) into the file-cipher format
+  // that the child/standalone rowboat-server expects (#940).
+  //
+  // Only runs in child-server mode: in-process mode keeps using safeStorage
+  // as the active cipher, so there is nothing to migrate.  The migration reads
+  // the old ciphertext through the safeStorage cipher above (which is still
+  // wired at this point), re-encrypts it with the file cipher the child server
+  // will use, and writes the result back to the same JSON files.  It is fully
+  // idempotent and safe to call on every launch.
+  if (childServerMode()) {
+    try {
+      const newCipher = await createFileCipher(WorkDir);
+      await migrateKeychainTokens(WorkDir, {
+        oldCipher: {
+          isAvailable: () => safeStorage.isEncryptionAvailable(),
+          encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+          decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+        },
+        newCipher,
+      });
+    } catch (err: unknown) {
+      // Migration is best-effort: a failure here means affected users will
+      // be asked to re-authenticate once. It must never block boot.
+      console.error('[token-migration] failed:', err);
+    }
+  }
 
   // Resident app (Granola-style): register as an OS login item once, on the
   // first packaged run — and on Windows, migrate pre-existing registrations
