@@ -1757,30 +1757,6 @@ function App() {
     }
   }, [startHoverCall, startCall])
 
-  // Skipper's click on Home starts the call on THE Command Center session —
-  // the standing operator channel — not whatever chat happens to be active.
-  // The operator frame rides server-side composition pins, so the first
-  // utterance is already "operate my command center", no preamble needed.
-  const startCommandCenterCall = useCallback(() => {
-    void (async () => {
-      try {
-        const { sessionId } = await window.ipc.invoke('home:commandCenter', {})
-        hoverRunIdRef.current = sessionId
-        setHoverRunId(sessionId)
-        bindAppChatOnHoverCreateRef.current = null
-      } catch {
-        // Couldn't resolve the operator session — a plain hover call still
-        // beats a dead click.
-      }
-      if (inCallRef.current) {
-        ttsRef.current.cancel()
-        void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
-        return
-      }
-      void startHoverCall()
-    })()
-  }, [startHoverCall])
-
   // The user-mute half that lives in the video pipeline: stop sampling
   // camera/screen frames while muted (see useVideoMode.setCapturePaused).
   const setCapturePaused = video.setCapturePaused
@@ -7028,8 +7004,6 @@ function App() {
                       onComposeTodo={composeTodoOnHome}
                       composeTarget={homeComposeTarget}
                       getRunModel={() => homeSelectionRef.current ?? undefined}
-                      onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
-                      onNewChat={handleNewChatTab}
                       onFocusComposer={() => setHomeComposerFocusSignal((n) => n + 1)}
                       onOpenNote={(path) => navigateToFile(path)}
                       onOpenInChat={(sessionId) => {
@@ -7044,7 +7018,6 @@ function App() {
                         setCodeFocusSessionId(sessionId)
                         void navigateToView({ type: 'code' })
                       }}
-                      onSkipperCall={voiceAvailable && ttsAvailable ? startCommandCenterCall : undefined}
                       attendedSessionId={inCall ? hoverRunId : null}
                     />
                 </div>
