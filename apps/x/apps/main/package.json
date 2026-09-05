@@ -10,7 +10,8 @@
         "start": "env -u ELECTRON_RUN_AS_NODE electron .",
         "build": "rm -rf dist && tsc && node bundle.mjs",
         "package": "electron-forge package",
-        "make": "electron-forge make"
+        "make": "electron-forge make",
+        "verify:windows-packaging": "node scripts/verify-windows-packaging.mjs"
     },
     "dependencies": {
         "@agentclientprotocol/claude-agent-acp": "^0.67.0",
