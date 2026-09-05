@@ -2,11 +2,12 @@
  * The companion window: ONE always-on-top window playing ONE floating role —
  * the SKIPPER, the hover companion.
  *
- * `pinned`: a live voice session's floating surface. The mascot with its
- * text panel, one corner-anchored draggable unit (text visible by default,
- * foldable to just the mascot — folding never moves the mascot). A live
- * CAMERA swaps the card for the pill (top-right), where the self-view
- * lives. Both survive blur — this is a companion the user works next to.
+ * `pinned`: a live voice session's floating surface. The Skipper card —
+ * control strip + composer, one corner-anchored draggable unit (text
+ * visible by default, foldable down to the mini call pill — folding never
+ * moves the corner). A live CAMERA swaps the card for the pill (top-right),
+ * where the self-view lives. Both survive blur — this is a companion the
+ * user works next to.
  *
  * `hidden`: no session. Nothing else exists.
  *
@@ -27,8 +28,9 @@
  * relays to the app window, which starts the voice session and pins this
  * window. While the Skipper is up the chord folds/unfolds its text panel.
  *
- * Geometry: a transparent frame with the card bottom-anchored and the mascot
- * at the anchor corner. The zone above the card is invisible stage — it
+ * Geometry: a transparent frame with the card bottom-anchored, its
+ * bottom-right at the anchor corner. The zone above the card is invisible
+ * stage — it
  * exists so in-window popovers (the @-mention list, the model picker, menus)
  * can open upward without being clipped, and so the text panel can grow
  * without any window resizing. The pill is sized to its content (the
@@ -56,13 +58,13 @@ export type CompanionMode = 'hidden' | 'pinned';
 const PINNED_WIDTH = 400;
 const PINNED_BASE_HEIGHT = 320;
 const PINNED_MAX_HEIGHT = 560;
-// Tucked presentation of the pinned role: just the mascot + status chip +
-// caption, everything else on hover.
-const TUCKED_WIDTH = 250;
-const TUCKED_HEIGHT = 250;
-// The Skipper card: the text panel + mascot, one unit. It hugs a corner,
-// with a tall transparent stage above the card for popovers and panel
-// growth.
+// Tucked presentation of the pinned role: the mini call pill — a caption
+// line over one row of logo · status lane · share · talk · end.
+const TUCKED_WIDTH = 380;
+const TUCKED_HEIGHT = 180;
+// The Skipper card: control strip + text panel + composer, one unit. It
+// hugs a corner, with a tall transparent stage above the card for popovers
+// and panel growth.
 const SKIPPER_FRAME_WIDTH = 560;
 const SKIPPER_FRAME_HEIGHT = 560;
 // Uniform downscale: the window shrinks and the page zooms by the SAME
@@ -165,11 +167,12 @@ export function onAppWindowClosed() {
   if (mode === 'pinned') setCompanionPinned(false);
 }
 
-// The Skipper's anchor: the bottom-right corner of the window, i.e. where
-// the MASCOT stands. The user can drag the Skipper anywhere; collapsing and
-// expanding the text panel both keep this corner fixed, so the mascot never
-// jumps — the panel folds toward it and unfolds from it. Updated from
-// user drags (the 'move' listener); programmatic setBounds are guarded out.
+// The Skipper's anchor: the bottom-right corner of the window — where the
+// card (and, folded, the mini pill) sits. The user can drag the Skipper
+// anywhere; collapsing and expanding the text panel both keep this corner
+// fixed, so the dock never jumps — the panel folds toward it and unfolds
+// from it. Updated from user drags (the 'move' listener); programmatic
+// setBounds are guarded out.
 let skipperCorner: { x: number; y: number } | null = null;
 let applyingBounds = false;
 
@@ -355,7 +358,7 @@ function markSummonPending() {
 
 /**
  * Which surface the pinned role expands to. There is ONE hover surface —
- * the Skipper card (mascot + pins + text panel) — regardless of how the
+ * the Skipper card (composer + footer dock) — regardless of how the
  * session was started (⌥⇧Space, the composer's call button, a minimized
  * call). Only a live CAMERA forces the pill, because the pill is where the
  * self-view lives; a screen share shows no pixels in the pill either, so
@@ -630,7 +633,7 @@ export function setCompanionPinned(pinned: boolean) {
     summonPendingAt = 0;
     setMode('pinned', fromSummon ? 'call surface (summoned)' : 'call surface');
     // ONE landing for every entry point: the Skipper lands as one unit —
-    // mascot with the text panel already open (text is the default;
+    // the card with the text panel already open (text is the default;
     // tucking is the user's gesture, never the arrival state) — anchored
     // at its corner (last dragged spot, else bottom-right of the cursor's
     // display). A camera-on call lands as the pill instead (self-view).
@@ -709,8 +712,8 @@ export function setPinnedCollapsed(collapsed: boolean) {
     // renderer is about to paint — the two can disagree for a tick when a
     // device flips mid-fold.
     if (getExpandedSurface() === 'card') return;
-    // The PILL still resizes: it folds to a DIFFERENT layout (the centered
-    // TuckedMascot), which only lands right in mascot-sized bounds. Push
+    // The PILL still resizes: it folds to a DIFFERENT layout (the corner
+    // mini call pill), which only lands right in pill-sized bounds. Push
     // the layout FIRST and shrink once it's painted — shrinking first
     // squeezes the still-open pill into those bounds for a frame (every
     // control looks dead).
