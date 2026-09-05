@@ -7,7 +7,7 @@ import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
     STREAM_READ_KEY, buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, loadOlderStreamMessages,
-    removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage, usePresenceSender,
+    prefetchThread, removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
@@ -586,6 +586,7 @@ export function GeneralStream({
                 thread={thread}
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
+                onPrefetchThread={(id) => prefetchThread(org.id, space.id, id)}
                 onReplyInThread={replyInThread}
                 onAskRowboat={askRowboat}
                 onCopyLink={(m) => void copyLink(m)}

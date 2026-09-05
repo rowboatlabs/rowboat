@@ -126,7 +126,7 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onPrefetchThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
@@ -136,6 +136,8 @@ function MessageRowImpl({
     /** Present when a thread hangs under this message (stream only). */
     thread?: ThreadRowData | null
     onOpenThread?: (rootMessageId: string) => void
+    /** Hover = intent: warm the thread's replies so the click paints instantly. */
+    onPrefetchThread?: (rootMessageId: string) => void
     onReplyInThread?: (message: spaces.Message) => void
     onAskRowboat?: (message: spaces.Message) => void
     onCopyLink?: (message: spaces.Message) => void
@@ -322,6 +324,7 @@ function MessageRowImpl({
                     <button
                         type="button"
                         onClick={() => onOpenThread(thread.rootMessageId)}
+                        onMouseEnter={() => onPrefetchThread?.(thread.rootMessageId)}
                         className={cn(
                             'group/thread mt-1.5 flex w-full max-w-2xl items-center gap-2 rounded-md border border-transparent px-2 py-1 text-left text-xs transition-colors hover:border-border hover:bg-[var(--rowboat-raised)]',
                             thread.archived && 'opacity-60',

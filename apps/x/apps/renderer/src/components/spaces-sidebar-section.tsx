@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { AddOrgDialog, OrgMonogram, type SpaceSelection } from '@/components/spaces-view'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { prefetchStream, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
+import { prefetchMembers } from '@/hooks/use-space-members'
 import { bumpSpaceUse, readSpaceUse, spaceUseKey } from '@/lib/space-usage'
 import { toast } from '@/lib/toast'
 
@@ -226,9 +227,12 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
                         <SidebarMenuButton
                             isActive={active}
                             onClick={() => onOpenSpace(org.id, space.id)}
-                            // Hover = intent: warm the cached tail + start the
-                            // refresh, so the click paints instantly.
-                            onMouseEnter={() => prefetchStream(org.id, space.id)}
+                            // Hover = intent: warm the cached tail + roster and
+                            // start the refresh, so the click paints instantly.
+                            onMouseEnter={() => {
+                                prefetchStream(org.id, space.id)
+                                prefetchMembers(org.id, space.id)
+                            }}
                             className="pl-9"
                         >
                             {/* A space is a channel — # says so. */}

@@ -18,6 +18,7 @@ import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
+import { refreshMembers, useSpaceMembers } from '@/hooks/use-space-members'
 import { useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { useSpaceNotifyPrefs, type NotifyLevel } from '@/hooks/use-spaces-notify'
 import { requestJump } from '@/lib/spaces-jump'
@@ -194,7 +195,6 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
 }) {
-    const [members, setMembers] = useState<spaces.Member[]>([])
     const [entries, setEntries] = useState<spaces.SpacesAssetEntry[]>([])
     // Local-only empty folders: folders are key prefixes, so an empty one has
     // nothing to store — it lives here until its first file lands (then the
@@ -207,6 +207,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     const stream = useStream(org.id, space.id)
     const presence = useSpacePresence(org.id, space.id, org.memberId)
     const lastReadAt = useSpaceLastReadAt(org.id, space.id)
+    // The roster comes from the module store (cached, hydrated in render) so
+    // names resolve in the same first frame as the stream's cached tail.
+    const members = useSpaceMembers(org.id, space.id)
     const memberNames = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
 
     // The artifacts rail: open by default when a thread has artifacts, collapsed
@@ -215,13 +218,12 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
 
     useEffect(() => {
         let cancelled = false
-        void Promise.all([
-            window.ipc.invoke('spaces:listMembers', { orgId: org.id, spaceId: space.id }),
-            window.ipc.invoke('spaces:listAssets', { orgId: org.id, spaceId: space.id }),
-        ])
-            .then(([membersRes, assetsRes]) => {
+        // The roster store fetches on its own mount; the tick keeps it fresh
+        // on live activity (throttled inside — one refetch per burst).
+        refreshMembers(org.id, space.id)
+        void window.ipc.invoke('spaces:listAssets', { orgId: org.id, spaceId: space.id })
+            .then((assetsRes) => {
                 if (cancelled) return
-                setMembers(membersRes.members)
                 setEntries(assetsRes.entries)
             })
             .catch(() => {
