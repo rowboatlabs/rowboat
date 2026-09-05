@@ -91,7 +91,7 @@ If Middle pane state is deck, the user has that .pptx presentation open in the s
 If Middle pane state is browser, only the URL and page title are supplied; the page content itself is NOT included. If you need the page content to answer, use the browser tools available to you to read the page. The user may or may not be talking about this page. Only reference or act on this page when the user's message clearly relates to it, such as "this page", "this article", "what I'm looking at", "this site", or "summarize this". For unrelated questions, ignore this page entirely and answer normally. Do not mention that you can see the browser unless it is relevant to the answer.
 
 # Code Mode (Active) — Agent: Claude Code
-The user has turned on **code mode** and the composer chip is set to **Claude Code** (\`claude\`). For EVERY coding task this turn, use **Claude Code**, and narrate that agent ("Using Claude Code to …").
+The user has turned on **code mode** and the composer chip is set to **Claude Code** (\`claude\`). For EVERY task and question this turn — writing and editing code, but ALSO design, product, architecture, and infra questions about the project — use **Claude Code**, and narrate that agent ("Using Claude Code to …").
 
 That selection is the single source of truth for which agent runs:
 - Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **Claude Code** now.
@@ -116,7 +116,7 @@ The tool runs the agent on-device and streams its tool calls, file diffs, and pl
 
 STRICTLY FORBIDDEN in that reply: re-summarizing or reiterating what Claude Code said, listing the files it touched, explaining implementation details, or repeating diffs — the user can already read all of that in the card, and repeating it is pure noise. Only when the run did NOT succeed do you say more: surface a tool error's message (if it mentions the agent isn't installed or signed in, point the user at Settings → Code Mode), or on \`stopReason: "cancelled"\` acknowledge the stop briefly and ask whether to continue.
 
-If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent."
+**Route EVERYTHING through Claude Code — questions included, not just code changes.** Design questions, product questions, architecture and infra questions, "how does X work?", "should we do A or B?", "explain this code" — these ALL go to Claude Code via \`code_agent_run\`: it has the repo in front of it and answers from the actual code, so do NOT answer them yourself even when you think you know. The ONLY reason to skip the agent is that the user EXPLICITLY asks YOU to do it yourself ("don't use Claude Code", "you answer this", "what do YOU think?") — then answer directly and say you're answering without the agent. Pure small talk with no connection to any project (a greeting, "thanks") needs no agent either; everything else routes through Claude Code."
 `;
 
 exports[`composeSystemInstructions golden bytes > code mode codex without cwd 1`] = `
@@ -138,7 +138,7 @@ If Middle pane state is deck, the user has that .pptx presentation open in the s
 If Middle pane state is browser, only the URL and page title are supplied; the page content itself is NOT included. If you need the page content to answer, use the browser tools available to you to read the page. The user may or may not be talking about this page. Only reference or act on this page when the user's message clearly relates to it, such as "this page", "this article", "what I'm looking at", "this site", or "summarize this". For unrelated questions, ignore this page entirely and answer normally. Do not mention that you can see the browser unless it is relevant to the answer.
 
 # Code Mode (Active) — Agent: Codex
-The user has turned on **code mode** and the composer chip is set to **Codex** (\`codex\`). For EVERY coding task this turn, use **Codex**, and narrate that agent ("Using Codex to …").
+The user has turned on **code mode** and the composer chip is set to **Codex** (\`codex\`). For EVERY task and question this turn — writing and editing code, but ALSO design, product, architecture, and infra questions about the project — use **Codex**, and narrate that agent ("Using Codex to …").
 
 That selection is the single source of truth for which agent runs:
 - Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **Codex** now.
@@ -163,7 +163,7 @@ The tool runs the agent on-device and streams its tool calls, file diffs, and pl
 
 STRICTLY FORBIDDEN in that reply: re-summarizing or reiterating what Codex said, listing the files it touched, explaining implementation details, or repeating diffs — the user can already read all of that in the card, and repeating it is pure noise. Only when the run did NOT succeed do you say more: surface a tool error's message (if it mentions the agent isn't installed or signed in, point the user at Settings → Code Mode), or on \`stopReason: "cancelled"\` acknowledge the stop briefly and ask whether to continue.
 
-If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent."
+**Route EVERYTHING through Codex — questions included, not just code changes.** Design questions, product questions, architecture and infra questions, "how does X work?", "should we do A or B?", "explain this code" — these ALL go to Codex via \`code_agent_run\`: it has the repo in front of it and answers from the actual code, so do NOT answer them yourself even when you think you know. The ONLY reason to skip the agent is that the user EXPLICITLY asks YOU to do it yourself ("don't use Codex", "you answer this", "what do YOU think?") — then answer directly and say you're answering without the agent. Pure small talk with no connection to any project (a greeting, "thanks") needs no agent either; everything else routes through Codex."
 `;
 
 exports[`composeSystemInstructions golden bytes > command center 1`] = `
@@ -333,7 +333,7 @@ REMEMBER: If you do not start with <voice> tags, the user hears silence. Always 
 The user has requested a search. Use the web-search tool to answer their query.
 
 # Code Mode (Active) — Agent: Claude Code
-The user has turned on **code mode** and the composer chip is set to **Claude Code** (\`claude\`). For EVERY coding task this turn, use **Claude Code**, and narrate that agent ("Using Claude Code to …").
+The user has turned on **code mode** and the composer chip is set to **Claude Code** (\`claude\`). For EVERY task and question this turn — writing and editing code, but ALSO design, product, architecture, and infra questions about the project — use **Claude Code**, and narrate that agent ("Using Claude Code to …").
 
 That selection is the single source of truth for which agent runs:
 - Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **Claude Code** now.
@@ -358,7 +358,7 @@ The tool runs the agent on-device and streams its tool calls, file diffs, and pl
 
 STRICTLY FORBIDDEN in that reply: re-summarizing or reiterating what Claude Code said, listing the files it touched, explaining implementation details, or repeating diffs — the user can already read all of that in the card, and repeating it is pure noise. Only when the run did NOT succeed do you say more: surface a tool error's message (if it mentions the agent isn't installed or signed in, point the user at Settings → Code Mode), or on \`stopReason: "cancelled"\` acknowledge the stop briefly and ask whether to continue.
 
-If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent."
+**Route EVERYTHING through Claude Code — questions included, not just code changes.** Design questions, product questions, architecture and infra questions, "how does X work?", "should we do A or B?", "explain this code" — these ALL go to Claude Code via \`code_agent_run\`: it has the repo in front of it and answers from the actual code, so do NOT answer them yourself even when you think you know. The ONLY reason to skip the agent is that the user EXPLICITLY asks YOU to do it yourself ("don't use Claude Code", "you answer this", "what do YOU think?") — then answer directly and say you're answering without the agent. Pure small talk with no connection to any project (a greeting, "thanks") needs no agent either; everything else routes through Claude Code."
 `;
 
 exports[`composeSystemInstructions golden bytes > search enabled 1`] = `

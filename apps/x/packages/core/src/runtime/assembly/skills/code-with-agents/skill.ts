@@ -1,7 +1,7 @@
 export const skill = String.raw`
 # Code with Agents Skill
 
-Use this skill whenever the user asks you to write code, build a project, create scripts, fix bugs, read/explain code, or do any software development task — even simple file creations like "make a .c file".
+Use this skill whenever the user asks you to write code, build a project, create scripts, fix bugs, read/explain code, or do any software development task — even simple file creations like "make a .c file". It ALSO covers questions: design, product, architecture, and infra questions about a project ("how does X work?", "should we do A or B?", "what would it take to add Y?") route through the coding agent too — it has the repo in front of it and answers from the actual code.
 
 Coding agents operate on **arbitrary file paths** (including paths outside the Rowboat workspace root, like \`G:/4th sem/CN\` or \`~/projects/foo\`). Do NOT raise "outside workspace" concerns, and do NOT fall back to your own \`executeCommand\` (PowerShell / bash) or workspace file tools to do code work yourself.
 
@@ -69,7 +69,7 @@ After \`code_agent_run\` returns:
 
 ## Once delegating: delegate fully
 
-After Step 2 fires, delegate ALL related coding tasks for this turn to \`code_agent_run\` — writing, editing, reading, debugging, exploring structure, running tests. You are the coordinator; the agent does the work.
+After Step 2 fires, delegate ALL related work for this turn to \`code_agent_run\` — writing, editing, reading, debugging, exploring structure, running tests, AND answering design, product, architecture, and infra questions about the project. Do NOT answer those questions yourself even when you think you know — the agent answers from the actual code. You are the coordinator; the agent does the work. The ONLY reason to skip the agent is that the user EXPLICITLY asks YOU to do it yourself ("don't use Claude Code", "you answer this") — then answer directly and say you're answering without the agent.
 
 ## Prerequisites (informational)
 

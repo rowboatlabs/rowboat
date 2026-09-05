@@ -126,7 +126,7 @@ const CODE_MODE_TEMPLATE = (
     codeMode: "claude" | "codex",
     codeCwd: string | null,
 ): string => `# Code Mode (Active) — Agent: ${agentDisplay}
-The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY coding task this turn, use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
+The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY task and question this turn — writing and editing code, but ALSO design, product, architecture, and infra questions about the project — use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
 
 That selection is the single source of truth for which agent runs:
 - Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **${agentDisplay}** now.
@@ -151,4 +151,4 @@ The tool runs the agent on-device and streams its tool calls, file diffs, and pl
 
 STRICTLY FORBIDDEN in that reply: re-summarizing or reiterating what ${agentDisplay} said, listing the files it touched, explaining implementation details, or repeating diffs — the user can already read all of that in the card, and repeating it is pure noise. Only when the run did NOT succeed do you say more: surface a tool error's message (if it mentions the agent isn't installed or signed in, point the user at Settings → Code Mode), or on \`stopReason: "cancelled"\` acknowledge the stop briefly and ask whether to continue.
 
-If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent.`;
+**Route EVERYTHING through ${agentDisplay} — questions included, not just code changes.** Design questions, product questions, architecture and infra questions, "how does X work?", "should we do A or B?", "explain this code" — these ALL go to ${agentDisplay} via \`code_agent_run\`: it has the repo in front of it and answers from the actual code, so do NOT answer them yourself even when you think you know. The ONLY reason to skip the agent is that the user EXPLICITLY asks YOU to do it yourself ("don't use ${agentDisplay}", "you answer this", "what do YOU think?") — then answer directly and say you're answering without the agent. Pure small talk with no connection to any project (a greeting, "thanks") needs no agent either; everything else routes through ${agentDisplay}.`;
