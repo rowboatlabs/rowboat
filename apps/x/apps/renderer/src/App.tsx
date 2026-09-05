@@ -742,7 +742,7 @@ function parseDeepLink(input: string): ViewState | null {
 }
 
 /** Sidebar toggle (fixed position, top-left) — one persistent control that
-    swaps between the expanded panel and the dock, in both directions. */
+    swaps between the expanded panel and the icon rail, in both directions. */
 function FixedSidebarToggle({
   leftInsetPx,
   onNewChat,
@@ -760,7 +760,7 @@ function FixedSidebarToggle({
         className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
         aria-label="Toggle sidebar"
-        title={state === 'collapsed' ? 'Expand sidebar' : 'Collapse to dock'}
+        title={state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
       </button>
@@ -6756,9 +6756,9 @@ function App() {
       }}>
         <div className="rowboat-shell flex h-svh w-full overflow-hidden">
           {/* Left navigation, two forms: expanded = the panel sidebar,
-              collapsed = the floating dock. The collapse button (fixed
-              top-left) and the dock's expand button swap between them; the
-              gutter padding clears the dock when it's showing. */}
+              collapsed = the slim icon rail. The collapse button (fixed
+              top-left) swaps between them; the gutter padding clears the
+              rail when it's showing. */}
           <SidebarProvider
             open={sidebarOpen}
             onOpenChange={handleSidebarOpenChange}
@@ -7748,12 +7748,14 @@ function App() {
                 getLevel={tts.getLevel}
               />
             )}
-            {/* Top-left dock gutter strip: keeps the traffic-light corner
-                draggable while no panel covers it. */}
+            {/* Top-left gutter strip: continues the titlebar band across the
+                icon rail (the traffic lights are wider than the rail, so the
+                band must be one uninterrupted surface — the rail itself starts
+                below it) and keeps that corner draggable. */}
             {!sidebarOpen && (
               <div
                 aria-hidden="true"
-                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
+                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10 border-b border-border bg-background"
                 style={{ width: DOCK_GUTTER_PX }}
               />
             )}

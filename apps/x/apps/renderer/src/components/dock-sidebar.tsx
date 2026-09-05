@@ -80,86 +80,27 @@ import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
 
-// The app's left navigation as a macOS-Dock-style floating icon tray (design:
-// "Rowboat Dock Sidebar" handoff): a frosted-glass vertical dock 18px from the
-// window's left edge, with hover magnification, dark status tooltips, unread
-// badges, running dots, frosted flyout panels for Chats and Spaces, and a
-// Cmd-Tab-style keyboard switcher (⌥/⌃ + Tab or `). It replaces the old
-// panel sidebar; content panes clear it via DOCK_GUTTER_PX.
+// The app's left navigation collapsed to a slim icon rail (Notion/Linear
+// style): a full-height strip of the same monochrome glyphs the panel sidebar
+// uses, with unread-count badges, status tooltips, flyout panels for Chats and
+// Spaces, and a Cmd-Tab-style keyboard switcher (⌥/⌃ + Tab or `). It replaces
+// the panel sidebar while collapsed; content panes clear it via DOCK_GUTTER_PX.
 
 // ---------------------------------------------------------------------------
-// Geometry (from the design handoff)
+// Geometry
 // ---------------------------------------------------------------------------
 
-const DOCK_EDGE_PX = 16 // dock's distance from the window's left edge
-const DOCK_PAD = 10
-const DOCK_GAP = 6
-const DOCK_SEP_H = 8
-const DOCK_ICON_MAX = 36
-const DOCK_ICON_MIN = 24
-const DOCK_MAG = 0.45 // hover magnification strength
-const DOCK_MAG_RADIUS = 100 // px falloff radius around the cursor
-
-/** Horizontal space the content panes leave for the dock. */
-export const DOCK_GUTTER_PX = DOCK_EDGE_PX + DOCK_ICON_MAX + DOCK_PAD * 2 + 14
+/** Rail width = horizontal space the content panes leave for it. */
+export const DOCK_GUTTER_PX = 48
+const RAIL_BUTTON_PX = 32
+const RAIL_ICON_PX = 18
 
 /** The most recently opened space — App writes it on every space navigation;
     the ⌥Tab switcher lands there instead of opening the flyout. */
 export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
 
-/** Where flyout panels (Chats / Spaces) sit, just right of the tray. */
-const DOCK_FLYOUT_LEFT_PX = DOCK_EDGE_PX + DOCK_ICON_MAX + DOCK_PAD * 2 + 20
-
-// Light tile faces, each carrying a faint tint of its own glyph color
-// (9% -> 18% of the hue mixed into white, top to bottom); the color proper
-// lives in the glyph. The hues are the dark stops of the original palette.
-const tileFace = (glyphColor: string): string =>
-  `linear-gradient(145deg, color-mix(in oklab, ${glyphColor} 9%, white), color-mix(in oklab, ${glyphColor} 18%, white))`
-
-// The Assistant tile stays untinted — an off-white face sets it apart
-// from the tinted destination tiles without glaring bright white.
-const ASSISTANT_FACE = "linear-gradient(145deg, #f7f8f8, #e9eceb)"
-const GLYPH_COLORS: Record<string, string> = {
-  assistant: "#795548",
-  home: "#0f766e",
-  email: "#1d4ed8",
-  code: "#0f172a",
-  meetings: "#c2352b",
-  brain: "#c2740a",
-  apps: "#6d28d9",
-  agents: "#334155",
-  workspaces: "#0369a1",
-  browser: "#86198f",
-  spaces: "#4338ca",
-  chats: "#15803d",
-  settings: "#4b5563",
-}
-const DEFAULT_GLYPH_COLOR = "#4b5563"
-
-
-// Pinned apps get a stable glyph color hashed from their folder name, with a
-// monogram for the drawing.
-const APP_GLYPH_COLORS: string[] = [
-  "#be185d", // pink
-  "#be123c", // rose
-  "#c2410c", // orange
-  "#0e7490", // cyan
-  "#4d7c0f", // lime
-  "#a21caf", // fuchsia
-  "#115e59", // teal
-  "#1e40af", // periwinkle
-]
-
-function hashString(s: string): number {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
-  return Math.abs(h)
-}
-
-const appGlyphColor = (folder: string): string =>
-  APP_GLYPH_COLORS[hashString(folder) % APP_GLYPH_COLORS.length]
-
-const appMonogram = (name: string): string => [...name.trim()][0]?.toUpperCase() ?? "A"
+/** Where flyout panels (Chats / Spaces) sit, just right of the rail. */
+const DOCK_FLYOUT_LEFT_PX = DOCK_GUTTER_PX + 8
 
 // ---------------------------------------------------------------------------
 // Shared shapes (mirrors what App.tsx already passes around)
@@ -567,12 +508,8 @@ type DockItemDef = {
   key: string
   label: string
   icon: LucideIcon
-  /** Overrides the GLYPH_COLORS lookup (pinned-app tiles). */
-  glyphColor?: string
   /** Shorter name for the ⌥Tab switcher cell, when the full label truncates. */
   switcherLabel?: string
-  /** Letter rendered instead of the icon (pinned-app tiles). */
-  monogram?: string
   tourId?: string
   badge?: string
   badgeAmber?: boolean
@@ -624,8 +561,9 @@ export function DockSidebar({
   onToggleMeetingRecording,
 }: DockSidebarProps) {
   // ----- interaction state -----
-  const [mouseY, setMouseY] = useState<number | null>(null)
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  // The hovered row plus its on-screen center, so the tooltip can render as a
+  // fixed sibling of the (clipping) scroll column instead of inside it.
+  const [hoverTip, setHoverTip] = useState<{ index: number; centerY: number } | null>(null)
   const [chatsOpen, setChatsOpen] = useState(false)
   const [spacesOpen, setSpacesOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -634,13 +572,6 @@ export function DockSidebar({
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
   const [syncLogOpen, setSyncLogOpen] = useState(false)
   const [addOrgOpen, setAddOrgOpen] = useState(false)
-  const [winH, setWinH] = useState(() => window.innerHeight)
-
-  useEffect(() => {
-    const onResize = () => setWinH(window.innerHeight)
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
 
   const closeFlyouts = useCallback(() => {
     setChatsOpen(false)
@@ -1097,13 +1028,11 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenApps?.() },
         },
       },
-      // Apps pinned from the Apps view get their own tile: a monogram in a
-      // color hashed from the folder, right-click to remove.
+      // Apps pinned from the Apps view get their own row (same AppWindow
+      // glyph as the panel sidebar), right-click to remove.
       ...pinnedApps.map(({ folder, name }) => ({
         item: {
           key: `app:${folder}`, label: name, icon: AppWindow,
-          glyphColor: appGlyphColor(folder),
-          monogram: appMonogram(name),
           onClick: () => { closeFlyouts(); onOpenApp?.(folder) },
         },
       })),
@@ -1164,36 +1093,6 @@ export function DockSidebar({
     onOpenBgTasks, workspaceCount, totalSpacesUnread, totalSpaces, spacesOpen, chatsOpen,
     outOfCredits, hasOauthError, settingsStatus, settingsAlert,
   ])
-
-  // ----- geometry: base icon size shrinks so the dock always fits the window -----
-  const iconCount = rows.filter((r) => !r.sep).length
-  const sepCount = rows.length - iconCount
-  const base = Math.max(
-    DOCK_ICON_MIN,
-    Math.min(
-      DOCK_ICON_MAX,
-      Math.floor((winH - 96 - DOCK_PAD * 2 - sepCount * DOCK_SEP_H - (rows.length - 1) * DOCK_GAP) / iconCount),
-    ),
-  )
-
-  // Row centers at rest, for the magnification falloff.
-  const centers = useMemo(() => {
-    let y = DOCK_PAD
-    return rows.map((r) => {
-      const h = r.sep ? DOCK_SEP_H : base
-      const c = y + h / 2
-      y += h + DOCK_GAP
-      return c
-    })
-  }, [rows, base])
-
-  const moving = mouseY != null
-  const sizeFor = (i: number) => {
-    if (!moving) return base
-    const dist = Math.abs((mouseY as number) - centers[i])
-    const f = Math.max(0, 1 - (dist / DOCK_MAG_RADIUS) * (dist / DOCK_MAG_RADIUS))
-    return Math.round(base * (1 + DOCK_MAG * f))
-  }
 
   // ----- app switcher (⌥/⌃ + Tab or `) -----
   // Sections in most-recently-used order (macOS ⌘Tab style): whenever a
@@ -1404,77 +1303,42 @@ export function DockSidebar({
   return (
     <>
       {!switcherOnly && (
-      <div
-        data-dock-root=""
-        className="rowboat-dock titlebar-no-drag"
-        style={{ left: DOCK_EDGE_PX, width: base + DOCK_PAD * 2, gap: DOCK_GAP, padding: DOCK_PAD }}
-        onMouseMove={(e) => {
-          const r = e.currentTarget.getBoundingClientRect()
-          setMouseY(e.clientY - r.top)
-        }}
-        onMouseLeave={() => { setMouseY(null); setHoverIndex(null) }}
-      >
+      <div data-dock-root="" className="rowboat-dock titlebar-no-drag" style={{ width: DOCK_GUTTER_PX }}>
+        <div
+          className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-2 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          onMouseLeave={() => setHoverTip(null)}
+        >
         {rows.map((row, i) => {
           if (row.sep) {
-            return (
-              <div key={`sep-${i}`} style={{ width: base, height: DOCK_SEP_H, flex: 'none', display: 'flex', alignItems: 'center' }}>
-                <div className="rowboat-dock-sep" />
-              </div>
-            )
+            return <div key={`sep-${i}`} className="my-1 h-px w-5 shrink-0 bg-border" />
           }
           const item = row.item
-          const s = sizeFor(i)
           const Icon = item.icon
-          const glyphColor = item.glyphColor ?? GLYPH_COLORS[item.key] ?? DEFAULT_GLYPH_COLOR
-          // No tooltip while the switcher, or this tile's own flyout, is up.
-          const flyoutOpen = (item.key === 'chats' && chatsOpen) || (item.key === 'spaces' && spacesOpen)
-          const showTip = hoverIndex === i && !switcherOpen && !flyoutOpen
           const tile = (
-            <div
+            <button
               key={item.key}
-              role="button"
+              type="button"
               aria-label={item.label}
               data-tour-id={item.tourId}
-              style={{
-                position: 'relative',
-                width: s,
-                height: s,
-                flex: 'none',
-                cursor: 'pointer',
-                transition: moving ? 'none' : 'width .22s cubic-bezier(.3,.9,.4,1), height .22s cubic-bezier(.3,.9,.4,1)',
+              className={cn(
+                'relative flex shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors',
+                'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                item.running && 'bg-sidebar-accent text-sidebar-accent-foreground',
+              )}
+              style={{ width: RAIL_BUTTON_PX, height: RAIL_BUTTON_PX }}
+              onMouseEnter={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setHoverTip({ index: i, centerY: r.top + r.height / 2 })
               }}
-              onMouseEnter={() => setHoverIndex(i)}
               onClick={item.onClick}
             >
-              <div
-                className="rowboat-dock-tile"
-                style={{ borderRadius: Math.round(s * 0.24), background: item.key === 'assistant' ? ASSISTANT_FACE : tileFace(glyphColor) }}
-              >
-                {item.monogram ? (
-                  <span className="font-bold" style={{ fontSize: Math.round(s * 0.44), lineHeight: 1, color: glyphColor }}>
-                    {item.monogram}
-                  </span>
-                ) : (
-                  <Icon size={Math.round(s * 0.56)} strokeWidth={2} style={{ color: glyphColor }} />
-                )}
-              </div>
+              <Icon size={RAIL_ICON_PX} strokeWidth={1.75} />
               {item.badge && (
                 <span className={cn('rowboat-dock-badge', item.badgeAmber && 'rowboat-dock-badge-amber', item.badgePulse && 'animate-pulse')}>
                   {item.badge}
                 </span>
               )}
-              {item.running && <span className="rowboat-dock-dot" />}
-              {showTip && (
-                <span className="rowboat-dock-tip" style={{ left: s + 16, padding: item.status ? '6px 12px' : '4px 10px' }}>
-                  <span>{item.label}</span>
-                  {item.status && (
-                    <span className={cn('rowboat-dock-tip-status', item.statusAlert && 'rowboat-dock-tip-status-alert')}>
-                      {item.status}
-                    </span>
-                  )}
-                </span>
-              )}
-            </div>
+            </button>
           )
           const menu = contextMenuFor(item.key)
           const wrapped = menu ? (
@@ -1502,6 +1366,30 @@ export function DockSidebar({
           }
           return wrapped
         })}
+        </div>
+        {(() => {
+          // The status tooltip, rendered as a fixed sibling so the scroll
+          // column can't clip it. None while the switcher or the hovered
+          // row's own flyout is up.
+          if (!hoverTip || switcherOpen) return null
+          const row = rows[hoverTip.index]
+          if (!row || row.sep) return null
+          const item = row.item
+          if ((item.key === 'chats' && chatsOpen) || (item.key === 'spaces' && spacesOpen)) return null
+          return (
+            <span
+              className="rowboat-dock-tip"
+              style={{ left: DOCK_GUTTER_PX + 8, top: hoverTip.centerY, padding: item.status ? '6px 12px' : '4px 10px' }}
+            >
+              <span>{item.label}</span>
+              {item.status && (
+                <span className={cn('rowboat-dock-tip-status', item.statusAlert && 'rowboat-dock-tip-status-alert')}>
+                  {item.status}
+                </span>
+              )}
+            </span>
+          )
+        })()}
       </div>
       )}
 
@@ -1532,47 +1420,38 @@ export function DockSidebar({
         />
       )}
 
-      {/* App switcher overlay (⌥/⌃ + Tab or `) */}
+      {/* App switcher overlay (⌥/⌃ + Tab or `): a compact dark pill — same
+          icon scale as the rail, with only the selected item's name below. */}
       {switcherOpen && (
         <div data-slot="dock-overlay" data-state="open" className="fixed inset-0 z-50 flex items-center justify-center bg-black/10">
-          <div className="flex flex-col items-center gap-2.5">
+          <div className="flex flex-col items-center gap-2">
             <div className="rowboat-dock-switcher">
-              {switcherItems.map((item, i) => {
-                const Icon = item.icon
-                const glyphColor = item.glyphColor ?? GLYPH_COLORS[item.key] ?? DEFAULT_GLYPH_COLOR
-                const selected = i === switcherIndex
-                return (
-                  <div
-                    key={item.key}
-                    className={cn(
-                      'flex cursor-pointer flex-col items-center gap-2 rounded-2xl px-3 pb-2.5 pt-3.5',
-                      selected && 'bg-[var(--sidebar-accent)]',
-                    )}
-                    onClick={() => { setSwitcherOpen(false); (item.switchTo ?? item.onClick)() }}
-                  >
+              <div className="flex items-center gap-0.5">
+                {switcherItems.map((item, i) => {
+                  const Icon = item.icon
+                  const selected = i === switcherIndex
+                  return (
                     <div
-                      className="rowboat-dock-tile"
-                      style={{ width: 72, height: 72, borderRadius: 17, background: tileFace(glyphColor) }}
-                    >
-                      {item.monogram ? (
-                        <span className="font-bold" style={{ fontSize: 32, lineHeight: 1, color: glyphColor }}>{item.monogram}</span>
-                      ) : (
-                        <Icon size={40} strokeWidth={2} style={{ color: glyphColor }} />
-                      )}
-                    </div>
-                    <span
+                      key={item.key}
                       className={cn(
-                        'max-w-[86px] truncate text-center text-xs',
-                        selected ? 'font-bold text-foreground' : 'font-medium text-muted-foreground',
+                        'flex size-9 cursor-pointer items-center justify-center rounded-lg text-[color:var(--rowboat-bubble-foreground)]',
+                        selected ? 'bg-white/20 opacity-100' : 'opacity-55 hover:opacity-90',
                       )}
+                      onClick={() => { setSwitcherOpen(false); (item.switchTo ?? item.onClick)() }}
                     >
-                      {item.switcherLabel ?? item.label}
-                    </span>
-                  </div>
-                )
-              })}
+                      <Icon size={RAIL_ICON_PX} strokeWidth={1.75} />
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="mt-1.5 truncate text-center text-xs font-medium text-[color:var(--rowboat-bubble-foreground)]">
+                {(() => {
+                  const item = switcherItems[switcherIndex]
+                  return item ? (item.switcherLabel ?? item.label) : ''
+                })()}
+              </div>
             </div>
-            <div className="rounded-full bg-background/60 px-3 py-1 text-xs text-foreground/45 backdrop-blur-md">
+            <div className="rounded-full bg-background/60 px-3 py-1 text-[11px] text-foreground/45 backdrop-blur-md">
               hold ⌥ or ⌃, tap Tab or ` to cycle · release to switch · Esc to cancel
             </div>
           </div>
@@ -1582,7 +1461,7 @@ export function DockSidebar({
       {/* First-time-action credit rewards (feature-flagged, signed-in only).
           The expanded panel carries its own copy, so dock mode only. */}
       {!switcherOnly && (
-      <div className="titlebar-no-drag fixed bottom-2 left-2 z-30 w-60">
+      <div className="titlebar-no-drag fixed bottom-2 z-30 w-60" style={{ left: DOCK_GUTTER_PX + 8 }}>
         <SidebarCreditRewards
           onOpenEmail={onOpenEmail}
           onOpenMeetings={onOpenMeetings}

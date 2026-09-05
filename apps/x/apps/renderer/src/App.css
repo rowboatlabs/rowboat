@@ -1285,44 +1285,22 @@
   background: var(--background);
 }
 
-/* ---- Dock sidebar (design: "Rowboat Dock Sidebar" handoff) ---- */
+/* ---- Dock sidebar: the collapsed left navigation as a slim icon rail ---- */
 
 .rowboat-dock {
   position: fixed;
-  top: 50%;
-  transform: translateY(-50%);
+  /* Below the titlebar band: the traffic lights are wider than the rail, so
+     the h-10 top row stays one full-width surface (the gutter strip in App
+     paints its left segment) and the rail hangs underneath, Linear-style. */
+  top: 2.5rem;
+  bottom: 0;
+  left: 0;
   z-index: 30;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   box-sizing: border-box;
-  /* Floating surface: solid raised ground, hairline ring folded into
-     the shadow token — no frosted glass. Tokens flip for dark mode. */
-  border-radius: 18px;
-  background: var(--rowboat-raised);
-  border: 1px solid transparent;
-  box-shadow: var(--rowboat-shadow);
-  overflow: visible;
-}
-
-.rowboat-dock-tile {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Off-white faces need definition the old saturated tiles didn't: a soft
-     drop, a bright inner top edge, and a hairline border. */
-  border: 1px solid var(--border);
-  box-sizing: border-box;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
-}
-
-.rowboat-dock-sep {
-  width: 70%;
-  height: 1px;
-  background: var(--border);
-  margin: 0 auto;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
 }
 
 .rowboat-dock-badge {
@@ -1340,7 +1318,7 @@
   align-items: center;
   justify-content: center;
   padding: 0 3.5px;
-  border: 1.5px solid var(--rowboat-raised);
+  border: 1.5px solid var(--sidebar);
   z-index: 2;
   box-sizing: border-box;
 }
@@ -1349,20 +1327,8 @@
   background: #d97706;
 }
 
-.rowboat-dock-dot {
-  position: absolute;
-  left: -9px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 4px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--rowboat-ink-secondary);
-}
-
 .rowboat-dock-tip {
-  position: absolute;
-  top: 50%;
+  position: fixed;
   transform: translateY(-50%);
   background: var(--rowboat-bubble);
   color: var(--rowboat-bubble-foreground);
@@ -1416,13 +1382,14 @@
   }
 }
 
+/* The ⌥Tab switcher pill: same dark bubble surface as the rail tooltips,
+   so the monochrome glyphs pop against it. */
 .rowboat-dock-switcher {
   display: flex;
-  gap: 4px;
-  padding: 14px;
-  background: var(--rowboat-raised);
-  border: 1px solid transparent;
-  border-radius: 18px;
+  flex-direction: column;
+  padding: 8px 10px;
+  background: var(--rowboat-bubble);
+  border-radius: 14px;
   box-shadow: var(--rowboat-shadow);
 }
 
