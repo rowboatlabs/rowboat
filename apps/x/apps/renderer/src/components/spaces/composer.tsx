@@ -10,6 +10,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
 import { MemberAvatar } from '@/components/spaces/atoms'
+import { FormattingToolbar } from '@/components/spaces/composer-toolbar'
+import { toggleCodeBlock, toggleInline, toggleLinePrefix, type FormatResult } from '@/lib/spaces-format'
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -394,34 +396,22 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         else insertAt(mentionMatch.start, caret, `@${c.label} `)
     }
 
-    // Markdown formatting shortcuts (⌘B bold, ⌘I italic, ⌘E code, ⌘⇧X
-    // strikethrough): wrap the selection — or an empty caret — in the marker;
-    // fired again on an already-wrapped selection, unwrap (toggle).
-    const wrapSelection = (marker: string) => {
+    // Markdown formatting: the toolbar's buttons and the keyboard shortcuts
+    // run the same pure helpers (composer-toolbar.tsx) through here — one
+    // draft rewrite, one selection restore, caret kept in sync for the
+    // autocompletes.
+    const applyFormat = (run: (value: string, start: number, end: number) => FormatResult) => {
         const el = ref.current
         if (!el) return
-        const start = el.selectionStart ?? 0
+        const start = el.selectionStart ?? draft.length
         const end = el.selectionEnd ?? start
-        const selected = draft.slice(start, end)
-        const before = draft.slice(0, start)
-        const after = draft.slice(end)
-        const place = (next: string, selStart: number, selEnd: number) => {
-            setDraft(next)
-            requestAnimationFrame(() => {
-                el.focus()
-                el.setSelectionRange(selStart, selEnd)
-                setCaret(selEnd)
-            })
-        }
-        if (before.endsWith(marker) && after.startsWith(marker)) {
-            place(`${before.slice(0, -marker.length)}${selected}${after.slice(marker.length)}`, start - marker.length, end - marker.length)
-        } else if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2) {
-            const inner = selected.slice(marker.length, selected.length - marker.length)
-            place(`${before}${inner}${after}`, start, start + inner.length)
-        } else {
-            // Empty caret lands between the markers, ready to type.
-            place(`${before}${marker}${selected}${marker}${after}`, start + marker.length, end + marker.length)
-        }
+        const r = run(draft, Math.min(start, end), Math.max(start, end))
+        setDraft(r.next)
+        requestAnimationFrame(() => {
+            el.focus()
+            el.setSelectionRange(r.selStart, r.selEnd)
+            setCaret(r.selEnd)
+        })
     }
 
     const insertRowboatChip = () => {
@@ -600,6 +590,17 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                         <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
                     </div>
                 )}
+                {/* The formatting bar rides the top edge, Slack-style. */}
+                <FormattingToolbar
+                    textareaRef={ref}
+                    value={draft}
+                    onChange={(next) => {
+                        setDraft(next)
+                        onType?.()
+                    }}
+                    onCaret={setCaret}
+                    className="px-2 pt-1.5"
+                />
                 {attachments.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
                         {attachments.map((a) => (
@@ -638,7 +639,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     value={draft}
                     placeholder={placeholder}
                     rows={1}
-                    className="min-h-9 max-h-40 resize-none border-0 bg-transparent dark:bg-transparent px-3 pt-2.5 pb-1 text-sm shadow-none focus-visible:ring-0 field-sizing-content"
+                    className="min-h-9 max-h-40 resize-none border-0 bg-transparent dark:bg-transparent px-3 pt-1.5 pb-1 text-sm shadow-none focus-visible:ring-0 field-sizing-content"
                     onPaste={onPaste}
                     onChange={(e) => {
                         setDraft(e.target.value)
@@ -719,14 +720,32 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 return
                             }
                         }
+                        // The Slack chords: ⌘B/⌘I/⌘⇧X inline marks, ⌘E and
+                        // ⌘⇧C inline code, ⌘⇧7/8/9 ordered/bullet/quote
+                        // (e.code — shift turns the digits into symbols),
+                        // ⌘⌥⇧C a fenced code block.
+                        if ((e.metaKey || e.ctrlKey) && e.altKey && e.shiftKey && e.code === 'KeyC') {
+                            e.preventDefault()
+                            applyFormat(toggleCodeBlock)
+                            return
+                        }
                         if ((e.metaKey || e.ctrlKey) && !e.altKey) {
                             const key = e.key.toLowerCase()
-                            const marker = e.shiftKey
-                                ? key === 'x' ? '~~' : null
-                                : key === 'b' ? '**' : key === 'i' ? '*' : key === 'e' ? '`' : null
-                            if (marker) {
+                            let run: ((v: string, s: number, en: number) => FormatResult) | null = null
+                            if (e.shiftKey) {
+                                if (key === 'x') run = (v, s, en) => toggleInline(v, s, en, '~~')
+                                else if (e.code === 'KeyC') run = (v, s, en) => toggleInline(v, s, en, '`')
+                                else if (e.code === 'Digit7') run = (v, s, en) => toggleLinePrefix(v, s, en, 'ordered')
+                                else if (e.code === 'Digit8') run = (v, s, en) => toggleLinePrefix(v, s, en, 'bullet')
+                                else if (e.code === 'Digit9') run = (v, s, en) => toggleLinePrefix(v, s, en, 'quote')
+                            } else {
+                                if (key === 'b') run = (v, s, en) => toggleInline(v, s, en, '**')
+                                else if (key === 'i') run = (v, s, en) => toggleInline(v, s, en, '*')
+                                else if (key === 'e') run = (v, s, en) => toggleInline(v, s, en, '`')
+                            }
+                            if (run) {
                                 e.preventDefault()
-                                wrapSelection(marker)
+                                applyFormat(run)
                                 return
                             }
                         }

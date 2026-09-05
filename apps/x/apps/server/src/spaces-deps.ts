@@ -6,12 +6,13 @@ import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
+import { fetchLinkPreview } from '@x/core/dist/spaces/link-preview.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
 
 // Spaces handlers, server-side (Phase 9). Verbatim lifts of the Electron
 // handlers in apps/main/src/spaces/ipc.ts, minus the client-only ones
-// (save dialogs, link previews — those stay in main). Spaces is core-coupled
+// (save dialogs — those stay in main). Spaces is core-coupled
 // — the topic agent runs turns through the session runtime, mention offsets
 // and org tokens live in the workdir — so it runs where core runs. Browser
 // opens ride the url-opener seam (shell.openExternal in-process, the
@@ -58,7 +59,7 @@ type SpacesRpcChannel =
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
   | 'spaces:search'
-  | 'spaces:listStream' | 'spaces:listThread' | 'spaces:postMessage' | 'spaces:createTopic'
+  | 'spaces:listStream' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:invokeRowboat' | 'spaces:topicSession'
@@ -241,6 +242,8 @@ export const spacesRpcHandlers: SpacesHandlers = {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
+
+  'spaces:linkPreview': async (args) => ({ preview: await fetchLinkPreview(args.url) }),
 
   'spaces:postMessage': async (args) =>
     orgs.getClient(args.orgId).postMessage(args.spaceId, {
