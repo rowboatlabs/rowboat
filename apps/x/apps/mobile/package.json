@@ -53,7 +53,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "eas-build-post-install": "cd ../../../harbor/packages/protocol && npm install --no-audit --no-fund && npm run build"
   },
   "private": true
 }
