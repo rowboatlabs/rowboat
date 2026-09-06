@@ -53,7 +53,10 @@ function SignIn() {
       <View style={{ flex: 1, justifyContent: 'center', gap: 28 }}>
         <View style={{ alignItems: 'center', gap: 10 }}>
           <Image source="sf:sailboat" style={{ width: 48, height: 48 }} tintColor={colors.label} />
-          <Text style={{ fontSize: 26, fontWeight: '700', color: colors.label }}>Welcome to Rowboat</Text>
+          <View style={{ alignItems: 'center', gap: 4 }}>
+            <Text style={{ fontSize: 26, fontWeight: '700', color: colors.label }}>Welcome to Spaces</Text>
+            <Text style={{ fontSize: 14, color: colors.tertiaryLabel }}>by Rowboat</Text>
+          </View>
         </View>
 
         <View style={{ gap: 20, marginTop: 8 }}>
