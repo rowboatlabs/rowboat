@@ -54,7 +54,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "eas-build-post-install": "cd ../../../harbor/packages/protocol && npm install --no-audit --no-fund && npm run build"
+    "eas-build-post-install": "cd ../../../harbor && pnpm install --filter ./packages/protocol --no-frozen-lockfile && cd packages/protocol && pnpm run build"
   },
   "private": true
 }
