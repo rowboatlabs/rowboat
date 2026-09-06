@@ -47,25 +47,67 @@ function SignIn() {
   };
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 32, backgroundColor: colors.background }}>
-      <Image source="sf:sailboat" style={{ width: 44, height: 44 }} tintColor={colors.secondaryLabel} />
-      <Text style={{ fontSize: 20, fontWeight: '600', color: colors.label }}>Rowboat Spaces</Text>
-      <Text style={{ fontSize: 14, textAlign: 'center', color: colors.secondaryLabel }}>
-        Talk and files, for your team and everyone's agents.
-      </Text>
-      <Pressable
-        disabled={busy}
-        onPress={() => void go()}
-        style={({ pressed }) => ({
-          marginTop: 8, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, borderCurve: 'continuous',
-          backgroundColor: colors.label, opacity: pressed || busy ? 0.7 : 1,
-        })}
-      >
-        {busy
-          ? <ActivityIndicator color={colors.background} />
-          : <Text style={{ fontSize: 15, fontWeight: '600', color: colors.background }}>Sign in with Rowboat</Text>}
-      </Pressable>
-      {error ? <Text style={{ fontSize: 13, textAlign: 'center', color: colors.destructive }}>{error}</Text> : null}
+    <View style={{ flex: 1, paddingHorizontal: 28, backgroundColor: colors.background }}>
+      {/* Welcome (the one-screen onboarding, Apple's pattern): identity,
+          three feature rows, one primary action. */}
+      <View style={{ flex: 1, justifyContent: 'center', gap: 28 }}>
+        <View style={{ alignItems: 'center', gap: 10 }}>
+          <Image source="sf:sailboat" style={{ width: 48, height: 48 }} tintColor={colors.label} />
+          <Text style={{ fontSize: 26, fontWeight: '700', color: colors.label }}>Welcome to Rowboat</Text>
+        </View>
+
+        <View style={{ gap: 20, marginTop: 8 }}>
+          <FeatureRow
+            icon="sf:bubble.left.and.bubble.right.fill"
+            title="Talk with your team"
+            detail="Every space has one stream — messages, threads, reactions."
+          />
+          <FeatureRow
+            icon="sf:folder.fill"
+            title="Files everyone can see"
+            detail="Plans, notes, and decisions live next to the conversation."
+          />
+          <FeatureRow
+            icon="sf:sparkles"
+            title="Agents included"
+            detail="Mention @rowboat and your agent picks it up — as you, for you."
+          />
+        </View>
+      </View>
+
+      <View style={{ paddingBottom: 40, gap: 14 }}>
+        <Pressable
+          disabled={busy}
+          onPress={() => void go()}
+          style={({ pressed }) => ({
+            paddingVertical: 14, borderRadius: 14, borderCurve: 'continuous', alignItems: 'center',
+            backgroundColor: colors.label, opacity: pressed || busy ? 0.7 : 1,
+          })}
+        >
+          {busy
+            ? <ActivityIndicator color={colors.background} />
+            : <Text style={{ fontSize: 16, fontWeight: '600', color: colors.background }}>Sign in with Rowboat</Text>}
+        </Pressable>
+        <Pressable onPress={() => router.push('/pairing')} style={{ alignItems: 'center', padding: 4 }}>
+          <Text style={{ fontSize: 14, color: colors.secondaryLabel }}>
+            Use Rowboat on your Mac? <Text style={{ fontWeight: '600', color: colors.label }}>Connect your Mac</Text>
+          </Text>
+        </Pressable>
+        {error ? <Text style={{ fontSize: 13, textAlign: 'center', color: colors.destructive }}>{error}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+function FeatureRow({ icon, title, detail }: { icon: string; title: string; detail: string }) {
+  const colors = useColors();
+  return (
+    <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+      <Image source={icon} style={{ width: 30, height: 30 }} tintColor={colors.label} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={{ fontSize: 15, fontWeight: '600', color: colors.label }}>{title}</Text>
+        <Text style={{ fontSize: 13, lineHeight: 18, color: colors.secondaryLabel }}>{detail}</Text>
+      </View>
     </View>
   );
 }

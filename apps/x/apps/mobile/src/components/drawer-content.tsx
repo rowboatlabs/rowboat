@@ -115,7 +115,13 @@ export function DrawerContent(props: DrawerContentComponentProps) {
         }
       />
       ) : (
-        <View style={{ flex: 1 }} />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 32 }}>
+          <Image source="sf:bubble.left.and.bubble.right" style={{ width: 30, height: 30 }} tintColor={colors.tertiaryLabel} />
+          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.secondaryLabel }}>Nothing here yet</Text>
+          <Text style={{ fontSize: 13, textAlign: 'center', lineHeight: 18, color: colors.tertiaryLabel }}>
+            Chats with your Mac and your Brain show up here once you connect your Mac.
+          </Text>
+        </View>
       )}
 
       {/* Foot: Brain, then the connection row */}
