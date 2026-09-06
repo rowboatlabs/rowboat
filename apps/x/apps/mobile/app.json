@@ -15,8 +15,10 @@
         "NSMicrophoneUsageDescription": "The microphone is used to talk to your Rowboat agents with voice.",
         "NSLocalNetworkUsageDescription": "Rowboat connects to the Rowboat app on your Mac over your local network.",
         "NSBonjourServices": [
+          "_http._tcp",
           "_http._tcp"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

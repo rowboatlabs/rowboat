@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
 import { MessageActionSheet, MessageRow, applyReaction } from '@/components/space-message';
@@ -18,6 +19,7 @@ import { useColors } from '@/theme/colors';
 export default function SpaceChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
   const account = useSpacesAccount();
   const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string }>();
   const { org, space, title, me } = params;
@@ -192,7 +194,7 @@ export default function SpaceChatScreen() {
       )}
 
       {/* Composer */}
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 8, paddingBottom: insets.bottom + 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 8, paddingBottom: (keyboardVisible ? 0 : insets.bottom) + 8 }}>
         <TextInput
           style={{
             flex: 1, minHeight: 40, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10,
