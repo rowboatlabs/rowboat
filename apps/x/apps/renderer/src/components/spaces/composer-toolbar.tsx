@@ -1,4 +1,5 @@
 import { useState, type RefObject } from 'react'
+import { useEditorState, type Editor } from '@tiptap/react'
 import {
     BoldIcon, CodeIcon, CodeSquareIcon, ItalicIcon, LinkIcon, ListIcon, ListOrderedIcon, QuoteIcon, StrikethroughIcon,
 } from 'lucide-react'
@@ -180,6 +181,174 @@ export function FormattingToolbar({ textareaRef, value, onChange, onCaret, class
             {GROUPS[2]!.map(button)}
             {separator}
             {GROUPS[3]!.map(button)}
+        </div>
+    )
+}
+
+// ---------------------------------------------------------------------------
+// The same bar, driven by the rich composer's TipTap editor: real commands
+// with pressed states instead of string transforms. (The message editor's
+// textarea still uses FormattingToolbar above.)
+// ---------------------------------------------------------------------------
+
+type RichToolKey = 'bold' | 'italic' | 'strike' | 'ordered' | 'bullet' | 'quote' | 'code' | 'codeblock'
+
+interface RichToolDef {
+    key: RichToolKey
+    title: string
+    icon: typeof BoldIcon
+    run: (editor: Editor) => void
+}
+
+const RICH_GROUPS: RichToolDef[][] = [
+    [
+        { key: 'bold', title: `Bold (${mod}B)`, icon: BoldIcon, run: (e) => e.chain().focus().toggleBold().run() },
+        { key: 'italic', title: `Italic (${mod}I)`, icon: ItalicIcon, run: (e) => e.chain().focus().toggleItalic().run() },
+        { key: 'strike', title: `Strikethrough (${mod}⇧X)`, icon: StrikethroughIcon, run: (e) => e.chain().focus().toggleStrike().run() },
+    ],
+    [
+        { key: 'ordered', title: `Ordered list (${mod}⇧7)`, icon: ListOrderedIcon, run: (e) => e.chain().focus().toggleOrderedList().run() },
+        { key: 'bullet', title: `Bulleted list (${mod}⇧8)`, icon: ListIcon, run: (e) => e.chain().focus().toggleBulletList().run() },
+    ],
+    [
+        { key: 'quote', title: `Blockquote (${mod}⇧9)`, icon: QuoteIcon, run: (e) => e.chain().focus().toggleBlockquote().run() },
+    ],
+    [
+        { key: 'code', title: `Code (${mod}E)`, icon: CodeIcon, run: (e) => e.chain().focus().toggleCode().run() },
+        { key: 'codeblock', title: `Code block (${mod}⌥⇧C)`, icon: CodeSquareIcon, run: (e) => e.chain().focus().toggleCodeBlock().run() },
+    ],
+]
+
+export function RichFormattingToolbar({ editor, className }: { editor: Editor | null; className?: string }) {
+    const [linkOpen, setLinkOpen] = useState(false)
+    // The selection as it stood when the link popover opened — its inputs
+    // steal focus, so the live selection is gone by submit time.
+    const [linkText, setLinkText] = useState('')
+    const [linkUrl, setLinkUrl] = useState('')
+    const active = useEditorState({
+        editor,
+        selector: ({ editor: ed }) =>
+            ed
+                ? {
+                      bold: ed.isActive('bold'),
+                      italic: ed.isActive('italic'),
+                      strike: ed.isActive('strike'),
+                      link: ed.isActive('link'),
+                      ordered: ed.isActive('orderedList'),
+                      bullet: ed.isActive('bulletList'),
+                      quote: ed.isActive('blockquote'),
+                      code: ed.isActive('code'),
+                      codeblock: ed.isActive('codeBlock'),
+                  }
+                : null,
+    })
+    if (!editor) return null
+
+    const openLink = () => {
+        const { from, to } = editor.state.selection
+        setLinkText(editor.state.doc.textBetween(from, to, ' '))
+        setLinkUrl((editor.getAttributes('link').href as string | undefined) ?? '')
+        setLinkOpen(true)
+    }
+
+    const submitLink = () => {
+        const url = linkUrl.trim()
+        if (!url) return
+        const href = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`
+        if (active?.link) {
+            // Re-addressing an existing link keeps its text.
+            editor.chain().focus().extendMarkRange('link').setLink({ href }).run()
+        } else {
+            // Replace the selection (or insert at the caret) with linked text,
+            // then a plain space so typing continues unlinked.
+            editor.chain().focus().insertContent([
+                { type: 'text', text: linkText.trim() || href, marks: [{ type: 'link', attrs: { href } }] },
+                { type: 'text', text: ' ' },
+            ]).run()
+        }
+        setLinkOpen(false)
+    }
+
+    const button = (t: RichToolDef) => (
+        <Tooltip key={t.key} delayDuration={400}>
+            <TooltipTrigger asChild>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t.title}
+                    aria-pressed={active?.[t.key] ?? false}
+                    className={cn('size-7 text-muted-foreground hover:text-foreground', active?.[t.key] && 'bg-accent text-foreground')}
+                    // Keep the editor focused (and its selection alive) through the click.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => t.run(editor)}
+                >
+                    <t.icon className="size-4" />
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{t.title}</TooltipContent>
+        </Tooltip>
+    )
+
+    const separator = <span className="mx-1 h-4 w-px shrink-0 bg-border" />
+
+    return (
+        <div className={cn('flex items-center', className)}>
+            {RICH_GROUPS[0]!.map(button)}
+            {separator}
+            <Popover open={linkOpen} onOpenChange={setLinkOpen}>
+                <PopoverTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Link"
+                        aria-pressed={active?.link ?? false}
+                        className={cn('size-7 text-muted-foreground hover:text-foreground', active?.link && 'bg-accent text-foreground')}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={openLink}
+                    >
+                        <LinkIcon className="size-4" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" sideOffset={6} className="w-72 p-2.5">
+                    <div className="flex flex-col gap-2">
+                        <Input
+                            placeholder="Text"
+                            value={linkText}
+                            onChange={(e) => setLinkText(e.target.value)}
+                            className="h-8 text-sm"
+                        />
+                        <Input
+                            autoFocus
+                            placeholder="Link"
+                            value={linkUrl}
+                            onChange={(e) => setLinkUrl(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    submitLink()
+                                }
+                            }}
+                            className="h-8 text-sm"
+                        />
+                        <div className="flex justify-end gap-1.5">
+                            <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => setLinkOpen(false)}>
+                                Cancel
+                            </Button>
+                            <Button type="button" size="sm" className="h-7" disabled={!linkUrl.trim()} onClick={submitLink}>
+                                Add
+                            </Button>
+                        </div>
+                    </div>
+                </PopoverContent>
+            </Popover>
+            {separator}
+            {RICH_GROUPS[1]!.map(button)}
+            {separator}
+            {RICH_GROUPS[2]!.map(button)}
+            {separator}
+            {RICH_GROUPS[3]!.map(button)}
         </div>
     )
 }

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { EditorContent, useEditor } from '@tiptap/react'
+import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
 import { ArrowUp, BarChart3, Bot, Clock, FileText, Globe, Loader2, Megaphone, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
@@ -6,13 +8,13 @@ import { cn } from '@/lib/utils'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
 import { MemberAvatar } from '@/components/spaces/atoms'
-import { FormattingToolbar } from '@/components/spaces/composer-toolbar'
-import { toggleCodeBlock, toggleInline, toggleLinePrefix, type FormatResult } from '@/lib/spaces-format'
+import { caretContext, composerExtensions, composerMarkdown, type CaretContext } from '@/components/spaces/composer-editor'
+import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
+import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import { schedulePresets } from '@/lib/spaces-schedule'
@@ -122,7 +124,45 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         }
     }, [draftKey, draft])
     const [appliedSeed, setAppliedSeed] = useState<number | null>(null)
-    const ref = useRef<HTMLTextAreaElement | null>(null)
+
+    // ------------------------------------------------------------------
+    // The rich input (TipTap). The editor owns what you see; `draft` is the
+    // serialized markdown mirror, re-derived on every update, so drafts,
+    // slash commands, @rowboat detection and buildBody all keep reading the
+    // exact string a textarea used to hold. Editor callbacks go through
+    // latest-closure refs — the instance is created once per mount.
+    // ------------------------------------------------------------------
+    const placeholderRef = useRef(placeholder)
+    const onTypeRef = useRef(onType)
+    const keydownRef = useRef<(view: EditorView, event: KeyboardEvent) => boolean>(() => false)
+    const pasteRef = useRef<(event: ClipboardEvent) => boolean>(() => false)
+    const dropRef = useRef<(event: DragEvent) => boolean>(() => false)
+    /** Where the caret sits (text-before-caret + doc position) — drives the autocompletes. */
+    const [context, setContext] = useState<CaretContext | null>(null)
+    const [mentionOpen, setMentionOpen] = useState(false)
+
+    const editor = useEditor({
+        // The getter runs inside Placeholder's decoration pass (post-render,
+        // in the editor), never during this render — a false positive here.
+        // eslint-disable-next-line react-hooks/refs
+        extensions: composerExtensions(() => placeholderRef.current),
+        content: draft,
+        autofocus: autoFocus ? 'end' : false,
+        editorProps: {
+            handleKeyDown: (view, event) => keydownRef.current(view, event),
+            handlePaste: (_view, event) => pasteRef.current(event),
+            handleDrop: (_view, event) => dropRef.current(event),
+        },
+        onUpdate: ({ editor: ed }) => {
+            setDraft(composerMarkdown(ed))
+            const ctx = caretContext(ed)
+            setContext(ctx)
+            // Open on "@" at a word start; stay open while the query grows.
+            setMentionOpen(!!ctx && MENTION_RE.test(ctx.text))
+            onTypeRef.current?.()
+        },
+        onSelectionUpdate: ({ editor: ed }) => setContext(caretContext(ed)),
+    })
 
     // --- attachments ---------------------------------------------------------
     const refs = useSpaceRefs()
@@ -197,38 +237,32 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         setDragOver(false)
         addFiles(Array.from(e.dataTransfer.files))
     }
-    const onPaste = (e: React.ClipboardEvent) => {
-        if (refs) {
-            const files = Array.from(e.clipboardData.items)
+    // Pasted files attach; a pasted direct image address (a GIF link) becomes
+    // the image itself, nothing re-hosted — but only when the paste IS the
+    // URL; a URL inside a sentence stays as typed.
+    const handleEditorPaste = (event: ClipboardEvent): boolean => {
+        const data = event.clipboardData
+        if (refs && data) {
+            const files = Array.from(data.items)
                 .filter((item) => item.kind === 'file')
                 .map((item) => item.getAsFile())
                 .filter((f): f is File => f !== null)
             if (files.length > 0) {
-                e.preventDefault()
                 addFiles(files)
-                return
+                return true
             }
         }
-        // A pasted direct image address (a GIF link) becomes the image, not
-        // the URL text — markdown image syntax, nothing re-hosted: the message
-        // keeps pointing at the original. Only when the paste IS the URL;
-        // a URL inside a sentence stays as typed.
-        const text = e.clipboardData.getData('text/plain').trim()
-        if (!text || /\s/.test(text) || !isDirectImageUrl(text)) return
-        e.preventDefault()
-        const el = ref.current
-        const start = el?.selectionStart ?? draft.length
-        const end = el?.selectionEnd ?? draft.length
-        const inserted = `![](${text})`
-        setDraft(draft.slice(0, start) + inserted + draft.slice(end))
-        onType?.()
-        requestAnimationFrame(() => {
-            const node = ref.current
-            if (!node) return
-            const pos = start + inserted.length
-            node.setSelectionRange(pos, pos)
-        })
+        const text = data?.getData('text/plain').trim() ?? ''
+        if (text && !/\s/.test(text) && isDirectImageUrl(text) && editor) {
+            editor.chain().focus().insertContent({ type: 'image', attrs: { src: text } }).run()
+            return true
+        }
+        return false
     }
+    // Files dropped on the editor belong to the container's drop handler (the
+    // overlay + addFiles above) — only stop ProseMirror from inserting.
+    const editorDropGuard = (event: DragEvent): boolean =>
+        !!(refs && event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files'))
 
     // Agent options — only meaningful (and only shown) when @rowboat is addressed.
     const [model, setModel] = useState<ModelSelection | null>(null)
@@ -247,34 +281,28 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         return () => window.removeEventListener('code-mode-config-changed', load)
     }, [])
 
-    // Apply a new seed during render (React's adjust-state-on-prop-change pattern).
-    if (seed && seed.nonce !== appliedSeed) {
-        setAppliedSeed(seed.nonce)
-        // Append (the profile popover's "Mention") joins a draft in progress;
-        // a plain seed replaces it (quote-reply, ask-rowboat).
-        setDraft(seed.append && draft ? `${draft}${/\s$/.test(draft) ? '' : ' '}${seed.text}` : seed.text)
-    }
-    const seedNonce = seed?.nonce ?? null
+    // Apply a new seed by rebuilding the doc from its markdown. Append (the
+    // profile popover's "Mention") joins a draft in progress; a plain seed
+    // replaces it (quote-reply, ask-rowboat). Caret lands at the end.
     useEffect(() => {
-        if (seedNonce === null) return
-        const el = ref.current
-        if (!el) return
-        el.focus()
-        const end = el.value.length
-        el.setSelectionRange(end, end)
-    }, [seedNonce])
+        if (!editor || !seed || seed.nonce === appliedSeed) return
+        setAppliedSeed(seed.nonce)
+        const current = composerMarkdown(editor)
+        const next = seed.append && current ? `${current}${/\s$/.test(current) ? '' : ' '}${seed.text}` : seed.text
+        editor.commands.setContent(next)
+        setDraft(composerMarkdown(editor))
+        editor.commands.focus('end')
+    }, [editor, seed, appliedSeed])
 
     // --- @ autocomplete ------------------------------------------------------
-    const [caret, setCaret] = useState(0)
-    const [mentionOpen, setMentionOpen] = useState(false)
     const [mentionIndex, setMentionIndex] = useState(0)
     const mentionMatch = useMemo(() => {
-        if (!mentionOpen) return null
-        const before = draft.slice(0, caret)
-        const m = MENTION_RE.exec(before)
+        if (!mentionOpen || !context) return null
+        const m = MENTION_RE.exec(context.text)
         if (!m) return null
-        return { query: (m[2] ?? '').toLowerCase(), start: caret - (m[2]?.length ?? 0) - 1 }
-    }, [draft, caret, mentionOpen])
+        const query = m[2] ?? ''
+        return { query: query.toLowerCase(), from: context.from - query.length - 1, to: context.from }
+    }, [context, mentionOpen])
     const candidates = useMemo<MentionCandidate[]>(() => {
         if (!mentionMatch) return []
         const q = mentionMatch.query
@@ -313,10 +341,11 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // ":fi" at the caret offers 🔥 etc.; a completed ":fire:" left as text
     // still converts at send time (replaceShortcodes).
     const emojiMatch = useMemo(() => {
-        const m = /(^|[\s([{]):([a-z0-9_+-]{2,})$/.exec(draft.slice(0, caret))
+        if (!context) return null
+        const m = /(^|[\s([{]):([a-z0-9_+-]{2,})$/.exec(context.text)
         if (!m) return null
-        return { query: m[2]!, start: caret - m[2]!.length - 1 }
-    }, [draft, caret])
+        return { query: m[2]!, from: context.from - m[2]!.length - 1, to: context.from }
+    }, [context])
     const emojiCandidates = useMemo<EmojiEntry[]>(() => (emojiMatch ? searchEmoji(emojiMatch.query, 8) : []), [emojiMatch])
     const [emojiIndex, setEmojiIndex] = useState(0)
     const [emojiDismissed, setEmojiDismissed] = useState(false)
@@ -328,9 +357,9 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         setEmojiDismissed(false)
     }
     const pickEmoji = (entry: EmojiEntry) => {
-        if (!emojiMatch) return
+        if (!emojiMatch || !editor) return
         noteEmojiUsed(entry.e)
-        insertAt(emojiMatch.start, caret, `${entry.e} `)
+        editor.chain().focus().deleteRange({ from: emojiMatch.from, to: emojiMatch.to }).insertContent({ type: 'text', text: `${entry.e} ` }).run()
     }
 
     // --- slash commands ------------------------------------------------------
@@ -356,76 +385,40 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     })()
 
     const pickCommand = (c: CommandEntry) => {
+        if (!editor) return
         if (c.args) {
             // Complete to "/name " — the person types the argument, Enter runs.
-            const next = `/${c.name} `
-            setDraft(next)
-            requestAnimationFrame(() => {
-                const el = ref.current
-                if (!el) return
-                el.focus()
-                el.setSelectionRange(next.length, next.length)
-                setCaret(next.length)
-            })
+            editor.chain().focus().clearContent().insertContent({ type: 'text', text: `/${c.name} ` }).run()
         } else {
-            setDraft('')
+            editor.chain().clearContent().run()
             if (c.run) void c.run('')
         }
     }
 
-    const insertAt = (start: number, end: number, text: string) => {
-        const next = `${draft.slice(0, start)}${text}${draft.slice(end)}`
-        setDraft(next)
-        setMentionOpen(false)
-        requestAnimationFrame(() => {
-            const el = ref.current
-            if (!el) return
-            el.focus()
-            const pos = start + text.length
-            el.setSelectionRange(pos, pos)
-            setCaret(pos)
-        })
-    }
     // The draft shows the person's name; send() encodes it back to the wire
     // address @<memberId> (what notifications and agent invocation scan for).
-    // A file inserts a plain markdown link — relative links in messages mean
-    // space files, standard syntax on the wire.
+    // A file becomes a live link to the space path — standard markdown on the
+    // wire. Inserted as literal nodes, never re-parsed as markdown.
     const pickCandidate = (c: MentionCandidate) => {
-        if (!mentionMatch) return
-        if (c.filePath) insertAt(mentionMatch.start, caret, `[${c.filePath}](${encodeSpaceLinkTarget(c.filePath)}) `)
-        else insertAt(mentionMatch.start, caret, `@${c.label} `)
-    }
-
-    // Markdown formatting: the toolbar's buttons and the keyboard shortcuts
-    // run the same pure helpers (composer-toolbar.tsx) through here — one
-    // draft rewrite, one selection restore, caret kept in sync for the
-    // autocompletes.
-    const applyFormat = (run: (value: string, start: number, end: number) => FormatResult) => {
-        const el = ref.current
-        if (!el) return
-        const start = el.selectionStart ?? draft.length
-        const end = el.selectionEnd ?? start
-        const r = run(draft, Math.min(start, end), Math.max(start, end))
-        setDraft(r.next)
-        requestAnimationFrame(() => {
-            el.focus()
-            el.setSelectionRange(r.selStart, r.selEnd)
-            setCaret(r.selEnd)
-        })
+        if (!mentionMatch || !editor) return
+        const chain = editor.chain().focus().deleteRange({ from: mentionMatch.from, to: mentionMatch.to })
+        if (c.filePath) {
+            chain.insertContent([
+                { type: 'text', text: c.filePath, marks: [{ type: 'link', attrs: { href: encodeSpaceLinkTarget(c.filePath) } }] },
+                { type: 'text', text: ' ' },
+            ]).run()
+        } else {
+            chain.insertContent({ type: 'text', text: `@${c.label} ` }).run()
+        }
+        setMentionOpen(false)
     }
 
     const insertRowboatChip = () => {
-        const el = ref.current
-        const mention = '@rowboat '
-        if (!el) {
-            setDraft((d) => (d.includes('@rowboat') ? d : `${mention}${d}`))
-            return
-        }
-        const start = el.selectionStart ?? draft.length
-        const end = el.selectionEnd ?? draft.length
-        const before = draft.slice(0, start)
+        if (!editor) return
+        const { $from, empty } = editor.state.selection
+        const before = empty && $from.parent.isTextblock ? $from.parent.textBetween(0, $from.parentOffset, ' ', ' ') : ''
         const needsSpace = before.length > 0 && !/\s$/.test(before)
-        insertAt(start, end, `${needsSpace ? ' ' : ''}${mention}`)
+        editor.chain().focus().insertContent({ type: 'text', text: `${needsSpace ? ' ' : ''}@rowboat ` }).run()
     }
 
     // --- send ----------------------------------------------------------------
@@ -457,6 +450,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         const body = buildBody(raw)
         if (!body) return
         await onSchedule(body, at)
+        editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
         setMentionOpen(false)
@@ -477,6 +471,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     return
                 }
                 if (found.run) {
+                    editor?.chain().clearContent().run()
                     setDraft('')
                     await found.run(args)
                     return
@@ -502,10 +497,109 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
               }
             : undefined
         await onSend(body, agent)
+        editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
         setMentionOpen(false)
     }
+
+    // The editor's keydown: popover navigation first (it must beat every
+    // editor keymap), then the send keys. Formatting chords live in the
+    // editor's own extensions. Returning true consumes the event.
+    const handleEditorKeyDown = (view: EditorView, e: KeyboardEvent): boolean => {
+        if (showCommands) {
+            if (e.key === 'ArrowDown') {
+                setCmdIndex((i) => (i + 1) % cmdCandidates.length)
+                return true
+            }
+            if (e.key === 'ArrowUp') {
+                setCmdIndex((i) => (i - 1 + cmdCandidates.length) % cmdCandidates.length)
+                return true
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+                const c = cmdCandidates[cmdIndex]
+                if (c) pickCommand(c)
+                return true
+            }
+            if (e.key === 'Escape') {
+                setCmdDismissed(true)
+                return true
+            }
+        }
+        if (showMentions) {
+            if (e.key === 'ArrowDown') {
+                setMentionIndex((i) => (i + 1) % candidates.length)
+                return true
+            }
+            if (e.key === 'ArrowUp') {
+                setMentionIndex((i) => (i - 1 + candidates.length) % candidates.length)
+                return true
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+                const c = candidates[mentionIndex]
+                if (c) pickCandidate(c)
+                return true
+            }
+            if (e.key === 'Escape') {
+                setMentionOpen(false)
+                return true
+            }
+        }
+        if (showEmoji) {
+            if (e.key === 'ArrowDown') {
+                setEmojiIndex((i) => (i + 1) % emojiCandidates.length)
+                return true
+            }
+            if (e.key === 'ArrowUp') {
+                setEmojiIndex((i) => (i - 1 + emojiCandidates.length) % emojiCandidates.length)
+                return true
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+                const c = emojiCandidates[emojiIndex]
+                if (c) pickEmoji(c)
+                return true
+            }
+            if (e.key === 'Escape') {
+                setEmojiDismissed(true)
+                return true
+            }
+        }
+        if (e.key !== 'Enter') return false
+        // ⌘Enter always sends — even from inside a code fence.
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+            void send()
+            return true
+        }
+        if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && editor) {
+            // Shift+Enter continues a list — next item, or out of the list
+            // from an empty one; elsewhere the default hard break applies.
+            if (editor.isActive('listItem')) {
+                const { $from } = editor.state.selection
+                if ($from.parent.textContent === '') return editor.chain().focus().liftListItem('listItem').run()
+                return editor.chain().focus().splitListItem('listItem').run()
+            }
+            return false
+        }
+        if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !view.composing) {
+            // Inside a code fence Enter breaks the line (the Slack posture);
+            // everywhere else it sends.
+            if (view.state.selection.$from.parent.type.name === 'codeBlock') return false
+            void send()
+            return true
+        }
+        return false
+    }
+
+    // The editor reads its callbacks through refs, re-pointed after every
+    // render so the closures always see current state (the ref-mirror
+    // pattern the notes editor uses).
+    useEffect(() => {
+        placeholderRef.current = placeholder
+        onTypeRef.current = onType
+        keydownRef.current = handleEditorKeyDown
+        pasteRef.current = handleEditorPaste
+        dropRef.current = editorDropGuard
+    })
 
     return (
         <div className="px-3 pb-3 pt-1 shrink-0">
@@ -591,16 +685,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     </div>
                 )}
                 {/* The formatting bar rides the top edge, Slack-style. */}
-                <FormattingToolbar
-                    textareaRef={ref}
-                    value={draft}
-                    onChange={(next) => {
-                        setDraft(next)
-                        onType?.()
-                    }}
-                    onCaret={setCaret}
-                    className="px-2 pt-1.5"
-                />
+                <RichFormattingToolbar editor={editor} className="px-2 pt-1.5" />
                 {attachments.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
                         {attachments.map((a) => (
@@ -633,129 +718,9 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                         ))}
                     </div>
                 )}
-                <Textarea
-                    ref={ref}
-                    autoFocus={autoFocus}
-                    value={draft}
-                    placeholder={placeholder}
-                    rows={1}
-                    className="min-h-9 max-h-40 resize-none border-0 bg-transparent dark:bg-transparent px-3 pt-1.5 pb-1 text-sm shadow-none focus-visible:ring-0 field-sizing-content"
-                    onPaste={onPaste}
-                    onChange={(e) => {
-                        setDraft(e.target.value)
-                        const pos = e.target.selectionStart ?? e.target.value.length
-                        setCaret(pos)
-                        // Open on "@" at a word start; stay open while the query grows.
-                        setMentionOpen(MENTION_RE.test(e.target.value.slice(0, pos)))
-                        onType?.()
-                    }}
-                    onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-                    onKeyDown={(e) => {
-                        if (showCommands) {
-                            if (e.key === 'ArrowDown') {
-                                e.preventDefault()
-                                setCmdIndex((i) => (i + 1) % cmdCandidates.length)
-                                return
-                            }
-                            if (e.key === 'ArrowUp') {
-                                e.preventDefault()
-                                setCmdIndex((i) => (i - 1 + cmdCandidates.length) % cmdCandidates.length)
-                                return
-                            }
-                            if (e.key === 'Enter' || e.key === 'Tab') {
-                                e.preventDefault()
-                                const c = cmdCandidates[cmdIndex]
-                                if (c) pickCommand(c)
-                                return
-                            }
-                            if (e.key === 'Escape') {
-                                e.preventDefault()
-                                setCmdDismissed(true)
-                                return
-                            }
-                        }
-                        if (showMentions) {
-                            if (e.key === 'ArrowDown') {
-                                e.preventDefault()
-                                setMentionIndex((i) => (i + 1) % candidates.length)
-                                return
-                            }
-                            if (e.key === 'ArrowUp') {
-                                e.preventDefault()
-                                setMentionIndex((i) => (i - 1 + candidates.length) % candidates.length)
-                                return
-                            }
-                            if (e.key === 'Enter' || e.key === 'Tab') {
-                                e.preventDefault()
-                                const c = candidates[mentionIndex]
-                                if (c) pickCandidate(c)
-                                return
-                            }
-                            if (e.key === 'Escape') {
-                                e.preventDefault()
-                                setMentionOpen(false)
-                                return
-                            }
-                        }
-                        if (showEmoji) {
-                            if (e.key === 'ArrowDown') {
-                                e.preventDefault()
-                                setEmojiIndex((i) => (i + 1) % emojiCandidates.length)
-                                return
-                            }
-                            if (e.key === 'ArrowUp') {
-                                e.preventDefault()
-                                setEmojiIndex((i) => (i - 1 + emojiCandidates.length) % emojiCandidates.length)
-                                return
-                            }
-                            if (e.key === 'Enter' || e.key === 'Tab') {
-                                e.preventDefault()
-                                const c = emojiCandidates[emojiIndex]
-                                if (c) pickEmoji(c)
-                                return
-                            }
-                            if (e.key === 'Escape') {
-                                e.preventDefault()
-                                setEmojiDismissed(true)
-                                return
-                            }
-                        }
-                        // The Slack chords: ⌘B/⌘I/⌘⇧X inline marks, ⌘E and
-                        // ⌘⇧C inline code, ⌘⇧7/8/9 ordered/bullet/quote
-                        // (e.code — shift turns the digits into symbols),
-                        // ⌘⌥⇧C a fenced code block.
-                        if ((e.metaKey || e.ctrlKey) && e.altKey && e.shiftKey && e.code === 'KeyC') {
-                            e.preventDefault()
-                            applyFormat(toggleCodeBlock)
-                            return
-                        }
-                        if ((e.metaKey || e.ctrlKey) && !e.altKey) {
-                            const key = e.key.toLowerCase()
-                            let run: ((v: string, s: number, en: number) => FormatResult) | null = null
-                            if (e.shiftKey) {
-                                if (key === 'x') run = (v, s, en) => toggleInline(v, s, en, '~~')
-                                else if (e.code === 'KeyC') run = (v, s, en) => toggleInline(v, s, en, '`')
-                                else if (e.code === 'Digit7') run = (v, s, en) => toggleLinePrefix(v, s, en, 'ordered')
-                                else if (e.code === 'Digit8') run = (v, s, en) => toggleLinePrefix(v, s, en, 'bullet')
-                                else if (e.code === 'Digit9') run = (v, s, en) => toggleLinePrefix(v, s, en, 'quote')
-                            } else {
-                                if (key === 'b') run = (v, s, en) => toggleInline(v, s, en, '**')
-                                else if (key === 'i') run = (v, s, en) => toggleInline(v, s, en, '*')
-                                else if (key === 'e') run = (v, s, en) => toggleInline(v, s, en, '`')
-                            }
-                            if (run) {
-                                e.preventDefault()
-                                applyFormat(run)
-                                return
-                            }
-                        }
-                        // Enter sends; Shift+Enter breaks a line.
-                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                            e.preventDefault()
-                            void send()
-                        }
-                    }}
-                />
+                {/* The rich input. What you see is what sends — the doc
+                    serializes back to wire markdown on every update. */}
+                <EditorContent editor={editor} className="space-composer" />
                 <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
                     {refs && (
                         <>
