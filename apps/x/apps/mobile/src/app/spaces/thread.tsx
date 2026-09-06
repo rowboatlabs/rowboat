@@ -1,4 +1,4 @@
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -12,22 +12,22 @@ import { SpacesClient } from '@/lib/spaces/client';
 import { SpacesLive } from '@/lib/spaces/live';
 import { useColors } from '@/theme/colors';
 
-// One space's stream (S2): root messages newest at the bottom, live over the
-// org WS, composer to post. Long-press a row for reactions / reply-in-thread;
-// replies live on the thread screen.
-export default function SpaceChatScreen() {
+// One flat thread: root pinned on top, replies below, composer posts with
+// threadRoot. Live folds replies + reactions addressed to this thread.
+export default function SpaceThreadScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const account = useSpacesAccount();
-  const params = useLocalSearchParams<{ org: string; space: string; title: string; me: string }>();
-  const { org, space, title, me } = params;
+  const params = useLocalSearchParams<{ org: string; space: string; root: string; title: string; me: string }>();
+  const { org, space, root, me } = params;
 
   const client = useMemo(
     () => new SpacesClient({ baseUrl: `https://${org}`, token: (opts) => account.getAccessToken(opts) }),
     [org, account],
   );
 
-  const [messages, setMessages] = useState<Message[] | null>(null);
+  const [rootMessage, setRootMessage] = useState<Message | null>(null);
+  const [replies, setReplies] = useState<Message[] | null>(null);
   const [members, setMembers] = useState<Map<string, Member>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -36,57 +36,44 @@ export default function SpaceChatScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
-  // Fold one live message into the stream: roots append; replies bump their
-  // root's reply chip.
-  const foldMessage = useCallback((message: Message) => {
-    setMessages((prev) => {
-      if (!prev) return prev;
-      if (message.threadRoot) {
-        return prev.map((m) =>
-          m.id === message.threadRoot
-            ? { ...m, replyCount: m.replyCount + 1, lastReplyAt: message.postedAt }
-            : m,
-        );
-      }
-      if (prev.some((m) => m.id === message.id)) return prev;
-      return [...prev, message];
-    });
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.listStream(space), client.listMembers(space)])
-      .then(([stream, memberList]) => {
+    Promise.all([client.listThread(space, root), client.listMembers(space)])
+      .then(([thread, memberList]) => {
         if (cancelled) return;
         setMembers(new Map(memberList.map((m) => [m.id, m])));
-        setMessages(stream.messages);
-        lastOffset.current = stream.messages.at(-1)?.offset;
+        setRootMessage(thread.root);
+        setReplies(thread.messages);
+        lastOffset.current = thread.messages.at(-1)?.offset ?? thread.root.offset;
       })
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)));
     return () => {
       cancelled = true;
     };
-  }, [client, space]);
+  }, [client, space, root]);
 
-  // Live: one socket for this screen's lifetime, replay from the last offset
-  // the initial fetch saw (subscribe waits until that fetch lands).
   useEffect(() => {
-    if (messages === null) return;
+    if (replies === null) return;
     const live = new SpacesLive({ baseUrl: `https://${org}`, token: () => account.getAccessToken() });
     const off = live.subscribe(
       space,
       (frame) => {
         if (frame.kind !== 'event') return;
         const event = frame.event;
-        if (event.type === 'message') foldMessage(event.message);
-        else if (event.type === 'message_deleted') {
-          setMessages((prev) => prev?.map((m) => (m.id === event.deletion.messageId ? { ...m, body: '', deletedAt: event.deletion.at } : m)) ?? null);
+        if (event.type === 'message' && event.message.threadRoot === root) {
+          setReplies((prev) => (prev && !prev.some((m) => m.id === event.message.id) ? [...prev, event.message] : prev));
+        } else if (event.type === 'message_deleted') {
+          const patch = (m: Message) => (m.id === event.deletion.messageId ? { ...m, body: '', deletedAt: event.deletion.at } : m);
+          setRootMessage((prev) => (prev ? patch(prev) : prev));
+          setReplies((prev) => prev?.map(patch) ?? null);
         } else if (event.type === 'message_edited') {
-          setMessages((prev) => prev?.map((m) => (m.id === event.edit.messageId ? { ...m, body: event.edit.body, editedAt: event.edit.at } : m)) ?? null);
+          const patch = (m: Message) => (m.id === event.edit.messageId ? { ...m, body: event.edit.body, editedAt: event.edit.at } : m);
+          setRootMessage((prev) => (prev ? patch(prev) : prev));
+          setReplies((prev) => prev?.map(patch) ?? null);
         } else if (event.type === 'reaction') {
-          // Reactions fold server-side on reads; refetch the one message set is
-          // overkill — apply the toggle locally.
-          setMessages((prev) => prev?.map((m) => (m.id === event.reaction.messageId ? applyReaction(m, event.reaction.emoji, event.reaction.by.memberId, event.action) : m)) ?? null);
+          const patch = (m: Message) => (m.id === event.reaction.messageId ? applyReaction(m, event.reaction.emoji, event.reaction.by.memberId, event.action) : m);
+          setRootMessage((prev) => (prev ? patch(prev) : prev));
+          setReplies((prev) => prev?.map(patch) ?? null);
         }
       },
       lastOffset.current,
@@ -96,12 +83,12 @@ export default function SpaceChatScreen() {
       live.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- connect once per screen after first load
-  }, [messages === null, org, space]);
+  }, [replies === null, org, space, root]);
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 50);
     return () => clearTimeout(t);
-  }, [messages?.length]);
+  }, [replies?.length]);
 
   const send = async () => {
     const body = draft.trim();
@@ -110,8 +97,8 @@ export default function SpaceChatScreen() {
     setSending(true);
     setDraft('');
     try {
-      const { message } = await client.postMessage(space, { body, actingMode: 'direct' });
-      foldMessage(message);
+      const { message } = await client.postMessage(space, { body, threadRoot: root, actingMode: 'direct' });
+      setReplies((prev) => (prev && !prev.some((m) => m.id === message.id) ? [...prev, message] : prev));
     } catch (err) {
       setDraft(body);
       setError(err instanceof Error ? err.message : String(err));
@@ -120,47 +107,26 @@ export default function SpaceChatScreen() {
     }
   };
 
-  // Optimistic toggle; the server's folded message (and the live echo — both
-  // idempotent) settle the final state.
   const toggleReaction = useCallback(
     (message: Message, emoji: string) => {
       const mine = message.reactions.some((g) => g.emoji === emoji && g.memberIds.includes(me));
-      const action = mine ? ('removed' as const) : ('added' as const);
-      setMessages((prev) => prev?.map((m) => (m.id === message.id ? applyReaction(m, emoji, me, action) : m)) ?? null);
+      const patchWith = (folded: Message) => {
+        setRootMessage((prev) => (prev && prev.id === folded.id ? folded : prev));
+        setReplies((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null);
+      };
+      patchWith(applyReaction(message, emoji, me, mine ? 'removed' : 'added'));
       client
         .reactToMessage(space, message.id, { emoji, action: mine ? 'remove' : 'add', actingMode: 'direct' })
-        .then((folded) => setMessages((prev) => prev?.map((m) => (m.id === folded.id ? folded : m)) ?? null))
-        .catch(() => {
-          // Revert the optimistic fold.
-          setMessages((prev) => prev?.map((m) => (m.id === message.id ? applyReaction(m, emoji, me, mine ? 'added' : 'removed') : m)) ?? null);
-        });
+        .then(patchWith)
+        .catch(() => patchWith(message));
     },
     [client, space, me],
   );
 
-  const openThread = useCallback(
-    (message: Message) => {
-      router.push({ pathname: '/spaces/thread', params: { org, space, root: message.id, title: title ?? 'Thread', me } });
-    },
-    [org, space, title, me],
-  );
-
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior="padding" keyboardVerticalOffset={insets.top + 44}>
-      <Stack.Screen
-        options={{
-          title: title ?? 'Space',
-          headerRight: () => (
-            <Pressable
-              hitSlop={10}
-              onPress={() => router.push({ pathname: '/spaces/files', params: { org, space, title } })}
-            >
-              <Image source="sf:folder" style={{ width: 20, height: 20 }} tintColor={colors.label} />
-            </Pressable>
-          ),
-        }}
-      />
-      {messages === null && !error ? (
+      <Stack.Screen options={{ title: 'Thread' }} />
+      {rootMessage === null && !error ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator />
         </View>
@@ -172,22 +138,20 @@ export default function SpaceChatScreen() {
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
         >
           {error ? <Text style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
-          {messages?.map((m) => (
-            <MessageRow
-              key={m.id}
-              message={m}
-              member={members.get(m.author.memberId)}
-              me={me}
-              onToggleReaction={toggleReaction}
-              onOpenThread={openThread}
-              onLongPress={setActionMessage}
-            />
-          ))}
-          {messages?.length === 0 ? (
-            <Text style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: colors.tertiaryLabel }}>
-              No messages yet — say hi.
-            </Text>
+          {rootMessage ? (
+            <MessageRow message={rootMessage} member={members.get(rootMessage.author.memberId)} me={me} onToggleReaction={toggleReaction} onLongPress={setActionMessage} />
           ) : null}
+          {rootMessage && (replies?.length ?? 0) > 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: colors.tertiaryLabel }}>
+                {replies!.length} {replies!.length === 1 ? 'REPLY' : 'REPLIES'}
+              </Text>
+              <View style={{ flex: 1, height: 1, backgroundColor: colors.separator }} />
+            </View>
+          ) : null}
+          {replies?.map((m) => (
+            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} me={me} onToggleReaction={toggleReaction} onLongPress={setActionMessage} />
+          ))}
         </ScrollView>
       )}
 
@@ -199,7 +163,7 @@ export default function SpaceChatScreen() {
             fontSize: 16, color: colors.label, backgroundColor: colors.secondaryBackground,
             borderRadius: 20, borderCurve: 'continuous',
           }}
-          placeholder={`Message #${title ?? ''}`}
+          placeholder="Reply…"
           placeholderTextColor={colors.tertiaryLabel}
           value={draft}
           onChangeText={setDraft}
@@ -219,7 +183,6 @@ export default function SpaceChatScreen() {
         me={me}
         onClose={() => setActionMessage(null)}
         onToggleReaction={toggleReaction}
-        onReply={openThread}
       />
     </KeyboardAvoidingView>
   );

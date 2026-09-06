@@ -28,6 +28,9 @@ export default function SpacesLayout() {
       />
       {/* Title set by the screen from its params; native back chevron, no label. */}
       <Stack.Screen name="chat" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="thread" options={{ title: 'Thread', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="files" options={{ title: 'Files', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen name="file" options={{ title: '', headerBackButtonDisplayMode: 'minimal' }} />
     </Stack>
   );
 }
