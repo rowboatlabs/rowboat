@@ -7,7 +7,6 @@ import type { z } from 'zod';
 import type { workspace as workspaceShared } from '@x/shared';
 
 import { useConnection } from '@/lib/connection';
-import { FLAGS } from '@/lib/flags';
 import { useColors } from '@/theme/colors';
 
 type DirEntry = z.infer<typeof workspaceShared.DirEntry>;
@@ -62,9 +61,10 @@ function buildTree(entries: DirEntry[]): TreeNode[] {
   return sortNodes(root);
 }
 
-// Legacy surface: behind the flag while the release is Spaces-only.
+// Mac surface — only reachable with a pairing; otherwise back to Spaces.
 export default function BrainScreen() {
-  if (!FLAGS.legacyChatBrain) return <Redirect href="/" />;
+  const { pairing } = useConnection();
+  if (pairing === null) return <Redirect href="/" />;
   return <BrainTree />;
 }
 

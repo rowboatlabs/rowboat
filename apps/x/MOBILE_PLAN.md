@@ -6,9 +6,10 @@ they belong to, and they get the space's chat (stream + discussions:
 read/post/react) and a read-only files view. No QR pairing — Spaces are
 hosted by Rowboat (Harbor), so the phone talks to Harbor directly.
 
-The earlier chat + Brain build (M1–M3 below, done) stays in the codebase
-behind the `legacyChatBrain` feature flag — hidden in the release, one
-switch to bring back.
+The earlier chat + Brain build (M1–M3 below, done) stays fully available
+as an OPT-IN (decided 2026-09-03, replacing the feature-flag plan): the
+app opens into Spaces; the drawer offers "Connect your Mac" (QR pairing),
+and once paired the Mac chat, history, and Brain appear alongside Spaces.
 
 **How this runs:** every phase is one PR against `main`, verified in the
 simulator before it ships, merged by Gagan. App lives in
@@ -42,9 +43,9 @@ reinvent.
 
 ## S1 — Login + orgs + flag
 
-- `legacyChatBrain` feature flag (added 2026-09-03): gates the chat home,
-  drawer history, and Brain. Stays ON in dev until S3 lands, then flips
-  OFF for release.
+- Spaces-first shell: home redirects to /spaces; Mac chat moved to /chat;
+  drawer sections keyed on pairing state (no flag — the `legacyChatBrain`
+  flag was replaced by the pairing opt-in).
 - OAuth deep-link sign-in (expo-auth-session, PKCE, keychain tokens);
   verify the `rowboat://` redirect against Supabase DCR, fall back to an
   apex bounce page if refused.
@@ -67,8 +68,7 @@ reinvent.
 - Space assets browser; tap a markdown file → rendered with the existing
   ChatMarkdown (LaTeX and all); images/blobs via authed Harbor routes.
 - Live refresh on changesets.
-- **Verify:** edit a file on desktop → phone view updates. Then flip
-  `legacyChatBrain` OFF — app is Spaces-only.
+- **Verify:** edit a file on desktop → phone view updates.
 
 ## S4 — On the iPhone + release polish
 

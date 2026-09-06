@@ -9,7 +9,6 @@ import type { sessions as sessionsShared } from '@x/shared';
 
 import * as analytics from '@/lib/analytics';
 import { useConnection } from '@/lib/connection';
-import { FLAGS } from '@/lib/flags';
 import { useColors } from '@/theme/colors';
 
 type Entry = sessionsShared.SessionIndexEntry;
@@ -55,16 +54,17 @@ export function DrawerContent(props: DrawerContentComponentProps) {
 
   const openChat = (id?: string) => {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-    router.replace({ pathname: '/', params: id ? { id } : { id: '' } });
+    router.replace({ pathname: '/chat', params: id ? { id } : { id: '' } });
     props.navigation.closeDrawer();
   };
 
+  const paired = Boolean(pairing);
   const connected = status === 'connected';
 
   return (
     <View style={{ flex: 1, paddingTop: insets.top + 8, backgroundColor: colors.background }}>
-      {/* Search + new chat (legacy chat, hidden when the flag is off) */}
-      {FLAGS.legacyChatBrain ? (
+      {/* Search + new chat — the Mac chat's tools, present once paired */}
+      {paired ? (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingBottom: 8 }}>
         <View
           style={{
@@ -90,7 +90,7 @@ export function DrawerContent(props: DrawerContentComponentProps) {
       ) : null}
 
       {/* History */}
-      {FLAGS.legacyChatBrain ? (
+      {paired ? (
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.sessionId}
@@ -128,7 +128,7 @@ export function DrawerContent(props: DrawerContentComponentProps) {
             props.navigation.closeDrawer();
           }}
         />
-        {FLAGS.legacyChatBrain ? (
+        {paired ? (
         <FootRow
           icon="sf:brain"
           label="Brain"
@@ -138,6 +138,7 @@ export function DrawerContent(props: DrawerContentComponentProps) {
           }}
         />
         ) : null}
+        {paired ? (
         <FootRow
           icon={connected ? 'sf:laptopcomputer' : 'sf:wifi.slash'}
           label={connected ? (pairing?.name ?? 'Connected') : 'Reconnecting…'}
@@ -145,9 +146,19 @@ export function DrawerContent(props: DrawerContentComponentProps) {
           detailColor={colors.destructive}
           onDetail={() => {
             analytics.mobileUnpaired('user');
-            void unpair().then(() => router.replace('/pairing'));
+            void unpair().then(() => router.replace('/spaces'));
           }}
         />
+        ) : (
+        <FootRow
+          icon="sf:laptopcomputer"
+          label="Connect your Mac"
+          onPress={() => {
+            router.push('/pairing');
+            props.navigation.closeDrawer();
+          }}
+        />
+        )}
       </View>
     </View>
   );

@@ -31,11 +31,13 @@ export default function RootLayout() {
               headerTintColor: colorScheme === 'dark' ? '#ffffff' : '#000000',
             }}
           >
+            {/* Home just redirects into Spaces. */}
+            <Drawer.Screen name="index" options={{ headerShown: false }} />
             {/* Floating hamburger in a glass circle: transparent header, no divider. */}
             <Drawer.Screen
-              name="index"
+              name="chat"
               options={({ navigation }) => ({
-                title: 'Rowboat',
+                title: 'Mac chat',
                 headerTitle: '',
                 headerTransparent: true,
                 headerLeft: () => <GlassHamburger onPress={() => navigation.openDrawer()} />,

@@ -44,7 +44,7 @@ export default function PairingScreen() {
       }
       await pair({ url: healthy, token: pairToken, name });
       analytics.mobilePaired(method);
-      router.replace('/');
+      router.replace('/chat');
     },
     [pair],
   );
