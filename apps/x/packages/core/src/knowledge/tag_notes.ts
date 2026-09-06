@@ -186,11 +186,14 @@ export async function processUntaggedNotes(): Promise<void> {
             const result = await tagNoteBatch(files);
             totalEdited += result.filesEdited.size;
 
-            // Only mark files that were actually edited by the agent
+            // Mark all files in the batch as processed to avoid infinite loops
+            // if the agent fails or refuses to edit them
             for (const file of files) {
+                markNoteAsTagged(file.path, state);
+                
                 const relativePath = path.relative(WorkDir, file.path);
-                if (result.filesEdited.has(relativePath)) {
-                    markNoteAsTagged(file.path, state);
+                if (!result.filesEdited.has(relativePath)) {
+                    console.log(`[NoteTagging] Agent skipped or failed to edit: ${relativePath}`);
                 }
             }
 
@@ -201,6 +204,14 @@ export async function processUntaggedNotes(): Promise<void> {
             failedBatches++;
             const errorDetails = getErrorDetails(error);
             console.error(`[NoteTagging] Error processing batch ${batchNumber}:`, error);
+            
+            // Prevent infinite loops on catastrophic batch failures (e.g. no AI provider configured)
+            // We mark them as processed here so it doesn't endlessly retry every 15 seconds.
+            for (const filePath of batchPaths) {
+                markNoteAsTagged(filePath, state);
+            }
+            saveNoteTaggingState(state);
+
             await serviceLogger.log({
                 type: 'error',
                 service: run.service,
