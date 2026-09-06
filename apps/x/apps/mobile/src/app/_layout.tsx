@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import Drawer from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
+import { useEffect } from 'react';
 import { Pressable, useColorScheme } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -18,6 +19,11 @@ SplashScreen.preventAutoHideAsync();
 // (pairing, note view) stacks on top.
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  // Nothing else hides the native splash — without this the release build
+  // sits on the logo forever (Expo Go masks it).
+  useEffect(() => {
+    void SplashScreen.hideAsync();
+  }, []);
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
