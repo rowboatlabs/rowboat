@@ -39,6 +39,7 @@ import {
   ackSummon,
   pushChatContext,
   pushPopoutState,
+  pushPopoutLevels,
   resizeCompanionPinned,
   setCompanionPinned,
   setPinnedCollapsed,
@@ -2654,6 +2655,10 @@ export function setupIpcHandlers() {
     },
     'video:popoutState': async (_event, args) => {
       pushPopoutState(args);
+      return {};
+    },
+    'video:popoutLevels': async (_event, args) => {
+      pushPopoutLevels(args.levels);
       return {};
     },
     'video:popoutResize': async (_event, args) => {

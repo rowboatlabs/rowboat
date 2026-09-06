@@ -260,8 +260,11 @@ speak"). There is no separate popout window, and no second "ask bar" role.
   (`onAppWindowClosed`).
 - The pill captures its **own** camera preview (MediaStreams can't cross
   windows) and synthesizes the mascot mouth level (no audio in that
-  window). The card's recording-bar waveform rides a synthesized speech
-  envelope for the same reason — no live mic amplitude crosses windows.
+  window). The card's recording-bar waveform is REAL, though: the app
+  window relays the voice hook's per-frame amplitudes (~16/s, batched)
+  over `video:popoutLevels` → `video:popout-levels`, so the bars track
+  actual speech at the app composer's own cadence. Levels are never
+  cached in main — a waveform is only meaningful live.
 - **Tiles show live pixels; controls show capabilities.** A voice-only
   call (camera off, no share) renders the pill WITHOUT the "You" tile —
   mascot + response + composer + controls — so untucking a voice call

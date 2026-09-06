@@ -2648,6 +2648,15 @@ export const ipcSchemas = {
     }),
     res: z.object({}),
   },
+  // Main-window renderer → main: a batch of recording-waveform amplitudes
+  // (the voice hook's auto-gained per-frame levels, ~16/s) for the
+  // companion's recording bar. Relayed, never cached — a waveform is only
+  // meaningful live. (Audio itself can't cross windows; a few numbers a
+  // second can.)
+  'video:popoutLevels': {
+    req: z.object({ levels: z.array(z.number()) }),
+    res: z.object({}),
+  },
   // Popout → main: grow/shrink the pill window as the response panel
   // opens/closes (height clamped in main).
   'video:popoutResize': {
@@ -2707,6 +2716,11 @@ export const ipcSchemas = {
       responseText: z.string().nullable(),
       questionText: z.string().nullable(),
     }),
+    res: z.null(),
+  },
+  // Push channel: main → companion with a recording-waveform level batch.
+  'video:popout-levels': {
+    req: z.object({ levels: z.array(z.number()) }),
     res: z.null(),
   },
   // Push channel: main → app window with a popout control-bar action.

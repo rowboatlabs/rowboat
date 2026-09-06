@@ -324,31 +324,24 @@ export function QuickAskBar() {
   // The mic gate is open — the composer flips to its recording bar.
   const micOpen = !callState.micMuted && (callState.status === 'listening' || callState.pttLocked)
 
-  // Levels feeding the composer's recording waveform (the SAME bar as the
-  // app composer's dictation). The real amplitudes live in the app window
-  // and MediaStreams can't cross windows, so the bars ride a synthesized
-  // speech envelope — same trade the mascot's mouth made. One entry is
-  // appended per frame; VoiceWaveform scrolls them left like a recording.
-  const synthLevelsRef = useRef<number[]>([])
+  // Levels feeding the composer's recording waveform — the REAL per-frame
+  // amplitudes from the app window's voice hook (one auto-gained level per
+  // captured audio frame, ~16/s), relayed over video:popout-levels: the
+  // bars move at the app composer's cadence and track actual speech.
+  // (Audio itself can't cross windows; a few numbers a second can — this
+  // replaced a synthesized envelope that neither tracked the voice nor
+  // matched the pace.) Cleared when the gate closes, so the next capture
+  // starts a fresh strip.
+  const levelsRef = useRef<number[]>([])
   useEffect(() => {
-    if (!micOpen) {
-      synthLevelsRef.current = []
-      return
-    }
-    let raf = 0
-    const tick = () => {
-      const t = performance.now()
-      const level = Math.max(
-        0.05,
-        Math.min(1, 0.4 + 0.28 * Math.sin(t / 180) * Math.sin(t / 77) + 0.22 * Math.random()),
-      )
-      const arr = synthLevelsRef.current
-      arr.push(level)
-      if (arr.length > 512) arr.splice(0, arr.length - 512)
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    return window.ipc.on('video:popout-levels', ({ levels }) => {
+      const arr = levelsRef.current
+      arr.push(...levels)
+      if (arr.length > 4800) arr.splice(0, arr.length - 4800)
+    })
+  }, [])
+  useEffect(() => {
+    if (!micOpen) levelsRef.current = []
   }, [micOpen])
 
   // Knowledge files for @-mentions, fetched over IPC (this window has no
@@ -954,7 +947,7 @@ export function QuickAskBar() {
               isRecording={micOpen}
               recordingText={callState.interimText ?? ''}
               recordingState="listening"
-              audioLevelsRef={synthLevelsRef}
+              audioLevelsRef={levelsRef}
               onSubmitRecording={() => sendAction('ptt-up')}
               onCancelRecording={() => sendAction('ptt-cancel')}
             />

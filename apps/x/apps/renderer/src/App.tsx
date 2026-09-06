@@ -2172,6 +2172,28 @@ function App() {
       .catch(() => {})
   }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, hoverActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
+  // Relay the recording waveform's raw amplitudes to the companion: the
+  // voice hook records one auto-gained level per captured audio frame
+  // (~16/s, and NOTHING while the mic gate is paused), and the hover
+  // recording bar draws them with the same VoiceWaveform as this window's
+  // composer — real speech, the app composer's own cadence. Batched on a
+  // short interval; the cursor survives across captures (the hook's array
+  // only ever appends within a call), and resets if the array shrinks.
+  useEffect(() => {
+    if (!inCall) return
+    const levelsRef = voice.audioLevelsRef
+    let cursor = levelsRef.current.length
+    const id = setInterval(() => {
+      const arr = levelsRef.current
+      if (arr.length < cursor) cursor = 0
+      if (arr.length === cursor) return
+      const batch = arr.slice(cursor)
+      cursor = arr.length
+      void window.ipc.invoke('video:popoutLevels', { levels: batch }).catch(() => {})
+    }, 128)
+    return () => clearInterval(id)
+  }, [inCall, voice.audioLevelsRef])
+
   // Screen-pointer gate: tell main whether a share is live (call OR
   // quick-ask — this window owns the capture either way). While true the
   // assistant's screen-pointer tool may draw on the shared display; flipping

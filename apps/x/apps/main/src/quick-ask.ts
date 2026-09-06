@@ -804,6 +804,15 @@ export function getPopoutState(): PopoutState | null {
   return lastPopoutState;
 }
 
+/**
+ * Relay a batch of recording-waveform amplitudes to the companion. NOT
+ * cached (unlike the call state): a waveform is only meaningful live, and
+ * replaying stale bars on window load would draw a voice nobody is using.
+ */
+export function pushPopoutLevels(levels: number[]) {
+  getQuickAskWindow()?.webContents.send('video:popout-levels', { levels });
+}
+
 // Destination-chat context (title chip + recents switcher), pushed by the
 // app window — cached so a freshly loaded bar renders the right chip.
 type ChatContext = {
