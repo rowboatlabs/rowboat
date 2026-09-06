@@ -50,6 +50,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "owner": "rowboatlabs1",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6140976a-7fdd-4c45-be0b-61485997afe1"
+      }
     }
   }
 }
