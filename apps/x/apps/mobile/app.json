@@ -8,7 +8,6 @@
     "scheme": "rowboat",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.rowboat.app.mobile",
       "supportsTablet": false,
       "infoPlist": {
@@ -38,9 +37,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#000000",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 120
         }
       ],
       "expo-secure-store",
