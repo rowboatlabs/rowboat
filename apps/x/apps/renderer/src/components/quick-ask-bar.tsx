@@ -1247,15 +1247,6 @@ const COMPANION_MOTION_CSS = `
      safe — and the glow moves box-shadow only, never the rect. */
   .qa-wave-bar { animation: qa-wave 1.05s ease-in-out infinite; }
   .qa-speak-bar { animation: qa-speak 1.2s ease-in-out infinite; }
-  .qa-dots {
-    background-image: radial-gradient(circle, rgba(0, 0, 0, 0.22) 1.6px, transparent 1.9px);
-    background-size: 9px 4px;
-    background-repeat: repeat-x;
-    background-position: left center;
-  }
-  html.dark .qa-dots {
-    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.28) 1.6px, transparent 1.9px);
-  }
   .qa-shimmer {
     background-image: linear-gradient(90deg, #9ca3af 25%, #303030 50%, #9ca3af 75%);
     background-size: 200% 100%;
@@ -1751,9 +1742,10 @@ function SpeakLane({ bars, className = '' }: { bars: number; className?: string 
  * happening: a live waveform while the mic gate is open, the running
  * activity ("Searching the web…", flicker-held by the caller) as shimmer
  * text while a turn thinks, the rolling speak wave while the reply is
- * spoken, and a dotted resting line otherwise. (The open card carries
- * these signals elsewhere: the composer's recording bar, the panel's
- * shimmer row, and the strip logo's glow.)
+ * spoken, and the talk-key hint ("Hold right ⌘" / "Hold right Ctrl", from
+ * shared/ptt-key.ts) at rest — the invitation, not decoration. (The open
+ * card carries these signals elsewhere: the composer's recording bar, the
+ * panel's shimmer row, and the strip logo's glow.)
  */
 function StatusLane({
   state,
@@ -1781,7 +1773,9 @@ function StatusLane({
           </span>
         </span>
       ) : (
-        <span className="qa-dots h-full w-full" />
+        <span className="truncate whitespace-nowrap text-[12px] text-neutral-400 dark:text-neutral-500">
+          Hold {PTT_LABEL}
+        </span>
       )}
     </span>
   )
@@ -1959,9 +1953,9 @@ function EndButton({
  * input, mirroring the card's » tuck handle. The lane keeps narrating
  * while folded — waveform while the user speaks, the running activity
  * while a turn thinks, the rolling speak wave while the reply is read
- * aloud, a dotted resting line otherwise — and the MOTION is the whole
- * story: the pill deliberately shows no transcript in either direction
- * (the user tucked the text away; unfold to read).
+ * aloud, the talk-key hint at rest — and beyond that hint the MOTION is
+ * the whole story: the pill deliberately shows no transcript in either
+ * direction (the user tucked the text away; unfold to read).
  */
 function TuckedDock({
   state,

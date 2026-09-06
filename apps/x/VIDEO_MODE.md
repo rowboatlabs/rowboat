@@ -284,10 +284,11 @@ speak"). There is no separate popout window, and no second "ask bar" role.
   visible way back to the text input, mirroring the card's » tuck handle
   (⌥⇧Space and the logo work too). The lane keeps narrating while folded — jittery
   waveform while the user speaks, spinner + shimmer activity while a turn
-  thinks, a coherent rolling speak wave while the reply is read aloud,
-  dotted line at rest — and that motion is the whole story: the pill shows
-  NO transcript in either direction (the user tucked the text away; unfold
-  to read). A live share keeps its consent badge on the lit share button.
+  thinks, a coherent rolling speak wave while the reply is read aloud, the
+  talk-key hint ("Hold right ⌘" / "Hold right Ctrl", platform-aware via
+  shared/ptt-key.ts) at rest — and beyond that hint the motion is the
+  whole story: the pill shows NO transcript in either direction (the user
+  tucked the text away; unfold to read). A live share keeps its consent badge on the lit share button.
   The card's tuck handle (»), Esc, and a click on the stage near the card
   all enter this state; ⌥⇧Space toggles it. Tuck/untuck never ends the
   session — only End & close does.
