@@ -56,12 +56,12 @@ function StatusDot({ status }: { status: CodeSessionStatus }) {
   )
 }
 
-// One session card: two lines — the title, then the branch the session
-// works on (or the agent, when it runs without a worktree) — behind a
-// status dot. Active cards show the time and, on hover, a check (mark
-// done) beside the menu; done cards show when they were finished and a
-// reopen arrow instead. Cards keep their looks in either pile — only the
-// heading above them changes.
+// One session card: two lines — the title, then the agent running it —
+// behind a status dot. The worktree branch stays off the card (it's in
+// the tooltip and the session header's chip). Active cards show the time
+// and, on hover, a check (mark done) beside the menu; done cards show
+// when they were finished and a reopen arrow instead. Cards keep their
+// looks in either pile — only the heading above them changes.
 function SessionRow({
   session,
   status,
@@ -86,9 +86,9 @@ function SessionRow({
 }) {
   const worktree = session.worktree && !session.worktree.removedAt ? session.worktree : undefined
   const when = formatRelativeTime((done && session.doneAt) || session.lastActivityAt || session.createdAt)
-  // The second line: the branch, or the agent when there is none — every
-  // card keeps its two-line shape.
-  const detail = worktree?.branch ?? AGENT_LABEL[session.agent] ?? session.agent
+  // The second line: the agent — short and constant, so every card keeps
+  // its two-line shape without the branch noise.
+  const detail = AGENT_LABEL[session.agent] ?? session.agent
   const ToggleIcon = done ? RotateCcw : Check
   const toggleLabel = done ? 'Reopen' : 'Mark as done'
   return (
@@ -116,14 +116,17 @@ function SessionRow({
             {prefix && <span className="text-muted-foreground">{prefix} · </span>}
             {session.title}
           </span>
-          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0">
+          {/* The time's slot is exactly as wide as the hover actions, so the
+              actions replace the time — never the title beside it. */}
+          <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0 group-has-[[data-state=open]]:opacity-0">
             {when}
           </span>
         </div>
         <div className="truncate text-[11px] leading-4 text-muted-foreground/70">{detail}</div>
       </div>
-      {/* Hover actions sit over the time so the card never reflows. */}
-      <div className="absolute right-1 top-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
+      {/* Hover actions sit in the time's reserved slot so the card never
+          reflows and nothing overlaps the text. */}
+      <div className="absolute right-1.5 top-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -168,7 +171,7 @@ function SessionRow({
 }
 
 // Left rail of the Code section: registered projects with their active
-// sessions as two-line cards (title, then branch), attention-first, and a
+// sessions as two-line cards (title, then agent), attention-first, and a
 // Done pile pinned to the bottom. Status lives in each card's gutter dot —
 // the working session's ripples (see `.code-working-dot` in App.css) so it
 // can be found at a glance even when it is not the selected one. The rail
