@@ -16,9 +16,13 @@ import { getClient, getLive, spacesMcpServerNameFor } from './orgs.js';
 //
 // Contracts kept here:
 // - The agent's final act is one post_message reply into the thread (spaces
-//   skill). A WATCHDOG enforces never-go-dark: any turn that ends without
-//   having posted gets a short mechanical receipt posted on its behalf,
-//   attributed actingMode 'agent' — the thread never ends in silence.
+//   skill). A WATCHDOG enforces never-go-dark: any TOPIC turn that ends
+//   without having posted gets a short mechanical receipt posted on its
+//   behalf, attributed actingMode 'agent' — the thread never ends in silence.
+//   Only turns this module started count (turn_created carrying the
+//   space_topic subUseCase): the session is user-openable from the thread
+//   pane, and receipting the user's private chat turns there would post
+//   "finished without a receipt" into the feed on every reply.
 // - While turns run, an agent_working presence lease (renewed every 10s,
 //   thread-scoped) tells the room; viewers prune stale chips themselves.
 
@@ -125,6 +129,15 @@ export function describeTurnError(error: string | undefined): string {
   return truncate(raw, 200);
 }
 
+/** Marks turns this module starts; the watchdog receipts ONLY these. */
+export const TOPIC_SUB_USE_CASE = 'space_topic';
+
+/** Was this turn started by a topic invocation (vs the user chatting in the session)? (pure; tested) */
+export function isTopicTurnCreated(event: unknown): boolean {
+  const e = event as { type?: string; analytics?: { subUseCase?: string } };
+  return e.type === 'turn_created' && e.analytics?.subUseCase === TOPIC_SUB_USE_CASE;
+}
+
 /** Does this turn event carry the agent's receipt into the given thread? (pure; tested) */
 export function isTopicReceiptCall(event: unknown, threadRootId: string): boolean {
   const e = event as {
@@ -152,6 +165,8 @@ interface TopicWatch {
   spaceId: string;
   threadRootId: string;
   turns: Map<string, TurnRecord>;
+  /** Session turns that are NOT topic invocations (the user chatting in the pane). */
+  ignoredTurns: Set<string>;
   activeTurns: Set<string>;
   presenceTimer: ReturnType<typeof setInterval> | null;
 }
@@ -163,6 +178,7 @@ function ensureWatch(bus: ITurnEventBus, sessionId: string, scope: { orgId: stri
   const watch: TopicWatch = {
     ...scope,
     turns: new Map(),
+    ignoredTurns: new Set(),
     activeTurns: new Set(),
     presenceTimer: null,
   };
@@ -176,16 +192,37 @@ function ensureWatch(bus: ITurnEventBus, sessionId: string, scope: { orgId: stri
 }
 
 function handleTurnEvent(watch: TopicWatch, busEvent: TurnBusEvent): void {
+  const event = busEvent.event as { type?: string; reason?: string };
   let record = watch.turns.get(busEvent.turnId);
   if (!record) {
-    record = { posted: false, terminal: false };
-    watch.turns.set(busEvent.turnId, record);
-    watch.activeTurns.add(busEvent.turnId);
-    startPresence(watch);
+    if (watch.ignoredTurns.has(busEvent.turnId)) return;
+    if (event.type === 'turn_created') {
+      if (!isTopicTurnCreated(event)) {
+        // The user chatting in this session from the chat pane — private
+        // conversation, not a topic invocation. No receipt, no presence chip.
+        watch.ignoredTurns.add(busEvent.turnId);
+        return;
+      }
+      record = { posted: false, terminal: false };
+      watch.turns.set(busEvent.turnId, record);
+      watch.activeTurns.add(busEvent.turnId);
+      startPresence(watch);
+    } else if (event.type === 'turn_cancelled' && event.reason === RECLAIMED_TURN_REASON) {
+      // A crash-orphaned turn reclaimed by the mention that just created this
+      // watch: its turn_created predates the process, so no record exists —
+      // the "interrupted, picking up your latest message" beat still applies.
+      void postBackstop(watch, event as never).catch((err) => {
+        console.error('[spaces] backstop receipt failed:', err);
+      });
+      return;
+    } else {
+      // Mid-flight events of a turn whose creation this watch never saw:
+      // not a turn this module started — nothing to receipt.
+      return;
+    }
   }
   if (record.terminal) return;
 
-  const event = busEvent.event as { type?: string };
   if (isTopicReceiptCall(event, watch.threadRootId)) {
     record.posted = true;
     return;
@@ -231,17 +268,25 @@ function stopPresence(watch: TopicWatch): void {
   }
 }
 
-/** Extract the assistant's final text from a turn_completed output, defensively. */
+/**
+ * Extract the assistant's final text from a turn_completed output, defensively.
+ * The event carries a single AssistantMessage ({ role, content }); strings and
+ * message arrays are accepted too. Only 'text' parts count — a reasoning part
+ * also has .text, and chain-of-thought must never land in a team feed.
+ */
 export function finalAssistantText(output: unknown): string | null {
   if (typeof output === 'string') return output || null;
-  if (!Array.isArray(output)) return null;
-  for (let i = output.length - 1; i >= 0; i--) {
-    const message = output[i] as { role?: string; content?: unknown };
+  const messages = Array.isArray(output) ? output : [output];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i] as { role?: string; content?: unknown } | null | undefined;
     if (message?.role !== 'assistant') continue;
     if (typeof message.content === 'string') return message.content || null;
     if (Array.isArray(message.content)) {
       const text = message.content
-        .map((part) => (typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : ''))
+        .map((part) => {
+          const p = part as { type?: string; text?: unknown };
+          return p.type === 'text' && typeof p.text === 'string' ? p.text : '';
+        })
         .join('')
         .trim();
       if (text) return text;
@@ -359,7 +404,9 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
         },
       },
       useCase: 'copilot_chat',
-      subUseCase: 'space_topic',
+      // The watchdog keys on this tag to tell topic turns from the user's own
+      // chat turns in the same session — keep them in lockstep.
+      subUseCase: TOPIC_SUB_USE_CASE,
       ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
       // Auto unless the composer asked for manual approval prompts (they
       // surface in the topic's session, reachable from the working chip).

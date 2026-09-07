@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { RECLAIMED_TURN_REASON } from '../runtime/sessions/api.js';
-import { backstopBody, buildInvocationMessage, describeTurnError, finalAssistantText, isTopicReceiptCall } from './topic-agent.js';
+import {
+    backstopBody,
+    buildInvocationMessage,
+    describeTurnError,
+    finalAssistantText,
+    isTopicReceiptCall,
+    isTopicTurnCreated,
+    TOPIC_SUB_USE_CASE,
+} from './topic-agent.js';
 
 const input = {
     orgId: 'org-1',
@@ -68,10 +76,35 @@ describe('isTopicReceiptCall', () => {
     });
 });
 
+describe('isTopicTurnCreated', () => {
+    it('matches only turn_created events tagged with the topic subUseCase', () => {
+        expect(
+            isTopicTurnCreated({ type: 'turn_created', analytics: { useCase: 'copilot_chat', subUseCase: TOPIC_SUB_USE_CASE } }),
+        ).toBe(true);
+        // The user chatting in the same session from the chat pane: no tag.
+        expect(isTopicTurnCreated({ type: 'turn_created', analytics: { useCase: 'copilot_chat' } })).toBe(false);
+        expect(isTopicTurnCreated({ type: 'turn_created' })).toBe(false);
+        expect(isTopicTurnCreated({ type: 'turn_completed', analytics: { useCase: 'copilot_chat', subUseCase: TOPIC_SUB_USE_CASE } })).toBe(false);
+    });
+});
+
 describe('finalAssistantText', () => {
-    it('reads string output, message arrays, and part arrays', () => {
+    it('reads the single assistant message a turn_completed carries', () => {
+        expect(finalAssistantText({ role: 'assistant', content: 'all set' })).toBe('all set');
+        expect(
+            finalAssistantText({
+                role: 'assistant',
+                content: [
+                    { type: 'reasoning', text: 'let me think… ' },
+                    { type: 'text', text: 'final ' },
+                    { type: 'text', text: 'answer' },
+                ],
+            }),
+        ).toBe('final answer');
+    });
+
+    it('still reads string output and message arrays', () => {
         expect(finalAssistantText('done')).toBe('done');
-        expect(finalAssistantText([{ role: 'assistant', content: 'all set' }])).toBe('all set');
         expect(
             finalAssistantText([
                 { role: 'assistant', content: 'draft' },
@@ -83,7 +116,9 @@ describe('finalAssistantText', () => {
     it('returns null when nothing usable exists', () => {
         expect(finalAssistantText(undefined)).toBeNull();
         expect(finalAssistantText([])).toBeNull();
-        expect(finalAssistantText([{ role: 'user', content: 'hi' }])).toBeNull();
+        expect(finalAssistantText({ role: 'user', content: 'hi' })).toBeNull();
+        // Reasoning-only content must never surface in a feed.
+        expect(finalAssistantText({ role: 'assistant', content: [{ type: 'reasoning', text: 'hmm' }] })).toBeNull();
     });
 });
 
@@ -115,5 +150,11 @@ describe('backstopBody', () => {
         expect(backstopBody({ type: 'turn_completed' })).toBe(
             'Rowboat finished without posting a receipt or leaving a note.',
         );
+    });
+
+    it("quotes the agent's final note from the turn_completed assistant message", () => {
+        expect(
+            backstopBody({ type: 'turn_completed', output: { role: 'assistant', content: 'Posted the summary to roadmap.md.' } }),
+        ).toBe('Rowboat finished without posting a receipt. Its final note: "Posted the summary to roadmap.md."');
     });
 });
