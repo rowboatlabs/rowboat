@@ -5,7 +5,7 @@ import { WorkDir } from '../../config/config.js';
 const REPO_OWNER = 'browser-use';
 const REPO_NAME = 'browser-harness';
 const REPO_BRANCH = 'main';
-const DOMAIN_SKILLS_PREFIX = 'domain-skills/';
+const DOMAIN_SKILLS_PREFIX = 'agent-workspace/domain-skills/';
 
 const MANIFEST_TTL_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 20_000;
@@ -15,7 +15,7 @@ export type SkillEntry = {
   site: string;            // e.g. "github"
   fileName: string;        // e.g. "repo-actions.md"
   title: string;           // first H1 from the markdown, or a derived title
-  path: string;            // relative repo path, e.g. "domain-skills/github/repo-actions.md"
+  path: string;            // relative repo path, e.g. "agent-workspace/domain-skills/github/repo-actions.md"
   localPath: string;       // absolute path on disk
 };
 
