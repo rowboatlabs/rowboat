@@ -99,11 +99,12 @@ export function DrawerContent(props: DrawerContentComponentProps) {
           <Pressable
             onPress={() => openChat(item.sessionId)}
             style={({ pressed }) => ({
-              paddingHorizontal: 10, paddingVertical: 10, borderRadius: 8, borderCurve: 'continuous',
+              minHeight: 42, justifyContent: 'center',
+              paddingHorizontal: 10, borderRadius: 10, borderCurve: 'continuous',
               backgroundColor: pressed ? (colors.secondaryBackground) : 'transparent',
             })}
           >
-            <Text numberOfLines={1} style={{ fontSize: 15, color: colors.label }}>
+            <Text numberOfLines={1} style={{ fontSize: 16, color: colors.label }}>
               {item.title || 'New chat'}
             </Text>
           </Pressable>
@@ -125,7 +126,7 @@ export function DrawerContent(props: DrawerContentComponentProps) {
       )}
 
       {/* Foot: Brain, then the connection row */}
-      <View style={{ borderTopWidth: 0.5, borderTopColor: colors.separator, paddingTop: 6, paddingBottom: insets.bottom + 8, paddingHorizontal: 8, gap: 2 }}>
+      <View style={{ borderTopWidth: 0.5, borderTopColor: colors.separator, paddingTop: 6, paddingBottom: insets.bottom + 8, gap: 2 }}>
         <FootRow
           icon="sf:person.2"
           label="Spaces"
@@ -183,16 +184,18 @@ function FootRow({ icon, label, onPress, detail, detailColor, onDetail }: {
     <Pressable
       onPress={onPress}
       style={({ pressed }) => ({
-        flexDirection: 'row', alignItems: 'center', gap: 10,
-        paddingHorizontal: 10, paddingVertical: 10, borderRadius: 8, borderCurve: 'continuous',
-        backgroundColor: pressed && onPress ? (colors.secondaryBackground) : 'transparent',
+        flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 42,
+        marginHorizontal: 8, paddingHorizontal: 8, borderRadius: 10, borderCurve: 'continuous',
+        backgroundColor: pressed && onPress ? colors.secondaryBackground : 'transparent',
       })}
     >
-      <Image source={icon} style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
-      <Text style={{ flex: 1, fontSize: 15, color: colors.label }}>{label}</Text>
+      <View style={{ width: 28, alignItems: 'center' }}>
+        <Image source={icon} style={{ width: 18, height: 18 }} tintColor={colors.secondaryLabel} />
+      </View>
+      <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{label}</Text>
       {detail ? (
-        <Pressable hitSlop={8} onPress={onDetail}>
-          <Text style={{ fontSize: 13, color: detailColor ?? (colors.secondaryLabel) }}>{detail}</Text>
+        <Pressable hitSlop={8} onPress={onDetail} style={{ paddingHorizontal: 4 }}>
+          <Text style={{ fontSize: 13, color: detailColor ?? colors.secondaryLabel }}>{detail}</Text>
         </Pressable>
       ) : null}
     </Pressable>
