@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+    translatePattern,
     translatePcreShorthands,
     sanitizePatternsInPlace,
     sanitizeChatCompletionsBody,
@@ -65,7 +66,65 @@ describe("translatePcreShorthands", () => {
     });
 });
 
+describe("translatePattern", () => {
+    it("reports the translated pattern when every shorthand is expressible", () => {
+        expect(translatePattern("^\\d$")).toEqual({ kind: "translated", pattern: "^[0-9]$" });
+    });
+
+    it("names the offending construct when a pattern has to be dropped", () => {
+        expect(translatePattern("\\bword\\b")).toEqual({
+            kind: "dropped",
+            reason: "word boundary \\b has no GBNF equivalent",
+        });
+        expect(translatePattern("[\\D]")).toEqual({
+            kind: "dropped",
+            reason: "negated shorthand \\D cannot be expressed inside a character class",
+        });
+        expect(translatePattern("[0-9")).toEqual({
+            kind: "dropped",
+            reason: "unbalanced character class",
+        });
+    });
+});
+
 describe("sanitizePatternsInPlace", () => {
+    it("reports each dropped pattern with its reason through onDrop", () => {
+        const onDrop = vi.fn<(pattern: string, reason: string) => void>();
+        const schema = {
+            type: "object",
+            properties: {
+                a: { type: "string", pattern: "\\bword\\b" },
+                b: { type: "string", pattern: "\\d+" },
+            },
+        };
+
+        sanitizePatternsInPlace(schema, onDrop);
+
+        // Only the untranslatable pattern is reported; the translated one is silent.
+        expect(onDrop).toHaveBeenCalledTimes(1);
+        expect(onDrop).toHaveBeenCalledWith("\\bword\\b", "word boundary \\b has no GBNF equivalent");
+    });
+
+    it("leaves patternProperties keys alone but sanitizes patterns nested under them", () => {
+        // llama.cpp's JSON-Schema -> GBNF converter builds object rules from
+        // `properties` / `additionalProperties` only; it never reads
+        // `patternProperties`, so its regex keys never reach the grammar parser
+        // and must be preserved verbatim. Schemas *inside* those values are
+        // ordinary schemas and still get sanitized.
+        const schema = {
+            type: "object",
+            patternProperties: {
+                "^\\d+$": { type: "string", pattern: "^\\w+$" },
+            },
+        };
+
+        const changes = sanitizePatternsInPlace(schema);
+
+        expect(changes).toBe(1);
+        expect(Object.keys(schema.patternProperties)).toEqual(["^\\d+$"]);
+        expect(schema.patternProperties["^\\d+$"].pattern).toBe("^[A-Za-z0-9_]+$");
+    });
+
     it("rewrites a pattern nested deep inside a tool parameters schema", () => {
         const schema = {
             type: "object",
@@ -220,6 +279,39 @@ describe("makeGbnfSafeFetch", () => {
         expect(base).toHaveBeenCalledTimes(1);
         // Same init object reference — no clone when there's nothing to rewrite.
         expect(base.mock.calls[0][1]).toBe(init);
+    });
+
+    it("warns once per distinct dropped pattern, even across repeated requests", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const base = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response("ok"));
+        const wrapped = makeGbnfSafeFetch(base as unknown as typeof fetch);
+        const bodyWith = (patterns: string[]) => JSON.stringify({
+            messages: [],
+            tools: [{
+                type: "function",
+                function: {
+                    name: "t",
+                    parameters: {
+                        type: "object",
+                        properties: Object.fromEntries(patterns.map((pattern, i) => [`f${i}`, { type: "string", pattern }])),
+                    },
+                },
+            }],
+        });
+
+        // The same tool schema is re-sent on every turn: the drop must be logged
+        // the first time only, or it would spam the console once per message.
+        await wrapped("http://localhost:1234/v1/chat/completions", { method: "POST", body: bodyWith(["\\bword\\b", "\\d"]) });
+        await wrapped("http://localhost:1234/v1/chat/completions", { method: "POST", body: bodyWith(["\\bword\\b", "\\d"]) });
+        // A different untranslatable pattern is a new event and gets its own line.
+        await wrapped("http://localhost:1234/v1/chat/completions", { method: "POST", body: bodyWith(["[\\W]"]) });
+
+        expect(warn).toHaveBeenCalledTimes(2);
+        expect(warn.mock.calls[0][0]).toContain("\\bword\\b");
+        expect(warn.mock.calls[0][0]).toContain("word boundary");
+        expect(warn.mock.calls[1][0]).toContain("[\\W]");
+        // Translatable shorthands are rewritten silently — no noise for the happy path.
+        expect(warn.mock.calls.some((call) => String(call[0]).includes("\"\\d\""))).toBe(false);
     });
 
     it("passes through requests with a non-string body", async () => {

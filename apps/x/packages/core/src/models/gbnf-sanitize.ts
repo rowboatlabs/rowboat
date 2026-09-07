@@ -48,20 +48,30 @@ const SHORTHAND_INSIDE_CLASS: Record<string, string | null> = {
 };
 
 /**
+ * Outcome of translating one JSON-Schema `pattern` for GBNF: either the
+ * rewritten pattern, or a human-readable reason why it had to be dropped (used
+ * for the one-time diagnostic log in {@link makeGbnfSafeFetch}).
+ */
+export type PatternTranslation =
+    | { kind: "translated"; pattern: string }
+    | { kind: "dropped"; reason: string };
+
+/**
  * Rewrite the PCRE shorthand classes in a regex `pattern` into GBNF-safe
  * character classes.
  *
- * Returns the translated pattern, or `null` when the pattern contains something
- * that cannot be safely expressed in GBNF (a `\b`/`\B` word boundary, a negated
- * shorthand inside a character class, or an unbalanced class). A `null` result
- * means "drop this pattern entirely" — omitting a validation constraint is
- * strictly safer than shipping a grammar that fails the whole request.
+ * Returns the translated pattern, or a `dropped` result when the pattern
+ * contains something that cannot be safely expressed in GBNF (a `\b`/`\B` word
+ * boundary, a negated shorthand inside a character class, or an unbalanced
+ * class). `dropped` means "remove this pattern entirely" — omitting a validation
+ * constraint is strictly safer than shipping a grammar that fails the whole
+ * request.
  *
  * The scan is character-class aware so `\d` becomes `[0-9]` on its own but
  * `0-9` inside `[...]`. Escapes GBNF already understands (`\n \t \\ \" \xNN` …)
  * are passed through untouched.
  */
-export function translatePcreShorthands(pattern: string): string | null {
+export function translatePattern(pattern: string): PatternTranslation {
     let out = "";
     let inClass = false;
 
@@ -78,14 +88,17 @@ export function translatePcreShorthands(pattern: string): string | null {
             }
             // Word boundaries have no GBNF equivalent, in or out of a class.
             if (next === "b" || next === "B") {
-                return null;
+                return { kind: "dropped", reason: `word boundary \\${next} has no GBNF equivalent` };
             }
             const table = inClass ? SHORTHAND_INSIDE_CLASS : SHORTHAND_OUTSIDE_CLASS;
             if (Object.prototype.hasOwnProperty.call(table, next)) {
                 const replacement = table[next];
                 if (replacement === null) {
                     // e.g. `\D` inside `[...]` — untranslatable, drop the pattern.
-                    return null;
+                    return {
+                        kind: "dropped",
+                        reason: `negated shorthand \\${next} cannot be expressed inside a character class`,
+                    };
                 }
                 out += replacement;
             } else {
@@ -108,10 +121,22 @@ export function translatePcreShorthands(pattern: string): string | null {
     if (inClass) {
         // Unbalanced character class — we can't reason about member escapes
         // safely, so drop the pattern rather than risk broken grammar.
-        return null;
+        return { kind: "dropped", reason: "unbalanced character class" };
     }
-    return out;
+    return { kind: "translated", pattern: out };
 }
+
+/**
+ * Convenience form of {@link translatePattern}: the translated pattern, or
+ * `null` when it must be dropped.
+ */
+export function translatePcreShorthands(pattern: string): string | null {
+    const result = translatePattern(pattern);
+    return result.kind === "translated" ? result.pattern : null;
+}
+
+/** Called once for every `pattern` the sanitizer had to remove. */
+export type OnPatternDropped = (pattern: string, reason: string) => void;
 
 /**
  * Walk an arbitrary JSON value (a parsed JSON Schema or any nesting of tool
@@ -125,11 +150,20 @@ export function translatePcreShorthands(pattern: string): string | null {
  * A key literally named `pattern` whose value is NOT a string (e.g. a tool
  * input field that happens to be called "pattern") is left alone and recursed
  * into normally, so only real JSON-Schema `pattern` constraints are touched.
+ *
+ * `patternProperties` keys are regexes too, but they are deliberately NOT
+ * rewritten: llama.cpp's JSON-Schema -> GBNF converter builds object rules from
+ * `properties` / `additionalProperties` only and never reads
+ * `patternProperties`, so those keys never reach the grammar parser. The
+ * schemas nested under them are walked like any other value.
+ *
+ * `onDrop` is invoked for every pattern that had to be removed, with the
+ * original pattern and the reason it is untranslatable.
  */
-export function sanitizePatternsInPlace(node: unknown): number {
+export function sanitizePatternsInPlace(node: unknown, onDrop?: OnPatternDropped): number {
     if (Array.isArray(node)) {
         let changes = 0;
-        for (const item of node) changes += sanitizePatternsInPlace(item);
+        for (const item of node) changes += sanitizePatternsInPlace(item, onDrop);
         return changes;
     }
     if (node === null || typeof node !== "object") {
@@ -141,17 +175,18 @@ export function sanitizePatternsInPlace(node: unknown): number {
     for (const key of Object.keys(obj)) {
         const value = obj[key];
         if (key === "pattern" && typeof value === "string") {
-            const translated = translatePcreShorthands(value);
-            if (translated === null) {
+            const result = translatePattern(value);
+            if (result.kind === "dropped") {
                 delete obj[key];
                 changes++;
-            } else if (translated !== value) {
-                obj[key] = translated;
+                onDrop?.(value, result.reason);
+            } else if (result.pattern !== value) {
+                obj[key] = result.pattern;
                 changes++;
             }
             continue;
         }
-        changes += sanitizePatternsInPlace(value);
+        changes += sanitizePatternsInPlace(value, onDrop);
     }
     return changes;
 }
@@ -163,8 +198,10 @@ export function sanitizePatternsInPlace(node: unknown): number {
  * body isn't JSON, carries no schema, or needs no changes — so non-chat
  * requests (embeddings, model listing, …) and clean bodies pass through
  * byte-for-byte.
+ *
+ * `onDrop` is forwarded to {@link sanitizePatternsInPlace}.
  */
-export function sanitizeChatCompletionsBody(body: string): string {
+export function sanitizeChatCompletionsBody(body: string, onDrop?: OnPatternDropped): string {
     let parsed: unknown;
     try {
         parsed = JSON.parse(body);
@@ -178,10 +215,10 @@ export function sanitizeChatCompletionsBody(body: string): string {
     const obj = parsed as Record<string, unknown>;
     let changes = 0;
     if (Array.isArray(obj.tools)) {
-        changes += sanitizePatternsInPlace(obj.tools);
+        changes += sanitizePatternsInPlace(obj.tools, onDrop);
     }
     if (obj.response_format !== undefined) {
-        changes += sanitizePatternsInPlace(obj.response_format);
+        changes += sanitizePatternsInPlace(obj.response_format, onDrop);
     }
     return changes > 0 ? JSON.stringify(parsed) : body;
 }
@@ -192,12 +229,27 @@ export function sanitizeChatCompletionsBody(body: string): string {
  * Bodies without schemas are forwarded unchanged. This is the seam the
  * openai-compatible provider uses so llama.cpp-backed servers don't 400 on
  * shorthand-bearing patterns.
+ *
+ * Dropping a pattern silently would make "why isn't this field validated?"
+ * impossible to debug, so each distinct dropped pattern is logged once per
+ * wrapper (i.e. per provider instance). Once, not per request: the same tool
+ * schemas are re-sent on every turn and would otherwise flood the console.
  */
 export function makeGbnfSafeFetch(baseFetch: typeof fetch = fetch): typeof fetch {
+    const warnedPatterns = new Set<string>();
+    const warnOnce: OnPatternDropped = (pattern, reason) => {
+        if (warnedPatterns.has(pattern)) return;
+        warnedPatterns.add(pattern);
+        console.warn(
+            `[models] Dropped JSON-Schema pattern "${pattern}" from an openai-compatible request: ${reason}. ` +
+            "llama.cpp cannot compile it to GBNF, so the field is sent without that constraint.",
+        );
+    };
+
     return async (input, init) => {
         const body = init?.body;
         if (typeof body === "string" && body.length > 0) {
-            const sanitized = sanitizeChatCompletionsBody(body);
+            const sanitized = sanitizeChatCompletionsBody(body, warnOnce);
             if (sanitized !== body) {
                 return baseFetch(input, { ...init, body: sanitized });
             }
