@@ -3852,7 +3852,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
             {(inboxFilter === 'all' || inboxFilter === 'important') && (visibleNeedsYou.length > 0 ? (
               <section className="gmail-section">
                 <div className="gmail-list-header">
-                  <span>Needs you</span>
+                  <span>Important - Needs you</span>
                   <span>
                     {visibleNeedsYou.length}{important.hasReachedEnd ? '' : '+'} thread{visibleNeedsYou.length === 1 ? '' : 's'}
                   </span>
@@ -3865,7 +3865,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
             {(inboxFilter === 'all' || inboxFilter === 'important') && visibleWaiting.length > 0 && (
               <section className="gmail-section">
                 <div className="gmail-list-header">
-                  <span>Waiting on them</span>
+                  <span>Important - Waiting on them</span>
                   <span>
                     {visibleWaiting.length}{important.hasReachedEnd ? '' : '+'} thread{visibleWaiting.length === 1 ? '' : 's'}
                   </span>
