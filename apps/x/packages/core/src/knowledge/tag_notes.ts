@@ -10,6 +10,8 @@ import {
     loadNoteTaggingState,
     saveNoteTaggingState,
     markNoteAsTagged,
+    markNoteAsFailed,
+    clearNoteFailure,
     type NoteTaggingState,
 } from './note_tagging_state.js';
 import { getNoteTypeDefinitions } from './note_system.js';
@@ -49,6 +51,20 @@ function getUntaggedNotes(state: NoteTaggingState): string[] {
             // Skip if already tracked in state
             if (state.processedFiles[fullPath]) {
                 continue;
+            }
+
+            const failedInfo = state.failedFiles?.[fullPath];
+            if (failedInfo) {
+                if (stat.mtimeMs > failedInfo.lastModifiedMs) {
+                    // File was edited since last failure, reset retry count
+                    clearNoteFailure(fullPath, state);
+                } else if (Date.now() < failedInfo.nextRetryAt) {
+                    // Not time to retry yet
+                    continue;
+                } else if (failedInfo.retryCount >= 5) {
+                    // Max retries reached, wait for manual edit
+                    continue;
+                }
             }
 
             // Skip if file already has frontmatter
@@ -97,18 +113,23 @@ async function tagNoteBatch(
         message += `\n\n---\n\n`;
     }
 
-    const { turnId, state } = await runWhenPossible({
+    const { turnId, state, outcome } = await runWhenPossible({
         agentId: NOTE_TAGGING_AGENT,
         message,
         useCase: 'knowledge_sync',
         subUseCase: 'tag_notes',
         ...asRunModelOptions(await getKgModel()),
-        throwOnError: true,
     });
 
-    // Edited paths come from the durable turn state instead of streaming
-    // bus subscriptions.
-    return { runId: turnId, filesEdited: toolInputPaths(state, ['file-editText']) };
+    const filesEdited = toolInputPaths(state, ['file-editText']);
+
+    if (outcome.status !== 'completed') {
+        const error = new Error(outcome.status === 'failed' ? outcome.error : `turn ${outcome.status}`);
+        (error as any).partialFilesEdited = filesEdited;
+        throw error;
+    }
+
+    return { runId: turnId, filesEdited };
 }
 
 /**
@@ -186,11 +207,15 @@ export async function processUntaggedNotes(): Promise<void> {
             const result = await tagNoteBatch(files);
             totalEdited += result.filesEdited.size;
 
-            // Only mark files that were actually edited by the agent
             for (const file of files) {
                 const relativePath = path.relative(WorkDir, file.path);
                 if (result.filesEdited.has(relativePath)) {
                     markNoteAsTagged(file.path, state);
+                    clearNoteFailure(file.path, state);
+                } else {
+                    console.log(`[NoteTagging] Agent skipped or failed to edit: ${relativePath}`);
+                    const stat = fs.statSync(file.path);
+                    markNoteAsFailed(file.path, state, stat.mtimeMs);
                 }
             }
 
@@ -201,6 +226,27 @@ export async function processUntaggedNotes(): Promise<void> {
             failedBatches++;
             const errorDetails = getErrorDetails(error);
             console.error(`[NoteTagging] Error processing batch ${batchNumber}:`, error);
+            
+            const partialEdited: Set<string> = (error as any).partialFilesEdited || new Set();
+
+            // Mark batch as failed so we can backoff and retry later, but save partial successes
+            for (const filePath of batchPaths) {
+                const relativePath = path.relative(WorkDir, filePath);
+                if (partialEdited.has(relativePath)) {
+                    markNoteAsTagged(filePath, state);
+                    clearNoteFailure(filePath, state);
+                    totalEdited++;
+                } else {
+                    try {
+                        const stat = fs.statSync(filePath);
+                        markNoteAsFailed(filePath, state, stat.mtimeMs);
+                    } catch (e) {
+                        // Ignore if file was deleted
+                    }
+                }
+            }
+            saveNoteTaggingState(state);
+
             await serviceLogger.log({
                 type: 'error',
                 service: run.service,
