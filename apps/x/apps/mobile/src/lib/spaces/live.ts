@@ -52,6 +52,13 @@ export class SpacesLive {
   private ws: WebSocket | undefined;
   private connecting = false;
   private subs = new Map<string, Subscription>();
+  /**
+   * Frames addressed to the MEMBER, not a space (`space_added`, direct
+   * messages 2026-09-07): someone else put us into a space we could not have
+   * subscribed to yet. No per-space state; a registered handler keeps the
+   * socket alive like a subscription does.
+   */
+  private memberHandlers = new Set<SpaceFrameHandler>();
   private statusHandlers = new Set<(status: SpacesLiveStatus) => void>();
   private attempts = 0;
   private closed = false;
@@ -110,6 +117,15 @@ export class SpacesLive {
           this.ws.send(JSON.stringify({ kind: 'unsubscribe', spaceId }));
         }
       }
+    };
+  }
+
+  /** Receive member-addressed frames (`space_added`). Keeps the socket connected while registered. */
+  onMemberFrame(handler: SpaceFrameHandler): () => void {
+    this.memberHandlers.add(handler);
+    this.ensureConnected();
+    return () => {
+      this.memberHandlers.delete(handler);
     };
   }
 
@@ -239,6 +255,10 @@ export class SpacesLive {
       } catch {
         return; // a frame we don't understand is not a reason to drop the socket
       }
+      if (frame.kind === 'space_added') {
+        for (const h of this.memberHandlers) h(frame);
+        return;
+      }
       const spaceId = 'spaceId' in frame ? frame.spaceId : undefined;
       if (!spaceId) return;
       const sub = this.subs.get(spaceId);
@@ -268,7 +288,7 @@ export class SpacesLive {
     this.attempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      if (this.subs.size > 0 || this.statusHandlers.size > 0) this.ensureConnected();
+      if (this.subs.size > 0 || this.statusHandlers.size > 0 || this.memberHandlers.size > 0) this.ensureConnected();
     }, delay);
   }
 }

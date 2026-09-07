@@ -187,8 +187,12 @@ function OrgCard({ org }: { org: SpacesOrg }) {
   const [members, setMembers] = useState<Map<string, Member[]>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
+  const client = useMemo(
+    () => new SpacesClient({ baseUrl: `https://${org.address}`, token: (opts) => account.getAccessToken(opts) }),
+    [org.address, account],
+  );
+
   useEffect(() => {
-    const client = new SpacesClient({ baseUrl: `https://${org.address}`, token: (opts) => account.getAccessToken(opts) });
     client
       .listSpaces()
       .then(async (list) => {
@@ -200,7 +204,22 @@ function OrgCard({ org }: { org: SpacesOrg }) {
         setMembers(new Map(loaded));
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, [org.address, account]);
+  }, [client]);
+
+  const [openingDm, setOpeningDm] = useState<string | null>(null);
+
+  const openDm = async (m: Member) => {
+    if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+    setOpeningDm(m.id);
+    try {
+      const { space } = await client.openDirect(m.id);
+      router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title: m.displayName, me: org.memberId } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOpeningDm(null);
+    }
+  };
 
   const orgMembers = useMemo(() => {
     const seen = new Map<string, Member>();
@@ -260,14 +279,24 @@ function OrgCard({ org }: { org: SpacesOrg }) {
         </Text>
       ) : null}
 
-      {/* Members, as their own section (union across the org's spaces). */}
-      {orgMembers.length > 0 ? (
+      {/* Direct messages: every other member is one tap from a DM (a DM is a
+          `direct` space — openDirect is get-or-create, idempotent). */}
+      {orgMembers.filter((m) => m.id !== org.memberId).length > 0 ? (
         <View style={{ marginTop: 12 }}>
           <Text style={{ fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, color: colors.secondaryLabel, paddingHorizontal: 16, marginBottom: 2 }}>
-            Members
+            Direct messages
           </Text>
-          {orgMembers.map((m) => (
-            <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 8 }}>
+          {orgMembers.filter((m) => m.id !== org.memberId).map((m) => (
+            <Pressable
+              key={m.id}
+              disabled={openingDm !== null}
+              onPress={() => void openDm(m)}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 8,
+                backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+                opacity: openingDm && openingDm !== m.id ? 0.5 : 1,
+              })}
+            >
               <View
                 style={{
                   width: 28, height: 28, borderRadius: 14,
@@ -279,10 +308,10 @@ function OrgCard({ org }: { org: SpacesOrg }) {
                 </Text>
               </View>
               <Text style={{ flex: 1, fontSize: 15, color: colors.label }}>{m.displayName}</Text>
-              {m.role === 'admin' ? (
-                <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>Admin</Text>
-              ) : null}
-            </View>
+              {openingDm === m.id ? <ActivityIndicator size="small" /> : (
+                <Image source="sf:chevron.right" style={{ width: 12, height: 12 }} tintColor={colors.tertiaryLabel} />
+              )}
+            </Pressable>
           ))}
         </View>
       ) : null}
