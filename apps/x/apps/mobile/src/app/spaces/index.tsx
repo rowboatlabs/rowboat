@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { useSpacesAccount, type SpacesOrg } from '@/lib/spaces/account';
@@ -131,11 +131,12 @@ function OrgList() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, gap: 16 }}
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={{ paddingVertical: 8, gap: 24 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
     >
       {account.orgsError ? (
-        <Text style={{ fontSize: 13, color: colors.destructive }}>{account.orgsError}</Text>
+        <Text selectable style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16 }}>{account.orgsError}</Text>
       ) : null}
       {account.orgs === null && !account.orgsError ? <ActivityIndicator style={{ marginTop: 48 }} /> : null}
       {account.orgs?.map((org) => <OrgCard key={org.id} org={org} />)}
@@ -148,7 +149,7 @@ function OrgList() {
       ) : null}
 
       {/* Account footer */}
-      <View style={{ marginTop: 8 }}>
+      <View style={{ borderTopWidth: 0.5, borderTopColor: colors.separator, paddingTop: 6 }}>
         {who ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12 }}>
             <Image source="sf:person.crop.circle" style={{ width: 20, height: 20 }} tintColor={colors.secondaryLabel} />
@@ -228,53 +229,49 @@ function OrgCard({ org }: { org: SpacesOrg }) {
   }, [members]);
 
   return (
-    <View>
-      {/* Org identity header */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10 }}>
+    <View style={{ gap: 4 }}>
+      {/* Org identity */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 10 }}>
         <View
           style={{
-            width: 40, height: 40, borderRadius: 10, borderCurve: 'continuous',
+            width: 44, height: 44, borderRadius: 11, borderCurve: 'continuous',
             alignItems: 'center', justifyContent: 'center', backgroundColor: orgTint(org.id, dark),
           }}
         >
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#ffffff' }}>
+          <Text style={{ fontSize: 19, fontWeight: '700', color: '#ffffff' }}>
             {(org.name[0] ?? '?').toUpperCase()}
           </Text>
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 17, fontWeight: '600', color: colors.label }}>{org.name}</Text>
-          <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>
+        <View style={{ flex: 1, gap: 1 }}>
+          <Text style={{ fontSize: 20, fontWeight: '700', letterSpacing: -0.3, color: colors.label }}>{org.name}</Text>
+          <Text style={{ fontSize: 13, color: colors.tertiaryLabel }}>
             {org.role === 'admin' ? 'Admin' : 'Member'}
             {spaces ? ` · ${spaces.length} ${spaces.length === 1 ? 'space' : 'spaces'}` : ''}
           </Text>
         </View>
       </View>
 
-      {error ? <Text style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 14, paddingBottom: 12 }}>{error}</Text> : null}
-      {spaces === null && !error ? <ActivityIndicator style={{ alignSelf: 'flex-start', marginLeft: 14, marginBottom: 12 }} /> : null}
+      {error ? <Text selectable style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
+      {spaces === null && !error ? <ActivityIndicator style={{ alignSelf: 'center', marginVertical: 16 }} /> : null}
 
-      {spaces?.map((space, i) => (
-        <Fragment key={space.id}>
-          <View style={{ height: 1, marginLeft: i === 0 ? 0 : 46, backgroundColor: colors.separator }} />
-          <Pressable
-            onPress={() => {
-              if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
-              router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title: space.name, me: org.memberId } });
-            }}
-            style={({ pressed }) => ({
-              flexDirection: 'row', alignItems: 'center', gap: 10,
-              paddingLeft: 16, paddingRight: 12, paddingVertical: 13,
-              backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
-            })}
-          >
-            <Image source="sf:number" style={{ width: 16, height: 16 }} tintColor={colors.secondaryLabel} />
-            <Text style={{ flex: 1, fontSize: 16, color: colors.label }}>{space.name}</Text>
-            <Image source="sf:chevron.right" style={{ width: 12, height: 12 }} tintColor={colors.tertiaryLabel} />
-          </Pressable>
-        </Fragment>
+      {/* Spaces */}
+      {spaces !== null ? <SectionLabel text="Spaces" /> : null}
+      {spaces?.map((space) => (
+        <Row
+          key={space.id}
+          onPress={() => {
+            if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+            router.push({ pathname: '/spaces/chat', params: { org: org.address, space: space.id, title: space.name, me: org.memberId } });
+          }}
+        >
+          <View style={{ width: 28, alignItems: 'center' }}>
+            <Image source="sf:number" style={{ width: 17, height: 17 }} tintColor={colors.secondaryLabel} />
+          </View>
+          <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{space.name}</Text>
+        </Row>
       ))}
       {spaces?.length === 0 ? (
-        <Text style={{ fontSize: 13, color: colors.tertiaryLabel, paddingHorizontal: 14, paddingBottom: 14 }}>
+        <Text style={{ fontSize: 14, color: colors.tertiaryLabel, paddingHorizontal: 16, paddingVertical: 4 }}>
           No spaces in this org yet.
         </Text>
       ) : null}
@@ -282,39 +279,63 @@ function OrgCard({ org }: { org: SpacesOrg }) {
       {/* Direct messages: every other member is one tap from a DM (a DM is a
           `direct` space — openDirect is get-or-create, idempotent). */}
       {orgMembers.filter((m) => m.id !== org.memberId).length > 0 ? (
-        <View style={{ marginTop: 12 }}>
-          <Text style={{ fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, color: colors.secondaryLabel, paddingHorizontal: 16, marginBottom: 2 }}>
-            Direct messages
-          </Text>
+        <>
+          <View style={{ height: 16 }} />
+          <SectionLabel text="Direct messages" />
           {orgMembers.filter((m) => m.id !== org.memberId).map((m) => (
-            <Pressable
-              key={m.id}
-              disabled={openingDm !== null}
-              onPress={() => void openDm(m)}
-              style={({ pressed }) => ({
-                flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 8,
-                backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
-                opacity: openingDm && openingDm !== m.id ? 0.5 : 1,
-              })}
-            >
-              <View
-                style={{
-                  width: 28, height: 28, borderRadius: 14,
-                  alignItems: 'center', justifyContent: 'center', backgroundColor: orgTint(m.id, dark),
-                }}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '600', color: '#ffffff' }}>
-                  {(m.displayName[0] ?? '?').toUpperCase()}
-                </Text>
+            <Row key={m.id} disabled={openingDm !== null} dimmed={openingDm !== null && openingDm !== m.id} onPress={() => void openDm(m)}>
+              <View style={{ width: 28, alignItems: 'center' }}>
+                <View
+                  style={{
+                    width: 26, height: 26, borderRadius: 13,
+                    alignItems: 'center', justifyContent: 'center', backgroundColor: orgTint(m.id, dark),
+                  }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: '#ffffff' }}>
+                    {(m.displayName[0] ?? '?').toUpperCase()}
+                  </Text>
+                </View>
               </View>
-              <Text style={{ flex: 1, fontSize: 15, color: colors.label }}>{m.displayName}</Text>
-              {openingDm === m.id ? <ActivityIndicator size="small" /> : (
-                <Image source="sf:chevron.right" style={{ width: 12, height: 12 }} tintColor={colors.tertiaryLabel} />
-              )}
-            </Pressable>
+              <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, color: colors.label }}>{m.displayName}</Text>
+              {openingDm === m.id ? <ActivityIndicator size="small" /> : null}
+            </Row>
           ))}
-        </View>
+        </>
       ) : null}
     </View>
+  );
+}
+
+/** Slack's quiet section label: small, weighty, inset with the row text. */
+function SectionLabel({ text }: { text: string }) {
+  const colors = useColors();
+  return (
+    <Text style={{ fontSize: 13, fontWeight: '600', color: colors.secondaryLabel, paddingHorizontal: 16, paddingBottom: 4 }}>
+      {text}
+    </Text>
+  );
+}
+
+/** 44pt list row with an inset rounded pressed state — no chevrons, like Slack. */
+function Row({ children, onPress, disabled, dimmed }: {
+  children: ReactNode;
+  onPress: () => void;
+  disabled?: boolean;
+  dimmed?: boolean;
+}) {
+  const colors = useColors();
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 42,
+        marginHorizontal: 8, paddingHorizontal: 8, borderRadius: 10, borderCurve: 'continuous',
+        backgroundColor: pressed ? colors.secondaryBackground : 'transparent',
+        opacity: dimmed ? 0.5 : 1,
+      })}
+    >
+      {children}
+    </Pressable>
   );
 }
