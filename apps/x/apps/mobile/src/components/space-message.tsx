@@ -3,6 +3,8 @@ import { memo, useMemo } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
+import { spaces } from '@x/shared';
+
 import { ChatMarkdown } from '@/components/markdown';
 import { SpaceBlobImage } from '@/components/space-blob-image';
 import { useColors } from '@/theme/colors';
@@ -41,6 +43,7 @@ function avatarColor(id: string, dark: boolean): string {
 export const MessageRow = memo(function MessageRow({
   message,
   member,
+  memberNames,
   me,
   onToggleReaction,
   onOpenThread,
@@ -48,6 +51,8 @@ export const MessageRow = memo(function MessageRow({
 }: {
   message: Message;
   member?: Member;
+  /** id → displayName for the whole space — resolves @<memberId> mentions. */
+  memberNames?: ReadonlyMap<string, string>;
   me: string;
   onToggleReaction: (message: Message, emoji: string) => void;
   /** Omit on the thread screen (replies have no threads). */
@@ -59,6 +64,11 @@ export const MessageRow = memo(function MessageRow({
   const name = member?.displayName ?? message.author.memberId;
   const agent = message.author.actingMode !== 'direct';
   const time = new Date(message.postedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  // Wire member addresses ("@01ABC…") → bold display names, code spans untouched.
+  const body = useMemo(
+    () => (memberNames ? spaces.decorateMentions(message.body, memberNames) : message.body),
+    [message.body, memberNames],
+  );
 
   const imageRule = useMemo(
     () => ({
@@ -107,7 +117,7 @@ export const MessageRow = memo(function MessageRow({
           <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>{time}</Text>
           {message.editedAt ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>(edited)</Text> : null}
         </View>
-        <ChatMarkdown extraRules={imageRule}>{message.body}</ChatMarkdown>
+        <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
         {message.reactions.length > 0 ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
             {message.reactions.map((g) => {

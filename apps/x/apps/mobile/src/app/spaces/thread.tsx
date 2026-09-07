@@ -31,6 +31,7 @@ export default function SpaceThreadScreen() {
   const [rootMessage, setRootMessage] = useState<Message | null>(null);
   const [replies, setReplies] = useState<Message[] | null>(null);
   const [members, setMembers] = useState<Map<string, Member>>(new Map());
+  const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -141,7 +142,7 @@ export default function SpaceThreadScreen() {
         >
           {error ? <Text style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
           {rootMessage ? (
-            <MessageRow message={rootMessage} member={members.get(rootMessage.author.memberId)} me={me} onToggleReaction={toggleReaction} onLongPress={setActionMessage} />
+            <MessageRow message={rootMessage} member={members.get(rootMessage.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={setActionMessage} />
           ) : null}
           {rootMessage && (replies?.length ?? 0) > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
@@ -152,7 +153,7 @@ export default function SpaceThreadScreen() {
             </View>
           ) : null}
           {replies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} me={me} onToggleReaction={toggleReaction} onLongPress={setActionMessage} />
+            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={setActionMessage} />
           ))}
         </ScrollView>
       )}

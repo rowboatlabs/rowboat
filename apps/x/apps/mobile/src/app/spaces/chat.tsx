@@ -31,6 +31,7 @@ export default function SpaceChatScreen() {
 
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [members, setMembers] = useState<Map<string, Member>>(new Map());
+  const memberNames = useMemo(() => new Map([...members].map(([id, m]) => [id, m.displayName])), [members]);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -179,6 +180,7 @@ export default function SpaceChatScreen() {
               key={m.id}
               message={m}
               member={members.get(m.author.memberId)}
+              memberNames={memberNames}
               me={me}
               onToggleReaction={toggleReaction}
               onOpenThread={openThread}
