@@ -3686,9 +3686,11 @@ export const ipcSchemas = {
   },
   // Self-serve org creation on the managed deployment's apex (free for now —
   // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
-  // caller is the org's first admin at <slug>.spaces.rowboatlabs.com.
+  // caller is the org's first admin. The address is generated in core
+  // (name-derived prefix + always-appended random suffix — decision
+  // 2026-09-07): the user names the server; nobody picks a slug.
   'spaces:createOrg': {
-    req: z.object({ name: z.string(), slug: z.string() }),
+    req: z.object({ name: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
   },
   // Where the Create button makes orgs (from /v1/config via core). null =

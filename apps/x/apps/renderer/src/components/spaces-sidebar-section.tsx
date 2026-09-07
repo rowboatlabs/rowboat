@@ -3,6 +3,10 @@ import { ChevronRight, Hash, Loader2, MessagesSquare, MoreVertical, Plus, Trash2
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+    AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -78,8 +82,8 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
                     </button>
                     <button
                         type="button"
-                        aria-label="Add an org"
-                        title="Add an org"
+                        aria-label="Add a server"
+                        title="Add a server"
                         onClick={() => setAddOrgOpen(true)}
                         className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/spaces-head:opacity-100"
                     >
@@ -97,7 +101,7 @@ export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
                             onClick={() => setAddOrgOpen(true)}
                             className="pl-6 pr-4 pb-2 text-left text-[11.5px] italic text-muted-foreground hover:text-foreground"
                         >
-                            Add an org to see its spaces here.
+                            Add a server to see its spaces here.
                         </button>
                     ) : (
                         <SidebarMenu>
@@ -142,6 +146,7 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
     const [newName, setNewName] = useState('')
     const [newDirectOpen, setNewDirectOpen] = useState(false)
     const [showAllDirects, setShowAllDirects] = useState(false)
+    const [confirmRemove, setConfirmRemove] = useState(false)
     // A dead OAuth session shows as a gentle "Sign in again" (org.authError, from core);
     // an unreachable org shows Retry.
     const needsSignIn = !!org.authError
@@ -186,7 +191,7 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
     return (
         <>
             <SidebarMenuItem>
-                <div className="group/org flex h-7 items-center gap-1.5 rounded-md pl-6 pr-2 text-[11.5px] text-muted-foreground" title={`${org.address} · you are ${org.memberId}`}>
+                <div className="group/org flex h-7 items-center gap-1.5 rounded-md pl-6 pr-2 text-[11.5px] text-muted-foreground" title={`You are ${org.memberId}`}>
                     <OrgMonogram org={org} size="sm" />
                     <span className="flex-1 truncate">{org.name}</span>
                     {needsSignIn ? (
@@ -213,7 +218,7 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
                         <DropdownMenuTrigger asChild>
                             <button
                                 type="button"
-                                aria-label="Org options"
+                                aria-label="Server options"
                                 className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/org:opacity-100 data-[state=open]:opacity-100"
                             >
                                 <MoreVertical className="size-3.5" />
@@ -229,14 +234,34 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                                 className="text-destructive focus:text-destructive"
-                                onClick={() => {
-                                    void window.ipc.invoke('spaces:removeOrg', { orgId: org.id }).then(onChanged)
-                                }}
+                                onClick={() => setConfirmRemove(true)}
                             >
-                                <Trash2 className="mr-2 size-3.5" /> Remove org
+                                <Trash2 className="mr-2 size-3.5" /> Remove server
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
+                    <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Remove {org.name}?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    This only removes the server from this device — you can rejoin with an invite link.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                    className="bg-destructive text-white hover:bg-destructive/90"
+                                    onClick={() => {
+                                        setConfirmRemove(false)
+                                        void window.ipc.invoke('spaces:removeOrg', { orgId: org.id }).then(onChanged)
+                                    }}
+                                >
+                                    Remove
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
                 </div>
             </SidebarMenuItem>
             {org.spaces.filter((space) => !visibleSpaceKeys || visibleSpaceKeys.has(spaceUseKey(org.id, space.id))).map((space) => {

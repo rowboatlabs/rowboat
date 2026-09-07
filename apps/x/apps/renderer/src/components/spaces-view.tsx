@@ -162,7 +162,7 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                             your teammates&apos; agents work in them with you.
                         </p>
                         <Button size="sm" className="mt-4" onClick={() => setAddOrgOpen(true)}>
-                            <Plus className="size-4 mr-1" /> Add an org
+                            <Plus className="size-4 mr-1" /> Add a server
                         </Button>
                     </>
                 ) : (
@@ -170,8 +170,8 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                         <h2 className="text-sm font-semibold">No space to open</h2>
                         <p className="mt-1 text-sm text-muted-foreground">
                             {orgs.some((o) => o.error)
-                                ? 'An org is unreachable — check it is running and you are signed in.'
-                                : 'Create the first space from the org row in the sidebar.'}
+                                ? 'A server is unreachable — check it is running and you are signed in.'
+                                : 'Create the first space from the server row in the sidebar.'}
                         </p>
                     </>
                 )}
@@ -636,8 +636,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
             {active && <SelectionCopy />}
             <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
                 {/* Left: the org's mark, then # the space. Hover it for what the
-                    old identity card said — org name, address, who you are.
-                    Inviting lives with the members; nothing here repeats it. */}
+                    old identity card said — server name, who you are. The address
+                    is deliberately absent (decision 2026-09-07: names are the
+                    identity; the address is plumbing). Inviting lives with the
+                    members; nothing here repeats it. */}
                 <HoverCard openDelay={200} closeDelay={150}>
                     <HoverCardTrigger asChild>
                         <button
@@ -671,10 +673,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             </div>
                         </div>
                         <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px]">
-                            <dt className="text-right font-medium">Organization</dt>
-                            <dd className="truncate text-muted-foreground">{org.name}</dd>
                             <dt className="text-right font-medium">Server</dt>
-                            <dd className="min-w-0"><CopyLine text={org.address} title="Copy the server address" className="text-[13px]" /></dd>
+                            <dd className="truncate text-muted-foreground">{org.name}</dd>
                             <dt className="text-right font-medium">Members</dt>
                             <dd className="truncate text-muted-foreground">
                                 {members.length}{here.length > 0 && <span> · {here.length} here</span>}

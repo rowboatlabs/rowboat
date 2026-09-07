@@ -104,7 +104,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:createOrg': async (args) => {
-    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, slug: args.slug, openBrowser }));
+    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
     void syncSpaceMentionWatch({ force: true });
     return { org };
   },

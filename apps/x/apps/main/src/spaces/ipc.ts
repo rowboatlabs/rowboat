@@ -142,7 +142,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:createOrg': async (_event, args) => {
-    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, slug: args.slug, openBrowser }));
+    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
     void syncSpaceMentionWatch({ force: true });
     return { org };
   },

@@ -46,6 +46,8 @@ export interface OrgRecord {
   address: string;
   /** Where to reach it, scheme included, e.g. http://localhost:4272. */
   baseUrl: string;
+  /** The server's durable org id (`org-<ulid>`) when known — the cross-device identity; `id` stays the local registry key. */
+  serverOrgId?: string;
   auth: OrgAuth;
 }
 
@@ -314,6 +316,7 @@ export function upsertOAuthOrg(input: {
   baseUrl: string;
   name: string;
   address: string;
+  serverOrgId?: string;
   issuer: string;
   clientId: string;
   memberId: string;
@@ -341,6 +344,7 @@ export function upsertOAuthOrg(input: {
   record.name = input.name;
   record.address = input.address;
   record.auth = auth;
+  if (input.serverOrgId) record.serverOrgId = input.serverOrgId;
   if (!existing) config.orgs.push(record);
   writeConfig(config);
   const runtime = runtimes.get(record.id);

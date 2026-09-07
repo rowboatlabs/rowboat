@@ -868,6 +868,7 @@ export function DockSidebar({
   }, [recentRuns, pinnedChatIds])
 
   const [deleteChatTarget, setDeleteChatTarget] = useState<{ id: string; title: string } | null>(null)
+  const [removeOrgTarget, setRemoveOrgTarget] = useState<{ id: string; name: string } | null>(null)
 
   // ----- data: spaces (safe when the flag is off — the store stays empty) -----
   const { orgs, loading: spacesLoading, refresh: refreshSpaces } = useSpacesOrgs()
@@ -1427,6 +1428,7 @@ export function DockSidebar({
           onOpenSpace={(orgId, spaceId) => { closeFlyouts(); onOpenSpace?.(orgId, spaceId) }}
           onAddOrg={() => setAddOrgOpen(true)}
           onChanged={() => void refreshSpaces()}
+          onRequestRemoveOrg={(id, name) => setRemoveOrgTarget({ id, name })}
         />
       )}
 
@@ -1501,6 +1503,32 @@ export function DockSidebar({
               }}
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Remove-server confirm — hoisted to the root like delete-chat: the
+          flyout it's triggered from can close underneath it. */}
+      <AlertDialog open={!!removeOrgTarget} onOpenChange={(open) => { if (!open) setRemoveOrgTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {removeOrgTarget?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This only removes the server from this device — you can rejoin with an invite link.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => {
+                const target = removeOrgTarget
+                setRemoveOrgTarget(null)
+                if (target) void window.ipc.invoke('spaces:removeOrg', { orgId: target.id }).then(() => void refreshSpaces())
+              }}
+            >
+              Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1679,6 +1707,7 @@ function SpacesFlyout({
   onOpenSpace,
   onAddOrg,
   onChanged,
+  onRequestRemoveOrg,
 }: {
   orgs: OrgWithSpaces[]
   loading: boolean
@@ -1687,6 +1716,7 @@ function SpacesFlyout({
   onOpenSpace: (orgId: string, spaceId: string) => void
   onAddOrg: () => void
   onChanged: () => void
+  onRequestRemoveOrg: (orgId: string, name: string) => void
 }) {
   return (
     <div data-dock-flyout="" data-slot="dock-overlay" data-state="open" className="rowboat-dock-flyout titlebar-no-drag" style={{ left: DOCK_FLYOUT_LEFT_PX }}>
@@ -1697,7 +1727,7 @@ function SpacesFlyout({
           onClick={onAddOrg}
           className="flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-800 dark:text-teal-400 dark:hover:text-teal-300"
         >
-          <Plus className="size-3" /> Add org
+          <Plus className="size-3" /> Add server
         </button>
       </div>
       {loading ? (
@@ -1708,7 +1738,7 @@ function SpacesFlyout({
           onClick={onAddOrg}
           className="px-2.5 pb-2 text-left text-[11.5px] italic text-muted-foreground hover:text-foreground"
         >
-          Add an org to see its spaces here.
+          Add a server to see its spaces here.
         </button>
       ) : (
         orgs.map((org) => (
@@ -1719,6 +1749,7 @@ function SpacesFlyout({
             unread={unread}
             onOpenSpace={onOpenSpace}
             onChanged={onChanged}
+            onRequestRemoveOrg={onRequestRemoveOrg}
           />
         ))
       )}
@@ -1726,12 +1757,13 @@ function SpacesFlyout({
   )
 }
 
-function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
+function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onRequestRemoveOrg }: {
   org: OrgWithSpaces
   activeSpace: SpaceSelection
   unread: Map<string, number>
   onOpenSpace: (orgId: string, spaceId: string) => void
   onChanged: () => void
+  onRequestRemoveOrg: (orgId: string, name: string) => void
 }) {
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -1777,7 +1809,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
 
   return (
     <>
-      <div className="group/org flex h-8 items-center gap-1.5 rounded-[9px] px-2 text-[11.5px] text-muted-foreground" title={`${org.address} · you are ${org.memberId}`}>
+      <div className="group/org flex h-8 items-center gap-1.5 rounded-[9px] px-2 text-[11.5px] text-muted-foreground" title={`You are ${org.memberId}`}>
         <OrgMonogram org={org} size="sm" />
         <span className="flex-1 truncate">{org.name}</span>
         {needsSignIn ? (
@@ -1804,7 +1836,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label="Org options"
+              aria-label="Server options"
               className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/org:opacity-100 data-[state=open]:opacity-100"
             >
               <MoreVertical className="size-3.5" />
@@ -1820,11 +1852,9 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged }: {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
-              onClick={() => {
-                void window.ipc.invoke('spaces:removeOrg', { orgId: org.id }).then(onChanged)
-              }}
+              onClick={() => onRequestRemoveOrg(org.id, org.name)}
             >
-              <Trash2 className="mr-2 size-3.5" /> Remove org
+              <Trash2 className="mr-2 size-3.5" /> Remove server
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
