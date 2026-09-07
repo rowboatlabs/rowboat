@@ -36,6 +36,7 @@ export default function SpaceChatScreen() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
+  const [reactionsOnly, setReactionsOnly] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
@@ -184,7 +185,8 @@ export default function SpaceChatScreen() {
               me={me}
               onToggleReaction={toggleReaction}
               onOpenThread={openThread}
-              onLongPress={setActionMessage}
+              onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
+              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }}
             />
           ))}
           {messages?.length === 0 ? (
@@ -219,6 +221,7 @@ export default function SpaceChatScreen() {
       </View>
 
       <MessageActionSheet
+        reactionsOnly={reactionsOnly}
         message={actionMessage}
         me={me}
         onClose={() => setActionMessage(null)}

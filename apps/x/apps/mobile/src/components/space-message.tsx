@@ -3,6 +3,7 @@ import { memo, useMemo } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import type { Member, Message } from '@rowboat/spaces-protocol';
 
+import { Image } from 'expo-image';
 import { spaces } from '@x/shared';
 
 import { ChatMarkdown } from '@/components/markdown';
@@ -48,6 +49,7 @@ export const MessageRow = memo(function MessageRow({
   onToggleReaction,
   onOpenThread,
   onLongPress,
+  onAddReaction,
 }: {
   message: Message;
   member?: Member;
@@ -58,6 +60,8 @@ export const MessageRow = memo(function MessageRow({
   /** Omit on the thread screen (replies have no threads). */
   onOpenThread?: (message: Message) => void;
   onLongPress: (message: Message) => void;
+  /** The emoji+ pill — a reactions-only picker (defaults to the full sheet). */
+  onAddReaction?: (message: Message) => void;
 }) {
   const colors = useColors();
   const dark = colors.background === '#000000';
@@ -88,6 +92,8 @@ export const MessageRow = memo(function MessageRow({
 
   return (
     <Pressable
+      // Tap opens the thread (Slack); long-press keeps the action sheet.
+      onPress={onOpenThread ? () => onOpenThread(message) : undefined}
       onLongPress={() => {
         if (process.env.EXPO_OS === 'ios') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         onLongPress(message);
@@ -142,6 +148,20 @@ export const MessageRow = memo(function MessageRow({
                 </Pressable>
               );
             })}
+            {/* Slack's add-reaction pill: emoji picker only. */}
+            <Pressable
+              onPress={() => {
+                if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+                (onAddReaction ?? onLongPress)(message);
+              }}
+              style={{
+                flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 3,
+                borderRadius: 12, backgroundColor: colors.secondaryBackground,
+              }}
+            >
+              <Image source="sf:face.smiling" style={{ width: 14, height: 14 }} tintColor={colors.secondaryLabel} />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: colors.secondaryLabel, marginLeft: 1, marginTop: -6 }}>+</Text>
+            </Pressable>
           </View>
         ) : null}
         {onOpenThread && message.replyCount > 0 ? (
@@ -163,6 +183,7 @@ export function MessageActionSheet({
   onClose,
   onToggleReaction,
   onReply,
+  reactionsOnly,
 }: {
   message: Message | null;
   me: string;
@@ -170,6 +191,8 @@ export function MessageActionSheet({
   onToggleReaction: (message: Message, emoji: string) => void;
   /** Omit on the thread screen — the composer is already the reply box. */
   onReply?: (message: Message) => void;
+  /** The emoji+ pill's mode: just the reactions row. */
+  reactionsOnly?: boolean;
 }) {
   const colors = useColors();
   if (!message) return null;
@@ -203,7 +226,7 @@ export function MessageActionSheet({
               </Pressable>
             ))}
           </View>
-          {onReply ? (
+          {onReply && !reactionsOnly ? (
             <Pressable
               onPress={() => {
                 onReply(message);

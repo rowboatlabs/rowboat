@@ -36,6 +36,7 @@ export default function SpaceThreadScreen() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
+  const [reactionsOnly, setReactionsOnly] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const lastOffset = useRef<number | undefined>(undefined);
 
@@ -142,7 +143,8 @@ export default function SpaceThreadScreen() {
         >
           {error ? <Text style={{ fontSize: 13, color: colors.destructive, paddingHorizontal: 16, paddingBottom: 8 }}>{error}</Text> : null}
           {rootMessage ? (
-            <MessageRow message={rootMessage} member={members.get(rootMessage.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={setActionMessage} />
+            <MessageRow message={rootMessage} member={members.get(rootMessage.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
+              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} />
           ) : null}
           {rootMessage && (replies?.length ?? 0) > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
@@ -153,7 +155,8 @@ export default function SpaceThreadScreen() {
             </View>
           ) : null}
           {replies?.map((m) => (
-            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={setActionMessage} />
+            <MessageRow key={m.id} message={m} member={members.get(m.author.memberId)} memberNames={memberNames} me={me} onToggleReaction={toggleReaction} onLongPress={(m) => { setReactionsOnly(false); setActionMessage(m); }}
+              onAddReaction={(m) => { setReactionsOnly(true); setActionMessage(m); }} />
           ))}
         </ScrollView>
       )}
@@ -182,6 +185,7 @@ export default function SpaceThreadScreen() {
       </View>
 
       <MessageActionSheet
+        reactionsOnly={reactionsOnly}
         message={actionMessage}
         me={me}
         onClose={() => setActionMessage(null)}
