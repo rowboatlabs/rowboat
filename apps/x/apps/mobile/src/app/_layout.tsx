@@ -9,6 +9,8 @@ import { GlassHamburger } from '@/components/glass-hamburger';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { DrawerContent } from '@/components/drawer-content';
+import { registerWithMac } from '@/lib/push';
+import { useConnection } from '@/lib/connection';
 import { ConnectionProvider } from '@/lib/connection';
 import { SpacesAccountProvider } from '@/lib/spaces/account';
 
@@ -30,6 +32,7 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <ConnectionProvider>
           <SpacesAccountProvider>
+          <PushRegistrar />
           <Drawer
             drawerContent={(props) => <DrawerContent {...props} />}
             screenOptions={{
@@ -77,10 +80,21 @@ export default function RootLayout() {
             />
             <Drawer.Screen name="notes" options={{ title: 'Brain', headerShown: false }} />
             <Drawer.Screen name="pair-dev" options={{ title: 'Dev pairing', headerShown: false }} />
+            <Drawer.Screen name="notifications" options={{ title: 'Notifications', headerShown: true }} />
           </Drawer>
           </SpacesAccountProvider>
         </ConnectionProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );
+}
+
+// Re-register the phone's push token + level whenever the Mac connects —
+// tokens rotate and prefs change; the call is idempotent.
+function PushRegistrar() {
+  const { rpc, status } = useConnection();
+  useEffect(() => {
+    if (status === 'connected' && rpc) void registerWithMac(rpc).catch(() => {});
+  }, [status, rpc]);
+  return null;
 }

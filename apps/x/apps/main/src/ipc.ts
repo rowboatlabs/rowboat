@@ -3114,6 +3114,11 @@ export function setupIpcHandlers() {
       await setServerLanEnabled(args.enabled);
       return { success: true };
     },
+    'phone:push:register': async (_event, args) => {
+      const { registerPhonePush } = await import('@x/core/dist/spaces/phone-push.js');
+      registerPhonePush(args);
+      return { ok: true as const };
+    },
     'server:rotateKey': async () => {
       await rotateServerKey();
       return { success: true };

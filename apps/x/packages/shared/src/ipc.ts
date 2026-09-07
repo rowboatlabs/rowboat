@@ -3613,6 +3613,15 @@ export const ipcSchemas = {
   },
   // Mints a new server key and rebinds — every paired phone is revoked and
   // must re-pair. This is the recovery path for a leaked QR/token.
+  /** A paired phone registers (or updates) its push token + notify level. */
+  'phone:push:register': {
+    req: z.object({
+      token: z.string().min(1).max(200),
+      level: z.enum(['off', 'mentions', 'dms', 'all']),
+      deviceName: z.string().max(64).optional(),
+    }),
+    res: z.object({ ok: z.literal(true) }),
+  },
   'server:rotateKey': {
     req: z.null(),
     res: z.object({

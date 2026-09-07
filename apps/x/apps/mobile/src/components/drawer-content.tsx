@@ -147,6 +147,16 @@ export function DrawerContent(props: DrawerContentComponentProps) {
         ) : null}
         {paired ? (
         <FootRow
+          icon="sf:bell"
+          label="Notifications"
+          onPress={() => {
+            router.push('/notifications');
+            props.navigation.closeDrawer();
+          }}
+        />
+        ) : null}
+        {paired ? (
+        <FootRow
           icon={connected ? 'sf:laptopcomputer' : 'sf:wifi.slash'}
           label={connected ? (pairing?.name ?? 'Connected') : 'Reconnecting…'}
           detail="Unpair"

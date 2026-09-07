@@ -190,6 +190,11 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
       await sessions().deleteSession(args.sessionId);
       return { success: true };
     },
+    'phone:push:register': async (args) => {
+      const { registerPhonePush } = await import('@x/core/dist/spaces/phone-push.js');
+      registerPhonePush(args);
+      return { ok: true as const };
+    },
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();
       if (!signedIn) {
