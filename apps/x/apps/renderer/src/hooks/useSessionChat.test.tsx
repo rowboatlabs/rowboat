@@ -81,6 +81,12 @@ function makeDeps() {
           if (i >= 0) deltaSubs.splice(i, 1)
         }
       },
+      // Synchronous emission — this harness tests the hook's wiring, not
+      // the frame coalescing (covered in store.test.ts).
+      scheduleEmit: (flush: () => void) => {
+        flush()
+        return () => {}
+      },
     },
     calls,
     emit: (event: TurnBusEvent) => emit(event),

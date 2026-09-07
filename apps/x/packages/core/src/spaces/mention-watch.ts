@@ -6,7 +6,7 @@ import { notifyIfEnabled } from '../application/notification/notifier.js';
 import type { NotifyInput } from '../application/notification/service.js';
 import { WorkDir } from '../config/config.js';
 import { dndActive, notifyLevelFor } from './notify-prefs.js';
-import { getClient, getLive, listOrgs } from './orgs.js';
+import { getClient, getLive, listOrgs, onMemberFrame } from './orgs.js';
 
 // Space mention notifications: main-side watcher that subscribes to EVERY
 // space of every org (independent of what's on screen), scans incoming
@@ -50,6 +50,8 @@ export interface MentionHit {
    * level is 'all'.
    */
   kind: 'you' | 'here' | 'message';
+  /** A direct message: `spaceName` is the other person, so titles don't repeat it. */
+  direct?: boolean;
 }
 
 export function isMissedArrival(postedAt: string, now: number = Date.now()): boolean {
@@ -85,8 +87,11 @@ export function mentionExcerpt(body: string, max = 140): string {
 }
 
 export function buildMentionNotify(hit: MentionHit): NotifyInput {
-  const title =
-    hit.kind === 'message'
+  const title = hit.direct
+    ? hit.kind === 'message'
+      ? hit.authorName
+      : `${hit.authorName} mentioned you`
+    : hit.kind === 'message'
       ? `${hit.authorName} · ${hit.spaceName}`
       : `${hit.authorName} ${hit.kind === 'here' ? 'mentioned everyone' : 'mentioned you'} · ${hit.spaceName}`;
   return {
@@ -169,6 +174,7 @@ const offsets = readOffsets();
 let offsetsFlush: ReturnType<typeof setTimeout> | null = null;
 let resyncTimer: ReturnType<typeof setInterval> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let memberFrameUnsubscribe: (() => void) | null = null;
 let lastSyncAt = 0;
 let syncing = false;
 
@@ -218,8 +224,15 @@ function queueMissed(k: string, orgId: string, spaceId: string, spaceName: strin
   missed.set(k, bucket);
 }
 
-function makeHandler(orgId: string, spaceId: string, spaceName: string, me: MentionIdentity): (frame: ServerFrame) => void {
+function makeHandler(
+  orgId: string,
+  spaceId: string,
+  spaceName: string,
+  me: MentionIdentity,
+  opts: { direct?: boolean } = {},
+): (frame: ServerFrame) => void {
   const k = key(orgId, spaceId);
+  const direct = opts.direct === true;
   return (frame) => {
     if (frame.kind !== 'event') return;
     noteOffset(k, frame.offset);
@@ -234,7 +247,8 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
     // floods, only real mentions fold into the away summary).
     // The thread this message belongs to — a root stands for its own thread.
     const threadRootId = message.threadRoot ?? message.id;
-    const level = notifyLevelFor(orgId, spaceId, threadRootId);
+    // A DM defaults to 'all' — it is addressed to you by construction.
+    const level = notifyLevelFor(orgId, spaceId, threadRootId, direct ? 'all' : 'mentions');
     if (level === 'mute') return;
     // People type the NAME (ids are opaque); agent-written mentions may carry
     // the id. A direct mention outranks @here when both appear.
@@ -260,6 +274,7 @@ function makeHandler(orgId: string, spaceId: string, spaceName: string, me: Ment
       orgId,
       spaceId,
       spaceName,
+      ...(direct ? { direct: true } : {}),
       threadRootId,
       authorName: authorName(k, message.author.memberId),
       // The wire carries "@<memberId>" addresses — show people, not ids.
@@ -290,7 +305,9 @@ export async function syncSpaceMentionWatch(opts?: { force?: boolean }): Promise
     for (const org of listOrgs()) {
       let spaces;
       try {
-        spaces = await getClient(org.id).listSpaces();
+        // DMs ride the same watcher — the sidebar is not the only surface
+        // that must know a message landed.
+        spaces = await getClient(org.id).listSpaces({ includeDirect: true });
       } catch {
         // Org unreachable right now — keep its subscriptions and try again soon.
         unreachable = true;
@@ -317,11 +334,20 @@ export async function syncSpaceMentionWatch(opts?: { force?: boolean }): Promise
         }
 
         const myName = memberNames.get(k)?.get(org.auth.memberId);
-        const handler = makeHandler(org.id, space.id, space.name, {
+        const direct = space.kind === 'direct';
+        // A DM is labelled by the other person (its stored name is a placeholder).
+        const other = direct ? (space.participants ?? []).find((id) => id !== org.auth.memberId) : undefined;
+        const label = direct ? authorName(k, other ?? '') : space.name;
+        const handler = makeHandler(org.id, space.id, label, {
           id: org.auth.memberId,
           ...(myName ? { displayName: myName } : {}),
-        });
-        const stored = offsets[k];
+        }, { direct });
+        // A shared space we have never watched starts live-only (no replay
+        // flood on first sight). A DM starts from offset 0: its log is a few
+        // events long, and the opener's first message may already be on it —
+        // that message must notify, and must fold into the away summary if
+        // we were closed when it landed.
+        const stored = offsets[k] ?? (direct ? 0 : undefined);
         const unsubscribe = getLive(org.id).subscribe(space.id, handler, stored);
         subs.set(k, { memberId: org.auth.memberId, unsubscribe });
       }));
@@ -348,6 +374,12 @@ export async function syncSpaceMentionWatch(opts?: { force?: boolean }): Promise
 /** Boot the watcher: initial sync + a slow re-sync loop (new spaces/orgs). */
 export function startSpaceMentionWatch(): void {
   void syncSpaceMentionWatch({ force: true });
+  // Someone opened a DM with us: watch it now, not at the next slow loop.
+  if (!memberFrameUnsubscribe) {
+    memberFrameUnsubscribe = onMemberFrame((_orgId, frame) => {
+      if (frame.kind === 'space_added') void syncSpaceMentionWatch({ force: true });
+    });
+  }
   if (!resyncTimer) {
     resyncTimer = setInterval(() => void syncSpaceMentionWatch({ force: true }), RESYNC_INTERVAL_MS);
     resyncTimer.unref?.();
@@ -357,6 +389,8 @@ export function startSpaceMentionWatch(): void {
 export function stopSpaceMentionWatch(): void {
   if (resyncTimer) clearInterval(resyncTimer);
   resyncTimer = null;
+  memberFrameUnsubscribe?.();
+  memberFrameUnsubscribe = null;
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = null;
   for (const sub of subs.values()) sub.unsubscribe();

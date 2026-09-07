@@ -5,9 +5,23 @@ import { SPACES_ENABLED } from '@/lib/feature-flags'
 import { getLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
 
 export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
+    /** Shared spaces — what every "the spaces" surface renders. */
     spaces: spaces.Space[]
+    /**
+     * Direct messages (kind 'direct'), kept apart so no space consumer ever
+     * lists one by accident; the sidebar renders them as people.
+     */
+    directs: spaces.Space[]
+    /** DM space id → the other participant's current display name (resolved from the DM's own roster). */
+    directLabels: Record<string, string>
     /** Set when the org could not be reached — the sidebar's "org unreachable" state. */
     error?: string
+}
+
+/** A space by id, shared or direct. */
+export function findSpace(org: OrgWithSpaces, spaceId: string | undefined): spaces.Space | undefined {
+    if (!spaceId) return undefined
+    return org.spaces.find((s) => s.id === spaceId) ?? org.directs.find((s) => s.id === spaceId)
 }
 
 // ---------------------------------------------------------------------------
@@ -36,11 +50,28 @@ export function refreshSpacesOrgs(): Promise<void> {
             const { orgs: records } = await window.ipc.invoke('spaces:listOrgs', null)
             const withSpaces = await Promise.all(
                 records.map(async (org): Promise<OrgWithSpaces> => {
+                    const previous = orgsState.orgs.find((o) => o.id === org.id)
                     try {
-                        const { spaces: list } = await window.ipc.invoke('spaces:listSpaces', { orgId: org.id })
-                        return { ...org, spaces: list }
+                        const { spaces: list } = await window.ipc.invoke('spaces:listSpaces', { orgId: org.id, includeDirect: true })
+                        const shared = list.filter((s) => s.kind !== 'direct')
+                        const directs = list.filter((s) => s.kind === 'direct')
+                        // A DM is labelled by the other person's CURRENT name — its
+                        // stored name is a placeholder. The DM's own two-member
+                        // roster is the lookup (no org roster route exists).
+                        const directLabels: Record<string, string> = {}
+                        await Promise.all(directs.map(async (dm) => {
+                            const other = (dm.participants ?? []).find((id) => id !== org.memberId)
+                            if (!other) return
+                            try {
+                                const { members } = await window.ipc.invoke('spaces:listMembers', { orgId: org.id, spaceId: dm.id })
+                                directLabels[dm.id] = members.find((m) => m.id === other)?.displayName ?? other
+                            } catch {
+                                directLabels[dm.id] = previous?.directLabels[dm.id] ?? other
+                            }
+                        }))
+                        return { ...org, spaces: shared, directs, directLabels }
                     } catch (err) {
-                        return { ...org, spaces: [], error: err instanceof Error ? err.message : String(err) }
+                        return { ...org, spaces: [], directs: [], directLabels: {}, error: err instanceof Error ? err.message : String(err) }
                     }
                 }),
             )
@@ -222,6 +253,13 @@ function wireFeedBus(): void {
     feedBusWired = true
     subscribeSpacesFeed((event) => {
         const frame = event.frame
+        if (frame.kind === 'space_added') {
+            // Someone opened a DM with us. The listing is how we learn its
+            // label and start watching it — no per-space subscription can
+            // exist for a space we did not know about.
+            void refreshSpacesOrgs()
+            return
+        }
         if (frame.kind !== 'event') return
         const key = liveKey(event.orgId, frame.spaceId)
         if (!feedReleases.has(key) || feedRefreshTimers.has(key)) return
@@ -243,7 +281,7 @@ function syncFeedSubscriptions(): void {
     wireFeedBus()
     const wanted = new Set<string>()
     for (const org of orgsState.orgs) {
-        for (const space of org.spaces) {
+        for (const space of [...org.spaces, ...org.directs]) {
             const key = liveKey(org.id, space.id)
             wanted.add(key)
             if (!feedReleases.has(key)) {

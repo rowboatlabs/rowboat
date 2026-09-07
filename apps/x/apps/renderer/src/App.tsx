@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
-import { workspace, quickAskShortcut } from '@x/shared';
+import { workspace, quickAskShortcut, pttKey, type ipc } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
@@ -19,7 +19,6 @@ import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './compo
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
-import { VoiceNoteButton } from '@/components/voice-note-button'
 import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
@@ -42,7 +41,8 @@ import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { SpacesView, type SpaceSelection } from '@/components/spaces-view';
 import { railKey, type RailSelection } from '@/lib/spaces-selection';
-import { useSpacesOrgs } from '@/hooks/use-spaces';
+import { findSpace, useSpacesOrgs } from '@/hooks/use-spaces';
+import { spaceDisplayName } from '@/lib/spaces-direct';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
@@ -54,7 +54,6 @@ import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
 import { CodeWorkspaceDrawer } from '@/components/code/workspace-drawer';
 import type { CodePanel } from '@/components/code/code-panels';
-import { CODE_RAIL_WIDTH } from '@/components/code/session-rail';
 import { useCodeGitStatus } from '@/components/code/use-code-git-status';
 import { refreshCodeSessions } from '@/components/code/use-code-sessions';
 import { CodeDiffOpenerProvider } from '@/contexts/code-diff-context';
@@ -72,7 +71,8 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import { SettingsDialog } from "@/components/settings-dialog"
+import { SettingsDialog, type ConfigTab } from "@/components/settings-dialog"
+import { AboutDialog } from "@/components/about-dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
@@ -92,7 +92,7 @@ import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { type ChatTab } from '@/components/tab-bar'
-import { CaffeinateIndicator } from '@/components/caffeinate-indicator'
+import { CaffeinateToggle } from '@/components/caffeinate-toggle'
 import {
   type ChatMessage,
   type ChatViewportAnchorState,
@@ -124,6 +124,7 @@ import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 import { playAckCue, playAlertCue, playPopCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
+import { isMac } from '@/lib/shortcut'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -146,11 +147,14 @@ const graphPalette = [
   { hue: 0, sat: 72, light: 52 },
 ]
 
-// Push-to-talk gesture timing: a Right-⌘ press shorter than PTT_TAP_MS is a
-// tap (toggles hands-free lock); anything longer is a hold (release
+// Push-to-talk gesture timing: a talk-key press shorter than PTT_TAP_MS is
+// a tap (toggles hands-free lock); anything longer is a hold (release
 // submits). PTT_EDGE_ECHO_MS collapses the same key edge arriving from two
 // sources at once (global uiohook hook + in-window DOM listener).
+// The key is right ⌘ on macOS, right Ctrl elsewhere — shared/ptt-key.ts.
 const PTT_TAP_MS = 350
+const PTT_CODE = pttKey.pttEventCode(isMac)
+const PTT_KEY_LABEL = pttKey.pttKeyLabel(isMac)
 // Mic-ownership token for the Home composer (chat composers use their chatId).
 const HOME_VOICE_HOLDER = 'home-composer'
 const PTT_EDGE_ECHO_MS = 80
@@ -739,19 +743,30 @@ function parseDeepLink(input: string): ViewState | null {
 }
 
 /** Sidebar toggle (fixed position, top-left) — one persistent control that
-    swaps between the expanded panel and the dock, in both directions. */
+    swaps between the expanded panel and the icon rail, in both directions.
+    Reports its rendered width so collapsed-mode headers can pad past the
+    whole cluster (its contents vary: new chat, caffeinate). */
 function FixedSidebarToggle({
   leftInsetPx,
   onNewChat,
-  onVoiceNoteCreated,
+  onWidthChange,
 }: {
   leftInsetPx: number
   onNewChat?: () => void
-  onVoiceNoteCreated?: (path: string) => void
+  onWidthChange?: (px: number) => void
 }) {
   const { toggleSidebar, state } = useSidebar()
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el || !onWidthChange) return
+    onWidthChange(el.offsetWidth)
+    const observer = new ResizeObserver(() => onWidthChange(el.offsetWidth))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [onWidthChange])
   return (
-    <div className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div ref={rootRef} className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
       <button
         type="button"
@@ -759,7 +774,7 @@ function FixedSidebarToggle({
         className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         style={{ marginLeft: TITLEBAR_TOGGLE_MARGIN_LEFT_PX }}
         aria-label="Toggle sidebar"
-        title={state === 'collapsed' ? 'Expand sidebar' : 'Collapse to dock'}
+        title={state === 'collapsed' ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         <PanelLeftIcon className="size-[17px]" strokeWidth={1.5} />
       </button>
@@ -774,13 +789,28 @@ function FixedSidebarToggle({
           <SquarePen className="size-[17px]" strokeWidth={1.5} />
         </button>
       )}
-      <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} variant="action" />
+      {/* Caffeinate lives here rather than in a pane header: it is app-wide
+          state, and this cluster is the one control group present on every
+          view, sidebar expanded or docked. */}
+      <CaffeinateToggle />
     </div>
   )
 }
 
-/** Main content header. The traffic lights live over the expanded panel or
-    the dock gutter, so a small constant left padding is enough. */
+/** Application-menu "View > Toggle Sidebar" (menu:toggleSidebar). A bridge
+ * component because useSidebar() must be called under the SidebarProvider,
+ * below where the menu:command dispatcher sits. Renders nothing. */
+function MenuSidebarToggleBridge() {
+  const { toggleSidebar } = useSidebar()
+  const toggleRef = useRef(toggleSidebar)
+  useEffect(() => { toggleRef.current = toggleSidebar }, [toggleSidebar])
+  useEffect(() => window.ipc.on('menu:toggleSidebar', () => toggleRef.current()), [])
+  return null
+}
+
+/** Main content header. Expanded, the panel absorbs the fixed toggle cluster
+    so ordinary padding works; collapsed, the header pads past the cluster's
+    measured width (collapsedLeftPaddingPx) so back/forward never sit under it. */
 function ContentHeader({
   children,
   onNavigateBack,
@@ -860,6 +890,7 @@ function App() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
   const [isBrowserOpen, setIsBrowserOpen] = useState(false)
   const [isSuggestedTopicsOpen, setIsSuggestedTopicsOpen] = useState(false)
   const [isMeetingsOpen, setIsMeetingsOpen] = useState(false)
@@ -928,15 +959,16 @@ function App() {
   // auto-closes when the active note changes.
   const [liveNotePanelPath, setLiveNotePanelPath] = useState<string | null>(null)
   const [, setActiveShortcutPane] = useState<ShortcutPane>('left')
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
-  // In dock mode the fixed toggle button overhangs the pane's left edge
-  // (the gutter is narrower than traffic lights + toggle), so top bars pad
-  // past it; the expanded panel absorbs the toggle, so ordinary padding.
-  const collapsedLeftPaddingPx = Math.max(
-    12,
-    (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) +
-      TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 32 + 8 - DOCK_GUTTER_PX,
+  // In collapsed mode the fixed toggle cluster (traffic lights + toggle +
+  // new chat + caffeinate) overhangs the pane's left edge (the rail gutter
+  // is narrower than it), so top bars pad past its MEASURED width — the
+  // cluster's contents vary; the expanded panel absorbs it, so ordinary
+  // padding there. Initial estimate covers first paint until the observer
+  // reports.
+  const [titlebarControlsWidthPx, setTitlebarControlsWidthPx] = useState(
+    (isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0) + TITLEBAR_TOGGLE_MARGIN_LEFT_PX + 3 * 32,
   )
+  const collapsedLeftPaddingPx = Math.max(12, titlebarControlsWidthPx + 8 - DOCK_GUTTER_PX)
   // Expanded panel vs. collapsed dock — the collapse button swaps between
   // them; the choice persists per machine.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -1150,7 +1182,7 @@ function App() {
   // because segment consumption freezes while the gate is open.
   const [pttStatus, setPttStatus] = useState<'idle' | 'held' | 'locked'>('idle')
   const pttStatusRef = useRef<'idle' | 'held' | 'locked'>('idle')
-  // Ghostwriter chord (⇧ + right ⌘): the NEXT utterance's result gets
+  // Ghostwriter chord (⇧ + the talk key): the NEXT utterance's result gets
   // pasted at the user's cursor. Set on the down edge, consumed by the
   // utterance callback, cleared on cancel.
   const pttPasteIntentRef = useRef(false)
@@ -1568,7 +1600,7 @@ function App() {
     ttsEnabledRef.current = true
     ttsModeRef.current = 'full'
     // Push-to-talk: the mic + Deepgram socket stay warm for the whole call,
-    // but nothing is heard until the user opens the gate (hold Right ⌘, or
+    // but nothing is heard until the user opens the gate (hold the talk key, or
     // tap it to lock hands-free capture). The key release is the endpoint —
     // no silence detection, no misfires.
     void voiceRef.current
@@ -1754,30 +1786,6 @@ function App() {
     }
   }, [startHoverCall, startCall])
 
-  // Skipper's click on Home starts the call on THE Command Center session —
-  // the standing operator channel — not whatever chat happens to be active.
-  // The operator frame rides server-side composition pins, so the first
-  // utterance is already "operate my command center", no preamble needed.
-  const startCommandCenterCall = useCallback(() => {
-    void (async () => {
-      try {
-        const { sessionId } = await window.ipc.invoke('home:commandCenter', {})
-        hoverRunIdRef.current = sessionId
-        setHoverRunId(sessionId)
-        bindAppChatOnHoverCreateRef.current = null
-      } catch {
-        // Couldn't resolve the operator session — a plain hover call still
-        // beats a dead click.
-      }
-      if (inCallRef.current) {
-        ttsRef.current.cancel()
-        void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
-        return
-      }
-      void startHoverCall()
-    })()
-  }, [startHoverCall])
-
   // The user-mute half that lives in the video pipeline: stop sampling
   // camera/screen frames while muted (see useVideoMode.setCapturePaused).
   const setCapturePaused = video.setCapturePaused
@@ -1857,8 +1865,8 @@ function App() {
   // in one gesture, and the next tap after a stop behaves normally.
   const pttSpokeAtDownRef = useRef(false)
   const pttLastEdgeRef = useRef<{ type: 'down' | 'up'; at: number } | null>(null)
-  // Right ⌘ was used as a modifier (⌘C etc.) during this press — the
-  // matching release must not commit/lock.
+  // The talk key was used as a modifier (⌘C / Ctrl+C etc.) during this
+  // press — the matching release must not commit/lock.
   const pttChordedRef = useRef(false)
 
   const pttEdgeIsEcho = useCallback((type: 'down' | 'up') => {
@@ -1923,7 +1931,7 @@ function App() {
       if (shown < 2) {
         localStorage.setItem('ptt-hold-tip-shown', String(shown + 1))
         toast('No need to keep holding', {
-          description: 'For longer turns, quick-tap right ⌘ instead — talk hands-free, then tap again to send.',
+          description: `For longer turns, quick-tap ${PTT_KEY_LABEL} instead — talk hands-free, then tap again to send.`,
           duration: 6000,
         })
       }
@@ -1961,7 +1969,7 @@ function App() {
       else handlePttChord()
     })
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight') {
+      if (e.code === PTT_CODE) {
         if (!e.repeat) handlePttDown(e.shiftKey)
         return
       }
@@ -1971,10 +1979,10 @@ function App() {
         return
       }
       if (pttStatusRef.current === 'held') handlePttChord()
-      else if (pttStatusRef.current === 'locked' && e.metaKey) handlePttChord()
+      else if (pttStatusRef.current === 'locked' && pttKey.pttModifierHeld(e, isMac)) handlePttChord()
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'MetaRight') handlePttUp()
+      if (e.code === PTT_CODE) handlePttUp()
     }
     document.addEventListener('keydown', onKeyDown)
     document.addEventListener('keyup', onKeyUp)
@@ -1993,13 +2001,17 @@ function App() {
 
   // Global-PTT onboarding: shortly into a call, if the key hook is running
   // but has seen zero input events, macOS Input Monitoring hasn't taken
-  // effect — explain it instead of letting Right ⌘ silently do nothing from
-  // other apps. At most once per app session: once-ever proved too little
+  // effect — explain it instead of letting the talk key silently do nothing
+  // from other apps. At most once per app session: once-ever proved too little
   // (dismiss without granting and global PTT stayed silently broken), every
   // call would nag. (In-window PTT works regardless.)
   const inputMonitoringPromptedRef = useRef(false)
   useEffect(() => {
     if (!inCall) return
+    // macOS-only: Input Monitoring is a TCC grant with no Windows or Linux
+    // equivalent, so a dead hook there means something else entirely and
+    // this dialog would send the user looking for a switch that isn't there.
+    if (!isMac) return
     if (inputMonitoringPromptedRef.current) return
     const timer = setTimeout(async () => {
       try {
@@ -2165,6 +2177,28 @@ function App() {
       .catch(() => {})
   }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, speakerMuted, hoverActivityText, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
+  // Relay the recording waveform's raw amplitudes to the companion: the
+  // voice hook records one auto-gained level per captured audio frame
+  // (~16/s, and NOTHING while the mic gate is paused), and the hover
+  // recording bar draws them with the same VoiceWaveform as this window's
+  // composer — real speech, the app composer's own cadence. Batched on a
+  // short interval; the cursor survives across captures (the hook's array
+  // only ever appends within a call), and resets if the array shrinks.
+  useEffect(() => {
+    if (!inCall) return
+    const levelsRef = voice.audioLevelsRef
+    let cursor = levelsRef.current.length
+    const id = setInterval(() => {
+      const arr = levelsRef.current
+      if (arr.length < cursor) cursor = 0
+      if (arr.length === cursor) return
+      const batch = arr.slice(cursor)
+      cursor = arr.length
+      void window.ipc.invoke('video:popoutLevels', { levels: batch }).catch(() => {})
+    }, 128)
+    return () => clearInterval(id)
+  }, [inCall, voice.audioLevelsRef])
+
   // Screen-pointer gate: tell main whether a share is live (call OR
   // quick-ask — this window owns the capture either way). While true the
   // assistant's screen-pointer tool may draw on the shared display; flipping
@@ -2216,13 +2250,14 @@ function App() {
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'ptt-down') handlePttDown()
       else if (action === 'ptt-up') handlePttUp()
+      else if (action === 'ptt-cancel') handlePttCancel()
       else if (action === 'end-call') endCall()
       else if (action === 'expand') {
         if (video.screenState === 'live') video.stopScreenShare()
         setCallMinimized(false)
       }
     })
-  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
+  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, handlePttCancel, endCall, video])
 
   // Discoverability: nothing else in the UI reveals the global quick-ask
   // shortcut. One toast, once per install, shortly after launch. The chord
@@ -2574,7 +2609,6 @@ function App() {
   const [workDirByTab, setWorkDirByTab] = useState<Record<string, string | null>>({})
   const workDirByTabRef = useRef(workDirByTab)
   workDirByTabRef.current = workDirByTab
-  const chatScrollTopByTabRef = useRef(new Map<string, number>())
   const [toolOpenByTab, setToolOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
   const [chatViewportAnchorByTab, setChatViewportAnchorByTab] = useState<Record<string, ChatViewportAnchorState>>({})
   const activeChatTabIdRef = useRef(activeChatTabId)
@@ -2617,8 +2651,10 @@ function App() {
     const runId = chatTabsRef.current.find((t) => t.id === tabId)?.runId
     if (runId) void persistRunWorkDir(runId, value)
   }, [persistRunWorkDir])
-  const isToolOpenForTab = useCallback((tabId: string, toolId: string): boolean => {
-    return toolOpenByTab[tabId]?.[toolId] ?? false
+  // `undefined` = no explicit user choice — TurnConversation then applies the
+  // per-tool default (coding-run cards open, everything else closed).
+  const isToolOpenForTab = useCallback((tabId: string, toolId: string): boolean | undefined => {
+    return toolOpenByTab[tabId]?.[toolId]
   }, [toolOpenByTab])
   const setToolOpenForTab = useCallback((tabId: string, toolId: string, open: boolean) => {
     setToolOpenByTab((prev) => {
@@ -2645,29 +2681,6 @@ function App() {
       }
     })
   }, [])
-  const getChatScrollContainer = useCallback((tabId: string): HTMLElement | null => {
-    if (typeof document === 'undefined') return null
-    const panel = document.querySelector<HTMLElement>(
-      `[data-chat-tab-panel="${tabId}"][aria-hidden="false"]`
-    )
-    if (!panel) return null
-    const logRoot = panel.querySelector<HTMLElement>('[role="log"]')
-    if (!logRoot) return null
-    const children = Array.from(logRoot.children) as HTMLElement[]
-    for (const child of children) {
-      const style = window.getComputedStyle(child)
-      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
-        return child
-      }
-    }
-    return null
-  }, [])
-  const saveChatScrollForTab = useCallback((tabId: string) => {
-    const container = getChatScrollContainer(tabId)
-    if (!container) return
-    chatScrollTopByTabRef.current.set(tabId, container.scrollTop)
-  }, [getChatScrollContainer])
-
   const getChatTabTitle = useCallback((tab: ChatTab) => {
     if (!tab.runId) return 'New chat'
     return runs.find(r => r.id === tab.runId)?.title || '(Untitled chat)'
@@ -2685,6 +2698,10 @@ function App() {
   // Deep-link into the Code section (a Home Deck strip's door): select this
   // session when the view opens, then clear.
   const [codeFocusSessionId, setCodeFocusSessionId] = useState<string | null>(null)
+  // The code rail's width (drag-resizable, persisted by its SecondaryRail
+  // shell) — the middle pane hugs it while a session's chat is the main
+  // surface. The rail reports before first paint, so the default never shows.
+  const [codeRailWidth, setCodeRailWidth] = useState(280)
   // A file the code chat asked to review — consumed by the workspace drawer.
   const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
   // Which workspace panel (changes / files / terminal) is open beside the
@@ -3819,7 +3836,9 @@ function App() {
             return next
           })
 
-          if (event.toolCallId) {
+          // Coding-run cards stay expanded after the run settles — the card is
+          // the primary output surface (the assistant only confirms in a line).
+          if (event.toolCallId && event.toolName !== 'code_agent_run') {
             setToolOpenForTab(activeChatTabIdRef.current, event.toolCallId, false)
           }
 
@@ -4529,7 +4548,6 @@ function App() {
     if (active?.runId === rid) return
     // Cancel any active dictation — its transcript belongs to the old chat.
     cancelRecordingIfActive()
-    saveChatScrollForTab(activeChatTabIdRef.current)
     setChatTabs((prev) => prev.map((t) => (
       // Rebinding to a different session = a different chat identity — but a
       // DETERMINISTIC one (the session id), so switching A→B→A restores A's
@@ -4537,7 +4555,7 @@ function App() {
       t.id === activeChatTabIdRef.current ? { ...t, runId: rid, chatId: rid } : t
     )))
     void loadRun(rid)
-  }, [cancelRecordingIfActive, loadRun, saveChatScrollForTab])
+  }, [cancelRecordingIfActive, loadRun])
   bindChatToRunRef.current = bindChatToRun
 
   // A code session was selected in the Code view: bind the chat to it — the
@@ -4573,79 +4591,9 @@ function App() {
   }, [])
   const handleCodeDiffOpened = useCallback(() => setCodeDiffPath(null), [])
 
-  useEffect(() => {
-    let cleanupScrollListener: (() => void) | undefined
-    let pollRaf: number | undefined
-    let restoreRafA: number | undefined
-    let restoreRafB: number | undefined
-    let restoreTimeout: ReturnType<typeof setTimeout> | undefined
-    let cancelled = false
-
-    const restoreScrollTop = (container: HTMLElement, top: number) => {
-      const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight)
-      const clampedTop = clampNumber(top, 0, maxScroll)
-      container.scrollTop = clampedTop
-    }
-
-    const attach = (): boolean => {
-      if (cancelled) return true
-      const container = getChatScrollContainer(activeChatTabId)
-      if (!container) return false
-
-      const savedTop = chatScrollTopByTabRef.current.get(activeChatTabId)
-      if (savedTop !== undefined) {
-        // Reinforce restoration across a couple frames because stick-to-bottom
-        // may schedule scroll adjustments during mount/resize.
-        restoreScrollTop(container, savedTop)
-        restoreRafA = requestAnimationFrame(() => {
-          restoreScrollTop(container, savedTop)
-          restoreRafB = requestAnimationFrame(() => {
-            restoreScrollTop(container, savedTop)
-          })
-        })
-        restoreTimeout = setTimeout(() => {
-          restoreScrollTop(container, savedTop)
-        }, 220)
-      }
-
-      const onScroll = () => {
-        chatScrollTopByTabRef.current.set(activeChatTabId, container.scrollTop)
-      }
-      container.addEventListener('scroll', onScroll, { passive: true })
-      cleanupScrollListener = () => {
-        chatScrollTopByTabRef.current.set(activeChatTabId, container.scrollTop)
-        container.removeEventListener('scroll', onScroll)
-      }
-      return true
-    }
-
-    let attempts = 0
-    const maxAttempts = 60
-    const pollAttach = () => {
-      if (cancelled) return
-      if (attach()) return
-      if (attempts >= maxAttempts) return
-      attempts += 1
-      pollRaf = requestAnimationFrame(pollAttach)
-    }
-    pollAttach()
-
-    return () => {
-      cancelled = true
-      cleanupScrollListener?.()
-      if (pollRaf !== undefined) cancelAnimationFrame(pollRaf)
-      if (restoreRafA !== undefined) cancelAnimationFrame(restoreRafA)
-      if (restoreRafB !== undefined) cancelAnimationFrame(restoreRafB)
-      if (restoreTimeout !== undefined) clearTimeout(restoreTimeout)
-    }
-  }, [
-    activeChatTabId,
-    selectedPath,
-    isGraphOpen,
-    isChatSidebarOpen,
-    isRightPaneMaximized,
-    getChatScrollContainer,
-  ])
+  // Reading-position persistence across pane remounts (view toggles,
+  // dock/full-screen switches, run rebinds) lives inside the conversation
+  // scroll controller now — see lib/chat-scroll.ts (keyed by tab.chatId).
 
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
@@ -4665,6 +4613,14 @@ function App() {
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
   }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSpacesOpen, spaceSelection, railSelection, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
+
+  // Navigation handlers can be invoked from closures frozen in older renders
+  // (Spaces' MessageRow memoizes by data and ignores handler identity), so
+  // dedupe/history logic must read the view state through this render-filled
+  // ref — a captured `currentViewState` can be stale, making "already there"
+  // checks eat real navigations.
+  const currentViewStateRef = useRef(currentViewState)
+  currentViewStateRef.current = currentViewState
 
   // applyViewState is declared further down (it needs the chat-binding
   // helpers); handlers above it reach it through this render-filled ref.
@@ -4686,7 +4642,8 @@ function App() {
       case 'apps': return 'Apps'
       case 'spaces': {
         const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
-        return org?.spaces.find((sp) => sp.id === currentViewState.spaceId)?.name ?? 'Spaces'
+        const space = org ? findSpace(org, currentViewState.spaceId) : undefined
+        return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
       case 'workspace': return 'Workspace'
       case 'knowledge-view': return 'Brain'
@@ -5205,7 +5162,7 @@ function App() {
   applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
-    const current = currentViewState
+    const current = currentViewStateRef.current
     if (viewStatesEqual(current, nextView)) {
       if (isBrowserOpen) {
         dismissBrowserOverlay()
@@ -5220,7 +5177,7 @@ function App() {
     }
     setHistory(nextHistory)
     await applyViewState(nextView)
-  }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory, isBrowserOpen, dismissBrowserOverlay])
+  }, [appendUnique, applyViewState, cancelRecordingIfActive, setHistory, isBrowserOpen, dismissBrowserOverlay])
 
   // Move the maximized/full-screen chat into the right side pane: restore the
   // view we expanded from (or fall back to Home) and dock the chat on the right.
@@ -5273,11 +5230,12 @@ function App() {
   }, [navigateToView])
 
   const navigateBack = useCallback(async () => {
+    const current = currentViewStateRef.current
     const { back, forward } = historyRef.current
     if (back.length === 0) return
 
     let i = back.length - 1
-    while (i >= 0 && viewStatesEqual(back[i], currentViewState)) i -= 1
+    while (i >= 0 && viewStatesEqual(back[i], current)) i -= 1
     if (i < 0) {
       setHistory({ back: [], forward })
       return
@@ -5286,18 +5244,19 @@ function App() {
     const target = back[i]
     const nextHistory = {
       back: back.slice(0, i),
-      forward: appendUnique(forward, currentViewState),
+      forward: appendUnique(forward, current),
     }
     setHistory(nextHistory)
     await applyViewState(target)
-  }, [appendUnique, applyViewState, currentViewState, setHistory])
+  }, [appendUnique, applyViewState, setHistory])
 
   const navigateForward = useCallback(async () => {
+    const current = currentViewStateRef.current
     const { back, forward } = historyRef.current
     if (forward.length === 0) return
 
     let i = forward.length - 1
-    while (i >= 0 && viewStatesEqual(forward[i], currentViewState)) i -= 1
+    while (i >= 0 && viewStatesEqual(forward[i], current)) i -= 1
     if (i < 0) {
       setHistory({ back, forward: [] })
       return
@@ -5305,12 +5264,12 @@ function App() {
 
     const target = forward[i]
     const nextHistory = {
-      back: appendUnique(back, currentViewState),
+      back: appendUnique(back, current),
       forward: forward.slice(0, i),
     }
     setHistory(nextHistory)
     await applyViewState(target)
-  }, [appendUnique, applyViewState, currentViewState, setHistory])
+  }, [appendUnique, applyViewState, setHistory])
 
   const canNavigateBack = React.useMemo(() => {
     for (let i = viewHistory.back.length - 1; i >= 0; i--) {
@@ -5790,16 +5749,17 @@ function App() {
   }, [sessionChat.chatState?.conversation, runId, navigateToView])
 
   const navigateToFullScreenChat = useCallback(() => {
+    const current = currentViewStateRef.current
     // Only treat this as navigation when coming from another view
-    if (currentViewState.type !== 'chat') {
+    if (current.type !== 'chat') {
       const nextHistory = {
-        back: appendUnique(historyRef.current.back, currentViewState),
+        back: appendUnique(historyRef.current.back, current),
         forward: [] as ViewState[],
       }
       setHistory(nextHistory)
     }
     handleOpenFullScreenChat()
-  }, [appendUnique, currentViewState, handleOpenFullScreenChat, setHistory])
+  }, [appendUnique, handleOpenFullScreenChat, setHistory])
 
   // Handle image upload for the markdown editor
   const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
@@ -5926,7 +5886,8 @@ function App() {
 
     document.addEventListener('keydown', handleHistoryKeyDown, true)
     return () => document.removeEventListener('keydown', handleHistoryKeyDown, true)
-  }, [isMac, selectedPath])
+    // isMac is a module constant now (lib/shortcut), not a component value.
+  }, [selectedPath])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -6238,6 +6199,93 @@ function App() {
       })
     },
   }), [deleteInitialContentForPath, setInitialContentForPath, tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, removeEditorCacheForPath])
+
+  // Settings opened from the application menu (Settings… / Keyboard
+  // Shortcuts…) — its own dialog instance so the menu can deep-link any tab.
+  const [menuSettings, setMenuSettings] = useState<{ open: boolean; tab: ConfigTab }>({ open: false, tab: 'account' })
+
+  // Native application-menu commands (apps/main/src/menu.ts). The dispatcher
+  // lives in a ref refreshed every render so the one-time IPC subscription
+  // below always routes into the current handlers — same pattern as
+  // navigateToViewRef above. Each command reuses the exact code path of the
+  // in-app control it mirrors.
+  const menuCommandRef = useRef<(cmd: ipc.IPCChannels['menu:command']['req']) => void>(() => {})
+  useEffect(() => {
+    menuCommandRef.current = (cmd) => {
+      switch (cmd.command) {
+        case 'new-chat':
+          handleNewChatTab()
+          break
+        case 'new-note':
+          void knowledgeActions.createNote()
+          break
+        case 'new-presentation':
+          knowledgeActions.createPresentation()
+          break
+        case 'undo':
+        case 'redo': {
+          // Mirrors the ⌘Z keydown routing above: the open markdown editor's
+          // history when it applies, the focused input's native undo otherwise.
+          const active = document.activeElement
+          const inTipTap = active instanceof HTMLElement && Boolean(active.closest('.tiptap-editor'))
+          const inOtherTextInput = (
+            active instanceof HTMLInputElement
+            || active instanceof HTMLTextAreaElement
+            || (active instanceof HTMLElement && active.isContentEditable)
+          ) && !inTipTap
+          const handlers = fileHistoryHandlersRef.current
+          if (!inOtherTextInput && selectedPath?.endsWith('.md') && handlers) {
+            if (cmd.command === 'undo') handlers.undo()
+            else handlers.redo()
+          } else {
+            document.execCommand(cmd.command)
+          }
+          break
+        }
+        case 'open-search':
+          setIsSearchOpen(true)
+          break
+        case 'toggle-browser':
+          handleToggleBrowser()
+          break
+        case 'toggle-full-screen-chat':
+          if (isFullScreenChat && expandedFrom) {
+            handleCloseFullScreenChat()
+          } else {
+            navigateToFullScreenChat()
+          }
+          break
+        case 'go-back':
+          void navigateBack()
+          break
+        case 'go-forward':
+          void navigateForward()
+          break
+        case 'open-settings':
+          setMenuSettings({ open: true, tab: cmd.tab ?? 'account' })
+          break
+        case 'open-about':
+          setAboutOpen(true)
+          break
+        case 'export-note': {
+          const path = selectedPath
+          if (!path || !path.endsWith('.md')) {
+            toast('Open a note to export it')
+            break
+          }
+          const markdown = editorContentByPath[path]
+            ?? (editorPathRef.current === path ? editorContent : '')
+          void window.ipc.invoke('export:note', { markdown, format: cmd.format, title: getBaseName(path) })
+            .then(() => analytics.noteExported(cmd.format))
+            .catch((err) => { console.error('Export failed:', err) })
+          break
+        }
+      }
+    }
+  })
+  useEffect(() => {
+    return window.ipc.on('menu:command', (cmd) => menuCommandRef.current(cmd))
+  }, [])
 
   // Drives the mascot product tour through the app's main sections
   const handleTourNavigate = useCallback((target: TourNavTarget) => {
@@ -6700,7 +6748,7 @@ function App() {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
     if (!isRightPaneContext || !chatPaneOpen || isRightPaneMaximized) return style
     if (codeChatMain) {
-      return { ...style, width: CODE_RAIL_WIDTH, flex: '0 0 auto' }
+      return { ...style, width: codeRailWidth, flex: '0 0 auto' }
     }
     if (chatPaneSize === 'chat-equal') {
       return { ...style, width: 0, flex: '1 1 0' }
@@ -6709,7 +6757,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [chatPaneSize, codeChatMain, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized])
+  }, [chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -6828,9 +6876,9 @@ function App() {
       }}>
         <div className="rowboat-shell flex h-svh w-full overflow-hidden">
           {/* Left navigation, two forms: expanded = the panel sidebar,
-              collapsed = the floating dock. The collapse button (fixed
-              top-left) and the dock's expand button swap between them; the
-              gutter padding clears the dock when it's showing. */}
+              collapsed = the slim icon rail. The collapse button (fixed
+              top-left) swaps between them; the gutter padding clears the
+              rail when it's showing. */}
           <SidebarProvider
             open={sidebarOpen}
             onOpenChange={handleSidebarOpenChange}
@@ -6950,7 +6998,6 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
-                <CaffeinateIndicator />
                 {/* Trailing layout control. Always mounted (just toggled invisible
                     when inactive) so its -webkit-app-region:no-drag rect is stable —
                     a freshly-mounted no-drag button inside the drag-region header
@@ -7101,8 +7148,6 @@ function App() {
                       onComposeTodo={composeTodoOnHome}
                       composeTarget={homeComposeTarget}
                       getRunModel={() => homeSelectionRef.current ?? undefined}
-                      onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
-                      onNewChat={handleNewChatTab}
                       onFocusComposer={() => setHomeComposerFocusSignal((n) => n + 1)}
                       onOpenNote={(path) => navigateToFile(path)}
                       onOpenInChat={(sessionId) => {
@@ -7117,7 +7162,6 @@ function App() {
                         setCodeFocusSessionId(sessionId)
                         void navigateToView({ type: 'code' })
                       }}
-                      onSkipperCall={voiceAvailable && ttsAvailable ? startCommandCenterCall : undefined}
                       attendedSessionId={inCall ? hoverRunId : null}
                     />
                 </div>
@@ -7152,6 +7196,7 @@ function App() {
                     onSessionSelected={handleCodeSessionSelected}
                     focusSessionId={codeFocusSessionId}
                     onFocusConsumed={() => setCodeFocusSessionId(null)}
+                    onRailWidthChange={setCodeRailWidth}
                   />
                 </div>
                 </Activity>
@@ -7562,6 +7607,7 @@ function App() {
                         activeIsWorking={activeIsWorking}
                         activeIsProcessing={activeIsProcessing}
                         activeIsReasoning={activeIsReasoning}
+                        isCodeSession={!!(tab.runId && codeSessionLocks[tab.runId])}
                       />
                     )
                   })}
@@ -7668,6 +7714,10 @@ function App() {
                 onSelectRun={bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
+                onNavigateBack={() => { void navigateBack() }}
+                onNavigateForward={() => { void navigateForward() }}
+                canNavigateBack={canNavigateBack}
+                canNavigateForward={canNavigateForward}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
                 currentReasoning={activeChatTabState.currentReasoning}
@@ -7820,12 +7870,14 @@ function App() {
                 getLevel={tts.getLevel}
               />
             )}
-            {/* Top-left dock gutter strip: keeps the traffic-light corner
-                draggable while no panel covers it. */}
+            {/* Top-left gutter strip: continues the titlebar band across the
+                icon rail (the traffic lights are wider than the rail, so the
+                band must be one uninterrupted surface — the rail itself starts
+                below it) and keeps that corner draggable. */}
             {!sidebarOpen && (
               <div
                 aria-hidden="true"
-                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10"
+                className="titlebar-drag-region fixed left-0 top-0 z-20 h-10 border-b border-border bg-background"
                 style={{ width: DOCK_GUTTER_PX }}
               />
             )}
@@ -7834,8 +7886,9 @@ function App() {
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
               onNewChat={handleNewChat}
-              onVoiceNoteCreated={handleVoiceNoteCreated}
+              onWidthChange={setTitlebarControlsWidthPx}
             />
+            <MenuSidebarToggleBridge />
           </SidebarProvider>
         </div>
         <CommandPalette
@@ -7885,10 +7938,17 @@ function App() {
         onOpenChange={setRetentionSettingsOpen}
         defaultTab="advanced"
       />
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
       <SettingsDialog
         open={shortcutSettingsOpen}
         onOpenChange={setShortcutSettingsOpen}
         defaultTab="shortcuts"
+      />
+      {/* Application menu: Settings… / Help > Keyboard Shortcuts… */}
+      <SettingsDialog
+        open={menuSettings.open}
+        onOpenChange={(open) => setMenuSettings((s) => ({ ...s, open }))}
+        defaultTab={menuSettings.tab}
       />
       <SettingsDialog
         open={voiceSetupOpen}

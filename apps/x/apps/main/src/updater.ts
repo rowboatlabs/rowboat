@@ -9,6 +9,8 @@ const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 
 let status: UpdaterStatus = { state: "disabled", version: "", reason: "dev" };
 
+const statusListeners = new Set<(status: UpdaterStatus) => void>();
+
 function setStatus(next: Omit<UpdaterStatus, "version">): void {
   status = { version: status.version, ...next };
   for (const win of BrowserWindow.getAllWindows()) {
@@ -16,10 +18,21 @@ function setStatus(next: Omit<UpdaterStatus, "version">): void {
       win.webContents.send("updater:status", status);
     }
   }
+  for (const listener of statusListeners) listener(status);
 }
 
 export function getUpdaterStatus(): UpdaterStatus {
   return status;
+}
+
+/**
+ * Main-process subscription to updater state changes — the application menu
+ * relabels its "Check for Updates…" item on each transition (menu.ts).
+ * Returns an unsubscribe function.
+ */
+export function onUpdaterStatusChanged(listener: (status: UpdaterStatus) => void): () => void {
+  statusListeners.add(listener);
+  return () => statusListeners.delete(listener);
 }
 
 // 32x32 green dot with a white ring (scratchpad-generated PNG). Windows'

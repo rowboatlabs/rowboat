@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, Check, ChevronDown, Clock, FileText, ListPlus, Loader2, MessageCircle, Pin, Plus, RotateCcw, Sparkles, Square, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, ChevronDown, Clock, FileText, ListPlus, Loader2, MessageCircle, Pin, Plus, RotateCcw, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
 import type { HomeThread } from '@x/shared/dist/home-threads.js'
-import { TalkingHead } from '@/components/talking-head'
 
 // ---------------------------------------------------------------------------
 // The home to-do list — one rolling ~/.rowboat/todo.md shared with @rowboat.
@@ -18,8 +17,6 @@ type TodoViewProps = {
   onOpenNote: (path: string) => void
   /** Bind the chat dock to an item's session — the full thread view. */
   onOpenInChat: (sessionId: string) => void
-  /** Start a brand-new chat (the app's canonical new-chat flow). */
-  onNewChat?: () => void
   /** Focus the page-bottom composer — the "c" shortcut's landing spot. */
   onFocusComposer?: () => void
   /** The real assistant composer, mounted by App (full features, submits
@@ -27,8 +24,6 @@ type TodoViewProps = {
   composer?: React.ReactNode
   /** Route a ＋/reply affordance into the composer with a destination chip. */
   onComposeTodo?: (target: ComposeTarget) => void
-  /** "View all →" in the Conversations section — the chat history view. */
-  onOpenChatHistory?: () => void
   /** The composer's current destination (from App) — drives the spotlight
    * connecting the source row to the composer while a reply is composed. */
   composeTarget?: ComposeTarget | null
@@ -38,9 +33,6 @@ type TodoViewProps = {
   /** A code strip's door: the Code section (diffs, terminal, worktree),
    * focused on the session. Falls back to the chat dock when absent. */
   onOpenCodeSession?: (sessionId: string) => void
-  /** Clicking Skipper starts a voice call (the companion flow). Absent when
-   * voice isn't configured — the mascot still keeps the watch. */
-  onSkipperCall?: () => void
   /** The thread the user is ATTENDING right now (the live call's
    * conversation). It earns no Deck strip and no counts — the Deck is for
    * unattended work; without this, the operator channel's own turns pop a
@@ -364,11 +356,6 @@ function CommentComposer({ onSend, onCancel }: {
 // ---------------------------------------------------------------------------
 
 const MAX_BUBBLES = 6
-
-// Hard ceiling for the Conversations stream — active threads (running or
-// unread) win the slots, but nothing pushes the section past this. The rest
-// live in "View all".
-const STREAM_CAP = 8
 
 function Bubble({ b, onOpenNote, onRetry }: {
   b: TodoChatBubble
@@ -865,17 +852,6 @@ type ArchivedEntry = {
   item: TodoItem
 }
 
-// ---------------------------------------------------------------------------
-// The stream — recent chat threads (sessions that aren't to-do threads).
-// Same thread mechanics as items: expand → bubbles, inline reply, 💬 → dock.
-// ---------------------------------------------------------------------------
-
-type StreamThread = {
-  sessionId: string
-  title: string
-  updatedAt: string
-}
-
 function relativeTime(iso: string): string {
   const then = Date.parse(iso)
   if (!Number.isFinite(then)) return ''
@@ -885,17 +861,6 @@ function relativeTime(iso: string): string {
   const h = Math.floor(mins / 60)
   if (h < 24) return `${h}h`
   return `${Math.floor(h / 24)}d`
-}
-
-/** The trailing segment worth peeking at: Rowboat's most recent reply plus
- * anything the user sent after it. Never the history — that's the sidebar. */
-function lastResponseTail(bubbles: TodoChatBubble[]): TodoChatBubble[] {
-  let idx = -1
-  for (let i = bubbles.length - 1; i >= 0; i--) {
-    if (bubbles[i].role === 'rowboat') { idx = i; break }
-  }
-  const tail = idx >= 0 ? bubbles.slice(idx) : bubbles
-  return tail.slice(-3)
 }
 
 /** Collapse bubble markup for one-line previews: filepath fences become
@@ -918,236 +883,6 @@ function previewLine(bubbles: TodoChatBubble[]): string {
   if (last.kind === 'error') return `failed: ${last.text}`
   const links = last.links.map((l) => l.label).join(', ')
   return stripBubbleMarkup(last.text) || links
-}
-
-function ConversationsSection({ threads, total = 0, loaded = false, running, needsApproval, conversations, expanded, replyFor, spotlightSessionId, dimAll, changedSessionIds, onHide, onViewAll, onNewChat, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat, pinnedIds, onTogglePin }: {
-  threads: StreamThread[]
-  /** Threads that exist beyond the cap — the footer says so when > shown. */
-  total?: number
-  /** The sessions list has answered at least once — distinguishes the
-   * empty state from the initial load (which renders nothing). */
-  loaded?: boolean
-  running: Set<string>
-  /** Runs suspended on a permission prompt, keyed `chat:<sessionId>`. */
-  needsApproval?: Record<string, string>
-  conversations: Record<string, TodoChatBubble[]>
-  expanded: string | null
-  replyFor: string | null
-  /** The composer is replying to this thread — lift it, dim siblings. */
-  spotlightSessionId?: string | null
-  /** The composer's destination is in the other section — dim this one. */
-  dimAll?: boolean
-  /** Threads that advanced since the user last looked — unread dots. */
-  changedSessionIds?: Set<string>
-  /** Hide from Home (attention filter — the session stays in history). */
-  onHide?: (sessionId: string) => void
-  /** Threads pinned to the Deck (the watch flag) + its toggle. */
-  pinnedIds?: Set<string>
-  onTogglePin?: (sessionId: string, pinned: boolean) => void
-  /** Everything, in the chat history view. */
-  onViewAll?: () => void
-  /** Start a brand-new chat. */
-  onNewChat?: () => void
-  onToggle: (sessionId: string) => void
-  onReply: (sessionId: string) => void
-  onSendReply: (sessionId: string, message: string) => void
-  onOpenNote: (path: string) => void
-  onOpenInChat: (sessionId: string) => void
-}) {
-  // Nothing renders until the sessions list has answered once — an empty
-  // flash would read as "no chats" during load.
-  if (threads.length === 0 && !loaded) return null
-  return (
-    <div className={`flex flex-col gap-1 transition-opacity duration-200 ${dimAll ? 'opacity-60' : ''}`}>
-      <div className="flex items-center justify-between px-1">
-        <div className={SECTION_LABEL}>Conversations</div>
-        {onNewChat && (
-          <IconTip label="Start a new chat — ⌘N">
-            <button
-              type="button"
-              onClick={onNewChat}
-              aria-keyshortcuts="Meta+N"
-              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <SquarePen className="size-3" /> New chat
-            </button>
-          </IconTip>
-        )}
-      </div>
-      {threads.length === 0 ? (
-        <div className="px-2 py-2 text-[13px] text-muted-foreground/70">
-          No conversations yet — ask anything in the composer below, or start a new chat. Every chat lands here.
-        </div>
-      ) : (
-      <div>
-        {threads.map((t) => {
-          const isRunning = running.has(`chat:${t.sessionId}`)
-          const approvalMsg = needsApproval?.[`chat:${t.sessionId}`] ?? null
-          const isOpen = expanded === t.sessionId
-          const bubbles = conversations[t.sessionId] ?? []
-          const preview = previewLine(bubbles)
-          const isSpot = spotlightSessionId === t.sessionId
-          return (
-            <div
-              key={t.sessionId}
-              className={`group/thread relative rounded-md px-2 py-[5px] transition-colors duration-100 hover:bg-foreground/[0.045] ${
-                isSpot ? 'bg-card ring-1 ring-primary/20' : ''
-              } ${spotlightSessionId && !isSpot ? 'opacity-40' : ''}`}
-            >
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    // ⌘click skips the peek and resumes the chat directly —
-                    // the chat-history rows' gesture, same muscle memory.
-                    if (e.metaKey || e.ctrlKey) { onOpenInChat(t.sessionId); return }
-                    onToggle(t.sessionId)
-                  }}
-                  aria-expanded={isOpen}
-                  className="relative min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {changedSessionIds?.has(t.sessionId) && (
-                    <span
-                      title="New activity since you last looked"
-                      className="absolute -left-2.5 top-[7px] size-1.5 rounded-full bg-primary"
-                    />
-                  )}
-                  <span className="flex items-center gap-2">
-                    <MessageCircle className="size-3.5 shrink-0 text-muted-foreground/60" />
-                    <span className={`min-w-0 flex-1 truncate text-sm ${changedSessionIds?.has(t.sessionId) ? 'font-semibold' : ''}`}>{t.title}</span>
-                  </span>
-                  {/* One glance = where this ended up. Click = the peek. */}
-                  {preview && !isOpen && (
-                    <span className="block truncate pl-[22px] text-[12px] text-muted-foreground/70">{preview}</span>
-                  )}
-                </button>
-                {isRunning && approvalMsg && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenInChat(t.sessionId)}
-                    className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 hover:bg-amber-500/25 dark:text-amber-400"
-                    title={approvalMsg}
-                  >
-                    approve in chat
-                  </button>
-                )}
-                {isRunning && !approvalMsg && <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
-                <span className="shrink-0 text-[11px] text-muted-foreground/60">{relativeTime(t.updatedAt)}</span>
-                {/* Same floating tray as items — one grammar everywhere,
-                    inside the row's own band (never over the previous row).
-                    Opacity (not display) so Tab can reach the buttons. */}
-                <div className="pointer-events-none absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md border-none bg-[var(--rowboat-raised)] p-0.5 opacity-0 shadow-[var(--rowboat-shadow-soft)] transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100">
-                  <IconTip label="Reply">
-                    <button
-                      type="button"
-                      onClick={() => onReply(t.sessionId)}
-                      aria-label="Reply"
-                      className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      <Plus className="size-3.5" />
-                    </button>
-                  </IconTip>
-                  <IconTip label="Open the full thread in the sidebar">
-                    <button
-                      type="button"
-                      onClick={() => onOpenInChat(t.sessionId)}
-                      aria-label="Open the full thread in the sidebar"
-                      className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      <ArrowUpRight className="size-3.5" />
-                    </button>
-                  </IconTip>
-                  {onTogglePin && (
-                    <IconTip label={pinnedIds?.has(t.sessionId) ? 'Unpin from the Deck' : 'Pin to the Deck — keeps a strip even while idle'}>
-                      <button
-                        type="button"
-                        onClick={() => onTogglePin(t.sessionId, !pinnedIds?.has(t.sessionId))}
-                        aria-label="Pin to the Deck"
-                        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        <Pin className={`size-3.5 ${pinnedIds?.has(t.sessionId) ? 'fill-current' : ''}`} />
-                      </button>
-                    </IconTip>
-                  )}
-                  {onHide && (
-                    <IconTip label="Hide from Home — stays in your chat history">
-                      <button
-                        type="button"
-                        onClick={() => onHide(t.sessionId)}
-                        aria-label="Hide from Home"
-                        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        <X className="size-3.5" />
-                      </button>
-                    </IconTip>
-                  )}
-                </div>
-              </div>
-              {isOpen && (
-                <div className="flex flex-col gap-1.5 pb-1 pl-5 pt-1">
-                  {/* The last response only — the full thread lives in the
-                      sidebar, like chat threads opening on the side. */}
-                  {lastResponseTail(bubbles).map((b, i) => (
-                    <Bubble key={i} b={b} onOpenNote={onOpenNote} />
-                  ))}
-                  {isRunning && approvalMsg && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenInChat(t.sessionId)}
-                      className="flex w-fit items-center gap-1.5 text-[12px] font-medium text-amber-600 hover:underline dark:text-amber-400"
-                    >
-                      waiting for your approval — open the chat to allow it →
-                    </button>
-                  )}
-                  {isRunning && !approvalMsg && (
-                    <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                      <Loader2 className="size-3 animate-spin" /> working…
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    {replyFor !== t.sessionId && (
-                      <button
-                        type="button"
-                        onClick={() => onReply(t.sessionId)}
-                        className="flex w-fit items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        <Plus className="size-3" /> reply
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onOpenInChat(t.sessionId)}
-                      className="flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      view full thread →
-                    </button>
-                  </div>
-                  {replyFor === t.sessionId && (
-                    <CommentComposer
-                      onSend={(m) => onSendReply(t.sessionId, m)}
-                      onCancel={() => onReply(t.sessionId)}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })}
-        {onViewAll && (
-          <button
-            type="button"
-            onClick={onViewAll}
-            className="flex w-full items-center justify-center gap-1 py-1.5 text-[11px] font-medium text-muted-foreground/70 hover:text-foreground"
-          >
-            {total > threads.length
-              ? `latest ${threads.length} of ${total} — view all →`
-              : 'View all →'}
-          </button>
-        )}
-      </div>
-      )}
-    </div>
-  )
 }
 
 // Everything dismissed or cleared lands here (todo/archive/), listed below
@@ -1226,16 +961,13 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
 }
 
 // ---------------------------------------------------------------------------
-// The Deck — the operator band above the ledger. Two bays in fixed order:
-// "Needs you" (amber, oldest first — the queue J burns to zero) and
-// "Underway" (live threads with a one-line activity feed). A strip is a
+// The Deck — the operator band. Two bays: "Underway" (live threads with a
+// one-line activity feed, above the ledger) and "Needs you" (amber, oldest
+// first — the queue J burns to zero, below the tasks). A strip is a
 // projection of a thread — task, code session, or chat — never a second
 // home: clicking one jumps to the item in place or opens the thread in the
-// dock. The whole band collapses to nothing when both bays are empty.
+// dock. Each bay collapses to nothing when empty.
 // ---------------------------------------------------------------------------
-
-/** Stable no-op audio level for the header mascot (no TTS on this surface). */
-const ZERO_LEVEL = () => 0
 
 /** Friendly labels for the registry's raw activity (a builtin tool name). */
 const ACTIVITY_LABELS: Record<string, string> = {
@@ -1351,7 +1083,7 @@ function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze, onDismiss }:
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer, composer, onComposeTodo, composeTarget, onOpenChatHistory, getRunModel, onOpenCodeSession, onSkipperCall, attendedSessionId }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, onComposeTodo, composeTarget, getRunModel, onOpenCodeSession, attendedSessionId }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   // Live runs suspended on a permission prompt (manual mode): key → message.
@@ -1388,32 +1120,19 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   }, [plannerMenuOpen])
   const [commentKey, setCommentKey] = useState<string | null>(null)
   const [subDraftFor, setSubDraftFor] = useState<string | null>(null)
-  // The stream: recent chat threads (non-todo sessions).
-  const [streamThreads, setStreamThreads] = useState<StreamThread[]>([])
-  // How many threads exist beyond the cap — for the section's footer line.
-  const [streamTotal, setStreamTotal] = useState(0)
-  // Sessions list answered at least once — gates the stream's empty state.
-  const [streamLoaded, setStreamLoaded] = useState(false)
   // Bumped by the header's "New to-do" button and the N shortcut; the
   // add-row scrolls into view and takes focus.
   const [addFocusSignal, setAddFocusSignal] = useState(0)
   const focusAddRow = useCallback(() => setAddFocusSignal((n) => n + 1), [])
-  const [streamConvs, setStreamConvs] = useState<Record<string, TodoChatBubble[]>>({})
-  const [expandedThread, setExpandedThread] = useState<string | null>(null)
-  const [chatReplyFor, setChatReplyFor] = useState<string | null>(null)
   // Attention: triage filter + changed-since-last-look baseline.
   const [triageFilter, setTriageFilter] = useState<'needs_you' | 'running' | 'done' | null>(null)
   const [sessionUpdatedAt, setSessionUpdatedAt] = useState<Record<string, string>>({})
   const [seenBaseline, setSeenBaseline] = useState<string>(() => localStorage.getItem('todo.seenBaseline') ?? new Date(0).toISOString())
-  const seenBaselineRef = useRef(seenBaseline)
-  useEffect(() => { seenBaselineRef.current = seenBaseline }, [seenBaseline])
   // Per-session read marks: opening a thread (expand, or into the sidebar)
   // clears its dot immediately — the global baseline only advances on blur.
   const [sessionSeenAt, setSessionSeenAt] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem('todo.sessionSeenAt') ?? '{}') as Record<string, string> } catch { return {} }
   })
-  const sessionSeenAtRef = useRef(sessionSeenAt)
-  useEffect(() => { sessionSeenAtRef.current = sessionSeenAt }, [sessionSeenAt])
   const markSessionSeen = useCallback((sessionId: string) => {
     // Dual-write while the seen-state migrates: the workspace registry is
     // what the Deck (and later Skipper/notifications) read; localStorage
@@ -1431,10 +1150,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
       return next
     })
   }, [])
-  // Threads hidden from Home — an attention filter, never a record: the
-  // sessions stay whole in chat history; losing this file just makes
-  // threads reappear.
-  const hiddenThreadsRef = useRef<Set<string>>(new Set())
   // Per-row collapse (chevron) — a reading preference, persisted locally.
   const [collapsedRows, setCollapsedRows] = useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem('todo.collapsedRows') ?? '{}') as Record<string, boolean> } catch { return {} }
@@ -1465,32 +1180,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
     setSessions(res.sessions)
     setSuggestions(res.suggestions)
     void window.ipc.invoke('todo:listArchived', null).then((r) => setArchived(r.items)).catch(() => {})
-    // The stream: recent non-todo sessions. STREAM_CAP is a hard ceiling —
-    // active threads (running, or changed since the user last looked) win
-    // the slots, everything else is in "View all".
+    // Session freshness feeds the items' changed-since-you-looked dots.
     void window.ipc.invoke('sessions:list', {}).then(({ sessions: all }) => {
-      setStreamLoaded(true)
-      const todoSessionIds = new Set(Object.values(res.sessions))
       setSessionUpdatedAt(Object.fromEntries(all.map((s) => [s.sessionId, s.updatedAt])))
-      const candidates = all
-        .filter((s) => !todoSessionIds.has(s.sessionId) && !hiddenThreadsRef.current.has(s.sessionId))
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      const isActive = (s: (typeof candidates)[number]) =>
-        res.running.includes(`chat:${s.sessionId}`)
-        || (s.updatedAt > seenBaselineRef.current && s.updatedAt > (sessionSeenAtRef.current[s.sessionId] ?? ''))
-      const active = candidates.filter(isActive)
-      const rest = candidates.filter((s) => !isActive(s))
-      const threads = [...active, ...rest]
-        .slice(0, STREAM_CAP)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .map((s) => ({ sessionId: s.sessionId, title: s.title ?? 'New chat', updatedAt: s.updatedAt }))
-      setStreamTotal(candidates.length)
-      setStreamThreads(threads)
-      for (const t of threads) {
-        if (streamConvFetchedRef.current[t.sessionId] !== t.updatedAt) {
-          void fetchStreamConv(t.sessionId, t.updatedAt)
-        }
-      }
     }).catch(() => {})
     // Conversations are derived per session; fetch them all (lists are small).
     const keys = Object.keys(res.sessions)
@@ -1529,34 +1221,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
     saveTimerRef.current = setTimeout(() => void saveNowRef.current(), 600)
   }, [])
 
-  // Conversation cache keyed by the session's updatedAt — collapsed rows
-  // need the last response for their preview line, so every visible thread
-  // gets fetched, but only re-derived when it actually advanced.
-  const streamConvFetchedRef = useRef<Record<string, string>>({})
-  const fetchStreamConv = useCallback(async (sessionId: string, updatedAt?: string) => {
-    try {
-      const r = await window.ipc.invoke('todo:getSessionConversation', { sessionId })
-      if (updatedAt) streamConvFetchedRef.current[sessionId] = updatedAt
-      setStreamConvs((c) => ({ ...c, [sessionId]: r.bubbles }))
-    } catch {
-      // session may have been deleted
-    }
-  }, [])
-  const expandedThreadRef = useRef<string | null>(null)
-  useEffect(() => { expandedThreadRef.current = expandedThread }, [expandedThread])
-
   useEffect(() => {
-    // Load the hidden-threads filter, then the data (so the first stream
-    // render already respects it).
-    void window.ipc.invoke('workspace:readFile', { path: 'config/home-hidden-threads.json' })
-      .then((r) => {
-        const parsed: unknown = JSON.parse(r.data)
-        if (Array.isArray(parsed)) {
-          hiddenThreadsRef.current = new Set(parsed.filter((x): x is string => typeof x === 'string'))
-        }
-      })
-      .catch(() => {})
-      .finally(() => void refetch())
+    void refetch()
   }, [refetch])
 
   useEffect(() => {
@@ -1605,15 +1271,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
     })
   }, [refetch])
 
-  const hideThread = useCallback((sessionId: string) => {
-    hiddenThreadsRef.current.add(sessionId)
-    setStreamThreads((t) => t.filter((x) => x.sessionId !== sessionId))
-    void window.ipc.invoke('workspace:writeFile', {
-      path: 'config/home-hidden-threads.json',
-      data: JSON.stringify([...hiddenThreadsRef.current].slice(-200), null, 2),
-    }).catch(() => {})
-  }, [])
-
   useEffect(() => {
     const off = window.ipc.on('todo:events', (event: TodoEventType) => {
       if (event.type === 'run_start') {
@@ -1637,17 +1294,14 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
           delete next[event.key]
           return next
         })
-        if (event.key.startsWith('chat:')) {
-          const sid = event.key.slice('chat:'.length)
-          if (expandedThreadRef.current === sid) void fetchStreamConv(sid)
-        } else if (event.type === 'run_complete' && !localStorage.getItem(CALLOUT_KEY)) {
+        if (!event.key.startsWith('chat:') && event.type === 'run_complete' && !localStorage.getItem(CALLOUT_KEY)) {
           setShowCallout(true)
         }
       }
       void refetch()
     })
     return off
-  }, [refetch, fetchStreamConv])
+  }, [refetch])
 
   // "Seen" baseline: leaving the window marks everything current as seen —
   // what changes while you're away gets the dot and the catch-up strip.
@@ -1723,7 +1377,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   }, [focusAddRow, onFocusComposer])
 
   // Dock chats advance without todo:events — follow the session index feed
-  // (debounced: it fires per turn event) so the stream stays current.
+  // (debounced: it fires per turn event) so the items' dots stay current.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
     const off = window.ipc.on('sessions:events', () => {
@@ -1770,17 +1424,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
     setConversations((c) => ({ ...c, [key]: [...(c[key] ?? []), { role: 'user', text: message, links: [] }] }))
     void window.ipc.invoke('todo:comment', { key, message, model: getRunModel?.() })
   }, [getRunModel])
-
-  const toggleThread = useCallback((sessionId: string) => {
-    // Opening IS reading — the dot clears the moment the thread expands.
-    markSessionSeen(sessionId)
-    setExpandedThread((cur) => {
-      const next = cur === sessionId ? null : sessionId
-      if (next) void fetchStreamConv(next)
-      return next
-    })
-    setChatReplyFor(null)
-  }, [fetchStreamConv, markSessionSeen])
 
   // Every door into a session marks it read — expand, or off to the sidebar.
   const openInChat = useCallback((sessionId: string) => {
@@ -1840,25 +1483,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   }, [])
   const dismissThreadRef = useRef(dismissThread)
   useEffect(() => { dismissThreadRef.current = dismissThread }, [dismissThread])
-  const pinnedIds = new Set(deckThreads.filter((t) => t.pinned).map((t) => t.sessionId))
 
+  // The fallback composer's chat door — the thread lives in the dock now.
   const startChat = useCallback(async (text: string) => {
     const res = await window.ipc.invoke('todo:startChat', { text })
-    if (res.success && res.sessionId) {
-      const sid = res.sessionId
-      setRunning((s) => new Set(s).add(`chat:${sid}`))
-      setStreamConvs((c) => ({ ...c, [sid]: [{ role: 'user', text, links: [] }] }))
-      setStreamThreads((t) => [{ sessionId: sid, title: text, updatedAt: new Date().toISOString() }, ...t])
-      setExpandedThread(sid)
-    }
-  }, [])
-
-  const sendChatReply = useCallback((sessionId: string, message: string) => {
-    setChatReplyFor(null)
-    setRunning((s) => new Set(s).add(`chat:${sessionId}`))
-    setStreamConvs((c) => ({ ...c, [sessionId]: [...(c[sessionId] ?? []), { role: 'user', text: message, links: [] }] }))
-    void window.ipc.invoke('todo:chatReply', { sessionId, message })
-  }, [])
+    if (res.success && res.sessionId) openInChat(res.sessionId)
+  }, [openInChat])
 
   const addItem = useCallback(async (text: string) => {
     // Flush edits first so the appended line lands on the saved file.
@@ -1926,7 +1556,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
 
   const itemBlocks = (blocks ?? []).map((b, i) => ({ block: b, index: i }))
   const hasCompleted = itemBlocks.some(({ block }) => block.kind === 'item' && block.item.checked)
-  const todayLabel = new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
 
   // ---- Attention: triage counts + changed-since-last-look ----
   const allItems: TodoItem[] = itemBlocks.flatMap(({ block }) =>
@@ -1963,17 +1592,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
   // The J-cursor's last stop — what H snoozes.
   const lastJumpedRef = useRef<HomeThread | null>(null)
 
-  // Skipper's watch: the fleet state as one glance (and one sentence).
-  // Snoozed and dismissed threads are deliberately parked, and the attended
-  // thread is the user's own conversation — none of them count.
-  const skipperUnderway = deckVisible.filter((t) => t.status === 'underway').length
-  const skipperNeeds = deckVisible.filter((t) => t.status === 'needs-you' && !t.snoozed && !t.dismissed).length
-  const skipperReady = deckVisible.filter((t) => t.status === 'ready' && !t.snoozed && !t.dismissed).length
-  const sitrep = [
-    skipperUnderway > 0 && `${skipperUnderway} underway`,
-    skipperNeeds > 0 && `${skipperNeeds} need${skipperNeeds === 1 ? 's' : ''} you`,
-    skipperReady > 0 && `${skipperReady} ready for review`,
-  ].filter(Boolean).join(' · ') || 'All quiet'
+  // Live threads only — a bay holding just pinned idle strips shouldn't
+  // count them.
+  const underwayCount = deckVisible.filter((t) => t.status === 'underway').length
 
   const isChanged = (key: string): boolean => {
     const sid = sessions[key]
@@ -2026,7 +1647,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
               triage pills sit under it like quiet page properties. */}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em]">{todayLabel}</h1>
+              <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em]">Todos</h1>
               {(needsYouCount > 0 || runningCount > 0 || doneCount > 0) && (
                 <div className="mt-1.5 -ml-1.5 flex items-center gap-0.5">
                   {triagePill('needs_you', 'need you', needsYouCount, 'text-amber-600 dark:text-amber-400')}
@@ -2120,133 +1741,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
                   Clear done
                 </button>
               )}
-              {/* Skipper takes the watch — the ambient channel: rowing while
-                  threads are underway, an amber count when something needs
-                  you, a sitrep on hover, voice on click. */}
-              <IconTip label={`${sitrep}${onSkipperCall ? ' — click to talk' : ''}`}>
-                <button
-                  type="button"
-                  onClick={onSkipperCall}
-                  disabled={!onSkipperCall}
-                  aria-label={`Skipper: ${sitrep}`}
-                  className="relative -my-2 shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-default"
-                >
-                  <TalkingHead ttsState="idle" getLevel={ZERO_LEVEL} size={46} rowing={skipperUnderway > 0} />
-                  {skipperNeeds + skipperReady > 0 && (
-                    <span className="absolute -right-0.5 top-0 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[9.5px] font-semibold leading-none text-white">
-                      {skipperNeeds + skipperReady}
-                    </span>
-                  )}
-                </button>
-              </IconTip>
             </div>
           </div>
-
-          {/* The Deck — every thread needing eyes or underway, across the
-              whole app (tasks, code sessions, chats). Collapses to nothing
-              when quiet: a calm morning looks exactly like before. */}
-          {(deckNeedsYou.length > 0 || deckUnderway.length > 0) && (
-            <div className="flex flex-col gap-2.5">
-              {deckNeedsYou.length > 0 && (
-                <div>
-                  <div className="flex items-baseline justify-between px-1 pb-1">
-                    <div className="text-[12px] font-medium text-amber-600/90 dark:text-amber-400/90">
-                      Needs you · {deckNeedsYou.length}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground/50">J cycles the queue</div>
-                  </div>
-                  {deckNeedsYou.map((t) => (
-                    <DeckStrip
-                      key={t.sessionId}
-                      thread={t}
-                      onJump={() => { lastJumpedRef.current = t; jumpToStrip(t) }}
-                      onOpen={() => openStrip(t)}
-                      onTogglePin={() => togglePin(t)}
-                      onSnooze={() => snoozeThread(t)}
-                      onDismiss={() => dismissThread(t)}
-                    />
-                  ))}
-                </div>
-              )}
-              {deckUnderway.length > 0 && (
-                <div>
-                  <div className={`px-1 pb-1 ${SECTION_LABEL}`}>
-                    {/* Count only live threads — a bay holding just pinned
-                        idle strips says "Underway" without the number. */}
-                    Underway{skipperUnderway > 0 ? ` · ${skipperUnderway}` : ''}
-                  </div>
-                  {deckUnderway.map((t) => (
-                    <DeckStrip
-                      key={t.sessionId}
-                      thread={t}
-                      onJump={() => jumpToStrip(t)}
-                      onOpen={() => openStrip(t)}
-                      onTogglePin={() => togglePin(t)}
-                    />
-                  ))}
-                  {/* Little's law, softly: every thread you start joins the
-                      divisor under everything else. Never a cap. */}
-                  {skipperUnderway >= 6 && (
-                    <div className="px-2 pt-1 text-[11px] text-muted-foreground/60">
-                      {skipperUnderway} underway — landing one beats launching one.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* While you were away — dismissable catch-up */}
-          {changedItems.length > 0 && (
-            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
-              <span className="size-1.5 shrink-0 rounded-full bg-foreground" />
-              <span className="flex-1">
-                While you were away:
-                {changedFinished > 0 && ` ${changedFinished} item${changedFinished === 1 ? '' : 's'} got updates`}
-                {changedFinished > 0 && changedNeedsYou > 0 && ' ·'}
-                {changedNeedsYou > 0 && ` ${changedNeedsYou} need${changedNeedsYou === 1 ? 's' : ''} you`}
-                {' '}— marked with dots.
-              </span>
-              <button
-                type="button"
-                onClick={markSeenNow}
-                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* First-proposals explainer — shown once, ever */}
-          {!plannerIntroSeen
-            && (suggestions.length > 0 || itemBlocks.some(({ block }) => block.kind === 'item' && block.item.proposed && !block.item.checked)) && (
-            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
-              <Bot className="size-3.5 shrink-0" />
-              <span className="flex-1">Rowboat has suggestions from your mail and calendar — accept the useful ones to add them to your list; declining teaches it what not to suggest. Nothing is added or run without you.</span>
-              <button
-                type="button"
-                onClick={() => { localStorage.setItem('todo.plannerIntroSeen', '1'); setPlannerIntroSeen(true) }}
-                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* First-completion callout — shown once, ever */}
-          {showCallout && (
-            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-4 py-2.5 text-sm">
-              <Bot className="size-4 shrink-0 text-primary" />
-              <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Hit ＋ on the row to refine the work with a comment; 💬 opens the whole conversation in the sidebar.</span>
-              <button
-                type="button"
-                onClick={() => { localStorage.setItem(CALLOUT_KEY, '1'); setShowCallout(false) }}
-                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )}
 
           {/* The list */}
           <div className={`transition-opacity duration-200 ${spotSession ? 'opacity-60' : ''}`}>
@@ -2416,6 +1912,112 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
             )}
           </div>
 
+          {/* The Needs-you bay — threads waiting on an answer, below the
+              list so the tasks stay first. Oldest first: J serves the
+              longest wait. */}
+          {deckNeedsYou.length > 0 && (
+            <div>
+              <div className="flex items-baseline justify-between px-1 pb-1">
+                <div className="text-[12px] font-medium text-amber-600/90 dark:text-amber-400/90">
+                  Needs you · {deckNeedsYou.length}
+                </div>
+                <div className="text-[11px] text-muted-foreground/50">J cycles the queue</div>
+              </div>
+              {deckNeedsYou.map((t) => (
+                <DeckStrip
+                  key={t.sessionId}
+                  thread={t}
+                  onJump={() => { lastJumpedRef.current = t; jumpToStrip(t) }}
+                  onOpen={() => openStrip(t)}
+                  onTogglePin={() => togglePin(t)}
+                  onSnooze={() => snoozeThread(t)}
+                  onDismiss={() => dismissThread(t)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* The Underway bay — live threads across the whole app (tasks,
+              code sessions, chats). Collapses to nothing when quiet: a calm
+              morning looks exactly like before. */}
+          {deckUnderway.length > 0 && (
+            <div>
+              <div className={`px-1 pb-1 ${SECTION_LABEL}`}>
+                {/* Count only live threads — a bay holding just pinned
+                    idle strips says "Underway" without the number. */}
+                Underway{underwayCount > 0 ? ` · ${underwayCount}` : ''}
+              </div>
+              {deckUnderway.map((t) => (
+                <DeckStrip
+                  key={t.sessionId}
+                  thread={t}
+                  onJump={() => jumpToStrip(t)}
+                  onOpen={() => openStrip(t)}
+                  onTogglePin={() => togglePin(t)}
+                />
+              ))}
+              {/* Little's law, softly: every thread you start joins the
+                  divisor under everything else. Never a cap. */}
+              {underwayCount >= 6 && (
+                <div className="px-2 pt-1 text-[11px] text-muted-foreground/60">
+                  {underwayCount} underway — landing one beats launching one.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* While you were away — dismissable catch-up */}
+          {changedItems.length > 0 && (
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
+              <span className="size-1.5 shrink-0 rounded-full bg-foreground" />
+              <span className="flex-1">
+                While you were away:
+                {changedFinished > 0 && ` ${changedFinished} item${changedFinished === 1 ? '' : 's'} got updates`}
+                {changedFinished > 0 && changedNeedsYou > 0 && ' ·'}
+                {changedNeedsYou > 0 && ` ${changedNeedsYou} need${changedNeedsYou === 1 ? 's' : ''} you`}
+                {' '}— marked with dots.
+              </span>
+              <button
+                type="button"
+                onClick={markSeenNow}
+                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* First-proposals explainer — shown once, ever */}
+          {!plannerIntroSeen
+            && (suggestions.length > 0 || itemBlocks.some(({ block }) => block.kind === 'item' && block.item.proposed && !block.item.checked)) && (
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
+              <Bot className="size-3.5 shrink-0" />
+              <span className="flex-1">Rowboat has suggestions from your mail and calendar — accept the useful ones to add them to your list; declining teaches it what not to suggest. Nothing is added or run without you.</span>
+              <button
+                type="button"
+                onClick={() => { localStorage.setItem('todo.plannerIntroSeen', '1'); setPlannerIntroSeen(true) }}
+                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* First-completion callout — shown once, ever */}
+          {showCallout && (
+            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-4 py-2.5 text-sm">
+              <Bot className="size-4 shrink-0 text-primary" />
+              <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Hit ＋ on the row to refine the work with a comment; 💬 opens the whole conversation in the sidebar.</span>
+              <button
+                type="button"
+                onClick={() => { localStorage.setItem(CALLOUT_KEY, '1'); setShowCallout(false) }}
+                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* The suggestion tray — proposals awaiting your accept. Never
               part of the list until you say so. The amber tint is this
               surface's "needs your decision" color — the one tinted block
@@ -2456,35 +2058,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
             </div>
           )}
 
-          {/* The stream — recent chat threads */}
-          <ConversationsSection
-            threads={streamThreads}
-            total={streamTotal}
-            loaded={streamLoaded}
-            onNewChat={onNewChat}
-            running={running}
-            needsApproval={needsApproval}
-            conversations={streamConvs}
-            expanded={expandedThread}
-            replyFor={chatReplyFor}
-            spotlightSessionId={spotSession}
-            dimAll={spotKey !== null}
-            changedSessionIds={new Set(streamThreads
-              .filter((t) => t.updatedAt > seenBaseline && t.updatedAt > (sessionSeenAt[t.sessionId] ?? ''))
-              .map((t) => t.sessionId))}
-            onHide={hideThread}
-            pinnedIds={pinnedIds}
-            onTogglePin={(sessionId, pinned) => void window.ipc.invoke('home:setPinned', { sessionId, pinned })}
-            onViewAll={onOpenChatHistory}
-            onToggle={toggleThread}
-            onReply={(sid) => (onComposeTodo
-              ? onComposeTodo({ kind: 'chatReply', sessionId: sid, title: streamThreads.find((t) => t.sessionId === sid)?.title ?? 'conversation', quote: lastBubbleText(streamConvs[sid]) })
-              : setChatReplyFor(chatReplyFor === sid ? null : sid))}
-            onSendReply={sendChatReply}
-            onOpenNote={onOpenNote}
-            onOpenInChat={openInChat}
-          />
-
           {/* Done & dismissed — the archive, restorable */}
           <ArchivedSection
             entries={archived}
@@ -2510,14 +2083,17 @@ export function TodoView({ onOpenNote, onOpenInChat, onNewChat, onFocusComposer,
         </div>
       </div>
 
-      {/* The assistant composer — pinned to the bottom like any chat
-          surface; everything above scrolls. Tasks are born in the list's
-          add-row or by @rowboat mention. */}
-      <div className="shrink-0 border-t border-foreground/[0.06] bg-background px-9 pb-5 pt-3">
-        <div className="mx-auto max-w-[720px]">
-          {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
+      {/* The assistant composer — hidden until something summons it:
+          typing @rowboat in the list hands off here, and reply/comment
+          affordances land here with their destination chip. Dismissing
+          the chip (Escape/✕) or sending puts it away again. */}
+      {composeTarget != null && (
+        <div className="shrink-0 border-t border-foreground/[0.06] bg-background px-9 pb-5 pt-3">
+          <div className="mx-auto max-w-[720px]">
+            {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

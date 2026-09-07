@@ -266,8 +266,8 @@ export const RPC_CHANNELS = [
   'oauth:deliverLoopbackCallback',
 
   // Phase 9: Spaces (landed on main mid-separation) — core-coupled, so it
-  // runs server-side. Client-local pieces (save dialogs, link previews,
-  // blob thumbnails) stay in the Electron app.
+  // runs server-side. Client-local pieces (save dialogs, blob thumbnails)
+  // stay in the Electron app.
   'spaces:listOrgs',
   'spaces:addOrg',
   'spaces:resolveInviteLink',
@@ -278,6 +278,7 @@ export const RPC_CHANNELS = [
   'spaces:removeOrg',
   'spaces:listSpaces',
   'spaces:createSpace',
+  'spaces:openDirect',
   'spaces:listMembers',
   'spaces:createInvite',
   'spaces:resolveInvite',
@@ -295,6 +296,7 @@ export const RPC_CHANNELS = [
   'spaces:search',
   'spaces:listStream',
   'spaces:listThread',
+  'spaces:linkPreview',
   'spaces:postMessage',
   'spaces:createTopic',
   'spaces:manageTopic',

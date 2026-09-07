@@ -206,41 +206,66 @@ export async function apexUrl(): Promise<string> {
 }
 
 /**
+ * The org's address is generated, never chosen (decision 2026-09-07: names
+ * are display-only; the address is opaque). The name-derived prefix keeps
+ * logs and DB rows legible; the random suffix is ALWAYS appended — never try
+ * the bare name — so creation reveals nothing about taken slugs and the
+ * clean namespace stays free for a future vanity claim. Prefix 35 + '-' + 4
+ * fits the server's 40-char slug cap.
+ */
+function generatedSlug(name: string): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const prefix =
+    name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 35).replace(/-+$/, '') || 'server';
+  let suffix = '';
+  for (let i = 0; i < 4; i++) suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return `${prefix}-${suffix}`;
+}
+
+/**
  * Self-serve org creation on the managed deployment: dance against the apex
  * (same discovery, same flow), POST the org, and — because shared-realm
  * tokens are realm-generic — the dance's tokens work at the new org's
  * subdomain immediately. The caller is the org's provisioned first admin.
+ * The slug is generated here, not passed in: a suffix collision is ~one in
+ * 1.7M per prefix, so the retry is a formality; any other failure surfaces
+ * verbatim on the first pass.
  */
 export async function createOrgOnDeployment(input: {
   name: string;
-  slug: string;
   openBrowser: OpenBrowser;
   apexUrl?: string;
 }): Promise<OrgRecord> {
   const apex = (input.apexUrl ?? (await apexUrl())).replace(/\/$/, '');
   const dance = await danceForTokens({ baseUrl: apex, openBrowser: input.openBrowser });
-  const res = await fetch(`${apex}/v1/orgs`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${dance.tokens.access}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ name: input.name, slug: input.slug }),
-  });
-  const body = (await res.json().catch(() => ({}))) as {
-    message?: string;
-    org?: { id: string; name: string; address: string };
-    member?: { id: string };
-  };
-  if (!res.ok || !body.org || !body.member) {
-    throw new Error(body.message ?? `org creation failed (${res.status})`);
+  let failure = 'org creation failed';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(`${apex}/v1/orgs`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${dance.tokens.access}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: input.name, slug: generatedSlug(input.name) }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      message?: string;
+      org?: { id: string; name: string; address: string };
+      member?: { id: string };
+    };
+    if (res.ok && body.org && body.member) {
+      return upsertOAuthOrg({
+        baseUrl: `${new URL(apex).protocol}//${body.org.address}`,
+        name: body.org.name,
+        address: body.org.address,
+        serverOrgId: body.org.id,
+        issuer: dance.issuer,
+        clientId: dance.clientId,
+        memberId: body.member.id,
+        tokens: dance.tokens,
+      });
+    }
+    failure = body.message ?? `org creation failed (${res.status})`;
+    if (!/is taken/.test(failure)) break;
   }
-  return upsertOAuthOrg({
-    baseUrl: `${new URL(apex).protocol}//${body.org.address}`,
-    name: body.org.name,
-    address: body.org.address,
-    issuer: dance.issuer,
-    clientId: dance.clientId,
-    memberId: body.member.id,
-    tokens: dance.tokens,
-  });
+  throw new Error(failure);
 }
 
 /** Pre-auth resolution of a pasted invite link — what the join card shows. */

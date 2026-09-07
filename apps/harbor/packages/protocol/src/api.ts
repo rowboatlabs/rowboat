@@ -10,7 +10,7 @@ import {
   RestoreAssetResult,
 } from './changeset.js';
 import { ActingMode, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
+import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
   AcceptInviteResult,
@@ -84,10 +84,33 @@ export const routes = {
     response: z.object({ member: Member }),
   },
   // --- spaces & membership -------------------------------------------------
+  /**
+   * The spaces you are a member of. Default = SHARED spaces only (today's
+   * shape, unchanged). `includeDirect` adds your direct messages — opt-in so
+   * a pre-DM client never renders a DM as a space. Any present value counts
+   * as true (coerce semantics, like every flag here).
+   */
   listSpaces: {
     method: 'GET',
     path: '/v1/spaces',
+    query: z.object({ includeDirect: z.coerce.boolean().optional() }),
     response: z.object({ spaces: z.array(Space) }),
+  },
+  /**
+   * Direct messages (2026-09-07): a DM is a `direct` space between exactly
+   * two members — same substrate, fixed membership (see SpaceKind). Get-or-
+   * create, idempotent: the org keys DMs on the sorted participant pair, so
+   * two members can only ever have one; `created` says whether this call
+   * made it. No invite and no acceptance — the org is the trust boundary,
+   * as inside one Slack workspace. The other participant learns of the space
+   * by a `space_added` live frame (events.ts) and on their next listing.
+   * Refuses yourself (no self-DM in v1) and unknown members.
+   */
+  openDirect: {
+    method: 'POST',
+    path: '/v1/direct',
+    request: z.object({ memberId: MemberId }),
+    response: z.object({ space: Space, created: z.boolean() }),
   },
   createSpace: {
     method: 'POST',

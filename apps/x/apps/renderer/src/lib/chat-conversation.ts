@@ -29,6 +29,13 @@ export interface ChatMessage {
   content: string
   attachments?: MessageAttachment[]
   timestamp: number
+  /**
+   * A live in-flight model call's text, rendered through the SAME item slot
+   * (and id) its durable version will occupy so completion updates the node
+   * in place — no unmount/remount flash. Streaming items get the smoothed
+   * reveal; durable items render their content directly.
+   */
+  streaming?: boolean
 }
 
 export interface ToolCall {
@@ -61,6 +68,9 @@ export interface ReasoningMessage {
   kind: 'reasoning'
   content: string
   timestamp: number
+  /** Live thought stream for the in-flight model call (same in-place-update
+   * contract as ChatMessage.streaming); drives ReasoningRow's shimmer. */
+  streaming?: boolean
 }
 
 export type ReasoningEffortLevel = 'low' | 'medium' | 'high'

@@ -124,12 +124,15 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
   const ctx = { memberId: actor.memberId };
   switch (name) {
     case 'list_spaces': {
-      const spaces = await service.listSpaces(ctx);
+      const a = args as { includeDirect?: boolean };
+      const spaces = await service.listSpaces(ctx, { includeDirect: a.includeDirect ?? false });
       return {
         spaces: await Promise.all(
           spaces.map(async (space) => ({
             id: space.id,
             name: space.name,
+            kind: space.kind,
+            ...(space.participants ? { participants: space.participants } : {}),
             memberCount: (await service.listMembers(ctx, space.id)).length,
             assets: await service.listAssets(ctx, space.id),
           })),

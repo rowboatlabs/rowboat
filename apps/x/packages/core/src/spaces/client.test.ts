@@ -258,6 +258,19 @@ describe('SpacesClient', () => {
     expect((await ramnique.readAsset(spaceId, 'notes/scratch.md')).content).toBe('scratch\n');
   });
 
+  it('direct messages: get-or-create from either side, hidden unless asked, fixed membership', async () => {
+    const opened = await ramnique.openDirect('gagan');
+    expect(opened.created).toBe(true);
+    expect(opened.space.kind).toBe('direct');
+    expect(opened.space.participants).toEqual(['gagan', 'ramnique']);
+    const again = await gagan.openDirect('ramnique');
+    expect(again).toMatchObject({ created: false, space: { id: opened.space.id } });
+    expect((await ramnique.listSpaces()).some((s) => s.id === opened.space.id)).toBe(false);
+    expect((await gagan.listSpaces({ includeDirect: true })).some((s) => s.id === opened.space.id)).toBe(true);
+    await expect(ramnique.createInvite(opened.space.id)).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(gagan.leaveSpace(opened.space.id)).rejects.toMatchObject({ code: 'invalid_request' });
+  });
+
   it('errors carry the wire code', async () => {
     await expect(ramnique.readAsset(spaceId, 'ghost.md')).rejects.toMatchObject({
       code: 'not_found',
@@ -303,6 +316,21 @@ describe('SpacesLive', () => {
     expect(seen.filter((f) => f.kind === 'event').map((f) => f.offset)).toEqual([1, 2, 3]);
 
     live.close();
+  });
+
+  it('a member-addressed space_added frame reaches the other participant without any subscription', async () => {
+    await harbor.store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member' });
+    const harsh = new SpacesLive({ baseUrl: harbor.url, token: 'dev-harsh' });
+    const added: Array<{ spaceId: string; by: string }> = [];
+    harsh.onMemberFrame((frame) => {
+      if (frame.kind === 'space_added') added.push({ spaceId: frame.spaceId, by: frame.by });
+    });
+    await waitFor(() => harsh.status === 'open', 'harsh socket open (no subscriptions, just the member handler)');
+
+    const opened = await ramnique.openDirect('harsh');
+    await waitFor(() => added.length >= 1, 'space_added frame');
+    expect(added[0]).toEqual({ spaceId: opened.space.id, by: 'ramnique' });
+    harsh.close();
   });
 
   it('whiteboard frames round-trip: opaque payload out, sender-stamped frame in', async () => {

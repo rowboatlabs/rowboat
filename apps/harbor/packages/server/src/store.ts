@@ -67,6 +67,21 @@ export interface StoredInvite {
   revoked: boolean;
 }
 
+/**
+ * The stored name of every direct space — a constant placeholder, never
+ * displayed: clients label a DM by its other participant's current name.
+ */
+export const DIRECT_SPACE_NAME = 'Direct message';
+
+/**
+ * A DM's identity: its sorted participant ids, JSON-encoded (unambiguous for
+ * any member id). Both drivers key their uniqueness guard on exactly this
+ * string, and `participants` on the wire is its decoding.
+ */
+export function directKeyFor(participants: readonly string[]): string {
+  return JSON.stringify([...participants].sort());
+}
+
 /** A durable, offsetted fact as stored — exactly what WS replay sends. */
 export interface StoredEvent {
   offset: number;
@@ -122,10 +137,15 @@ export interface Store {
   getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined>;
   putIdentity(iss: string, sub: string, memberId: string): Promise<void>;
 
-  // spaces
+  // spaces — `kind` (migration 014) rides the row; a direct space also
+  // stores its direct key, and putSpace MUST refuse a second direct space
+  // with the same key (the get-or-create race guard the service relies on).
   putSpace(space: Space): Promise<void>;
   getSpace(id: string): Promise<Space | undefined>;
-  listSpacesFor(memberId: string): Promise<Space[]>;
+  /** Shared spaces only unless `includeDirect` — the listing's compatibility posture (api.ts). */
+  listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
+  /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
+  getDirectSpace(directKey: string): Promise<Space | undefined>;
 
   // membership
   getMembership(spaceId: string, memberId: string): Promise<Membership | undefined>;

@@ -6,12 +6,13 @@ import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
+import { fetchLinkPreview } from '@x/core/dist/spaces/link-preview.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
 
 // Spaces handlers, server-side (Phase 9). Verbatim lifts of the Electron
 // handlers in apps/main/src/spaces/ipc.ts, minus the client-only ones
-// (save dialogs, link previews — those stay in main). Spaces is core-coupled
+// (save dialogs — those stay in main). Spaces is core-coupled
 // — the topic agent runs turns through the session runtime, mention offsets
 // and org tokens live in the workdir — so it runs where core runs. Browser
 // opens ride the url-opener seam (shell.openExternal in-process, the
@@ -38,6 +39,10 @@ function emitSpacesEvent(event: spacesShared.SpacesBusEvent): void {
 
 const liveSubscriptions = new Map<string, () => void>();
 
+// Member-addressed frames (space_added) ride no space subscription — relay
+// them to every client as they arrive.
+orgs.onMemberFrame((orgId, frame) => emitSpacesEvent({ orgId, frame }));
+
 function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
   return {
     id: record.id,
@@ -53,12 +58,12 @@ function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
 type SpacesRpcChannel =
   | 'spaces:listOrgs' | 'spaces:addOrg' | 'spaces:resolveInviteLink' | 'spaces:joinInvite'
   | 'spaces:signInOrg' | 'spaces:createOrg' | 'spaces:apexInfo' | 'spaces:removeOrg'
-  | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:listMembers' | 'spaces:createInvite'
+  | 'spaces:listSpaces' | 'spaces:createSpace' | 'spaces:openDirect' | 'spaces:listMembers' | 'spaces:createInvite'
   | 'spaces:resolveInvite' | 'spaces:acceptInvite' | 'spaces:listAssets' | 'spaces:moveAsset'
   | 'spaces:deleteAsset' | 'spaces:restoreAsset' | 'spaces:uploadBlob' | 'spaces:readAsset'
   | 'spaces:proposeChange' | 'spaces:assetHistory' | 'spaces:diff' | 'spaces:listTopics'
   | 'spaces:search'
-  | 'spaces:listStream' | 'spaces:listThread' | 'spaces:postMessage' | 'spaces:createTopic'
+  | 'spaces:listStream' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
   | 'spaces:invokeRowboat' | 'spaces:topicSession'
@@ -100,7 +105,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:createOrg': async (args) => {
-    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, slug: args.slug, openBrowser }));
+    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
     void syncSpaceMentionWatch({ force: true });
     return { org };
   },
@@ -126,7 +131,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:listSpaces': async (args) => {
-    const spaces = await orgs.getClient(args.orgId).listSpaces();
+    const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
     // The renderer just reached this org — if it was down at boot (or restarted),
     // this is the earliest signal that its spaces are watchable again. Unforced:
     // repeated refreshes collapse into one sync.
@@ -138,6 +143,12 @@ export const spacesRpcHandlers: SpacesHandlers = {
     const space = await orgs.getClient(args.orgId).createSpace(args.name);
     void syncSpaceMentionWatch({ force: true });
     return { space };
+  },
+
+  'spaces:openDirect': async (args) => {
+    const result = await orgs.getClient(args.orgId).openDirect(args.memberId);
+    if (result.created) void syncSpaceMentionWatch({ force: true });
+    return result;
   },
 
   'spaces:listMembers': async (args) => ({
@@ -241,6 +252,8 @@ export const spacesRpcHandlers: SpacesHandlers = {
       ...(args.beforeOffset !== undefined ? { beforeOffset: args.beforeOffset } : {}),
       ...(args.limit !== undefined ? { limit: args.limit } : {}),
     }),
+
+  'spaces:linkPreview': async (args) => ({ preview: await fetchLinkPreview(args.url) }),
 
   'spaces:postMessage': async (args) =>
     orgs.getClient(args.orgId).postMessage(args.spaceId, {

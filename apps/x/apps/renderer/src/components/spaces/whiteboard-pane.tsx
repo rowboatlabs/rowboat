@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Loader2, PenTool } from 'lucide-react'
+import { Check, ChevronDown, Loader2, PenTool, X } from 'lucide-react'
 import {
     CaptureUpdateAction,
     Excalidraw,
@@ -116,7 +116,7 @@ function initials(name: string | null | undefined): string {
     return ((parts[0][0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase()
 }
 
-export default function WhiteboardPane({ org, space, boardId, memberNames, active, boards, onSelectBoard, onCreateBoard }: {
+export default function WhiteboardPane({ org, space, boardId, memberNames, active, boards, onSelectBoard, onCreateBoard, onClose }: {
     org: OrgWithSpaces
     space: spaces.Space
     /** The board's asset path (whiteboards/<name>.excalidraw). */
@@ -129,6 +129,8 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
     onSelectBoard: (path: string) => void
     /** Create-or-open by path (SpacePane owns the empty-snapshot propose). */
     onCreateBoard: (path: string) => void
+    /** Closes the board's column; the chat takes the width. */
+    onClose: () => void
 }) {
     const { resolvedTheme } = useTheme()
     const [load, setLoad] = useState<LoadState>({ phase: 'loading' })
@@ -549,6 +551,15 @@ export default function WhiteboardPane({ org, space, boardId, memberNames, activ
                 // person's cursor.
                 renderTopRightUI={() => (
                     <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            title="Close the board"
+                            aria-label="Close board"
+                            onClick={onClose}
+                            className="flex size-9 items-center justify-center rounded-lg border border-border bg-popover text-muted-foreground shadow-sm hover:bg-accent/50 hover:text-foreground"
+                        >
+                            <X className="size-4" />
+                        </button>
                         <Popover open={switcherOpen} onOpenChange={setSwitcherOpen}>
                             <PopoverTrigger asChild>
                                 <button

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Topic, TopicRemoval } from './core.js';
+import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetPath, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
@@ -133,6 +133,26 @@ export const ServerFrame = z.discriminatedUnion('kind', [
    * kinds by contract, so this is a v0-legal addition.
    */
   z.object({ kind: z.literal('ping'), at: z.iso.datetime() }),
+  /**
+   * Addressed to a MEMBER, not a space (direct messages, 2026-09-07): someone
+   * else put you into a space — a DM opened with you today; admin-adds and
+   * org invites tomorrow. Every other way into a space is an act you perform
+   * yourself, so your client already knows to refresh; this is the one case
+   * where it cannot. Ephemeral and never replayed: the durable truth is the
+   * membership row plus the `joined` event on the new space's own log, which
+   * you could not have been subscribed to yet. On receipt, refresh the space
+   * listing and subscribe from offset 0 — the log is a few events long and
+   * the opener's first message may already be on it. Pre-DM clients ignore
+   * unknown frame kinds by contract.
+   */
+  z.object({
+    kind: z.literal('space_added'),
+    spaceId: SpaceId,
+    spaceKind: SpaceKind,
+    /** Who put you here. */
+    by: MemberId,
+    at: z.iso.datetime(),
+  }),
   /**
    * Ephemeral whiteboard collaboration traffic (scene diffs, cursors, idle
    * state), fanned out to the space's subscribers. The payload is opaque to

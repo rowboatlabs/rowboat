@@ -47,11 +47,11 @@ export function coalesceCodeRunEvents(events: CodeRunEventType[]): CodeRunEventT
 export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
     code_agent_run: {
         permission: "none",
-        description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context.',
+        description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context. The agent\'s entire output is directly visible to the user in the run card, so after the run reply with a ~2-line confirmation only — never re-summarize the agent\'s output.',
         inputSchema: z.object({
             agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
             cwd: z.string().optional().describe('Absolute path to the working directory / project folder the agent should operate in. OMIT this when the user has not named a path — the run then uses their default code repo (the single registered project, or the one picked in Settings → Code). Only pass a path the user actually named or that prior context established.'),
-            prompt: z.string().describe('The full, self-contained coding instruction for the agent (file names, expected behavior, constraints).'),
+            prompt: z.string().describe("The user's coding request, forwarded almost verbatim — fix only transcription artifacts, typos, and minor grammar; do NOT expand, rephrase, or add details the user never stated. Append extra context (clearly labeled) only when the user explicitly asked you to gather it first."),
         }),
         execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex', cwd?: string, prompt: string }, ctx?: ToolContext) => {
             if (!ctx) {
@@ -248,6 +248,9 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
                     agent: effectiveAgent,
                     summary: finalText.trim(),
                     changedFiles: [...changedFiles],
+                    // Model-facing: the summary above is context for follow-up turns,
+                    // not material for the reply — the user already watched the run.
+                    note: "The agent's ENTIRE output and diffs are directly visible to the user, fully formatted, in the run card right above your reply — there is strictly NO need to re-summarize it. Reply with ~2 lines max: (1) what was done ('I used Claude Code to implement [task].'), (2) optionally one key outcome — a PR link if one was created, or the changes' status / next step. Do NOT reiterate what the agent said, list touched files, explain implementation details, or repeat diffs.",
                     // Adoption happened DURING this call — the turn's composed
                     // prompt predates the pin, so tell the model where work
                     // actually lives now (else it narrates stale paths).

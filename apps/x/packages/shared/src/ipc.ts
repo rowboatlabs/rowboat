@@ -1210,6 +1210,46 @@ export const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
+  // Main → renderer: native application-menu commands (apps/main/src/menu.ts).
+  // One channel for all of them; each routes into the same handler the
+  // corresponding in-app control uses. Go-menu navigation is NOT here — it
+  // rides the existing deep-link pipeline (app:openUrl / pending-link drain).
+  'menu:command': {
+    req: z.discriminatedUnion('command', [
+      z.object({ command: z.literal('new-chat') }),
+      z.object({ command: z.literal('new-note') }),
+      z.object({ command: z.literal('new-presentation') }),
+      z.object({ command: z.literal('undo') }),
+      z.object({ command: z.literal('redo') }),
+      z.object({ command: z.literal('open-search') }),
+      z.object({ command: z.literal('open-about') }),
+      z.object({ command: z.literal('toggle-browser') }),
+      z.object({ command: z.literal('toggle-full-screen-chat') }),
+      z.object({ command: z.literal('go-back') }),
+      z.object({ command: z.literal('go-forward') }),
+      z.object({
+        command: z.literal('open-settings'),
+        // Mirrors the renderer's settings-dialog ConfigTab union.
+        tab: z.enum([
+          'account', 'connections', 'mobile', 'phone', 'models', 'mcp', 'security',
+          'code-mode', 'appearance', 'shortcuts', 'notifications',
+          'permissions', 'note-tagging', 'advanced', 'help',
+        ]).optional(),
+      }),
+      z.object({
+        command: z.literal('export-note'),
+        format: z.enum(['md', 'pdf', 'docx']),
+      }),
+    ]),
+    res: z.null(),
+  },
+  // Main → renderer: View > Toggle Sidebar. Its own channel because the
+  // handler must live inside the SidebarProvider, below where menu:command's
+  // dispatcher sits.
+  'menu:toggleSidebar': {
+    req: z.null(),
+    res: z.null(),
+  },
   // The ⌥/⌃+Tab section switcher, forwarded from the main process when an
   // embedded page (e.g. the browser <webview>) holds keyboard focus — its
   // keystrokes go to the guest and never reach the app renderer's listeners.
@@ -1278,14 +1318,15 @@ export const ipcSchemas = {
       success: z.literal(true),
     }),
   },
-  // --- Global push-to-talk (Right ⌘) ---
+  // --- Global push-to-talk (right ⌘ on macOS, right Ctrl elsewhere —
+  // see ptt-key.ts) ---
   // Push channel: main → app window, a system-wide PTT key transition.
-  // 'chord' = another key/click while Right ⌘ was held (it's being used as a
+  // 'chord' = another key/click while the talk key was held (it's being used as a
   // modifier, not the talk key) — the renderer cancels the capture.
   'voice:ptt-key': {
     req: z.object({
       type: z.enum(['down', 'up', 'chord']),
-      // Ghostwriter chord (⇧ held when Right ⌘ went down): this capture's
+      // Ghostwriter chord (⇧ held when the talk key went down): this capture's
       // result should be pasted at the user's cursor.
       paste: z.boolean().optional(),
     }),
@@ -1459,6 +1500,15 @@ export const ipcSchemas = {
     req: z.object({ x: z.number(), y: z.number() }),
     res: z.null(),
   },
+  // Main → companion: the window is being dragged right now. A drag region
+  // is a NATIVE affair — on Windows the hit test answers HTCAPTION, on macOS
+  // it is a view layered over the page — so the renderer never sees the
+  // mousedown and `:active` never fires. Main watches its own 'move' instead
+  // and says so, which is what lets the cursor go from grab to grabbing.
+  'quick-ask:dragging': {
+    req: z.object({ dragging: z.boolean() }),
+    res: z.null(),
+  },
   // (The old quickAsk:setTextMode / quick-ask:text-mode channels are gone:
   // whether a reply is SPOKEN now follows the question's modality — spoken
   // questions get spoken replies, typed ones stay silent — plus the
@@ -1543,6 +1593,25 @@ export const ipcSchemas = {
   // hold-to-talk chord detection all follow the one source of truth.
   'quick-ask:shortcut-changed': {
     req: z.object({ accelerator: z.string(), registered: z.boolean() }),
+    res: z.null(),
+  },
+  // --- Theme, across windows ---
+  // The setting itself lives in the renderer's localStorage, which every
+  // window already shares (one origin, one Electron session), so a freshly
+  // loaded utility window paints the right skin with no round trip. These
+  // channels carry only the *changes*: utility windows have no ThemeProvider,
+  // and a localStorage write in the app window raises no cross-window event
+  // they can rely on, so the app window tells main and main tells them.
+  // The raw setting travels, not the resolved one — 'system' must resolve
+  // per window, against that window's own matchMedia.
+  // App window → main, on mount and on every change.
+  'theme:set': {
+    req: z.object({ theme: z.enum(['light', 'dark', 'system']) }),
+    res: z.object({}),
+  },
+  // Push: main → every OTHER window.
+  'theme:changed': {
+    req: z.object({ theme: z.enum(['light', 'dark', 'system']) }),
     res: z.null(),
   },
   // --- Ambient meeting detection popup (own always-on-top window) ---
@@ -2619,6 +2688,15 @@ export const ipcSchemas = {
     }),
     res: z.object({}),
   },
+  // Main-window renderer → main: a batch of recording-waveform amplitudes
+  // (the voice hook's auto-gained per-frame levels, ~16/s) for the
+  // companion's recording bar. Relayed, never cached — a waveform is only
+  // meaningful live. (Audio itself can't cross windows; a few numbers a
+  // second can.)
+  'video:popoutLevels': {
+    req: z.object({ levels: z.array(z.number()) }),
+    res: z.object({}),
+  },
   // Popout → main: grow/shrink the pill window as the response panel
   // opens/closes (height clamped in main).
   'video:popoutResize': {
@@ -2652,10 +2730,11 @@ export const ipcSchemas = {
   // Popout control bar → main process → relayed to the app window, which
   // executes the action on the live call. 'expand' additionally focuses the
   // main app window (handled in the main process). 'ptt-down'/'ptt-up' are
-  // the on-screen talk button's press/release edges.
+  // the on-screen talk button's press/release edges; 'ptt-cancel' discards
+  // an open capture without sending (the composer recording bar's ✕).
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'ptt-cancel', 'end-call', 'expand']),
     }),
     res: z.object({}),
   },
@@ -2679,10 +2758,15 @@ export const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // Push channel: main → companion with a recording-waveform level batch.
+  'video:popout-levels': {
+    req: z.object({ levels: z.array(z.number()) }),
+    res: z.null(),
+  },
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'toggle-speaker', 'stop-speaking', 'ptt-down', 'ptt-up', 'ptt-cancel', 'end-call', 'expand']),
     }),
     res: z.null(),
   },
@@ -3602,9 +3686,11 @@ export const ipcSchemas = {
   },
   // Self-serve org creation on the managed deployment's apex (free for now —
   // billing/limits parked by decision 2026-08-20). Browser sign-in, then the
-  // caller is the org's first admin at <slug>.spaces.rowboatlabs.com.
+  // caller is the org's first admin. The address is generated in core
+  // (name-derived prefix + always-appended random suffix — decision
+  // 2026-09-07): the user names the server; nobody picks a slug.
   'spaces:createOrg': {
-    req: z.object({ name: z.string(), slug: z.string() }),
+    req: z.object({ name: z.string() }),
     res: z.object({ org: SpacesOrgSummary }),
   },
   // Where the Create button makes orgs (from /v1/config via core). null =
@@ -3617,13 +3703,22 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
+  // Shared spaces by default; includeDirect adds the member's DMs (kind
+  // 'direct') — opt-in on the wire so a pre-DM build never renders one as a space.
   'spaces:listSpaces': {
-    req: z.object({ orgId: z.string() }),
+    req: z.object({ orgId: z.string(), includeDirect: z.boolean().optional() }),
     res: z.object({ spaces: z.array(z.custom<SpacesTypes.Space>()) }),
   },
   'spaces:createSpace': {
     req: z.object({ orgId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
+  // Direct messages: get-or-create the DM with another org member. No
+  // invite, no acceptance — the other side learns of it by a space_added
+  // frame on 'spaces:events' and shows it in their sidebar.
+  'spaces:openDirect': {
+    req: z.object({ orgId: z.string(), memberId: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>(), created: z.boolean() }),
   },
   'spaces:listMembers': {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
@@ -3915,9 +4010,9 @@ export const ipcSchemas = {
     req: z.object({ url: z.string() }),
     res: z.object({ saved: z.boolean(), path: z.string().optional() }),
   },
-  // OpenGraph metadata for a link card. Main fetches the page — the renderer
-  // can't (CORS) — with a size cap and timeout. null preview = nothing
-  // usable (not html, too slow, no tags). https only.
+  // OpenGraph metadata for a link card. The host fetches the page — the
+  // renderer can't (CORS) — with a size cap and timeout. null preview =
+  // nothing usable (not html, too slow, no tags). https only.
   'spaces:linkPreview': {
     req: z.object({ url: z.string() }),
     res: z.object({
@@ -3928,6 +4023,7 @@ export const ipcSchemas = {
           description: z.string().optional(),
           imageUrl: z.string().optional(),
           siteName: z.string().optional(),
+          favicon: z.string().optional(),
         })
         .nullable(),
     }),

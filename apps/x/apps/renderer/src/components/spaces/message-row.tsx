@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, Forward, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,7 @@ import {
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Textarea } from '@/components/ui/textarea'
 import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
+import { FormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { EmojiPickerPopover } from '@/components/spaces/emoji-picker'
 import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
 import { PollCard } from '@/components/spaces/poll-card'
@@ -110,7 +111,7 @@ function ReactionChips({ message, memberNames, selfMemberId, onReact, onPickerOp
     )
 }
 
-const MESSAGE_PROSE = 'text-[15px] leading-[22px] [&_p]:my-0.5 [&_h1]:text-base [&_h2]:text-[15px] [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-2 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_ul]:my-1 [&_ol]:my-1'
+const MESSAGE_PROSE = 'text-[15px] leading-[22px] [&_p]:my-0.5 [&_h1]:text-base [&_h2]:text-[15px] [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-2 [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_ul]:my-1 [&_ol]:my-1 [&_blockquote]:my-1 [&_blockquote]:border-l-4 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_pre]:my-1 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:border-border [&_pre]:bg-muted/40 [&_pre]:p-2.5 [&_pre]:text-[13px] [&_pre]:leading-normal'
 
 export interface ThreadRowData {
     /** The thread's identity: its root message id (the row's own message). */
@@ -126,7 +127,7 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, continuation, thread, onOpenThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onPrefetchThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
@@ -136,6 +137,8 @@ function MessageRowImpl({
     /** Present when a thread hangs under this message (stream only). */
     thread?: ThreadRowData | null
     onOpenThread?: (rootMessageId: string) => void
+    /** Hover = intent: warm the thread's replies so the click paints instantly. */
+    onPrefetchThread?: (rootMessageId: string) => void
     onReplyInThread?: (message: spaces.Message) => void
     onAskRowboat?: (message: spaces.Message) => void
     onCopyLink?: (message: spaces.Message) => void
@@ -180,6 +183,7 @@ function MessageRowImpl({
     const canEdit = !!onEdit && !deleted && !unconfirmed && !message.poll && selfMemberId === message.author.memberId
     // The inline editor: null = not editing; a string = the draft body.
     const [editDraft, setEditDraft] = useState<string | null>(null)
+    const editRef = useRef<HTMLTextAreaElement | null>(null)
     const commitEdit = () => {
         const text = (editDraft ?? '').trim()
         setEditDraft(null)
@@ -248,7 +252,9 @@ function MessageRowImpl({
                 )}
                 {editDraft !== null ? (
                     <div className="mt-1">
+                        <FormattingToolbar textareaRef={editRef} value={editDraft} onChange={setEditDraft} className="mb-1" />
                         <Textarea
+                            ref={editRef}
                             autoFocus
                             value={editDraft}
                             onChange={(e) => setEditDraft(e.target.value)}
@@ -288,7 +294,7 @@ function MessageRowImpl({
                         {message.editedAt && (
                             <span title={formatFullTimestamp(message.editedAt)} className="text-[10.5px] text-muted-foreground/70">(edited)</span>
                         )}
-                        <MessageLinkPreview body={message.body} />
+                        <MessageLinkPreview body={message.body} messageId={message.id} />
                     </div>
                 )}
                 {message.failed && (
@@ -322,6 +328,7 @@ function MessageRowImpl({
                     <button
                         type="button"
                         onClick={() => onOpenThread(thread.rootMessageId)}
+                        onMouseEnter={() => onPrefetchThread?.(thread.rootMessageId)}
                         className={cn(
                             'group/thread mt-1.5 flex w-full max-w-2xl items-center gap-2 rounded-md border border-transparent px-2 py-1 text-left text-xs transition-colors hover:border-border hover:bg-[var(--rowboat-raised)]',
                             thread.archived && 'opacity-60',

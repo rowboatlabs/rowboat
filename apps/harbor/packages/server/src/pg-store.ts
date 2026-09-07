@@ -12,17 +12,18 @@ import type {
 import { migrate } from './migrations.js';
 import { extractSearchText, matchesAllTerms, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import type {
-  AssetRecord,
-  AssetSearchRow,
-  AssetVersionData,
-  MessageSearchRow,
-  Store,
-  StoredEvent,
-  StoredInvite,
-  StoredPollVote,
-  StoredReaction,
-  StoredSpaceBlob,
+import {
+  directKeyFor,
+  type AssetRecord,
+  type AssetSearchRow,
+  type AssetVersionData,
+  type MessageSearchRow,
+  type Store,
+  type StoredEvent,
+  type StoredInvite,
+  type StoredPollVote,
+  type StoredReaction,
+  type StoredSpaceBlob,
 } from './store.js';
 
 // The real Harbor's storage: mergeable text lives inline in Postgres (≤1MB,
@@ -51,6 +52,24 @@ function rowToMember(r: MemberRow): Member {
     displayName: r.display_name,
     ...(r.avatar_url !== null ? { avatarUrl: r.avatar_url } : {}),
     role: r.role,
+  };
+}
+
+interface SpaceRow {
+  id: string;
+  name: string;
+  created_at: string;
+  kind: Space['kind'];
+  direct_key: string | null;
+}
+
+function rowToSpace(r: SpaceRow): Space {
+  return {
+    id: r.id,
+    name: r.name,
+    createdAt: r.created_at,
+    kind: r.kind,
+    ...(r.kind === 'direct' && r.direct_key !== null ? { participants: JSON.parse(r.direct_key) as string[] } : {}),
   };
 }
 
@@ -300,32 +319,51 @@ export class PgStore implements Store {
   // --- spaces ----------------------------------------------------------------
 
   async putSpace(space: Space): Promise<void> {
+    // ON CONFLICT names the primary key only: a second direct space with the
+    // same direct_key trips the partial unique index (migration 014) and
+    // raises — the service treats that as "lost the race, re-read".
     await this.sql.query(
-      `insert into spaces (org_id, id, name, created_at) values ($1, $2, $3, $4)
+      `insert into spaces (org_id, id, name, created_at, kind, direct_key) values ($1, $2, $3, $4, $5, $6)
        on conflict (id) do update set name = excluded.name`,
-      [this.orgId, space.id, space.name, space.createdAt],
+      [
+        this.orgId,
+        space.id,
+        space.name,
+        space.createdAt,
+        space.kind,
+        space.kind === 'direct' ? directKeyFor(space.participants ?? []) : null,
+      ],
     );
   }
 
   async getSpace(id: string): Promise<Space | undefined> {
     // Org-scoped on purpose: this is what makes a foreign org's space ids
     // (and invite tokens, which resolve through here) not_found.
-    const rows = await this.sql.query<{ id: string; name: string; created_at: string }>(
-      'select id, name, created_at from spaces where org_id = $1 and id = $2',
+    const rows = await this.sql.query<SpaceRow>(
+      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 and id = $2',
       [this.orgId, id],
     );
-    const r = rows[0];
-    return r ? { id: r.id, name: r.name, createdAt: r.created_at } : undefined;
+    return rows[0] ? rowToSpace(rows[0]) : undefined;
   }
 
-  async listSpacesFor(memberId: string): Promise<Space[]> {
-    const rows = await this.sql.query<{ id: string; name: string; created_at: string }>(
-      `select s.id, s.name, s.created_at from spaces s
+  async listSpacesFor(memberId: string, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
+    const rows = await this.sql.query<SpaceRow>(
+      `select s.id, s.name, s.created_at, s.kind, s.direct_key from spaces s
        join memberships m on m.space_id = s.id
-       where s.org_id = $1 and m.member_id = $2 order by s.created_at, s.id`,
-      [this.orgId, memberId],
+       where s.org_id = $1 and m.member_id = $2 and ($3::boolean or s.kind <> 'direct')
+       order by s.created_at, s.id`,
+      [this.orgId, memberId, opts.includeDirect === true],
     );
-    return rows.map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at }));
+    return rows.map(rowToSpace);
+  }
+
+  async getDirectSpace(directKey: string): Promise<Space | undefined> {
+    const rows = await this.sql.query<SpaceRow>(
+      `select id, name, created_at, kind, direct_key from spaces
+       where org_id = $1 and kind = 'direct' and direct_key = $2`,
+      [this.orgId, directKey],
+    );
+    return rows[0] ? rowToSpace(rows[0]) : undefined;
   }
 
   // --- memberships -----------------------------------------------------------

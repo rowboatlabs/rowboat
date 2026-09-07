@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, Loader2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Loader2, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Composer, type AgentOptions } from '@/components/spaces/composer'
 import { ForwardDialog } from '@/components/spaces/forward-dialog'
@@ -7,7 +7,7 @@ import { DayDivider, MessageRow, NewDivider, TypingIndicator, type ThreadRowData
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import {
     STREAM_READ_KEY, buildPendingMessage, failPendingStreamMessage, ingestStreamMessage, loadOlderStreamMessages,
-    removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage, usePresenceSender,
+    prefetchThread, removeStreamMessage, resolvePendingStreamMessage, updateStreamMessage, usePresenceSender,
 } from '@/hooks/use-space-chat'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
@@ -44,7 +44,7 @@ const NEW_FADE_MS = 800
 const PIN_BANNER_MAX = 3
 
 export function GeneralStream({
-    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, visible = true,
+    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onClose, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -56,6 +56,8 @@ export function GeneralStream({
     entries?: spaces.SpacesAssetEntry[]
     /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
     onOpenThread: (rootMessageId: string) => void
+    /** Set while a doc column sits beside the chat: closes THIS column, the doc takes the width. */
+    onClose?: () => void
     /**
      * The keep-alive flag: the stream stays MOUNTED while a thread, a file, or
      * another app section covers it, and this goes false. Hidden means no
@@ -584,6 +586,7 @@ export function GeneralStream({
                 thread={thread}
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
+                onPrefetchThread={(id) => prefetchThread(org.id, space.id, id)}
                 onReplyInThread={replyInThread}
                 onAskRowboat={askRowboat}
                 onCopyLink={(m) => void copyLink(m)}
@@ -613,6 +616,17 @@ export function GeneralStream({
                 <span className="text-xs text-muted-foreground truncate">What the team says, in order. Reply to one to start a thread.</span>
                 <span className="flex-1" />
                 {stream.error && <span className="text-xs text-destructive truncate" title={stream.error}>messages unavailable</span>}
+                {onClose && (
+                    <button
+                        type="button"
+                        title="Close the chat — the file takes the width"
+                        aria-label="Close chat"
+                        onClick={onClose}
+                        className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                        <X className="size-3.5" />
+                    </button>
+                )}
             </div>
             <PinnedBanner
                 pinned={pinned}

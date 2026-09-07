@@ -482,6 +482,20 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists poll_votes_space_message on poll_votes (space_id, message_id)`,
     ],
   },
+  {
+    // Direct messages: a DM is a space of kind 'direct' whose identity is its
+    // sorted participant set (direct_key = JSON of the sorted member ids).
+    // The partial unique index IS the get-or-create race guard: two members
+    // opening the same DM at once both pass the lookup, one insert wins, the
+    // other re-reads. Membership rows are the access truth as for any space;
+    // the key only answers "which space is the DM between these two".
+    id: '014-direct-spaces',
+    statements: [
+      `alter table spaces add column if not exists kind text not null default 'shared'`,
+      `alter table spaces add column if not exists direct_key text`,
+      `create unique index if not exists spaces_direct_key on spaces (org_id, direct_key) where kind = 'direct'`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

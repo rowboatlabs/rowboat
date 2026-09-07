@@ -63,6 +63,9 @@ import {
   usePromptInputController,
 } from '@/components/ai-elements/prompt-input'
 import { toast } from 'sonner'
+import * as quickAskShortcut from '@x/shared/src/quick-ask-shortcut.js'
+import { useQuickAskShortcut } from '@/hooks/use-quick-ask-shortcut'
+import { isMac } from '@/lib/shortcut'
 
 export type StagedAttachment = {
   id: string
@@ -197,7 +200,8 @@ function compactWorkDirPath(path: string) {
 
 // Call presets: front doors into the same call engine, differing only in
 // starting devices. 'share' is the call button's main click — the "work
-// together" default (the hover companion — same surface as ⌥⇧Space). The
+// together" default (the hover companion — same surface the summon chord
+// opens). The
 // chevron menu holds the deviations.
 export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
 
@@ -311,6 +315,11 @@ function ChatInputInner({
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
+  // The summon chord is user-configurable and platform-formatted — never
+  // spell it out inline (the tooltip used to read "⌥⇧Space" on every OS,
+  // and stayed wrong after a rebind).
+  const summonShortcut = useQuickAskShortcut()
+  const summonShortcutLabel = quickAskShortcut.formatShortcut(summonShortcut.accelerator, isMac)
   const [attachments, setAttachments] = useState<StagedAttachment[]>([])
   const [focusNonce, setFocusNonce] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1278,8 +1287,8 @@ function ChatInputInner({
                     if (inCall && callOnThisChat) {
                       onEndCall?.()
                     } else if (callAvailable) {
-                      // Voice hover companion — the same surface ⌥⇧Space
-                      // summons. During a live call on ANOTHER chat this
+                      // Voice hover companion — the same surface the summon
+                      // chord opens. During a live call on ANOTHER chat this
                       // re-points the call at this one (same devices).
                       onStartCall('voice')
                     }
@@ -1303,7 +1312,7 @@ function ChatInputInner({
                       ? 'End call'
                       : 'On a call about another chat — click to bring THIS chat into it')
                   : callAvailable
-                    ? 'Talk it through — summons your hover companion (⌥⇧Space)'
+                    ? `Talk it through — summons your hover companion (${summonShortcutLabel})`
                     : 'Calls need voice input and output configured'}
               </TooltipContent>
             </Tooltip>

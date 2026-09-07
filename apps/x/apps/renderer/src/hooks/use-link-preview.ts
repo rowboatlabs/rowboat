@@ -6,6 +6,7 @@ export interface LinkPreviewData {
     description?: string
     imageUrl?: string
     siteName?: string
+    favicon?: string
 }
 
 // Session-lived cache: one fetch per URL no matter how many rows show it

@@ -32,6 +32,8 @@ interface Props {
     spaceId: string
     /** Resolves `me` in from:/mentions: to the viewer. */
     selfMemberId?: string
+    /** The wrapper's size — the header gives it the centre of the row. */
+    className?: string
     onNavigate: (sel: RailSelection) => void
 }
 
@@ -47,7 +49,7 @@ const PAGE = 5
 /** The org's per-category cap — a filtered query fetches this and narrows it here. */
 const FILTERED_PAGE = 50
 
-export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate }: Props) {
+export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate, className }: Props) {
     const names = useMemberNames()
     const inputRef = useRef<HTMLInputElement>(null)
     const [query, setQuery] = useState('')
@@ -252,15 +254,15 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate }: Props)
     }
 
     return (
-        <div className="relative">
+        <div className={cn('relative', className)}>
             <label
                 className={cn(
-                    'flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground',
-                    'w-40 transition-[width] focus-within:w-64 focus-within:border-foreground/30',
+                    'flex h-8 w-full items-center gap-2 rounded-md border border-transparent bg-muted/60 px-2.5 text-[13px] text-muted-foreground',
+                    'transition-colors focus-within:border-foreground/25 focus-within:bg-background hover:bg-muted',
                 )}
                 title={`Search this space (${chord('K', { shift: true })})`}
             >
-                <Search className="size-3 shrink-0" />
+                <Search className="size-3.5 shrink-0" />
                 <input
                     ref={inputRef}
                     value={query}
@@ -268,13 +270,13 @@ export function SpaceSearch({ orgId, spaceId, selfMemberId, onNavigate }: Props)
                     onFocus={() => setFocused(true)}
                     onBlur={() => setFocused(false)}
                     onKeyDown={onKeyDown}
-                    placeholder="Search"
+                    placeholder="Search this space"
                     className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
                 />
-                {!focused && <kbd className="rounded border border-border bg-muted px-1 text-[10px]">{chord('K', { shift: true })}</kbd>}
+                {!focused && <kbd className="rounded border border-border bg-background px-1 text-[10px]">{chord('K', { shift: true })}</kbd>}
             </label>
             {open && (
-                <div className="absolute right-0 top-full z-30 mt-1 max-h-96 w-[26rem] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md">
+                <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-96 min-w-[26rem] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md">
                     {sections.map((s) => (
                         <div key={s.label}>
                             <div className="flex items-baseline justify-between px-2 pb-0.5 pt-1.5 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground/80">

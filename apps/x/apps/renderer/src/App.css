@@ -1285,44 +1285,22 @@
   background: var(--background);
 }
 
-/* ---- Dock sidebar (design: "Rowboat Dock Sidebar" handoff) ---- */
+/* ---- Dock sidebar: the collapsed left navigation as a slim icon rail ---- */
 
 .rowboat-dock {
   position: fixed;
-  top: 50%;
-  transform: translateY(-50%);
+  /* Below the titlebar band: the traffic lights are wider than the rail, so
+     the h-10 top row stays one full-width surface (the gutter strip in App
+     paints its left segment) and the rail hangs underneath, Linear-style. */
+  top: 2.5rem;
+  bottom: 0;
+  left: 0;
   z-index: 30;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   box-sizing: border-box;
-  /* Floating surface: solid raised ground, hairline ring folded into
-     the shadow token — no frosted glass. Tokens flip for dark mode. */
-  border-radius: 18px;
-  background: var(--rowboat-raised);
-  border: 1px solid transparent;
-  box-shadow: var(--rowboat-shadow);
-  overflow: visible;
-}
-
-.rowboat-dock-tile {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Off-white faces need definition the old saturated tiles didn't: a soft
-     drop, a bright inner top edge, and a hairline border. */
-  border: 1px solid var(--border);
-  box-sizing: border-box;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
-}
-
-.rowboat-dock-sep {
-  width: 70%;
-  height: 1px;
-  background: var(--border);
-  margin: 0 auto;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
 }
 
 .rowboat-dock-badge {
@@ -1340,7 +1318,7 @@
   align-items: center;
   justify-content: center;
   padding: 0 3.5px;
-  border: 1.5px solid var(--rowboat-raised);
+  border: 1.5px solid var(--sidebar);
   z-index: 2;
   box-sizing: border-box;
 }
@@ -1349,20 +1327,8 @@
   background: #d97706;
 }
 
-.rowboat-dock-dot {
-  position: absolute;
-  left: -9px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 4px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--rowboat-ink-secondary);
-}
-
 .rowboat-dock-tip {
-  position: absolute;
-  top: 50%;
+  position: fixed;
   transform: translateY(-50%);
   background: var(--rowboat-bubble);
   color: var(--rowboat-bubble-foreground);
@@ -1416,13 +1382,14 @@
   }
 }
 
+/* The ⌥Tab switcher pill: same dark bubble surface as the rail tooltips,
+   so the monochrome glyphs pop against it. */
 .rowboat-dock-switcher {
   display: flex;
-  gap: 4px;
-  padding: 14px;
-  background: var(--rowboat-raised);
-  border: 1px solid transparent;
-  border-radius: 18px;
+  flex-direction: column;
+  padding: 8px 10px;
+  background: var(--rowboat-bubble);
+  border-radius: 14px;
   box-shadow: var(--rowboat-shadow);
 }
 
@@ -1687,43 +1654,18 @@
   opacity: 1;
 }
 
-/* Code rail: the session that is currently working wears an outline that
-   orbits its row — a comet travelling a faint ring — so the live session is
-   findable at a glance even when it isn't the selected one. The gradient's
-   start angle is a registered property so it can animate. */
-@property --code-orbit {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
+/* Code rail: the working session's status dot ripples — a soft ring
+   swelling off the dot and fading, with a quiet beat between pulses — so
+   the live session reads at a glance without lighting its card. */
+@keyframes code-dot-ripple {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--rowboat-git) 45%, transparent); }
+  60%, 100% { box-shadow: 0 0 0 5px transparent; }
 }
-@keyframes code-orbit-spin {
-  to { --code-orbit: 360deg; }
-}
-.code-working-outline {
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--rowboat-git) 28%, transparent);
-}
-.code-working-outline::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(
-    from var(--code-orbit),
-    transparent 0deg,
-    transparent 230deg,
-    color-mix(in oklab, var(--rowboat-git) 35%, transparent) 300deg,
-    var(--rowboat-git) 360deg
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: code-orbit-spin 2.4s linear infinite;
-  pointer-events: none;
+.code-working-dot {
+  animation: code-dot-ripple 2.4s ease-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .code-working-outline::after { animation: none; }
+  .code-working-dot { animation: none; }
 }
 
 
@@ -1739,4 +1681,33 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .code-cursor-blink { animation: none; }
+}
+
+/* Spaces columns: a column opening grows from 0 to its width (content is
+   fixed at that width and anchored to the far edge, so it slides in rather
+   than wipes); closing runs the same in reverse. --rb-col-w is set inline. */
+@keyframes rb-column-in { from { width: 0; } to { width: var(--rb-col-w); } }
+@keyframes rb-column-out { from { width: var(--rb-col-w); } to { width: 0; } }
+
+/* Caffeinate toggle (top-left cluster): while on, the three steam ticks above the
+   lucide coffee cup rise a hair and dissipate, staggered so they ripple
+   rather than pulse. Negative delays start each tick mid-cycle, so nothing
+   pops when the class lands. The cup (3rd path) stays still. Reduced motion
+   keeps the steam static — the amber tint does the work. */
+@keyframes caffeinate-steam {
+  0%   { transform: translateY(0.5px); opacity: 0; }
+  30%  { opacity: 1; }
+  100% { transform: translateY(-1.5px); opacity: 0; }
+}
+.caffeinate-steam { overflow: visible; }
+.caffeinate-steam path:nth-child(1),
+.caffeinate-steam path:nth-child(2),
+.caffeinate-steam path:nth-child(4) {
+  animation: caffeinate-steam 2.2s ease-out infinite;
+}
+.caffeinate-steam path:nth-child(4) { animation-delay: 0s; }     /* left */
+.caffeinate-steam path:nth-child(1) { animation-delay: -0.75s; } /* middle */
+.caffeinate-steam path:nth-child(2) { animation-delay: -1.5s; }  /* right */
+@media (prefers-reduced-motion: reduce) {
+  .caffeinate-steam path { animation: none; }
 }

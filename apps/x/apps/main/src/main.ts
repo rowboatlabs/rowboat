@@ -69,6 +69,8 @@ import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { ensureLoginItemRegistration } from "./login_item.js";
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
 import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
+import { installAppMenu } from "./menu.js";
+import { setupZoomShortcuts } from "./zoom.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
 import { initQuickAsk, onAppWindowClosed } from "./quick-ask.js";
 
@@ -357,38 +359,6 @@ function configureAppDisplayMediaHandler(targetSession: Session): void {
   });
 }
 
-// Wire Ctrl/Cmd + (+ / − / 0) to zoom the renderer in/out/reset.
-// The app sets no application menu, so the default menu's zoom roles aren't
-// available — and on Linux the menu bar is suppressed by the frameless
-// `hiddenInset` title bar — so handle the accelerators directly here.
-// `event.preventDefault()` stops the keystroke from leaking into the editor.
-function setupZoomShortcuts(win: BrowserWindow) {
-  const ZOOM_STEP = 0.5; // zoom-level units (factor = 1.2 ^ level, ~9.5% per step)
-  const MIN_ZOOM_LEVEL = -3;
-  const MAX_ZOOM_LEVEL = 3;
-  const wc = win.webContents;
-
-  wc.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown") return;
-    // Cmd on macOS, Ctrl elsewhere.
-    if (!(process.platform === "darwin" ? input.meta : input.control)) return;
-
-    // input.key is the produced character: "+"/"=" share a physical key (as do
-    // "-"/"_"), and numpad +/- produce the same characters, so this covers both.
-    const key = input.key;
-    if (key === "+" || key === "=") {
-      wc.setZoomLevel(Math.min(wc.getZoomLevel() + ZOOM_STEP, MAX_ZOOM_LEVEL));
-      event.preventDefault();
-    } else if (key === "-" || key === "_") {
-      wc.setZoomLevel(Math.max(wc.getZoomLevel() - ZOOM_STEP, MIN_ZOOM_LEVEL));
-      event.preventDefault();
-    } else if (key === "0") {
-      wc.setZoomLevel(0);
-      event.preventDefault();
-    }
-  });
-}
-
 // Resident-app plumbing (Granola-style): the main window may exist hidden
 // (launched at login) or not at all (closed on macOS) while the app keeps
 // running from the tray. showApp() is the single "bring the app up" path
@@ -652,24 +622,35 @@ app.whenReady().then(async () => {
   // we never re-register on boot.
   ensureLoginItemRegistration();
 
+  // Shared by the tray menu and the application menu: reveal the app and
+  // toggle meeting notes. If the renderer isn't ready to receive the toggle
+  // (window closed or still loading), park it as a pending command the
+  // renderer drains on mount — same pull pattern as pending deep links.
+  const toggleMeetingNotesFromMenus = () => {
+    const hadWindow = mainWindow !== null && !mainWindow.isDestroyed();
+    showApp();
+    const win = mainWindow;
+    if (!hadWindow || !win || win.webContents.isLoading()) {
+      markPendingToggleMeetingNotes();
+      return;
+    }
+    win.webContents.send("app:toggleMeetingNotes", null);
+  };
+
+  // Application menu (File/Edit/View/Go/Tools/Window/Help) — installed
+  // before the window so Linux/Windows never paint the default menu.
+  installAppMenu({
+    openApp: showApp,
+    getMainWindow: () => mainWindow,
+    toggleMeetingNotes: toggleMeetingNotesFromMenus,
+  });
+
   createWindow({ startHidden: wasLaunchedAtLogin() });
 
-  // Menu bar icon: open the app / start-stop meeting notes without the
-  // window. If the renderer isn't ready to receive the toggle (window closed
-  // or still loading), park it as a pending command the renderer drains on
-  // mount — same pull pattern as pending deep links.
+  // Menu bar icon: open the app / start-stop meeting notes without the window.
   createAppTray({
     openApp: showApp,
-    toggleMeetingNotes: () => {
-      const hadWindow = mainWindow !== null && !mainWindow.isDestroyed();
-      showApp();
-      const win = mainWindow;
-      if (!hadWindow || !win || win.webContents.isLoading()) {
-        markPendingToggleMeetingNotes();
-        return;
-      }
-      win.webContents.send("app:toggleMeetingNotes", null);
-    },
+    toggleMeetingNotes: toggleMeetingNotesFromMenus,
   });
 
   // Ambient meeting detection (Granola-style): the mic-monitor helper +

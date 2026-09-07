@@ -7,6 +7,7 @@ import type {
   Topic,
 } from '@rowboat/spaces-protocol';
 import { extractSearchText, matchesAllTerms, snippetAround, type SearchQuery } from './search.js';
+import { directKeyFor } from './store.js';
 import type {
   AssetRecord,
   AssetSearchRow,
@@ -43,6 +44,7 @@ export class MemoryStore implements Store {
   private members = new Map<string, Member>();
   private identities = new Map<string, string>(); // `${iss}\n${sub}` → memberId
   private spaces = new Map<string, SpaceState>();
+  private directKeys = new Map<string, string>(); // direct key → spaceId (the unique index, in memory)
   private invites = new Map<string, StoredInvite>();
 
   private state(spaceId: string): SpaceState | undefined {
@@ -78,6 +80,14 @@ export class MemoryStore implements Store {
       existing.space = space;
       return;
     }
+    if (space.kind === 'direct') {
+      const key = directKeyFor(space.participants ?? []);
+      const holder = this.directKeys.get(key);
+      if (holder !== undefined && holder !== space.id) {
+        throw new Error(`direct space ${holder} already holds key ${key}`);
+      }
+      this.directKeys.set(key, space.id);
+    }
     this.spaces.set(space.id, {
       space,
       memberships: new Map(),
@@ -102,11 +112,17 @@ export class MemoryStore implements Store {
     return this.state(id)?.space;
   }
 
-  async listSpacesFor(memberId: string): Promise<Space[]> {
+  async listSpacesFor(memberId: string, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
     return [...this.spaces.values()]
       .filter((s) => s.memberships.has(memberId))
       .map((s) => s.space)
+      .filter((s) => opts.includeDirect || s.kind !== 'direct')
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async getDirectSpace(directKey: string): Promise<Space | undefined> {
+    const id = this.directKeys.get(directKey);
+    return id === undefined ? undefined : this.state(id)?.space;
   }
 
   async getMembership(spaceId: string, memberId: string): Promise<Membership | undefined> {

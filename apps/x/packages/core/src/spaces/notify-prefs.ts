@@ -104,7 +104,12 @@ export function setNotifyPref(orgId: string, spaceId: string, topicId: string | 
 }
 
 /** The effective level for one message's destination: topic override → space level → 'mentions'. */
-export function notifyLevelFor(orgId: string, spaceId: string, topicId: string): NotifyLevel {
+/**
+ * Thread override → space level → `fallback`. The fallback is the space
+ * kind's default: 'mentions' for shared spaces, 'all' for direct messages
+ * (a DM is addressed to you by construction — every message counts).
+ */
+export function notifyLevelFor(orgId: string, spaceId: string, topicId: string, fallback: NotifyLevel = 'mentions'): NotifyLevel {
   const space = load()[key(orgId, spaceId)];
-  return space?.topics[topicId] ?? space?.level ?? 'mentions';
+  return space?.topics[topicId] ?? space?.level ?? fallback;
 }

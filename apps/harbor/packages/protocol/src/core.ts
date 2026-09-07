@@ -32,10 +32,30 @@ export const Member = z.object({
 });
 export type Member = z.infer<typeof Member>;
 
+/**
+ * What a space IS at the org level (direct messages, 2026-09-07). `shared` =
+ * the ordinary space: invites, leave, files, feed. `direct` = a DM: the SAME
+ * container on the same substrate (stream, threads, files, offsets, agent
+ * sessions all unchanged), with a FIXED membership — exactly `participants`,
+ * no invites, no leave — and private forever: any later access path that
+ * opens spaces to non-members (browse, self-join) MUST require `shared`.
+ * Defaulted so payloads from pre-DM servers still parse as shared spaces.
+ */
+export const SpaceKind = z.enum(['shared', 'direct']);
+export type SpaceKind = z.infer<typeof SpaceKind>;
+
 export const Space = z.object({
   id: SpaceId,
+  /**
+   * Display name of a shared space. A direct space carries a constant
+   * placeholder — nothing is stored to go stale; clients label a DM by its
+   * other participant's CURRENT display name (listMembers on the space).
+   */
   name: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
+  kind: SpaceKind.default('shared'),
+  /** Direct spaces only: the fixed member set, sorted — the DM's identity. Absent on shared spaces. */
+  participants: z.array(MemberId).min(2).optional(),
 });
 export type Space = z.infer<typeof Space>;
 

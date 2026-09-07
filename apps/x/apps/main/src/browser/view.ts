@@ -85,6 +85,9 @@ type BrowserTab = {
   view: WebContentsView;
   domReadyAt: number | null;
   loadError: string | null;
+  // Latest page-favicon-updated URL; webContents has no getter for it, so it
+  // must be cached here to survive into snapshotTabState.
+  favicon: string | null;
 };
 
 type CachedSnapshot = {
@@ -465,10 +468,13 @@ export class BrowserViewManager extends EventEmitter {
       this.emitState();
     };
 
-    wc.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
+    wc.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
       if (isMainFrame !== false) {
         tab.domReadyAt = null;
         tab.loadError = null;
+        // A real navigation invalidates the old page's icon; in-page
+        // navigations (hash/pushState) keep it.
+        if (!isInPlace) tab.favicon = null;
       }
       this.invalidateSnapshot(tabId);
       reapplyBounds();
@@ -500,6 +506,12 @@ export class BrowserViewManager extends EventEmitter {
       invalidateAndEmit();
     });
     wc.on('page-title-updated', this.emitState.bind(this));
+    wc.on('page-favicon-updated', (_event, favicons) => {
+      const favicon = favicons[0] ?? null;
+      if (tab.favicon === favicon) return;
+      tab.favicon = favicon;
+      this.emitState();
+    });
 
     this.wireWindowPolicy(wc);
   }
@@ -646,6 +658,7 @@ export class BrowserViewManager extends EventEmitter {
       id: tab.id,
       url: wc.getURL(),
       title: wc.getTitle(),
+      favicon: tab.favicon,
       canGoBack: wc.navigationHistory.canGoBack(),
       canGoForward: wc.navigationHistory.canGoForward(),
       loading: wc.isLoading(),
@@ -696,6 +709,7 @@ export class BrowserViewManager extends EventEmitter {
       view: this.createView(),
       domReadyAt: null,
       loadError: null,
+      favicon: null,
     };
 
     this.wireEvents(tab);

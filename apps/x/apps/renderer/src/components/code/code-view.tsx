@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useCodeSessions, projectLabel } from './use-code-sessions'
-import { SessionRail, CODE_RAIL_WIDTH } from './session-rail'
+import { SessionRail } from './session-rail'
 import { AGENT_LABEL, fetchCodeAgentsStatus, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
 // Remember which session was open so leaving the Code section (which unmounts
@@ -42,12 +42,16 @@ export function CodeView({
   onSessionSelected,
   focusSessionId,
   onFocusConsumed,
+  onRailWidthChange,
 }: {
   onSessionSelected?: (active: ActiveCodeSession | null) => void
   // Deep-link from elsewhere (a Home Deck strip): select this session on
   // mount/change instead of the remembered one.
   focusSessionId?: string | null
   onFocusConsumed?: () => void
+  // The rail's drag-resizable width, reported up so App can size the middle
+  // pane to the rail while a session's chat is the main surface.
+  onRailWidthChange?: (width: number) => void
 }) {
   const { projects, sessions, statusOf, refresh } = useCodeSessions()
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(readStoredSelectedSessionId)
@@ -179,37 +183,37 @@ export function CodeView({
 
   return (
     <div className="flex h-full min-h-0">
-      {/* Session rail. With a session selected this IS the middle pane (App
-          sizes the pane to the rail); without one the empty state fills the
-          rest and the chat pane stays out of the way. */}
-      <div
-        className={selectedSession ? 'min-w-0 flex-1' : 'shrink-0 border-r border-border'}
-        style={selectedSession ? undefined : { width: CODE_RAIL_WIDTH }}
-      >
-        <SessionRail
-          projects={projects}
-          sessions={sessions}
-          statusOf={statusOf}
-          agentsStatus={agentsStatus}
-          selectedSessionId={selectedSessionId}
-          onSelectSession={(id) => {
-            setSelectedSessionId(id)
-            // Re-clicking the already-selected session is a no-op for React
-            // state, but the user means "show me this session's chat" — the
-            // chat may have been rebound to another conversation meanwhile.
-            // Re-notify so App re-asserts the binding (it dedupes).
-            if (id === selectedSessionId) {
-              const session = sessions.find((s) => s.id === id)
-              if (session) onSessionSelected?.({ session, status: statusOf(session.id) })
-            }
-          }}
-          onAddProject={() => void handleAddProject()}
-          onRemoveProject={(id) => void handleRemoveProject(id)}
-          onNewSession={(projectId, agent) => void handleNewSession(projectId, agent)}
-          onSetDone={(session, done) => void handleSetDone(session, done)}
-          onDeleteSession={setDeleteTarget}
-        />
-      </div>
+      {/* Session rail, on the shared SecondaryRail shell (it owns its width
+          and drag-resize). With a session selected this IS the middle pane —
+          App sizes the pane to the width the rail reports; without one the
+          empty state fills the rest and the chat pane stays out of the way. */}
+      <SessionRail
+        projects={projects}
+        sessions={sessions}
+        statusOf={statusOf}
+        agentsStatus={agentsStatus}
+        selectedSessionId={selectedSessionId}
+        onSelectSession={(id) => {
+          setSelectedSessionId(id)
+          // Re-clicking the already-selected session is a no-op for React
+          // state, but the user means "show me this session's chat" — the
+          // chat may have been rebound to another conversation meanwhile.
+          // Re-notify so App re-asserts the binding (it dedupes).
+          if (id === selectedSessionId) {
+            const session = sessions.find((s) => s.id === id)
+            if (session) onSessionSelected?.({ session, status: statusOf(session.id) })
+          }
+        }}
+        onAddProject={() => void handleAddProject()}
+        onRemoveProject={(id) => void handleRemoveProject(id)}
+        onNewSession={(projectId, agent) => void handleNewSession(projectId, agent)}
+        onSetDone={(session, done) => void handleSetDone(session, done)}
+        onDeleteSession={setDeleteTarget}
+        onWidthChange={onRailWidthChange}
+        // With a session selected the chat pane sits flush right and draws
+        // the divider (its border-l) — the rail's own would double it.
+        className={selectedSession ? 'border-r-0' : undefined}
+      />
 
       {!selectedSession && (
         <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-center">

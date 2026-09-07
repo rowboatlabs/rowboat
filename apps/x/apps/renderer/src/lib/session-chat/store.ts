@@ -47,6 +47,40 @@ export interface SessionChatStoreDeps {
   // Declares "this window is watching turn X" so main forwards its deltas;
   // returns the unsubscribe.
   subscribeDeltas: (turnId: string) => () => void
+  // Schedules a coalesced snapshot flush; returns a cancel. Defaults to a
+  // requestAnimationFrame + timeout race (see defaultScheduleEmit). Tests
+  // inject a synchronous scheduler to keep assertions immediate.
+  scheduleEmit?: (flush: () => void) => () => void
+}
+
+// One flush per animation frame: an end-of-turn burst (model_call_completed
+// + turn_completed, plus tool_result in code mode) becomes ONE React commit,
+// so the transcript's net height change lands in a single layout and the
+// scroll controller adjusts once, pre-paint — instead of a visible
+// up-then-down wobble across back-to-back commits. The timeout backstop
+// keeps streaming state flowing when rAF is throttled (occluded window) or
+// unavailable (non-DOM environments).
+function defaultScheduleEmit(flush: () => void): () => void {
+  let settled = false
+  const run = () => {
+    if (settled) return
+    settled = true
+    cancel()
+    flush()
+  }
+  const rafId =
+    typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : null
+  const timeoutId = setTimeout(run, 50)
+  function cancel() {
+    if (rafId !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(rafId)
+    }
+    clearTimeout(timeoutId)
+  }
+  return () => {
+    settled = true
+    cancel()
+  }
 }
 
 // Framework-agnostic controller for one active session's chat. Owns all the
@@ -61,6 +95,12 @@ export class SessionChatStore {
   private feedDisconnect: (() => void) | null = null
   private sessionFeedDisconnect: (() => void) | null = null
   private readonly listeners = new Set<() => void>()
+  private readonly scheduleEmit: (flush: () => void) => () => void
+  // Cancel for the scheduled flush; non-null means an emit is pending and
+  // further emit() calls coalesce into it. State mutations always happen
+  // synchronously before emit(), so deferring the derive drops nothing and
+  // cannot reorder — the flush derives from the latest state.
+  private cancelScheduledEmit: (() => void) | null = null
 
   private sessionId: string | null = null
   // Settled earlier turns, reduced once and frozen.
@@ -91,6 +131,7 @@ export class SessionChatStore {
     this.subscribeTurnFeed = deps.subscribeTurnFeed
     this.subscribeSessionFeed = deps.subscribeSessionFeed
     this.subscribeDeltas = deps.subscribeDeltas
+    this.scheduleEmit = deps.scheduleEmit ?? defaultScheduleEmit
   }
 
   // Feed attachment is effect-managed and idempotent so React StrictMode's
@@ -108,6 +149,13 @@ export class SessionChatStore {
       this.sessionFeedDisconnect?.()
       this.sessionFeedDisconnect = null
       this.syncDeltas()
+      // A pending coalesced flush must not be lost across teardown (e.g.
+      // StrictMode's mount → cleanup → mount): deliver it now.
+      if (this.cancelScheduledEmit) {
+        this.cancelScheduledEmit()
+        this.cancelScheduledEmit = null
+        this.flushEmit()
+      }
     }
   }
 
@@ -310,6 +358,19 @@ export class SessionChatStore {
   // ── Derivation ──────────────────────────────────────────────────────────
 
   private emit(): void {
+    if (this.cancelScheduledEmit) return
+    // A synchronous scheduler (tests) runs the flush before returning its
+    // cancel — only keep the cancel when the flush is genuinely pending.
+    let flushed = false
+    const cancel = this.scheduleEmit(() => {
+      flushed = true
+      this.cancelScheduledEmit = null
+      this.flushEmit()
+    })
+    if (!flushed) this.cancelScheduledEmit = cancel
+  }
+
+  private flushEmit(): void {
     this.snapshot = this.derive()
     for (const listener of [...this.listeners]) {
       listener()

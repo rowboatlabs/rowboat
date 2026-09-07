@@ -325,9 +325,12 @@ export class CodeSessionService {
     }
 
     // Done is the user's own verdict on a session (or the natural end of a
-    // merge-back). It touches nothing on disk: worktree, branch and chat all
-    // stay, so reopening is just clearing the flag. Activity clears it too
-    // (status tracker) so a done session that gets a message comes back.
+    // merge-back). Worktree, branch and chat all stay on disk, so reopening
+    // is just clearing the flag — but the session's terminal PTY is killed:
+    // done means nothing keeps running on the session's behalf (a dev server
+    // or watcher left in the shell). The pane respawns a fresh shell on the
+    // next attach. Activity clears the flag too (status tracker) so a done
+    // session that gets a message comes back.
     async setDone(sessionId: string, done: boolean): Promise<CodeSession> {
         const session = await this.codeSessionsRepo.get(sessionId);
         if (!session) throw new Error(`Unknown session: ${sessionId}`);
@@ -335,7 +338,20 @@ export class CodeSessionService {
         if (done) updated.doneAt = new Date().toISOString();
         else delete updated.doneAt;
         await this.codeSessionsRepo.save(updated);
+        if (done) await this.killTerminal(sessionId);
         return updated;
+    }
+
+    // Best-effort PTY kill, shared by every path that files a session under
+    // Done. Dynamic import keeps node-pty (native) off the module graph of
+    // anything that merely imports this service.
+    private async killTerminal(sessionId: string): Promise<void> {
+        try {
+            const { disposeTerminal } = await import('../../terminal/terminal.js');
+            disposeTerminal(sessionId);
+        } catch {
+            // No terminal module or no PTY — never blocks Done.
+        }
     }
 
     // Stop whatever turn is live on the session's chat. The turn's abort
@@ -371,6 +387,7 @@ export class CodeSessionService {
                 worktree: { ...session.worktree, mergedAt: now },
                 doneAt: session.doneAt ?? now,
             });
+            await this.killTerminal(sessionId);
         }
         return result;
     }

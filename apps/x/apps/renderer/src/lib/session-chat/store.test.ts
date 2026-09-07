@@ -101,7 +101,9 @@ class FakeClient implements SessionsClient {
   }
 }
 
-function makeStore() {
+function makeStore(
+  options: { scheduleEmit?: (flush: () => void) => () => void } = {}
+) {
   const client = new FakeClient()
   let emit: (event: TurnBusEvent) => void = () => undefined
   let subscribed = 0
@@ -128,6 +130,14 @@ function makeStore() {
         if (i >= 0) deltaSubs.splice(i, 1)
       }
     },
+    // Synchronous by default so assertions can read the snapshot right
+    // after emitting; the coalescing tests inject a manual scheduler.
+    scheduleEmit:
+      options.scheduleEmit ??
+      ((flush) => {
+        flush()
+        return () => {}
+      }),
   })
   const disconnect = store.connect()
   return {
@@ -160,6 +170,104 @@ function turnEvent(
   offsetByTurn.set(turnId, offset)
   return { turnId, sessionId, event, offset }
 }
+
+describe('SessionChatStore — emit coalescing', () => {
+  function manualScheduler() {
+    let pendingFlush: (() => void) | null = null
+    return {
+      scheduleEmit: (flush: () => void) => {
+        pendingFlush = flush
+        return () => {
+          pendingFlush = null
+        }
+      },
+      drain: () => {
+        const flush = pendingFlush
+        pendingFlush = null
+        flush?.()
+      },
+      hasPending: () => pendingFlush !== null,
+    }
+  }
+
+  it('merges an end-of-turn burst into one snapshot emission, nothing dropped', async () => {
+    const scheduler = manualScheduler()
+    const { client, store, emit } = makeStore(scheduler)
+    client.sessions.set(S1, sessionState(S1, []))
+    await store.setSession(S1)
+    scheduler.drain()
+
+    let notifications = 0
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1
+    })
+
+    emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
+    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0)))
+    emit(turnEvent(S1, 'turn-1', completed('turn-1', 0, assistantText('done'))))
+    emit(turnEvent(S1, 'turn-1', turnCompleted('turn-1')))
+    expect(notifications).toBe(0)
+
+    scheduler.drain()
+    expect(notifications).toBe(1)
+    const snapshot = store.getSnapshot()
+    expect(snapshot.latestTurnId).toBe('turn-1')
+    expect(snapshot.chatState?.isProcessing).toBe(false)
+    expect(snapshot.chatState?.currentAssistantMessage).toBe('')
+    expect(
+      snapshot.chatState?.conversation.filter(isChatMessage).map((m) => m.content),
+    ).toEqual(['go', 'done'])
+    unsubscribe()
+  })
+
+  it('flushes a pending emission on disconnect so nothing is lost', async () => {
+    const scheduler = manualScheduler()
+    const { client, store, emit, disconnect } = makeStore(scheduler)
+    client.sessions.set(S1, sessionState(S1, []))
+    await store.setSession(S1)
+    scheduler.drain()
+
+    let notifications = 0
+    store.subscribe(() => {
+      notifications += 1
+    })
+    emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
+    expect(notifications).toBe(0)
+    expect(scheduler.hasPending()).toBe(true)
+
+    disconnect()
+    expect(notifications).toBe(1)
+    expect(scheduler.hasPending()).toBe(false)
+    expect(
+      store.getSnapshot().chatState?.conversation.filter(isChatMessage).map((m) => m.content),
+    ).toEqual(['go'])
+  })
+
+  it('the default scheduler delivers without an injected one', async () => {
+    const client = new FakeClient()
+    offsetByTurn.clear()
+    let emit: (event: TurnBusEvent) => void = () => undefined
+    const store = new SessionChatStore({
+      client,
+      subscribeTurnFeed: (listener) => {
+        emit = listener
+        return () => {}
+      },
+      subscribeSessionFeed: () => () => undefined,
+      subscribeDeltas: () => () => undefined,
+    })
+    const disconnect = store.connect()
+    client.sessions.set(S1, sessionState(S1, []))
+    await store.setSession(S1)
+    emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
+    // rAF (or its 50ms timeout backstop) flushes shortly.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(
+      store.getSnapshot().chatState?.conversation.filter(isChatMessage).map((m) => m.content),
+    ).toEqual(['go'])
+    disconnect()
+  })
+})
 
 describe('SessionChatStore', () => {
   it('seeds a session: prior turns frozen, latest live, conversation composed', async () => {

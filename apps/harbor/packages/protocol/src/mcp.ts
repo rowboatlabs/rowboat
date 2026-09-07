@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { BlobInfo } from './blob.js';
 import { DeleteAssetResult, MoveAssetResult, ProposeChangeResult, ReadAssetResult } from './changeset.js';
-import { Message, Topic } from './core.js';
-import { AssetPath, AssetVersion, BlobHash, MessageId, SpaceId, TopicId } from './ids.js';
+import { Message, SpaceKind, Topic } from './core.js';
+import { AssetPath, AssetVersion, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
 
 // Decision 5 (CONTRACT.md): the agent face — direct projections of the core
@@ -39,13 +39,22 @@ export const listSpaces = tool({
     'List the spaces you are a member of on this org, each with its file listing. ' +
     'Call this first: it resolves a space name (e.g. "Roadboard") to the spaceId every other ' +
     'tool needs, and shows the asset paths available to read_asset. Discovery is mechanical — ' +
-    'do not guess spaceIds or file paths.',
-  input: z.object({}),
+    'do not guess spaceIds or file paths. Shared spaces only by default; pass includeDirect to ' +
+    'also list your direct messages (kind "direct": a private conversation with exactly one other ' +
+    'member — its participants are listed; label it by the other member, its name is a placeholder). ' +
+    'Every other tool works on a DM exactly as on a space.',
+  input: z.object({
+    /** Also list the member's direct messages (kind 'direct'). Default false: pre-DM skills never see one. */
+    includeDirect: z.boolean().optional(),
+  }),
   output: z.object({
     spaces: z.array(
       z.object({
         id: SpaceId,
         name: z.string(),
+        kind: SpaceKind,
+        /** Direct spaces only: the two member ids. */
+        participants: z.array(MemberId).optional(),
         memberCount: z.number().int().nonnegative(),
         assets: z.array(
           z.object({

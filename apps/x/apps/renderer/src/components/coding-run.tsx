@@ -17,6 +17,8 @@ import {
 } from 'lucide-react'
 import type { CodeRunEvent, PermissionAsk, PermissionDecision } from '@x/shared/src/code-mode.js'
 import { cn } from '@/lib/utils'
+import { MessageResponse } from '@/components/ai-elements/message'
+import { streamdownComponents } from '@/lib/markdown-render'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
 import { getToolErrorText, toToolState, type ToolCall } from '@/lib/chat-conversation'
 import { clearCodeRunBuffer, useCodeRunFeed } from '@/lib/code-run-feed'
@@ -140,10 +142,12 @@ export function CodingRunTimeline({
     <div className="flex flex-col gap-2 py-1">
       {rows.map((row) => {
         if (row.kind === 'text') {
+          // Streamdown handles partial markdown, so this renders cleanly both
+          // while the agent streams and for the durable settled timeline.
           return (
-            <p key={row.id} className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-              {row.text}
-            </p>
+            <div key={row.id} className="min-w-0 break-words text-sm leading-relaxed text-foreground/90">
+              <MessageResponse components={streamdownComponents}>{row.text}</MessageResponse>
+            </div>
           )
         }
         if (row.kind === 'tool') {

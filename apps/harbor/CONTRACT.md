@@ -188,6 +188,33 @@ team and a Roadboard space (`src/main.ts`).
   text is refused. Topic listings fold their root like any page read, so a
   poll root card carries its votes. No `is_finalized` dance: every vote lands
   under the space lock, so folded counts are exact, live.
+- **Direct messages are spaces** (`Space.kind`, the `openDirect` route, the
+  `space_added` live frame, `list_spaces {includeDirect}` — 2026-09-07). A DM
+  is a space of kind `direct` between exactly two members: the same container
+  on the same substrate (stream, threads, discussions, files, blobs, search,
+  offsets, agent sessions — nothing forked), with a **fixed membership** —
+  `createInvite` and `leaveSpace` refuse (`invalid_request`), and the two
+  `joined` events at offsets 1 and 2 are its whole membership history. Both
+  participants hold ordinary membership rows (the access gate is unchanged);
+  the org additionally keys the DM on its **sorted participant pair**
+  (`participants` on the wire; a partial unique index in storage), so
+  `openDirect` is get-or-create and idempotent from either side — concurrent
+  opens converge on one space (`created` says who made it). No invite, no
+  acceptance: the org is the trust boundary, as inside one Slack workspace;
+  self-DM (`invalid_request`) and unknown members (`not_found`) refuse. **A
+  direct space is private forever** — any future path that opens spaces to
+  non-members (browse, self-join) MUST require `kind === 'shared'`. Its stored
+  `name` is a constant placeholder; clients label a DM by the other
+  participant's current display name (`listMembers` on the space). **Opt-in
+  visibility on both faces**: `listSpaces` and `list_spaces` return shared
+  spaces only unless `includeDirect` is passed, so a pre-DM client or skill
+  never renders a DM as a space. **The other participant is told live** by
+  `space_added` — the protocol's first frame addressed to a member rather than
+  a space (the hub grew a per-member channel): ephemeral, never replayed,
+  carrying `spaceId`/`spaceKind`/`by`; the durable truth is the membership row
+  and the `joined` event on the new space's own log. Clients refresh their
+  listing and subscribe from offset 0 so an opener's first message that beat
+  the subscription still arrives. Migration 014 adds `kind` + `direct_key`.
 - **Unknown invite tokens are 404**; `expired`/`revoked` are resolvable states.
 - **MCP face attribution**: acting mode defaults to `agent`; automations
   declare `x-acting-mode: scheduled`; `x-agent-name` carries the display label.

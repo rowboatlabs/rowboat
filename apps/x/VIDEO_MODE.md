@@ -63,12 +63,10 @@ hands-free" when idle, "Listening — release to send" while capturing,
 "Hands-free — tap ⌘ to send" while locked. The popout additionally embeds
 the REAL chat composer (`ChatInputWithMentions`) as its typed input —
 @-mentions, attachments, and per-turn config all work mid-call, and
-messages land in the chat like composer messages, frames riding along —
-and a collapsible **response panel**: the latest assistant reply of the
-call streams into the pill (auto-opens on each new turn,
-`video:popoutResize` grows the window), so a typed question can be
-read right there without switching back to the app. Replies are spoken
-too; the panel is the readable half. **Mute is a full input
+messages land in the chat like composer messages, frames riding along.
+NO transcript renders in the pill (in either direction) — minimized
+surfaces show none; replies are spoken aloud, and expanding is how you
+read. **Mute is a full input
 pause**, not just audio — mic audio stops reaching Deepgram
 (`useVoiceMode.setPaused`, OR'd with the automatic thinking/speaking pause)
 AND camera/screen frame capture stops (`useVideoMode.setCapturePaused`;
@@ -205,9 +203,17 @@ the key while muted does nothing; muting mid-capture discards it).
 
 One always-on-top window (`apps/main/src/quick-ask.ts`, renderer
 `components/quick-ask-bar.tsx`, hash `#quick-ask`) with ONE visible role,
-pushed over `quick-ask:mode` (`'pinned' | 'hidden'`): the Skipper — mascot
-+ text panel, or the pill when a live camera needs its self-view. There is
-no separate popout window, and no second "ask bar" role.
+pushed over `quick-ask:mode` (`'pinned' | 'hidden'`): the Skipper — a
+self-contained card (top strip: logo · destination · window actions · share
+· talk/stop · small ✕ dismiss, over the real composer), or the pill when a
+live camera needs its self-view. The mascot lives on only in the camera
+pill; the card carries its signals instead — the composer flips to the app
+composer's recording bar (waveform + interim transcript) while the mic gate
+is open, wired to the call's PTT machine (↑ sends `ptt-up`, ✕ discards
+`ptt-cancel`); a running turn shows as the strip logo's glow plus a
+spinner-and-shimmer activity row in the response panel; the composer
+placeholder names the platform talk key ("hold right ⌘ / right Ctrl to
+speak"). There is no separate popout window, and no second "ask bar" role.
 
 - The window is an NSPanel (`type: 'panel'`) with
   `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true,
@@ -221,8 +227,9 @@ no separate popout window, and no second "ask bar" role.
 - Pinned iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
   Renderer asks `video:setPopout {show}`; main repositions the companion
   window (Skipper card at its anchor corner, or the old popout geometry
-  top-right for camera calls; `video:popoutResize` grows the pill for the
-  response panel) and reveals it — focused when a summon is pending,
+  top-right for camera calls; the `video:popoutResize` channel remains for
+  renderer-driven pill heights but nothing drives it since the response
+  panel was removed) and reveals it — focused when a summon is pending,
   `showInactive()` otherwise so it never steals focus. Blur does NOTHING
   (a companion you work next to must not vanish when you click away), Esc
   tucks the text rather than dismissing, and ⌥⇧Space folds/unfolds the
@@ -253,7 +260,11 @@ no separate popout window, and no second "ask bar" role.
   (`onAppWindowClosed`).
 - The pill captures its **own** camera preview (MediaStreams can't cross
   windows) and synthesizes the mascot mouth level (no audio in that
-  window).
+  window). The card's recording-bar waveform is REAL, though: the app
+  window relays the voice hook's per-frame amplitudes (~16/s, batched)
+  over `video:popoutLevels` → `video:popout-levels`, so the bars track
+  actual speech at the app composer's own cadence. Levels are never
+  cached in main — a waveform is only meaningful live.
 - **Tiles show live pixels; controls show capabilities.** A voice-only
   call (camera off, no share) renders the pill WITHOUT the "You" tile —
   mascot + response + composer + controls — so untucking a voice call
@@ -265,15 +276,22 @@ no separate popout window, and no second "ask bar" role.
   not be shown or messaged. Right ⌘ pressed while the pill has focus also
   relays as ptt-down/ptt-up actions (no Input Monitoring needed for that
   case).
-- **Tucked (mascot-only voice-to-voice)**: the pinned pill can collapse to
-  just the mascot (`quickAsk:setPinnedCollapsed`; presentation state is
-  pushed with `quick-ask:mode`). The mascot is the drag handle; hover
-  reveals hold-to-talk / bring-text-back / end-call; a one-line caption
-  shows interim speech and the spoken reply's tail; an active screen share
-  KEEPS its consent badge. The card's tuck handle (»), Esc, a click on the
-  stage near the card, and the mascot's text pin all enter this state;
-  ⌥⇧Space toggles it. Tuck/untuck never ends the session — only End &
-  close does.
+- **Tucked (the mini call pill, voice-to-voice)**: the pinned surface can
+  collapse to the mini call pill (`quickAsk:setPinnedCollapsed`;
+  presentation state is pushed with `quick-ask:mode`): logo (click to
+  unfold) · status lane · share · talk/stop · end, with the pill body as
+  the drag handle and a « unfold handle on the pill's left edge — the
+  visible way back to the text input, mirroring the card's » tuck handle
+  (⌥⇧Space and the logo work too). The lane keeps narrating while folded — jittery
+  waveform while the user speaks, spinner + shimmer activity while a turn
+  thinks, a coherent rolling speak wave while the reply is read aloud, the
+  talk-key hint ("Hold right ⌘" / "Hold right Ctrl", platform-aware via
+  shared/ptt-key.ts) at rest — and beyond that hint the motion is the
+  whole story: the pill shows NO transcript in either direction (the user
+  tucked the text away; unfold to read). A live share keeps its consent badge on the lit share button.
+  The card's tuck handle (»), Esc, and a click on the stage near the card
+  all enter this state; ⌥⇧Space toggles it. Tuck/untuck never ends the
+  session — only End & close does.
 
 ## Permissions
 

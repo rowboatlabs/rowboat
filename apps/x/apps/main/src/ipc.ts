@@ -39,6 +39,7 @@ import {
   ackSummon,
   pushChatContext,
   pushPopoutState,
+  pushPopoutLevels,
   resizeCompanionPinned,
   setCompanionPinned,
   setPinnedCollapsed,
@@ -99,6 +100,7 @@ import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
 import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
+import { setMenuRecordingState } from './menu.js';
 import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
 
 // Ambient meeting detection must ignore Rowboat's own mic use: meeting
@@ -893,6 +895,7 @@ export function setupIpcHandlers() {
     },
     'meeting:setRecordingState': async (_event, args) => {
       setTrayRecordingState(args.recording);
+      setMenuRecordingState(args.recording);
       meetingRecordingActive = args.recording;
       updateSelfCaptureState();
       // Recording started through another path — a lingering "Take Notes?"
@@ -1027,6 +1030,19 @@ export function setupIpcHandlers() {
           return { state: 'unknown' };
         }
       }
+    },
+    // --- Theme relay ---
+    // The app window owns the setting (localStorage); utility windows have no
+    // ThemeProvider and get told. Relayed through main because renderers have
+    // no channel to each other. Fire-and-forget: a window that has not loaded
+    // yet needs no catch-up push — it reads the same localStorage on mount.
+    'theme:set': async (event, args) => {
+      const sender = BrowserWindow.fromWebContents(event.sender);
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win.isDestroyed() || win === sender) continue;
+        win.webContents.send('theme:changed', args);
+      }
+      return {};
     },
     // --- Hover companion relays ---
     'quickAsk:getShortcut': async () => {
@@ -2641,6 +2657,10 @@ export function setupIpcHandlers() {
     },
     'video:popoutState': async (_event, args) => {
       pushPopoutState(args);
+      return {};
+    },
+    'video:popoutLevels': async (_event, args) => {
+      pushPopoutLevels(args.levels);
       return {};
     },
     'video:popoutResize': async (_event, args) => {

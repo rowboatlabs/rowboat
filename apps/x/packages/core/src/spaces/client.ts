@@ -150,8 +150,15 @@ export class SpacesClient {
 
   // --- spaces & membership --------------------------------------------------
 
-  async listSpaces(): Promise<Space[]> {
-    return (await this.request('GET', routes.listSpaces.path, routes.listSpaces.response)).spaces;
+  /** Shared spaces by default; `includeDirect` adds the member's DMs (api.ts listSpaces). */
+  async listSpaces(opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
+    const qs = opts.includeDirect ? '?includeDirect=true' : '';
+    return (await this.request('GET', `${routes.listSpaces.path}${qs}`, routes.listSpaces.response)).spaces;
+  }
+
+  /** Get-or-create the DM with another member — idempotent from either side (api.ts openDirect). */
+  async openDirect(memberId: string): Promise<{ space: Space; created: boolean }> {
+    return this.request('POST', routes.openDirect.path, routes.openDirect.response, { memberId });
   }
 
   async createSpace(name: string): Promise<Space> {

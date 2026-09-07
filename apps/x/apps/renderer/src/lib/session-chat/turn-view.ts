@@ -179,6 +179,18 @@ export function applyOverlay(overlay: LiveOverlay, event: TurnStreamEvent): Live
 // Conversation items
 // ---------------------------------------------------------------------------
 
+// THE single source of a model call's item ids. The live overlay renders
+// synthetic items under these same ids while the call streams, so the
+// durable items produced at completion reconcile onto the same mounted
+// nodes (no unmount/remount flash) — any drift between the two would
+// silently reintroduce the flash, which is why both sides call these.
+export function assistantMessageId(turnId: string, callIndex: number): string {
+  return `${turnId}:a${callIndex}`
+}
+export function reasoningMessageId(turnId: string, callIndex: number): string {
+  return `${turnId}:r${callIndex}`
+}
+
 type UserContent = TurnState['definition']['input']['content']
 
 function extractText(content: UserContent): string {
@@ -324,7 +336,7 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
       : ''
     if (reasoning) {
       items.push({
-        id: `${turnId}:r${call.index}`,
+        id: reasoningMessageId(turnId, call.index),
         kind: 'reasoning',
         content: reasoning,
         timestamp: ts(),
@@ -342,7 +354,7 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
     )
     if (text) {
       items.push({
-        id: `${turnId}:a${call.index}`,
+        id: assistantMessageId(turnId, call.index),
         role: 'assistant',
         content: text,
         timestamp: ts(),
@@ -553,6 +565,46 @@ export function buildSessionChatState(
 
   const settled = status === 'completed' || status === 'failed' || status === 'cancelled'
   const waitingOnHuman = allPermissionRequests.size > 0 || pendingAskHumanRequests.size > 0
+
+  // The live model call's thought/text stream, rendered as ordinary trailing
+  // conversation items under the SAME ids their durable versions will get
+  // (assistantMessageId / reasoningMessageId): when the call completes, the
+  // durable items land at the same position with the same keys and React
+  // updates the mounted nodes in place — instead of unmounting the streaming
+  // bubble and remounting a fresh subtree, which replayed Streamdown's
+  // async syntax highlighting and mermaid/chart rendering as a visible
+  // end-of-generation flash. An open call contributes nothing durable (its
+  // buildTurnConversation branch skips until the response lands), so these
+  // never duplicate. When no open call exists (e.g. a failed turn with
+  // unflushed overlay text), no synthetic is emitted — the pane's fallback
+  // slot covers that via currentAssistantMessage, exactly as before.
+  const openCall = latest?.modelCalls[latest.modelCalls.length - 1]
+  const openCallLive =
+    !settled &&
+    openCall !== undefined &&
+    openCall.response === undefined &&
+    openCall.error === undefined
+  if (latest && openCallLive) {
+    if (overlay.reasoning) {
+      conversation.push({
+        id: reasoningMessageId(latestTurnId, openCall.index),
+        kind: 'reasoning',
+        content: overlay.reasoning,
+        streaming: isModelReasoning(latest),
+        timestamp: Date.now(),
+      } satisfies ReasoningMessage)
+    }
+    const liveText = stripVoiceTags(overlay.text)
+    if (liveText) {
+      conversation.push({
+        id: assistantMessageId(latestTurnId, openCall.index),
+        role: 'assistant',
+        content: liveText,
+        streaming: true,
+        timestamp: Date.now(),
+      } satisfies ChatMessage)
+    }
+  }
   const lastModel = latest?.definition.agent.resolved.model
   const lastEffort = latest?.definition.config.reasoningEffort
   return {

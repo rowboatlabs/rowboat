@@ -51,7 +51,16 @@ import { SpaceHub } from './hub.js';
 import { merge3 } from './merge.js';
 import { dispositionFor, imageDimensions, resolveMime } from './mime.js';
 import { parseSearchQuery } from './search.js';
-import type { AssetRecord, AssetVersionData, Store, StoredEvent, StoredPollVote, StoredReaction } from './store.js';
+import {
+  DIRECT_SPACE_NAME,
+  directKeyFor,
+  type AssetRecord,
+  type AssetVersionData,
+  type Store,
+  type StoredEvent,
+  type StoredPollVote,
+  type StoredReaction,
+} from './store.js';
 
 // The one service core (spec §9: one core, two faces). REST (http.ts) and MCP
 // (mcp.ts) are thin projections over this class; neither has a privileged path.
@@ -136,6 +145,13 @@ export class HarborService {
     return space;
   }
 
+  /**
+   * THE access gate: a membership row, nothing else. Direct spaces pass
+   * through it unchanged — their two participants are ordinary members. If
+   * this ever grows a non-membership path (open spaces: browse/self-join for
+   * any org member), that path MUST require `space.kind === 'shared'`; a DM
+   * is private forever (SpaceKind, core.ts).
+   */
   async requireMember(ctx: ActorCtx, spaceId: string): Promise<Space> {
     const space = await this.requireSpace(spaceId);
     const membership = await this.store.getMembership(spaceId, ctx.memberId);
@@ -152,14 +168,14 @@ export class HarborService {
 
   // --- spaces & membership ---------------------------------------------------
 
-  async listSpaces(ctx: ActorCtx): Promise<Space[]> {
-    return this.store.listSpacesFor(ctx.memberId);
+  async listSpaces(ctx: ActorCtx, opts: { includeDirect?: boolean } = {}): Promise<Space[]> {
+    return this.store.listSpacesFor(ctx.memberId, opts);
   }
 
   async createSpace(ctx: ActorCtx, name: string): Promise<Space> {
     this.guardWrite();
     const now = this.now();
-    const space: Space = { id: this.ulid(), name, createdAt: now };
+    const space: Space = { id: this.ulid(), name, createdAt: now, kind: 'shared' };
     await this.store.putSpace(space);
     return this.store.withSpaceLock(space.id, async () => {
       const membership: Membership = { spaceId: space.id, memberId: ctx.memberId, joinedAt: now };
@@ -170,6 +186,55 @@ export class HarborService {
       // space's root messages, born empty.
       return space;
     });
+  }
+
+  /**
+   * Direct messages (api.ts openDirect): get-or-create the one DM between
+   * the caller and `otherMemberId`. Membership is written for both under the
+   * new space's lock — two `joined` events are the whole membership history
+   * of a DM, forever (no invites, no leave). The other participant is told
+   * by a member-addressed `space_added` frame: the org is the trust
+   * boundary, so there is no acceptance step. Two participants opening the
+   * same DM at once both pass the lookup; the store's direct-key uniqueness
+   * refuses the second row and that caller re-reads the winner's space.
+   */
+  async openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
+    if (otherMemberId === ctx.memberId) {
+      throw new HarborError('invalid_request', 'a direct message needs someone else — there is no self-DM');
+    }
+    const other = await this.store.getMember(otherMemberId);
+    if (!other) throw new HarborError('not_found', 'no such member on this org');
+    const participants = [ctx.memberId, otherMemberId].sort();
+    const key = directKeyFor(participants);
+    const existing = await this.store.getDirectSpace(key);
+    if (existing) return { space: existing, created: false };
+
+    this.guardWrite();
+    const now = this.now();
+    const space: Space = { id: this.ulid(), name: DIRECT_SPACE_NAME, createdAt: now, kind: 'direct', participants };
+    try {
+      await this.store.putSpace(space);
+    } catch (err) {
+      const raced = await this.store.getDirectSpace(key);
+      if (raced) return { space: raced, created: false };
+      throw err;
+    }
+    await this.store.withSpaceLock(space.id, async () => {
+      let offset = await this.store.head(space.id);
+      for (const memberId of participants) {
+        const membership: Membership = { spaceId: space.id, memberId, joinedAt: now };
+        await this.store.putMembership(membership);
+        await this.append(space.id, ++offset, now, { type: 'membership', membership, action: 'joined' });
+      }
+    });
+    this.hub.publishToMember(otherMemberId, {
+      kind: 'space_added',
+      spaceId: space.id,
+      spaceKind: 'direct',
+      by: ctx.memberId,
+      at: now,
+    });
+    return { space, created: true };
   }
 
   async listMembers(ctx: ActorCtx, spaceId: string): Promise<Member[]> {
@@ -184,7 +249,10 @@ export class HarborService {
   }
 
   async leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
-    await this.requireMember(ctx, spaceId);
+    const space = await this.requireMember(ctx, spaceId);
+    if (space.kind === 'direct') {
+      throw new HarborError('invalid_request', 'a direct message has a fixed membership — it cannot be left');
+    }
     await this.store.withSpaceLock(spaceId, async () => {
       const membership = await this.store.getMembership(spaceId, ctx.memberId);
       if (!membership) return;
@@ -197,7 +265,10 @@ export class HarborService {
   // --- invites ---------------------------------------------------------------
 
   async createInvite(ctx: ActorCtx, spaceId: string, expiresInHours?: number): Promise<CreateInviteResult> {
-    await this.requireMember(ctx, spaceId);
+    const space = await this.requireMember(ctx, spaceId);
+    if (space.kind === 'direct') {
+      throw new HarborError('invalid_request', 'a direct message has a fixed membership — nobody can be invited');
+    }
     this.guardWrite();
     const token = randomBytes(24).toString('base64url');
     const now = this.now();

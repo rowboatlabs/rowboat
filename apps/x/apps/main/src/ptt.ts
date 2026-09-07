@@ -1,10 +1,11 @@
 /**
  * Global push-to-talk key hook (uiohook-napi).
  *
- * Watches the Right ⌘ key system-wide while a call (or the quick-ask bar)
- * needs it and relays down/up/chord transitions to the app window, which
- * owns the PTT state machine. The hook only runs while a consumer is
- * registered — no input monitoring outside calls.
+ * Watches the hold-to-talk key system-wide while a call (or the quick-ask
+ * bar) needs it and relays down/up/chord transitions to the app window,
+ * which owns the PTT state machine. The key is platform-dependent (right ⌘
+ * on macOS, right Ctrl elsewhere — see shared/ptt-key.ts); the hook only
+ * runs while a consumer is registered — no input monitoring outside calls.
  *
  * macOS gates global event taps behind the Input Monitoring permission
  * (TCC). Starting the hook triggers the system consent prompt on first use,
@@ -15,16 +16,19 @@
  * way).
  */
 import { app, BrowserWindow, shell } from 'electron';
+import { pttKey } from '@x/shared';
 
 type PttKeyEvent = {
   type: 'down' | 'up' | 'chord';
-  /** Ghostwriter chord: ⇧ was already held when Right ⌘ went down — the
-   * utterance's result should be pasted at the user's cursor. */
+  /** Ghostwriter chord: ⇧ was already held when the talk key went down —
+   * the utterance's result should be pasted at the user's cursor. */
   paste?: boolean;
 };
 
-// libuiohook VC_META_R — the Right ⌘ key.
-const META_RIGHT = 3676;
+// The talk key's libuiohook keycode: VC_META_R (right ⌘) on macOS,
+// VC_CONTROL_R (right Ctrl) everywhere else — Windows owns the right Win
+// key, so a tap there opens the Start menu instead of talking.
+const PTT_KEYCODE = pttKey.pttUiohookKeycode(process.platform);
 
 type UiohookModule = typeof import('uiohook-napi');
 
@@ -35,7 +39,7 @@ let running = false;
 // True once ANY input event arrives — mouse moves land within moments of
 // hook start on a granted system, so a stale false means no permission.
 let eventsSeen = false;
-let metaRightHeld = false;
+let pttKeyHeld = false;
 
 const reasons = new Set<string>();
 
@@ -106,10 +110,10 @@ function attachListeners(mod: UiohookModule) {
   listenersAttached = true;
   mod.uIOhook.on('keydown', guarded((e: { keycode: number; shiftKey?: boolean }) => {
     eventsSeen = true;
-    if (e.keycode === META_RIGHT) {
+    if (e.keycode === PTT_KEYCODE) {
       // OS key-repeat refires keydown while held — only the edge matters.
-      if (!metaRightHeld) {
-        metaRightHeld = true;
+      if (!pttKeyHeld) {
+        pttKeyHeld = true;
         const paste = e.shiftKey === true;
         if (paste) {
           // Remember the frontmost app NOW — it's the paste target.
@@ -117,23 +121,23 @@ function attachListeners(mod: UiohookModule) {
         }
         broadcast({ type: 'down', paste });
       }
-    } else if (metaRightHeld) {
-      // Right ⌘ is acting as a modifier (⌘C etc.), not as the PTT key —
-      // the renderer cancels the capture.
+    } else if (pttKeyHeld) {
+      // The talk key is acting as a modifier (⌘C / Ctrl+C etc.), not as the
+      // PTT key — the renderer cancels the capture.
       broadcast({ type: 'chord' });
     }
   }));
   mod.uIOhook.on('keyup', guarded((e: { keycode: number }) => {
     eventsSeen = true;
-    if (e.keycode === META_RIGHT && metaRightHeld) {
-      metaRightHeld = false;
+    if (e.keycode === PTT_KEYCODE && pttKeyHeld) {
+      pttKeyHeld = false;
       broadcast({ type: 'up' });
     }
   }));
   mod.uIOhook.on('mousedown', guarded(() => {
     eventsSeen = true;
-    // ⌘-click with the held key: a chord, same as a keyboard one.
-    if (metaRightHeld) broadcast({ type: 'chord' });
+    // A click with the talk key held: a chord, same as a keyboard one.
+    if (pttKeyHeld) broadcast({ type: 'chord' });
   }));
   mod.uIOhook.on('mousemove', guarded(() => {
     eventsSeen = true;
@@ -161,7 +165,7 @@ function stopHook() {
     console.error('[ptt] failed to stop hook:', err);
   }
   running = false;
-  metaRightHeld = false;
+  pttKeyHeld = false;
   eventsSeen = false;
 }
 
@@ -178,7 +182,7 @@ export async function setPttActive(reason: string, active: boolean) {
   if (active) reasons.add(reason);
   else reasons.delete(reason);
   if (reasons.size > 0 && !running) await startHook();
-  else if (reasons.size === 0) metaRightHeld = false;
+  else if (reasons.size === 0) pttKeyHeld = false;
 }
 
 export function getPttStatus() {

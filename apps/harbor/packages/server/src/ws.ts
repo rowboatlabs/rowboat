@@ -119,6 +119,10 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
     send({ kind: 'error', ...(spaceId ? { spaceId } : {}), code, message });
   };
 
+  // Member-addressed frames (space_added) need no subscription — the whole
+  // point is that the space is one you could not have subscribed to yet.
+  const unsubscribeMember = deps.hub.subscribeMember(memberId, send);
+
   ws.on('message', (data) => {
     ws.sawLifeSinceLastBeat = true;
     void (async () => {
@@ -202,6 +206,7 @@ function handleConnection(ws: LiveSocket, memberId: string, deps: Deps): void {
   });
 
   ws.on('close', () => {
+    unsubscribeMember();
     for (const unsubscribe of subscriptions.values()) unsubscribe();
     subscriptions.clear();
   });

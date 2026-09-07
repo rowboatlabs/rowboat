@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import * as oauthClient from '../auth/oauth-client.js';
 import { WorkDir } from '../config/config.js';
+import type { ServerFrame } from '@rowboat/spaces-protocol';
 import { SpacesClient } from './client.js';
 import { SpacesLive } from './live.js';
 
@@ -45,6 +46,8 @@ export interface OrgRecord {
   address: string;
   /** Where to reach it, scheme included, e.g. http://localhost:4272. */
   baseUrl: string;
+  /** The server's durable org id (`org-<ulid>`) when known — the cross-device identity; `id` stays the local registry key. */
+  serverOrgId?: string;
   auth: OrgAuth;
 }
 
@@ -268,6 +271,22 @@ export function bounceAllLive(): void {
   for (const runtime of runtimes.values()) runtime.live.bounce();
 }
 
+type MemberFrameListener = (orgId: string, frame: ServerFrame) => void;
+const memberFrameListeners = new Set<MemberFrameListener>();
+
+/**
+ * Member-addressed live frames from EVERY org (`space_added`: someone opened
+ * a DM with us — direct messages 2026-09-07). One registration covers orgs
+ * added later too: each org's socket fans out to this set as it is created.
+ * Hosts relay these to the renderer; the mention watcher re-syncs on them.
+ */
+export function onMemberFrame(listener: MemberFrameListener): () => void {
+  memberFrameListeners.add(listener);
+  return () => {
+    memberFrameListeners.delete(listener);
+  };
+}
+
 /** The client pair for an org — created lazily, one WS per org for the process lifetime. */
 export function orgRuntime(orgId: string): OrgRuntime {
   const cached = runtimes.get(orgId);
@@ -279,6 +298,9 @@ export function orgRuntime(orgId: string): OrgRuntime {
     client: new SpacesClient({ baseUrl: org.baseUrl, token }),
     live: new SpacesLive({ baseUrl: org.baseUrl, token }),
   };
+  runtime.live.onMemberFrame((frame) => {
+    for (const listener of memberFrameListeners) listener(orgId, frame);
+  });
   runtimes.set(orgId, runtime);
   return runtime;
 }
@@ -294,6 +316,7 @@ export function upsertOAuthOrg(input: {
   baseUrl: string;
   name: string;
   address: string;
+  serverOrgId?: string;
   issuer: string;
   clientId: string;
   memberId: string;
@@ -321,6 +344,7 @@ export function upsertOAuthOrg(input: {
   record.name = input.name;
   record.address = input.address;
   record.auth = auth;
+  if (input.serverOrgId) record.serverOrgId = input.serverOrgId;
   if (!existing) config.orgs.push(record);
   writeConfig(config);
   const runtime = runtimes.get(record.id);

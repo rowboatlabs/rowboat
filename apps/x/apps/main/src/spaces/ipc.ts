@@ -30,6 +30,7 @@ type SpacesHandlers = {
   'spaces:removeOrg': InvokeHandler<'spaces:removeOrg'>;
   'spaces:listSpaces': InvokeHandler<'spaces:listSpaces'>;
   'spaces:createSpace': InvokeHandler<'spaces:createSpace'>;
+  'spaces:openDirect': InvokeHandler<'spaces:openDirect'>;
   'spaces:listMembers': InvokeHandler<'spaces:listMembers'>;
   'spaces:createInvite': InvokeHandler<'spaces:createInvite'>;
   'spaces:resolveInvite': InvokeHandler<'spaces:resolveInvite'>;
@@ -88,6 +89,11 @@ function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
 
 const openBrowser = (url: string) => shell.openExternal(url);
 
+// Member-addressed frames (space_added: someone opened a DM with us) have no
+// space subscription to ride — relay them to every window as they arrive; the
+// renderer's orgs store refreshes its listing on them.
+orgs.onMemberFrame((orgId, frame) => broadcastSpacesEvent({ orgId, frame }));
+
 function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed() && win.webContents) {
@@ -136,7 +142,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:createOrg': async (_event, args) => {
-    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, slug: args.slug, openBrowser }));
+    const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
     void syncSpaceMentionWatch({ force: true });
     return { org };
   },
@@ -162,7 +168,7 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:listSpaces': async (_event, args) => {
-    const spaces = await orgs.getClient(args.orgId).listSpaces();
+    const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
     // The renderer just reached this org — if it was down at boot (or restarted),
     // this is the earliest signal that its spaces are watchable again. Unforced:
     // repeated refreshes collapse into one sync.
@@ -174,6 +180,12 @@ export const spacesIpcHandlers: SpacesHandlers = {
     const space = await orgs.getClient(args.orgId).createSpace(args.name);
     void syncSpaceMentionWatch({ force: true });
     return { space };
+  },
+
+  'spaces:openDirect': async (_event, args) => {
+    const result = await orgs.getClient(args.orgId).openDirect(args.memberId);
+    if (result.created) void syncSpaceMentionWatch({ force: true });
+    return result;
   },
 
   'spaces:listMembers': async (_event, args) => ({

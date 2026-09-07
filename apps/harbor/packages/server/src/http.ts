@@ -128,13 +128,23 @@ export function buildHttpApp(deps: {
 
   // --- spaces & membership ---------------------------------------------------
 
-  app.get(routes.listSpaces.path, async (c) =>
-    reply(c, routes.listSpaces.response, { spaces: await service.listSpaces(actor(c)) }),
-  );
+  app.get(routes.listSpaces.path, async (c) => {
+    // Any present value counts as true (coerce semantics; clients send the flag only when they mean it).
+    const q = parseWith(routes.listSpaces.query, {
+      ...(c.req.query('includeDirect') !== undefined ? { includeDirect: c.req.query('includeDirect') } : {}),
+    });
+    const spaces = await service.listSpaces(actor(c), { includeDirect: q.includeDirect ?? false });
+    return reply(c, routes.listSpaces.response, { spaces });
+  });
 
   app.post(routes.createSpace.path, async (c) => {
     const input = await body(c, routes.createSpace.request);
     return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name) });
+  });
+
+  app.post(routes.openDirect.path, async (c) => {
+    const input = await body(c, routes.openDirect.request);
+    return reply(c, routes.openDirect.response, await service.openDirect(actor(c), input.memberId));
   });
 
   app.get('/v1/spaces/:spaceId/members', async (c) => {
