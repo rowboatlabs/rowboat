@@ -46,7 +46,7 @@ async function providerFlavorsById(): Promise<Map<string, string>> {
  * back to the raw value — which today always equals the flavor key.
  */
 export async function flavorForProviderId(id: string): Promise<string> {
-    if (id === "rowboat" || id === "codex") return id;
+    if (id === "rowboat" || id === "codex" || id === "antigravity") return id;
     return (await providerFlavorsById()).get(id) ?? id;
 }
 
@@ -66,6 +66,7 @@ export async function syncModelProviderPersonProperties(): Promise<void> {
         const cfg = await (await resolveRepo()).getConfig().catch(() => null);
         const { isSignedIn } = await import("../account/account.js");
         const { getChatGPTStatus } = await import("../auth/chatgpt-auth.js");
+        const { getAntigravityStatus } = await import("../auth/antigravity-auth.js");
         const flavors = new Set<string>();
         for (const entry of Object.values(cfg?.providers ?? {})) {
             flavors.add(entry.flavor);
@@ -73,6 +74,8 @@ export async function syncModelProviderPersonProperties(): Promise<void> {
         if (await isSignedIn().catch(() => false)) flavors.add("rowboat");
         const chatgpt = await getChatGPTStatus().catch(() => ({ signedIn: false }));
         if (chatgpt.signedIn) flavors.add("codex");
+        const antigravity = await getAntigravityStatus().catch(() => ({ signedIn: false }));
+        if (antigravity.signedIn) flavors.add("antigravity");
 
         const assistant = cfg?.assistantModel ?? null;
         setPersonProperties({

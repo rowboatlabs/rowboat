@@ -5,6 +5,7 @@
 export type OAuthConnectEvent = { provider: string; success: boolean; error?: string; userId?: string };
 export type ComposioConnectEvent = { toolkitSlug: string; success: boolean; error?: string };
 export type ChatGPTStatusEvent = { signedIn: boolean };
+export type AntigravityStatusEvent = { signedIn: boolean };
 
 function makeBus<T>() {
   const listeners = new Set<(e: T) => void>();
@@ -22,3 +23,4 @@ function makeBus<T>() {
 export const oauthConnectBus = makeBus<OAuthConnectEvent>();
 export const composioConnectBus = makeBus<ComposioConnectEvent>();
 export const chatgptStatusBus = makeBus<ChatGPTStatusEvent>();
+export const antigravityStatusBus = makeBus<AntigravityStatusEvent>();
