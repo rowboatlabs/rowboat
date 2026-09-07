@@ -101,9 +101,9 @@ const ATTRIBUTION_HEADERS: Readonly<Record<string, string>> = Object.freeze({
  * because a malformed one is DROPPED by the receiving service rather than
  * rejected: the request succeeds and the attribution silently goes nowhere.
  *
- * Empty on purpose. No id has been issued for Rowboat, and a made-up value
- * is worse than none. When one is issued this constant is the only edit;
- * while it is empty the header is not sent at all.
+ * This is the id the provider registered for Rowboat's traffic. Should it
+ * ever be cleared, the header is simply not sent — the empty string is a
+ * handled state, not an error.
  */
 export const AIMLAPI_PARTNER_ID: string = "part_VGDbk3ZJHZ1bi3eoaLNwToNC";
 
