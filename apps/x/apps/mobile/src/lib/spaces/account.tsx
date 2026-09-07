@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
@@ -11,6 +12,8 @@ import { danceForTokens, discoverIssuer, refreshTokens, type SpacesTokens } from
 export const APEX_URL = process.env.EXPO_PUBLIC_SPACES_APEX ?? 'https://spaces.x.rowboatlabs.com';
 
 const ACCOUNT_KEY = 'rowboat.spaces.account.v1';
+/** Last-seen org list — painted instantly on launch, refreshed in the background. */
+const ORGS_CACHE_KEY = 'rowboat.spaces.orgs.v1';
 
 export interface SpacesOrg {
   id: string;
@@ -55,6 +58,9 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
       const raw = await SecureStore.getItemAsync(ACCOUNT_KEY).catch(() => null);
       if (raw) {
         accountRef.current = JSON.parse(raw) as StoredAccount;
+        // Paint the cached orgs immediately; refreshOrgs replaces them.
+        const cached = await AsyncStorage.getItem(ORGS_CACHE_KEY).catch(() => null);
+        if (cached) setOrgs((prev) => prev ?? (JSON.parse(cached) as SpacesOrg[]));
         setStatus('signedIn');
       } else {
         setStatus('signedOut');
@@ -87,6 +93,7 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
       if (!res.ok) throw new Error(`org list failed (${res.status})`);
       const json = (await res.json()) as { orgs: SpacesOrg[] };
       setOrgs(json.orgs);
+      void AsyncStorage.setItem(ORGS_CACHE_KEY, JSON.stringify(json.orgs)).catch(() => {});
     } catch (err) {
       setOrgsError(err instanceof Error ? err.message : String(err));
     }
@@ -106,6 +113,7 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await persist(null);
+    void AsyncStorage.removeItem(ORGS_CACHE_KEY).catch(() => {});
     setOrgs(null);
     setOrgsError(null);
     setStatus('signedOut');
