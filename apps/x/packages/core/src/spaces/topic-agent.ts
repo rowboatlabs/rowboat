@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { ITurnEventBus } from '../runtime/turns/event-hub.js';
 import { type ISessions, RECLAIMED_TURN_REASON } from '../runtime/sessions/api.js';
-import type { TurnBusEvent } from '@x/shared/dist/turns.js';
+import { deriveTurnStatus, reduceTurn, type TurnBusEvent } from '@x/shared/dist/turns.js';
 import { WorkDir } from '../config/config.js';
 import { getClient, getLive, spacesMcpServerNameFor } from './orgs.js';
 
@@ -368,4 +368,38 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
   );
 
   return { sessionId, queued: outcome.queued };
+}
+
+/**
+ * The stop square on the space's working chip: cancel the thread session's
+ * live turn from where the user is watching, no session hop needed. Returns
+ * stopped:false when there is nothing to stop (no session for the thread, or
+ * its latest turn already settled) — the chip clears on its own then, when
+ * the agent_working lease expires.
+ */
+export async function stopTopicAgent(input: {
+  orgId: string;
+  spaceId: string;
+  threadRootId: string;
+}): Promise<{ stopped: boolean }> {
+  const sessionId = topicSessionId(input.orgId, input.spaceId, input.threadRootId);
+  if (!sessionId) return { stopped: false };
+  const { sessions } = await resolveDeps();
+  let latestTurnId: string | undefined;
+  try {
+    latestTurnId = (await sessions.getSession(sessionId)).latestTurnId;
+  } catch {
+    return { stopped: false }; // session deleted since the registry entry
+  }
+  if (!latestTurnId) return { stopped: false };
+  const turn = await sessions.getTurn(latestTurnId);
+  const status = deriveTurnStatus(reduceTurn(turn.events));
+  if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+    return { stopped: false };
+  }
+  // idle or suspended = live (running, or parked on a permission/async tool).
+  // The watchdog sees the turn_cancelled, posts the "stopped" receipt, and
+  // releases the presence lease — the room learns what happened either way.
+  await sessions.stopTurn(latestTurnId, 'stopped from the space');
+  return { stopped: true };
 }

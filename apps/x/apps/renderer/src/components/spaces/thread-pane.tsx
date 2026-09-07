@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Pencil, ShieldAlert, Tag, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -537,6 +537,39 @@ export function ThreadPane({
         }
     }
 
+    // Whether an agent session exists for this thread — powers the header's
+    // persistent "Chat" link (the working chip only exists while a turn runs).
+    const [hasSession, setHasSession] = useState(false)
+    useEffect(() => {
+        let cancelled = false
+        void window.ipc
+            .invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            .then((res) => {
+                if (!cancelled) setHasSession(!!res.sessionId)
+            })
+            .catch(() => {})
+        return () => {
+            cancelled = true
+        }
+        // workingAgents.length: the session is born on first invoke — the
+        // moment a chip appears is the moment the link becomes real.
+    }, [org.id, space.id, rootMessageId, refreshTick, workingAgents.length])
+
+    // The stop square beside your working chip: cancel the run from here.
+    // The chip clears when the cancelled turn releases its presence lease.
+    const [stopping, setStopping] = useState(false)
+    const stopRowboat = async () => {
+        setStopping(true)
+        try {
+            const { stopped } = await window.ipc.invoke('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            if (!stopped) toast('Nothing to stop — the run already finished', 'info')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not stop the run', 'error')
+        } finally {
+            setStopping(false)
+        }
+    }
+
     // Replies with compaction and the New line. Deleted replies disappear
     // (nothing anchors to a reply, so no tombstone row is needed here).
     const visibleReplies = replies.filter((m) => !m.deletedAt)
@@ -614,6 +647,14 @@ export function ThreadPane({
                     )}
                 </span>
                 <span className="flex-1" />
+                {hasSession && onOpenSession && (
+                    // Persistent, unlike the working chip: the conversation the
+                    // agent had about this thread stays one click away after
+                    // the run ends.
+                    <Button variant="ghost" size="xs" className="gap-1 px-2 text-muted-foreground" onClick={() => void openTopicSession()} title="Open the agent chat for this thread">
+                        <Bot className="size-3.5" /> Chat
+                    </Button>
+                )}
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -760,9 +801,20 @@ export function ThreadPane({
                             const own = memberId === org.memberId
                             const label = own ? 'Your Rowboat is working…' : <><MemberName id={memberId} />’s Rowboat is working…</>
                             return own ? (
-                                <button key={memberId} className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent session for this thread" onClick={() => void openTopicSession()}>
-                                    <Loader2 className="size-3 animate-spin" />{label}
-                                </button>
+                                <span key={memberId} className="flex items-center gap-1">
+                                    <button className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent chat for this thread" onClick={() => void openTopicSession()}>
+                                        <Loader2 className="size-3 animate-spin" />{label}
+                                        <span className="font-medium text-[var(--stream-link)]">Open chat</span>
+                                    </button>
+                                    <button
+                                        className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
+                                        title="Stop your Rowboat"
+                                        disabled={stopping}
+                                        onClick={() => void stopRowboat()}
+                                    >
+                                        {stopping ? <Loader2 className="size-2.5 animate-spin" /> : <Square className="size-2.5 fill-current" />} Stop
+                                    </button>
+                                </span>
                             ) : (
                                 <span key={memberId} className="flex items-center gap-1.5 rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground"><Bot className="size-3" />{label}</span>
                             )

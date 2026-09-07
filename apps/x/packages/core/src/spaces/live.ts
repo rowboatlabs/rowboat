@@ -29,6 +29,14 @@ const BACKOFF_CAP_MS = 30_000;
 /** ~3 missed server beacons (25s cadence) before a silent socket is presumed dead. */
 const DEFAULT_STALE_AFTER_MS = 80_000;
 const DEFAULT_WATCHDOG_TICK_MS = 15_000;
+/**
+ * Cap on resolving the connection token. The provider chains OAuth discovery
+ * + refresh fetches with no timeout of their own; on a bad network (sleep,
+ * captive portal) such a fetch can hang FOREVER, and a hung token used to
+ * pin `connecting` true permanently — no reconnect, presence silently
+ * dropped, and nothing (not even bounce) could revive the client.
+ */
+const DEFAULT_TOKEN_TIMEOUT_MS = 20_000;
 
 export interface SpacesLiveOptions {
   /** http(s)://host[:port] — same base as the REST client. */
@@ -41,6 +49,8 @@ export interface SpacesLiveOptions {
   staleAfterMs?: number;
   /** Watchdog cadence (test knob). */
   watchdogTickMs?: number;
+  /** Cap on one token resolution before the attempt is abandoned and retried (test knob). */
+  tokenTimeoutMs?: number;
 }
 
 export class SpacesLive {
@@ -49,6 +59,7 @@ export class SpacesLive {
   private readonly WebSocketImpl: typeof WebSocket;
   private readonly staleAfterMs: number;
   private readonly watchdogTickMs: number;
+  private readonly tokenTimeoutMs: number;
   private ws: WebSocket | undefined;
   private connecting = false;
   private subs = new Map<string, Subscription>();
@@ -72,6 +83,7 @@ export class SpacesLive {
     this.WebSocketImpl = options.webSocketImpl ?? WebSocket;
     this.staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
     this.watchdogTickMs = options.watchdogTickMs ?? DEFAULT_WATCHDOG_TICK_MS;
+    this.tokenTimeoutMs = options.tokenTimeoutMs ?? DEFAULT_TOKEN_TIMEOUT_MS;
   }
 
   status: SpacesLiveStatus = 'closed';
@@ -134,6 +146,12 @@ export class SpacesLive {
       this.ws.send(
         JSON.stringify({ kind: 'presence', spaceId, state, ...(threadRootId !== undefined ? { threadRootId } : {}) }),
       );
+    } else {
+      // The frame itself is droppable (senders renew), but wanting to send is
+      // proof someone needs the socket — an agent's working lease renews every
+      // 10s, so a downed connection comes back within a renewal or two instead
+      // of staying dark for the whole turn. No-op when already connecting.
+      this.ensureConnected();
     }
   }
 
@@ -146,6 +164,8 @@ export class SpacesLive {
   whiteboard(spaceId: string, boardId: string, payload: unknown): void {
     if (this.ws?.readyState === this.WebSocketImpl.OPEN) {
       this.ws.send(JSON.stringify({ kind: 'whiteboard', spaceId, boardId, payload }));
+    } else {
+      this.ensureConnected(); // same posture as presence
     }
   }
 
@@ -167,9 +187,21 @@ export class SpacesLive {
    * machinery is already on it).
    */
   bounce(): void {
-    if (this.closed || !this.ws) return;
+    if (this.closed) return;
     this.attempts = 0;
-    this.dropSocket(this.ws);
+    if (this.ws) {
+      this.dropSocket(this.ws);
+    } else if (!this.connecting) {
+      // No socket at all — a failed attempt waiting out its backoff, or a
+      // wedged one that died without scheduling a retry. Wake is the moment
+      // the host KNOWS the network changed: reconnect now, not in 30s (or
+      // never).
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = undefined;
+      }
+      this.ensureConnected();
+    }
   }
 
   /** Detach + discard a socket and get reconnection going. Safe on already-dead sockets. */
@@ -191,10 +223,23 @@ export class SpacesLive {
       // After sleep this timer fires promptly on wake, sees the huge silence
       // gap, and bounces — so recovery needs no OS-specific hooks to work.
       const ws = this.ws;
-      if (!ws || ws.readyState !== this.WebSocketImpl.OPEN) return;
-      if (Date.now() - this.lastTraffic > this.staleAfterMs) {
-        this.attempts = 0;
-        this.dropSocket(ws);
+      if (ws) {
+        // Covers OPEN-but-silent (half-open after sleep) and stuck mid
+        // handshake alike: lastTraffic resets when the attempt starts, so a
+        // socket that never reaches OPEN goes just as stale.
+        if (Date.now() - this.lastTraffic > this.staleAfterMs) {
+          this.attempts = 0;
+          this.dropSocket(ws);
+        }
+        return;
+      }
+      // No socket, someone wants one (a space subscription or a member-frame
+      // handler — same gate as scheduleReconnect), and no attempt is in
+      // flight or scheduled: a connect attempt died without arranging its own
+      // retry (openSocket threw, a token attempt was abandoned). Self-heal —
+      // this state used to be permanent and silently killed all live traffic.
+      if (!this.closed && !this.connecting && !this.reconnectTimer && (this.subs.size > 0 || this.memberHandlers.size > 0)) {
+        this.ensureConnected();
       }
     }, this.watchdogTickMs);
   }
@@ -213,26 +258,50 @@ export class SpacesLive {
     if (this.closed || this.ws || this.connecting) return;
     this.connecting = true;
     this.setStatus('connecting');
+    this.ensureWatchdog();
     void (async () => {
       let token: string;
       try {
-        token = typeof this.token === 'string' ? this.token : await this.token();
+        // The timeout guards `connecting` itself: an un-timed-out provider
+        // fetch that never settles would pin it true forever, blocking every
+        // future attempt. An abandoned attempt just retries with backoff; the
+        // provider's own single-flight absorbs the duplicate resolution.
+        token =
+          typeof this.token === 'string'
+            ? this.token
+            : await Promise.race([
+                this.token(),
+                new Promise<never>((_, reject) => {
+                  const t = setTimeout(() => reject(new Error('token timeout')), this.tokenTimeoutMs);
+                  (t as { unref?: () => void }).unref?.();
+                }),
+              ]);
       } catch {
-        // Token source failed (refresh dead → org needs re-login). Back off
-        // like a connection failure so a later re-auth resumes the stream.
+        // Token source failed (refresh dead → org needs re-login) or hung.
+        // Back off like a connection failure so a later re-auth resumes the
+        // stream.
         this.connecting = false;
         this.scheduleReconnect();
         return;
       }
       this.connecting = false;
       if (this.closed || this.ws) return;
-      this.openSocket(`${this.wsBase}/v1/live?token=${encodeURIComponent(token)}`);
+      try {
+        this.openSocket(`${this.wsBase}/v1/live?token=${encodeURIComponent(token)}`);
+      } catch {
+        // Constructor threw (bad URL from a mangled base, a runtime without
+        // the impl). Without this the attempt died scheduling nothing.
+        this.scheduleReconnect();
+      }
     })();
   }
 
   private openSocket(wsUrl: string): void {
     const ws = new this.WebSocketImpl(wsUrl);
     this.ws = ws;
+    // The attempt itself counts as traffic: a handshake stuck in CONNECTING
+    // goes stale on the same clock as a silent OPEN socket.
+    this.lastTraffic = Date.now();
     this.ensureWatchdog();
 
     ws.addEventListener('open', () => {

@@ -44,7 +44,7 @@ const NEW_FADE_MS = 800
 const PIN_BANNER_MAX = 3
 
 export function GeneralStream({
-    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onClose, visible = true,
+    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onOpenSession, onClose, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -56,6 +56,8 @@ export function GeneralStream({
     entries?: spaces.SpacesAssetEntry[]
     /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
     onOpenThread: (rootMessageId: string) => void
+    /** Navigate to a chat session — the working strip's "Open chat" affordance. */
+    onOpenSession?: (sessionId: string) => void
     /** Set while a doc column sits beside the chat: closes THIS column, the doc takes the width. */
     onClose?: () => void
     /**
@@ -222,6 +224,28 @@ export function GeneralStream({
     // Reply creates NOTHING: the thread pane opens on the message itself —
     // a thread with zero replies is just a thread (annotation model).
     const replyInThread = (parent: spaces.Message) => onOpenThread(parent.id)
+
+    // The working strip's "Open chat": the thread's agent session, one click.
+    const openAgentChat = async (rootMessageId: string) => {
+        try {
+            const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            if (sessionId && onOpenSession) onOpenSession(sessionId)
+            else if (!sessionId) toast('No agent chat for this thread yet', 'info')
+        } catch {
+            toast('Could not open the agent chat', 'error')
+        }
+    }
+
+    // The working strip's stop square: cancel your Rowboat's run right here.
+    // The chip clears when the cancelled turn releases its presence lease.
+    const stopAgent = async (rootMessageId: string) => {
+        try {
+            const { stopped } = await window.ipc.invoke('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            if (!stopped) toast('Nothing to stop — the run already finished', 'info')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not stop the run', 'error')
+        }
+    }
 
     const askRowboat = (message: spaces.Message) => {
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
@@ -587,6 +611,8 @@ export function GeneralStream({
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
                 onPrefetchThread={(id) => prefetchThread(org.id, space.id, id)}
+                onOpenAgentChat={onOpenSession ? (id) => void openAgentChat(id) : undefined}
+                onStopAgent={(id) => void stopAgent(id)}
                 onReplyInThread={replyInThread}
                 onAskRowboat={askRowboat}
                 onCopyLink={(m) => void copyLink(m)}

@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from 'react'
-import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, Forward, Link as LinkIcon, Loader2, MessageSquare, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Trash2 } from 'lucide-react'
+import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, Forward, Link as LinkIcon, Loader2, MessageSquare, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Square, Trash2 } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -127,7 +127,7 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, continuation, thread, onOpenThread, onPrefetchThread, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onPrefetchThread, onOpenAgentChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
@@ -139,6 +139,10 @@ function MessageRowImpl({
     onOpenThread?: (rootMessageId: string) => void
     /** Hover = intent: warm the thread's replies so the click paints instantly. */
     onPrefetchThread?: (rootMessageId: string) => void
+    /** Opens the thread's agent session in the chat view (working strip's "Open chat"). */
+    onOpenAgentChat?: (rootMessageId: string) => void
+    /** Stops the viewer's own Rowboat working this thread (working strip's stop square). */
+    onStopAgent?: (rootMessageId: string) => void
     onReplyInThread?: (message: spaces.Message) => void
     onAskRowboat?: (message: spaces.Message) => void
     onCopyLink?: (message: spaces.Message) => void
@@ -361,13 +365,36 @@ function MessageRowImpl({
                     </button>
                 )}
                 {thread && thread.replyCount === 0 && thread.workingAgents.length > 0 && onOpenThread && (
-                    <button
-                        type="button"
-                        onClick={() => onOpenThread(thread.rootMessageId)}
-                        className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
-                    >
-                        <Loader2 className="size-3 animate-spin" /> Rowboat is working on a reply…
-                    </button>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <button
+                            type="button"
+                            onClick={() => onOpenThread(thread.rootMessageId)}
+                            title="Open the thread"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                        >
+                            <Loader2 className="size-3 animate-spin" /> Rowboat is working on a reply…
+                        </button>
+                        {onOpenAgentChat && (
+                            <button
+                                type="button"
+                                onClick={() => onOpenAgentChat(thread.rootMessageId)}
+                                title="Open the agent chat for this run"
+                                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-xs font-medium text-[var(--stream-link)] hover:bg-accent/50"
+                            >
+                                <MessageSquareText className="size-3" /> Open chat
+                            </button>
+                        )}
+                        {onStopAgent && !!selfMemberId && thread.workingAgents.includes(selfMemberId) && (
+                            <button
+                                type="button"
+                                onClick={() => onStopAgent(thread.rootMessageId)}
+                                title="Stop your Rowboat"
+                                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
+                            >
+                                <Square className="size-2.5 fill-current" /> Stop
+                            </button>
+                        )}
+                    </div>
                 )}
             </div>
             {showActions && (

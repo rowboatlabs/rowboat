@@ -918,6 +918,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             memberNames={memberNames}
                             entries={entries}
                             onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                            onOpenSession={onOpenSession}
                             onClose={split ? closeChat : undefined}
                             visible={active && showChat && !chatRootId}
                         />

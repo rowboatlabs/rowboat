@@ -3974,6 +3974,14 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string() }),
     res: z.object({ sessionId: z.string().nullable() }),
   },
+  // The stop square on the working chip: cancel the thread session's live
+  // turn without leaving the space. Invoker-only by construction — the
+  // topic→session registry is local, so only the member whose Rowboat runs
+  // here has anything to stop. stopped:false = nothing was running.
+  'spaces:stopRowboat': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string() }),
+    res: z.object({ stopped: z.boolean() }),
+  },
   // Upload phase 1 (spec §6): bytes in, {hash, size, mime} out. Bytes travel
   // either inline (clipboard pastes — ArrayBuffer over structured clone) or as
   // an absolute file path (drag-drop / picker via electronUtils.getPathForFile)

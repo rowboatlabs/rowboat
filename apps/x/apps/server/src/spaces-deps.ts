@@ -5,7 +5,7 @@ import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
-import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
+import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { fetchLinkPreview } from '@x/core/dist/spaces/link-preview.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
@@ -37,7 +37,11 @@ function emitSpacesEvent(event: spacesShared.SpacesBusEvent): void {
   for (const listener of spacesEventListeners) listener(event);
 }
 
-const liveSubscriptions = new Map<string, () => void>();
+// Keyed by org/space; each entry remembers WHICH live client it subscribed
+// on. A re-auth (orgs.upsertOAuthOrg) closes and replaces the org's client —
+// a cached subscription on the dead instance would swallow live frames
+// forever while every later subscribeSpace call no-ops against the cache.
+const liveSubscriptions = new Map<string, { live: unknown; unsubscribe: () => void }>();
 
 // Member-addressed frames (space_added) ride no space subscription — relay
 // them to every client as they arrive.
@@ -66,7 +70,7 @@ type SpacesRpcChannel =
   | 'spaces:listStream' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
-  | 'spaces:invokeRowboat' | 'spaces:topicSession'
+  | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:stopRowboat'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive'
   | 'spaces:getNotifyPrefs' | 'spaces:setNotifyPref' | 'spaces:getDnd' | 'spaces:setDnd'
@@ -120,9 +124,9 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:removeOrg': async (args) => {
     void syncSpaceMentionWatch({ force: true });
-    for (const [key, unsubscribe] of liveSubscriptions) {
+    for (const [key, entry] of liveSubscriptions) {
       if (key.startsWith(`${args.orgId}/`)) {
-        unsubscribe();
+        entry.unsubscribe();
         liveSubscriptions.delete(key);
       }
     }
@@ -317,22 +321,27 @@ export const spacesRpcHandlers: SpacesHandlers = {
     sessionId: topicSessionId(args.orgId, args.spaceId, args.threadRootId),
   }),
 
+  'spaces:stopRowboat': async (args) => stopTopicAgent(args),
+
   'spaces:subscribeSpace': async (args) => {
     const key = `${args.orgId}/${args.spaceId}`;
-    if (!liveSubscriptions.has(key)) {
-      const unsubscribe = orgs.getLive(args.orgId).subscribe(
+    const live = orgs.getLive(args.orgId);
+    const cached = liveSubscriptions.get(key);
+    if (!cached || cached.live !== live) {
+      cached?.unsubscribe();
+      const unsubscribe = live.subscribe(
         args.spaceId,
         (frame) => emitSpacesEvent({ orgId: args.orgId, frame }),
         args.afterOffset,
       );
-      liveSubscriptions.set(key, unsubscribe);
+      liveSubscriptions.set(key, { live, unsubscribe });
     }
     return { success: true };
   },
 
   'spaces:unsubscribeSpace': async (args) => {
     const key = `${args.orgId}/${args.spaceId}`;
-    liveSubscriptions.get(key)?.();
+    liveSubscriptions.get(key)?.unsubscribe();
     liveSubscriptions.delete(key);
     return { success: true };
   },

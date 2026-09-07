@@ -8,7 +8,7 @@ import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
-import { invokeTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
+import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { fetchLinkPreview } from './link-preview.js';
 
@@ -61,6 +61,7 @@ type SpacesHandlers = {
   'spaces:endPoll': InvokeHandler<'spaces:endPoll'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
+  'spaces:stopRowboat': InvokeHandler<'spaces:stopRowboat'>;
   'spaces:getNotifyPrefs': InvokeHandler<'spaces:getNotifyPrefs'>;
   'spaces:setNotifyPref': InvokeHandler<'spaces:setNotifyPref'>;
   'spaces:schedule': InvokeHandler<'spaces:schedule'>;
@@ -105,7 +106,8 @@ function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
 // One core-level live subscription per (org, space), fanned out to all windows.
 // The renderer's afterOffset drives replay on first subscribe; core's
 // SpacesLive owns reconnect + resume from the last seen offset after that.
-const liveSubscriptions = new Map<string, () => void>();
+// Each entry remembers WHICH live client it subscribed on (see subscribeSpace).
+const liveSubscriptions = new Map<string, { live: unknown; unsubscribe: () => void }>();
 
 /**
  * Spaces IPC handlers, exported as a plain object and spread into the main
@@ -157,9 +159,9 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:removeOrg': async (_event, args) => {
     void syncSpaceMentionWatch({ force: true });
-    for (const [key, unsubscribe] of liveSubscriptions) {
+    for (const [key, entry] of liveSubscriptions) {
       if (key.startsWith(`${args.orgId}/`)) {
-        unsubscribe();
+        entry.unsubscribe();
         liveSubscriptions.delete(key);
       }
     }
@@ -379,6 +381,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
     sessionId: topicSessionId(args.orgId, args.spaceId, args.threadRootId),
   }),
 
+  'spaces:stopRowboat': async (_event, args) => stopTopicAgent(args),
+
   'spaces:getNotifyPrefs': async (_event, args) => getNotifyPrefs(args.orgId, args.spaceId),
 
   'spaces:setNotifyPref': async (_event, args) => {
@@ -413,20 +417,25 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:subscribeSpace': async (_event, args) => {
     const key = `${args.orgId}/${args.spaceId}`;
-    if (!liveSubscriptions.has(key)) {
-      const unsubscribe = orgs.getLive(args.orgId).subscribe(
+    const live = orgs.getLive(args.orgId);
+    const cached = liveSubscriptions.get(key);
+    // Instance check: a re-auth (upsertOAuthOrg) replaces the org's live
+    // client; a subscription cached on the dead one would eat frames forever.
+    if (!cached || cached.live !== live) {
+      cached?.unsubscribe();
+      const unsubscribe = live.subscribe(
         args.spaceId,
         (frame) => broadcastSpacesEvent({ orgId: args.orgId, frame }),
         args.afterOffset,
       );
-      liveSubscriptions.set(key, unsubscribe);
+      liveSubscriptions.set(key, { live, unsubscribe });
     }
     return { success: true };
   },
 
   'spaces:unsubscribeSpace': async (_event, args) => {
     const key = `${args.orgId}/${args.spaceId}`;
-    liveSubscriptions.get(key)?.();
+    liveSubscriptions.get(key)?.unsubscribe();
     liveSubscriptions.delete(key);
     return { success: true };
   },

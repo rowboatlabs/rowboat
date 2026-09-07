@@ -307,6 +307,7 @@ export const RPC_CHANNELS = [
   'spaces:endPoll',
   'spaces:invokeRowboat',
   'spaces:topicSession',
+  'spaces:stopRowboat',
   'spaces:subscribeSpace',
   'spaces:unsubscribeSpace',
   'spaces:presence',
