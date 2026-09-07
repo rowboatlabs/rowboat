@@ -32,7 +32,8 @@ export type SpacesAccountStatus = 'loading' | 'signedOut' | 'signedIn';
 
 interface SpacesAccount {
   status: SpacesAccountStatus;
-  orgs: SpacesOrg[];
+  /** null until the first fetch answers — render a spinner, not an empty state. */
+  orgs: SpacesOrg[] | null;
   orgsError: string | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -45,7 +46,7 @@ const Ctx = createContext<SpacesAccount | null>(null);
 
 export function SpacesAccountProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SpacesAccountStatus>('loading');
-  const [orgs, setOrgs] = useState<SpacesOrg[]>([]);
+  const [orgs, setOrgs] = useState<SpacesOrg[] | null>(null);
   const [orgsError, setOrgsError] = useState<string | null>(null);
   const accountRef = useRef<StoredAccount | null>(null);
 
@@ -105,7 +106,7 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await persist(null);
-    setOrgs([]);
+    setOrgs(null);
     setOrgsError(null);
     setStatus('signedOut');
   }, [persist]);

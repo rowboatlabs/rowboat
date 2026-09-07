@@ -126,7 +126,7 @@ function OrgList() {
     setRefreshing(false);
   }, [account]);
 
-  const who = account.orgs[0]?.displayName;
+  const who = account.orgs?.[0]?.displayName;
 
   return (
     <ScrollView
@@ -137,8 +137,9 @@ function OrgList() {
       {account.orgsError ? (
         <Text style={{ fontSize: 13, color: colors.destructive }}>{account.orgsError}</Text>
       ) : null}
-      {account.orgs.map((org) => <OrgCard key={org.id} org={org} />)}
-      {account.orgs.length === 0 && !account.orgsError ? (
+      {account.orgs === null && !account.orgsError ? <ActivityIndicator style={{ marginTop: 48 }} /> : null}
+      {account.orgs?.map((org) => <OrgCard key={org.id} org={org} />)}
+      {account.orgs?.length === 0 && !account.orgsError ? (
         <View style={{ alignItems: 'center', marginTop: 64, gap: 8 }}>
           <Image source="sf:person.2" style={{ width: 36, height: 36 }} tintColor={colors.tertiaryLabel} />
           <Text style={{ fontSize: 15, fontWeight: '600', color: colors.secondaryLabel }}>No orgs yet</Text>
