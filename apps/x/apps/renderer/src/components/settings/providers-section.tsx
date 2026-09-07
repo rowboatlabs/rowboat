@@ -14,6 +14,7 @@ import { useModels } from "@/hooks/use-models"
 import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { useChatGPT } from "@/hooks/useChatGPT"
 import {
+  AimlapiIcon,
   AnthropicIcon,
   GenericApiIcon,
   GoogleIcon,
@@ -29,7 +30,7 @@ import {
 // Providers manage CREDENTIALS only — model choices live in
 // ModelSelectionSection above this section.
 
-type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type ByokFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "aimlapi" | "ollama" | "openai-compatible"
 
 interface ProviderMeta {
   id: string
@@ -54,6 +55,10 @@ const TASK_LABELS: Record<string, string> = {
 }
 
 const BYOK_CATALOG: Array<{ flavor: ByokFlavor; name: string; tagline: string; icon: React.ElementType; needsKey: boolean; needsEndpoint: boolean; optionalKey?: boolean; manualModel?: boolean }> = [
+  // manualModel: the catalog is ~350 chat models deep and its order is the
+  // provider's, so auto-select (first listed) is close to arbitrary — the
+  // optional box lets someone name the model they came for at connect time.
+  { flavor: "aimlapi", name: "aimlapi.com", tagline: "One key, 350+ chat models", icon: AimlapiIcon, needsKey: true, needsEndpoint: false, manualModel: true },
   { flavor: "openai", name: "OpenAI", tagline: "GPT models", icon: OpenAIIcon, needsKey: true, needsEndpoint: false },
   { flavor: "anthropic", name: "Anthropic", tagline: "Claude models", icon: AnthropicIcon, needsKey: true, needsEndpoint: false },
   { flavor: "google", name: "Gemini", tagline: "Google AI Studio", icon: GoogleIcon, needsKey: true, needsEndpoint: false },
@@ -67,6 +72,7 @@ const DEFAULT_BASE_URLS: Partial<Record<ByokFlavor, string>> = {
   ollama: "http://localhost:11434",
   "openai-compatible": "http://localhost:1234/v1",
   aigateway: "https://ai-gateway.vercel.sh/v1",
+  aimlapi: "https://api.aimlapi.com/v1",
 }
 
 function flavorMeta(flavor: string) {

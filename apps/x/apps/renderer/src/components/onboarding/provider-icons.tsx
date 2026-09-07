@@ -56,6 +56,18 @@ export function VercelIcon({ className }: IconProps) {
   )
 }
 
+// aimlapi.com's mark: the hexagonal container plus its zig-zag glyph,
+// reduced to two currentColor paths so it inherits the sheet's monochrome
+// treatment like every other provider icon here.
+export function AimlapiIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 37 33" fill="currentColor" className={cn("size-5", className)}>
+      <path d="M35.7 15.056a3.9 3.9 0 0 1 0 3.751l-6.949 12.037a3.75 3.75 0 0 1-3.249 1.876H11.604a3.75 3.75 0 0 1-3.249-1.876L1.406 18.807a3.9 3.9 0 0 1 0-3.751L8.355 3.02a3.75 3.75 0 0 1 3.249-1.876h13.898a3.75 3.75 0 0 1 3.249 1.876L35.7 15.056Z" opacity="0.35" />
+      <path d="M10.926 22.232a1.28 1.28 0 0 1-.746-.253 1.29 1.29 0 0 1-.224-1.718l4.889-6.355a1.28 1.28 0 0 1 1.83-.216l4.606 3.619 4.03-5.2a1.29 1.29 0 0 1 1.719-.219 1.29 1.29 0 0 1 .219 1.718l-4.786 6.175a1.28 1.28 0 0 1-1.808.248l-4.603-3.617-4.135 5.373c-.242.314-.604.478-.971.478Z" />
+    </svg>
+  )
+}
+
 export function GmailIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" className={cn("size-5", className)}>
