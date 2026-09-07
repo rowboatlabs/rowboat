@@ -6,13 +6,23 @@ const STATE_FILE = path.join(WorkDir, 'note_tagging_state.json');
 
 export interface NoteTaggingState {
     processedFiles: Record<string, { taggedAt: string }>;
+    failedFiles?: Record<string, {
+        failedAt: string;
+        retryCount: number;
+        nextRetryAt: number;
+        lastModifiedMs: number;
+    }>;
     lastRunTime: string;
 }
 
 export function loadNoteTaggingState(): NoteTaggingState {
     if (fs.existsSync(STATE_FILE)) {
         try {
-            return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+            const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+            if (!state.failedFiles) {
+                state.failedFiles = {};
+            }
+            return state;
         } catch (error) {
             console.error('Error loading note tagging state:', error);
         }
@@ -20,6 +30,7 @@ export function loadNoteTaggingState(): NoteTaggingState {
 
     return {
         processedFiles: {},
+        failedFiles: {},
         lastRunTime: new Date(0).toISOString(),
     };
 }
@@ -42,7 +53,35 @@ export function markNoteAsTagged(filePath: string, state: NoteTaggingState): voi
 export function resetNoteTaggingState(): void {
     const emptyState: NoteTaggingState = {
         processedFiles: {},
+        failedFiles: {},
         lastRunTime: new Date().toISOString(),
     };
     saveNoteTaggingState(emptyState);
+}
+
+const BASE_DELAY_MS = 60 * 1000; // 1 minute
+
+export function markNoteAsFailed(filePath: string, state: NoteTaggingState, mtimeMs: number): void {
+    if (!state.failedFiles) {
+        state.failedFiles = {};
+    }
+    
+    const existing = state.failedFiles[filePath];
+    const retryCount = existing ? existing.retryCount + 1 : 1;
+    
+    // Exponential backoff: 1m, 2m, 4m, 8m, etc.
+    const backoffMs = Math.pow(2, retryCount - 1) * BASE_DELAY_MS;
+    
+    state.failedFiles[filePath] = {
+        failedAt: new Date().toISOString(),
+        retryCount,
+        nextRetryAt: Date.now() + backoffMs,
+        lastModifiedMs: mtimeMs
+    };
+}
+
+export function clearNoteFailure(filePath: string, state: NoteTaggingState): void {
+    if (state.failedFiles && state.failedFiles[filePath]) {
+        delete state.failedFiles[filePath];
+    }
 }

@@ -54,20 +54,15 @@ describe('tag_notes', () => {
         vi.clearAllMocks();
     });
 
-    it('should mark notes as processed even if the agent fails to tag them to prevent infinite loops', async () => {
-        // Create an untagged note
+    it('should mark notes as failed when skipped by the agent and backoff', async () => {
         const notePath = path.join(WorkDir, 'knowledge', 'People', 'TestNote.md');
         fs.writeFileSync(notePath, '# Test Note\nNo frontmatter here.');
-
-        // Verify it is untagged
-        let state = loadNoteTaggingState();
-        expect(state.processedFiles[notePath]).toBeUndefined();
 
         // Mock the agent to simulate a SKIP or FAILURE (returns empty set of files edited)
         vi.mocked(headlessApp.runWhenPossible).mockResolvedValue({
             turnId: 'test-turn',
             state: {} as any,
-            outcome: {} as any,
+            outcome: { status: 'completed' } as any,
             summary: null
         });
         vi.mocked(headlessApp.toolInputPaths).mockReturnValue(new Set()); // No files edited
@@ -75,23 +70,141 @@ describe('tag_notes', () => {
         // Run the process
         await processUntaggedNotes();
 
-        // Verify the file was marked as processed despite the agent failing
+        let state = loadNoteTaggingState();
+        expect(state.processedFiles[notePath]).toBeUndefined();
+        expect(state.failedFiles?.[notePath]).toBeDefined();
+        expect(state.failedFiles?.[notePath].retryCount).toBe(1);
+        
+        expect(headlessApp.runWhenPossible).toHaveBeenCalledTimes(1);
+
+        // Second run - it should be skipped due to backoff
+        await processUntaggedNotes();
+        expect(headlessApp.runWhenPossible).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle provider failure with backoff and eventual recovery', async () => {
+        const notePath = path.join(WorkDir, 'knowledge', 'People', 'TestNote.md');
+        fs.writeFileSync(notePath, '# Test Note\nNo frontmatter here.');
+
+        // First run: provider throws an error
+        vi.mocked(headlessApp.runWhenPossible).mockRejectedValueOnce(new Error('Provider API down'));
+        
+        await processUntaggedNotes();
+        
+        let state = loadNoteTaggingState();
+        expect(state.processedFiles[notePath]).toBeUndefined();
+        expect(state.failedFiles?.[notePath]).toBeDefined();
+        expect(state.failedFiles?.[notePath].retryCount).toBe(1);
+        
+        // Fast forward time to pass the backoff 
+        state.failedFiles![notePath].nextRetryAt = Date.now() - 1000;
+        fs.writeFileSync(path.join(WorkDir, 'note_tagging_state.json'), JSON.stringify(state));
+
+        // Second run: provider recovers and agent successfully tags the note
+        vi.mocked(headlessApp.runWhenPossible).mockResolvedValueOnce({
+            turnId: 'test-turn-2',
+            state: {} as any,
+            outcome: { status: 'completed' } as any,
+            summary: null
+        });
+        vi.mocked(headlessApp.toolInputPaths).mockReturnValueOnce(new Set(['knowledge/People/TestNote.md']));
+        
+        await processUntaggedNotes();
+        
         state = loadNoteTaggingState();
         expect(state.processedFiles[notePath]).toBeDefined();
-        
-        // Prove the AI was called exactly 1 time on the first run
-        expect(headlessApp.runWhenPossible).toHaveBeenCalledTimes(1);
+        expect(state.failedFiles?.[notePath]).toBeUndefined(); // Cleared on success
+    });
 
-        // Simulate the 15-second timer ticking and triggering a SECOND run
+    it('should handle partially processed batches correctly', async () => {
+        const note1Path = path.join(WorkDir, 'knowledge', 'People', 'Note1.md');
+        const note2Path = path.join(WorkDir, 'knowledge', 'People', 'Note2.md');
+        fs.writeFileSync(note1Path, '# Note 1\n');
+        fs.writeFileSync(note2Path, '# Note 2\n');
+
+        vi.mocked(headlessApp.runWhenPossible).mockResolvedValueOnce({
+            turnId: 'test-turn',
+            state: {} as any,
+            outcome: { status: 'completed' } as any,
+            summary: null
+        });
+        // Agent edits Note 1 but skips Note 2
+        vi.mocked(headlessApp.toolInputPaths).mockReturnValueOnce(new Set(['knowledge/People/Note1.md']));
+
         await processUntaggedNotes();
 
-        // Prove the AI was STILL only called 1 time overall! 
-        // This proves the note was correctly skipped on the second run.
-        expect(headlessApp.runWhenPossible).toHaveBeenCalledTimes(1);
+        const state = loadNoteTaggingState();
+        
+        // Note 1 should be processed
+        expect(state.processedFiles[note1Path]).toBeDefined();
+        expect(state.failedFiles?.[note1Path]).toBeUndefined();
+        
+        // Note 2 should be failed
+        expect(state.processedFiles[note2Path]).toBeUndefined();
+        expect(state.failedFiles?.[note2Path]).toBeDefined();
+    });
 
-        // Furthermore, prove that the file wasn't even sent for processing internally!
-        // `serviceLogger.startRun` is ONLY called if `untagged.length > 0`.
-        // Because it was only called 1 time, it proves `getUntaggedNotes` returned an empty list on the second run.
-        expect(serviceLogger.startRun).toHaveBeenCalledTimes(1);
+    it('should save partial successes when an error is thrown mid-batch', async () => {
+        const note1Path = path.join(WorkDir, 'knowledge', 'People', 'Note1.md');
+        const note2Path = path.join(WorkDir, 'knowledge', 'People', 'Note2.md');
+        fs.writeFileSync(note1Path, '# Note 1\n');
+        fs.writeFileSync(note2Path, '# Note 2\n');
+
+        vi.mocked(headlessApp.runWhenPossible).mockResolvedValueOnce({
+            turnId: 'test-turn',
+            state: {} as any,
+            outcome: { status: 'failed', error: 'Mid-batch provider error' } as any,
+            summary: null
+        });
+        // Agent edits Note 1 but fails before editing Note 2
+        vi.mocked(headlessApp.toolInputPaths).mockReturnValueOnce(new Set(['knowledge/People/Note1.md']));
+
+        await processUntaggedNotes();
+
+        const state = loadNoteTaggingState();
+        
+        // Note 1 should be processed because it was edited before the error
+        expect(state.processedFiles[note1Path]).toBeDefined();
+        expect(state.failedFiles?.[note1Path]).toBeUndefined();
+        
+        // Note 2 should be failed
+        expect(state.processedFiles[note2Path]).toBeUndefined();
+        expect(state.failedFiles?.[note2Path]).toBeDefined();
+    });
+
+    it('should reset retries if a failed file is edited', async () => {
+        const notePath = path.join(WorkDir, 'knowledge', 'People', 'EditMe.md');
+        fs.writeFileSync(notePath, '# Edit Me\n');
+
+        // Fail first time
+        vi.mocked(headlessApp.runWhenPossible).mockResolvedValue({
+            turnId: 'test-turn',
+            state: {} as any,
+            outcome: { status: 'completed' } as any,
+            summary: null
+        });
+        vi.mocked(headlessApp.toolInputPaths).mockReturnValue(new Set()); // No edits
+
+        await processUntaggedNotes();
+
+        let state = loadNoteTaggingState();
+        expect(state.failedFiles?.[notePath]).toBeDefined();
+        
+        // Set retry count to MAX (5)
+        state.failedFiles![notePath].retryCount = 5;
+        state.failedFiles![notePath].nextRetryAt = Date.now() - 1000;
+        fs.writeFileSync(path.join(WorkDir, 'note_tagging_state.json'), JSON.stringify(state));
+
+        // It should skip it now because of max retries
+        await processUntaggedNotes();
+        expect(headlessApp.runWhenPossible).toHaveBeenCalledTimes(1); 
+
+        // Now user edits the file! Wait a small bit so mtime changes (or touch)
+        await new Promise(resolve => setTimeout(resolve, 50));
+        fs.appendFileSync(notePath, 'New content here.');
+
+        // Second run after edit - it should pick it up again!
+        await processUntaggedNotes();
+        expect(headlessApp.runWhenPossible).toHaveBeenCalledTimes(2); 
     });
 });
