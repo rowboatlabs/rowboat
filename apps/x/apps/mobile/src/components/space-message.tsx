@@ -7,6 +7,7 @@ import { Image } from 'expo-image';
 import { spaces } from '@x/shared';
 
 import { ChatMarkdown } from '@/components/markdown';
+import { MessageLinkPreviews } from '@/components/link-preview-card';
 import { SpaceBlobImage } from '@/components/space-blob-image';
 import { useColors } from '@/theme/colors';
 
@@ -50,6 +51,7 @@ export const MessageRow = memo(function MessageRow({
   onOpenThread,
   onLongPress,
   onAddReaction,
+  alwaysShowReactionBar,
 }: {
   message: Message;
   member?: Member;
@@ -62,6 +64,8 @@ export const MessageRow = memo(function MessageRow({
   onLongPress: (message: Message) => void;
   /** The emoji+ pill — a reactions-only picker (defaults to the full sheet). */
   onAddReaction?: (message: Message) => void;
+  /** Thread root: keep the emoji+ pill visible even with zero reactions (Slack). */
+  alwaysShowReactionBar?: boolean;
 }) {
   const colors = useColors();
   const dark = colors.background === '#000000';
@@ -124,7 +128,8 @@ export const MessageRow = memo(function MessageRow({
           {message.editedAt ? <Text style={{ fontSize: 12, color: colors.tertiaryLabel }}>(edited)</Text> : null}
         </View>
         <ChatMarkdown extraRules={imageRule}>{body}</ChatMarkdown>
-        {message.reactions.length > 0 ? (
+        <MessageLinkPreviews body={message.body} />
+        {message.reactions.length > 0 || alwaysShowReactionBar ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
             {message.reactions.map((g) => {
               const mine = g.memberIds.includes(me);
