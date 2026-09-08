@@ -1,7 +1,8 @@
-import { memo, useRef, useState } from 'react'
-import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, Forward, Link as LinkIcon, Loader2, MessageSquare, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Square, Trash2 } from 'lucide-react'
+import { memo, useState } from 'react'
+import { Bookmark, BookmarkCheck, Bot, ChevronRight, Copy, Forward, Link as LinkIcon, Loader2, MessageSquare, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Quote, SmilePlus, Square, Trash2, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub,
     ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
@@ -10,16 +11,18 @@ import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { Textarea } from '@/components/ui/textarea'
 import { MemberAvatar, MemberProfilePopover } from '@/components/spaces/atoms'
-import { FormattingToolbar } from '@/components/spaces/composer-toolbar'
+import { MessageEditBox } from '@/components/spaces/edit-box'
 import { EmojiPickerPopover } from '@/components/spaces/emoji-picker'
 import { MessageLinkPreview } from '@/components/spaces/link-preview-card'
 import { PollCard } from '@/components/spaces/poll-card'
-import { SpaceMarkdown } from '@/components/spaces/space-markdown'
+import { SpaceMarkdown, useSpaceRefs } from '@/components/spaces/space-markdown'
 import { frequentEmoji, noteEmojiUsed } from '@/lib/emoji-data'
 import { PIN_EMOJI } from '@/lib/spaces-corpus'
-import { formatFeedTime, formatFullTimestamp, resolveMentions } from '@/lib/spaces-presentation'
+import {
+    blobAppUrl, encodeMentions, formatFeedTime, formatFullTimestamp, joinImageEmbeds,
+    parseBlobAppUrl, resolveMentions, rewriteBlobLinks, splitImageEmbeds, type ImageEmbed,
+} from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
 // One message in a stream (general or a thread). Consecutive messages by the
@@ -185,13 +188,45 @@ function MessageRowImpl({
     const canDelete = !!onDelete && !deleted && !unconfirmed && selfMemberId === message.author.memberId
     // Poll messages are immutable once posted (the org refuses too).
     const canEdit = !!onEdit && !deleted && !unconfirmed && !message.poll && selfMemberId === message.author.memberId
-    // The inline editor: null = not editing; a string = the draft body.
-    const [editDraft, setEditDraft] = useState<string | null>(null)
-    const editRef = useRef<HTMLTextAreaElement | null>(null)
+    // The inline editor: null = not editing. Images live beside the text, not
+    // in it — the box edits prose while the embeds show as removable
+    // thumbnails (the Slack model); split/joinImageEmbeds carry the round trip.
+    // `initial` seeds the editor once; `text` is its live markdown; `baseline`
+    // is what an untouched draft serializes to (see MessageEditBox.onChange).
+    const [edit, setEdit] = useState<{ initial: string; text: string; images: ImageEmbed[]; baseline: string | null } | null>(null)
+    const refs = useSpaceRefs()
+    // A thumbnail address for an extracted embed: the org's blob links render
+    // through the app:// cache (their https wire form doesn't), anything
+    // external is its own src.
+    const editThumbSrc = (url: string): string => {
+        if (!refs) return url
+        const parsed = parseBlobAppUrl(rewriteBlobLinks(url, refs))
+        return parsed ? blobAppUrl(parsed, parsed.hash, { thumb: 128 }) : url
+    }
+    // The editor shows people, the wire stores ids: mentions resolve to names
+    // on open and encode back on save — the same trip the composer's send
+    // path makes, so editing "@Name …" round-trips to "@<memberId> …".
+    const beginEdit = () => {
+        const { text, images } = splitImageEmbeds(message.body)
+        const resolved = resolveMentions(text, memberNames)
+        setEdit({ initial: resolved, text: resolved, images, baseline: null })
+    }
     const commitEdit = () => {
-        const text = (editDraft ?? '').trim()
-        setEditDraft(null)
-        if (text && text !== message.body) onEdit!(message, text)
+        if (!edit) return
+        const members = [...memberNames].map(([id, displayName]) => ({ id, displayName }))
+        const body = joinImageEmbeds(encodeMentions(edit.text, members), edit.images)
+        setEdit(null)
+        if (!body || body === message.body) return
+        // A no-change save must never rewrite the message, and the assembled
+        // body alone can't tell: the editor normalizes markdown, legacy inline
+        // images move to the tile row, mentions re-encode. Compare the parts
+        // instead — text against the editor's own baseline, images by url.
+        const orig = splitImageEmbeds(message.body)
+        const untouched = edit.baseline !== null
+            && edit.text === edit.baseline
+            && edit.images.length === orig.images.length
+            && edit.images.every((img, i) => img.url === orig.images[i]?.url)
+        if (!untouched) onEdit!(message, body)
     }
     const showActions = !deleted && !unconfirmed && !!(onReplyInThread || onAskRowboat || onCopyLink || onReact || canDelete)
     // While the emoji picker or the ⋯ menu is open the hover-revealed chrome
@@ -254,29 +289,37 @@ function MessageRowImpl({
                         <span title={formatFullTimestamp(message.postedAt)} className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
                     </div>
                 )}
-                {editDraft !== null ? (
+                {edit !== null ? (
                     <div className="mt-1">
-                        <FormattingToolbar textareaRef={editRef} value={editDraft} onChange={setEditDraft} className="mb-1" />
-                        <Textarea
-                            ref={editRef}
-                            autoFocus
-                            value={editDraft}
-                            onChange={(e) => setEditDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault()
-                                    commitEdit()
-                                } else if (e.key === 'Escape') {
-                                    setEditDraft(null)
-                                }
-                            }}
-                            className="min-h-16 text-sm"
-                        />
-                        <div className="mt-1 flex items-center gap-2 text-xs">
-                            <button type="button" onClick={commitEdit} className="rounded-md bg-foreground px-2 py-0.5 font-medium text-background hover:opacity-90">Save</button>
-                            <button type="button" onClick={() => setEditDraft(null)} className="text-muted-foreground hover:text-foreground">Cancel</button>
-                            <span className="text-muted-foreground/70">Enter to save · Esc to cancel</span>
-                        </div>
+                        <MessageEditBox
+                            initial={edit.initial}
+                            onChange={(text) => setEdit((e) => (e ? { ...e, text, baseline: e.baseline ?? text } : e))}
+                            onSave={commitEdit}
+                            onCancel={() => setEdit(null)}
+                        >
+                            {edit.images.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5 px-2.5 pb-1 pt-1">
+                                    {edit.images.map((img, i) => (
+                                        <span key={`${img.url}-${i}`} className="group/edit-thumb relative">
+                                            <img src={editThumbSrc(img.url)} alt={img.alt} title={img.alt} className="size-16 rounded-lg border border-border object-cover" />
+                                            <button
+                                                type="button"
+                                                onClick={() => setEdit({ ...edit, images: edit.images.filter((_, j) => j !== i) })}
+                                                aria-label={`Remove ${img.alt || 'image'}`}
+                                                className="absolute -right-1.5 -top-1.5 hidden rounded-full border border-border bg-background p-0.5 text-muted-foreground shadow-xs hover:text-foreground group-hover/edit-thumb:block"
+                                            >
+                                                <X className="size-3" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2 px-2 pb-2 pt-1 text-xs">
+                                <span className="text-muted-foreground/70">Enter to save · Esc to cancel</span>
+                                <Button variant="outline" size="sm" className="ml-auto" onClick={() => setEdit(null)}>Cancel</Button>
+                                <Button size="sm" disabled={!edit.text.trim() && edit.images.length === 0} onClick={commitEdit}>Save</Button>
+                            </div>
+                        </MessageEditBox>
                     </div>
                 ) : deleted ? (
                     <div className="text-sm italic leading-relaxed text-muted-foreground">This message was deleted</div>
@@ -464,7 +507,7 @@ function MessageRowImpl({
                                     </DropdownMenuItem>
                                 )}
                                 {canEdit && (
-                                    <DropdownMenuItem onClick={() => setEditDraft(message.body)}>
+                                    <DropdownMenuItem onClick={beginEdit}>
                                         <Pencil className="size-3.5 mr-2" /> Edit message
                                     </DropdownMenuItem>
                                 )}
@@ -552,7 +595,7 @@ function MessageRowImpl({
                     </ContextMenuItem>
                 )}
                 {canEdit && (
-                    <ContextMenuItem onSelect={() => setEditDraft(message.body)}>
+                    <ContextMenuItem onSelect={beginEdit}>
                         <Pencil className="size-3.5 mr-2" /> Edit message
                     </ContextMenuItem>
                 )}

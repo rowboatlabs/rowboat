@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Bot, Clock, FileText, Globe, Loader2, LoaderIcon, Megaphone, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Clock, FileText, Globe, Loader2, LoaderIcon, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -11,19 +11,19 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
-import { MemberAvatar } from '@/components/spaces/atoms'
 import { VoiceWaveform } from '@/components/chat-input-with-mentions'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceInputAvailable } from '@/hooks/use-voice-available'
 import { CALL_VOICE_HOLDER, acquireVoice, releaseVoice, voiceOwnerId } from '@/lib/voice-ownership'
 import { caretContext, composerExtensions, composerMarkdown, type CaretContext } from '@/components/spaces/composer-editor'
 import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
+import { MentionMenu, useMentionAutocomplete } from '@/components/spaces/mention-autocomplete'
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
 import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import { schedulePresets } from '@/lib/spaces-schedule'
-import { blobAppUrl, blobWireUrl, encodeMentions, encodeSpaceLinkTarget, formatBytes, isImageMime } from '@/lib/spaces-presentation'
+import { blobAppUrl, blobWireUrl, encodeMentions, formatBytes, isImageMime, mentionEndingAtCaret } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
@@ -60,19 +60,6 @@ export interface AgentOptions {
     searchEnabled?: boolean
     codeMode?: 'claude' | 'codex'
 }
-
-interface MentionCandidate {
-    id: string
-    label: string
-    hint?: string
-    isAgent?: boolean
-    isBroadcast?: boolean
-    /** A file suggestion — picking it inserts a plain markdown link to the path. */
-    filePath?: string
-}
-
-// "/" so typing into a folder ("@design/sc…") keeps the file query alive.
-const MENTION_RE = /(^|[\s([{])@([\w./-]*)$/
 
 /** A pane-provided slash command; `args` absent = picking it runs immediately. */
 export interface SlashCommand {
@@ -160,9 +147,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     const keydownRef = useRef<(view: EditorView, event: KeyboardEvent) => boolean>(() => false)
     const pasteRef = useRef<(event: ClipboardEvent) => boolean>(() => false)
     const dropRef = useRef<(event: DragEvent) => boolean>(() => false)
-    /** Where the caret sits (text-before-caret + doc position) — drives the autocompletes. */
+    /** Where the caret sits (text-before-caret + doc position) — drives the :emoji: autocomplete. */
     const [context, setContext] = useState<CaretContext | null>(null)
-    const [mentionOpen, setMentionOpen] = useState(false)
 
     const editor = useEditor({
         // The getter runs inside Placeholder's decoration pass (post-render,
@@ -177,10 +163,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         },
         onUpdate: ({ editor: ed }) => {
             setDraft(composerMarkdown(ed))
-            const ctx = caretContext(ed)
-            setContext(ctx)
-            // Open on "@" at a word start; stay open while the query grows.
-            setMentionOpen(!!ctx && MENTION_RE.test(ctx.text))
+            setContext(caretContext(ed))
             onTypeRef.current?.()
         },
         onSelectionUpdate: ({ editor: ed }) => setContext(caretContext(ed)),
@@ -317,47 +300,12 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     }, [editor, seed, appliedSeed])
 
     // --- @ autocomplete ------------------------------------------------------
-    const [mentionIndex, setMentionIndex] = useState(0)
-    const mentionMatch = useMemo(() => {
-        if (!mentionOpen || !context) return null
-        const m = MENTION_RE.exec(context.text)
-        if (!m) return null
-        const query = m[2] ?? ''
-        return { query: query.toLowerCase(), from: context.from - query.length - 1, to: context.from }
-    }, [context, mentionOpen])
-    const candidates = useMemo<MentionCandidate[]>(() => {
-        if (!mentionMatch) return []
-        const q = mentionMatch.query
-        const people: MentionCandidate[] = []
-        if ('rowboat'.startsWith(q)) people.push({ id: 'rowboat', label: 'rowboat', hint: 'your agent — acts only when asked', isAgent: true })
-        if ('here'.startsWith(q)) people.push({ id: 'here', label: 'here', hint: 'notify everyone online', isBroadcast: true })
-        for (const m of members) {
-            const hay = `${m.id} ${m.displayName}`.toLowerCase()
-            if (!q || hay.includes(q)) people.push({ id: m.id, label: m.displayName, ...(m.id === selfMemberId ? { hint: 'you' } : {}) })
-        }
-        // Files join once a query exists (a bare "@" is a people gesture);
-        // picking one inserts a markdown link, not a mention.
-        const files: MentionCandidate[] = q
-            ? entries
-                  .filter((e) => e.state !== 'deleted' && e.path.toLowerCase().includes(q))
-                  .slice(0, 4)
-                  .map((e) => ({
-                      id: `file:${e.path}`,
-                      label: e.path.split('/').pop() ?? e.path,
-                      ...(e.path.includes('/') ? { hint: e.path } : {}),
-                      filePath: e.path,
-                  }))
-            : []
-        return [...people.slice(0, 8 - files.length), ...files]
-    }, [mentionMatch, members, entries, selfMemberId])
-    // Reset the highlighted row whenever the query changes (adjust-on-change, not an effect).
-    const mentionQuery = mentionMatch?.query ?? null
-    const [lastQuery, setLastQuery] = useState<string | null>(null)
-    if (mentionQuery !== lastQuery) {
-        setLastQuery(mentionQuery)
-        setMentionIndex(0)
-    }
-    const showMentions = mentionOpen && !!mentionMatch && candidates.length > 0
+    // The shared hook (same popup the inline message editor uses) — it rides
+    // the editor's own events, so no wiring through onUpdate here. The menu
+    // portals out and measures against the box, hence the element in state.
+    const [box, setBox] = useState<HTMLDivElement | null>(null)
+    const mention = useMentionAutocomplete(editor, { members, entries, ...(selfMemberId ? { selfMemberId } : {}) })
+    const showMentions = mention.show
 
     // --- :emoji: autocomplete ------------------------------------------------
     // ":fi" at the caret offers 🔥 etc.; a completed ":fire:" left as text
@@ -417,24 +365,6 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         }
     }
 
-    // The draft shows the person's name; send() encodes it back to the wire
-    // address @<memberId> (what notifications and agent invocation scan for).
-    // A file becomes a live link to the space path — standard markdown on the
-    // wire. Inserted as literal nodes, never re-parsed as markdown.
-    const pickCandidate = (c: MentionCandidate) => {
-        if (!mentionMatch || !editor) return
-        const chain = editor.chain().focus().deleteRange({ from: mentionMatch.from, to: mentionMatch.to })
-        if (c.filePath) {
-            chain.insertContent([
-                { type: 'text', text: c.filePath, marks: [{ type: 'link', attrs: { href: encodeSpaceLinkTarget(c.filePath) } }] },
-                { type: 'text', text: ' ' },
-            ]).run()
-        } else {
-            chain.insertContent({ type: 'text', text: `@${c.label} ` }).run()
-        }
-        setMentionOpen(false)
-    }
-
     const insertRowboatChip = () => {
         if (!editor) return
         const { $from, empty } = editor.state.selection
@@ -486,7 +416,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
-        setMentionOpen(false)
+        mention.close()
     }
 
     const send = async (textOverride?: string) => {
@@ -525,7 +455,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
-        setMentionOpen(false)
+        mention.close()
     }
 
     // --- voice input ---------------------------------------------------------
@@ -682,25 +612,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                 return true
             }
         }
-        if (showMentions) {
-            if (e.key === 'ArrowDown') {
-                setMentionIndex((i) => (i + 1) % candidates.length)
-                return true
-            }
-            if (e.key === 'ArrowUp') {
-                setMentionIndex((i) => (i - 1 + candidates.length) % candidates.length)
-                return true
-            }
-            if (e.key === 'Enter' || e.key === 'Tab') {
-                const c = candidates[mentionIndex]
-                if (c) pickCandidate(c)
-                return true
-            }
-            if (e.key === 'Escape') {
-                setMentionOpen(false)
-                return true
-            }
-        }
+        if (mention.onKeyDown(e)) return true
         if (showEmoji) {
             if (e.key === 'ArrowDown') {
                 setEmojiIndex((i) => (i + 1) % emojiCandidates.length)
@@ -719,6 +631,18 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                 setEmojiDismissed(true)
                 return true
             }
+        }
+        if (e.key === 'Backspace' && editor) {
+            // A mention deletes as one unit (the Discord behavior): with the
+            // caret right at the end of "@Name", the whole token goes, not
+            // the last letter. caretContext bows out for range selections and
+            // code — a cited @Name still edits character by character.
+            const ctx = caretContext(editor)
+            const start = ctx ? mentionEndingAtCaret(ctx.text, members.map((m) => m.displayName)) : null
+            if (ctx && start !== null) {
+                return editor.chain().focus().deleteRange({ from: ctx.from - (ctx.text.length - start), to: ctx.from }).run()
+            }
+            return false
         }
         if (e.key !== 'Enter') return false
         // ⌘Enter always sends — even from inside a code fence.
@@ -763,6 +687,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     return (
         <div className="px-3 pb-3 pt-1 shrink-0">
             <div
+                ref={setBox}
                 className="relative rounded-2xl border border-border bg-background shadow-[0_8px_24px_rgb(0_0_0_/_0.04)]"
                 onDragEnter={onDragEnter}
                 onDragOver={(e) => { if (refs && dragHasFiles(e)) e.preventDefault() }}
@@ -877,33 +802,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
                         </div>
                     )}
-                    {showMentions && (
-                        <div className="absolute bottom-full left-2 z-20 mb-1 w-72 overflow-hidden rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
-                            {candidates.map((c, i) => (
-                                <button
-                                    key={c.id}
-                                    type="button"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => pickCandidate(c)}
-                                    className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left', i === mentionIndex ? 'bg-accent' : 'hover:bg-accent/60')}
-                                >
-                                    {c.isAgent ? (
-                                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><Bot className="size-3.5" /></span>
-                                    ) : c.isBroadcast ? (
-                                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Megaphone className="size-3.5" /></span>
-                                    ) : c.filePath ? (
-                                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><FileText className="size-3.5" /></span>
-                                    ) : (
-                                        <MemberAvatar id={c.id} name={c.label} size="sm" className="size-6 text-[10px]" />
-                                    )}
-                                    <span className="min-w-0 flex-1">
-                                        <span className="block truncate text-[13px] font-medium">{c.label}</span>
-                                        {c.hint && <span className="block truncate text-[11px] text-muted-foreground">{c.hint}</span>}
-                                    </span>
-                                </button>
-                            ))}
-                            <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
-                        </div>
+                    {/* Portalled, so the recording guard is explicit — the
+                        `hidden` wrapper above can't reach it. */}
+                    {!recording && mention.show && (
+                        <MentionMenu anchor={box} candidates={mention.candidates} index={mention.index} onPick={mention.pick} />
                     )}
                     {/* The formatting bar rides the top edge, Slack-style. */}
                     <RichFormattingToolbar editor={editor} className="px-2 pt-1.5" />
