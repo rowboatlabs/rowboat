@@ -1,16 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Bot, Clock, FileText, Globe, Loader2, Megaphone, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Bot, Clock, FileText, Globe, Loader2, LoaderIcon, Megaphone, Mic, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ModelSelector } from '@/components/model-selector'
 import type { ModelSelection } from '@/hooks/use-models'
 import { MemberAvatar } from '@/components/spaces/atoms'
+import { VoiceWaveform } from '@/components/chat-input-with-mentions'
+import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { useVoiceInputAvailable } from '@/hooks/use-voice-available'
+import { CALL_VOICE_HOLDER, acquireVoice, releaseVoice, voiceOwnerId } from '@/lib/voice-ownership'
 import { caretContext, composerExtensions, composerMarkdown, type CaretContext } from '@/components/spaces/composer-editor'
 import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { isDirectImageUrl, useSpaceRefs } from '@/components/spaces/space-markdown'
@@ -424,6 +429,17 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     // --- send ----------------------------------------------------------------
     const mentioned = containsRowboatAddress(draft)
 
+    /** Per-turn agent options — attached whenever the outgoing text addresses @rowboat. */
+    const agentOptionsFor = (text: string): AgentOptions | undefined =>
+        containsRowboatAddress(text)
+            ? {
+                  ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
+                  permissionMode,
+                  ...(searchEnabled ? { searchEnabled: true } : {}),
+                  ...(codeMode ? { codeMode } : {}),
+              }
+            : undefined
+
     /** The one body builder — send and send-later produce identical wire text. */
     const buildBody = (raw: string): string => {
         const ready = attachments.filter((a) => a.status === 'done' && a.hash)
@@ -488,20 +504,93 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         if (!body) return
         // From the text actually going out — an /ask rewrite mentions @rowboat
         // even though the draft it came from didn't.
-        const agent: AgentOptions | undefined = containsRowboatAddress(raw)
-            ? {
-                  ...(model ? { model: { provider: model.provider, model: model.model, ...(model.effort ? { effort: model.effort } : {}) } } : {}),
-                  permissionMode,
-                  ...(searchEnabled ? { searchEnabled: true } : {}),
-                  ...(codeMode ? { codeMode } : {}),
-              }
-            : undefined
-        await onSend(body, agent)
+        await onSend(body, agentOptionsFor(raw))
         editor?.chain().clearContent().run()
         setDraft('')
         setAttachments([])
         setMentionOpen(false)
     }
+
+    // --- voice input ---------------------------------------------------------
+    // The assistant composer's dictation, verbatim: the mic swaps the box for
+    // a live waveform + interim transcript; ↵ (or the arrow) finalizes and
+    // posts the transcript as a message, ✕/esc discards it. The typed draft
+    // and staged attachments sit untouched underneath either way. The mic is
+    // one physical resource — acquireVoice makes starting here a clean steal
+    // from any other composer, and a live call is never stolen from.
+    const voice = useVoiceMode()
+    const voiceAvailable = useVoiceInputAvailable()
+    const voiceHolderId = `space-composer:${useId()}`
+    const [recording, setRecording] = useState(false)
+    const recordingRef = useRef(false)
+
+    const startRecording = () => {
+        if (voiceOwnerId() === CALL_VOICE_HOLDER) return
+        acquireVoice(voiceHolderId, () => {
+            // Stolen (another composer or a call took the mic): drop the
+            // capture without releasing — the thief owns it now.
+            voice.cancel()
+            setRecording(false)
+            recordingRef.current = false
+        })
+        setRecording(true)
+        recordingRef.current = true
+        void voice.start().then((result) => {
+            if (result === 'mic-denied') {
+                setRecording(false)
+                recordingRef.current = false
+                releaseVoice(voiceHolderId)
+                // App owns the OS-permission explainer dialog.
+                window.dispatchEvent(new CustomEvent('rowboat:permission-needed', { detail: { kind: 'microphone' } }))
+            }
+        })
+    }
+
+    const cancelRecording = () => {
+        voice.cancel()
+        setRecording(false)
+        recordingRef.current = false
+        releaseVoice(voiceHolderId)
+    }
+
+    const submitRecording = async () => {
+        // Already finalizing (a second ↵ while 'submitting') must not run
+        // submit twice — that would post the transcript twice.
+        if (!recordingRef.current || voice.state === 'submitting') return
+        const text = await voice.submit()
+        setRecording(false)
+        recordingRef.current = false
+        releaseVoice(voiceHolderId)
+        if (!text) return
+        const body = encodeMentions(replaceShortcodes(text), members)
+        if (body) await onSend(body, agentOptionsFor(text))
+    }
+
+    const submitRecordingRef = useRef(submitRecording)
+    const cancelRecordingRef = useRef(cancelRecording)
+
+    // ↵ submits the dictation, esc discards it — document-level while
+    // recording, the same keys the assistant composer honors.
+    useEffect(() => {
+        if (!recording) return
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+                e.preventDefault()
+                void submitRecordingRef.current()
+            } else if (e.key === 'Escape') {
+                e.preventDefault()
+                cancelRecordingRef.current()
+            }
+        }
+        document.addEventListener('keydown', handleKeyDown)
+        return () => document.removeEventListener('keydown', handleKeyDown)
+    }, [recording])
+
+    // Unmounting mid-recording (space/thread switch) must not keep the mic:
+    // drop the capture and free the ownership token.
+    useEffect(() => () => {
+        if (recordingRef.current) cancelRecordingRef.current()
+    }, [])
 
     // The editor's keydown: popover navigation first (it must beat every
     // editor keymap), then the send keys. Formatting chords live in the
@@ -599,6 +688,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         keydownRef.current = handleEditorKeyDown
         pasteRef.current = handleEditorPaste
         dropRef.current = editorDropGuard
+        submitRecordingRef.current = submitRecording
+        cancelRecordingRef.current = cancelRecording
     })
 
     return (
@@ -615,237 +706,293 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                         Drop to attach
                     </div>
                 )}
-                {showCommands && (
-                    <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 overflow-hidden rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
-                        {cmdCandidates.map((c, i) => (
-                            <button
-                                key={c.name}
-                                type="button"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => pickCommand(c)}
-                                className={cn('flex w-full items-baseline gap-2.5 rounded-lg px-3 py-2 text-left', i === cmdIndex ? 'bg-accent' : 'hover:bg-accent/60')}
-                            >
-                                <span className="shrink-0 font-mono text-sm font-medium">/{c.name}</span>
-                                {c.args && <span className="shrink-0 font-mono text-xs text-muted-foreground">{c.args}</span>}
-                                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.hint}</span>
-                            </button>
-                        ))}
-                        <div className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
-                    </div>
-                )}
-                {!showCommands && activeCommand && !showMentions && (
-                    <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 rounded-2xl border-none bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--rowboat-shadow)]">
-                        <span className="font-mono text-sm font-medium text-foreground">/{activeCommand.name}</span>
-                        {activeCommand.args && <span className="font-mono text-sm"> {activeCommand.args}</span>} — {activeCommand.hint} · ↵ to run
-                    </div>
-                )}
-                {showEmoji && (
-                    <div className="absolute bottom-full left-2 z-20 mb-1 w-64 overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-md">
-                        {emojiCandidates.map((c, i) => (
-                            <button
-                                key={c.n}
-                                type="button"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => pickEmoji(c)}
-                                className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left', i === emojiIndex ? 'bg-accent' : 'hover:bg-accent/60')}
-                            >
-                                <span className="text-base leading-none">{c.e}</span>
-                                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">:{c.n}:</span>
-                            </button>
-                        ))}
-                        <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
-                    </div>
-                )}
-                {showMentions && (
-                    <div className="absolute bottom-full left-2 z-20 mb-1 w-72 overflow-hidden rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
-                        {candidates.map((c, i) => (
-                            <button
-                                key={c.id}
-                                type="button"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => pickCandidate(c)}
-                                className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left', i === mentionIndex ? 'bg-accent' : 'hover:bg-accent/60')}
-                            >
-                                {c.isAgent ? (
-                                    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><Bot className="size-3.5" /></span>
-                                ) : c.isBroadcast ? (
-                                    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Megaphone className="size-3.5" /></span>
-                                ) : c.filePath ? (
-                                    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><FileText className="size-3.5" /></span>
-                                ) : (
-                                    <MemberAvatar id={c.id} name={c.label} size="sm" className="size-6 text-[10px]" />
-                                )}
-                                <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-[13px] font-medium">{c.label}</span>
-                                    {c.hint && <span className="block truncate text-[11px] text-muted-foreground">{c.hint}</span>}
-                                </span>
-                            </button>
-                        ))}
-                        <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
-                    </div>
-                )}
-                {/* The formatting bar rides the top edge, Slack-style. */}
-                <RichFormattingToolbar editor={editor} className="px-2 pt-1.5" />
-                {attachments.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
-                        {attachments.map((a) => (
-                            <span
-                                key={a.id}
-                                title={a.status === 'error' ? a.error : `${a.name} · ${formatBytes(a.size)}`}
-                                className={cn(
-                                    'inline-flex max-w-56 items-center gap-1.5 rounded-lg border px-2 py-1 text-xs',
-                                    a.status === 'error' ? 'border-red-300 text-red-600 dark:border-red-800 dark:text-red-400' : 'border-border text-foreground/90',
-                                )}
-                            >
-                                {a.status === 'uploading' ? (
-                                    <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-                                ) : refs && a.hash && isImageMime(a.mime) ? (
-                                    <img src={blobAppUrl({ orgId: refs.orgId, spaceId: refs.spaceId }, a.hash, { thumb: 64 })} alt="" className="size-5 shrink-0 rounded object-cover" />
-                                ) : (
-                                    <FileText className="size-3 shrink-0 text-muted-foreground" />
-                                )}
-                                <span className="truncate">{a.name}</span>
-                                <span className="shrink-0 text-[10px] text-muted-foreground">{a.status === 'uploading' ? 'uploading…' : a.status === 'error' ? 'failed' : formatBytes(a.size)}</span>
-                                <button
-                                    type="button"
-                                    onClick={() => removeAttachment(a.id)}
-                                    aria-label={`Remove ${a.name}`}
-                                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                                >
-                                    <XIcon className="size-3" />
-                                </button>
-                            </span>
-                        ))}
-                    </div>
-                )}
-                {/* The rich input. What you see is what sends — the doc
-                    serializes back to wire markdown on every update. */}
-                <EditorContent editor={editor} className="space-composer" />
-                <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
-                    {refs && (
-                        <>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                multiple
-                                className="hidden"
-                                onChange={(e) => {
-                                    addFiles(Array.from(e.target.files ?? []))
-                                    e.target.value = ''
-                                }}
-                            />
-                            <button
-                                type="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                title="Attach files (or paste / drop them)"
-                                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-                            >
-                                <Paperclip className="size-4" />
-                            </button>
-                        </>
-                    )}
-                    {onCreatePoll && (
+                {recording && (
+                    /* ── Recording bar (the assistant composer's, verbatim) ── */
+                    <div className="flex items-center gap-3 px-4 py-3">
                         <button
                             type="button"
-                            onClick={onCreatePoll}
-                            title="Create a poll"
-                            className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                            onClick={cancelRecording}
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            aria-label="Cancel recording"
                         >
-                            <BarChart3 className="size-4" />
+                            <XIcon className="h-4 w-4" />
                         </button>
-                    )}
-                    <button
-                        type="button"
-                        onClick={insertRowboatChip}
-                        title="Address your Rowboat — it acts only when asked"
-                        className={cn(
-                            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
-                            mentioned ? 'bg-foreground text-background' : 'bg-muted text-foreground/80 hover:bg-accent',
-                        )}
-                    >
-                        @rowboat
-                    </button>
-                    {mentioned && (
-                        <>
-                            <span className="mx-0.5 h-4 w-px bg-border" />
-                            <span className="text-[11px] text-muted-foreground">runs as your Rowboat</span>
-                            <ModelSelector value={model} onChange={setModel} defaultOption={{ label: 'Assistant model' }} effortSelectable />
-                            <button
-                                type="button"
-                                onClick={() => setPermissionMode((m) => (m === 'auto' ? 'manual' : 'auto'))}
-                                title={permissionMode === 'auto' ? 'Auto-permission on — click for manual approval prompts' : 'Manual approval prompts — click for auto-permission'}
+                        <div className="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden">
+                            <VoiceWaveform audioLevelsRef={voice.audioLevelsRef} />
+                            <div
                                 className={cn(
-                                    'flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors',
-                                    permissionMode === 'auto' ? 'bg-secondary text-foreground hover:bg-secondary/70' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    'min-h-5 truncate text-sm leading-5',
+                                    voice.interimText.trim() ? 'text-foreground' : 'text-muted-foreground',
                                 )}
                             >
-                                <ShieldCheck className="size-3.5 shrink-0" />
-                                <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setSearchEnabled((v) => !v)}
-                                aria-pressed={searchEnabled}
-                                title="Web search"
-                                className={cn(
-                                    'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
-                                    searchEnabled
-                                        ? 'border-transparent bg-secondary text-foreground hover:bg-secondary/70'
-                                        : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
-                                )}
-                            >
-                                <Globe className="size-4 shrink-0" />
-                                {searchEnabled && <span className="ml-1.5 text-xs font-medium">Search</span>}
-                            </button>
-                            {codeModeAvailable && (
+                                {voice.interimText.trim() || (voice.state === 'submitting' ? 'Finalizing...' : 'Listening...')}
+                            </div>
+                        </div>
+                        <Button
+                            size="icon"
+                            onClick={() => void submitRecording()}
+                            disabled={voice.state === 'submitting'}
+                            className={cn(
+                                'h-7 w-7 shrink-0 rounded-full transition-all',
+                                voice.state !== 'submitting'
+                                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                    : 'bg-muted text-muted-foreground',
+                            )}
+                        >
+                            {voice.state === 'submitting' ? (
+                                <LoaderIcon className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <ArrowUp className="h-4 w-4" />
+                            )}
+                        </Button>
+                    </div>
+                )}
+                {/* The composer body stays mounted while recording — the TipTap doc
+                    keeps the typed draft — it just hides behind the bar above. */}
+                <div className={cn(recording && 'hidden')}>
+                    {showCommands && (
+                        <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 overflow-hidden rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
+                            {cmdCandidates.map((c, i) => (
                                 <button
+                                    key={c.name}
                                     type="button"
-                                    onClick={() => setCodeMode((m) => (m ? null : 'claude'))}
-                                    aria-pressed={!!codeMode}
-                                    title={codeMode ? 'Terminal on (Claude Code) — click to turn off' : 'Let it use the terminal / code tools'}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => pickCommand(c)}
+                                    className={cn('flex w-full items-baseline gap-2.5 rounded-lg px-3 py-2 text-left', i === cmdIndex ? 'bg-accent' : 'hover:bg-accent/60')}
+                                >
+                                    <span className="shrink-0 font-mono text-sm font-medium">/{c.name}</span>
+                                    {c.args && <span className="shrink-0 font-mono text-xs text-muted-foreground">{c.args}</span>}
+                                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{c.hint}</span>
+                                </button>
+                            ))}
+                            <div className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
+                        </div>
+                    )}
+                    {!showCommands && activeCommand && !showMentions && (
+                        <div className="absolute bottom-full left-0 right-0 z-20 mb-1.5 rounded-2xl border-none bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--rowboat-shadow)]">
+                            <span className="font-mono text-sm font-medium text-foreground">/{activeCommand.name}</span>
+                            {activeCommand.args && <span className="font-mono text-sm"> {activeCommand.args}</span>} — {activeCommand.hint} · ↵ to run
+                        </div>
+                    )}
+                    {showEmoji && (
+                        <div className="absolute bottom-full left-2 z-20 mb-1 w-64 overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-md">
+                            {emojiCandidates.map((c, i) => (
+                                <button
+                                    key={c.n}
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => pickEmoji(c)}
+                                    className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left', i === emojiIndex ? 'bg-accent' : 'hover:bg-accent/60')}
+                                >
+                                    <span className="text-base leading-none">{c.e}</span>
+                                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">:{c.n}:</span>
+                                </button>
+                            ))}
+                            <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
+                        </div>
+                    )}
+                    {showMentions && (
+                        <div className="absolute bottom-full left-2 z-20 mb-1 w-72 overflow-hidden rounded-2xl border-none bg-popover p-1.5 shadow-[var(--rowboat-shadow)]">
+                            {candidates.map((c, i) => (
+                                <button
+                                    key={c.id}
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => pickCandidate(c)}
+                                    className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left', i === mentionIndex ? 'bg-accent' : 'hover:bg-accent/60')}
+                                >
+                                    {c.isAgent ? (
+                                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><Bot className="size-3.5" /></span>
+                                    ) : c.isBroadcast ? (
+                                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Megaphone className="size-3.5" /></span>
+                                    ) : c.filePath ? (
+                                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><FileText className="size-3.5" /></span>
+                                    ) : (
+                                        <MemberAvatar id={c.id} name={c.label} size="sm" className="size-6 text-[10px]" />
+                                    )}
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-[13px] font-medium">{c.label}</span>
+                                        {c.hint && <span className="block truncate text-[11px] text-muted-foreground">{c.hint}</span>}
+                                    </span>
+                                </button>
+                            ))}
+                            <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/80">↑↓ · ↵ or ⇥ to pick · esc</div>
+                        </div>
+                    )}
+                    {/* The formatting bar rides the top edge, Slack-style. */}
+                    <RichFormattingToolbar editor={editor} className="px-2 pt-1.5" />
+                    {attachments.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
+                            {attachments.map((a) => (
+                                <span
+                                    key={a.id}
+                                    title={a.status === 'error' ? a.error : `${a.name} · ${formatBytes(a.size)}`}
                                     className={cn(
-                                        'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
-                                        codeMode ? 'bg-secondary text-foreground border-transparent hover:bg-secondary/70' : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
+                                        'inline-flex max-w-56 items-center gap-1.5 rounded-lg border px-2 py-1 text-xs',
+                                        a.status === 'error' ? 'border-red-300 text-red-600 dark:border-red-800 dark:text-red-400' : 'border-border text-foreground/90',
                                     )}
                                 >
-                                    <Terminal className="size-4 shrink-0" />
-                                    {codeMode && <span className="ml-1.5 text-xs font-medium">Terminal</span>}
-                                </button>
-                            )}
-                        </>
+                                    {a.status === 'uploading' ? (
+                                        <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+                                    ) : refs && a.hash && isImageMime(a.mime) ? (
+                                        <img src={blobAppUrl({ orgId: refs.orgId, spaceId: refs.spaceId }, a.hash, { thumb: 64 })} alt="" className="size-5 shrink-0 rounded object-cover" />
+                                    ) : (
+                                        <FileText className="size-3 shrink-0 text-muted-foreground" />
+                                    )}
+                                    <span className="truncate">{a.name}</span>
+                                    <span className="shrink-0 text-[10px] text-muted-foreground">{a.status === 'uploading' ? 'uploading…' : a.status === 'error' ? 'failed' : formatBytes(a.size)}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => removeAttachment(a.id)}
+                                        aria-label={`Remove ${a.name}`}
+                                        className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    >
+                                        <XIcon className="size-3" />
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
                     )}
-                    <div className="flex-1" />
-                    {onSchedule && (draft.trim() || attachments.some((a) => a.status === 'done')) && (
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
+                    {/* The rich input. What you see is what sends — the doc
+                        serializes back to wire markdown on every update. */}
+                    <EditorContent editor={editor} className="space-composer" />
+                    <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
+                        {refs && (
+                            <>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        addFiles(Array.from(e.target.files ?? []))
+                                        e.target.value = ''
+                                    }}
+                                />
                                 <button
                                     type="button"
-                                    title="Send later"
-                                    disabled={busy || uploading}
-                                    className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    title="Attach files (or paste / drop them)"
+                                    className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
                                 >
-                                    <Clock className="size-4" />
+                                    <Paperclip className="size-4" />
                                 </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                {schedulePresets().map((p) => (
-                                    <DropdownMenuItem key={p.label} onClick={() => void scheduleDraft(p.at)}>
-                                        {p.label}
-                                    </DropdownMenuItem>
-                                ))}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    )}
-                    <button
-                        type="button"
-                        onClick={() => void send()}
-                        disabled={busy || uploading || (!draft.trim() && !attachments.some((a) => a.status === 'done'))}
-                        aria-label="Send"
-                        title={uploading ? 'Waiting for uploads…' : 'Send (↵ · Shift+↵ for a new line)'}
-                        className="inline-flex size-8 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30 transition-opacity"
-                    >
-                        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
-                    </button>
+                            </>
+                        )}
+                        {onCreatePoll && (
+                            <button
+                                type="button"
+                                onClick={onCreatePoll}
+                                title="Create a poll"
+                                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                                <BarChart3 className="size-4" />
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={insertRowboatChip}
+                            title="Address your Rowboat — it acts only when asked"
+                            className={cn(
+                                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+                                mentioned ? 'bg-foreground text-background' : 'bg-muted text-foreground/80 hover:bg-accent',
+                            )}
+                        >
+                            @rowboat
+                        </button>
+                        {mentioned && (
+                            <>
+                                <span className="mx-0.5 h-4 w-px bg-border" />
+                                <span className="text-[11px] text-muted-foreground">runs as your Rowboat</span>
+                                <ModelSelector value={model} onChange={setModel} defaultOption={{ label: 'Assistant model' }} effortSelectable />
+                                <button
+                                    type="button"
+                                    onClick={() => setPermissionMode((m) => (m === 'auto' ? 'manual' : 'auto'))}
+                                    title={permissionMode === 'auto' ? 'Auto-permission on — click for manual approval prompts' : 'Manual approval prompts — click for auto-permission'}
+                                    className={cn(
+                                        'flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors',
+                                        permissionMode === 'auto' ? 'bg-secondary text-foreground hover:bg-secondary/70' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    )}
+                                >
+                                    <ShieldCheck className="size-3.5 shrink-0" />
+                                    <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSearchEnabled((v) => !v)}
+                                    aria-pressed={searchEnabled}
+                                    title="Web search"
+                                    className={cn(
+                                        'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
+                                        searchEnabled
+                                            ? 'border-transparent bg-secondary text-foreground hover:bg-secondary/70'
+                                            : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
+                                    )}
+                                >
+                                    <Globe className="size-4 shrink-0" />
+                                    {searchEnabled && <span className="ml-1.5 text-xs font-medium">Search</span>}
+                                </button>
+                                {codeModeAvailable && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setCodeMode((m) => (m ? null : 'claude'))}
+                                        aria-pressed={!!codeMode}
+                                        title={codeMode ? 'Terminal on (Claude Code) — click to turn off' : 'Let it use the terminal / code tools'}
+                                        className={cn(
+                                            'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors',
+                                            codeMode ? 'bg-secondary text-foreground border-transparent hover:bg-secondary/70' : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
+                                        )}
+                                    >
+                                        <Terminal className="size-4 shrink-0" />
+                                        {codeMode && <span className="ml-1.5 text-xs font-medium">Terminal</span>}
+                                    </button>
+                                )}
+                            </>
+                        )}
+                        <div className="flex-1" />
+                        {onSchedule && (draft.trim() || attachments.some((a) => a.status === 'done')) && (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <button
+                                        type="button"
+                                        title="Send later"
+                                        disabled={busy || uploading}
+                                        className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                    >
+                                        <Clock className="size-4" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    {schedulePresets().map((p) => (
+                                        <DropdownMenuItem key={p.label} onClick={() => void scheduleDraft(p.at)}>
+                                            {p.label}
+                                        </DropdownMenuItem>
+                                    ))}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        )}
+                        {voiceAvailable && (
+                            <button
+                                type="button"
+                                onClick={startRecording}
+                                aria-label="Voice input"
+                                title="Voice input"
+                                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                                <Mic className="size-4" />
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => void send()}
+                            disabled={busy || uploading || (!draft.trim() && !attachments.some((a) => a.status === 'done'))}
+                            aria-label="Send"
+                            title={uploading ? 'Waiting for uploads…' : 'Send (↵ · Shift+↵ for a new line)'}
+                            className="inline-flex size-8 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30 transition-opacity"
+                        >
+                            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

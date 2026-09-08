@@ -1423,7 +1423,7 @@ function waveBarHeight(level: number): number {
   return WAVE_BAR_MIN + amp * (WAVE_BAR_MAX - WAVE_BAR_MIN)
 }
 
-function VoiceWaveform({ audioLevelsRef }: { audioLevelsRef?: React.MutableRefObject<number[]> }) {
+export function VoiceWaveform({ audioLevelsRef }: { audioLevelsRef?: React.MutableRefObject<number[]> }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [bars, setBars] = useState<number[]>([])
   // How many bars fit in the current width; recomputed on resize.

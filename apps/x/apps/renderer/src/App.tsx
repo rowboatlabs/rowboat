@@ -1467,6 +1467,17 @@ function App() {
     void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
   }, [permissionDialog])
 
+  // Components outside App's prop reach (the Spaces composer's dictation)
+  // surface permission problems through this event — same dialog, same cue.
+  useEffect(() => {
+    const onNeeded = (e: Event) => {
+      const kind = (e as CustomEvent<{ kind?: PermissionKind }>).detail?.kind
+      if (kind) setPermissionDialog(kind)
+    }
+    window.addEventListener('rowboat:permission-needed', onNeeded)
+    return () => window.removeEventListener('rowboat:permission-needed', onNeeded)
+  }, [])
+
   // Steal handler for PTT: another holder is taking the mic — drop the
   // in-flight recording without releasing ownership (the thief owns it now).
   const cancelPttForSteal = useCallback(() => {
