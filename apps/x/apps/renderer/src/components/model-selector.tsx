@@ -12,6 +12,8 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { useModels, type ModelPickerGroup, type ModelRef, type ModelSelection } from '@/hooks/use-models'
+import { useRowboatConfig } from '@/hooks/use-rowboat-config'
+import { AUTO_MODEL_ID, isAutoModel } from '@x/shared/dist/models.js'
 import { cn } from '@/lib/utils'
 
 export type { ModelRef, ModelSelection } from '@/hooks/use-models'
@@ -69,6 +71,8 @@ function pointInTriangle(p: Point, a: Point, b: Point, c: Point): boolean {
 }
 
 function getModelDisplayName(model: string) {
+  // The Auto sentinel is a selection, not a model id — never show it raw.
+  if (isAutoModel(model)) return 'Auto'
   return model.split('/').pop() || model
 }
 
@@ -222,10 +226,19 @@ export function ModelSelector({
   lockedModel = null,
   effortSelectable = false,
 }: ModelSelectorProps) {
-  const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, catalogByProvider, refresh } = useModels()
+  const { groups: catalogGroups, reasoningByKey, defaultModel: catalogDefault, defaultIsAuto, catalogByProvider, refresh } = useModels()
   const allGroups = groupsProp ?? catalogGroups
   // The chat default has no standing in a caller-supplied model space.
   const defaultModel = groupsProp ? null : catalogDefault
+
+  // Providers offering an "Auto (recommended)" row: those with a backend
+  // recommendation to resolve against (chat catalog only — Auto has no
+  // meaning in static/caller-supplied model spaces). Local/custom flavors
+  // never have recommendations, so they never show the row.
+  const modelRecommendations = useRowboatConfig()?.modelRecommendations
+  const autoEligible = useCallback((g: ModelPickerGroup) =>
+    !staticOptions && !groupsProp && Boolean(modelRecommendations?.[g.flavor]),
+  [staticOptions, groupsProp, modelRecommendations])
 
   // inheritDefault is defaultOption with placeholder styling — one sentinel
   // code path, not two.
@@ -374,10 +387,12 @@ export function ModelSelector({
       (o.label ?? o.id).toLowerCase().includes(queryValue) || o.id.toLowerCase().includes(queryValue))
   }, [staticOptions, queryValue])
   const staticLabelFor = (id: string) => staticOptions?.find((o) => o.id === id)?.label ?? id
-  // Nothing matches anywhere → "No models match".
+  // Nothing matches anywhere → "No models match". Auto rows count: a query
+  // of "auto" with no matching model id still has rows on screen.
   const anyModelRowVisible = staticVisible
     ? staticVisible.length > 0
     : standaloneVisible
+      || ('auto'.includes(queryValue) && groups.some((g) => autoEligible(g)))
       || groups.some((g) =>
         groupMatchesFilter(g) ? g.models.length > 0
           : g.models.some((m) => m.toLowerCase().includes(queryValue)))
@@ -559,6 +574,28 @@ export function ModelSelector({
     </CommandItem>
   )
 
+  // Searching still surfaces the row by name.
+  const autoRowMatchesQuery = !queryValue || 'auto'.includes(queryValue)
+
+  // The "Auto" row: commits the provider-scoped sentinel, which the runtime
+  // resolves to the current backend recommendation per run. Secondary text
+  // shows what Auto resolves to right now when we know it (the app default
+  // is an Auto selection on this provider); otherwise just "Recommended".
+  const renderAutoItem = (g: ModelPickerGroup) => {
+    if (!autoEligible(g) || !autoRowMatchesQuery) return null
+    const key = `${g.id}/${AUTO_MODEL_ID}`
+    const resolved = defaultIsAuto && defaultModel?.provider === g.id ? defaultModel.model : null
+    return (
+      <CommandItem key={key} value={key} onSelect={() => select({ provider: g.id, model: AUTO_MODEL_ID })}>
+        <Check className={cn('size-3.5 shrink-0', selectedKey === key ? 'opacity-100' : 'opacity-0')} />
+        <span className="truncate">Auto</span>
+        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+          {resolved ?? 'Recommended'}
+        </span>
+      </CommandItem>
+    )
+  }
+
   const renderErrorItem = (g: ModelPickerGroup) => (
     <CommandItem
       key={`__retry__:${g.id}`}
@@ -630,7 +667,7 @@ export function ModelSelector({
                 <span className="flex min-w-0 items-center gap-2">
                   <span className={cn('truncate', !value && sentinelMuted && 'text-muted-foreground')}>
                     {value
-                      ? (staticOptions ? staticLabelFor(value.model) : value.model)
+                      ? (staticOptions ? staticLabelFor(value.model) : isAutoModel(value.model) ? 'Auto' : value.model)
                       : (sentinel?.label || defaultModel?.model || 'Select a model')}
                   </span>
                   {renderEffortBadge()}
@@ -653,7 +690,11 @@ export function ModelSelector({
                 <span className="min-w-0 truncate text-foreground/80">
                   {staticOptions
                     ? (value ? staticLabelFor(value.model) : (sentinel?.label ?? 'Model'))
-                    : getModelDisplayName(value?.model || defaultModel?.model || 'Model')}
+                    : !value && defaultIsAuto && defaultModel
+                      // Following an Auto default: name what actually runs,
+                      // marked as Auto so it doesn't read as a pinned pick.
+                      ? `Auto · ${getModelDisplayName(defaultModel.model)}`
+                      : getModelDisplayName(value?.model || defaultModel?.model || 'Model')}
                 </span>
                 {renderEffortBadge()}
                 <ChevronDown className="h-3 w-3 shrink-0" />
@@ -742,6 +783,7 @@ export function ModelSelector({
                     <CommandList className="max-h-80 flex-1" onScroll={() => setSub(null)}>
                       <CommandGroup>
                         {renderSentinelItem()}
+                        {renderAutoItem(activeGroup)}
                         {standaloneDefault && standaloneDefault.provider === activeGroup.id &&
                           renderModelItem(standaloneDefault.provider, standaloneDefault.model)}
                         {activeGroup.models.map((m) => renderModelItem(activeGroup.id, m))}
@@ -790,9 +832,11 @@ export function ModelSelector({
                       // the header) regardless of the filter and don't count
                       // toward "No models match".
                       const showError = g.status === 'error'
-                      if (visibleModels.length === 0 && !showError) return null
+                      const autoRow = renderAutoItem(g)
+                      if (visibleModels.length === 0 && !showError && !autoRow) return null
                       return (
                         <CommandGroup key={g.id} heading={providerDisplayNames[g.flavor] || g.flavor}>
+                          {autoRow}
                           {visibleModels.map((m) => renderModelItem(g.id, m))}
                           {showError && renderErrorItem(g)}
                         </CommandGroup>

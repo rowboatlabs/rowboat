@@ -1,5 +1,5 @@
 import z from "zod";
-import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
+import { LlmModelConfig, LlmProvider, isAutoModel } from "@x/shared/dist/models.js";
 import { isSignedIn } from "../account/account.js";
 import { getChatGPTStatus } from "../auth/chatgpt-auth.js";
 import container from "../di/container.js";
@@ -49,8 +49,11 @@ export interface CatalogProviderEntry {
 export interface ModelCatalogResult {
     providers: CatalogProviderEntry[];
     /** The effective runtime default (what runs when nothing is picked),
-     *  with the effort stored alongside it — seeds new chats' composers. */
-    defaultModel: { provider: string; model: string; effort?: "low" | "medium" | "high" } | null;
+     *  with the effort stored alongside it — seeds new chats' composers.
+     *  Always a CONCRETE model: an Auto assistant arrives resolved, with
+     *  isAuto set so pickers can present it as "Auto" rather than treating
+     *  the sentinel as a missing model. */
+    defaultModel: { provider: string; model: string; effort?: "low" | "medium" | "high"; isAuto?: boolean } | null;
 }
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
@@ -230,26 +233,50 @@ export interface GetModelCatalogOptions {
     refreshProvider?: string;
 }
 
+// One models.dev read serves every cloud flavor in the build (disk cache,
+// no network — refreshed by its own background loop). Empty map on failure
+// → cloud flavors fall through to live listing.
+async function readModelsDevByFlavor(): Promise<Map<string, CatalogModelEntry[]>> {
+    const modelsDevByFlavor = new Map<string, CatalogModelEntry[]>();
+    try {
+        const catalog = await listOnboardingModels();
+        for (const p of catalog.providers) {
+            modelsDevByFlavor.set(p.id, p.models.map(({ id, name, reasoning }) => ({
+                id,
+                ...(name ? { name } : {}),
+                ...(reasoning !== undefined ? { reasoning } : {}),
+            })));
+        }
+    } catch {
+        // Empty map → cloud flavors fall through to live listing.
+    }
+    return modelsDevByFlavor;
+}
+
+/**
+ * The model ids one provider currently serves, through the same
+ * per-provider cache the catalog uses (so callers piggyback on picker
+ * listings and vice versa). Empty when the provider isn't connected or its
+ * list failed — the caller owns the fallback; used by the Auto resolver to
+ * validate recommendations before applying them.
+ */
+export async function listProviderModelIds(providerId: string): Promise<string[]> {
+    const discovered = await discoverProviders();
+    const provider = discovered.find((p) => p.id === providerId);
+    if (!provider) return [];
+    const modelsDevByFlavor = MODELS_DEV_FLAVORS.has(provider.flavor)
+        ? await readModelsDevByFlavor()
+        : new Map<string, CatalogModelEntry[]>();
+    const entry = await resolveProviderEntry(provider, modelsDevByFlavor, false);
+    return entry.models.map((m) => m.id);
+}
+
 export async function getModelCatalog(options?: GetModelCatalogOptions): Promise<ModelCatalogResult> {
     const discovered = await discoverProviders();
 
-    // One models.dev read serves every cloud flavor in the build (disk cache,
-    // no network — refreshed by its own background loop).
-    const modelsDevByFlavor = new Map<string, CatalogModelEntry[]>();
-    if (discovered.some((p) => MODELS_DEV_FLAVORS.has(p.flavor))) {
-        try {
-            const catalog = await listOnboardingModels();
-            for (const p of catalog.providers) {
-                modelsDevByFlavor.set(p.id, p.models.map(({ id, name, reasoning }) => ({
-                    id,
-                    ...(name ? { name } : {}),
-                    ...(reasoning !== undefined ? { reasoning } : {}),
-                })));
-            }
-        } catch {
-            // Empty map → cloud flavors fall through to live listing.
-        }
-    }
+    const modelsDevByFlavor = discovered.some((p) => MODELS_DEV_FLAVORS.has(p.flavor))
+        ? await readModelsDevByFlavor()
+        : new Map<string, CatalogModelEntry[]>();
 
     const entries = await Promise.all(discovered.map(async (provider) => {
         const entry = await resolveProviderEntry(
@@ -269,7 +296,12 @@ export async function getModelCatalog(options?: GetModelCatalogOptions): Promise
 
     let defaultModel: ModelCatalogResult["defaultModel"] = null;
     try {
-        defaultModel = await getDefaultModelAndProvider();
+        // Always the RESOLVED default — an Auto assistant comes back as the
+        // concrete model it currently resolves to, flagged so pickers can
+        // present it as "Auto" instead of a plain model choice.
+        const resolved = await getDefaultModelAndProvider();
+        const isAuto = isAutoModel((await readModelConfig())?.assistantModel?.model);
+        defaultModel = { ...resolved, ...(isAuto ? { isAuto: true } : {}) };
     } catch {
         // No default resolvable (no config, signed out) — the picker copes.
     }

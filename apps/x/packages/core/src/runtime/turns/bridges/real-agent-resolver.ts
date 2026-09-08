@@ -17,6 +17,8 @@ import { BuiltinTools } from "../../tools/catalog.js";
 import { skillToolNames } from "../../assembly/skills/index.js";
 import { ModeFlags } from "../../assembly/capabilities/types.js";
 import { getDefaultModelAndProvider } from "../../../models/defaults.js";
+import { resolveAutoSelection } from "../../../models/auto.js";
+import { isAutoModel } from "@x/shared/dist/models.js";
 import {
     builtinToolDescriptor,
     toJsonValue,
@@ -155,6 +157,13 @@ export class RealAgentResolver {
                 provider: agent.provider ?? fallback.provider,
                 model: agent.model ?? fallback.model,
             };
+        }
+        if (isAutoModel(model.model)) {
+            // An Auto sentinel from a turn override or an agent declaration
+            // (the app default arrives already resolved) pins its concrete
+            // resolution into this turn's snapshot.
+            const resolved = await resolveAutoSelection(model.provider, "assistant");
+            model = { provider: resolved.provider, model: resolved.model };
         }
 
         const parsed = CompositionOverrides.safeParse(

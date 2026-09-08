@@ -35,8 +35,12 @@ export interface ModelsSnapshot {
   reasoningByKey: Record<string, boolean>
   // The effective runtime default (what a run actually uses when the user
   // hasn't picked a model) — shown in pickers instead of guessing from list
-  // order, which can disagree with the real default.
+  // order, which can disagree with the real default. Always a CONCRETE
+  // model: an Auto assistant arrives resolved (defaultIsAuto marks it).
   defaultModel: ModelRef | null
+  // True when the saved assistant is the Auto selection — defaultModel then
+  // holds what Auto currently resolves to, for "Auto · <model>" displays.
+  defaultIsAuto: boolean
   // The reasoning effort stored WITH the assistant model ('' = Auto). Seeds
   // new chats' composer state and the settings field display.
   defaultEffort: '' | 'low' | 'medium' | 'high'
@@ -60,6 +64,7 @@ const EMPTY_SNAPSHOT: ModelsSnapshot = {
   groups: [],
   reasoningByKey: {},
   defaultModel: null,
+  defaultIsAuto: false,
   defaultEffort: '',
   isRowboatConnected: false,
   catalogByProvider: {},
@@ -126,6 +131,7 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
     groups,
     reasoningByKey,
     defaultModel,
+    defaultIsAuto: catalog.defaultModel?.isAuto === true,
     defaultEffort,
     isRowboatConnected: catalog.providers.some((p) => p.id === 'rowboat'),
     catalogByProvider,

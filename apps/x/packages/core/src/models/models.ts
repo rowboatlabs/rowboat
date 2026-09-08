@@ -6,7 +6,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOllama } from "ollama-ai-provider-v2";
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
+import { LlmModelConfig, LlmProvider, isAutoModel } from "@x/shared/dist/models.js";
 import z from "zod";
 import { getGatewayProvider } from "./gateway.js";
 import { getCodexProvider } from "./codex.js";
@@ -97,6 +97,12 @@ export function createLanguageModel(
     providerConfig: z.infer<typeof Provider>,
     modelId: string,
 ): LanguageModel {
+    if (isAutoModel(modelId)) {
+        // Last line of defense: the sentinel resolves in the selection
+        // funnels (defaults.ts / run creation). Reaching a provider SDK —
+        // or the gateway, which would 403 it — means a funnel was bypassed.
+        throw new Error("The Auto model selection must be resolved to a concrete model before invoking a provider");
+    }
     const model = createProvider(providerConfig).languageModel(modelId);
     return applyLocalModelSettings(model, providerConfig);
 }

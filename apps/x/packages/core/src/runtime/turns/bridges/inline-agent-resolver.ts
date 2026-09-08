@@ -9,6 +9,8 @@ import {
 import { ResolvedAgent as ResolvedAgentSchema } from "@x/shared/dist/turns.js";
 import { BuiltinTools } from "../../tools/catalog.js";
 import { getDefaultModelAndProvider } from "../../../models/defaults.js";
+import { resolveAutoSelection } from "../../../models/auto.js";
+import { isAutoModel } from "@x/shared/dist/models.js";
 import { builtinToolDescriptor } from "../../tools/descriptors.js";
 
 // Default tool profile for inline agents that omit `tools`: every builtin
@@ -59,6 +61,13 @@ export class InlineAgentResolver {
         if (!model) {
             const fallback = await this.defaultModel();
             model = { provider: fallback.provider, model: fallback.model };
+        }
+        if (isAutoModel(model.model)) {
+            // An Auto sentinel on an inline spec pins its concrete
+            // resolution into this agent's snapshot (the default fallback
+            // arrives already resolved).
+            const resolved = await resolveAutoSelection(model.provider, "assistant");
+            model = { provider: resolved.provider, model: resolved.model };
         }
 
         const names =

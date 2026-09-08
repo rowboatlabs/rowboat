@@ -13,6 +13,8 @@ import { extractCommandNames } from "../../application/lib/command-executor.js";
 import { addFileAccessGrant, addToSecurityConfig } from "../../config/security.js";
 import { loadAgent } from "../assembly/registry.js";
 import { getDefaultModelAndProvider } from "../../models/defaults.js";
+import { resolveAutoSelection } from "../../models/auto.js";
+import { isAutoModel } from "@x/shared/dist/models.js";
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
     const repo = container.resolve<IRunsRepo>('runsRepo');
@@ -25,8 +27,14 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
     // next link in the chain instead of being treated as a real value.
     const agent = await loadAgent(opts.agentId);
     const defaults = await getDefaultModelAndProvider();
-    const model = opts.model || agent.model || defaults.model;
+    let model = opts.model || agent.model || defaults.model;
     const provider = opts.provider || agent.provider || defaults.provider;
+    if (isAutoModel(model)) {
+        // An Auto sentinel from opts or an agent declaration (defaults come
+        // back already resolved) pins its concrete resolution here, so the
+        // run keeps one model for its whole life like any other run.
+        ({ model } = await resolveAutoSelection(provider, "assistant"));
+    }
     const useCase = opts.useCase ?? "copilot_chat";
 
     const run = await repo.create({
