@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadInputFor } from '@/lib/spaces-upload'
-import { ArrowUp, BarChart3, Bot, Clock, FileText, Globe, Loader2, LoaderIcon, Megaphone, Mic, Paperclip, ShieldCheck, Terminal, X as XIcon } from 'lucide-react'
+import { ArrowUp, BarChart3, Bot, Clock, FileText, Globe, Loader2, LoaderIcon, Megaphone, Mic, Paperclip, ShieldCheck, Square, Terminal, X as XIcon } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -91,6 +91,24 @@ const ASK_COMMAND: CommandEntry = { name: 'ask', args: '<question>', hint: 'Ask 
 /** A draft that IS a command: "/name" or "/name args". */
 const COMMAND_RE = /^\/([a-zA-Z]+)(?:\s+([\s\S]*))?$/
 
+// The dictation cleanup pass: the background-agents model turns raw speech
+// ("um so I was thinking...") into a message you'd post in Slack. Strictly
+// best-effort — any failure, empty result, or timeout falls back to the raw
+// transcript; cleanup never loses a dictation.
+const FORMAT_DICTATION_TIMEOUT_MS = 15_000
+
+async function formatTranscript(raw: string): Promise<string> {
+    try {
+        const res = await Promise.race([
+            window.ipc.invoke('voice:formatDictation', { text: raw }),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), FORMAT_DICTATION_TIMEOUT_MS)),
+        ])
+        return res?.text?.trim() || raw
+    } catch {
+        return raw
+    }
+}
+
 export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, autoFocus, onType, seed, members = [], entries = [], selfMemberId, draftKey, commands = [] }: {
     placeholder: string
     onSend: (body: string, agent?: AgentOptions) => Promise<void>
@@ -148,8 +166,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
 
     const editor = useEditor({
         // The getter runs inside Placeholder's decoration pass (post-render,
-        // in the editor), never during this render — a false positive here.
-        // eslint-disable-next-line react-hooks/refs
+        // in the editor), never during this render — safe despite the ref read.
         extensions: composerExtensions(() => placeholderRef.current),
         content: draft,
         autofocus: autoFocus ? 'end' : false,
@@ -512,17 +529,24 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     }
 
     // --- voice input ---------------------------------------------------------
-    // The assistant composer's dictation, verbatim: the mic swaps the box for
-    // a live waveform + interim transcript; ↵ (or the arrow) finalizes and
-    // posts the transcript as a message, ✕/esc discards it. The typed draft
-    // and staged attachments sit untouched underneath either way. The mic is
-    // one physical resource — acquireVoice makes starting here a clean steal
-    // from any other composer, and a live call is never stolen from.
+    // The assistant composer's dictation UI: the mic swaps the box for a live
+    // waveform + interim transcript. Two ways out, both running the cleanup
+    // pass (background-agents model → Slack-ready text): Stop (■ / ↵) drops
+    // the result INTO the input box — joining any typed draft — for the
+    // person to edit and send; the arrow (⌘↵) posts it straight away.
+    // ✕/esc discards the recording. The mic is one physical resource —
+    // acquireVoice makes starting here a clean steal from any other
+    // composer, and a live call is never stolen from.
     const voice = useVoiceMode()
     const voiceAvailable = useVoiceInputAvailable()
     const voiceHolderId = `space-composer:${useId()}`
     const [recording, setRecording] = useState(false)
     const recordingRef = useRef(false)
+    // Stop/send accepted: STT finalize + the cleanup pass are running — the
+    // bar shows "Finalizing...", the clicked button spins, and further
+    // clicks are ignored until it lands.
+    const [finalizing, setFinalizing] = useState<false | 'insert' | 'send'>(false)
+    const finalizingRef = useRef(false)
 
     const startRecording = () => {
         if (voiceOwnerId() === CALL_VOICE_HOLDER) return
@@ -553,30 +577,73 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         releaseVoice(voiceHolderId)
     }
 
-    const submitRecording = async () => {
-        // Already finalizing (a second ↵ while 'submitting') must not run
-        // submit twice — that would post the transcript twice.
-        if (!recordingRef.current || voice.state === 'submitting') return
-        const text = await voice.submit()
-        setRecording(false)
-        recordingRef.current = false
-        releaseVoice(voiceHolderId)
+    /**
+     * Stop capture and run the cleanup pass. Returns the Slack-ready text
+     * ('' when nothing usable was heard, or the dictation was cancelled
+     * mid-flight) with all recording state closed down.
+     */
+    const finishRecording = async (action: 'insert' | 'send'): Promise<string> => {
+        // One shot: a second click/↵ while finalizing must not run twice.
+        if (!recordingRef.current || finalizingRef.current || voice.state === 'submitting') return ''
+        finalizingRef.current = true
+        setFinalizing(action)
+        let text = ''
+        try {
+            const raw = await voice.submit()
+            // Capture is over — free the mic while the cleanup pass runs (a
+            // recording started elsewhere must not kill this pending text).
+            releaseVoice(voiceHolderId)
+            // Cancelled (esc / steal) while the transcript was finalizing.
+            if (!recordingRef.current) return ''
+            if (raw) {
+                text = await formatTranscript(raw)
+                if (!recordingRef.current) text = ''
+            }
+        } finally {
+            finalizingRef.current = false
+            setFinalizing(false)
+            setRecording(false)
+            recordingRef.current = false
+        }
+        return text
+    }
+
+    /** Stop (■): the cleaned text goes INTO the box for review — never posts. */
+    const stopRecording = async () => {
+        const text = await finishRecording('insert')
+        if (!text || !editor) return
+        // Joins a typed draft in progress (same append rule as seeds).
+        const current = composerMarkdown(editor)
+        const next = current ? `${current}${/\s$/.test(current) ? '' : ' '}${text}` : text
+        editor.commands.setContent(next)
+        setDraft(composerMarkdown(editor))
+        // The recording bar's close hasn't painted yet (the editor is still
+        // display:none) — focus once it's visible again.
+        requestAnimationFrame(() => editor.commands.focus('end'))
+    }
+
+    /** Send (↑): the cleaned text posts immediately, skipping the review stop. */
+    const sendRecording = async () => {
+        const text = await finishRecording('send')
         if (!text) return
         const body = encodeMentions(replaceShortcodes(text), members)
         if (body) await onSend(body, agentOptionsFor(text))
     }
 
-    const submitRecordingRef = useRef(submitRecording)
+    const stopRecordingRef = useRef(stopRecording)
+    const sendRecordingRef = useRef(sendRecording)
     const cancelRecordingRef = useRef(cancelRecording)
 
-    // ↵ submits the dictation, esc discards it — document-level while
-    // recording, the same keys the assistant composer honors.
+    // ↵ stops and drops the text into the box, ⌘/Ctrl+↵ sends it straight
+    // away (the composer's own "⌘↵ always sends" chord), esc discards —
+    // document-level while recording.
     useEffect(() => {
         if (!recording) return
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Enter') {
                 e.preventDefault()
-                void submitRecordingRef.current()
+                if (e.metaKey || e.ctrlKey) void sendRecordingRef.current()
+                else void stopRecordingRef.current()
             } else if (e.key === 'Escape') {
                 e.preventDefault()
                 cancelRecordingRef.current()
@@ -688,7 +755,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         keydownRef.current = handleEditorKeyDown
         pasteRef.current = handleEditorPaste
         dropRef.current = editorDropGuard
-        submitRecordingRef.current = submitRecording
+        stopRecordingRef.current = stopRecording
+        sendRecordingRef.current = sendRecording
         cancelRecordingRef.current = cancelRecording
     })
 
@@ -725,26 +793,44 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                     voice.interimText.trim() ? 'text-foreground' : 'text-muted-foreground',
                                 )}
                             >
-                                {voice.interimText.trim() || (voice.state === 'submitting' ? 'Finalizing...' : 'Listening...')}
+                                {voice.interimText.trim() || (finalizing || voice.state === 'submitting' ? 'Finalizing...' : 'Listening...')}
                             </div>
                         </div>
-                        <Button
-                            size="icon"
-                            onClick={() => void submitRecording()}
-                            disabled={voice.state === 'submitting'}
-                            className={cn(
-                                'h-7 w-7 shrink-0 rounded-full transition-all',
-                                voice.state !== 'submitting'
-                                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                                    : 'bg-muted text-muted-foreground',
-                            )}
-                        >
-                            {voice.state === 'submitting' ? (
-                                <LoaderIcon className="h-4 w-4 animate-spin" />
-                            ) : (
-                                <ArrowUp className="h-4 w-4" />
-                            )}
-                        </Button>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                            <Button
+                                size="icon"
+                                onClick={() => void stopRecording()}
+                                disabled={!!finalizing || voice.state === 'submitting'}
+                                aria-label="Stop recording"
+                                title="Stop — the text lands in the box to review (↵)"
+                                className="h-7 w-7 shrink-0 rounded-full bg-muted text-foreground transition-all hover:bg-muted/80 disabled:text-muted-foreground"
+                            >
+                                {finalizing === 'insert' ? (
+                                    <LoaderIcon className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Square className="h-3 w-3 fill-current" />
+                                )}
+                            </Button>
+                            <Button
+                                size="icon"
+                                onClick={() => void sendRecording()}
+                                disabled={!!finalizing || voice.state === 'submitting'}
+                                aria-label="Stop and send"
+                                title="Send it straight away (⌘↵)"
+                                className={cn(
+                                    'h-7 w-7 shrink-0 rounded-full transition-all',
+                                    !(finalizing || voice.state === 'submitting')
+                                        ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                        : 'bg-muted text-muted-foreground',
+                                )}
+                            >
+                                {finalizing === 'send' ? (
+                                    <LoaderIcon className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <ArrowUp className="h-4 w-4" />
+                                )}
+                            </Button>
+                        </div>
                     </div>
                 )}
                 {/* The composer body stays mounted while recording — the TipTap doc

@@ -114,6 +114,7 @@ function updateSelfCaptureState() {
 import * as composioHandler from '@x/core/dist/composio/flows.js';
 import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
 import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
+import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
@@ -2615,6 +2616,9 @@ export function setupIpcHandlers() {
       activeTtsStreams.get(args.requestId)?.abort();
       activeTtsStreams.delete(args.requestId);
       return {};
+    },
+    'voice:formatDictation': async (_event, args) => {
+      return { text: await formatDictation(args.text) };
     },
     'voice:ensureMicAccess': async () => {
       if (process.platform !== 'darwin') return { granted: true };

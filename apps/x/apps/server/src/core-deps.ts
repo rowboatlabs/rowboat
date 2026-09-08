@@ -30,6 +30,7 @@ import type { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import type { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import * as voice from '@x/core/dist/voice/voice.js';
 import { publishTtsChunk, subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
+import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
 import { fetchLiveNote, listLiveNotes, setLiveNote, setLiveNoteActive, deleteLiveNote } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
@@ -1279,6 +1280,9 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
     },
     'voice:synthesize': async (args) => {
       return voice.synthesizeSpeech(args.text);
+    },
+    'voice:formatDictation': async (args) => {
+      return { text: await formatDictation(args.text) };
     },
     'live-note:run': async (args) => {
       const result = await runLiveNoteAgent(args.filePath, 'manual', args.context);

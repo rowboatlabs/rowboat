@@ -2626,6 +2626,14 @@ export const ipcSchemas = {
     req: z.object({ requestId: z.string() }),
     res: z.object({}),
   },
+  // Dictation cleanup: the Spaces composer sends the raw STT transcript and
+  // places the returned Slack-ready text (background-agents task model) into
+  // the input box as an editable draft. null = unusable input or no usable
+  // output — the caller falls back to the raw transcript.
+  'voice:formatDictation': {
+    req: z.object({ text: z.string() }),
+    res: z.object({ text: z.string().nullable() }),
+  },
   // Push channel: main → renderer with streaming TTS audio. `done: true`
   // (possibly with a final chunk) ends the stream; `error` aborts it.
   'voice:tts-chunk': {
