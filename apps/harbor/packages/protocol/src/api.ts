@@ -112,6 +112,30 @@ export const routes = {
     request: z.object({ memberId: MemberId }),
     response: z.object({ space: Space, created: z.boolean() }),
   },
+  /**
+   * Push notifications (2026-09-07, PUSH_PLAN.md): a member's device
+   * registers its Expo push token and the member's notify level in one
+   * idempotent call — the phone re-registers on every start and on every
+   * preference change. Level is per MEMBER (all their devices); tokens are
+   * per device. Org-scoped like everything: each org pushes for its own
+   * spaces.
+   */
+  registerPush: {
+    method: 'POST',
+    path: '/v1/push/register',
+    request: z.object({
+      token: z.string().min(1).max(200),
+      level: z.enum(['off', 'mentions', 'dms', 'all']),
+    }),
+    response: z.object({ ok: z.literal(true) }),
+  },
+  /** Sign-out: forget one device token (the member's level stays). */
+  unregisterPush: {
+    method: 'POST',
+    path: '/v1/push/unregister',
+    request: z.object({ token: z.string().min(1).max(200) }),
+    response: z.object({ ok: z.literal(true) }),
+  },
   createSpace: {
     method: 'POST',
     path: '/v1/spaces',

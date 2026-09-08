@@ -4,13 +4,15 @@ import { useEffect, useState } from 'react';
 import { ScrollView, Pressable, Text, View } from 'react-native';
 
 import { useConnection } from '@/lib/connection';
-import { PUSH_LEVELS, getPushLevel, registerWithMac, setPushLevel, type PushLevel } from '@/lib/push';
+import { useSpacesAccount } from '@/lib/spaces/account';
+import { PUSH_LEVELS, getPushLevel, registerWithHarbor, registerWithMac, setPushLevel, type PushLevel } from '@/lib/push';
 import { useColors } from '@/theme/colors';
 
 // Notification preferences: one global level, enforced by the Mac's watcher.
 export default function NotificationsScreen() {
   const colors = useColors();
-  const { rpc, pairing } = useConnection();
+  const { rpc } = useConnection();
+  const account = useSpacesAccount();
   const [level, setLevel] = useState<PushLevel | null>(null);
   const [state, setState] = useState<string | null>(null);
 
@@ -22,15 +24,18 @@ export default function NotificationsScreen() {
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
     setLevel(next);
     await setPushLevel(next);
-    if (rpc) {
-      const result = await registerWithMac(rpc).catch(() => 'error' as const);
-      setState(
-        result === 'registered' ? null
-        : result === 'no-permission' ? 'Notifications are off in iOS Settings — enable them for Rowboat to get pushes.'
-        : result === 'unavailable' ? 'Simulators can’t receive pushes — try on a real device.'
-        : 'Could not reach your Mac to save this — it will retry on the next connect.',
-      );
-    }
+    // Harbor (the org servers) is the sender; a paired Mac is the fallback relay.
+    const result = account.orgs?.length
+      ? await registerWithHarbor(account.orgs, account.getAccessToken).catch(() => 'error' as const)
+      : 'no-orgs' as const;
+    if (rpc) void registerWithMac(rpc).catch(() => {});
+    setState(
+      result === 'registered' ? null
+      : result === 'no-permission' ? 'Notifications are off in iOS Settings — enable them for Rowboat to get pushes.'
+      : result === 'unavailable' ? 'Simulators can’t receive pushes — try on a real device.'
+      : result === 'no-orgs' ? 'Sign in to Spaces first — notifications come from your orgs.'
+      : 'Could not save this right now — it will retry on the next launch.',
+    );
   };
 
   return (
@@ -40,8 +45,7 @@ export default function NotificationsScreen() {
       contentContainerStyle={{ paddingVertical: 12 }}
     >
       <Text style={{ fontSize: 13, lineHeight: 18, color: colors.secondaryLabel, paddingHorizontal: 16, paddingBottom: 12 }}>
-        Push notifications for your spaces{pairing ? '' : ' — connect your Mac to turn these on'}. Your Mac relays them,
-        so it needs to be running.
+        Push notifications for messages, DMs, and mentions across your spaces.
       </Text>
       {PUSH_LEVELS.map((option) => (
         <Pressable

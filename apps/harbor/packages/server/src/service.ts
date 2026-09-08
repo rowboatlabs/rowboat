@@ -47,11 +47,12 @@ const MESSAGES_PAGE_MAX = 200;
 import type { z } from 'zod';
 import { blobHash, type BlobStore } from './blobs.js';
 import { HarborError } from './errors.js';
+import type { PushSender } from './push.js';
 import { SpaceHub } from './hub.js';
 import { merge3 } from './merge.js';
 import { dispositionFor, imageDimensions, resolveMime } from './mime.js';
 import { parseSearchQuery } from './search.js';
-import {
+import { type PushLevel,
   DIRECT_SPACE_NAME,
   directKeyFor,
   type AssetRecord,
@@ -125,6 +126,8 @@ export class HarborService {
     org: OrgInfo,
     /** Absent = uploads unconfigured on this org (routes refuse loudly, everything else works). */
     private readonly blobs?: BlobStore,
+    /** Absent = no push notifications on this org (PUSH_PLAN.md). */
+    private readonly push?: PushSender,
   ) {
     this.org = org;
   }
@@ -987,7 +990,7 @@ export class HarborService {
   }
 
   async postMessage(ctx: ActorCtx, spaceId: string, input: NewMessage): Promise<{ message: Message }> {
-    await this.requireMember(ctx, spaceId);
+    const space = await this.requireMember(ctx, spaceId);
     this.guardWrite();
     const author: Attribution = {
       memberId: ctx.memberId,
@@ -995,7 +998,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
-    return this.store.withSpaceLock(spaceId, async () => {
+    const result = await this.store.withSpaceLock(spaceId, async () => {
       const at = this.now();
       // The org stamps the poll from its own clock: answer ids 1..n, a
       // duration in becomes an expiry out (the Discord create asymmetry).
@@ -1062,6 +1065,25 @@ export class HarborService {
       await this.append(spaceId, offset, at, { type: 'message', message });
       return { message };
     });
+    // Push decisions run OUTSIDE the lock and never block the reply
+    // (PUSH_PLAN.md); the sender logs its own failures.
+    if (this.push) void this.push.onMessage(space, result.message);
+    return result;
+  }
+
+  // --- push (PUSH_PLAN.md) ---------------------------------------------------
+
+  /** A member's device registers its token + the member's level. Idempotent. */
+  async registerPush(ctx: ActorCtx, input: { token: string; level: PushLevel }): Promise<{ ok: true }> {
+    await this.store.putPushToken(ctx.memberId, input.token, this.now());
+    await this.store.setPushLevel(ctx.memberId, input.level);
+    return { ok: true };
+  }
+
+  /** Sign-out: forget one device. The member's level stays. */
+  async unregisterPush(_ctx: ActorCtx, input: { token: string }): Promise<{ ok: true }> {
+    await this.store.deletePushToken(input.token);
+    return { ok: true };
   }
 
   /**

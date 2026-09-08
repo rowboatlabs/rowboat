@@ -8,6 +8,7 @@ import { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
 import { MemoryStore } from './memory-store.js';
 import { HarborService } from './service.js';
+import { PushSender } from './push.js';
 import type { Store } from './store.js';
 import { attachLive } from './ws.js';
 
@@ -30,6 +31,8 @@ export interface SeedSpace {
 }
 
 export interface HarborOptions {
+  /** Test injection: replaces the default PushSender (PUSH_PLAN.md). */
+  pushSender?: PushSender;
   /** 0 (default) picks an ephemeral port — tests never collide. */
   port?: number;
   orgName?: string;
@@ -82,6 +85,7 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
       ...(options.allowedEmailDomains ? { allowedEmailDomains: options.allowedEmailDomains } : {}),
     },
     blobs,
+    options.pushSender ?? new PushSender(store, options.orgName ?? 'dev'),
   );
 
   for (const m of options.seedMembers ?? []) {

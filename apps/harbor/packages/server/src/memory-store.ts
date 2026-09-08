@@ -7,7 +7,7 @@ import type {
   Topic,
 } from '@rowboat/spaces-protocol';
 import { extractSearchText, matchesAllTerms, snippetAround, type SearchQuery } from './search.js';
-import { directKeyFor } from './store.js';
+import { type PushLevel, directKeyFor } from './store.js';
 import type {
   AssetRecord,
   AssetSearchRow,
@@ -46,6 +46,8 @@ export class MemoryStore implements Store {
   private spaces = new Map<string, SpaceState>();
   private directKeys = new Map<string, string>(); // direct key → spaceId (the unique index, in memory)
   private invites = new Map<string, StoredInvite>();
+  private pushTokens = new Map<string, { memberId: string; updatedAt: string }>(); // token → owner
+  private pushLevels = new Map<string, PushLevel>();
 
   private state(spaceId: string): SpaceState | undefined {
     return this.spaces.get(spaceId);
@@ -141,6 +143,26 @@ export class MemoryStore implements Store {
 
   async deleteMembership(spaceId: string, memberId: string): Promise<void> {
     this.must(spaceId).memberships.delete(memberId);
+  }
+
+  async putPushToken(memberId: string, token: string, updatedAt: string): Promise<void> {
+    this.pushTokens.set(token, { memberId, updatedAt });
+  }
+
+  async deletePushToken(token: string): Promise<void> {
+    this.pushTokens.delete(token);
+  }
+
+  async listPushTokens(memberId: string): Promise<string[]> {
+    return [...this.pushTokens.entries()].filter(([, v]) => v.memberId === memberId).map(([t]) => t);
+  }
+
+  async setPushLevel(memberId: string, level: PushLevel): Promise<void> {
+    this.pushLevels.set(memberId, level);
+  }
+
+  async getPushLevel(memberId: string): Promise<PushLevel | undefined> {
+    return this.pushLevels.get(memberId);
   }
 
   async listAssets(spaceId: string, includeDeleted: boolean): Promise<AssetRecord[]> {

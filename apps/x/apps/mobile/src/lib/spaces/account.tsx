@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { danceForTokens, discoverIssuer, refreshTokens, type SpacesTokens } from './oauth';
+import { registerWithHarbor } from '@/lib/push';
 
 // Spaces account state: ONE sign-in against the deployment's AS (discovered
 // from the apex), tokens in the keychain, orgs from apex GET /v1/orgs.
@@ -94,6 +95,9 @@ export function SpacesAccountProvider({ children }: { children: ReactNode }) {
       const json = (await res.json()) as { orgs: SpacesOrg[] };
       setOrgs(json.orgs);
       void AsyncStorage.setItem(ORGS_CACHE_KEY, JSON.stringify(json.orgs)).catch(() => {});
+      // Each org's Harbor is the push sender (PUSH_PLAN.md) — re-register on
+      // every refresh: idempotent, and it keeps token + level current.
+      void registerWithHarbor(json.orgs, getAccessToken).catch(() => {});
     } catch (err) {
       setOrgsError(err instanceof Error ? err.message : String(err));
     }

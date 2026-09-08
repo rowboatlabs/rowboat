@@ -260,6 +260,8 @@ Amended 2026-08-19 (spec §4: invites/profile/roles): an invite is one shape —
 - **Render-face Latitude details** — pagination, ETags, unread counters may be added without a contract round, provided existing fields keep their meaning.
 - **Presence granularity, digest thresholds, notification policy** — spec §13 open questions; the schemas carry the minimum (`PresenceState`) and will evolve with dogfood.
 
+Amended 2026-09-07 (push notifications, PUSH_PLAN.md): phones register an **Expo push token + a per-member notify level** (`off | mentions | dms | all`, default `dms`) via `registerPush`/`unregisterPush` — org-scoped like every route; tokens are per device, the level is per member. The decision runs on the message write path, outside the space lock, fire-and-forget: classify **mention** (`@<memberId>`/`@here` outside code spans) > **dm** (`kind: 'direct'`) > **message**, gate on the recipient's level, exclude the author, fan out to all their devices via Expo's push API (batches ≤100), prune `DeviceNotRegistered` tokens from tickets and a ~15-min receipts check. Deliberately not in v1: per-space mutes, DND, active-elsewhere suppression (hub presence enables it later), thread following, badges.
+
 ## Next
 
 1. ~~`packages/server`: the **in-memory stub Harbor**~~ — done: every route in `api.ts`, the WS frames in `events.ts`, the MCP tools, a merge engine passing the fixtures, fake single-org auth, and spec §11 running as an automated acceptance test.

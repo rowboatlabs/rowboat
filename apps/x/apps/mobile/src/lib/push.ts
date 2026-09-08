@@ -5,6 +5,9 @@ import * as Notifications from 'expo-notifications';
 
 import type { RpcClient } from '@x/client';
 
+import type { SpacesOrg } from '@/lib/spaces/account';
+import { SpacesClient } from '@/lib/spaces/client';
+
 // Push notifications, phone side: ask permission, mint the Expo push token,
 // and register {token, level} with the paired Mac — the Mac's mention watcher
 // does the sending (see core/spaces/phone-push.ts). Levels are global v1.
@@ -73,5 +76,26 @@ export async function registerWithMac(rpc: RpcClient): Promise<'registered' | 'n
     level,
     deviceName: Device.deviceName ?? undefined,
   });
+  return 'registered';
+}
+
+/**
+ * Register this device with every org's Harbor (the real sender —
+ * PUSH_PLAN.md). Permission is requested on the first call after sign-in.
+ */
+export async function registerWithHarbor(
+  orgs: SpacesOrg[],
+  getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>,
+): Promise<'registered' | 'no-permission' | 'unavailable'> {
+  const level = await getPushLevel();
+  const token = await getPushToken();
+  if (!token) return Device.isDevice ? 'no-permission' : 'unavailable';
+  await Promise.all(
+    orgs.map((org) =>
+      new SpacesClient({ baseUrl: `https://${org.address}`, token: getAccessToken })
+        .registerPush({ token, level })
+        .catch(() => {}),
+    ),
+  );
   return 'registered';
 }

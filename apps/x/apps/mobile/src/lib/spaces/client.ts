@@ -161,6 +161,15 @@ export class SpacesClient {
     return this.request('POST', routes.openDirect.path, routes.openDirect.response, { memberId });
   }
 
+  /** Register this device's push token + the member's level (PUSH_PLAN.md). */
+  async registerPush(input: { token: string; level: 'off' | 'mentions' | 'dms' | 'all' }): Promise<{ ok: true }> {
+    return this.request('POST', routes.registerPush.path, routes.registerPush.response, input);
+  }
+
+  async unregisterPush(token: string): Promise<{ ok: true }> {
+    return this.request('POST', routes.unregisterPush.path, routes.unregisterPush.response, { token });
+  }
+
   async createSpace(name: string): Promise<Space> {
     return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
   }

@@ -145,7 +145,6 @@ export function DrawerContent(props: DrawerContentComponentProps) {
           }}
         />
         ) : null}
-        {paired ? (
         <FootRow
           icon="sf:bell"
           label="Notifications"
@@ -154,7 +153,6 @@ export function DrawerContent(props: DrawerContentComponentProps) {
             props.navigation.closeDrawer();
           }}
         />
-        ) : null}
         {paired ? (
         <FootRow
           icon={connected ? 'sf:laptopcomputer' : 'sf:wifi.slash'}
