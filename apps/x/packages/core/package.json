@@ -16,7 +16,7 @@
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.67.0",
     "@agentclientprotocol/codex-acp": "^1.2.0",
-    "@agentclientprotocol/sdk": "^1.3.0",
+    "@agentclientprotocol/sdk": "^1.4.0",
     "@ai-sdk/anthropic": "^4.0.12",
     "@ai-sdk/google": "^4.0.12",
     "@ai-sdk/openai": "^4.0.11",
