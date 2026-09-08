@@ -1768,6 +1768,9 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [newDirectOpen, setNewDirectOpen] = useState(false)
+  // Rename-in-place: the row's label becomes an input (same shape as create).
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
   // A dead OAuth session shows as a gentle "Sign in again" (org.authError, from core);
   // an unreachable org shows Retry.
   const needsSignIn = !!org.authError
@@ -1796,6 +1799,18 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
       onOpenSpace(org.id, space.id)
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not create the space', 'error')
+    }
+  }
+
+  const renameSpace = async (spaceId: string) => {
+    const name = renameValue.trim()
+    setRenamingId(null)
+    if (!name || name === org.spaces.find((s) => s.id === spaceId)?.name) return
+    try {
+      await window.ipc.invoke('spaces:renameSpace', { orgId: org.id, spaceId, name })
+      onChanged()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not rename the space', 'error')
     }
   }
 
@@ -1862,21 +1877,54 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
       {org.spaces.map((space) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
         const count = unread.get(`${org.id}/${space.id}`) ?? 0
+        if (renamingId === space.id) {
+          return (
+            <div key={space.id} className="flex items-center gap-1 py-0.5 pl-5 pr-2">
+              <Input
+                autoFocus
+                value={renameValue}
+                className="h-7 text-xs"
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void renameSpace(space.id)
+                  if (e.key === 'Escape') {
+                    e.stopPropagation()
+                    setRenamingId(null)
+                  }
+                }}
+                onBlur={() => void renameSpace(space.id)}
+              />
+            </div>
+          )
+        }
         return (
-          <button
-            key={space.id}
-            type="button"
-            onClick={() => onOpenSpace(org.id, space.id)}
-            className={cn(
-              'flex w-full items-center gap-2.5 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-[13.5px] text-foreground/90 hover:bg-accent',
-              active && 'bg-[var(--sidebar-accent)]',
-            )}
-          >
-            <span className={cn('min-w-0 flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
-            {count > 0 && (
-              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
-            )}
-          </button>
+          <ContextMenu key={space.id}>
+            <ContextMenuTrigger asChild>
+              <button
+                type="button"
+                onClick={() => onOpenSpace(org.id, space.id)}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-[13.5px] text-foreground/90 hover:bg-accent',
+                  active && 'bg-[var(--sidebar-accent)]',
+                )}
+              >
+                <span className={cn('min-w-0 flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
+                {count > 0 && (
+                  <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
+                )}
+              </button>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem
+                onClick={() => {
+                  setRenameValue(space.name)
+                  setRenamingId(space.id)
+                }}
+              >
+                <Pencil className="mr-2 size-3.5" /> Rename space
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         )
       })}
       {org.spaces.length === 0 && !org.error && !creating && (
