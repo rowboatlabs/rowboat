@@ -261,6 +261,9 @@ function wireFeedBus(): void {
             return
         }
         if (frame.kind !== 'event') return
+        // A rename lands as a durable event on the space's log — refresh the
+        // org listing so the sidebar label follows on every device.
+        if (frame.event.type === 'space_renamed') void refreshSpacesOrgs()
         const key = liveKey(event.orgId, frame.spaceId)
         if (!feedReleases.has(key) || feedRefreshTimers.has(key)) return
         // Trailing debounce: a burst of events (an agent replying, a thread's

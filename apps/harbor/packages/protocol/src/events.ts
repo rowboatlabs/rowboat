@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ChangeSet } from './changeset.js';
-import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, SpaceKind, Topic, TopicRemoval } from './core.js';
+import { Attribution, Membership, Message, MessageDeletion, MessageEdit, PollEnd, PollVote, Reaction, Space, SpaceKind, Topic, TopicRemoval } from './core.js';
 import { AssetPath, MemberId, MessageId, SpaceId, StreamOffset } from './ids.js';
 
 // Decision 2 (CONTRACT.md): one WebSocket per org, per-space subscriptions,
@@ -78,6 +78,16 @@ export const SpaceEvent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('poll_ended'),
     end: PollEnd,
+  }),
+  /**
+   * The space was renamed (api.ts renameSpace) — the full row plus who did
+   * it, so clients update their listings and the feed can render an
+   * attributed "renamed the space" line. Identical-name renames emit nothing.
+   */
+  z.object({
+    type: z.literal('space_renamed'),
+    space: Space,
+    by: Attribution,
   }),
 ]);
 export type SpaceEvent = z.infer<typeof SpaceEvent>;

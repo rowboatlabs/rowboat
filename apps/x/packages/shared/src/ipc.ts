@@ -3713,6 +3713,10 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
+  'spaces:renameSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
   // Direct messages: get-or-create the DM with another org member. No
   // invite, no acceptance — the other side learns of it by a space_added
   // frame on 'spaces:events' and shows it in their sidebar.

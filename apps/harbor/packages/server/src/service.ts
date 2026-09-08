@@ -86,6 +86,7 @@ function seedDisplayName(identity: BindIdentity): string {
 }
 
 type NewMessage = z.infer<Routes['postMessage']['request']>;
+type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
 type CreateTopicInput = z.infer<Routes['createTopic']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
@@ -185,6 +186,35 @@ export class HarborService {
       // The stream needs no object (annotation model): it is simply the
       // space's root messages, born empty.
       return space;
+    });
+  }
+
+  /**
+   * Rename a space (api.ts renameSpace): any member, Slack channel
+   * semantics. Direct spaces refuse — their label derives from the
+   * participants, not the stored name. Identical-name renames are an
+   * idempotent no-op with no event; a real rename appends `space_renamed`
+   * under the space lock so every follower updates its listing.
+   */
+  async renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
+    const space = await this.requireMember(ctx, spaceId);
+    if (space.kind === 'direct') {
+      throw new HarborError('invalid_request', 'a direct message cannot be renamed — its name is the other person');
+    }
+    this.guardWrite();
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+    return this.store.withSpaceLock(spaceId, async () => {
+      const current = (await this.store.getSpace(spaceId)) ?? space;
+      if (current.name === input.name) return current; // idempotent, no event
+      const updated: Space = { ...current, name: input.name };
+      await this.store.putSpace(updated);
+      const offset = (await this.store.head(spaceId)) + 1;
+      await this.append(spaceId, offset, this.now(), { type: 'space_renamed', space: updated, by });
+      return updated;
     });
   }
 

@@ -118,6 +118,19 @@ export const routes = {
     request: z.object({ name: z.string().min(1).max(128) }),
     response: z.object({ space: Space }),
   },
+  /**
+   * Rename a space. Any member may rename (Slack channel semantics); direct
+   * spaces refuse — their label derives from the participants. An identical
+   * name is an idempotent no-op (no event). Everyone else learns by the
+   * durable `space_renamed` event on the space's log.
+   */
+  renameSpace: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/rename',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({ name: z.string().min(1).max(128), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
+    response: z.object({ space: Space }),
+  },
   listMembers: {
     method: 'GET',
     path: '/v1/spaces/:spaceId/members',

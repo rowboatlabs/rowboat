@@ -142,6 +142,12 @@ export function buildHttpApp(deps: {
     return reply(c, routes.createSpace.response, { space: await service.createSpace(actor(c), input.name) });
   });
 
+  app.post('/v1/spaces/:spaceId/rename', async (c) => {
+    const { spaceId } = parseWith(routes.renameSpace.params, c.req.param());
+    const input = await body(c, routes.renameSpace.request);
+    return reply(c, routes.renameSpace.response, { space: await service.renameSpace(actor(c), spaceId, input) });
+  });
+
   app.post(routes.openDirect.path, async (c) => {
     const input = await body(c, routes.openDirect.request);
     return reply(c, routes.openDirect.response, await service.openDirect(actor(c), input.memberId));

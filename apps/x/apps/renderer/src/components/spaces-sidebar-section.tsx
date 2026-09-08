@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Hash, Loader2, MessagesSquare, MoreVertical, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, Hash, Loader2, MessagesSquare, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -9,6 +9,9 @@ import {
 import {
     DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
 import { AddOrgDialog, OrgMonogram, type SpaceSelection } from '@/components/spaces-view'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
@@ -144,6 +147,9 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
 }) {
     const [creating, setCreating] = useState(false)
     const [newName, setNewName] = useState('')
+    // Rename-in-place: the row's label becomes an input (same shape as create).
+    const [renamingId, setRenamingId] = useState<string | null>(null)
+    const [renameValue, setRenameValue] = useState('')
     const [newDirectOpen, setNewDirectOpen] = useState(false)
     const [showAllDirects, setShowAllDirects] = useState(false)
     const [confirmRemove, setConfirmRemove] = useState(false)
@@ -175,6 +181,18 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
             onOpenSpace(org.id, space.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not create the space', 'error')
+        }
+    }
+
+    const renameSpace = async (spaceId: string) => {
+        const name = renameValue.trim()
+        setRenamingId(null)
+        if (!name || name === org.spaces.find((s) => s.id === spaceId)?.name) return
+        try {
+            await window.ipc.invoke('spaces:renameSpace', { orgId: org.id, spaceId, name })
+            onChanged()
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not rename the space', 'error')
         }
     }
 
@@ -267,26 +285,59 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
             {org.spaces.filter((space) => !visibleSpaceKeys || visibleSpaceKeys.has(spaceUseKey(org.id, space.id))).map((space) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
                 const count = unread.get(`${org.id}/${space.id}`) ?? 0
+                if (renamingId === space.id) {
+                    return (
+                        <SidebarMenuItem key={space.id}>
+                            <div className="flex items-center gap-1 py-0.5 pl-9 pr-2">
+                                <Input
+                                    autoFocus
+                                    value={renameValue}
+                                    className="h-7 text-xs"
+                                    onChange={(e) => setRenameValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') void renameSpace(space.id)
+                                        if (e.key === 'Escape') setRenamingId(null)
+                                    }}
+                                    onBlur={() => void renameSpace(space.id)}
+                                />
+                            </div>
+                        </SidebarMenuItem>
+                    )
+                }
                 return (
                     <SidebarMenuItem key={space.id}>
-                        <SidebarMenuButton
-                            isActive={active}
-                            onClick={() => onOpenSpace(org.id, space.id)}
-                            // Hover = intent: warm the cached tail + roster and
-                            // start the refresh, so the click paints instantly.
-                            onMouseEnter={() => {
-                                prefetchStream(org.id, space.id)
-                                prefetchMembers(org.id, space.id)
-                            }}
-                            className="pl-9"
-                        >
-                            {/* A space is a channel — # says so. */}
-                            <Hash className="size-3.5 shrink-0 text-muted-foreground" />
-                            <span className={cn('flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
-                            {count > 0 && (
-                                <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
-                            )}
-                        </SidebarMenuButton>
+                        <ContextMenu>
+                            <ContextMenuTrigger asChild>
+                                <SidebarMenuButton
+                                    isActive={active}
+                                    onClick={() => onOpenSpace(org.id, space.id)}
+                                    // Hover = intent: warm the cached tail + roster and
+                                    // start the refresh, so the click paints instantly.
+                                    onMouseEnter={() => {
+                                        prefetchStream(org.id, space.id)
+                                        prefetchMembers(org.id, space.id)
+                                    }}
+                                    className="pl-9"
+                                >
+                                    {/* A space is a channel — # says so. */}
+                                    <Hash className="size-3.5 shrink-0 text-muted-foreground" />
+                                    <span className={cn('flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
+                                    {count > 0 && (
+                                        <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
+                                    )}
+                                </SidebarMenuButton>
+                            </ContextMenuTrigger>
+                            <ContextMenuContent>
+                                <ContextMenuItem
+                                    onClick={() => {
+                                        setRenameValue(space.name)
+                                        setRenamingId(space.id)
+                                    }}
+                                >
+                                    <Pencil className="mr-2 size-3.5" /> Rename space
+                                </ContextMenuItem>
+                            </ContextMenuContent>
+                        </ContextMenu>
                     </SidebarMenuItem>
                 )
             })}
