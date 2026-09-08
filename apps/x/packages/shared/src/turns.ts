@@ -8,6 +8,7 @@ import {
 } from "./message.js";
 import { ReasoningEffort } from "./models.js";
 import { TurnAnalytics } from "./analytics.js";
+import { InputOrigin } from "./origins.js";
 
 // Durable turn contract for the turn runtime (see
 // packages/core/docs/turn-runtime-design.md). This module is the
@@ -180,6 +181,10 @@ export const TurnCreated = z.object({
     // analytics agent_name from drifting from the actual resolved agent.
     // Optional on read for turn files written before durable attribution.
     analytics: TurnAnalytics.optional(),
+    // What outside the runtime caused this turn's first input (a space
+    // mention, ...). Recorded, never read by the runtime; see origins.ts.
+    // Optional: most turns are a person typing, which has no origin.
+    origin: InputOrigin.optional(),
     config: z.object({
         autoPermission: z.boolean(),
         humanAvailable: z.boolean(),
@@ -419,6 +424,9 @@ export const InputAdded = z.object({
     ts: z.string(),
     inputIndex: z.number().int().positive(),
     message: UserMessage,
+    // The steered message's origin, when it had one (a queued space mention
+    // merged into a live turn). Same contract as turn_created.origin.
+    origin: InputOrigin.optional(),
 });
 
 export const TurnSuspended = z.object({

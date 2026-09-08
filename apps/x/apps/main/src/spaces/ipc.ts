@@ -9,6 +9,7 @@ import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
+import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { fetchLinkPreview } from './link-preview.js';
 
@@ -95,6 +96,13 @@ const openBrowser = (url: string) => shell.openExternal(url);
 // space subscription to ride — relay them to every window as they arrive; the
 // renderer's orgs store refreshes its listing on them.
 orgs.onMemberFrame((orgId, frame) => broadcastSpacesEvent({ orgId, frame }));
+
+// The agent-activity feed ("my Rowboat is working on this thread"): core
+// folds turn/session bus events into per-org lists and emits each whole list
+// on change; windows replace their copy. Started here, before any mention
+// can be sent.
+onSpaceAgentActivity((event) => broadcastSpacesEvent(event));
+void startSpaceAgentActivity().catch((err) => console.error('[spaces] agent activity feed failed to start:', err));
 
 function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {

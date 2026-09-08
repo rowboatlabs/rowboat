@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { UserMessage } from "./message.js";
+import type { InputOrigin } from "./origins.js";
 import { ModelDescriptor, type TurnStatus } from "./turns.js";
 
 // Durable session contract for the session layer (see
@@ -179,6 +180,9 @@ export interface QueuedSessionMessage {
     queueId: string;
     message: z.infer<typeof UserMessage>;
     ts: string;
+    // Carried from the send config until delivery, where it lands on the
+    // turn event (turn_created or input_added) — see origins.ts.
+    origin?: InputOrigin;
 }
 
 // What the renderer's session-feed consumer receives over IPC: session index

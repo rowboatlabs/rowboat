@@ -6,6 +6,7 @@ import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
 import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
+import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
 import { fetchLinkPreview } from '@x/core/dist/spaces/link-preview.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
@@ -36,6 +37,13 @@ export function subscribeSpacesEvents(listener: SpacesEventListener): () => void
 function emitSpacesEvent(event: spacesShared.SpacesBusEvent): void {
   for (const listener of spacesEventListeners) listener(event);
 }
+
+// The agent-activity feed ("my Rowboat is working on this thread"): core
+// folds turn/session bus events into per-org lists and emits each whole list
+// on change; clients replace their copy. Started here, before any mention
+// can be sent.
+onSpaceAgentActivity((event) => emitSpacesEvent(event));
+void startSpaceAgentActivity().catch((err) => console.error('[spaces] agent activity feed failed to start:', err));
 
 // Keyed by org/space; each entry remembers WHICH live client it subscribed
 // on. A re-auth (orgs.upsertOAuthOrg) closes and replaces the org's client —

@@ -729,6 +729,7 @@ interface InputAdded extends BaseTurnEvent {
   type: "input_added";
   inputIndex: number; // 1-based; index 0 is turn_created.input
   message: UserMessage;
+  origin?: InputOrigin; // as turn_created.origin: recorded verbatim, never read
 }
 ```
 
@@ -739,8 +740,13 @@ turn-definition immutability. Rules:
 - The messages come from a caller-supplied drain (`takeInputs`,
   section 15.2) polled once per loop iteration at the boundary: the tool
   batch has settled, completion was ruled out, the budget check and the
-  next `model_call_requested` are about to run. The loop never learns where
-  the messages come from (session queue, test fixture).
+  next `model_call_requested` are about to run. The loop never learns which
+  SOURCE drains (session queue, test fixture). Each message may carry an
+  `origin` — what outside the runtime caused it (`@x/shared` origins.ts, a
+  discriminated union: a space mention today) — written onto its
+  `input_added` verbatim and never acted on, exactly like
+  `turn_created.origin` for the first input. Consumers answer "is the agent
+  working on the thing I did?" from bus events alone.
 - Injection is purely additive. It never interrupts an in-flight model
   stream or tool execution and never cancels pending work; the message
   lands as a plain user message positioned after the batch's tool results.
@@ -1396,7 +1402,11 @@ interface CreateTurnInput {
 // the abort signal — both are ephemeral per-invocation channels into a live
 // advance that become durable only when acted on (turn_cancelled /
 // input_added respectively).
-type TakeAddedInputs = () => UserMessage[] | Promise<UserMessage[]>;
+interface AddedInput {
+  message: UserMessage;
+  origin?: InputOrigin; // lands on input_added.origin
+}
+type TakeAddedInputs = () => AddedInput[] | Promise<AddedInput[]>;
 
 interface ITurnRuntime {
   createTurn(input: CreateTurnInput): Promise<string>;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
+import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import { applyReaction, mergeMessages, threadRootOf } from '@/lib/spaces-conventions'
 import { applyPollVote } from '@/lib/spaces-poll'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
@@ -341,6 +342,7 @@ function wireBus(): void {
     if (busWired) return
     busWired = true
     subscribeSpacesFeed((event) => {
+        if (!('frame' in event)) return
         const frame = event.frame
         if (frame.kind === 'subscribed') {
             // A (re)connected subscription. Whatever was published while the
@@ -673,7 +675,11 @@ export interface SpacePresence {
     here: string[]
     /** threadRootId ('' = the stream) → members typing there. */
     typing: ReadonlyMap<string, string[]>
-    /** threadRootId → members whose agent holds an agent_working lease there. */
+    /**
+     * threadRootId → members whose agent is working there. Others' agents
+     * come from their agent_working leases; YOUR own comes from the local
+     * agent-activity feed (instant, and it knows about queued mentions).
+     */
     working: ReadonlyMap<string, string[]>
 }
 
@@ -691,7 +697,9 @@ function foldLeases(leases: Map<string, Lease>, selfMemberId: string): SpacePres
     for (const [k, lease] of leases) {
         const memberId = k.slice(0, k.indexOf('|'))
         if (lease.state === 'agent_working') {
-            working.set(lease.threadRootId, [...(working.get(lease.threadRootId) ?? []), memberId])
+            // Own-agent leases are the echo of frames this app sent; the local
+            // activity feed is the source for those (merged in useSpacePresence).
+            if (memberId !== selfMemberId) working.set(lease.threadRootId, [...(working.get(lease.threadRootId) ?? []), memberId])
             continue
         }
         here.add(memberId)
@@ -703,6 +711,7 @@ function foldLeases(leases: Map<string, Lease>, selfMemberId: string): SpacePres
 export function useSpacePresence(orgId: string, spaceId: string, selfMemberId: string): SpacePresence {
     const leasesRef = useRef<Map<string, Lease>>(new Map())
     const [presence, setPresence] = useState<SpacePresence>(EMPTY_PRESENCE)
+    const ownActivity = useSpaceAgentActivity(orgId, spaceId)
 
     useSpaceLive(orgId, spaceId, (frame) => {
         if (frame.kind !== 'presence') return
@@ -732,7 +741,15 @@ export function useSpacePresence(orgId: string, spaceId: string, selfMemberId: s
         return () => clearInterval(timer)
     }, [selfMemberId])
 
-    return presence
+    // Your own agent: every thread the activity feed lists (queued or running).
+    return useMemo(() => {
+        if (ownActivity.size === 0) return presence
+        const working = new Map(presence.working)
+        for (const threadRootId of ownActivity.keys()) {
+            working.set(threadRootId, [selfMemberId, ...(working.get(threadRootId) ?? [])])
+        }
+        return { ...presence, working }
+    }, [presence, ownActivity, selfMemberId])
 }
 
 /**
