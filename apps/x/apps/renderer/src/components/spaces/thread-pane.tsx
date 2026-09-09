@@ -1,5 +1,6 @@
+import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -45,7 +46,7 @@ const NEW_FADE_MS = 800
 
 export function ThreadPane({
     org, space, rootMessageId, rootFromStream, topicFromStream, changeSets, entries, presence, members, memberNames, refreshTick,
-    showBack, onBack, onCloseColumn, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
+    showBack, onBack, expanded = false, onToggleExpanded, onCloseColumn, onOpenFile, onOpenSession, artifactsRailOpen, onToggleArtifactsRail, onFolding, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -62,6 +63,8 @@ export function ThreadPane({
     refreshTick: number
     showBack: boolean
     onBack: () => void
+    expanded?: boolean
+    onToggleExpanded?: () => void
     /** Set while a doc column sits beside the chat: closes the chat column, the doc takes the width. */
     onCloseColumn?: () => void
     onOpenFile: (path: string) => void
@@ -705,6 +708,18 @@ export function ThreadPane({
                         )}
                     </DropdownMenuContent>
                 </DropdownMenu>
+                {onToggleExpanded && (
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 shrink-0 text-muted-foreground"
+                        onClick={onToggleExpanded}
+                        aria-label={expanded ? 'Show alongside Messages' : 'Expand thread'}
+                        title={expanded ? 'Show alongside Messages' : 'Expand thread'}
+                    >
+                        {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                    </Button>
+                )}
                 {!showBack && (
                     <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" onClick={onBack} aria-label="Close thread">
                         <X className="size-4" />
@@ -757,7 +772,7 @@ export function ThreadPane({
                                 )}
                                 <span className="text-muted-foreground">{formatFeedTime(root.postedAt)} · in Messages</span>
                             </div>
-                            <div className="text-[15px] leading-[22px] [&_p]:my-0.5">
+                            <div className={MESSAGE_PROSE}>
                                 {root.deletedAt ? (
                                     <span className="italic text-muted-foreground">This message was deleted</span>
                                 ) : (

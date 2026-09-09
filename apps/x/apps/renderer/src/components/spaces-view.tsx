@@ -438,6 +438,12 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, [])
     const columnsRef = useRef<HTMLDivElement | null>(null)
     const [conversationWidth, setConversationWidth] = useState(0)
+    const [threadExpanded, setThreadExpanded] = useState(() => localStorage.getItem('spaces:threadExpanded') === 'true')
+    const toggleThreadExpanded = () => {
+        const next = !threadExpanded
+        setThreadExpanded(next)
+        localStorage.setItem('spaces:threadExpanded', String(next))
+    }
     const [threadWidth, setThreadWidth] = useState(() => {
         const stored = Number(localStorage.getItem('spaces:threadWidth'))
         return Number.isFinite(stored) && stored >= THREAD_MIN_WIDTH ? stored : THREAD_DEFAULT_WIDTH
@@ -603,7 +609,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     else if (selection.kind === 'file' && selection.fromThreadRootId) chatContextRef.current = selection.fromThreadRootId
     const chatRootId = chatContextRef.current
 
-    const threadBesideStream = !!chatRootId && !docOpen && conversationWidth >= 840
+    const threadBesideStream = !!chatRootId && !docOpen && !threadExpanded && conversationWidth >= 840
     const selectedTopic = chatRootId ? feed.topics.find((t) => t.rootMessageId === chatRootId) : undefined
     const selectedGroups = chatRootId ? artifactsForThread(feed.changeSets, chatRootId) : []
     const artifactsRailOpen = chatRootId ? (railPins.get(chatRootId) ?? selectedGroups.length > 0) : false
@@ -942,6 +948,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                 memberNames={memberNames}
                                 refreshTick={refreshTick}
                                 showBack={!threadBesideStream}
+                                expanded={threadExpanded}
+                                onToggleExpanded={!docOpen && (conversationWidth >= 840 || threadExpanded) ? toggleThreadExpanded : undefined}
                                 onBack={() => select({ kind: 'general' })}
                                 onCloseColumn={split ? closeChat : undefined}
                                 onOpenFile={openFileFromThread(chatRootId)}
