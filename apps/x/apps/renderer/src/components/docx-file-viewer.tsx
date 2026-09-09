@@ -1,3 +1,4 @@
+import { useFileViewerSource } from './file-viewer-source'
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import {
   CloudDownloadIcon,
@@ -64,9 +65,11 @@ function baseName(path: string): string {
 }
 
 export function DocxFileViewer({ path }: DocxFileViewerProps) {
+  const source = useFileViewerSource()
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [buffer, setBuffer] = useState<ArrayBuffer | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [reloadNonce, setReloadNonce] = useState(0)
   const [link, setLink] = useState<GoogleDocLink | null>(null)
   const [syncing, setSyncing] = useState<'up' | 'down' | null>(null)
@@ -90,7 +93,7 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
 
     ;(async () => {
       try {
-        const result = await window.ipc.invoke('workspace:readFile', { path, encoding: 'base64' })
+        const result = await source.read({ path, encoding: 'base64' })
         if (cancelled) return
         setBuffer(base64ToArrayBuffer(result.data))
         setLoadState('ready')
@@ -106,17 +109,22 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
       cancelled = true
       if (armTimerRef.current) clearTimeout(armTimerRef.current)
     }
-  }, [path, reloadNonce])
+  }, [path, reloadNonce, source])
+
+  useEffect(() => source.subscribe?.(() => {
+    if (!dirtyRef.current && !savingRef.current) setReloadNonce((n) => n + 1)
+  }), [source])
 
   // Is this file linked to a Google Doc? Drives the sync bar.
   useEffect(() => {
     let cancelled = false
     setLink(null)
+    if (!source.workspace) return
     void window.ipc.invoke('google-docs:getLink', { path })
       .then((res) => { if (!cancelled) setLink(res.link) })
       .catch((err) => { console.error('Failed to read Google Doc link:', err) })
     return () => { cancelled = true }
-  }, [path])
+  }, [path, source])
 
   // Serialize the current document and write it back to disk.
   const persist = useCallback(async () => {
@@ -125,10 +133,12 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
     savingRef.current = true
     dirtyRef.current = false
     setSaveState('saving')
+    setSaveError(null)
+    let failed = false
     try {
       const out = await editor.save()
       if (out) {
-        await window.ipc.invoke('workspace:writeFile', {
+        await source.write({
           path,
           data: arrayBufferToBase64(out),
           opts: { encoding: 'base64' },
@@ -136,16 +146,18 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
       }
       setSaveState('saved')
     } catch (err) {
+      failed = true
+      setSaveError(err instanceof Error ? err.message.replace(/^ETag mismatch: /, '') : 'Could not save document')
       console.error('Failed to save docx:', err)
       dirtyRef.current = true
       setSaveState('error')
     } finally {
       savingRef.current = false
       // A change landed while we were saving — flush it.
-      if (dirtyRef.current) scheduleSave()
+      if (dirtyRef.current && !failed) scheduleSave()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path])
+  }, [path, source])
 
   const scheduleSave = () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -165,7 +177,7 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
       if (dirtyRef.current) void persist()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path])
+  }, [path, source])
 
   // Write any pending edits to disk before a sync-up so we push the latest.
   const flushPendingSave = useCallback(async () => {
@@ -235,7 +247,7 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
         <p className="max-w-md text-xs">The file may be corrupted or not a valid Word document.</p>
         <button
           type="button"
-          onClick={() => { void window.ipc.invoke('shell:openPath', { path }) }}
+          onClick={() => { void source.open({ path }) }}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
         >
           <ExternalLinkIcon className="size-3.5" />
@@ -247,6 +259,19 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden">
+      {saveError && (
+        <div role="alert" className="flex shrink-0 items-center gap-3 border-b border-border px-3 py-2 text-xs">
+          <span className="min-w-0 flex-1">{saveError}</span>
+          <button type="button" onClick={() => { void persist() }} className="shrink-0 underline">Retry save</button>
+          <button type="button" onClick={() => {
+            if (!window.confirm('Discard your unsaved edits and reload the latest document?')) return
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+            dirtyRef.current = false
+            setSaveError(null)
+            setReloadNonce((n) => n + 1)
+          }} className="shrink-0 underline">Discard edits and reload</button>
+        </div>
+      )}
       {link && (
         <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 text-xs">
           <GoogleDocsIcon className="size-4 shrink-0" />

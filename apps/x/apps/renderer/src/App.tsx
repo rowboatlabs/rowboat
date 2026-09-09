@@ -1,3 +1,4 @@
+import { DocumentFileViewer } from '@/components/document-file-viewer'
 import * as React from 'react'
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace, quickAskShortcut, pttKey, type ipc } from '@x/shared';
@@ -21,14 +22,7 @@ import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './compo
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
-import { ImageFileViewer } from '@/components/image-file-viewer';
-import { VideoFileViewer } from '@/components/video-file-viewer';
-import { AudioFileViewer } from '@/components/audio-file-viewer';
-import { DocxFileViewer } from '@/components/docx-file-viewer';
-import { SpreadsheetFileViewer } from '@/components/spreadsheet-file-viewer';
-import { PptxEditor } from '@/components/pptx-editor';
 import { PersistentViewerCache } from '@/components/persistent-viewer-cache';
-import { UnsupportedFileViewer } from '@/components/unsupported-file-viewer';
 import { getViewerType, isCacheableViewerPath } from '@/lib/file-types';
 import {
   readFileAfterExternalChangesSettle,
@@ -7731,37 +7725,9 @@ function App() {
                       />
                     )}
                   </div>
-                ) : selectedPath && getViewerType(selectedPath) === 'image' ? (
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <ImageFileViewer path={selectedPath} />
-                  </div>
-                ) : selectedPath && getViewerType(selectedPath) === 'video' ? (
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <VideoFileViewer path={selectedPath} />
-                  </div>
-                ) : selectedPath && getViewerType(selectedPath) === 'audio' ? (
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <AudioFileViewer path={selectedPath} />
-                  </div>
-                ) : selectedPath && getViewerType(selectedPath) === 'docx' ? (
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <DocxFileViewer path={selectedPath} />
-                  </div>
-                ) : selectedPath && getViewerType(selectedPath) === 'spreadsheet' ? (
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <SpreadsheetFileViewer path={selectedPath} />
-                  </div>
-                ) : selectedPath && getViewerType(selectedPath) === 'pptx' ? (
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <PptxEditor
-                      key={selectedPath}
-                      path={selectedPath}
-                      onSlideChange={handleDeckSlideChange}
-                    />
-                  </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-hidden">
-                    <UnsupportedFileViewer path={selectedPath} />
+                    <DocumentFileViewer path={selectedPath ?? ''} onSlideChange={handleDeckSlideChange} />
                   </div>
                 )
                 )}

@@ -2367,7 +2367,10 @@ export function setupIpcHandlers() {
     },
     'spreadsheet:load': async (_event, args) => {
       const { loadSheetWindow } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
-      const result = await loadSheetWindow(args.path, args.sheet, args.offset, args.limit);
+      const inputPath = args.space
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.path, args.space.version)
+        : args.path;
+      const result = await loadSheetWindow(inputPath, args.sheet, args.offset, args.limit);
       return {
         format: result.meta.format,
         sheets: result.meta.sheets,
@@ -2384,7 +2387,10 @@ export function setupIpcHandlers() {
     },
     'spreadsheet:find': async (_event, args) => {
       const { findInSheet } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
-      return await findInSheet(args.path, args.sheet, args.query, args.maxMatches);
+      const inputPath = args.space
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.path, args.space.version)
+        : args.path;
+      return await findInSheet(inputPath, args.sheet, args.query, args.maxMatches);
     },
     'dialog:openDirectory': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);
