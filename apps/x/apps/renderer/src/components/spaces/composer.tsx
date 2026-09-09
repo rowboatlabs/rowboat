@@ -661,7 +661,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
             return false
         }
         if (!e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !view.composing) {
-            // Inside a code fence Enter breaks the line (the Slack posture);
+            // Inside a code fence Enter breaks the line (the editor behavior);
             // everywhere else it sends.
             if (view.state.selection.$from.parent.type.name === 'codeBlock') return false
             void send()
@@ -685,10 +685,10 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     })
 
     return (
-        <div className="px-3 pb-3 pt-1 shrink-0">
+        <div className="spaces-composer-dock shrink-0">
             <div
                 ref={setBox}
-                className="relative rounded-2xl border border-border bg-background shadow-[0_8px_24px_rgb(0_0_0_/_0.04)]"
+                className="spaces-composer-frame relative border bg-background"
                 onDragEnter={onDragEnter}
                 onDragOver={(e) => { if (refs && dragHasFiles(e)) e.preventDefault() }}
                 onDragLeave={onDragLeave}
@@ -807,8 +807,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     {!recording && mention.show && (
                         <MentionMenu anchor={box} candidates={mention.candidates} index={mention.index} onPick={mention.pick} />
                     )}
-                    {/* The formatting bar rides the top edge, Slack-style. */}
-                    <RichFormattingToolbar editor={editor} className="px-2 pt-1.5" />
+                    {/* The formatting bar rides the top edge. */}
+                    <RichFormattingToolbar editor={editor} className="spaces-formatting px-2 py-1" />
                     {attachments.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">
                             {attachments.map((a) => (
@@ -844,7 +844,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     {/* The rich input. What you see is what sends — the doc
                         serializes back to wire markdown on every update. */}
                     <EditorContent editor={editor} className="space-composer" />
-                    <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
+                    <div className="spaces-compose-actions flex flex-wrap items-center gap-1.5 px-2 pb-2">
                         {refs && (
                             <>
                                 <input
@@ -861,7 +861,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                     type="button"
                                     onClick={() => fileInputRef.current?.click()}
                                     title="Attach files (or paste / drop them)"
-                                    className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                                    className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                                 >
                                     <Paperclip className="size-4" />
                                 </button>
@@ -872,7 +872,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 type="button"
                                 onClick={onCreatePoll}
                                 title="Create a poll"
-                                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                                className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                             >
                                 <BarChart3 className="size-4" />
                             </button>
@@ -945,7 +945,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                         type="button"
                                         title="Send later"
                                         disabled={busy || uploading}
-                                        className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                                        className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
                                     >
                                         <Clock className="size-4" />
                                     </button>
@@ -965,7 +965,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                                 onClick={startRecording}
                                 aria-label="Voice input"
                                 title="Voice input"
-                                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                                className="inline-flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                             >
                                 <Mic className="size-4" />
                             </button>
@@ -976,7 +976,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                             disabled={busy || uploading || (!draft.trim() && !attachments.some((a) => a.status === 'done'))}
                             aria-label="Send"
                             title={uploading ? 'Waiting for uploads…' : 'Send (↵ · Shift+↵ for a new line)'}
-                            className="inline-flex size-8 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30 transition-opacity"
+                            className="inline-flex spaces-send size-8 items-center justify-center rounded bg-foreground text-background disabled:opacity-30 transition-opacity"
                         >
                             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
                         </button>

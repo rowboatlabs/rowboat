@@ -45,7 +45,7 @@ const NEW_FADE_MS = 800
 const PIN_BANNER_MAX = 3
 
 export function GeneralStream({
-    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onOpenSession, onClose, visible = true,
+    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onOpenSession, onClose, visible = true, composeActive = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -67,6 +67,8 @@ export function GeneralStream({
      * presence lease, no read marks — the reader isn't actually looking.
      */
     visible?: boolean
+    /** Only the active conversation receives global profile-mention inserts. */
+    composeActive?: boolean
 }) {
     const [seed, setSeed] = useState<{ text: string; nonce: number; append?: boolean } | null>(null)
     const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -271,11 +273,11 @@ export function GeneralStream({
         setSeed({ text: `${quote}\n> — ${name}\n\n`, nonce: Date.now() })
     }
 
-    // The profile popover's "Mention" lands in whichever composer is visible.
+    // Profile mentions target the active conversation when a thread is beside us.
     useEffect(() => {
-        if (!visible) return
+        if (!visible || !composeActive) return
         return subscribeComposeInsert((insert) => setSeed({ text: insert.text, nonce: Date.now(), append: true }))
-    }, [visible])
+    }, [visible, composeActive])
 
     // Saved-for-later is personal and local; the row's menu label needs to
     // know which messages are in it.
@@ -644,9 +646,8 @@ export function GeneralStream({
 
     return (
         <section className="flex-1 min-w-0 min-h-0 flex flex-col">
-            <div className="flex items-center gap-2.5 px-5 h-9 shrink-0">
-                <span className="text-[13px] text-muted-foreground">Messages</span>
-                <span className="text-xs text-muted-foreground truncate">What the team says, in order. Reply to one to start a thread.</span>
+            <div className="spaces-pane-header flex items-center gap-2.5 shrink-0 border-b border-border">
+                <span className="text-[15px] font-semibold">Messages</span>
                 <span className="flex-1" />
                 {stream.error && <span className="text-xs text-destructive truncate" title={stream.error}>messages unavailable</span>}
                 {onClose && (
@@ -669,7 +670,7 @@ export function GeneralStream({
             <div className="relative flex-1 min-h-0 flex flex-col">
             <div
                 ref={scrollRef}
-                className="flex-1 min-h-0 overflow-y-auto px-3 pb-1"
+                className="flex-1 min-h-0 spaces-message-list overflow-y-auto pb-1"
                 onWheel={() => {
                     userScrollAtRef.current = performance.now()
                 }}

@@ -1,3 +1,5 @@
+import '@/styles/spaces.css'
+import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, BellOff, Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
@@ -425,7 +427,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // ------------------------------------------------------------------
     // Column slides. When a column appears or goes, it animates its width
     // (0 ⇄ its size) while the other column stays fluid and takes up the
-    // slack; content inside is fixed at the final width and anchored to the
+    // remaining width; content inside is fixed at the final width and anchored to the
     // far edge, so the doc slides in from the right and the chat from the
     // left. Detected during render (the state pattern React documents for
     // deriving from props) so the very first frame is already animating —
@@ -435,6 +437,21 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // ------------------------------------------------------------------
     const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, [])
     const columnsRef = useRef<HTMLDivElement | null>(null)
+    const [conversationWidth, setConversationWidth] = useState(0)
+    const [threadWidth, setThreadWidth] = useState(() => {
+        const stored = Number(localStorage.getItem('spaces:threadWidth'))
+        return Number.isFinite(stored) && stored >= THREAD_MIN_WIDTH ? stored : THREAD_DEFAULT_WIDTH
+    })
+    const maxThreadWidth = Math.max(THREAD_MIN_WIDTH, conversationWidth - STREAM_MIN_WIDTH - THREAD_DIVIDER_WIDTH)
+    const threadWidthEff = Math.min(threadWidth, maxThreadWidth)
+    useEffect(() => {
+        const el = columnsRef.current
+        if (!el) return
+        const observer = new ResizeObserver(() => setConversationWidth(el.clientWidth))
+        observer.observe(el)
+        setConversationWidth(el.clientWidth)
+        return () => observer.disconnect()
+    }, [])
     const chatRef = useRef<HTMLDivElement | null>(null)
     const docRef = useRef<HTMLElement | null>(null)
     const [layout, setLayout] = useState<{ docOpen: boolean; showChat: boolean; docPath: string | null; anim: ColumnAnim | null }>({ docOpen, showChat, docPath, anim: null })
@@ -586,6 +603,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     else if (selection.kind === 'file' && selection.fromThreadRootId) chatContextRef.current = selection.fromThreadRootId
     const chatRootId = chatContextRef.current
 
+    const threadBesideStream = !!chatRootId && !docOpen && conversationWidth >= 840
     const selectedTopic = chatRootId ? feed.topics.find((t) => t.rootMessageId === chatRootId) : undefined
     const selectedGroups = chatRootId ? artifactsForThread(feed.changeSets, chatRootId) : []
     const artifactsRailOpen = chatRootId ? (railPins.get(chatRootId) ?? selectedGroups.length > 0) : false
@@ -632,10 +650,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         <SpaceProfilesProvider members={members} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
         <SpaceNavProvider onOpenFile={openFile}>
-        <div className="relative flex-1 min-h-0 flex flex-col">
+        <div className="spaces-surface relative flex-1 min-h-0 flex flex-col">
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
-            <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+            <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
                 {/* Left: the org's mark, then # the space. Hover it for what the
                     old identity card said — server name, who you are. The address
                     is deliberately absent (decision 2026-09-07: names are the
@@ -869,9 +887,9 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     onTogglePin={toggleRailPin}
                 />
                 {/* The columns. Chat on the left — the stream, or an open
-                    thread. The stream is the expensive surface, so it never
+                    thread beside it when there is room. The stream never
                     unmounts while the space is open — a thread, or a doc
-                    taking the pane, HIDES it (keep-alive). The doc column on
+                    taking a narrow pane, hides it (keep-alive). The doc column on
                     the right holds a file or a board. Both keep fixed tree
                     positions (the divider slot stays in the array) so going
                     one ⇄ two columns never remounts either surface. */}
@@ -884,8 +902,32 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     className={cn('min-w-0 min-h-0', chatRender ? 'flex' : 'hidden', chatAnim ? 'shrink-0 overflow-hidden justify-end' : 'flex-1')}
                 >
                 <div style={chatAnim ? { width: chatAnim.width } : undefined} className={cn('flex min-w-0 min-h-0', chatAnim ? 'shrink-0' : 'flex-1')}>
+                    <div className={cn('flex-1 min-w-0 min-h-0', chatRootId && !threadBesideStream ? 'hidden' : 'flex')}>
+                        <GeneralStream
+                            org={org}
+                            space={space}
+                            stream={stream}
+                            presence={presence}
+                            members={members}
+                            memberNames={memberNames}
+                            entries={entries}
+                            onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                            onOpenSession={onOpenSession}
+                            onClose={split ? closeChat : undefined}
+                            visible={active && showChat && (!chatRootId || threadBesideStream)}
+                            composeActive={!chatRootId}
+                        />
+                    </div>
+                    {threadBesideStream && (
+                        <ThreadResizeHandle
+                            width={threadWidthEff}
+                            maxWidth={maxThreadWidth}
+                            onResize={setThreadWidth}
+                            onCommit={(width) => localStorage.setItem('spaces:threadWidth', String(width))}
+                        />
+                    )}
                     {chatRootId ? (
-                        <section className="flex-1 min-w-0 min-h-0 flex flex-col">
+                        <section aria-label="Thread" style={threadBesideStream ? { width: threadWidthEff } : undefined} className={cn('spaces-thread-column min-w-0 min-h-0 flex flex-col', threadBesideStream ? 'shrink-0' : 'flex-1')}>
                             <ThreadPane
                                 key={chatRootId}
                                 org={org}
@@ -899,7 +941,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                 members={members}
                                 memberNames={memberNames}
                                 refreshTick={refreshTick}
-                                showBack
+                                showBack={!threadBesideStream}
                                 onBack={() => select({ kind: 'general' })}
                                 onCloseColumn={split ? closeChat : undefined}
                                 onOpenFile={openFileFromThread(chatRootId)}
@@ -911,21 +953,6 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             />
                         </section>
                     ) : null}
-                    <div className={cn('flex-1 min-w-0 min-h-0', chatRootId ? 'hidden' : 'flex')}>
-                        <GeneralStream
-                            org={org}
-                            space={space}
-                            stream={stream}
-                            presence={presence}
-                            members={members}
-                            memberNames={memberNames}
-                            entries={entries}
-                            onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
-                            onOpenSession={onOpenSession}
-                            onClose={split ? closeChat : undefined}
-                            visible={active && showChat && !chatRootId}
-                        />
-                    </div>
                 </div>
                 </div>
                 {chatRender && docRender && twoFits ? (

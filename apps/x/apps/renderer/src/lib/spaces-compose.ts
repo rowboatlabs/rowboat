@@ -1,7 +1,6 @@
 // Insert-into-the-visible-composer bus: profile popovers (the "Mention"
-// action) fire here; whichever chat surface is visible appends the text to
-// its composer via the seed mechanism. Exactly one chat surface is visible
-// at a time (keep-alive hides the others), so a simple broadcast suffices.
+// action) fire here; the active conversation appends the text through its
+// seed mechanism. When a thread is beside Messages, only the thread subscribes.
 
 export interface ComposeInsert {
     text: string

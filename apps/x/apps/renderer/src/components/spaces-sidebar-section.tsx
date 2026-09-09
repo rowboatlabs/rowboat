@@ -203,7 +203,7 @@ function OrgRows({ org, activeSpace, unread, visibleSpaceKeys, onOpenSpace, onCh
         for (const dm of org.directs) prefetchStream(org.id, dm.id)
     }, [org.id, org.directs])
     // Your notes-to-self DM sits in the list like anyone else's, sorted by
-    // activity, labelled the way Slack does it: your name, then a quiet "you".
+    // activity, labelled the way conversation lists do: your name, then a quiet "you".
     // It shows before it exists — the org creates it on the first click.
     const selfDm = org.directs.find((dm) => isSelfDirect(dm, org.memberId))
     const directs = [...org.directs].sort((a, b) =>

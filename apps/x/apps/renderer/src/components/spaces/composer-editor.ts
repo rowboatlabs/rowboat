@@ -10,11 +10,11 @@ import { Markdown } from 'tiptap-markdown'
 // the doc, and composerMarkdown() serializes the doc back out on every
 // update, so everything downstream of the composer (drafts, slash commands,
 // @rowboat detection, buildBody) keeps operating on the same markdown string
-// a textarea used to hold. StarterKit's input rules give the Slack behavior
+// a textarea used to hold. StarterKit's input rules give the editor behavior
 // of `**bold**` converting live as you type.
 
 /**
- * Slack's formatting chords on top of TipTap's defaults (⌘B/⌘I bold/italic,
+ * the conversation formatting chords on top of TipTap's defaults (⌘B/⌘I bold/italic,
  * ⌘E code, ⌘⇧7/8 ordered/bullet come built in).
  */
 const ChatFormatKeys = Extension.create({

@@ -632,7 +632,7 @@ export function ThreadPane({
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-background">
-            <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-2 pr-2">
+            <div className="spaces-pane-header flex shrink-0 items-center gap-1.5 border-b border-border">
                 {showBack && (
                     <>
                         <Button variant="ghost" size="xs" className="gap-1 bg-primary/10 px-2 font-semibold text-primary hover:bg-primary/15 hover:text-primary" onClick={onBack} title="Back to Messages (Esc)" aria-label="Back to messages">
@@ -641,8 +641,8 @@ export function ThreadPane({
                         <span className="h-4 w-px shrink-0 bg-border" />
                     </>
                 )}
-                <span className="pl-1 text-[13px] text-muted-foreground">{topic ? 'Discussion' : 'Thread'}</span>
-                <span className="truncate text-xs text-muted-foreground">
+                <span className="pl-1 text-[15px] font-semibold">{topic ? 'Discussion' : 'Thread'}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                     {editingTitle !== null ? (
                         <input
                             autoFocus
@@ -654,7 +654,7 @@ export function ThreadPane({
                             }}
                             onBlur={() => setEditingTitle(null)}
                             placeholder={topic ? 'Discussion goal' : 'What needs to get resolved?'}
-                            className="w-64 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-xs text-foreground outline-none"
+                            className="w-full min-w-0 rounded-md border border-foreground/30 bg-background px-1.5 py-0.5 text-xs text-foreground outline-none"
                         />
                     ) : (
                         <>
@@ -675,7 +675,7 @@ export function ThreadPane({
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="size-7 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
+                        <Button variant="ghost" size="icon" aria-label="Thread options" className="size-8 shrink-0 text-muted-foreground"><MoreHorizontal className="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         {topic ? (
@@ -718,7 +718,7 @@ export function ThreadPane({
             </div>
 
             <div className="relative flex-1 min-h-0 flex flex-col">
-            <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+            <div ref={scrollRef} className="flex-1 min-h-0 spaces-message-list overflow-y-auto py-2">
                 {!loaded && !root && <div className="px-2 py-2 text-sm text-muted-foreground">Loading…</div>}
 
                 {/* Reply-to-activity-row provenance: the change this root answers. */}
@@ -741,23 +741,23 @@ export function ThreadPane({
                     </button>
                 )}
                 {root && (
-                    <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <div className="spaces-thread-root flex items-start gap-3">
                         <MemberProfilePopover id={root.author.memberId}>
                             <button type="button" aria-label={`${parentName}’s profile`} className="mt-0.5 shrink-0 cursor-pointer rounded-full">
-                                <MemberAvatar id={root.author.memberId} name={parentName} size="md" />
+                                <MemberAvatar id={root.author.memberId} name={parentName} size="xl" />
                             </button>
                         </MemberProfilePopover>
                         <div className="min-w-0 flex-1">
                             <div className="flex items-baseline gap-1.5 text-xs">
                                 <MemberProfilePopover id={root.author.memberId}>
-                                    <button type="button" className="cursor-pointer font-semibold hover:underline">{parentName}</button>
+                                    <button type="button" className="cursor-pointer text-[15px] font-bold hover:underline">{parentName}</button>
                                 </MemberProfilePopover>
                                 {root.author.actingMode !== 'direct' && (
                                     <span className="text-muted-foreground">via {root.author.agentName ?? 'agent'}</span>
                                 )}
                                 <span className="text-muted-foreground">{formatFeedTime(root.postedAt)} · in Messages</span>
                             </div>
-                            <div className="text-sm leading-relaxed [&_p]:my-0.5">
+                            <div className="text-[15px] leading-[22px] [&_p]:my-0.5">
                                 {root.deletedAt ? (
                                     <span className="italic text-muted-foreground">This message was deleted</span>
                                 ) : (
@@ -778,7 +778,7 @@ export function ThreadPane({
                     folding={folding}
                 />
 
-                <div className="flex items-center gap-2 px-1 pb-1 pt-3">
+                <div className="mx-5 flex items-center gap-2 pb-2 pt-4">
                     <span className="text-[11px] font-medium text-muted-foreground">
                         {replyCountLabel} {replyCountLabel === 1 ? 'reply' : 'replies'}
                     </span>

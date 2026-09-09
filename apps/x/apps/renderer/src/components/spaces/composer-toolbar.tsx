@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { isMac } from '@/lib/shortcut'
 import { insertLink, toggleCodeBlock, toggleInline, toggleLinePrefix, type FormatResult } from '@/lib/spaces-format'
 
-// The Slack-style formatting bar over a markdown textarea (the space composer
+// The conversation formatting bar over a markdown textarea (the space composer
 // and the message editor). The wire format is plain markdown, so every button
 // is a TEXT transform on (value, selection) — no document model, no editor
 // swap; the `@`/`:emoji:`/slash machinery underneath never notices. The
