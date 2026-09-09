@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -129,6 +130,7 @@ export default function ChatScreen() {
   const send = useCallback(async () => {
     const content = draft.trim();
     if (!content || !sessions) return;
+    Keyboard.dismiss();
     setSending(true);
     setDraft('');
     try {
@@ -185,6 +187,7 @@ export default function ChatScreen() {
         {id ? (
           <ScrollView
             ref={scrollRef}
+            keyboardDismissMode="interactive"
             // The header is transparent (floating hamburger) — pad the content
             // below it by hand: safe area + standard header height.
             contentContainerStyle={{ paddingTop: insets.top + 52, paddingHorizontal: 16, paddingBottom: 16, gap: 4 }}

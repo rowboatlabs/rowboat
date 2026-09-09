@@ -2,7 +2,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Keyboard, ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardVisible } from '@/lib/use-keyboard-visible';
 import type { Member, Message } from '@rowboat/spaces-protocol';
@@ -110,6 +110,7 @@ export default function SpaceThreadScreen() {
     const body = draft.trim();
     if (!body || sending) return;
     if (process.env.EXPO_OS === 'ios') void Haptics.selectionAsync();
+    Keyboard.dismiss();
     setSending(true);
     setDraft('');
     try {
@@ -158,6 +159,7 @@ export default function SpaceThreadScreen() {
       ) : (
         <ScrollView
           ref={scrollRef}
+          keyboardDismissMode="interactive"
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingVertical: 12 }}
         >
