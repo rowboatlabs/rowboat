@@ -1,11 +1,11 @@
-import { createContext, memo, useContext, useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
+import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { Streamdown } from 'streamdown'
 import { Eye, FileDown, FilePlus2, FileText, Loader2 } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { ZoomableImage } from '@/components/image-lightbox'
+import { ImageLightbox as SharedImageLightbox } from '@/components/image-lightbox'
 import { isTrustedDomain, linkDomain, trustDomain } from '@/lib/trusted-domains'
 import { toast } from '@/lib/toast'
 import { MemberProfilePopover } from '@/components/spaces/atoms'
@@ -97,12 +97,77 @@ function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }
     )
 }
 
-/**
- * Discord-style viewer: the image large on a dimmed backdrop. Esc or a click
- * outside closes; scroll zooms, click toggles fit ⇄ zoomed, drag pans. The
- * row under the image carries the source-specific action (download for
- * blobs, open-original for external links).
- */
+/** One gallery per message, using rendered tile order (including pasted image URLs). */
+const MessageImageGalleryContext = createContext<((image: HTMLImageElement) => void) | null>(null)
+
+function MessageImageGallery({ children }: { children: ReactNode }) {
+    const container = useRef<HTMLDivElement>(null)
+    const [gallery, setGallery] = useState<{ images: { src: string; alt: string }[]; index: number } | null>(null)
+    const openImage = (image: HTMLImageElement) => {
+        const tiles = Array.from(container.current?.querySelectorAll<HTMLImageElement>('img[data-message-image]') ?? [])
+        const index = tiles.indexOf(image)
+        if (index < 0) return
+        setGallery({ images: tiles.map((tile) => ({ src: tile.src, alt: tile.alt })), index })
+    }
+    const selected = gallery?.images[gallery.index]
+    return (
+        <MessageImageGalleryContext.Provider value={openImage}>
+            <div ref={container}>{children}</div>
+            <SharedImageLightbox
+                open={Boolean(selected)}
+                onOpenChange={(open) => { if (!open) setGallery(null) }}
+                src={selected?.src ?? ''}
+                name={selected?.alt || 'Image'}
+                actions={selected && <SpaceImageActions key={selected.src} src={selected.src} />}
+                navigation={gallery ? {
+                    index: gallery.index,
+                    count: gallery.images.length,
+                    onPrevious: () => setGallery((current) => current && ({ ...current, index: Math.max(0, current.index - 1) })),
+                    onNext: () => setGallery((current) => current && ({ ...current, index: Math.min(current.images.length - 1, current.index + 1) })),
+                } : undefined}
+            />
+        </MessageImageGalleryContext.Provider>
+    )
+}
+
+/** Source-specific actions always follow the currently selected image. */
+function SpaceImageActions({ src }: { src: string }) {
+    const [saving, setSaving] = useState(false)
+    const [saveOpen, setSaveOpen] = useState(false)
+    const parsed = parseBlobAppUrl(src)
+    const save = async () => {
+        if (saving) return
+        setSaving(true)
+        try {
+            const res = parsed
+                ? await window.ipc.invoke('spaces:saveBlob', {
+                    ...parsed,
+                    suggestedName: new URL(src).searchParams.get('name') ?? undefined,
+                })
+                : await window.ipc.invoke('spaces:saveImageUrl', { url: src })
+            if (res.saved) toast('Saved', 'success')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not download', 'error')
+        } finally {
+            setSaving(false)
+        }
+    }
+    return (
+        <>
+            <button type="button" disabled={saving} onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">
+                {saving ? 'Saving…' : 'Download'}
+            </button>
+            {parsed ? (
+                <button type="button" onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">Save to space files</button>
+            ) : (
+                <a href={src} target="_blank" rel="noreferrer" className="text-white/80 hover:text-white hover:underline">Open original</a>
+            )}
+            {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
+        </>
+    )
+}
+
+/** Standalone tiles outside a message retain a single-image viewer. */
 function ImageLightbox({ src, alt, open, onOpenChange, children }: {
     src: string
     alt: string
@@ -110,18 +175,7 @@ function ImageLightbox({ src, alt, open, onOpenChange, children }: {
     onOpenChange: (open: boolean) => void
     children?: ReactNode
 }) {
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent
-                showCloseButton={false}
-                className="flex w-auto max-w-[92vw] flex-col items-center border-none bg-transparent p-0 shadow-none outline-none sm:max-w-[92vw]"
-            >
-                <DialogTitle className="sr-only">{alt || 'Image'}</DialogTitle>
-                <ZoomableImage src={src} alt={alt} className="max-h-[82vh] max-w-[92vw] rounded-lg object-contain" />
-                {children && <div className="flex items-center gap-3 self-start text-xs">{children}</div>}
-            </DialogContent>
-        </Dialog>
-    )
+    return <SharedImageLightbox src={src} name={alt || 'Image'} open={open} onOpenChange={onOpenChange} actions={children} />
 }
 
 /** An uploaded image in a message: inline preview, click to view, download from the viewer. */
@@ -208,6 +262,12 @@ function SaveToSpaceDialog({ src, onClose }: { src: string; onClose: () => void 
 }
 
 export function BlobImage({ src, alt }: { src: string; alt: string }) {
+    const imageRef = useRef<HTMLImageElement>(null)
+    const openGallery = useContext(MessageImageGalleryContext)
+    const preview = () => {
+        if (openGallery && imageRef.current) openGallery(imageRef.current)
+        else setOpen(true)
+    }
     const [open, setOpen] = useState(false)
     const [saveOpen, setSaveOpen] = useState(false)
     const [saving, setSaving] = useState(false)
@@ -249,9 +309,17 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                 <ContextMenuTrigger asChild>
                     <img
                         src={src}
+                        ref={imageRef}
+                        data-message-image
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Preview ${alt || 'image'}`}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview() }
+                        }}
                         alt={alt}
                         loading="lazy"
-                        onClick={() => setOpen(true)}
+                        onClick={preview}
                         // The row has its own context menu — the image's wins here.
                         onContextMenu={(e) => e.stopPropagation()}
                         onLoad={() => setLoaded(true)}
@@ -260,7 +328,7 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                     />
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                    <ContextMenuItem onSelect={() => setOpen(true)}>
+                    <ContextMenuItem onSelect={preview}>
                         <Eye className="size-3.5 mr-2" /> View
                     </ContextMenuItem>
                     {parsed && (
@@ -314,6 +382,12 @@ function plainLabel(children: ReactNode): string | null {
  * images; a URL that never loads falls back to the plain link it came from.
  */
 function ExternalImage({ src, alt }: { src: string; alt: string }) {
+    const imageRef = useRef<HTMLImageElement>(null)
+    const openGallery = useContext(MessageImageGalleryContext)
+    const preview = () => {
+        if (openGallery && imageRef.current) openGallery(imageRef.current)
+        else setOpen(true)
+    }
     const [failed, setFailed] = useState(false)
     const [open, setOpen] = useState(false)
     const [saving, setSaving] = useState(false)
@@ -336,10 +410,18 @@ function ExternalImage({ src, alt }: { src: string; alt: string }) {
         <>
             <img
                 src={src}
+                ref={imageRef}
+                data-message-image
+                role="button"
+                tabIndex={0}
+                aria-label={`Preview ${alt || 'image'}`}
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview() }
+                }}
                 alt={alt}
                 title={src}
                 loading="lazy"
-                onClick={() => setOpen(true)}
+                onClick={preview}
                 onError={() => setFailed(true)}
                 className={cn(TILE_CLASS, 'h-60 max-w-[360px]')}
             />
@@ -522,7 +604,9 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
     }, [body, refs, memberNames])
     return (
         <div className={cn(className)}>
-            <Streamdown components={spaceComponents}>{text}</Streamdown>
+            <MessageImageGallery key={text}>
+                <Streamdown components={spaceComponents}>{text}</Streamdown>
+            </MessageImageGallery>
         </div>
     )
 })

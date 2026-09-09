@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
+import { ImageLightbox } from '@/components/image-lightbox'
 import type { MessageAttachment } from '@/lib/chat-conversation'
 import {
   type AttachmentIconKind,
@@ -39,47 +40,38 @@ function getAttachmentIcon(kind: AttachmentIconKind) {
   }
 }
 
-function ImageAttachmentPreview({ attachment }: { attachment: MessageAttachment }) {
-  const fallbackFileUrl = useMemo(() => toFileUrl(attachment.path), [attachment.path])
-  const [src, setSrc] = useState(attachment.thumbnailUrl || fallbackFileUrl)
-  const [triedBase64, setTriedBase64] = useState(Boolean(attachment.thumbnailUrl))
+function useAttachmentImage(attachment?: MessageAttachment) {
+  const path = attachment?.path
+  const thumbnailUrl = attachment?.thumbnailUrl
+  const mimeType = attachment?.mimeType
+  const fallbackFileUrl = useMemo(() => path ? toFileUrl(path) : '', [path])
+  const [loaded, setLoaded] = useState<{ path: string; src: string } | null>(null)
 
   useEffect(() => {
-    const nextSrc = attachment.thumbnailUrl || fallbackFileUrl
-    setSrc(nextSrc)
-    setTriedBase64(Boolean(attachment.thumbnailUrl))
-  }, [attachment.thumbnailUrl, fallbackFileUrl])
+    if (!path || thumbnailUrl) return
+    let cancelled = false
+    window.ipc.invoke('shell:readFileBase64', { path })
+      .then((result) => {
+        if (!cancelled) setLoaded({ path, src: `data:${result.mimeType || mimeType || 'image/*'};base64,${result.data}` })
+      })
+      .catch(() => { /* Keep the file URL if the read fails. */ })
+    return () => { cancelled = true }
+  }, [path, thumbnailUrl, mimeType])
 
-  const loadBase64 = useMemo(
-    () => async () => {
-      try {
-        const result = await window.ipc.invoke('shell:readFileBase64', { path: attachment.path })
-        const mimeType = result.mimeType || attachment.mimeType || 'image/*'
-        setSrc(`data:${mimeType};base64,${result.data}`)
-      } catch {
-        // Keep current src; fallback rendering (broken image icon) is better than crashing.
-      }
-    },
-    [attachment.mimeType, attachment.path]
-  )
+  return thumbnailUrl || (loaded?.path === path ? loaded?.src : undefined) || fallbackFileUrl
+}
 
-  useEffect(() => {
-    if (attachment.thumbnailUrl || triedBase64) return
-    setTriedBase64(true)
-    void loadBase64()
-  }, [attachment.thumbnailUrl, loadBase64, triedBase64])
-
+function ImageAttachmentPreview({ attachment, onOpen }: { attachment: MessageAttachment; onOpen: () => void }) {
+  const src = useAttachmentImage(attachment)
+  const name = getAttachmentDisplayName(attachment)
   return (
-    <img
-      src={src}
-      alt="Image attachment"
-      className="h-44 w-auto max-w-[300px] rounded-2xl border border-border/70 bg-muted object-cover"
-      onError={() => {
-        if (triedBase64) return
-        setTriedBase64(true)
-        void loadBase64()
-      }}
-    />
+    <button type="button" aria-label={`Preview ${name}`} onClick={onOpen} className="rounded-2xl cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <img
+        src={src}
+        alt={name}
+        className="h-44 w-auto max-w-[300px] rounded-2xl border border-border/70 bg-muted object-cover"
+      />
+    </button>
   )
 }
 
@@ -89,7 +81,7 @@ interface ChatMessageAttachmentsProps {
 }
 
 export function ChatMessageAttachments({ attachments, className }: ChatMessageAttachmentsProps) {
-  if (attachments.length === 0) return null
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
 
   const videoFrames = attachments.filter((attachment) => attachment.isVideoFrame)
   const imageAttachments = attachments.filter(
@@ -98,6 +90,12 @@ export function ChatMessageAttachments({ attachments, className }: ChatMessageAt
   const fileAttachments = attachments.filter(
     (attachment) => !attachment.isVideoFrame && !isImageMime(attachment.mimeType)
   )
+
+  const selected = selectedIndex === null ? undefined : imageAttachments[selectedIndex]
+  const selectedSrc = useAttachmentImage(selected)
+  const selectedName = selected ? getAttachmentDisplayName(selected) : ''
+
+  if (attachments.length === 0) return null
 
   return (
     <div className={cn('flex flex-col items-end gap-2', className)}>
@@ -116,10 +114,31 @@ export function ChatMessageAttachments({ attachments, className }: ChatMessageAt
       {imageAttachments.length > 0 && (
         <div className="flex flex-wrap justify-end gap-2">
           {imageAttachments.map((attachment, index) => (
-            <ImageAttachmentPreview key={`${attachment.path}-${index}`} attachment={attachment} />
+            <ImageAttachmentPreview key={`${attachment.path}-${index}`} attachment={attachment} onOpen={() => setSelectedIndex(index)} />
           ))}
         </div>
       )}
+      <ImageLightbox
+        open={Boolean(selected)}
+        onOpenChange={(open) => { if (!open) setSelectedIndex(null) }}
+        src={selectedSrc}
+        name={selectedName}
+        onDownload={() => {
+          const link = document.createElement('a')
+          link.href = selectedSrc
+          link.download = selectedName
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+        }}
+        onOpenInSystem={() => { if (selected) void window.ipc.invoke('shell:openPath', { path: selected.path }) }}
+        navigation={{
+          index: selectedIndex ?? 0,
+          count: imageAttachments.length,
+          onPrevious: () => setSelectedIndex((index) => index === null ? null : Math.max(0, index - 1)),
+          onNext: () => setSelectedIndex((index) => index === null ? null : Math.min(imageAttachments.length - 1, index + 1)),
+        }}
+      />
       {fileAttachments.length > 0 && (
         <div className="flex flex-wrap justify-end gap-2">
           {fileAttachments.map((attachment, index) => {

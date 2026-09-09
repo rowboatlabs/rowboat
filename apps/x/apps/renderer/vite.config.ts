@@ -41,6 +41,8 @@ export default defineConfig({
     excalidrawAssets(),
   ],
   resolve: {
+    // Linked workspace dependencies must share the renderer's React instance.
+    dedupe: ['react', 'react-dom'],
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
