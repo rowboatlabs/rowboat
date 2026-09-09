@@ -2367,7 +2367,9 @@ export function setupIpcHandlers() {
     },
     'spreadsheet:load': async (_event, args) => {
       const { loadSheetWindow } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
-      const inputPath = args.space
+      const inputPath = args.attachment
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeAttachment(args.attachment.orgId, args.attachment.spaceId, args.attachment.hash, args.path)
+        : args.space
         ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.path, args.space.version)
         : args.path;
       const result = await loadSheetWindow(inputPath, args.sheet, args.offset, args.limit);
@@ -2387,7 +2389,9 @@ export function setupIpcHandlers() {
     },
     'spreadsheet:find': async (_event, args) => {
       const { findInSheet } = await import('@x/core/dist/spreadsheet/spreadsheet.js');
-      const inputPath = args.space
+      const inputPath = args.attachment
+        ? await (await import('@x/core/dist/spaces/document-file.js')).materializeAttachment(args.attachment.orgId, args.attachment.spaceId, args.attachment.hash, args.path)
+        : args.space
         ? await (await import('@x/core/dist/spaces/document-file.js')).materializeDocument(args.space.orgId, args.space.spaceId, args.path, args.space.version)
         : args.path;
       return await findInSheet(inputPath, args.sheet, args.query, args.maxMatches);

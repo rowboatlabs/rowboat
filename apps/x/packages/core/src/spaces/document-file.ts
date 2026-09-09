@@ -12,3 +12,9 @@ export async function materializeDocument(orgId: string, spaceId: string, assetP
     const hash = createHash('sha256').update(bytes).digest('hex');
     return writeBlobFile(hash, path.basename(assetPath), bytes);
 }
+
+/** Message attachments need no asset entry to use the same document parsers. */
+export async function materializeAttachment(orgId: string, spaceId: string, hash: string, name: string): Promise<string> {
+    const { bytes } = await getBlob(orgId, spaceId, hash);
+    return writeBlobFile(hash, path.basename(name), bytes);
+}

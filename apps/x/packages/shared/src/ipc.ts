@@ -2457,6 +2457,7 @@ export const ipcSchemas = {
     req: z.object({
       path: z.string(),
       space: z.object({ orgId: z.string(), spaceId: z.string(), version: z.number().int().min(1) }).optional(),
+      attachment: z.object({ orgId: z.string(), spaceId: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) }).optional(),
       sheet: z.string().optional(),
       offset: z.number().int().min(0),
       limit: z.number().int().min(1).max(1000),
@@ -2486,6 +2487,7 @@ export const ipcSchemas = {
     req: z.object({
       path: z.string(),
       space: z.object({ orgId: z.string(), spaceId: z.string(), version: z.number().int().min(1) }).optional(),
+      attachment: z.object({ orgId: z.string(), spaceId: z.string(), hash: z.string().regex(/^[a-f0-9]{64}$/) }).optional(),
       sheet: z.string().optional(),
       query: z.string(),
       maxMatches: z.number().int().min(1).max(5000).optional(),

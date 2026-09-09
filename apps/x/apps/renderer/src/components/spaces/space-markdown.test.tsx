@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SpaceMarkdown, SpaceRefsProvider } from './space-markdown'
+import { AttachmentColumn, SpaceMarkdown, SpaceNavProvider, SpaceRefsProvider } from './space-markdown'
 import { blobWireUrl } from '@/lib/spaces-presentation'
 
 const refs = { orgId: 'org', spaceId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', orgAddress: 'spaces.example.com' }
@@ -55,5 +55,65 @@ describe('Spaces message image carousel', () => {
         render(<SpaceMarkdown body="![Only](https://example.com/only.png)" />)
         fireEvent.click(await screen.findByRole('button', { name: 'Preview Only' }))
         expect(screen.queryByRole('button', { name: 'Next image' })).not.toBeInTheDocument()
+    })
+})
+
+describe('Space file attachments', () => {
+    beforeEach(() => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['hello'], { type: 'text/plain' }) }))
+        vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:attachment')
+        vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    })
+    afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+    it('routes attachment clicks to the document panel without opening a modal', async () => {
+        const openAttachment = vi.fn()
+        render(<SpaceRefsProvider refs={refs}><SpaceNavProvider onOpenFile={vi.fn()} onOpenAttachment={openAttachment}>
+            <SpaceMarkdown body={`Conversation stays visible\n\n[notes.txt](${blobWireUrl(refs, firstHash, 'notes.txt')})`} />
+        </SpaceNavProvider></SpaceRefsProvider>)
+        fireEvent.click(await screen.findByRole('button', { name: 'notes.txt' }))
+        expect(openAttachment).toHaveBeenCalledWith(expect.stringContaining(firstHash), 'notes.txt')
+        expect(screen.getByText('Conversation stays visible')).toBeVisible()
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('routes uploaded images to the same panel when navigation is available', async () => {
+        const openAttachment = vi.fn()
+        render(<SpaceRefsProvider refs={refs}><SpaceNavProvider onOpenFile={vi.fn()} onOpenAttachment={openAttachment}>
+            <SpaceMarkdown body={`![Photo](${blobWireUrl(refs, firstHash, 'photo.png')})`} />
+        </SpaceNavProvider></SpaceRefsProvider>)
+        fireEvent.click(await screen.findByRole('button', { name: 'Preview Photo' }))
+        expect(openAttachment).toHaveBeenCalledWith(expect.stringContaining(firstHash), 'photo.png')
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('previews in the panel, closes it, and hands saved files to the existing file view', async () => {
+        invoke.mockImplementation(async (channel) => channel === 'spaces:listAssets' ? { entries: [] } : { outcome: 'applied' })
+        const onSaved = vi.fn()
+        const onDismiss = vi.fn()
+        render(<AttachmentColumn src={`app://space-blob/org/${refs.spaceId}/${firstHash}?name=notes.txt`} onSaved={onSaved} onDismiss={onDismiss} />)
+        expect(await screen.findByText('hello')).toBeInTheDocument()
+        expect(screen.getByRole('region', { name: 'Attachment preview' })).toBeInTheDocument()
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Close attachment preview' }))
+        expect(onDismiss).toHaveBeenCalledOnce()
+        fireEvent.click(screen.getByRole('button', { name: 'Save to space files' }))
+        fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+        await waitFor(() => expect(onSaved).toHaveBeenCalledWith('notes.txt'))
+        expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: refs.orgId, spaceId: refs.spaceId,
+            input: { assetPath: 'notes.txt', baseVersion: 0, blob: firstHash, reason: 'saved from chat' },
+        })
+        expect(invoke).not.toHaveBeenCalledWith('spaces:saveBlob', expect.anything())
+    })
+
+    it('keeps the save dialog open when the filename conflicts', async () => {
+        invoke.mockImplementation(async (channel) => channel === 'spaces:listAssets' ? { entries: [{ path: 'notes.txt', version: 1 }] } : { outcome: 'conflict', currentVersion: 1 })
+        render(<SpaceRefsProvider refs={refs}><SpaceMarkdown body={`[notes.txt](${blobWireUrl(refs, firstHash, 'notes.txt')})`} /></SpaceRefsProvider>)
+        fireEvent.click(await screen.findByRole('button', { name: 'Save to space files' }))
+        fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+        expect(await screen.findByRole('button', { name: 'Keep both' })).toBeEnabled()
+        expect(screen.getByRole('textbox', { name: 'File name' })).toHaveValue('notes.txt')
     })
 })

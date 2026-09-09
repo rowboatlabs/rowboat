@@ -15,6 +15,8 @@ export interface FileViewerSource {
   findCells: Channel<'spreadsheet:find'>
   subscribe?: (listener: () => void) => () => void
   notifyChanged?: (version: number) => void
+  /** Immutable attachments use the same viewers without editing controls. */
+  readOnly?: boolean
   workspace: boolean
 }
 

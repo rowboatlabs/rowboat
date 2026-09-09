@@ -391,7 +391,7 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
         // preserve it byte-for-byte — repair the package once, on open.
         try {
           const upgraded = await upgradeGeneratedDeck(bytes)
-          if (upgraded && !cancelled) {
+          if (upgraded && !cancelled && !source.readOnly) {
             // Guarded like every other write: if the assistant touched the
             // file between our read and this repair, keep opening as-is and
             // let the conflict banner sort it out.
@@ -1489,6 +1489,19 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
         <PresentationIcon className="size-6" />
         <p className="text-sm font-medium text-foreground">{baseName(path)}</p>
         <p className="max-w-md text-xs">This presentation has no slides.</p>
+      </div>
+    )
+  }
+
+  if (source.readOnly) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex items-center justify-center gap-3 border-b border-border p-2 text-xs">
+          <button type="button" disabled={currentIndex === 0} onClick={() => setActiveIndex(currentIndex - 1)}>Previous slide</button>
+          <span>{currentIndex + 1} of {deck.slides.length}</span>
+          <button type="button" disabled={currentIndex === deck.slides.length - 1} onClick={() => setActiveIndex(currentIndex + 1)}>Next slide</button>
+        </div>
+        {slide && <div className="min-h-0 flex-1 overflow-auto p-4"><SlideThumbnail slide={slide} sizeEmu={deck.slideSizeEmu} widthPx={800} /></div>}
       </div>
     )
   }

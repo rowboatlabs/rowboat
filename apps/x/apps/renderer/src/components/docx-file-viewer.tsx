@@ -129,7 +129,7 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
   // Serialize the current document and write it back to disk.
   const persist = useCallback(async () => {
     const editor = editorRef.current
-    if (!editor || savingRef.current) return
+    if (source.readOnly || !editor || savingRef.current) return
     savingRef.current = true
     dirtyRef.current = false
     setSaveState('saving')
@@ -165,7 +165,7 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
   }
 
   const handleChange = () => {
-    if (!armedRef.current) return
+    if (source.readOnly || !armedRef.current) return
     dirtyRef.current = true
     scheduleSave()
   }
@@ -330,10 +330,10 @@ export function DocxFileViewer({ path }: DocxFileViewerProps) {
             key={`${path}:${reloadNonce}`}
             ref={editorRef}
             documentBuffer={buffer}
-            mode="editing"
+            mode={source.readOnly ? 'viewing' : 'editing'}
             documentName={baseName(path)}
             documentNameEditable={false}
-            onChange={handleChange}
+            onChange={source.readOnly ? undefined : handleChange}
             onError={(err) => { console.error('docx editor error:', err) }}
             className="flex-1 min-h-0"
           />
