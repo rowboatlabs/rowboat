@@ -277,12 +277,10 @@ function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: stri
 }
 
 export function BlobImage({ src, alt }: { src: string; alt: string }) {
-    const openAttachment = useContext(AttachmentNavContext)
     const imageRef = useRef<HTMLImageElement>(null)
     const openGallery = useContext(MessageImageGalleryContext)
     const preview = () => {
-        if (openAttachment) openAttachment(src, new URL(src).searchParams.get('name') || alt || 'Image')
-        else if (openGallery && imageRef.current) openGallery(imageRef.current)
+        if (openGallery && imageRef.current) openGallery(imageRef.current)
         else setOpen(true)
     }
     const [open, setOpen] = useState(false)

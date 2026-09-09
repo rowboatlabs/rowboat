@@ -14,10 +14,11 @@ afterEach(cleanup)
 
 describe('Spaces message image carousel', () => {
     it('uses actual markdown tiles, opens the clicked image, and navigates only that message', async () => {
-        render(<SpaceRefsProvider refs={refs}>
+        const openAttachment = vi.fn()
+        render(<SpaceRefsProvider refs={refs}><SpaceNavProvider onOpenFile={vi.fn()} onOpenAttachment={openAttachment}>
             <SpaceMarkdown body={body} />
             <SpaceMarkdown body="![Other](https://example.com/other.png)" />
-        </SpaceRefsProvider>)
+        </SpaceNavProvider></SpaceRefsProvider>)
         fireEvent.click(await screen.findByRole('button', { name: 'Preview Second' }))
         const dialog = screen.getByRole('dialog')
         expect(within(dialog).getByRole('img', { name: 'Second' })).toBeInTheDocument()
@@ -41,6 +42,7 @@ describe('Spaces message image carousel', () => {
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
         fireEvent.keyDown(screen.getByRole('button', { name: 'Preview Second' }), { key: 'Enter' })
         expect(screen.getByRole('status')).toHaveTextContent('2 of 3')
+        expect(openAttachment).not.toHaveBeenCalled()
     })
 
     it('includes pasted image URLs, skips files and failed images, and handles one image', async () => {
@@ -78,14 +80,18 @@ describe('Space file attachments', () => {
         expect(invoke).not.toHaveBeenCalled()
     })
 
-    it('routes uploaded images to the same panel when navigation is available', async () => {
+    it('keeps a single uploaded image in the lightbox with save and download actions', async () => {
         const openAttachment = vi.fn()
         render(<SpaceRefsProvider refs={refs}><SpaceNavProvider onOpenFile={vi.fn()} onOpenAttachment={openAttachment}>
             <SpaceMarkdown body={`![Photo](${blobWireUrl(refs, firstHash, 'photo.png')})`} />
         </SpaceNavProvider></SpaceRefsProvider>)
         fireEvent.click(await screen.findByRole('button', { name: 'Preview Photo' }))
-        expect(openAttachment).toHaveBeenCalledWith(expect.stringContaining(firstHash), 'photo.png')
-        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        const dialog = screen.getByRole('dialog')
+        expect(within(dialog).getByRole('img', { name: 'Photo' })).toBeVisible()
+        expect(within(dialog).getByRole('button', { name: 'Download' })).toBeEnabled()
+        expect(within(dialog).getByRole('button', { name: 'Save to space files' })).toBeEnabled()
+        expect(screen.queryByRole('button', { name: 'Next image' })).not.toBeInTheDocument()
+        expect(openAttachment).not.toHaveBeenCalled()
     })
 
     it('previews in the panel, closes it, and hands saved files to the existing file view', async () => {
