@@ -497,7 +497,7 @@ const spaceComponents: StreamdownComponents = {
     },
     a: SpaceAnchor,
     // decorateMentions renders "@name" as **bold**; the stream dialect shows
-    // those as tinted mention chips. Slack treatment: only the chip is
+    // those as tinted mention chips. Mention treatment: only the chip is
     // tinted, never the row — amber when it addresses you (@you, @here),
     // blue for anyone else. A chip naming a real member opens their profile.
     strong: MentionStrong,

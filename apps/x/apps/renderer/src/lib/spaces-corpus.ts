@@ -70,7 +70,7 @@ export function peekSpaceCorpus(orgId: string, spaceId: string): spaces.Message[
 }
 
 // ---------------------------------------------------------------------------
-// Query syntax — the Discord/Slack filter grammar over the corpus:
+// Query syntax — the conversation filter grammar over the corpus:
 //   from:<name>      author's display name contains <name> ('me' = you)
 //   in:<topic>       the topic's title contains <topic> ('messages' = the stream)
 //   has:link|image|file   the body carries one

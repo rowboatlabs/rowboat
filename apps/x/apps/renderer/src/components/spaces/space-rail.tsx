@@ -239,7 +239,7 @@ export function SpaceRail({
     // The rail's content — the shell renders it docked or inside the peek
     // drawer at the fixed open width.
     const renderBody = ({ togglePin, onMenuOpenChange }: SecondaryRailContext) => (
-        <div ref={bodyRef} className={cn('flex h-full min-h-0 flex-col', resizing && 'select-none')}>
+        <div ref={bodyRef} className={cn('spaces-navigation flex h-full min-h-0 flex-col', resizing && 'select-none')}>
             <section style={chatStyle} className="group/section flex min-h-0 flex-col">
                 <SectionHeader label="Chat" collapsed={chatCollapsed} count={liveRows.length} onToggle={() => toggleSection('chat')}>
                     <DropdownMenu onOpenChange={onMenuOpenChange}>
@@ -290,10 +290,11 @@ export function SpaceRail({
                         ) : (
                             <button
                                 type="button"
+                                aria-current={selection.kind === 'general' ? 'page' : undefined}
                                 onClick={() => onSelect({ kind: 'general' })}
                                 className={cn(
                                     'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13.5px]',
-                                    selection.kind === 'general' ? 'bg-accent font-medium text-foreground' : 'text-foreground/90 hover:bg-accent/50',
+                                    selection.kind === 'general' ? 'bg-[var(--stream-mention-wash)] font-semibold text-[var(--stream-link)]' : 'text-foreground/90 hover:bg-accent/50',
                                 )}
                             >
                                 <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
@@ -309,7 +310,7 @@ export function SpaceRail({
                             const active = topic.rootMessageId === selectedRootId
                             const muted = effectiveLevel(topic.rootMessageId) === 'mute'
                             // Muted topics don't clamor: no bold, no dot,
-                            // greyed like archived (Slack's treatment).
+                            // greyed like archived (the conversation treatment).
                             const unread = isUnread(topic) && !muted
                             const replies = topic.rootMessage?.replyCount ?? 0
                             const files = artifactFiles.get(topic.rootMessageId)
@@ -352,8 +353,8 @@ export function SpaceRail({
                                                         className={cn(
                                                             // One tree step (12px) in from Messages: these nest under it.
                                                             // pr-7 keeps the title and indicators clear of the ⋯ slot.
-                                                            'flex h-7 w-full items-center gap-2 rounded-md pl-5 pr-7 text-left',
-                                                            active ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
+                                                            'flex h-8 w-full items-center gap-2 rounded pl-5 pr-7 text-left',
+                                                            active ? 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]' : 'hover:bg-accent/50',
                                                             (topic.archived || muted) && 'opacity-60',
                                                         )}
                                                     >
@@ -631,7 +632,7 @@ function SectionHeader({ label, collapsed, count, onToggle, children }: {
                 type="button"
                 onClick={onToggle}
                 title={collapsed ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`}
-                className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground hover:text-foreground"
+                className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-[13px] font-semibold text-muted-foreground hover:text-foreground"
             >
                 <span className="truncate">{label}</span>
                 {collapsed && count > 0 && <span className="font-normal tabular-nums">{count}</span>}

@@ -13,7 +13,7 @@ function atHour(base: Date, dayOffset: number, hour: number): Date {
     return d
 }
 
-/** The send-later menu: a Slack-shaped spread of near-term moments. */
+/** The send-later menu: a familiar spread of near-term moments. */
 export function schedulePresets(now: Date = new Date()): SchedulePreset[] {
     const presets: SchedulePreset[] = [
         { label: 'In 30 minutes', at: new Date(now.getTime() + 30 * 60_000) },
