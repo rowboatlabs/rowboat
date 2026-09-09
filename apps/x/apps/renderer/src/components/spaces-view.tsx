@@ -16,6 +16,9 @@ import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
+import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
+import { ServerSwitcher } from '@/components/spaces/server-switcher'
+import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
@@ -107,6 +110,7 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
 }) {
     const { orgs, loading, refresh } = useSpacesOrgs()
     const [addOrgOpen, setAddOrgOpen] = useState(false)
+    const [emptyShowArchived, setEmptyShowArchived] = useState(false)
 
     const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
     const selectedSpace = selection && selectedOrg ? (findSpace(selectedOrg, selection.spaceId) ?? null) : null
@@ -115,11 +119,11 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
     useEffect(() => {
         if (loading) return
         if (selectedOrg && selectedSpace) return
-        const first = orgs.find((o) => o.spaces.length > 0)
-        const space = first?.spaces[0]
+        const first = selectedOrg ?? orgs.find((o) => o.spaces.length > 0 || o.directs.length > 0)
+        const space = first?.spaces[0] ?? first?.directs[0]
         if (first && space) {
             if (!selection || selection.orgId !== first.id || selection.spaceId !== space.id) onSelect({ orgId: first.id, spaceId: space.id })
-        } else if (selection) {
+        } else if (selection && !selectedOrg) {
             onSelect(null)
         }
     }, [loading, orgs, selection, selectedOrg, selectedSpace, onSelect])
@@ -140,15 +144,34 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                 space={selectedSpace}
                 selection={railSelection}
                 onSelect={onRailSelect}
-                onSwitchSpace={(orgId, spaceId) => {
+                onSwitchSpace={(orgId, spaceId, next = { kind: 'general' }) => {
                     onSelect({ orgId, spaceId })
                     // The old space's rail selection means nothing over there.
-                    onRailSelect({ kind: 'general' })
+                    onRailSelect(next)
                 }}
                 onOpenSession={onOpenSession}
                 active={active}
             />
         )
+    }
+
+    if (selectedOrg) {
+        const openSpace = (orgId: string, spaceId: string) => {
+            onSelect({ orgId, spaceId })
+            onRailSelect({ kind: 'general' })
+        }
+        return <div className="flex min-h-0 flex-1">
+            <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-[var(--rowboat-panel-soft)] p-2">
+                <div className="flex items-center"><ServerSwitcher org={selectedOrg} onOpenSpace={openSpace} />
+                    <ServerOptionsMenu org={selectedOrg} showArchived={emptyShowArchived} onToggleArchived={() => setEmptyShowArchived((value) => !value)} onMenuOpenChange={() => {}} />
+                </div>
+                <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={openSpace}
+                    onOpenDiscussion={() => {}} activeDiscussionCount={0} renderActiveDiscussions={() => null} />
+            </aside>
+            <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+                {selectedOrg.error ? 'This server is unreachable. Retry or sign in from the server options.' : 'Create a space to start a conversation.'}
+            </div>
+        </div>
     }
 
     return (
@@ -188,13 +211,13 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onOpenSession, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     /** The quick switcher can land on another space entirely. */
-    onSwitchSpace: (orgId: string, spaceId: string) => void
+    onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
@@ -874,6 +897,15 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <SpaceRail
+                    org={org}
+                    onOpenSpace={(orgId, spaceId) => {
+                        if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })
+                        else onSwitchSpace(orgId, spaceId)
+                    }}
+                    onOpenDiscussion={(spaceId, next) => {
+                        if (spaceId === space.id) select(next)
+                        else onSwitchSpace(org.id, spaceId, next)
+                    }}
                     orgId={org.id}
                     spaceId={space.id}
                     selfMemberId={org.memberId}

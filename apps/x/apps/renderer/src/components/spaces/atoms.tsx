@@ -187,10 +187,11 @@ export function Segmented<T extends string>({ value, options, onChange, size = '
 }
 
 
-export function AddOrgDialog({ open, onOpenChange, onAdded }: {
+export function AddOrgDialog({ open, onOpenChange, onAdded, initialAction }: {
     open: boolean
     onOpenChange: (open: boolean) => void
-    onAdded: () => void
+    onAdded: (orgId: string, spaceId?: string) => void
+    initialAction?: 'create' | 'join'
 }) {
     // One dialog, two doors: paste an invite link (resolve pre-auth, then
     // join with a system-browser sign-in), or name a new server on the
@@ -226,7 +227,7 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
             toast(`Created ${org.name} — you're the admin`, 'success')
             onOpenChange(false)
             setOrgName('')
-            onAdded()
+            onAdded(org.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not create the server', 'error')
         } finally {
@@ -262,7 +263,7 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
             onOpenChange(false)
             setInviteUrl('')
             setPreview(null)
-            onAdded()
+            onAdded(org.id, space.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not join', 'error')
         } finally {
@@ -278,7 +279,7 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
             const { org } = await window.ipc.invoke('spaces:addOrg', { baseUrl: baseUrl.trim(), memberId: memberId.trim() })
             toast(`Signed into ${org.name} as ${org.memberId}`, 'success')
             onOpenChange(false)
-            onAdded()
+            onAdded(org.id)
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not reach the server', 'error')
         } finally {
@@ -290,7 +291,7 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
-                    <DialogTitle>{mode === 'dev' ? 'Add a dev server' : 'Add a server'}</DialogTitle>
+                    <DialogTitle>{mode === 'dev' ? 'Add a dev server' : initialAction === 'create' ? 'Create a server' : initialAction === 'join' ? 'Join a server' : 'Add a server'}</DialogTitle>
                     <DialogDescription>
                         {mode === 'dev'
                             ? 'Dev sign-in against a stub Harbor (run pnpm dev in apps/harbor/packages/server).'
@@ -304,7 +305,7 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
                             <p className="text-xs text-muted-foreground">Paste an invite link someone sent you.</p>
                             <div className="mt-1.5 flex items-center gap-2">
                                 <Input
-                                    autoFocus
+                                    autoFocus={initialAction !== 'create'}
                                     value={inviteUrl}
                                     onChange={(e) => void resolvePreview(e.target.value)}
                                     placeholder="https://org.example/join/…"
@@ -333,6 +334,7 @@ export function AddOrgDialog({ open, onOpenChange, onAdded }: {
                             <p className="text-xs text-muted-foreground">Free — you name it and you’re its admin.</p>
                             <div className="mt-1.5 flex items-center gap-2">
                                 <Input
+                                    autoFocus={initialAction === 'create'}
                                     value={orgName}
                                     onChange={(e) => setOrgName(e.target.value)}
                                     placeholder="Acme, book club, just me…"
