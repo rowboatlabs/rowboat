@@ -111,6 +111,8 @@ import {
 } from '@/lib/chat-conversation'
 import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
 import { COMMAND_CENTER_CHAT_SENTINEL } from '@x/shared/src/home-threads.js'
+import { isChatListSession } from '@x/shared/src/sessions.js'
+import type { SessionOrigin, SpaceThreadOrigin } from '@x/shared/src/origins.js'
 import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
@@ -2596,7 +2598,10 @@ function App() {
   }, [])
 
   // Runs history state
-  type RunListItem = { id: string; title?: string; createdAt: string; modifiedAt: string; agentId: string; useCase?: string }
+  // origin: what owns the session when something outside the runtime does
+  // (a space thread). Lists that show "your chats" filter on it via
+  // isChatListSession; lookups by id (tab titles, hover) use the full list.
+  type RunListItem = { id: string; title?: string; createdAt: string; modifiedAt: string; agentId: string; useCase?: string; origin?: SessionOrigin }
   const [runs, setRuns] = useState<RunListItem[]>([])
 
   // Chat tab state
@@ -3483,6 +3488,7 @@ function App() {
         createdAt: entry.createdAt,
         modifiedAt: entry.updatedAt,
         agentId: entry.lastAgentId ?? 'copilot',
+        ...(entry.origin ? { origin: entry.origin } : {}),
       })))
     } catch (err) {
       console.error('Failed to load sessions:', err)
@@ -3510,6 +3516,7 @@ function App() {
           createdAt: event.entry.createdAt,
           modifiedAt: event.entry.updatedAt,
           agentId: event.entry.lastAgentId ?? 'copilot',
+          ...(event.entry.origin ? { origin: event.entry.origin } : {}),
         }
         // Re-sort: chat-header slices the top of this list without sorting,
         // so it must stay newest-first like sessions:list.
@@ -3522,6 +3529,12 @@ function App() {
       })
     })
   }, [])
+
+  // The person's own chats — what every "recent chats" surface lists. Space
+  // threads and other owned sessions stay in `runs` (tab titles, the history
+  // pane's explicit filter) but out of these. One predicate, applied to the
+  // seed and to every feed event above, so seed and feed never disagree.
+  const chatRuns = useMemo(() => runs.filter(isChatListSession), [runs])
 
   const [bgTaskSummaries, setBgTaskSummaries] = useState<Array<{
     slug: string
@@ -4880,10 +4893,10 @@ function App() {
         activeTitle: hoverRunId
           ? (runs.find((r) => r.id === hoverRunId)?.title || '(Untitled chat)')
           : null,
-        recent: runs.slice(0, 10).map((r) => ({ id: r.id, title: r.title || '(Untitled chat)' })),
+        recent: chatRuns.slice(0, 10).map((r) => ({ id: r.id, title: r.title || '(Untitled chat)' })),
       })
       .catch(() => {})
-  }, [hoverRunId, runs])
+  }, [hoverRunId, runs, chatRuns])
 
   // The bar's chip switcher picked a chat: rebind the COMPANION to it. The
   // app window keeps showing whatever it was showing. The Command Center
@@ -7005,7 +7018,7 @@ function App() {
     onOpenApp: (folder: string) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() },
     onOpenSpace: openSpace,
     activeSpace: isSpacesOpen ? spaceSelection : null,
-    recentRuns: runs,
+    recentRuns: chatRuns,
     onOpenRun: openAssistantRun,
     onRenameRun: (rid: string, title: string) => {
       void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
@@ -7088,7 +7101,7 @@ function App() {
                       return activeTab ? getChatTabTitle(activeTab) : 'New chat'
                     })()}
                     onNewChatTab={handleNewChatTab}
-                    recentRuns={runs}
+                    recentRuns={chatRuns}
                     activeRunId={runId}
                     sessionUsage={activeChatTabState.sessionUsage}
                     onSelectRun={openAssistantRun}
@@ -7511,6 +7524,9 @@ function App() {
                     currentRunId={runId}
                     processingRunIds={processingRunIds}
                     onSelectRun={openAssistantRun}
+                    onOpenSpaceThread={(origin: SpaceThreadOrigin) => {
+                      void navigateToView({ type: 'spaces', orgId: origin.orgId, spaceId: origin.spaceId, rail: { kind: 'thread', rootMessageId: origin.threadRootId } })
+                    }}
                     onRenameRun={(rid, title) => {
                       void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
                         .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
@@ -7878,7 +7894,7 @@ function App() {
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
                 onNewChatTab={() => handleNewChatTabInSidebar()}
-                recentRuns={runs}
+                recentRuns={chatRuns}
                 onSelectRun={bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={dockFullScreen ? undefined : toggleRightPaneMaximize}

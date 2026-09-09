@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { UserMessage } from "@x/shared/dist/message.js";
+import type { SessionOrigin } from "@x/shared/dist/origins.js";
 import {
     type QueuedSessionMessage,
     SessionCreated,
@@ -168,7 +169,7 @@ export class SessionsImpl implements ISessions {
         return deriveTurnStatus(reduceTurn(turn.events));
     }
 
-    async createSession(input?: { title?: string }): Promise<string> {
+    async createSession(input?: { title?: string; origin?: SessionOrigin }): Promise<string> {
         const sessionId = await this.idGenerator.next();
         const event = SessionCreated.parse({
             type: "session_created",
@@ -176,6 +177,7 @@ export class SessionsImpl implements ISessions {
             sessionId,
             ts: this.clock.now(),
             ...(input?.title === undefined ? {} : { title: input.title }),
+            ...(input?.origin === undefined ? {} : { origin: input.origin }),
         });
         await this.sessionRepo.create(event);
         this.publishEntry(sessionIndexEntry(reduceSession([event]), "none"));

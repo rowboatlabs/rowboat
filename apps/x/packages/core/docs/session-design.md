@@ -116,6 +116,7 @@ interface SessionCreated extends BaseSessionEvent {
   type: "session_created";
   schemaVersion: 1;
   title?: string;
+  origin?: SessionOrigin; // what owns the session, when something does
 }
 
 interface SessionTurnAppended extends BaseSessionEvent {
@@ -140,6 +141,15 @@ type SessionEvent =
 `turn_appended` deliberately denormalizes `agentId` and `model` from the
 turn so the index can fold from session files without opening turn files.
 The turn file remains authoritative for the turn's actual configuration.
+
+`origin` (a `SessionOrigin`, `@x/shared/origins.ts`) names the thing
+outside the runtime that owns the conversation as a whole — a space thread
+today. It is set once at creation and never changes; the runtime records it
+and never reads it. It is distinct from the per-input `InputOrigin` on turn
+events: a space-thread session outlives any single mention, and a person can
+chat in it directly, so ownership must not be derived from the latest turn.
+Sessions created before the field existed carry none and read as a person's
+own chats; the log is append-only, so they are not retrofitted.
 
 The session file never mirrors turn outcomes. Turn lifecycle facts live only
 in turn files; deriving "is this session busy/suspended/failed" reads the
@@ -204,6 +214,7 @@ Rules:
 interface SessionIndexEntry {
   sessionId: string;
   title?: string;
+  origin?: SessionOrigin; // folded from session_created (section 5)
   createdAt: string;
   updatedAt: string;
   turnCount: number;
@@ -226,6 +237,13 @@ the same derivation everywhere: terminal event kind if present, else
 `idle`. Whether a turn is *actively processing right now* is not in the
 index; it is ephemeral bus state (`turn-processing-start/end`), per the turn
 specification.
+
+The index and `sessions:list` carry every session, owned or not. Hiding
+owned sessions from a person's chat list is an edge concern: each list
+applies `isChatListSession(entry)` (`@x/shared/sessions.ts`) to both the
+`sessions:list` seed and every `index-changed` event, so a filtered list and
+its live feed cannot disagree. A server-side filter argument belongs with
+pagination, if that non-goal is ever revisited.
 
 ### 8.2 Startup scan
 
@@ -264,7 +282,7 @@ interface SendMessageConfig {
 }
 
 interface ISessions {
-  createSession(input?: { title?: string }): Promise<string>;
+  createSession(input?: { title?: string; origin?: SessionOrigin }): Promise<string>;
   listSessions(): SessionIndexEntry[];
   getSession(sessionId: string): Promise<SessionState>;
   getTurn(turnId: string): Promise<Turn>; // passthrough to turn runtime

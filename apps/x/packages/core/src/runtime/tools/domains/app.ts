@@ -15,6 +15,7 @@ import { searchThreads } from "../../../knowledge/email/dispatcher.js";
 import { formatTimestampForModel } from "@x/shared/dist/time.js";
 import { listTasks as listBackgroundTasks } from "../../../background-tasks/fileops.js";
 import type { ISessions } from "../../sessions/api.js";
+import { isChatListSession } from "@x/shared/dist/sessions.js";
 import { BuiltinToolsSchema } from "../types.js";
 
 
@@ -139,6 +140,7 @@ export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {
                             case 'chat-history': {
                                 const sessions = container.resolve<ISessions>('sessions')
                                     .listSessions()
+                                    .filter(isChatListSession)
                                     .slice(0, limit)
                                     .map((s) => ({
                                         sessionId: s.sessionId,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildInvocationMessage, mentionOrigin } from './topic-agent.js';
+import { buildInvocationMessage, mentionOrigin, threadOrigin } from './topic-agent.js';
 
 const input = {
     orgId: 'org-1',
@@ -46,6 +46,18 @@ describe('mentionOrigin', () => {
             spaceId: '01M07B68G1BQFP70TX5RPHJX89',
             threadRootId: '01M07ROOTAAAAAAAAAAAAAAAA1',
             messageId: '01M07MSGAAAAAAAAAAAAAAAAA1',
+        });
+    });
+});
+
+describe('threadOrigin', () => {
+    it('identifies the thread and carries the space name as a display fallback — no message id', () => {
+        expect(threadOrigin(input)).toEqual({
+            kind: 'space_thread',
+            orgId: 'org-1',
+            spaceId: '01M07B68G1BQFP70TX5RPHJX89',
+            threadRootId: '01M07ROOTAAAAAAAAAAAAAAAA1',
+            spaceName: 'Roadboard',
         });
     });
 });

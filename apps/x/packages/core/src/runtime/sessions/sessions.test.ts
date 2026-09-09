@@ -368,6 +368,23 @@ describe("createSession and listing", () => {
             expect.objectContaining({ kind: "index-changed", sessionId }),
         ]);
     });
+
+    it("stamps a session origin on session_created and folds it into the index entry", async () => {
+        const { sessions, repo } = makeSessions();
+        const origin = {
+            kind: "space_thread" as const,
+            orgId: "org-1",
+            spaceId: "space-1",
+            threadRootId: "root-1",
+            spaceName: "Roadboard",
+        };
+        const sessionId = await sessions.createSession({ title: "SSO first?", origin });
+        const [created] = await (repo as InMemorySessionRepo).read(sessionId);
+        expect(created).toEqual(expect.objectContaining({ type: "session_created", origin }));
+        expect(sessions.listSessions()).toEqual([
+            expect.objectContaining({ sessionId, title: "SSO first?", origin }),
+        ]);
+    });
 });
 
 describe("sendMessage (13.3)", () => {

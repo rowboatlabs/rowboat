@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { UserMessage } from "./message.js";
-import type { InputOrigin } from "./origins.js";
+import { SessionOrigin, type InputOrigin } from "./origins.js";
 import { ModelDescriptor, type TurnStatus } from "./turns.js";
 
 // Durable session contract for the session layer (see
@@ -18,6 +18,9 @@ export const SessionCreated = z.object({
     sessionId: z.string(),
     ts: z.string(),
     title: z.string().optional(),
+    // What owns this conversation, when something outside the runtime does
+    // (a space thread). Absent for a person's own chats. See origins.ts.
+    origin: SessionOrigin.optional(),
 });
 
 // agentId/model are denormalized from the turn so the session index can fold
@@ -67,6 +70,7 @@ export interface SessionTurnRef {
 export interface SessionState {
     definition: z.infer<typeof SessionCreated>;
     title?: string;
+    origin?: SessionOrigin;
     turns: SessionTurnRef[];
     latestTurnId?: string;
     createdAt: string;
@@ -94,6 +98,7 @@ export function reduceSession(
     const state: SessionState = {
         definition: first,
         title: first.title,
+        ...(first.origin === undefined ? {} : { origin: first.origin }),
         turns: [],
         createdAt: first.ts,
         updatedAt: first.ts,
@@ -156,6 +161,9 @@ export type SessionLatestTurnStatus = "none" | TurnStatus;
 export interface SessionIndexEntry {
     sessionId: string;
     title?: string;
+    // Denormalized from session_created so lists can filter and group
+    // without reading session files. Absent = a person's own chat.
+    origin?: SessionOrigin;
     createdAt: string;
     updatedAt: string;
     turnCount: number;
@@ -218,6 +226,7 @@ export function sessionIndexEntry(
     return {
         sessionId: state.definition.sessionId,
         title: state.title,
+        ...(state.origin === undefined ? {} : { origin: state.origin }),
         createdAt: state.createdAt,
         updatedAt: state.updatedAt,
         turnCount: state.turns.length,
@@ -226,4 +235,15 @@ export function sessionIndexEntry(
         latestTurnId: state.latestTurnId,
         latestTurnStatus,
     };
+}
+
+// The ONE rule every chat list applies (sidebar, dock, chat header, quick-ask
+// switcher, mobile, the agent's chat-history read view): sessions owned by
+// something outside the runtime stay out of the default list and are reached
+// from their owner (the space thread) or from the history pane's explicit
+// filter. sessions:list and the index-changed feed still carry every session
+// — this predicate is applied at the edge, on the seed and on each feed
+// event alike, so the two paths cannot disagree.
+export function isChatListSession(entry: Pick<SessionIndexEntry, "origin">): boolean {
+    return entry.origin === undefined;
 }

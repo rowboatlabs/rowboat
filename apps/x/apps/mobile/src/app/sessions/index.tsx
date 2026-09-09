@@ -1,7 +1,7 @@
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Button, FlatList, Pressable, RefreshControl, StyleSheet, Text, useColorScheme, View } from 'react-native';
-import type { sessions as sessionsShared } from '@x/shared';
+import { sessions as sessionsShared } from '@x/shared';
 
 import * as analytics from '@/lib/analytics';
 import { StatusPill } from '@/components/status-pill';
@@ -23,7 +23,9 @@ export default function SessionsScreen() {
     try {
       const result = await sessions.list();
       setEntries(
-        [...result.sessions].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+        result.sessions
+          .filter(sessionsShared.isChatListSession)
+          .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
       );
       setError(null);
     } catch (err) {

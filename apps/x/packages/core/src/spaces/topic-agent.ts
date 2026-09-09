@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { ISessions } from '../runtime/sessions/api.js';
-import type { SpaceMentionOrigin } from '@x/shared/dist/origins.js';
+import type { SpaceMentionOrigin, SpaceThreadOrigin } from '@x/shared/dist/origins.js';
 import { deriveTurnStatus, reduceTurn } from '@x/shared/dist/turns.js';
 import { WorkDir } from '../config/config.js';
 import { spacesMcpServerNameFor } from './orgs.js';
@@ -22,8 +22,13 @@ import { spacesMcpServerNameFor } from './orgs.js';
 //   starts, or on the input_added when it steers a live one, and the
 //   agent-activity feed (agent-activity.ts) turns those events into the
 //   room's "Rowboat is working" chip and lease. The session is user-openable
-//   (thread pane + chat sidebar), so the person's own chat turns there carry
+//   (thread pane + history pane), so the person's own chat turns there carry
 //   no origin and never light the chip.
+// - The session itself carries a space_thread SESSION origin (org, space,
+//   thread root, space name) on its session_created, so every chat list
+//   keeps it out of the person's own chats (isChatListSession) and the
+//   history pane can group it under its space. Its title is the thread's
+//   label alone — the space is metadata, not a title prefix.
 
 const REGISTRY_FILE = path.join(WorkDir, 'config', 'spaces_topic_sessions.json');
 
@@ -125,6 +130,17 @@ export function mentionOrigin(input: Pick<InvokeTopicAgentInput, 'orgId' | 'spac
   };
 }
 
+/** The origin the thread's SESSION carries — set once at creation (pure; tested). */
+export function threadOrigin(input: Pick<InvokeTopicAgentInput, 'orgId' | 'spaceId' | 'threadRootId' | 'spaceName'>): SpaceThreadOrigin {
+  return {
+    kind: 'space_thread',
+    orgId: input.orgId,
+    spaceId: input.spaceId,
+    threadRootId: input.threadRootId,
+    spaceName: input.spaceName,
+  };
+}
+
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
@@ -153,7 +169,8 @@ export async function invokeTopicAgent(input: InvokeTopicAgentInput): Promise<In
   }
   if (!sessionId) {
     sessionId = await sessions.createSession({
-      title: truncate(`${input.spaceName}: ${input.threadLabel}`, 100),
+      title: truncate(input.threadLabel, 100),
+      origin: threadOrigin(input),
     });
     registry.sessions[key] = sessionId;
     writeRegistry(registry);
