@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AssistantChatDock } from './assistant-chat-dock'
 
 const sessions = vi.hoisted(() => new Map<string, { isProcessing: boolean; isWaitingOnHuman: boolean }>())
-vi.mock('@/hooks/useSessionChat', () => ({ useSessionChat: (sessionId: string) => ({ chatState: sessions.get(sessionId) }) }))
+vi.mock('@/hooks/useSessionChat', () => ({ useSessionChatStatus: (sessionId: string) => sessions.get(sessionId)?.isWaitingOnHuman ? 'waiting' : sessions.get(sessionId)?.isProcessing ? 'working' : 'idle' }))
 vi.mock('@/lib/session-title', () => ({ useSessionTitle: () => undefined }))
 
 beforeEach(() => {
@@ -19,6 +19,11 @@ const tabs = [
 const baseProps = { tabs, activeId: 'first', expanded: true, getTitle: (tab: { id: string }) => tab.id, onSelect: vi.fn(), onClose: vi.fn(), onNew: vi.fn() }
 
 describe('AssistantChatDock', () => {
+  it('reports multiple expanded panels independently of keyboard focus', () => {
+    render(<AssistantChatDock {...baseProps} expandedIds={['first', 'second']} />)
+    expect(screen.getByRole('button', { name: 'first' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'second' })).toHaveAttribute('aria-expanded', 'true')
+  })
   it('keeps a single minimized tab compact instead of filling the dock', () => {
     render(<AssistantChatDock {...baseProps} tabs={[tabs[0]]} expanded={false} />)
     const tab = screen.getByRole('button', { name: 'first' })

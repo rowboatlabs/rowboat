@@ -255,6 +255,7 @@ export function ChatSessionPane({
 }
 
 export interface ChatSessionComposerProps {
+  isFocused?: boolean
   tab: ChatTab
   isActive: boolean
   tabState: ChatTabViewState
@@ -327,6 +328,7 @@ export interface ChatSessionComposerProps {
 }
 
 export function ChatSessionComposer({
+  isFocused,
   tab,
   isActive,
   tabState,
@@ -405,6 +407,7 @@ export function ChatSessionComposer({
         </div>
       )}
       <ChatInputWithMentions
+        isFocused={isFocused ?? isActive}
         draftKey={tab.chatId}
         knowledgeFiles={knowledgeFiles}
         recentFiles={recentFiles}

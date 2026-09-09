@@ -10,12 +10,14 @@ import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
+import { AssistantPanels } from './components/assistant-panels';
+import { layoutAssistantPanels, restorePanelPreferences, type PanelSize } from './lib/assistant-panel-layout';
 import { AssistantChatDock } from './components/assistant-chat-dock';
-import { ASSISTANT_TABS_KEY, createAssistantTab, readAssistantPreference, restoreAssistantTabs, tabsAfterClose, writeAssistantPreference } from './lib/assistant-dock';
+import { ASSISTANT_TABS_KEY, assistantDockTabs, createAssistantTab, readAssistantPreference, replaceAssistantTab, restoreAssistantTabs, tabsAfterClose, writeAssistantPreference } from './lib/assistant-dock';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
-import { ChatSessionPane, ChatSessionComposer, queuedMessageText } from './components/chat-session';
+import { queuedMessageText } from './components/chat-session';
 // Value import: the Home to-do surface mounts a standalone composer directly
 // (not tab-bound); chat tabs render theirs through ChatSessionComposer.
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
@@ -92,7 +94,6 @@ import { LiveNoteSidebar } from '@/components/live-note-sidebar'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
-import { FileCardProvider } from '@/contexts/file-card-context'
 import { type ChatTab } from '@/components/tab-bar'
 import { CaffeinateToggle } from '@/components/caffeinate-toggle'
 import {
@@ -869,7 +870,7 @@ function ContentHeader({
 }
 
 function App() {
-  const { chatPanePlacement, chatPaneSize, assistantPresentation } = useTheme()
+  const { chatPanePlacement, chatPaneSize, assistantPresentation, setAssistantPresentation } = useTheme()
   const useBottomTabs = assistantPresentation === 'bottom-tabs'
   const isChatPaneInMiddle = chatPanePlacement === 'middle'
 
@@ -947,7 +948,7 @@ function App() {
   })
   const [graphStatus, setGraphStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [graphError, setGraphError] = useState<string | null>(null)
-  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
+  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(() => readAssistantPreference('rowboat-assistant-visible') !== 'false')
   const [isRightPaneMaximized, setIsRightPaneMaximized] = useState(false)
   // Middle-pane collapse animation. Animating its max-width from 100% is janky:
   // 100% is relative to the parent (far wider than the pane's real width), so the
@@ -1116,7 +1117,6 @@ function App() {
   const activeIsProcessing = sessionChat.chatState?.isProcessing ?? isProcessing
   const activeIsReasoning = sessionChat.chatState?.isReasoning ?? false
   const activeIsWaitingOnHuman = sessionChat.chatState?.isWaitingOnHuman ?? false
-  const activeIsWorking = activeIsProcessing && !activeIsWaitingOnHuman
   // (The in-flight-reply mirrors — pill response panel, fallback speech,
   // quick-ask state — read the HOVER session's store, declared above.)
   // A failed session load must be visible, not a blank chat.
@@ -1505,7 +1505,7 @@ function App() {
     })
   }, [voice, cancelPttForSteal])
 
-  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode, targetTabId?: string) => Promise<void>) | null>(null)
   // Companion sends (bar submits, call utterances) — filled once
   // handleHoverSubmit exists; early callers (startCall's PTT callback) fire
   // at event time, long after render.
@@ -1533,10 +1533,11 @@ function App() {
 
   const handleSubmitRecording = useCallback(async () => {
     if (!isRecordingRef.current) return
+    const holder = voiceOwnerId()
+    const targetTabId = chatTabsRef.current.find((tab) => tab.chatId === holder)?.id
     const text = await voice.submit()
     setIsRecording(false)
     isRecordingRef.current = false
-    const holder = voiceOwnerId()
     if (holder && holder !== CALL_VOICE_HOLDER) releaseVoice(holder)
     if (text) {
       pendingVoiceInputRef.current = true
@@ -1544,8 +1545,8 @@ function App() {
       // started the recording, not blindly to the active chat.
       if (holder === HOME_VOICE_HOLDER) {
         handleHomeComposerSubmitRef.current?.({ text, files: [] })
-      } else {
-        handlePromptSubmitRef.current?.({ text, files: [] })
+      } else if (targetTabId) {
+        handlePromptSubmitRef.current?.({ text, files: [] }, undefined, undefined, undefined, undefined, undefined, targetTabId)
       }
     }
   }, [voice])
@@ -2618,6 +2619,22 @@ function App() {
     if (useBottomTabs && saved && chatTabs.some((tab) => tab.id === saved)) return saved
     return chatTabs[0].id
   })
+  const [savedAssistantLayout] = useState(() => restorePanelPreferences(readAssistantPreference('rowboat-assistant-panels')))
+  const [expandedAssistantTabs, setExpandedAssistantTabs] = useState<string[]>(savedAssistantLayout.expanded)
+  const [dockedAssistantTabId, setDockedAssistantTabId] = useState<string | null>(() => chatTabs.some((tab) => tab.id === savedAssistantLayout.docked) ? savedAssistantLayout.docked : null)
+  const [assistantPanelSizes, setAssistantPanelSizes] = useState<Record<string, PanelSize>>(savedAssistantLayout.sizes)
+  const [dockedAssistantWidth, setDockedAssistantWidth] = useState(DEFAULT_CHAT_PANE_WIDTH)
+  useEffect(() => {
+    const ids = new Set(chatTabs.map((tab) => tab.id))
+    writeAssistantPreference('rowboat-assistant-panels', JSON.stringify({ sizes: Object.fromEntries(Object.entries(assistantPanelSizes).filter(([id]) => ids.has(id))), expanded: expandedAssistantTabs.filter((id) => ids.has(id)), docked: dockedAssistantTabId }))
+    writeAssistantPreference('rowboat-assistant-visible', String(isChatSidebarOpen))
+  }, [assistantPanelSizes, expandedAssistantTabs, dockedAssistantTabId, isChatSidebarOpen, chatTabs])
+  const [assistantViewport, setAssistantViewport] = useState({ width: window.innerWidth, height: window.innerHeight })
+  useEffect(() => {
+    const resize = () => setAssistantViewport({ width: window.innerWidth, height: window.innerHeight })
+    window.addEventListener('resize', resize)
+    return () => window.removeEventListener('resize', resize)
+  }, [])
   useEffect(() => {
     if (!useBottomTabs) return
     writeAssistantPreference(ASSISTANT_TABS_KEY, JSON.stringify(chatTabs))
@@ -2637,6 +2654,7 @@ function App() {
     }
   }
   const creatingSessionByChatRef = useRef(new Map<string, Promise<{ sessionId: string }>>())
+  const previousChatIdentityByRunRef = useRef(new Map<string, string>())
   // Per-tab selection (model + effort as ONE value) — the composer reports
   // every change (settings seed included) and reads it back on remount, so
   // a tab's selection survives tab switches for the life of the app.
@@ -4114,15 +4132,20 @@ function App() {
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
+    targetTabId?: string,
   ) => {
-    const submitTabId = activeChatTabIdRef.current
+    const submitTabId = targetTabId ?? activeChatTabIdRef.current
     const submitTab = chatTabsRef.current.find((tab) => tab.id === submitTabId)
     if (!submitTab) return
     const isSubmitTabActive = () => activeChatTabIdRef.current === submitTabId
       && chatTabsRef.current.find((tab) => tab.id === submitTabId)?.chatId === submitTab.chatId
     const submittedSelection = selectionByTabRef.current.get(submitTab.chatId)
+    const submittedWorkDir = workDirByTabRef.current[submitTabId] ?? null
     const submittedContext = buildMiddlePaneContext()
-    if (activeIsProcessing && inCallRef.current) {
+    const submitsToCall = inCallRef.current && submitTab.runId !== null && submitTab.runId === hoverRunIdRef.current
+    const submittedVoiceInput = pendingVoiceInputRef.current
+    pendingVoiceInputRef.current = false
+    if (isSubmitTabActive() && activeIsProcessing && submitsToCall) {
       // In-call input arrives at arbitrary moments — a hard
       // drop here silently ate utterances submitted while the previous turn
       // was still stopping (the PTT interrupt is async). Finish the stop and
@@ -4141,7 +4164,7 @@ function App() {
     // Video chat mode: drain the webcam frames buffered since the last send
     // so they ride along with this message as inline image parts.
     const marks = callTurnMarksRef.current
-    if (inCallRef.current && marks && marks.submit === undefined) {
+    if (submitsToCall && marks && marks.submit === undefined) {
       marks.submit = performance.now()
     }
 
@@ -4150,9 +4173,9 @@ function App() {
     // utterance — pendingVoiceInputRef is set just before submit) is spoken
     // even with the text panel open. Stamped per-turn so tucking or typing
     // mid-reply never flips an in-flight answer.
-    suppressSpeechTurnRef.current = inCallRef.current && !pendingVoiceInputRef.current
+    if (submitsToCall) suppressSpeechTurnRef.current = !submittedVoiceInput
 
-    if (inCallRef.current) {
+    if (submitsToCall) {
       // A new question supersedes whatever of the previous reply was still
       // unspoken — silence it and drop the frozen backlog so it never plays
       // over the new turn. (The overlay resets its segment list when the
@@ -4174,7 +4197,7 @@ function App() {
     // Frames ride along whenever screen capture is live — during calls, and
     // for quick-ask questions with the share toggle on.
     const videoFrames =
-      inCallRef.current || video.screenState === 'live' ? video.collectFrames() : []
+      submitsToCall || (!inCallRef.current && video.screenState === 'live') ? video.collectFrames() : []
 
     const userMessageId = `user-${Date.now()}`
     const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
@@ -4229,7 +4252,7 @@ function App() {
         )))
         // Flush this tab's pending work directory onto the freshly created run so
         // the agent picks it up on the first turn. Done before createMessage below.
-        const pendingWorkDir = workDirByTabRef.current[submitTabId] ?? null
+        const pendingWorkDir = submittedWorkDir
         if (pendingWorkDir) await persistRunWorkDir(currentRunId, pendingWorkDir)
         isNewRun = true
       }
@@ -4246,7 +4269,7 @@ function App() {
       // is dead air.
       const reasoningEffort =
         selected?.effort ??
-        (inCallRef.current && companionVoiceRef.current ? ('low' as const) : undefined)
+        (submitsToCall && companionVoiceRef.current ? ('low' as const) : undefined)
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.
@@ -4265,7 +4288,7 @@ function App() {
             ...(selected ? { model: { provider: selected.provider, model: selected.model } } : {}),
             composition: {
               workDirId: currentRunId,
-              ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
+              ...(submittedVoiceInput ? { voiceInput: true } : {}),
               ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               // Code-session pins: a bound chat always carries the session's
@@ -4278,7 +4301,7 @@ function App() {
                     codeCwd: codeSessionLocksRef.current[currentRunId].cwd,
                   }
                 : (codeMode ? { codeMode } : {})),
-              ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
+              ...((submitsToCall && video.cameraOn) || (!inCallRef.current && video.screenState === 'live')
                 ? { videoMode: true }
                 : {}),
               ...(practiceModeRef.current ? { coachMode: true } : {}),
@@ -4399,7 +4422,7 @@ function App() {
           config: sendConfig,
         })
         analytics.chatMessageSent({
-          voiceInput: pendingVoiceInputRef.current || undefined,
+          voiceInput: submittedVoiceInput || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
         })
@@ -4415,7 +4438,7 @@ function App() {
           config: sendConfig,
         })
         analytics.chatMessageSent({
-          voiceInput: pendingVoiceInputRef.current || undefined,
+          voiceInput: submittedVoiceInput || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
         })
@@ -4428,8 +4451,6 @@ function App() {
       if (sendResult.queued && isSubmitTabActive()) {
         setConversation((prev) => prev.filter((item) => item.id !== userMessageId))
       }
-
-      pendingVoiceInputRef.current = false
 
       if (isNewRun) {
         const inferredTitle = inferRunTitleFromMessage(titleSource)
@@ -4607,8 +4628,8 @@ function App() {
   }, [setChatViewportAnchor])
 
   const activateAssistantTab = useCallback((tab: ChatTab) => {
-    cancelRecordingIfActive()
-    setPresetMessage(chatDraftsRef.current.get(tab.chatId))
+    setExpandedAssistantTabs((previous) => previous.includes(tab.id) ? previous : [...previous, tab.id])
+    setPresetMessage(undefined)
     activeChatTabIdRef.current = tab.id
     setActiveChatTabId(tab.id)
     if (tab.runId) void loadRun(tab.runId)
@@ -4624,7 +4645,7 @@ function App() {
       setPermissionResponses(new Map())
       setAutoPermissionDecisions(new Map())
     }
-  }, [cancelRecordingIfActive, loadRun])
+  }, [loadRun])
 
   useEffect(() => {
     const initialTab = chatTabsRef.current.find((tab) => tab.id === activeChatTabIdRef.current)
@@ -4639,7 +4660,34 @@ function App() {
     setIsChatSidebarOpen(true)
   }, [activateAssistantTab])
 
+  const changeAssistantPanelChat = useCallback((tabId: string, sessionId: string | null) => {
+    const current = chatTabsRef.current.find((tab) => tab.id === tabId)
+    if (!current || (sessionId !== null && current.runId === sessionId)) return
+    const existing = sessionId ? chatTabsRef.current.find((tab) => tab.runId === sessionId) : undefined
+    if (existing) {
+      activateAssistantTab(existing)
+      setIsChatSidebarOpen(true)
+      return
+    }
+    if (voiceOwnerId() === current.chatId) handleCancelRecording()
+    if (current.runId) previousChatIdentityByRunRef.current.set(current.runId, current.chatId)
+    const chatId = sessionId ? previousChatIdentityByRunRef.current.get(sessionId) ?? sessionId : crypto.randomUUID()
+    const replacement = { ...current, runId: sessionId, chatId }
+    setChatTabs((tabs) => replaceAssistantTab(tabs, tabId, sessionId, chatId))
+    setWorkDirByTab((previous) => ({ ...previous, [tabId]: null }))
+    setChatViewportAnchorByTab((previous) => {
+      const next = { ...previous }
+      delete next[tabId]
+      return next
+    })
+    activateAssistantTab(replacement)
+    setIsChatSidebarOpen(true)
+  }, [activateAssistantTab, handleCancelRecording])
+
   const closeAssistantTab = useCallback((tabId: string) => {
+    if (voiceOwnerId() === chatIdForTab(tabId)) handleCancelRecording()
+    setDockedAssistantTabId((previous) => previous === tabId ? null : previous)
+    setExpandedAssistantTabs((previous) => previous.filter((id) => id !== tabId))
     const next = tabsAfterClose(chatTabsRef.current, tabId, activeChatTabIdRef.current)
     if (!next.tabs.length) {
       const blank = createAssistantTab()
@@ -4652,7 +4700,7 @@ function App() {
         activateAssistantTab(next.tabs.find((tab) => tab.id === next.activeId)!)
       }
     }
-  }, [activateAssistantTab])
+  }, [activateAssistantTab, chatIdForTab, handleCancelRecording])
 
   // Bind the single chat surface to a session. THE one way any part of the
   // app points the chat at a conversation (recents, history, Home threads,
@@ -5342,6 +5390,27 @@ function App() {
     }
   }, [handleCloseFullScreenChat, navigateToView])
 
+  const toggleAssistantDock = (tab: ChatTab) => {
+    if (tab.id !== activeChatTabIdRef.current) activateAssistantTab(tab)
+    if (!useBottomTabs || dockedAssistantTabId === tab.id || isFullScreenChat) {
+      setAssistantPresentation('bottom-tabs')
+      setDockedAssistantTabId(null)
+      setExpandedAssistantTabs((previous) => [...previous.filter((id) => id !== tab.id), tab.id])
+    } else {
+      setDockedAssistantTabId(tab.id)
+    }
+    setIsChatSidebarOpen(true)
+    setIsRightPaneMaximized(false)
+    if (isFullScreenChat) pushChatToSidePane()
+  }
+
+  const minimizeAssistantTab = (tabId: string) => {
+    setExpandedAssistantTabs((previous) => previous.filter((id) => id !== tabId))
+    if (tabId === activeChatTabIdRef.current) setIsChatSidebarOpen(false)
+    setIsRightPaneMaximized(false)
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-assistant-tab="${CSS.escape(tabId)}"]`)?.focus())
+  }
+
   // Section entry points (sidebar items, deep links, the tour). Thin wrappers
   // over navigateToView so every entry records history — the old direct
   // state-twiddling versions didn't, which made Back skip whole sections.
@@ -5900,6 +5969,7 @@ function App() {
 
   const navigateToFullScreenChat = useCallback(() => {
     const current = currentViewStateRef.current
+    if (current.type === 'chat' && !isBrowserOpen) return
     // Only treat this as navigation when coming from another view
     if (current.type !== 'chat') {
       const nextHistory = {
@@ -5909,7 +5979,7 @@ function App() {
       setHistory(nextHistory)
     }
     handleOpenFullScreenChat()
-  }, [appendUnique, handleOpenFullScreenChat, setHistory])
+  }, [appendUnique, handleOpenFullScreenChat, setHistory, isBrowserOpen])
 
   // Handle image upload for the markdown editor
   const handleImageUpload = useCallback(async (file: File): Promise<string | null> => {
@@ -6878,11 +6948,6 @@ function App() {
     permissionResponses,
     autoPermissionDecisions,
   ])
-  const emptyChatTabState = React.useMemo<ChatTabViewState>(() => createEmptyChatTabViewState(), [])
-  const getChatTabStateForRender = useCallback((tabId: string): ChatTabViewState => {
-    if (tabId === activeChatTabId) return activeChatTabState
-    return chatViewStateByTab[tabId] ?? emptyChatTabState
-  }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
   const chatTabStatesForRender = React.useMemo(() => ({
     ...chatViewStateByTab,
     [activeChatTabId]: activeChatTabState,
@@ -6896,10 +6961,18 @@ function App() {
   // the workspace drawer at its edge. Before a session is picked the empty
   // state owns the pane and the chat stays out of the way.
   const codeChatMain = isCodeOpen && activeCodeSession !== null
-  const floatingAssistant = useBottomTabs && !isFullScreenChat && !isCodeOpen && !isBrowserOpen
-  const dockFullScreen = useBottomTabs && isFullScreenChat
-  const showAssistantDock = useBottomTabs && !isCodeOpen
-  const chatPaneOpen = isCodeOpen ? codeChatMain : isChatSidebarOpen
+  const floatingPanelsEnabled = useBottomTabs && !isFullScreenChat && !isCodeOpen && !isBrowserOpen
+  const dockedAssistantVisible = floatingPanelsEnabled && dockedAssistantTabId !== null && (dockedAssistantTabId !== activeChatTabId || isChatSidebarOpen)
+  const floatingAssistant = floatingPanelsEnabled && !dockedAssistantVisible
+  const dockFullScreen = isFullScreenChat
+  const fullScreenAssistantTabId = isFullScreenChat || isRightPaneMaximized ? activeChatTabId : null
+  const dockTabs = assistantDockTabs(chatTabs, dockedAssistantTabId, fullScreenAssistantTabId)
+  const showAssistantDock = useBottomTabs && !isCodeOpen && (fullScreenAssistantTabId === null || dockTabs.length > 0)
+  const chatPaneOpen = isCodeOpen ? codeChatMain : dockedAssistantVisible || isChatSidebarOpen
+  const assistantPanelBounds = layoutAssistantPanels([
+    ...expandedAssistantTabs.filter((id) => id !== dockedAssistantTabId && (id !== activeChatTabId || isChatSidebarOpen) && chatTabs.some((tab) => tab.id === id)),
+    ...(isChatSidebarOpen && activeChatTabId !== dockedAssistantTabId && !expandedAssistantTabs.includes(activeChatTabId) ? [activeChatTabId] : []),
+  ], assistantPanelSizes, assistantViewport, dockedAssistantVisible ? dockedAssistantWidth : 0, activeChatTabId)
   const isRightPaneOnlyMode = (isRightPaneContext || floatingAssistant) && chatPaneOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
@@ -7021,6 +7094,7 @@ function App() {
     onOpenEmail: (threadId?: string) => openEmailView(threadId),
     onOpenHome: () => void navigateToView({ type: 'home' }),
     onNewChat: handleNewChatTab,
+    onOpenAssistant: navigateToFullScreenChat,
     onToggleBrowser: handleToggleBrowser,
     onStartTour: () => setTourActive(true),
     meetingRecordingState: meetingTranscription.state,
@@ -7741,123 +7815,33 @@ function App() {
                   />
                 </div>
               )}
-              {activeMiddle === 'chat' && !useBottomTabs && (
-              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }} onOpenFile={(path) => { navigateToFile(path) }}>
-              <div className="flex min-h-0 flex-1 flex-col">
-                <div className="relative min-h-0 flex-1">
-                  {chatTabs.map((tab) => {
-                    const isActive = tab.id === activeChatTabId
-                    return (
-                      <ChatSessionPane
-                        // Keyed by CHAT identity: rebinding this tab to a
-                        // different session remounts the panel (fresh
-                        // scroll/DOM state); first-send runId binding does not.
-                        key={tab.chatId}
-                        tab={tab}
-                        isActive={isActive}
-                        tabState={getChatTabStateForRender(tab.id)}
-                        viewportAnchor={chatViewportAnchorByTab[tab.id]}
-                        onPickPrompt={setPresetMessage}
-                        isToolOpenForTab={isToolOpenForTab}
-                        setToolOpenForTab={setToolOpenForTab}
-                        onPermissionResponse={handlePermissionResponse}
-                        onAskHumanResponse={handleAskHumanResponse}
-                        onCodePermissionResponse={handleCodePermissionResponse}
-                        onComposioConnected={(slug) => handleComposioConnected(slug, tab.id)}
-                        activeIsWorking={activeIsWorking}
-                        activeIsProcessing={activeIsProcessing}
-                        activeIsReasoning={activeIsReasoning}
-                        isCodeSession={!!(tab.runId && codeSessionLocks[tab.runId])}
-                      />
-                    )
-                  })}
-                </div>
-
-                <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-2 shadow-lg">
-                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
-                  <div className="mx-auto w-full max-w-4xl px-4">
-                    {chatTabs.map((tab) => {
-                      const isActive = tab.id === activeChatTabId
-                      return (
-                        <ChatSessionComposer
-                          // Composer instance per CHAT (see chat panel key
-                          // above): a rebound tab gets a fresh composer, so
-                          // attachments/toggles/selection can't leak across
-                          // sessions; first-send binding keeps the instance.
-                          key={tab.chatId}
-                          tab={tab}
-                          isActive={isActive}
-                          tabState={getChatTabStateForRender(tab.id)}
-                          knowledgeFiles={mentionableFiles}
-                          recentFiles={recentWikiFiles}
-                          visibleFiles={visibleKnowledgeFiles}
-                          onSubmit={handlePromptSubmit}
-                          onStop={handleStop}
-                          activeIsProcessing={activeIsProcessing}
-                          isStopping={isStopping}
-                          // The single session store follows the ACTIVE tab's
-                          // run — only that tab's composer shows its queue.
-                          queued={
-                            isActive && tab.runId && sessionChat.sessionId === tab.runId
-                              ? sessionChat.queued
-                              : undefined
-                          }
-                          onRemoveQueued={handleRemoveQueued}
-                          onPullQueued={handlePullQueued}
-                          presetMessage={presetMessage}
-                          onPresetMessageConsumed={() => setPresetMessage(undefined)}
-                          codeSessionLocks={codeSessionLocks}
-                          initialDraft={chatDraftsRef.current.get(tab.chatId)}
-                          onDraftChange={setChatDraftForTab}
-                          onSelectionChange={(t, selection) => {
-                            if (selection) {
-                              selectionByTabRef.current.set(t.chatId, selection)
-                            } else {
-                              selectionByTabRef.current.delete(t.chatId)
-                            }
-                          }}
-                          initialSelection={selectionByTabRef.current.get(tab.chatId) ?? null}
-                          // Last-turn restore: the single session store is
-                          // bound to the ACTIVE tab's run, so only that tab
-                          // gets a resolved value; others stay undefined
-                          // (loading) until activated. lastSelection is null
-                          // for a session with no turns (settings seed).
-                          restoredSelection={
-                            isActive && tab.runId
-                              && sessionChat.sessionId === tab.runId
-                              && sessionChat.chatState
-                              ? sessionChat.chatState.lastSelection
-                              : undefined
-                          }
-                          workDirByTab={workDirByTab}
-                          onWorkDirChange={setTabWorkDir}
-                          isRecording={isRecording}
-                          voiceOwner={voiceOwner}
-                          voice={voice}
-                          onStartRecording={handleStartRecording}
-                          onSubmitRecording={handleSubmitRecording}
-                          onCancelRecording={handleCancelRecording}
-                          voiceAvailable={voiceAvailable}
-                          inCall={inCall}
-                          callOnThisChat={callOnActiveChat}
-                          onStartCall={handleStartCall}
-                          onEndCall={endCall}
-                          ttsAvailable={ttsAvailable}
-                        />
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-              </FileCardProvider>
-              )}
             </SidebarInset>
 
             {/* Chat pane - shown when viewing files/graph/code. Code sessions
                 bind this same assistant chat (a code session IS a chat
                 session) — there is no separate code chat surface. */}
-            {(isRightPaneContext || useBottomTabs) && (
+            {(
               <CodeDiffOpenerProvider onOpenDiff={codeChatMain ? openCodeDiff : null}>
+              <AssistantPanels
+                bounds={assistantPanelBounds}
+                allowDockControls={!isBrowserOpen && !isCodeOpen}
+                floatingEnabled={floatingPanelsEnabled && !isRightPaneMaximized}
+                dockedTabId={floatingPanelsEnabled && !isRightPaneMaximized ? dockedAssistantTabId : activeChatTabId}
+                onDockedWidthChange={setDockedAssistantWidth}
+                recordingChatId={voiceOwner}
+                callSessionId={inCall ? hoverRunId : null}
+                onResize={(tabId, size) => setAssistantPanelSizes((previous) => ({ ...previous, [tabId]: size }))}
+                onFocus={(tab) => {
+                  if (tab.id === activeChatTabIdRef.current) return
+                  activateAssistantTab(tab)
+                  setIsChatSidebarOpen(true)
+                }}
+                onMinimize={minimizeAssistantTab}
+                onClose={closeAssistantTab}
+                onToggleDock={toggleAssistantDock}
+                onChangeChat={changeAssistantPanelChat}
+                onSubmit={(tabId, message, mentions, attachments, search, code, permission) => { void handlePromptSubmit(message, mentions, attachments, search, code, permission, tabId) }}
+              >
               <ChatSidebar
                 floating={floatingAssistant && !isRightPaneMaximized}
                 keepMounted={useBottomTabs || chatTabs.length > 1}
@@ -7867,10 +7851,10 @@ function App() {
                   requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-assistant-tab="${CSS.escape(activeChatTabId)}"]`)?.focus())
                 } : undefined}
                 onCloseTab={showAssistantDock ? () => closeAssistantTab(activeChatTabId) : undefined}
-                placement={useBottomTabs && isBrowserOpen ? 'right' : chatPanePlacement}
+                placement={useBottomTabs && !isCodeOpen ? 'right' : chatPanePlacement}
                 // Code mode: the chat fills whatever the rail and drawer leave.
                 paneSize={codeChatMain ? 'chat-bigger' : chatPaneSize}
-                className={cn(isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen) && "order-2", showAssistantDock && !(floatingAssistant && !isRightPaneMaximized) && 'mb-11')}
+                className={cn(isChatPaneInMiddle && (!useBottomTabs || isCodeOpen) && "order-2", showAssistantDock && !(floatingAssistant && !isRightPaneMaximized) && 'mb-11')}
                 defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={dockFullScreen || chatPaneOpen}
                 isMaximized={dockFullScreen || isRightPaneMaximized}
@@ -7957,8 +7941,8 @@ function App() {
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 // Gated on mic ownership: when another composer (Home, a
                 // call) owns the mic, the dock must not mirror the recording.
-                isRecording={isRecording && voiceOwner === chatIdForTab(activeChatTabId)}
-                recordingText={voiceOwner === chatIdForTab(activeChatTabId) ? voice.interimText : undefined}
+                isRecording={isRecording}
+                recordingText={voice.interimText}
                 recordingState={voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'}
                 audioLevelsRef={voice.audioLevelsRef}
                 onStartRecording={() => handleStartRecording(chatIdForTab(activeChatTabIdRef.current))}
@@ -7972,22 +7956,24 @@ function App() {
                 callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
               />
+              </AssistantPanels>
               </CodeDiffOpenerProvider>
             )}
             {useBottomTabs && (
               <AssistantChatDock
                 hidden={!showAssistantDock}
-                tabs={chatTabs}
+                tabs={dockTabs}
                 activeId={activeChatTabId}
                 expanded={dockFullScreen || chatPaneOpen}
+                expandedIds={floatingPanelsEnabled && !isRightPaneMaximized ? Object.keys(assistantPanelBounds) : undefined}
                 getTitle={getChatTabTitle}
                 onNew={addAssistantTab}
                 onClose={closeAssistantTab}
                 onSelect={(tab) => {
-                  if (tab.id === activeChatTabId && chatPaneOpen && !dockFullScreen) {
-                    setIsChatSidebarOpen(false)
-                    setIsRightPaneMaximized(false)
+                  if (assistantPanelBounds[tab.id] && floatingPanelsEnabled && !dockFullScreen) {
+                    minimizeAssistantTab(tab.id)
                   } else {
+                    setExpandedAssistantTabs((previous) => [...previous.filter((id) => id !== tab.id), tab.id])
                     if (tab.id !== activeChatTabId) activateAssistantTab(tab)
                     setIsChatSidebarOpen(true)
                   }

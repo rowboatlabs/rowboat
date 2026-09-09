@@ -210,6 +210,7 @@ type SidebarContentPanelProps = {
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
   onNewChat?: () => void
+  onOpenAssistant?: () => void
   onToggleBrowser?: () => void
   onVoiceNoteCreated?: (path: string) => void
   /** Starts the mascot-guided product tour. */
@@ -466,6 +467,7 @@ export function SidebarContentPanel({
   onOpenEmail,
   onOpenHome,
   onNewChat,
+  onOpenAssistant,
   onToggleBrowser,
   onVoiceNoteCreated,
   onStartTour,
@@ -854,7 +856,8 @@ export function SidebarContentPanel({
                 <SidebarMenuButton
                   isActive={activeNav === 'assistant'}
                   onClick={() => {
-                    if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+                    if (onOpenAssistant) onOpenAssistant()
+                    else if (lastChat && onOpenRun) onOpenRun(lastChat.id)
                     else onNewChat?.()
                   }}
                 >

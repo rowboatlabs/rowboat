@@ -30,20 +30,69 @@ const defaultDeps: SessionChatStoreDeps = {
   subscribeDeltas,
 }
 
+type Binding = { store: SessionChatStore; users: number; disconnect?: () => void; loaded: boolean }
+const bindings = new WeakMap<SessionChatStoreDeps, Map<string, Binding>>()
+
+function getBinding(deps: SessionChatStoreDeps, sessionId: string | null): Binding {
+  if (!sessionId) return { store: new SessionChatStore(deps), users: 0, loaded: false }
+  let sessions = bindings.get(deps)
+  if (!sessions) { sessions = new Map(); bindings.set(deps, sessions) }
+  let binding = sessions.get(sessionId)
+  if (!binding) {
+    binding = { store: new SessionChatStore(deps), users: 0, loaded: false }
+    sessions.set(sessionId, binding)
+  }
+  return binding
+}
+
 // Thin subscription over SessionChatStore — all logic (seeding, feed events,
 // reducer, overlay, action routing) lives in the store, which is unit-tested
 // without React. `deps` is injectable for tests.
-export function useSessionChat(
-  sessionId: string | null,
-  deps: SessionChatStoreDeps = defaultDeps,
-) {
-  const binding = useMemo(() => ({ sessionId, store: new SessionChatStore(deps) }), [deps, sessionId])
+function retainBinding(binding: Binding, sessionId: string | null, deps: SessionChatStoreDeps) {
   const { store } = binding
-  useEffect(() => store.connect(), [store])
-  useEffect(() => {
-    void binding.store.setSession(binding.sessionId)
-  }, [binding])
-  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  if (sessionId) bindings.get(deps)?.set(sessionId, binding)
+  binding.users += 1
+  if (binding.users === 1) binding.disconnect = store.connect()
+  if (!binding.loaded) {
+    binding.loaded = true
+    void store.setSession(sessionId)
+  }
+  return () => {
+    binding.users -= 1
+    if (binding.users === 0) {
+      binding.disconnect?.()
+      binding.loaded = false
+      if (sessionId && bindings.get(deps)?.get(sessionId) === binding) bindings.get(deps)?.delete(sessionId)
+    }
+  }
+}
+
+function useSessionStore(sessionId: string | null, deps: SessionChatStoreDeps) {
+  const binding = useMemo(() => getBinding(deps, sessionId), [deps, sessionId])
+  const { store } = binding
+  useEffect(() => retainBinding(binding, sessionId, deps), [binding, sessionId, deps])
+  return store
+}
+
+const inactiveSubscribe = () => () => undefined
+
+export function useSessionChatStatus(sessionId: string | null) {
+  const store = useSessionStore(sessionId, defaultDeps)
+  const getStatus = () => {
+    const state = store.getSnapshot().chatState
+    return state?.isWaitingOnHuman ? 'waiting' : state?.isProcessing ? 'working' : 'idle'
+  }
+  return useSyncExternalStore(store.subscribe, getStatus)
+}
+
+export function useSessionChat(sessionId: string | null, deps: SessionChatStoreDeps = defaultDeps, live = true) {
+  const store = useSessionStore(sessionId, deps)
+  const getSnapshot = useMemo(() => {
+    if (live) return store.getSnapshot
+    const frozen = store.getSnapshot()
+    return () => frozen
+  }, [store, live])
+  const snapshot = useSyncExternalStore(live ? store.subscribe : inactiveSubscribe, getSnapshot)
   return useMemo(
     () => ({
       ...snapshot,

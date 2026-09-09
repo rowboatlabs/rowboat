@@ -224,6 +224,7 @@ interface ChatInputInnerProps {
   allowSubmitWhileProcessing?: boolean
   isStopping?: boolean
   isActive: boolean
+  isFocused?: boolean
   presetMessage?: string
   onPresetMessageConsumed?: () => void
   runId?: string | null
@@ -289,6 +290,7 @@ function ChatInputInner({
   allowSubmitWhileProcessing = false,
   isStopping,
   isActive,
+  isFocused = isActive,
   presetMessage,
   onPresetMessageConsumed,
   runId,
@@ -738,6 +740,11 @@ function ChatInputInner({
     }
 
     const onDrop = (e: DragEvent) => {
+      const composer = e.target instanceof Element ? e.target.closest('[data-tour-id="chat-composer"]') : null
+      const panel = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-assistant-chat]') : null
+      if (composer) {
+        if (composer !== composerRef.current) return
+      } else if (panel ? panel.dataset.assistantChat !== draftKey : !composerRef.current?.contains(document.activeElement)) return
       if (e.dataTransfer?.types?.includes('Files')) {
         e.preventDefault()
       }
@@ -757,16 +764,18 @@ function ChatInputInner({
       document.removeEventListener('dragover', onDragOver)
       document.removeEventListener('drop', onDrop)
     }
-  }, [addFiles, isActive])
+  }, [addFiles, isActive, draftKey])
 
   const visibleRecentWorkDirs = recentWorkDirs
     .filter((entry) => entry.path !== workDir)
     .slice(0, MAX_VISIBLE_RECENT_WORK_DIRS)
   const currentWorkDirLabel = effectiveWorkDir ? basename(effectiveWorkDir) || effectiveWorkDir : 'Not set'
   const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
+  const composerRef = useRef<HTMLDivElement>(null)
 
   return (
     <div
+      ref={composerRef}
       data-tour-id="chat-composer"
       className={cn(
         // Composer: radius 24, raised surface; the ring is folded into
@@ -907,8 +916,8 @@ function ChatInputInner({
         <PromptInputTextarea
           placeholder={placeholder ?? 'Type your message...'}
           onKeyDown={handleKeyDown}
-          autoFocus={isActive}
-          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}:${focusSignal ?? 0}` : undefined}
+          autoFocus={isActive && isFocused}
+          focusTrigger={isActive && isFocused ? `${runId ?? 'new'}:${focusNonce}:${focusSignal ?? 0}` : undefined}
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
@@ -1515,6 +1524,7 @@ export interface ChatInputWithMentionsProps {
   allowSubmitWhileProcessing?: boolean
   isStopping?: boolean
   isActive?: boolean
+  isFocused?: boolean
   presetMessage?: string
   onPresetMessageConsumed?: () => void
   runId?: string | null
@@ -1564,6 +1574,7 @@ export function ChatInputWithMentions({
   allowSubmitWhileProcessing,
   isStopping,
   isActive = true,
+  isFocused = isActive,
   presetMessage,
   onPresetMessageConsumed,
   runId,
@@ -1602,6 +1613,7 @@ export function ChatInputWithMentions({
         allowSubmitWhileProcessing={allowSubmitWhileProcessing}
         isStopping={isStopping}
         isActive={isActive}
+        isFocused={isFocused}
         presetMessage={presetMessage}
         onPresetMessageConsumed={onPresetMessageConsumed}
         runId={runId}
