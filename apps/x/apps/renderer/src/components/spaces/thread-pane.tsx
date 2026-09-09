@@ -27,6 +27,7 @@ import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
+import { openResponseChat } from '@/lib/spaces-response-chat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -546,6 +547,12 @@ export function ThreadPane({
         }
     }
 
+    // "Open agent chat" on one of your Rowboat's replies: the run that wrote
+    // it, not merely the thread's session (see lib/spaces-response-chat.ts).
+    const openResponse = (message: spaces.Message) => {
+        if (onOpenSession) void openResponseChat({ orgId: org.id, spaceId: space.id, message, onOpenSession })
+    }
+
     // Whether an agent session exists for this thread — powers the header's
     // persistent "Chat" link (the working chip only exists while a turn runs).
     const [hasSession, setHasSession] = useState(false)
@@ -605,6 +612,7 @@ export function ThreadPane({
                 onForward={setForwarding}
                 onToggleSave={toggleSave}
                 saved={savedIds.has(message.id)}
+                onOpenResponseChat={onOpenSession ? openResponse : undefined}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
                 onVotePoll={(m, answerIds) => void votePoll(m, answerIds)}

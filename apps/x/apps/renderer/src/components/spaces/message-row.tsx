@@ -130,7 +130,7 @@ export interface ThreadRowData {
 }
 
 function MessageRowImpl({
-    message, memberNames, continuation, thread, onOpenThread, onPrefetchThread, onOpenAgentChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
+    message, memberNames, continuation, thread, onOpenThread, onPrefetchThread, onOpenAgentChat, onOpenResponseChat, onStopAgent, onReplyInThread, onAskRowboat, onCopyLink, onReact, onDelete, onEdit, onQuoteReply, onForward, onToggleSave, saved, onRetryFailed, onDiscardFailed, onVotePoll, onRemovePollVote, onEndPoll, dense, selfMemberId,
 }: {
     message: spaces.Message & { pending?: boolean; failed?: boolean }
     memberNames: Map<string, string>
@@ -144,6 +144,13 @@ function MessageRowImpl({
     onPrefetchThread?: (rootMessageId: string) => void
     /** Opens the thread's agent session in the chat view (working strip's "Open chat"). */
     onOpenAgentChat?: (rootMessageId: string) => void
+    /**
+     * Opens the run that posted THIS message (the viewer's own Rowboat's
+     * reply), landing on its turn — the "via Rowboat" label and the menu's
+     * "Open agent chat". Offered only on the viewer's own agent posts: the
+     * session lives on this machine, nobody else's.
+     */
+    onOpenResponseChat?: (message: spaces.Message) => void
     /** Stops the viewer's own Rowboat working this thread (working strip's stop square). */
     onStopAgent?: (rootMessageId: string) => void
     onReplyInThread?: (message: spaces.Message) => void
@@ -255,6 +262,7 @@ function MessageRowImpl({
     const canSave = !!onToggleSave && !deleted && !unconfirmed
     const canQuote = !!onQuoteReply && !deleted && !unconfirmed && !!messageText
     const canForward = !!onForward && !deleted && !unconfirmed
+    const canOpenResponseChat = !!onOpenResponseChat && viaAgent && !deleted && !unconfirmed && selfMemberId === message.author.memberId
 
     const row = (
         <div
@@ -282,9 +290,22 @@ function MessageRowImpl({
                             <button type="button" className="cursor-pointer text-[15px] font-extrabold leading-[22px] text-foreground hover:underline">{name}</button>
                         </MemberProfilePopover>
                         {viaAgent && (
-                            <span className="text-muted-foreground">
-                                via {message.author.agentName ?? 'agent'}{message.author.actingMode === 'scheduled' ? ', scheduled' : ''}
-                            </span>
+                            canOpenResponseChat ? (
+                                // Your own Rowboat's post: the label is the subtle way in
+                                // to the run that wrote it (the ⋯ menu has it too).
+                                <button
+                                    type="button"
+                                    onClick={() => onOpenResponseChat!(message)}
+                                    title="Open the agent chat that wrote this"
+                                    className="cursor-pointer text-muted-foreground hover:text-[var(--stream-link)] hover:underline"
+                                >
+                                    via {message.author.agentName ?? 'agent'}{message.author.actingMode === 'scheduled' ? ', scheduled' : ''}
+                                </button>
+                            ) : (
+                                <span className="text-muted-foreground">
+                                    via {message.author.agentName ?? 'agent'}{message.author.actingMode === 'scheduled' ? ', scheduled' : ''}
+                                </span>
+                            )
                         )}
                         <span title={formatFullTimestamp(message.postedAt)} className="text-muted-foreground">{formatFeedTime(message.postedAt)}</span>
                     </div>
@@ -476,7 +497,7 @@ function MessageRowImpl({
                             <Bot className="size-3.5" />
                         </button>
                     )}
-                    {(onCopyLink || canDelete || canEdit || canQuote || canForward || canPin || canSave) && (
+                    {(onCopyLink || canDelete || canEdit || canQuote || canForward || canPin || canSave || canOpenResponseChat) && (
                         <DropdownMenu onOpenChange={setMenuOpen}>
                             <DropdownMenuTrigger asChild>
                                 <button type="button" title="More" className={cn('inline-flex size-7 items-center justify-center rounded-md text-muted-foreground', ICON_HOVER)}>
@@ -484,6 +505,11 @@ function MessageRowImpl({
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className={MENU_HIGHLIGHT}>
+                                {canOpenResponseChat && (
+                                    <DropdownMenuItem onClick={() => onOpenResponseChat!(message)}>
+                                        <Bot className="size-3.5 mr-2" /> Open agent chat
+                                    </DropdownMenuItem>
+                                )}
                                 {canQuote && (
                                     <DropdownMenuItem onClick={() => onQuoteReply!(message)}>
                                         <Quote className="size-3.5 mr-2" /> Quote reply

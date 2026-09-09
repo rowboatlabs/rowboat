@@ -22,6 +22,7 @@ import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markRead, markTopicRead } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
+import { openResponseChat } from '@/lib/spaces-response-chat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -234,6 +235,11 @@ export function GeneralStream({
         } catch {
             toast('Could not open the agent chat', 'error')
         }
+    }
+
+    // "Open agent chat" on one of your Rowboat's posts: the run that wrote it.
+    const openResponse = (message: spaces.Message) => {
+        if (onOpenSession) void openResponseChat({ orgId: org.id, spaceId: space.id, message, onOpenSession })
     }
 
     // The working strip's stop square: cancel your Rowboat's run right here.
@@ -612,6 +618,7 @@ export function GeneralStream({
                 onOpenThread={onOpenThread}
                 onPrefetchThread={(id) => prefetchThread(org.id, space.id, id)}
                 onOpenAgentChat={onOpenSession ? (id) => void openAgentChat(id) : undefined}
+                onOpenResponseChat={onOpenSession ? openResponse : undefined}
                 onStopAgent={(id) => void stopAgent(id)}
                 onReplyInThread={replyInThread}
                 onAskRowboat={askRowboat}

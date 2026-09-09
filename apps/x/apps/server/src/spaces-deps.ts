@@ -7,6 +7,7 @@ import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
+import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
 import { fetchLinkPreview } from '@x/core/dist/spaces/link-preview.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { openExternalUrl } from '@x/core/dist/auth/url-opener.js';
@@ -44,6 +45,9 @@ function emitSpacesEvent(event: spacesShared.SpacesBusEvent): void {
 // can be sent.
 onSpaceAgentActivity((event) => emitSpacesEvent(event));
 void startSpaceAgentActivity().catch((err) => console.error('[spaces] agent activity feed failed to start:', err));
+// The per-response index ("which run posted this reply"): same bus, its own
+// consumer — see core/spaces/response-index.
+void startSpaceResponseIndex().catch((err) => console.error('[spaces] response index failed to start:', err));
 
 // Keyed by org/space; each entry remembers WHICH live client it subscribed
 // on. A re-auth (orgs.upsertOAuthOrg) closes and replaces the org's client —
@@ -78,7 +82,7 @@ type SpacesRpcChannel =
   | 'spaces:listStream' | 'spaces:listThread' | 'spaces:linkPreview' | 'spaces:postMessage' | 'spaces:createTopic'
   | 'spaces:manageTopic' | 'spaces:reactToMessage'
   | 'spaces:deleteMessage' | 'spaces:editMessage' | 'spaces:votePoll' | 'spaces:endPoll'
-  | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:stopRowboat'
+  | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive'
   | 'spaces:getNotifyPrefs' | 'spaces:setNotifyPref' | 'spaces:getDnd' | 'spaces:setDnd'
@@ -328,6 +332,8 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:topicSession': async (args) => ({
     sessionId: topicSessionId(args.orgId, args.spaceId, args.threadRootId),
   }),
+
+  'spaces:responseSession': async (args) => resolveResponseSession(args),
 
   'spaces:stopRowboat': async (args) => stopTopicAgent(args),
 
