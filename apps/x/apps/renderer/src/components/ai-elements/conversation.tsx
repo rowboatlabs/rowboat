@@ -36,6 +36,10 @@ export type ConversationProps = ComponentProps<"div"> & {
   scrollMemoryKey?: string;
   anchorMessageId?: string | null;
   anchorRequestKey?: number;
+  /** Deep link: pin this item's row near the viewport top once it renders
+   * (lib/chat-scroll.ts requestJump). Each new jumpRequestKey re-applies. */
+  jumpMessageId?: string | null;
+  jumpRequestKey?: number;
   children?: ReactNode;
 };
 
@@ -44,6 +48,8 @@ export const Conversation = ({
   scrollMemoryKey,
   anchorMessageId = null,
   anchorRequestKey,
+  jumpMessageId = null,
+  jumpRequestKey,
   children,
   className,
   ...props
@@ -108,6 +114,19 @@ export const Conversation = ({
     // it exactly once when the row appears.
     controller.requestSendAnchor(anchorMessageId);
   }, [anchorRequestKey, anchorMessageId, scrollMode, controller]);
+
+  // A deep link (Spaces' "Open agent chat" on a reply, landing on the run
+  // that wrote it). Unlike the send anchor, a mount-time request IS applied:
+  // the pane usually mounts because of the jump, and the controller keeps it
+  // pending until the transcript renders the row.
+  const appliedJumpKeyRef = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (jumpRequestKey === undefined || jumpRequestKey === appliedJumpKeyRef.current) {
+      return;
+    }
+    appliedJumpKeyRef.current = jumpRequestKey;
+    if (jumpMessageId) controller.requestJump(jumpMessageId);
+  }, [jumpRequestKey, jumpMessageId, controller]);
 
   const scrollToBottom = useCallback(() => {
     controller.jumpToLatest("smooth");

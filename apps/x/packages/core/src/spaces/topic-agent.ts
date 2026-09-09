@@ -83,7 +83,8 @@ function writeRegistry(registry: Registry): void {
 
 /**
  * The thread's session, if one has been created — the renderer's "open the
- * agent session" affordance when no live activity record names it.
+ * agent session" affordance when no live activity record names it. Thread-
+ * level only: the run behind ONE agent post is response-index.ts's job.
  */
 export function topicSessionId(orgId: string, spaceId: string, threadRootId: string): string | null {
   return readRegistry().sessions[registryKey(orgId, spaceId, threadRootId)] ?? null;

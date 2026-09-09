@@ -10,6 +10,7 @@ import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
+import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { fetchLinkPreview } from './link-preview.js';
 
@@ -63,6 +64,7 @@ type SpacesHandlers = {
   'spaces:endPoll': InvokeHandler<'spaces:endPoll'>;
   'spaces:invokeRowboat': InvokeHandler<'spaces:invokeRowboat'>;
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
+  'spaces:responseSession': InvokeHandler<'spaces:responseSession'>;
   'spaces:stopRowboat': InvokeHandler<'spaces:stopRowboat'>;
   'spaces:getNotifyPrefs': InvokeHandler<'spaces:getNotifyPrefs'>;
   'spaces:setNotifyPref': InvokeHandler<'spaces:setNotifyPref'>;
@@ -103,6 +105,9 @@ orgs.onMemberFrame((orgId, frame) => broadcastSpacesEvent({ orgId, frame }));
 // can be sent.
 onSpaceAgentActivity((event) => broadcastSpacesEvent(event));
 void startSpaceAgentActivity().catch((err) => console.error('[spaces] agent activity feed failed to start:', err));
+// The per-response index ("which run posted this reply"): same bus, its own
+// consumer — see core/spaces/response-index.
+void startSpaceResponseIndex().catch((err) => console.error('[spaces] response index failed to start:', err));
 
 function broadcastSpacesEvent(event: spacesShared.SpacesBusEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -393,6 +398,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:topicSession': async (_event, args) => ({
     sessionId: topicSessionId(args.orgId, args.spaceId, args.threadRootId),
   }),
+
+  'spaces:responseSession': async (_event, args) => resolveResponseSession(args),
 
   'spaces:stopRowboat': async (_event, args) => stopTopicAgent(args),
 

@@ -3986,6 +3986,20 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string() }),
     res: z.object({ sessionId: z.string().nullable() }),
   },
+  // The run behind ONE agent-posted message (core/spaces/response-index):
+  // the message row's "Open agent chat". found = open the session at that
+  // input; gone = the link's session was deleted since (say so, never fall
+  // through to the thread's recreated session); unknown = nothing recorded
+  // (pre-index post, or not this member's Rowboat) — the caller may fall
+  // back to spaces:topicSession.
+  'spaces:responseSession': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string() }),
+    res: z.discriminatedUnion('status', [
+      z.object({ status: z.literal('found'), sessionId: z.string(), turnId: z.string(), inputIndex: z.number().int().optional() }),
+      z.object({ status: z.literal('gone') }),
+      z.object({ status: z.literal('unknown') }),
+    ]),
+  },
   // The stop square on the working chip: cancel the thread session's live
   // turn without leaving the space. Invoker-only by construction — the
   // topic→session registry is local, so only the member whose Rowboat runs

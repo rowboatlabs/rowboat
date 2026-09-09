@@ -3,6 +3,7 @@ import {
   ANCHOR_TAIL_HEADROOM_PX,
   AT_BOTTOM_EPSILON_PX,
   ChatScrollController,
+  JUMP_DEADLINE_MS,
   NEAR_BOTTOM_PX,
   SEND_ANCHOR_PEEK_PX,
   resetChatScrollMemory,
@@ -773,5 +774,72 @@ describe('ChatScrollController — subscription and cleanup', () => {
     expect(controller.snapshot().following).toBe(true)
     h.grow(100)
     expect(h.container.scrollTop).toBe(h.maxTop())
+  })
+})
+
+describe('ChatScrollController — deep link (requestJump)', () => {
+  const TARGET = 1800 - SEND_ANCHOR_PEEK_PX
+
+  it('pins an existing row near the viewport top and stops following', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    addUserRow(h, 'turn-1:user', 1800)
+    expect(controller.snapshot().following).toBe(true)
+
+    controller.requestJump('turn-1:user')
+    expect(h.container.scrollTop).toBe(TARGET)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('waits for a row that renders later (the transcript is still loading)', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    controller.requestJump('turn-1:user')
+    expect(h.container.scrollTop).toBe(h.maxTop())
+
+    // Streaming/loading growth before the row lands keeps the live edge.
+    h.grow(300)
+    expect(h.container.scrollTop).toBe(h.maxTop())
+
+    addUserRow(h, 'turn-1:user', 1800)
+    triggerResize()
+    expect(h.container.scrollTop).toBe(TARGET)
+    expect(controller.snapshot().following).toBe(false)
+  })
+
+  it('never falls back to the last user row: a row that never appears does nothing', () => {
+    const h = createHarness()
+    const controller = attach(h)
+    addUserRow(h, 'other:user', 1800)
+    controller.requestJump('turn-9:user')
+    triggerResize()
+    expect(h.container.scrollTop).toBe(h.maxTop())
+    expect(controller.snapshot().following).toBe(true)
+  })
+
+  it("the reader's own scroll cancels a pending jump", () => {
+    const h = createHarness()
+    const controller = attach(h)
+    controller.requestJump('turn-1:user')
+    h.wheel(-100)
+    h.scrollTo(200)
+    addUserRow(h, 'turn-1:user', 1800)
+    triggerResize()
+    expect(h.container.scrollTop).toBe(200)
+  })
+
+  it('gives up after JUMP_DEADLINE_MS', () => {
+    vi.useFakeTimers()
+    try {
+      const h = createHarness()
+      const controller = attach(h)
+      controller.requestJump('turn-1:user')
+      vi.advanceTimersByTime(JUMP_DEADLINE_MS + 1)
+      addUserRow(h, 'turn-1:user', 1800)
+      triggerResize()
+      expect(h.container.scrollTop).toBe(h.maxTop())
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

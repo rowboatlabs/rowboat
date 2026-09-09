@@ -87,6 +87,11 @@ export const ANCHOR_TAIL_HEADROOM_PX = 128
  * queued message that will start a later turn — repositioning for it out of
  * the blue would be a yank, not navigation. */
 const SEND_ANCHOR_DEADLINE_MS = 3000
+/** A jump into a chat that is still loading (a Spaces reply's "Open agent
+ * chat" lands before the session's transcript renders) waits this long for
+ * its row. Longer than the send deadline: the whole transcript loads, not
+ * one round-trip. */
+export const JUMP_DEADLINE_MS = 15_000
 
 /** Keys that scroll a container when it (or a non-editable descendant) has
  * focus. */
@@ -135,6 +140,16 @@ export interface ChatScrollOptions {
   memoryKey?: string
 }
 
+/** A brief highlight on a deep-linked row so the eye finds it (no-op where
+ * the Web Animations API is missing, e.g. jsdom). */
+function flashRow(row: HTMLElement): void {
+  if (typeof row.animate !== 'function') return
+  row.animate(
+    [{ backgroundColor: 'rgba(250, 204, 21, 0.3)' }, { backgroundColor: 'transparent' }],
+    { duration: 1800, easing: 'ease-out' }
+  )
+}
+
 export class ChatScrollController {
   private mode: ChatScrollMode
   private memoryKey?: string
@@ -174,6 +189,11 @@ export class ChatScrollController {
     baselineUserRowId: string | null
     deadline: number
   } | null = null
+
+  // A deep link into the transcript (requestJump): pins the named row near
+  // the viewport top once it exists. Unlike a send anchor it has no
+  // last-user-row fallback — a jump to a row that never appears does nothing.
+  private pendingJump: { messageId: string; deadline: number } | null = null
 
   // In-flight smooth scroll to the live edge (jump button): growth re-targets
   // the animation instead of fighting it with instant writes.
@@ -232,6 +252,7 @@ export class ChatScrollController {
     this.els = null
     this.restore = null
     this.pendingSendAnchor = null
+    this.pendingJump = null
     this.smoothPending = false
   }
 
@@ -253,6 +274,7 @@ export class ChatScrollController {
     if (!els) return
     this.restore = null
     this.pendingSendAnchor = null
+    this.pendingJump = null
     this.following = true
     const top = this.maxTop()
     if (behavior === 'smooth' && typeof els.container.scrollTo === 'function') {
@@ -290,6 +312,37 @@ export class ChatScrollController {
       deadline: now() + SEND_ANCHOR_DEADLINE_MS,
     }
     this.trySendAnchor()
+  }
+
+  /**
+   * Deep link: pin the given message near the viewport top as soon as its row
+   * exists (now, or when a loading transcript renders it — resize ticks
+   * retry until JUMP_DEADLINE_MS). Reading-position restore and any pending
+   * send anchor yield to it; the reader's own scroll cancels it.
+   */
+  requestJump(messageId: string): void {
+    if (!this.els) return
+    this.restore = null
+    this.pendingSendAnchor = null
+    this.pendingJump = { messageId, deadline: now() + JUMP_DEADLINE_MS }
+    this.tryJump()
+  }
+
+  private tryJump(): void {
+    const pending = this.pendingJump
+    const els = this.els
+    if (!pending || !els) return
+    if (now() > pending.deadline) {
+      this.pendingJump = null
+      return
+    }
+    const row = els.content.querySelector<HTMLElement>(
+      `[data-message-id="${pending.messageId}"]`
+    )
+    if (!row) return
+    this.pendingJump = null
+    this.applyAnchorToElement(row, pending.messageId)
+    flashRow(row)
   }
 
   /**
@@ -395,15 +448,17 @@ export class ChatScrollController {
         if (distance > AT_BOTTOM_EPSILON_PX) {
           this.following = false
           this.cancelSmooth()
-          // The reader took over before a pending send reposition landed —
-          // applying it late would be a yank.
+          // The reader took over before a pending send reposition (or deep
+          // link) landed — applying it late would be a yank.
           this.pendingSendAnchor = null
+          this.pendingJump = null
         }
       } else if (attributed && distance <= NEAR_BOTTOM_PX) {
         // A downward user gesture back into the near-bottom band resumes
         // following.
         this.following = true
         this.pendingSendAnchor = null
+        this.pendingJump = null
       } else if (distance <= AT_BOTTOM_EPSILON_PX && this.spacerHeight === 0) {
         // Unattributed downward arrivals engage only at the true live edge:
         // that's a scrollbar dragged to the very end (scrollbars emit no
@@ -474,8 +529,10 @@ export class ChatScrollController {
 
   private handleResize = (): void => {
     if (!this.els) return
-    // A resize tick is exactly when a just-sent message's row lands.
+    // A resize tick is exactly when a just-sent message's row lands — or a
+    // loading transcript's rows, for a pending deep link.
     this.trySendAnchor()
+    this.tryJump()
     this.maintainAnchorSpacer()
     if (this.restore) {
       if (now() > this.restore.deadline) {
