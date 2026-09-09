@@ -21,6 +21,7 @@ import { UserMessage, UserMessageContent } from './message.js';
 import { RequestedAgent, type TurnBusEvent, type TurnEvent } from './turns.js';
 import type { QueuedSessionMessage, SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
+import { RecommendationRowSchema, RecommendationSlot } from './recommendation-update.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
@@ -1026,6 +1027,49 @@ export const ipcSchemas = {
     res: z.object({
       success: z.literal(true),
     }),
+  },
+  // The "Rowboat now recommends…" prompt (core/models/recommendation-update):
+  // the per-slot diff between the backend's current recommendation for the
+  // provider serving the assistant model and the saved config, offered once
+  // per recommendation version. shouldShow false = nothing pending (no
+  // assistant, no recommendation for its flavor, already answered, config
+  // already matches, or the provider's list failed to load).
+  'models:checkRecommendationUpdate': {
+    req: z.null(),
+    res: z.union([
+      z.object({ shouldShow: z.literal(false) }),
+      z.object({
+        shouldShow: z.literal(true),
+        flavor: z.string(),
+        providerId: z.string(),
+        // Content hash of the recommendation the rows were computed from;
+        // echoed back on resolve so a stale dialog can't apply over edits.
+        hash: z.string(),
+        // The assistant as saved now, for rendering inherit rows.
+        assistantModel: ModelSelection,
+        rows: z.array(RecommendationRowSchema),
+      }),
+    ]),
+  },
+  // The user's answer: `apply` = the checked slots (empty = "Not now").
+  // Rows are recomputed main-side before writing; the recommendation is
+  // recorded as seen either way. `applied` = the slots actually written.
+  'models:resolveRecommendationUpdate': {
+    req: z.object({
+      flavor: z.string(),
+      hash: z.string(),
+      apply: z.array(RecommendationSlot),
+    }),
+    res: z.object({
+      applied: z.array(RecommendationSlot),
+    }),
+  },
+  // Record the flavor's current recommendation as seen — the renderer's
+  // provider-connect flow calls this right after seeding the initial
+  // selection (the Rowboat sign-in path does the same main-side).
+  'models:markRecommendationSeen': {
+    req: z.object({ flavor: z.string() }),
+    res: z.object({ success: z.literal(true) }),
   },
   'oauth:connect': {
     req: z.object({

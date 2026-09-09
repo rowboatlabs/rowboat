@@ -5,6 +5,7 @@ import { getRowboatConfig } from "../config/rowboat.js";
 import { selectInitialModel, selectInitialTaskModels } from "./initial-selection.js";
 import { normalizeModelRecommendation } from "@x/shared/dist/rowboat-account.js";
 import { capture } from "../analytics/posthog.js";
+import { markRecommendationSeen } from "./recommendation-update.js";
 
 /**
  * Model-selection hooks for the Rowboat sign-in lifecycle. Signing in is
@@ -13,8 +14,9 @@ import { capture } from "../analytics/posthog.js";
  *
  * - Connect with no saved assistant → pick an initial model (backend
  *   recommendation if the gateway lists it, else the first listed model)
- *   and save it. A saved assistant is NEVER replaced — recommendations only
- *   ever choose the initial model.
+ *   and save it. A saved assistant is NEVER replaced silently — after this
+ *   moment a changed recommendation only reaches the config through the
+ *   explicit update prompt (recommendation-update.ts).
  * - Connect with no saved image model → seed the gateway's image model.
  *   Its own guard, not the assistant's: the image model cannot inherit the
  *   assistant (a text model), so a BYOK user who already has an assistant
@@ -58,6 +60,9 @@ async function seedAssistantModel(repo: IModelConfigRepo, cfg: Config | null): P
                 },
                 ...(Object.keys(taskModels).length > 0 ? { taskModels } : {}),
             });
+            // The user has now been offered this version of the
+            // recommendation; the update prompt waits for the next one.
+            await markRecommendationSeen("rowboat");
             // Measures recommendation quality: hit = the backend's pick was
             // in the gateway list; miss = first-listed fallback.
             capture("llm_initial_model_selected", {

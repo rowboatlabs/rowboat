@@ -413,6 +413,10 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
           taskOverridesSeeded: Object.keys(taskModels).length,
           source: analyticsSource,
         })
+        // The user has now been offered this version of the recommendation:
+        // the update prompt waits for the next one. Awaited BEFORE the
+        // config-changed event so a re-check can't race ahead of the marker.
+        await window.ipc.invoke("models:markRecommendationSeen", { flavor }).catch(() => {})
       }
       for (const warning of testRes.warnings ?? []) {
         toast.warning(warning, { duration: 12000 })

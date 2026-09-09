@@ -38,8 +38,10 @@ export const RowboatApiConfig = z.object({
   // intended model differs; for rowboat they reproduce the pre-v2 curated
   // lite-tier task models so plan credits aren't burned by background
   // services). Hints for the INITIAL selection when a provider is first
-  // connected — never a catalog, and never applied over a saved choice
-  // (see shared/initial-selection.ts). The bare-string form is the legacy
+  // connected — never a catalog, and never applied silently over a saved
+  // choice (see shared/initial-selection.ts; a later change is offered
+  // through the explicit update prompt, shared/recommendation-update.ts).
+  // The bare-string form is the legacy
   // wire shape, accepted so backend deploy order and rollback are
   // non-events. Local/custom flavors are intentionally absent: the API
   // can't know which models exist in a user's environment. Optional so
