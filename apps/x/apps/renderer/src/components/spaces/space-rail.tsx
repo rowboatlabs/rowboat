@@ -507,6 +507,9 @@ export function SpaceRail({
                             </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => uploadInputRef.current?.click()}>
+                                <Upload className="size-3.5 mr-2" /> Upload files…
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => { setCreatingBoard(false); setCreatingFile({ prefix: '' }) }}>
                                 <FileText className="size-3.5 mr-2" /> New file
                             </DropdownMenuItem>
@@ -515,9 +518,6 @@ export function SpaceRail({
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => { setCreatingFile(null); setCreatingFolder(false); setCreatingBoard(true) }}>
                                 <PenTool className="size-3.5 mr-2" /> New board
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => uploadInputRef.current?.click()}>
-                                <Upload className="size-3.5 mr-2" /> Upload files…
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>

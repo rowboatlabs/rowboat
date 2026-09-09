@@ -9,6 +9,8 @@ export type RailSelection =
     | { kind: 'thread'; rootMessageId: string }
     /** `fromThreadRootId` = opened from a thread (an artifact link) — the file view shows a crumb back to it. */
     | { kind: 'file'; path: string; fromThreadRootId?: string }
+    /** Original message blob URL, including its display name. */
+    | { kind: 'attachment'; path: string; fromThreadRootId?: string }
     /** A shared board, full-bleed. `path` is its asset path (whiteboards/<name>.excalidraw). */
     | { kind: 'whiteboard'; path: string }
 
@@ -16,6 +18,7 @@ export type RailSelection =
 export function railKey(sel: RailSelection | undefined): string {
     if (!sel || sel.kind === 'general') return 'general'
     if (sel.kind === 'thread') return `thread:${sel.rootMessageId}`
+    if (sel.kind === 'attachment') return `attachment:${sel.path}`
     if (sel.kind === 'whiteboard') return `whiteboard:${sel.path}`
     return `file:${sel.path}`
 }

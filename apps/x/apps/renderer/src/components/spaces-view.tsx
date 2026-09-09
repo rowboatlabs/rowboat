@@ -28,7 +28,7 @@ import { useSpaceNotifyPrefs, type NotifyLevel } from '@/hooks/use-spaces-notify
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
-import { SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
+import { AttachmentColumn, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
 import { markRead, markTopicRead } from '@/lib/spaces-read-state'
@@ -344,10 +344,10 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // ------------------------------------------------------------------
     const memoryKey = `${org.id}/${space.id}`
     const [docPath, setDocPath] = useState<string | null>(() => {
-        if (selection.kind === 'file' || selection.kind === 'whiteboard') return selection.path
+        if (selection.kind === 'file' || selection.kind === 'whiteboard' || selection.kind === 'attachment') return selection.path
         return columnMemory.get(memoryKey)?.docPath ?? null
     })
-    const [chatOpen, setChatOpen] = useState(() => columnMemory.get(memoryKey)?.chatOpen ?? true)
+    const [chatOpen, setChatOpen] = useState(() => selection.kind === 'attachment' || (columnMemory.get(memoryKey)?.chatOpen ?? true))
     useEffect(() => {
         columnMemory.set(memoryKey, { docPath, chatOpen })
     }, [memoryKey, docPath, chatOpen])
@@ -502,7 +502,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // right; anything from Chat reopens the left — and, narrow, closes the
     // doc so the chat actually shows.
     const placeSelection = (next: RailSelection) => {
-        if (next.kind === 'file' || next.kind === 'whiteboard') {
+        if (next.kind === 'file' || next.kind === 'whiteboard' || next.kind === 'attachment') {
+            if (next.kind === 'attachment') setChatOpen(true)
             setDocPath(next.path)
         } else {
             setChatOpen(true)
@@ -557,7 +558,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // rail stays where it is — it is a sidebar, not a flyout.
     const select = (next: RailSelection) => {
         onSelect(next)
-        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : next.kind === 'file' ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
+        analytics.spacesTabViewed(next.kind === 'general' ? 'general' : (next.kind === 'file' || next.kind === 'attachment') ? 'files' : next.kind === 'whiteboard' ? 'whiteboard' : 'topics')
         placeSelection(next)
     }
     const openFile = (path: string) => select({ kind: 'file', path })
@@ -607,7 +608,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     const chatContextRef = useRef<string | null>(null)
     if (selection.kind === 'thread') chatContextRef.current = selection.rootMessageId
     else if (selection.kind === 'general') chatContextRef.current = null
-    else if (selection.kind === 'file' && selection.fromThreadRootId) chatContextRef.current = selection.fromThreadRootId
+    else if ((selection.kind === 'file' || selection.kind === 'attachment') && selection.fromThreadRootId) chatContextRef.current = selection.fromThreadRootId
     const chatRootId = chatContextRef.current
 
     const threadBesideStream = !!chatRootId && !docOpen && !threadExpanded && conversationWidth >= 840
@@ -629,7 +630,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
         }
         setDocPath(null)
         setChatOpen(true)
-        if (selection.kind === 'file' || selection.kind === 'whiteboard') {
+        if (selection.kind === 'file' || selection.kind === 'whiteboard' || selection.kind === 'attachment') {
             onSelect(chatRootId ? { kind: 'thread', rootMessageId: chatRootId } : { kind: 'general' })
         }
     }
@@ -647,16 +648,19 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     const crumbLabel = crumbLabelRaw === null ? null : resolveMentions(crumbLabelRaw, memberNames)
 
     // Files picked (rail Upload button) or dropped on the tree, awaiting the
-    // destination-folder dialog. Prefill the open file's folder when there is one.
+    // upload confirmation. Default to Space files; choosing a folder is optional.
     const [uploadFiles, setUploadFiles] = useState<File[] | null>(null)
     const [trashOpen, setTrashOpen] = useState(false)
-    const uploadDefaultFolder = centerPath?.includes('/') ? centerPath.slice(0, centerPath.lastIndexOf('/')) : ''
 
     return (
         <SpaceMembersProvider members={memberNames}>
         <SpaceProfilesProvider members={members} here={hereSet} selfId={org.memberId}>
         <SpaceRefsProvider refs={{ orgId: org.id, orgAddress: org.address, spaceId: space.id }}>
-        <SpaceNavProvider onOpenFile={openFile}>
+        <SpaceNavProvider onOpenFile={openFile} onOpenAttachment={(src, name) => {
+            const url = new URL(src)
+            url.searchParams.set('name', name)
+            select({ kind: 'attachment', path: url.href, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
+        }}>
         <div className="spaces-surface relative flex-1 min-h-0 flex flex-col">
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
@@ -983,7 +987,12 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                         className={cn('min-w-0 min-h-0 flex', docAnim || (split && !anim) ? 'shrink-0 overflow-hidden' : 'flex-1')}
                     >
                     <div style={docAnim ? { width: docAnim.width } : undefined} className={cn('flex min-w-0 min-h-0', docAnim ? 'shrink-0' : 'flex-1', !split && !boardPath && 'justify-center')}>
-                        {boardPath ? (
+                        {docRender.startsWith('app://space-blob/') ? (
+                            <AttachmentColumn key={docRender} src={docRender} onDismiss={closeDoc} onSaved={(path) => {
+                                setRefreshTick((tick) => tick + 1)
+                                select({ kind: 'file', path, ...(chatRootId ? { fromThreadRootId: chatRootId } : {}) })
+                            }} />
+                        ) : boardPath ? (
                             // Keyed by path so switching boards remounts a fresh collab session.
                             <Suspense
                                 fallback={
@@ -1044,7 +1053,6 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                     space={space}
                     files={uploadFiles}
                     entries={entries}
-                    defaultFolder={uploadDefaultFolder}
                     onClose={() => setUploadFiles(null)}
                     onDone={() => setRefreshTick((t) => t + 1)}
                 />

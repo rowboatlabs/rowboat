@@ -1,3 +1,4 @@
+import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { MarkdownEditor } from '@/components/markdown-editor'
 import { SpaceDocumentViewer } from './document-viewer'
@@ -1152,7 +1153,8 @@ export function TrashDialog({ org, space, onClose }: {
 interface UploadRow {
     file: File
     name: string
-    status: 'pending' | 'uploading' | 'done' | 'error'
+    status: 'pending' | 'uploading' | 'done' | 'error' | 'cancelled'
+    savedPath?: string
     error?: string
 }
 
@@ -1167,43 +1169,39 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
     onDone: () => void
 }) {
     const [folder, setFolder] = useState(defaultFolder ?? '')
+    const [choosingFolder, setChoosingFolder] = useState(false)
     const [rows, setRows] = useState<UploadRow[]>(files.map((file) => ({ file, name: file.name, status: 'pending' })))
     const [running, setRunning] = useState(false)
+    const fileSave = useSpaceFileSave(org.id, space.id)
+    const uploadedHashes = useRef(new Map<File, string>())
 
     const cleanFolder = folder.trim().replace(/^\/+|\/+$/g, '')
     const destFor = (name: string) => (cleanFolder ? `${cleanFolder}/${name}` : name)
-    const existing = useMemo(() => new Map(entries.map((e) => [e.path, e.version])), [entries])
 
     const upload = async () => {
         setRunning(true)
         let failed = 0
         for (const [i, row] of rows.entries()) {
-            if (row.status === 'done') continue
-            setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'uploading' } : r)))
+            if (row.status === 'done' || row.status === 'cancelled') continue
+            setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'uploading', error: undefined } : r)))
             try {
-                const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
-                    orgId: org.id,
-                    spaceId: space.id,
-                    ...(await uploadInputFor(row.file)),
-                    name: row.name,
-                    ...(row.file.type ? { mime: row.file.type } : {}),
-                })
-                const dest = destFor(row.name)
-                const result = await window.ipc.invoke('spaces:proposeChange', {
-                    orgId: org.id,
-                    spaceId: space.id,
-                    input: {
-                        assetPath: dest,
-                        // Existing path = replace against its current head; new = create.
-                        baseVersion: existing.get(dest) ?? 0,
-                        blob: uploaded.blob.hash,
-                        reason: `upload ${row.name}`,
+                const savedPath = await fileSave.save({
+                    path: destFor(row.name),
+                    reason: `upload ${row.name}`,
+                    getBlob: async () => {
+                        const cached = uploadedHashes.current.get(row.file)
+                        if (cached) return cached
+                        const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                            orgId: org.id, spaceId: space.id,
+                            ...(await uploadInputFor(row.file)), name: row.name,
+                            ...(row.file.type ? { mime: row.file.type } : {}),
+                        })
+                        uploadedHashes.current.set(row.file, uploaded.blob.hash)
+                        return uploaded.blob.hash
                     },
                 })
-                if (result.outcome === 'conflict') {
-                    throw new Error(`someone changed ${dest} meanwhile — try again`)
-                }
-                setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: 'done' } : r)))
+                setRows((prev) => prev.map((r, j) => (j === i ? { ...r, status: savedPath ? 'done' : 'cancelled', savedPath: savedPath ?? undefined, error: undefined } : r)))
+                if (savedPath) onDone()
             } catch (err) {
                 failed += 1
                 const message = err instanceof Error ? err.message : 'upload failed'
@@ -1212,8 +1210,6 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
         }
         setRunning(false)
         if (failed === 0) {
-            toast(rows.length === 1 ? `Uploaded ${destFor(rows[0]!.name)}` : `Uploaded ${rows.length} files`, 'success')
-            onDone()
             onClose()
         }
     }
@@ -1225,16 +1221,23 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
                     <DialogTitle className="text-sm">Upload to {space.name}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3">
-                    <label className="block text-xs text-muted-foreground">
-                        Folder <span className="text-muted-foreground/70">(optional — e.g. design/screens; created by the upload)</span>
-                        <Input
-                            value={folder}
-                            placeholder="(space root)"
-                            className="mt-1 h-7 text-xs font-mono"
-                            disabled={running}
-                            onChange={(e) => setFolder(e.target.value)}
-                        />
-                    </label>
+                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>Upload to: {cleanFolder || 'Space files'}</span>
+                        <button type="button" disabled={running || rows.some((row) => row.status === 'done')} onClick={() => setChoosingFolder((value) => !value)} className="shrink-0 underline">Change folder</button>
+                    </div>
+                    {choosingFolder && (
+                        <label className="block text-xs text-muted-foreground">
+                            Folder (optional)
+                            <Input value={folder} placeholder="Leave blank for Space files" className="mt-1 h-7 text-xs" disabled={running || rows.some((row) => row.status === 'done')} onChange={(e) => setFolder(e.target.value)} list="space-upload-folders" />
+                            <datalist id="space-upload-folders">
+                                {[...new Set(entries.flatMap((entry) => {
+                                    const parts = entry.path.split('/')
+                                    return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))
+                                }))].sort().map((path) => <option key={path} value={path} />)}
+                            </datalist>
+                            <span className="mt-1 block">Choose an existing folder or type a new folder name.</span>
+                        </label>
+                    )}
                     <div className="max-h-56 space-y-1 overflow-y-auto">
                         {rows.map((row, i) => (
                             <div key={i} className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs">
@@ -1248,23 +1251,21 @@ export function UploadFilesDialog({ org, space, files, entries, defaultFolder, o
                                     <FileText className="size-3.5 shrink-0 text-muted-foreground" />
                                 )}
                                 <span className="min-w-0 flex-1">
-                                    <span className="block truncate font-mono">{destFor(row.name)}</span>
-                                    {row.error && <span className="block truncate text-red-500">{row.error}</span>}
+                                    <span className="block truncate font-mono">{row.savedPath ?? destFor(row.name)}{row.status === 'cancelled' ? ' — cancelled' : ''}</span>
+                                    {row.error && <span role="alert" className="block break-words text-red-500">{row.error}</span>}
                                 </span>
                                 <span className="shrink-0 text-muted-foreground">{formatBytes(row.file.size)}</span>
-                                {existing.has(destFor(row.name)) && row.status === 'pending' && (
-                                    <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] text-amber-700 dark:bg-amber-950 dark:text-amber-400">replaces v{existing.get(destFor(row.name))}</span>
-                                )}
                             </div>
                         ))}
                     </div>
-                    <div className="flex justify-end gap-2">
+                    {fileSave.conflict && <FileConflictNotice conflict={fileSave.conflict} onChoose={fileSave.choose} />}
+                    {!fileSave.conflict && <div className="flex justify-end gap-2">
                         <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={running} onClick={onClose}>Cancel</Button>
                         <Button size="sm" className="h-7 text-xs" disabled={running || rows.length === 0} onClick={() => void upload()}>
                             {running ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Upload className="size-3 mr-1" />}
                             Upload {rows.length === 1 ? '' : `${rows.length} files`}
                         </Button>
-                    </div>
+                    </div>}
                 </div>
             </DialogContent>
         </Dialog>

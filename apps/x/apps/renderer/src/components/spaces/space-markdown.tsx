@@ -1,6 +1,8 @@
+import { FileConflictNotice, useSpaceFileSave } from './file-conflict'
 import { createContext, memo, useContext, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
+import { BlobPreview } from '@/components/spaces/blob-preview'
 import { Streamdown } from 'streamdown'
-import { Eye, FileDown, FilePlus2, FileText, Loader2 } from 'lucide-react'
+import { Eye, FileDown, FilePlus2, FileText, Loader2, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -29,7 +31,7 @@ import {
 //      walker; fix-it-once rule from the mention sweep),
 //   2. blobs — the org's canonical https blob links rewrite to app://space-blob
 //      (served by main through the content-addressed cache), images render
-//      inline, non-image blob links render as a download card, and
+//      inline, non-image blob links render as a preview card, and
 //   3. file links — a relative link in a message points at a space file
 //      (resolved from the root; plain markdown on the wire), as does the
 //      contract's canonical …/f/<path> form; both open in the file pane.
@@ -46,16 +48,20 @@ export function useSpaceRefs(): SpaceRefs | null {
     return useContext(SpaceRefsContext)
 }
 
+const AttachmentNavContext = createContext<((src: string, name: string) => void) | null>(null)
+
 const SpaceNavContext = createContext<((path: string) => void) | null>(null)
 
 /** Mounted beside SpaceRefsProvider — lets any rendered file link open the file pane. */
-export function SpaceNavProvider({ onOpenFile, children }: { onOpenFile: (path: string) => void; children: ReactNode }) {
-    return <SpaceNavContext.Provider value={onOpenFile}>{children}</SpaceNavContext.Provider>
+export function SpaceNavProvider({ onOpenFile, onOpenAttachment, children }: { onOpenFile: (path: string) => void; onOpenAttachment?: (src: string, name: string) => void; children: ReactNode }) {
+    return <SpaceNavContext.Provider value={onOpenFile}><AttachmentNavContext.Provider value={onOpenAttachment ?? null}>{children}</AttachmentNavContext.Provider></SpaceNavContext.Provider>
 }
 
-/** An attached non-image file inside a message: name + download on tap. */
+/** Attachments preview on tap; saving to space files keeps the original link intact. */
 function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }) {
     const parsed = parseBlobAppUrl(href)
+    const openAttachment = useContext(AttachmentNavContext)
+    const [saveOpen, setSaveOpen] = useState(false)
     const [saving, setSaving] = useState(false)
     if (!parsed) return null
     const suggestedName = (() => {
@@ -85,15 +91,19 @@ function BlobLinkCard({ href, children }: { href: string; children?: ReactNode }
         }
     }
     return (
-        <button
-            type="button"
-            onClick={() => void save()}
-            title="Download"
-            className="my-0.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground/90 hover:border-foreground/30"
-        >
-            {saving ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <FileDown className="size-3.5 shrink-0 text-muted-foreground" />}
-            <span className="truncate">{children}</span>
-        </button>
+        <>
+            <span className="my-0.5 inline-flex max-w-full items-center rounded-lg border border-border bg-background text-xs font-medium text-foreground/90">
+                <button type="button" onClick={() => openAttachment?.(href, suggestedName || 'Attachment')} title="Preview file" className="inline-flex min-w-0 items-center gap-1.5 px-2.5 py-1.5 hover:bg-accent">
+                    <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{children}</span>
+                </button>
+                <button type="button" onClick={() => setSaveOpen(true)} title="Save to space files" aria-label="Save to space files" className="shrink-0 p-2 hover:bg-accent"><FilePlus2 className="size-3.5" /></button>
+                <button type="button" disabled={saving} onClick={() => void save()} title="Download" aria-label="Download" className="shrink-0 p-2 hover:bg-accent">
+                    {saving ? <Loader2 className="size-3.5 animate-spin" /> : <FileDown className="size-3.5" />}
+                </button>
+            </span>
+            {saveOpen && <SaveToSpaceDialog src={href} suggestedName={suggestedName} onClose={() => setSaveOpen(false)} />}
+        </>
     )
 }
 
@@ -198,12 +208,11 @@ function tileStyle(dims: { width: number; height: number } | null): CSSPropertie
 }
 
 /**
- * Promote a chat image into the space's files — the record. The bytes are
+ * Promote a chat attachment into the space's files. The bytes are
  * already in the org's blob store; saving is one proposeChange referencing
- * the hash. baseVersion 0 = create: an occupied path fails with the server's
- * conflict error rather than silently overwriting someone's file.
+ * the hash. Duplicate names use the same explicit choices as direct uploads.
  */
-function SaveToSpaceDialog({ src, onClose }: { src: string; onClose: () => void }) {
+function SaveToSpaceDialog({ src, suggestedName, onSaved, onClose }: { src: string; suggestedName?: string; onSaved?: (path: string) => void; onClose: () => void }) {
     const parsed = parseBlobAppUrl(src)
     const suggested = (() => {
         try {
@@ -212,60 +221,68 @@ function SaveToSpaceDialog({ src, onClose }: { src: string; onClose: () => void 
             return ''
         }
     })()
-    const [path, setPath] = useState(suggested || (parsed ? `image-${parsed.hash.slice(0, 8)}.png` : ''))
+    const [path, setPath] = useState(suggested || suggestedName || (parsed ? `attachment-${parsed.hash.slice(0, 8)}` : ''))
     const [saving, setSaving] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const fileSave = useSpaceFileSave(parsed?.orgId ?? '', parsed?.spaceId ?? '')
     if (!parsed) return null
     const save = async () => {
         const cleaned = path.split('/').filter((s) => s && s !== '.' && s !== '..').join('/')
-        if (!cleaned || saving) return
+        if (saving) return
+        if (!cleaned) { setError('Enter a file name.'); return }
         setSaving(true)
+        setError(null)
         try {
-            await window.ipc.invoke('spaces:proposeChange', {
-                orgId: parsed.orgId,
-                spaceId: parsed.spaceId,
-                input: { assetPath: cleaned, baseVersion: 0, blob: parsed.hash, reason: 'saved from chat' },
-            })
+            const savedPath = await fileSave.save({ path: cleaned, getBlob: async () => parsed.hash, reason: 'saved from chat' })
+            if (!savedPath) { onClose(); return }
             toast('Saved to space files', 'success')
+            onSaved?.(savedPath)
             onClose()
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not save to space files', 'error')
+            setError(err instanceof Error ? err.message : 'Could not save to space files')
         } finally {
             setSaving(false)
         }
     }
     return (
-        <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+        <Dialog open onOpenChange={(o) => { if (!o && !saving) onClose() }}>
             <DialogContent className="sm:max-w-md">
                 <DialogTitle>Save to space files</DialogTitle>
                 <div className="text-sm text-muted-foreground">
-                    The image becomes a file in this space — in the file tree for everyone, versioned like any other file.
+                    Save this attachment in Files for everyone in the space. It will still be available in this message.
                 </div>
                 <input
                     autoFocus
                     value={path}
-                    onChange={(e) => setPath(e.target.value)}
+                    onChange={(e) => { setPath(e.target.value); setError(null) }}
                     onKeyDown={(e) => {
                         if (e.key === 'Enter') void save()
                     }}
-                    placeholder="folder/name.png"
+                    aria-label="File name"
+                    disabled={saving}
+                    placeholder="File name"
                     className="w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs outline-none focus:border-foreground/30"
                 />
-                <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+                {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
+                {fileSave.conflict && <FileConflictNotice conflict={fileSave.conflict} onChoose={fileSave.choose} />}
+                {!fileSave.conflict && <div className="flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" disabled={saving} onClick={onClose}>Cancel</Button>
                     <Button size="sm" disabled={saving} onClick={() => void save()}>
                         {saving ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null} Save
                     </Button>
-                </div>
+                </div>}
             </DialogContent>
         </Dialog>
     )
 }
 
 export function BlobImage({ src, alt }: { src: string; alt: string }) {
+    const openAttachment = useContext(AttachmentNavContext)
     const imageRef = useRef<HTMLImageElement>(null)
     const openGallery = useContext(MessageImageGalleryContext)
     const preview = () => {
-        if (openGallery && imageRef.current) openGallery(imageRef.current)
+        if (openAttachment) openAttachment(src, new URL(src).searchParams.get('name') || alt || 'Image')
+        else if (openGallery && imageRef.current) openGallery(imageRef.current)
         else setOpen(true)
     }
     const [open, setOpen] = useState(false)
@@ -305,6 +322,7 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
     }
     return (
         <>
+            <span className="relative inline-block align-top">
             <ContextMenu>
                 <ContextMenuTrigger asChild>
                     <img
@@ -343,6 +361,8 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
                     )}
                 </ContextMenuContent>
             </ContextMenu>
+            {parsed && <button type="button" title="Save to space files" aria-label={`Save ${alt || 'image'} to space files`} onClick={() => setSaveOpen(true)} className="absolute bottom-3 right-3 rounded-md border border-border bg-background p-1.5 text-foreground shadow-sm hover:bg-accent"><FilePlus2 className="size-3.5" /></button>}
+            </span>
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
                 {parsed && (
                     <>
@@ -610,3 +630,33 @@ export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { 
         </div>
     )
 })
+
+
+/** Attachment content occupies the same document column as saved space files. */
+export function AttachmentColumn({ src, onDismiss, onSaved }: { src: string; onDismiss: () => void; onSaved: (path: string) => void }) {
+    const name = new URL(src).searchParams.get('name') || 'Attachment'
+    const [saveOpen, setSaveOpen] = useState(false)
+    const [downloading, setDownloading] = useState(false)
+    const download = async () => {
+        const parsed = parseBlobAppUrl(src)
+        if (!parsed || downloading) return
+        setDownloading(true)
+        try {
+            await window.ipc.invoke('spaces:saveBlob', { ...parsed, suggestedName: name })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not download', 'error')
+        } finally { setDownloading(false) }
+    }
+    return (
+        <section aria-label="Attachment preview" className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate font-mono text-foreground/80" title={name}>{name}</span>
+                <button type="button" onClick={() => setSaveOpen(true)} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FilePlus2 className="size-3" /> Save to space files</button>
+                <button type="button" disabled={downloading} onClick={() => void download()} className="flex shrink-0 items-center gap-1 hover:text-foreground"><FileDown className="size-3" /> Download</button>
+                <button type="button" aria-label="Close attachment preview" onClick={onDismiss} className="rounded p-1 hover:bg-accent hover:text-foreground"><X className="size-3.5" /></button>
+            </div>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"><BlobPreview src={src} name={name} /></div>
+            {saveOpen && <SaveToSpaceDialog src={src} suggestedName={name} onSaved={onSaved} onClose={() => setSaveOpen(false)} />}
+        </section>
+    )
+}
