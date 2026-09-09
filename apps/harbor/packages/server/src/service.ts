@@ -283,6 +283,32 @@ export class HarborService {
     return members;
   }
 
+  /**
+   * The org roster as THIS member may see it (api.ts listOrgMembers,
+   * 2026-09-09): the union of every roster the caller belongs to, DMs
+   * included, deduped by id and sorted by display name (case-insensitive,
+   * id breaks ties). Discovery is bounded by shared membership on purpose —
+   * no admin directory, no privacy surface beyond what listMembers already
+   * exposes per space. Always contains the caller (a member of no space at
+   * all still sees themself).
+   */
+  async listOrgMembers(ctx: ActorCtx): Promise<Member[]> {
+    const spaces = await this.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    const ids = new Set<string>([ctx.memberId]);
+    for (const space of spaces) {
+      for (const m of await this.store.listMemberships(space.id)) ids.add(m.memberId);
+    }
+    const members: Member[] = [];
+    for (const id of ids) {
+      const member = await this.store.getMember(id);
+      if (member) members.push(member);
+    }
+    return members.sort(
+      (a, b) =>
+        a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }) || a.id.localeCompare(b.id),
+    );
+  }
+
   async leaveSpace(ctx: ActorCtx, spaceId: string): Promise<void> {
     const space = await this.requireMember(ctx, spaceId);
     if (space.kind === 'direct') {
@@ -1321,15 +1347,13 @@ export class HarborService {
    * Toggle a vote on a poll answer — reaction semantics (per-(member, answer),
    * idempotent no-ops), plus the single-select rule: adding while another
    * answer holds this member's vote MOVES it (remove-then-add, two events,
-   * one lock). Closed polls and tombstones refuse. Agents cannot vote (the
-   * Discord posture: apps don't vote — an agent's opinion is a reply).
+   * one lock). Closed polls and tombstones refuse. Any acting mode may vote
+   * (parity, 2026-09-09): a vote cast by a member's agent IS that member's
+   * vote — attribution records how it happened, never who else.
    */
   async votePoll(ctx: ActorCtx, spaceId: string, messageId: string, input: VotePollInput): Promise<Message> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    if (input.actingMode !== 'direct') {
-      throw new HarborError('invalid_request', 'agents cannot vote on polls');
-    }
     const by: Attribution = {
       memberId: ctx.memberId,
       actingMode: input.actingMode,
@@ -1386,18 +1410,16 @@ export class HarborService {
   }
 
   /**
-   * End a poll early — author-only, deletion's posture. Ending an already-
+   * End a poll early — author-only, deletion's posture (any acting mode:
+   * the author's agent counts as the author). Ending an already-
    * closed poll (early-ended or naturally expired) is an idempotent no-op
    * with no event; natural expiry itself never calls this.
    */
   async endPoll(ctx: ActorCtx, spaceId: string, messageId: string, input: EndPollInput): Promise<Message> {
     await this.requireMember(ctx, spaceId);
     this.guardWrite();
-    // Same line as voting: a poll is a member's question to members, and an
-    // app acting under the author's identity must not close it either.
-    if (input.actingMode !== 'direct') {
-      throw new HarborError('invalid_request', 'agents cannot end polls');
-    }
+    // Same line as voting (parity, 2026-09-09): the author's agent counts as
+    // the author — the author-only check below is on memberId, not mode.
     const by: Attribution = {
       memberId: ctx.memberId,
       actingMode: input.actingMode,

@@ -938,10 +938,16 @@ describe('polls', () => {
     expect(removed.body.message.poll.votes).toEqual([{ answerId: 2, memberIds: ['gagan'] }]);
   });
 
-  it('agents cannot vote; unknown answers and non-poll messages refuse', async () => {
+  it('an agent votes as its member (parity 2026-09-09); unknown answers and non-poll messages refuse', async () => {
     const posted = await postPoll(ramnique, { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] });
     const messageId = posted.body.message.id;
-    expect((await vote(gagan, messageId, 1, 'add', 'agent')).status).toBe(400);
+    const byAgent = await vote(gagan, messageId, 1, 'add', 'agent');
+    expect(byAgent.status).toBe(200);
+    expect(byAgent.body.message.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
+    // The stored vote is the member's, attributed by mode.
+    expect((await harbor.store.listPollVotesByMessage(spaceId, messageId)).map((v) => v.by)).toEqual([
+      { memberId: 'gagan', actingMode: 'agent' },
+    ]);
     expect((await vote(gagan, messageId, 9, 'add')).status).toBe(400);
     const plain = await ramnique.post(`/v1/spaces/${spaceId}/messages`, { body: 'no poll here', actingMode: 'direct' });
     expect((await vote(gagan, plain.body.message.id, 1, 'add')).status).toBe(400);
@@ -1016,13 +1022,19 @@ describe('polls', () => {
     expect(row.rootMessage.poll.votes).toEqual([{ answerId: 1, memberIds: ['gagan'] }]);
   });
 
-  it('agents cannot end polls, even acting as the author', async () => {
+  it("the author's agent ends the poll as the author (parity 2026-09-09); another member's agent may not", async () => {
     const posted = await postPoll(ramnique, { question: 'q', answers: [{ text: 'A' }, { text: 'B' }] });
     const messageId = posted.body.message.id as string;
+    const notAuthor = await gagan.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/end`, { actingMode: 'agent', agentName: 'bot' });
+    expect(notAuthor.status).toBe(403);
     const asAgent = await ramnique.post(`/v1/spaces/${spaceId}/messages/${messageId}/poll/end`, { actingMode: 'agent', agentName: 'bot' });
-    expect(asAgent.status).toBe(400);
+    expect(asAgent.status).toBe(200);
+    expect(asAgent.body.message.poll.endedAt).toBeTruthy();
     const still = await gagan.get(`/v1/spaces/${spaceId}/stream`);
-    expect((still.body.messages as any[]).find((m) => m.id === messageId).poll.endedAt).toBeUndefined();
+    expect((still.body.messages as any[]).find((m) => m.id === messageId).poll.endedAt).toBe(asAgent.body.message.poll.endedAt);
+    const events = await harbor.service.eventsAfter(spaceId, 0);
+    const end = events.filter((e) => e.event.type === 'poll_ended').at(-1)!;
+    expect((end.event as any).end.by).toEqual({ memberId: 'ramnique', actingMode: 'agent', agentName: 'bot' });
   });
 
   it('ending early is author-only and idempotent; closed polls refuse votes', async () => {

@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, type ActingMode, type SearchKind } from '@rowboat/spaces-protocol';
+import { mcpTools, NewPoll, type ActingMode, type SearchKind } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import type { AuthDriver } from './auth.js';
 import { HarborError } from './errors.js';
@@ -13,7 +13,9 @@ import type { Store } from './store.js';
 // MCP streamable HTTP at /mcp. Every call is attributed as the token's member;
 // actingMode defaults to 'agent' ('scheduled' via the x-acting-mode header,
 // display label via x-agent-name). Rowboat's own agent uses this exact
-// endpoint — there is no privileged path.
+// endpoint — there is no privileged path. PARITY (2026-09-09): every member
+// operation the render face has is projected here; an agent's vote, reaction,
+// or edit is the member's act, attributed by mode.
 //
 // Stateless transport on purpose: each POST builds a per-request server bound
 // to the caller's identity, handles the request, and tears down. Fine for the
@@ -56,7 +58,7 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  const server = buildMcpServer(deps.service, actor);
+  const server = buildMcpServer(deps.service, deps.store, actor);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
@@ -78,7 +80,7 @@ export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse
   }
 }
 
-function buildMcpServer(service: HarborService, actor: McpActor): Server {
+function buildMcpServer(service: HarborService, store: Store, actor: McpActor): Server {
   const server = new Server({ name: 'harbor-stub', version: '0.0.1' }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -99,7 +101,7 @@ function buildMcpServer(service: HarborService, actor: McpActor): Server {
       );
     }
     try {
-      const result = await dispatch(service, actor, request.params.name, parsed.data);
+      const result = await dispatch(service, store, actor, request.params.name, parsed.data);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         structuredContent: result as Record<string, unknown>,
@@ -120,9 +122,57 @@ function errorResult(text: string) {
   return { content: [{ type: 'text' as const, text }], isError: true };
 }
 
-async function dispatch(service: HarborService, actor: McpActor, name: string, args: unknown): Promise<unknown> {
+async function dispatch(
+  service: HarborService,
+  store: Store,
+  actor: McpActor,
+  name: string,
+  args: unknown,
+): Promise<unknown> {
   const ctx = { memberId: actor.memberId };
+  // Every write is attributed as the token's member acting in the declared
+  // mode (PARITY 2026-09-09: an agent's vote/reaction/edit is the member's act).
+  const attribution = {
+    actingMode: actor.actingMode,
+    ...(actor.agentName ? { agentName: actor.agentName } : {}),
+  };
   switch (name) {
+    // --- identity & people --------------------------------------------------
+    case 'whoami': {
+      // The same row /v1/me serves — the member the auth driver resolved.
+      const member = await store.getMember(actor.memberId);
+      if (!member) throw new HarborError('not_found', 'member not found');
+      return { member };
+    }
+    case 'list_members': {
+      const a = args as { spaceId?: string };
+      const members = a.spaceId !== undefined
+        ? await service.listMembers(ctx, a.spaceId)
+        : await service.listOrgMembers(ctx);
+      return { members };
+    }
+    // --- spaces & membership --------------------------------------------------
+    case 'open_direct': {
+      const a = args as { memberId: string };
+      return service.openDirect(ctx, a.memberId);
+    }
+    case 'create_space': {
+      const a = args as { name: string };
+      return { space: await service.createSpace(ctx, a.name) };
+    }
+    case 'rename_space': {
+      const a = args as { spaceId: string; name: string };
+      return { space: await service.renameSpace(ctx, a.spaceId, { name: a.name, ...attribution }) };
+    }
+    case 'leave_space': {
+      const a = args as { spaceId: string };
+      await service.leaveSpace(ctx, a.spaceId);
+      return { left: true };
+    }
+    case 'create_invite': {
+      const a = args as { spaceId: string; expiresInHours?: number };
+      return service.createInvite(ctx, a.spaceId, a.expiresInHours);
+    }
     case 'list_spaces': {
       const a = args as { includeDirect?: boolean };
       const spaces = await service.listSpaces(ctx, { includeDirect: a.includeDirect ?? false });
@@ -158,8 +208,8 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
       return { root, topic, messages, truncated: hasMore };
     }
     case 'read_asset': {
-      const a = args as { spaceId: string; path: string };
-      return service.readAsset(ctx, a.spaceId, a.path);
+      const a = args as { spaceId: string; path: string; version?: number };
+      return service.readAsset(ctx, a.spaceId, a.path, a.version);
     }
     case 'propose_change': {
       const a = args as {
@@ -205,14 +255,68 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
       });
     }
     case 'post_message': {
-      const a = args as { spaceId: string; threadRoot?: string; body: string };
+      const a = args as { spaceId: string; threadRoot?: string; body: string; poll?: z.infer<typeof NewPoll> };
       const { message } = await service.postMessage(ctx, a.spaceId, {
         ...(a.threadRoot ? { threadRoot: a.threadRoot } : {}),
         body: a.body,
+        ...(a.poll !== undefined ? { poll: a.poll } : {}),
         actingMode: actor.actingMode,
         ...(actor.agentName ? { agentName: actor.agentName } : {}),
       });
       return { messageId: message.id, ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}) };
+    }
+    case 'edit_message': {
+      const a = args as { spaceId: string; messageId: string; body: string };
+      return { message: await service.editMessage(ctx, a.spaceId, a.messageId, { body: a.body, ...attribution }) };
+    }
+    case 'delete_message': {
+      const a = args as { spaceId: string; messageId: string };
+      return { message: await service.deleteMessage(ctx, a.spaceId, a.messageId, attribution) };
+    }
+    case 'react': {
+      const a = args as { spaceId: string; messageId: string; emoji: string; action: 'add' | 'remove' };
+      return {
+        message: await service.reactToMessage(ctx, a.spaceId, a.messageId, {
+          emoji: a.emoji,
+          action: a.action,
+          ...attribution,
+        }),
+      };
+    }
+    case 'vote_poll': {
+      const a = args as { spaceId: string; messageId: string; answerId: number; action: 'add' | 'remove' };
+      return {
+        message: await service.votePoll(ctx, a.spaceId, a.messageId, {
+          answerId: a.answerId,
+          action: a.action,
+          ...attribution,
+        }),
+      };
+    }
+    case 'end_poll': {
+      const a = args as { spaceId: string; messageId: string };
+      return { message: await service.endPoll(ctx, a.spaceId, a.messageId, attribution) };
+    }
+    case 'restore_asset': {
+      const a = args as { spaceId: string; path: string; reason: string };
+      return service.restoreAsset(ctx, a.spaceId, {
+        path: a.path,
+        reason: a.reason, // required on this face (CONTRACT.md decision 5)
+        ...attribution,
+      });
+    }
+    case 'asset_history': {
+      const a = args as { spaceId: string; path?: string; beforeOffset?: number; limit?: number };
+      const changeSets = await service.assetHistory(ctx, a.spaceId, {
+        ...(a.path !== undefined ? { path: a.path } : {}),
+        ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
+        ...(a.limit !== undefined ? { limit: a.limit } : {}),
+      });
+      return { changeSets };
+    }
+    case 'diff': {
+      const a = args as { spaceId: string; path: string; from: number; to: number };
+      return { unified: await service.diff(ctx, a.spaceId, a.path, a.from, a.to) };
     }
     case 'list_topics': {
       const a = args as { spaceId: string; includeArchived?: boolean };
