@@ -1,10 +1,11 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, useColorScheme } from 'react-native';
-import Markdown from 'react-native-markdown-display';
+import { Image, ScrollView, StyleSheet, Text } from 'react-native';
 
 import * as analytics from '@/lib/analytics';
+import { ChatMarkdown } from '@/components/markdown';
 import { useConnection } from '@/lib/connection';
+import { useColors } from '@/theme/colors';
 
 // Read-only note view. Relative image refs are rewritten to the server's
 // authenticated /workspace route; the auth header rides along per-image.
@@ -28,7 +29,7 @@ function rewriteImageRefs(markdown: string, noteDir: string, baseUrl: string): s
 export default function NoteViewScreen() {
   const { path } = useLocalSearchParams<{ path: string }>();
   const { rpc, events, pairing } = useConnection();
-  const scheme = useColorScheme();
+  const colors = useColors();
   const [body, setBody] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,19 +64,21 @@ export default function NoteViewScreen() {
   }, [events, path, refresh]);
 
   const title = path?.split('/').pop()?.replace(/\.md$/, '') ?? 'Note';
-  const textColor = scheme === 'dark' ? '#fff' : '#000';
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView
+      style={{ backgroundColor: colors.background }}
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={styles.container}
+    >
       <Stack.Screen options={{ title }} />
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && <Text selectable style={{ color: colors.destructive, marginBottom: 8 }}>{error}</Text>}
       {body !== null && (
-        <Markdown
-          style={{ body: { color: textColor, fontSize: 15, lineHeight: 22 } }}
-          rules={{
+        <ChatMarkdown
+          extraRules={{
             // Workspace images sit behind the server's bearer auth, so the
             // default <img> rendering won't do — attach the header per image.
-            image: (node) => (
+            image: (node: { key: string; attributes: { src?: string } }) => (
               <Image
                 key={node.key}
                 source={{
@@ -89,7 +92,7 @@ export default function NoteViewScreen() {
           }}
         >
           {body}
-        </Markdown>
+        </ChatMarkdown>
       )}
     </ScrollView>
   );
@@ -97,6 +100,5 @@ export default function NoteViewScreen() {
 
 const styles = StyleSheet.create({
   container: { padding: 16, paddingBottom: 48 },
-  error: { color: '#c0392b', marginBottom: 8 },
   image: { width: '100%', height: 220, marginVertical: 8 },
 });

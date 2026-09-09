@@ -7,11 +7,15 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": true }
+      "ios": {
+        "simulator": true
+      }
     },
     "device": {
       "extends": "development",
-      "ios": { "simulator": false }
+      "ios": {
+        "simulator": false
+      }
     },
     "preview": {
       "distribution": "internal"
@@ -21,6 +25,13 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6809176622",
+        "ascApiKeyPath": "/Users/gagan/.rowboat/asc/AuthKey_F27A4L437P.p8",
+        "ascApiKeyId": "F27A4L437P",
+        "ascApiKeyIssuerId": "4f6e9138-1db7-420b-b324-e7ab9644d894"
+      }
+    }
   }
 }

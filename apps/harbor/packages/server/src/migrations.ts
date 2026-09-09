@@ -496,6 +496,26 @@ export const MIGRATIONS: Migration[] = [
       `create unique index if not exists spaces_direct_key on spaces (org_id, direct_key) where kind = 'direct'`,
     ],
   },
+  {
+    // Push notifications (PUSH_PLAN.md): device tokens + member levels.
+    id: '015-push',
+    statements: [
+      `create table if not exists push_tokens (
+        org_id text not null,
+        token text not null,
+        member_id text not null,
+        updated_at text not null,
+        primary key (org_id, token)
+      )`,
+      `create index if not exists push_tokens_member on push_tokens (org_id, member_id)`,
+      `create table if not exists push_prefs (
+        org_id text not null,
+        member_id text not null,
+        level text not null,
+        primary key (org_id, member_id)
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

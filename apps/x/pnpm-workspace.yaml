@@ -26,6 +26,13 @@ packageExtensions:
   langium:
     dependencies:
       vscode-jsonrpc: '*'
+  # react-native-worklets' babel plugin requires @babel/generator without
+  # declaring it; graft it on (same trick as langium above).
+  react-native-worklets:
+    dependencies:
+      '@babel/generator': '*'
+      '@babel/traverse': '*'
+      '@babel/types': '*'
 
 catalog:
   vitest: 4.1.7

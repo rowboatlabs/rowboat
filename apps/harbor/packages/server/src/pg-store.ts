@@ -12,7 +12,7 @@ import type {
 import { migrate } from './migrations.js';
 import { extractSearchText, matchesAllTerms, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
-import {
+import { type PushLevel,
   directKeyFor,
   type AssetRecord,
   type AssetSearchRow,
@@ -395,6 +395,44 @@ export class PgStore implements Store {
 
   async deleteMembership(spaceId: string, memberId: string): Promise<void> {
     await this.sql.query('delete from memberships where space_id = $1 and member_id = $2', [spaceId, memberId]);
+  }
+
+  // --- push (PUSH_PLAN.md) ---------------------------------------------------
+
+  async putPushToken(memberId: string, token: string, updatedAt: string): Promise<void> {
+    await this.sql.query(
+      `insert into push_tokens (org_id, token, member_id, updated_at) values ($1, $2, $3, $4)
+       on conflict (org_id, token) do update set member_id = excluded.member_id, updated_at = excluded.updated_at`,
+      [this.orgId, token, memberId, updatedAt],
+    );
+  }
+
+  async deletePushToken(token: string): Promise<void> {
+    await this.sql.query('delete from push_tokens where org_id = $1 and token = $2', [this.orgId, token]);
+  }
+
+  async listPushTokens(memberId: string): Promise<string[]> {
+    const rows = await this.sql.query<{ token: string }>(
+      'select token from push_tokens where org_id = $1 and member_id = $2 order by updated_at',
+      [this.orgId, memberId],
+    );
+    return rows.map((r) => r.token);
+  }
+
+  async setPushLevel(memberId: string, level: PushLevel): Promise<void> {
+    await this.sql.query(
+      `insert into push_prefs (org_id, member_id, level) values ($1, $2, $3)
+       on conflict (org_id, member_id) do update set level = excluded.level`,
+      [this.orgId, memberId, level],
+    );
+  }
+
+  async getPushLevel(memberId: string): Promise<PushLevel | undefined> {
+    const rows = await this.sql.query<{ level: string }>(
+      'select level from push_prefs where org_id = $1 and member_id = $2',
+      [this.orgId, memberId],
+    );
+    return rows[0]?.level as PushLevel | undefined;
   }
 
   // --- assets ----------------------------------------------------------------

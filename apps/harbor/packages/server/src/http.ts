@@ -153,6 +153,16 @@ export function buildHttpApp(deps: {
     return reply(c, routes.openDirect.response, await service.openDirect(actor(c), input.memberId));
   });
 
+  app.post(routes.registerPush.path, async (c) => {
+    const input = await body(c, routes.registerPush.request);
+    return reply(c, routes.registerPush.response, await service.registerPush(actor(c), input));
+  });
+
+  app.post(routes.unregisterPush.path, async (c) => {
+    const input = await body(c, routes.unregisterPush.request);
+    return reply(c, routes.unregisterPush.response, await service.unregisterPush(actor(c), input));
+  });
+
   app.get('/v1/spaces/:spaceId/members', async (c) => {
     const { spaceId } = parseWith(routes.listMembers.params, c.req.param());
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });

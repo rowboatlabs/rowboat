@@ -4,3 +4,6 @@ test-fixtures/
 
 # Local pnpm settings (e.g. script-shell on Windows) — never for CI
 .npmrc
+
+# local-only notes
+*.local.md

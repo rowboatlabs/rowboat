@@ -6,6 +6,7 @@ import { notifyIfEnabled } from '../application/notification/notifier.js';
 import type { NotifyInput } from '../application/notification/service.js';
 import { WorkDir } from '../config/config.js';
 import { dndActive, notifyLevelFor } from './notify-prefs.js';
+import { sendPhonePush } from './phone-push.js';
 import { getClient, getLive, listOrgs, onMemberFrame } from './orgs.js';
 
 // Space mention notifications: main-side watcher that subscribes to EVERY
@@ -274,7 +275,7 @@ function makeHandler(
     const last = threadCooldown.get(cooldownKey) ?? 0;
     if (Date.now() - last < THREAD_COOLDOWN_MS) return;
     threadCooldown.set(cooldownKey, Date.now());
-    void notifyIfEnabled('space_mention', buildMentionNotify({
+    const hit: MentionHit = {
       orgId,
       spaceId,
       spaceName,
@@ -286,7 +287,11 @@ function makeHandler(
       // The wire carries "@<memberId>" addresses — show people, not ids.
       body: resolveMentions(message.body, memberNames.get(k) ?? new Map()),
       kind,
-    }));
+    };
+    const built = buildMentionNotify(hit);
+    void notifyIfEnabled('space_mention', built);
+    // Paired phones ride the same watcher (their own levels apply).
+    void sendPhonePush(hit, { title: built.title ?? hit.spaceName, body: built.message ?? '' });
   };
 }
 

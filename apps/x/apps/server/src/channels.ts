@@ -21,6 +21,7 @@ export const RPC_CHANNELS = [
   'sessions:setTitle',
   'sessions:delete',
   'account:getRowboat',
+  'phone:push:register',
   'workspace:getRoot',
   'workspace:exists',
   'workspace:stat',
