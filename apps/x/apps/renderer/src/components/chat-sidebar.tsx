@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Minus, X, PanelRightClose, PanelsTopLeft } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Minus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { readAssistantPreference, writeAssistantPreference } from '@/lib/assistant-dock'
-import { clampPanelSize, type PanelSize } from '@/lib/assistant-panel-layout'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
@@ -54,12 +53,7 @@ function getInitialPaneWidth(defaultWidth: number): number {
   }
 }
 
-export interface ChatSidebarProps {
-  isFocused?: boolean
-  onDockedWidthChange?: (width: number) => void
-  floatingBounds?: PanelSize & { right: number }
-  onFloatingResize?: (size: PanelSize) => void
-  onToggleDock?: () => void
+interface ChatSidebarProps {
   floating?: boolean
   keepMounted?: boolean
   onMinimize?: () => void
@@ -154,11 +148,6 @@ export interface ChatSidebarProps {
 }
 
 export function ChatSidebar({
-  isFocused = true,
-  onDockedWidthChange,
-  floatingBounds,
-  onFloatingResize,
-  onToggleDock,
   floating = false,
   keepMounted = false,
   onMinimize,
@@ -247,7 +236,6 @@ export function ChatSidebar({
   const [width, setWidth] = useState(() => getInitialPaneWidth(defaultWidth))
   const [isResizing, setIsResizing] = useState(false)
   const [showContent, setShowContent] = useState(isOpen)
-  const [animateContent, setAnimateContent] = useState(isOpen)
   const [floatingSize, setFloatingSize] = useState(() => {
     const fallback = { width: 460, height: 600 }
     try {
@@ -261,9 +249,6 @@ export function ChatSidebar({
   const [localPresetMessage, setLocalPresetMessage] = useState<string | undefined>(undefined)
 
   const paneRef = useRef<HTMLDivElement>(null)
-  const hasOpenedRef = useRef(isOpen)
-  const resizeRef = useRef<{ x: number; y: number; size: PanelSize; axis: 'width' | 'height' | 'both'; next: PanelSize } | null>(null)
-  const resizeFrame = useRef<number | null>(null)
   const startXRef = useRef(0)
   const startWidthRef = useRef(0)
   const prevIsMaximizedRef = useRef(isMaximized)
@@ -292,94 +277,28 @@ export function ChatSidebar({
   }, [])
 
   useEffect(() => {
-    if (keepMounted || isOpen) {
+    if (keepMounted) {
       setShowContent(true)
       return
+    }
+    if (isOpen) {
+      const timer = setTimeout(() => setShowContent(true), 150)
+      return () => clearTimeout(timer)
     }
     setShowContent(false)
   }, [isOpen, keepMounted])
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    if (!floating || !isOpen) return
     const pane = paneRef.current
     if (!pane) return
-    if (!floating) { pane.style.visibility = isOpen ? 'visible' : 'hidden'; return }
-    if (!isOpen && !hasOpenedRef.current) { pane.style.visibility = 'hidden'; return }
-    if (isOpen) hasOpenedRef.current = true
-    if (!pane.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      pane.style.visibility = isOpen ? 'visible' : 'hidden'
-      setAnimateContent(isOpen)
-      return
-    }
-    if (isOpen) setAnimateContent(true)
-    pane.style.visibility = 'visible'
-    const frames = [{ opacity: 0, transform: 'translateY(16px) scale(0.98)' }, { opacity: 1, transform: 'translateY(0) scale(1)' }]
-    const animation = pane.animate(isOpen ? frames : [...frames].reverse(), { duration: isOpen ? 170 : 130, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' })
-    animation.onfinish = () => { pane.style.visibility = isOpen ? 'visible' : 'hidden'; setAnimateContent(isOpen) }
-    return () => animation.cancel()
-  }, [floating, isOpen])
-
-  useEffect(() => {
-    const pane = paneRef.current
-    if (!pane || floating || !isOpen || !onDockedWidthChange) return
-    const observer = new ResizeObserver(() => onDockedWidthChange(pane.getBoundingClientRect().width))
+    const observer = new ResizeObserver(() => {
+      const bounds = pane.getBoundingClientRect()
+      writeAssistantPreference('rowboat-assistant-floating-size', JSON.stringify({ width: bounds.width, height: bounds.height }))
+    })
     observer.observe(pane)
     return () => observer.disconnect()
-  }, [floating, isOpen, onDockedWidthChange])
-
-  useEffect(() => () => { if (resizeFrame.current !== null) cancelAnimationFrame(resizeFrame.current) }, [])
-
-  const commitFloatingSize = (size: PanelSize) => {
-    setFloatingSize(size)
-    onFloatingResize?.(size)
-    writeAssistantPreference('rowboat-assistant-floating-size', JSON.stringify(size))
-  }
-
-  const resizeHandle = (axis: 'width' | 'height' | 'both') => (
-    <div
-      role="separator"
-      tabIndex={0}
-      aria-label={`Resize chat ${axis === 'both' ? 'width and height' : axis}`}
-      aria-orientation={axis === 'height' ? 'horizontal' : 'vertical'}
-      aria-valuenow={Math.round(axis === 'height' ? (floatingBounds ?? floatingSize).height : (floatingBounds ?? floatingSize).width)}
-      className={cn('titlebar-no-drag absolute z-40 touch-none hover:bg-primary/10 focus-visible:bg-primary/20', axis === 'width' ? 'left-0 top-2 bottom-2 w-2 cursor-ew-resize' : axis === 'height' ? 'top-0 left-2 right-2 h-2 cursor-ns-resize' : 'top-0 left-0 size-3 cursor-nwse-resize')}
-      onDoubleClick={() => commitFloatingSize(clampPanelSize({ width: 420, height: 600 }, { width: window.innerWidth, height: window.innerHeight }))}
-      onPointerDown={(event) => {
-        event.preventDefault()
-        const bounds = paneRef.current?.getBoundingClientRect()
-        if (!bounds) return
-        const size = { width: bounds.width, height: bounds.height }
-        resizeRef.current = { x: event.clientX, y: event.clientY, size, axis, next: size }
-        event.currentTarget.setPointerCapture(event.pointerId)
-      }}
-      onPointerMove={(event) => {
-        const drag = resizeRef.current
-        if (!drag) return
-        drag.next = clampPanelSize({ width: drag.size.width + (drag.axis !== 'height' ? drag.x - event.clientX : 0), height: drag.size.height + (drag.axis !== 'width' ? drag.y - event.clientY : 0) }, { width: window.innerWidth - (floatingBounds?.right ?? 12) + 12, height: window.innerHeight })
-        if (resizeFrame.current !== null) return
-        resizeFrame.current = requestAnimationFrame(() => {
-          resizeFrame.current = null
-          if (!paneRef.current || !resizeRef.current) return
-          paneRef.current.style.width = `${resizeRef.current.next.width}px`
-          paneRef.current.style.height = `${resizeRef.current.next.height}px`
-        })
-      }}
-      onLostPointerCapture={() => {
-        if (!resizeRef.current) return
-        commitFloatingSize(resizeRef.current.next)
-        resizeRef.current = null
-      }}
-      onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
-      onPointerCancel={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
-      onKeyDown={(event) => {
-        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
-        event.preventDefault()
-        event.stopPropagation()
-        const size = floatingBounds ?? floatingSize
-        const step = event.shiftKey ? 40 : 10
-        commitFloatingSize(clampPanelSize({ width: size.width + (axis !== 'height' ? (event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0) : 0), height: size.height + (axis !== 'width' ? (event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0) : 0) }, { width: window.innerWidth, height: window.innerHeight }))
-      }}
-    />
-  )
+  }, [floating, isOpen])
 
   useEffect(() => {
     prevIsMaximizedRef.current = isMaximized
@@ -458,15 +377,15 @@ export function ChatSidebar({
   const paneStyle = useMemo<React.CSSProperties>(() => {
     if (floating) {
       return {
-        position: 'fixed', right: floatingBounds?.right ?? 12, bottom: 52, zIndex: 30,
-        width: (floatingBounds ?? floatingSize).width, height: (floatingBounds ?? floatingSize).height,
+        position: 'fixed', right: 12, bottom: 52, zIndex: 30,
+        width: floatingSize.width, height: floatingSize.height,
         maxWidth: 'calc(100vw - 88px)', maxHeight: 'calc(100dvh - 108px)',
-        minWidth: 'min(320px, calc(100vw - 88px))', minHeight: 'min(280px, calc(100dvh - 108px))',
-        pointerEvents: isOpen ? undefined : 'none', transformOrigin: 'bottom right',
+        minWidth: 'min(360px, calc(100vw - 88px))', minHeight: 'min(320px, calc(100dvh - 108px))',
+        resize: 'both', display: isOpen ? undefined : 'none',
       }
     }
     if (!isOpen) {
-      return { width: 0, flex: '0 0 auto', borderWidth: 0 }
+      return { width: 0, flex: '0 0 auto' }
     }
     if (isMaximized) {
       // In maximize mode the pane should grow into the freed left space,
@@ -477,20 +396,26 @@ export function ChatSidebar({
       return { width: 0, flex: '1 1 0' }
     }
     return { width, flex: '0 0 auto' }
-  }, [isOpen, isMaximized, paneSize, width, floating, floatingSize, floatingBounds])
+  }, [isOpen, isMaximized, paneSize, width, floating, floatingSize])
 
   return (
     <div
       ref={paneRef}
       data-chat-sidebar-root
-      data-assistant-panel={activeChatTabId}
-      data-assistant-chat={chatTabs.find((tab) => tab.id === activeChatTabId)?.chatId}
-      data-docked-chat={isOpen && !floating ? '' : undefined}
       role={floating ? 'region' : undefined}
       aria-label={floating ? 'Assistant conversation' : undefined}
       aria-hidden={!isOpen}
       inert={!isOpen}
       onKeyDown={(event) => {
+        if (floating && event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+          event.preventDefault()
+          const bounds = paneRef.current?.getBoundingClientRect()
+          if (bounds) setFloatingSize({
+            width: Math.max(360, Math.min(window.innerWidth - 88, bounds.width + (event.key === 'ArrowLeft' ? 20 : event.key === 'ArrowRight' ? -20 : 0))),
+            height: Math.max(320, Math.min(window.innerHeight - 108, bounds.height + (event.key === 'ArrowUp' ? 20 : event.key === 'ArrowDown' ? -20 : 0))),
+          })
+          return
+        }
         if (event.key !== 'Escape' || event.defaultPrevented || !floating) return
         if ((event.target as HTMLElement).closest('[role="dialog"], [role="menu"], [role="listbox"]')) return
         event.preventDefault()
@@ -507,8 +432,7 @@ export function ChatSidebar({
       )}
       style={paneStyle}
     >
-      {floating && <span className="sr-only">Use arrow keys on the resize handles to resize. Escape minimizes this chat.</span>}
-      {floating && <>{resizeHandle('width')}{resizeHandle('height')}{resizeHandle('both')}</>}
+      {floating && <span className="sr-only">Resize with Alt and arrow keys. Escape minimizes this chat.</span>}
       {!floating && !isMaximized && isResizable && (
         <div
           onMouseDown={handleMouseDown}
@@ -577,7 +501,6 @@ export function ChatSidebar({
                 onOpenChatHistory={onOpenChatHistory}
               />
             )}
-            {onToggleDock && !pinnedToCodeSession && <Button variant="ghost" size="icon" onClick={onToggleDock} className="titlebar-no-drag my-1 size-8 shrink-0" aria-label={floating ? 'Dock chat' : 'Undock chat'} title={floating ? 'Dock chat to sidebar' : 'Undock chat into floating panel'}>{floating ? <PanelRightClose className="size-4" /> : <PanelsTopLeft className="size-4" />}</Button>}
             {onOpenFullScreen && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -605,7 +528,7 @@ export function ChatSidebar({
               {/* Pane padding lives here, on the container — the shared chat pane renders identically on every surface. */}
               <div className="relative min-h-0 flex-1 px-3">
                 {chatTabs.map((tab) => {
-                  const isActive = tab.id === activeChatTabId && (isOpen || (floating && animateContent))
+                  const isActive = tab.id === activeChatTabId && isOpen
                   return (
                     <ChatSessionPane
                       // Keyed by chat identity — see App's chat panel key.
@@ -635,14 +558,13 @@ export function ChatSidebar({
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
                   {chatTabs.map((tab) => {
-                    const isActive = tab.id === activeChatTabId && (isOpen || (floating && animateContent))
+                    const isActive = tab.id === activeChatTabId && isOpen
                     return (
                       <ChatSessionComposer
                         // Composer instance per chat — see App's composer key.
                         key={tab.chatId}
                         tab={tab}
                         isActive={isActive}
-                        isFocused={isFocused && isOpen}
                         tabState={getTabState(tab.id)}
                         knowledgeFiles={knowledgeFiles}
                         recentFiles={recentFiles}

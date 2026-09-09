@@ -159,7 +159,6 @@ export type DockSidebarProps = {
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
   onNewChat?: () => void
-  onOpenAssistant?: () => void
   onToggleBrowser?: () => void
   /** Whether the browser overlay is up, for the Browser tile's running dot. */
   browserOpen?: boolean
@@ -556,7 +555,6 @@ export function DockSidebar({
   onOpenEmail,
   onOpenHome,
   onNewChat,
-  onOpenAssistant,
   onToggleBrowser,
   browserOpen = false,
   switcherOnly = false,
@@ -949,7 +947,7 @@ export function DockSidebar({
       // The top section: Assistant (resumes the most recent chat, falling
       // back to a fresh one — white tile) with Spaces right under it, then a
       // divider before the destinations.
-      ...(onOpenAssistant || onOpenRun || onNewChat ? [
+      ...(onOpenRun || onNewChat ? [
         {
           item: {
             key: 'assistant', label: 'Assistant', icon: MascotFaceIcon as unknown as LucideIcon,
@@ -957,8 +955,7 @@ export function DockSidebar({
             running: activeNav === 'assistant',
             onClick: () => {
               closeFlyouts()
-              if (onOpenAssistant) onOpenAssistant()
-              else if (lastChat && onOpenRun) onOpenRun(lastChat.id)
+              if (lastChat && onOpenRun) onOpenRun(lastChat.id)
               else onNewChat?.()
             },
           },
@@ -1097,7 +1094,7 @@ export function DockSidebar({
     knowledgeUpdatedLabel, knowledgeActions, onOpenApps, pinnedApps, onOpenApp,
     bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
     switcherOnly, openLastSpace, onOpenChatHistory,
-    onNewChat, onOpenAssistant, lastChat, onOpenRun,
+    onNewChat, lastChat, onOpenRun,
     onOpenBgTasks, workspaceCount, totalSpacesUnread, totalSpaces, spacesOpen, chatsOpen,
     outOfCredits, hasOauthError, settingsStatus, settingsAlert,
   ])
