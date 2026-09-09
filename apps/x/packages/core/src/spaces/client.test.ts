@@ -269,6 +269,10 @@ describe('SpacesClient', () => {
     expect((await gagan.listSpaces({ includeDirect: true })).some((s) => s.id === opened.space.id)).toBe(true);
     await expect(ramnique.createInvite(opened.space.id)).rejects.toMatchObject({ code: 'invalid_request' });
     await expect(gagan.leaveSpace(opened.space.id)).rejects.toMatchObject({ code: 'invalid_request' });
+    // Your own id = your self-DM, one participant.
+    const notes = await ramnique.openDirect('ramnique');
+    expect(notes.space).toMatchObject({ kind: 'direct', participants: ['ramnique'] });
+    expect((await ramnique.openDirect('ramnique')).created).toBe(false);
   });
 
   it('errors carry the wire code', async () => {

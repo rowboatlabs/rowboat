@@ -127,6 +127,30 @@ describe('spaces, invites, membership', () => {
     expect((await prakhar.post(`/v1/spaces/${spaceId}/leave`)).status).toBe(200);
     expect((await prakhar.get(`/v1/spaces/${spaceId}/assets`)).status).toBe(403);
   });
+
+  it('rename: any member renames, the listing follows, identical name no-ops', async () => {
+    const r = await gagan.post(`/v1/spaces/${spaceId}/rename`, { name: 'Launch plan', actingMode: 'direct' });
+    expect(r.status).toBe(200);
+    expect(r.body.space.name).toBe('Launch plan');
+    const list = await ramnique.get('/v1/spaces');
+    expect(list.body.spaces.find((s: any) => s.id === spaceId)?.name).toBe('Launch plan');
+    // Idempotent: the same name again succeeds and appends no event.
+    const before = await harbor.store.head(spaceId);
+    const again = await gagan.post(`/v1/spaces/${spaceId}/rename`, { name: 'Launch plan', actingMode: 'direct' });
+    expect(again.status).toBe(200);
+    expect(await harbor.store.head(spaceId)).toBe(before);
+    // A real rename appends the durable space_renamed event.
+    await gagan.post(`/v1/spaces/${spaceId}/rename`, { name: 'Show HN draft', actingMode: 'direct' });
+    expect(await harbor.store.head(spaceId)).toBe(before + 1);
+  });
+
+  it('rename: non-members are forbidden; a DM refuses; empty names are 400', async () => {
+    expect((await prakhar.post(`/v1/spaces/${spaceId}/rename`, { name: 'Nope', actingMode: 'direct' })).status).toBe(403);
+    expect((await ramnique.post(`/v1/spaces/${spaceId}/rename`, { name: '', actingMode: 'direct' })).status).toBe(400);
+    const dm = await ramnique.post('/v1/direct', { memberId: 'gagan' });
+    expect(dm.status).toBe(200);
+    expect((await ramnique.post(`/v1/spaces/${dm.body.space.id}/rename`, { name: 'Us', actingMode: 'direct' })).status).toBe(400);
+  });
 });
 
 describe('assets and the change-set log', () => {

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Minus, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { readAssistantPreference, writeAssistantPreference } from '@/lib/assistant-dock'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
@@ -53,6 +54,10 @@ function getInitialPaneWidth(defaultWidth: number): number {
 }
 
 interface ChatSidebarProps {
+  floating?: boolean
+  keepMounted?: boolean
+  onMinimize?: () => void
+  onCloseTab?: () => void
   defaultWidth?: number
   isOpen?: boolean
   isMaximized?: boolean
@@ -139,10 +144,14 @@ interface ChatSidebarProps {
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
   callAvailable?: boolean
-  onComposioConnected?: (toolkitSlug: string) => void
+  onComposioConnected?: (toolkitSlug: string, tabId?: string) => void
 }
 
 export function ChatSidebar({
+  floating = false,
+  keepMounted = false,
+  onMinimize,
+  onCloseTab,
   defaultWidth = DEFAULT_WIDTH,
   isOpen = true,
   isMaximized = false,
@@ -227,6 +236,16 @@ export function ChatSidebar({
   const [width, setWidth] = useState(() => getInitialPaneWidth(defaultWidth))
   const [isResizing, setIsResizing] = useState(false)
   const [showContent, setShowContent] = useState(isOpen)
+  const [floatingSize, setFloatingSize] = useState(() => {
+    const fallback = { width: 460, height: 600 }
+    try {
+      const saved = JSON.parse(readAssistantPreference('rowboat-assistant-floating-size') ?? 'null')
+      if (Number.isFinite(saved?.width) && Number.isFinite(saved?.height)) {
+        return { width: Math.max(360, Math.min(900, saved.width)), height: Math.max(320, Math.min(1000, saved.height)) }
+      }
+    } catch { return fallback }
+    return fallback
+  })
   const [localPresetMessage, setLocalPresetMessage] = useState<string | undefined>(undefined)
 
   const paneRef = useRef<HTMLDivElement>(null)
@@ -258,12 +277,28 @@ export function ChatSidebar({
   }, [])
 
   useEffect(() => {
+    if (keepMounted) {
+      setShowContent(true)
+      return
+    }
     if (isOpen) {
       const timer = setTimeout(() => setShowContent(true), 150)
       return () => clearTimeout(timer)
     }
     setShowContent(false)
-  }, [isOpen])
+  }, [isOpen, keepMounted])
+
+  useEffect(() => {
+    if (!floating || !isOpen) return
+    const pane = paneRef.current
+    if (!pane) return
+    const observer = new ResizeObserver(() => {
+      const bounds = pane.getBoundingClientRect()
+      writeAssistantPreference('rowboat-assistant-floating-size', JSON.stringify({ width: bounds.width, height: bounds.height }))
+    })
+    observer.observe(pane)
+    return () => observer.disconnect()
+  }, [floating, isOpen])
 
   useEffect(() => {
     prevIsMaximizedRef.current = isMaximized
@@ -340,6 +375,15 @@ export function ChatSidebar({
     return chatTabStates[tabId] ?? emptyTabState
   }, [activeChatTabId, activeTabState, chatTabStates, emptyTabState])
   const paneStyle = useMemo<React.CSSProperties>(() => {
+    if (floating) {
+      return {
+        position: 'fixed', right: 12, bottom: 52, zIndex: 30,
+        width: floatingSize.width, height: floatingSize.height,
+        maxWidth: 'calc(100vw - 88px)', maxHeight: 'calc(100dvh - 108px)',
+        minWidth: 'min(360px, calc(100vw - 88px))', minHeight: 'min(320px, calc(100dvh - 108px))',
+        resize: 'both', display: isOpen ? undefined : 'none',
+      }
+    }
     if (!isOpen) {
       return { width: 0, flex: '0 0 auto' }
     }
@@ -352,23 +396,44 @@ export function ChatSidebar({
       return { width: 0, flex: '1 1 0' }
     }
     return { width, flex: '0 0 auto' }
-  }, [isOpen, isMaximized, paneSize, width])
+  }, [isOpen, isMaximized, paneSize, width, floating, floatingSize])
 
   return (
     <div
       ref={paneRef}
       data-chat-sidebar-root
+      role={floating ? 'region' : undefined}
+      aria-label={floating ? 'Assistant conversation' : undefined}
+      aria-hidden={!isOpen}
+      inert={!isOpen}
+      onKeyDown={(event) => {
+        if (floating && event.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+          event.preventDefault()
+          const bounds = paneRef.current?.getBoundingClientRect()
+          if (bounds) setFloatingSize({
+            width: Math.max(360, Math.min(window.innerWidth - 88, bounds.width + (event.key === 'ArrowLeft' ? 20 : event.key === 'ArrowRight' ? -20 : 0))),
+            height: Math.max(320, Math.min(window.innerHeight - 108, bounds.height + (event.key === 'ArrowUp' ? 20 : event.key === 'ArrowDown' ? -20 : 0))),
+          })
+          return
+        }
+        if (event.key !== 'Escape' || event.defaultPrevented || !floating) return
+        if ((event.target as HTMLElement).closest('[role="dialog"], [role="menu"], [role="listbox"]')) return
+        event.preventDefault()
+        onMinimize?.()
+      }}
       onMouseDownCapture={onActivate}
       onFocusCapture={onActivate}
       className={cn(
         'relative flex min-w-0 flex-col overflow-hidden bg-background',
         isMiddlePlacement ? 'border-r border-border' : 'border-l border-border',
-        !isResizing && !justToggledMaximize && 'transition-[width] duration-200 ease-linear',
+        !floating && !isResizing && !justToggledMaximize && 'transition-[width] duration-200 ease-linear motion-reduce:transition-none',
+        floating && 'rounded-xl border border-border shadow-2xl',
         className
       )}
       style={paneStyle}
     >
-      {!isMaximized && isResizable && (
+      {floating && <span className="sr-only">Resize with Alt and arrow keys. Escape minimizes this chat.</span>}
+      {!floating && !isMaximized && isResizable && (
         <div
           onMouseDown={handleMouseDown}
           className={cn(
@@ -384,7 +449,7 @@ export function ChatSidebar({
       {showContent && (
         <>
           <header
-            className="titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar"
+            className={cn(floating ? 'titlebar-no-drag' : 'titlebar-drag-region', 'flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar')}
             style={{
               paddingLeft: isMaximized ? (sidebarState === 'collapsed' ? collapsedLeftPaddingPx : 12) : undefined,
               paddingRight: isMaximized ? 12 : undefined,
@@ -444,16 +509,18 @@ export function ChatSidebar({
                     size="icon"
                     onClick={onOpenFullScreen}
                     className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                    aria-label={isMaximized ? 'Dock chat to side pane' : 'Expand chat'}
+                    aria-label={isMaximized ? (onMinimize ? 'Restore chat panel' : 'Dock chat to side pane') : 'Expand chat'}
                   >
                     {isMaximized
                       ? (isMiddlePlacement ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />)
                       : (isMiddlePlacement ? <ArrowRight className="size-5" /> : <ArrowLeft className="size-5" />)}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">{isMaximized ? 'Dock to side pane' : 'Expand chat'}</TooltipContent>
+                <TooltipContent side="bottom">{isMaximized ? (onMinimize ? 'Restore chat panel' : 'Dock to side pane') : 'Expand chat'}</TooltipContent>
               </Tooltip>
             )}
+            {onMinimize && <Button variant="ghost" size="icon" onClick={onMinimize} className="titlebar-no-drag my-1 size-8 shrink-0" aria-label="Minimize chat" title="Minimize chat"><Minus className="size-4" /></Button>}
+            {onCloseTab && <Button variant="ghost" size="icon" onClick={onCloseTab} className="titlebar-no-drag my-1 mr-1 size-8 shrink-0" aria-label="Close chat tab" title="Close tab — conversation stays in history"><X className="size-4" /></Button>}
           </header>
 
           <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})} onOpenFile={onOpenFile}>
@@ -461,7 +528,7 @@ export function ChatSidebar({
               {/* Pane padding lives here, on the container — the shared chat pane renders identically on every surface. */}
               <div className="relative min-h-0 flex-1 px-3">
                 {chatTabs.map((tab) => {
-                  const isActive = tab.id === activeChatTabId
+                  const isActive = tab.id === activeChatTabId && isOpen
                   return (
                     <ChatSessionPane
                       // Keyed by chat identity — see App's chat panel key.
@@ -479,7 +546,7 @@ export function ChatSidebar({
                       activeIsProcessing={isProcessing}
                       activeIsReasoning={isReasoning}
                       onCodePermissionResponse={onCodePermissionResponse}
-                      onComposioConnected={onComposioConnected}
+                      onComposioConnected={(slug) => onComposioConnected?.(slug, tab.id)}
                       emptyStateVariant={pinnedToCodeSession ? 'code' : 'default'}
                       isCodeSession={!!(tab.runId && codeSessionLocks[tab.runId])}
                     />
@@ -487,11 +554,11 @@ export function ChatSidebar({
                 })}
               </div>
 
-              <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
+              <div className={cn('sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
                   {chatTabs.map((tab) => {
-                    const isActive = tab.id === activeChatTabId
+                    const isActive = tab.id === activeChatTabId && isOpen
                     return (
                       <ChatSessionComposer
                         // Composer instance per chat — see App's composer key.

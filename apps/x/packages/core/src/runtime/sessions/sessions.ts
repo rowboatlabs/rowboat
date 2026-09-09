@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { UserMessage } from "@x/shared/dist/message.js";
+import type { SessionOrigin } from "@x/shared/dist/origins.js";
 import {
     type QueuedSessionMessage,
     SessionCreated,
@@ -23,6 +24,7 @@ import {
 import type { IMonotonicallyIncreasingIdGenerator } from "../../application/lib/id-gen.js";
 import { chatActivity } from "../../application/lib/chat-activity.js";
 import {
+    type AddedInput,
     type ITurnRuntime,
     type Turn,
     type TurnExecution,
@@ -67,7 +69,9 @@ interface ActiveAdvance {
 
 // One pending-queue entry (QueuedSessionMessage plus the SendMessageConfig it
 // arrived with — used only if the entry is promoted to a new turn; a steered
-// entry joins the live turn, whose configuration wins).
+// entry joins the live turn, whose configuration wins. The config's origin
+// is the one field that rides along either way: it lands on turn_created at
+// promotion and on input_added at steer).
 interface PendingSessionEntry {
     queueId: string;
     message: z.infer<typeof UserMessage>;
@@ -76,7 +80,14 @@ interface PendingSessionEntry {
 }
 
 function publicQueueEntry(entry: PendingSessionEntry): QueuedSessionMessage {
-    return { queueId: entry.queueId, message: entry.message, ts: entry.ts };
+    return {
+        queueId: entry.queueId,
+        message: entry.message,
+        ts: entry.ts,
+        ...(entry.config.origin === undefined
+            ? {}
+            : { origin: entry.config.origin }),
+    };
 }
 
 // The session layer per session-design.md: owns conversations as ordered
@@ -158,7 +169,7 @@ export class SessionsImpl implements ISessions {
         return deriveTurnStatus(reduceTurn(turn.events));
     }
 
-    async createSession(input?: { title?: string }): Promise<string> {
+    async createSession(input?: { title?: string; origin?: SessionOrigin }): Promise<string> {
         const sessionId = await this.idGenerator.next();
         const event = SessionCreated.parse({
             type: "session_created",
@@ -166,6 +177,7 @@ export class SessionsImpl implements ISessions {
             sessionId,
             ts: this.clock.now(),
             ...(input?.title === undefined ? {} : { title: input.title }),
+            ...(input?.origin === undefined ? {} : { origin: input.origin }),
         });
         await this.sessionRepo.create(event);
         this.publishEntry(sessionIndexEntry(reduceSession([event]), "none"));
@@ -388,6 +400,7 @@ export class SessionsImpl implements ISessions {
                     ? { subUseCase: config.subUseCase }
                     : {}),
             },
+            ...(config.origin === undefined ? {} : { origin: config.origin }),
             config: {
                 humanAvailable: config.humanAvailable ?? true,
                 ...(config.autoPermission === undefined
@@ -845,16 +858,19 @@ export class SessionsImpl implements ISessions {
     // The loop-facing drain (TakeAddedInputs): hand every pending message to
     // the live turn. Synchronous mutation — no interleaving with the
     // lock-holding paths' own synchronous queue access is possible.
-    private drainQueuedForSteer(
-        sessionId: string,
-    ): Array<z.infer<typeof UserMessage>> {
+    private drainQueuedForSteer(sessionId: string): AddedInput[] {
         const queue = this.pending.get(sessionId);
         if (!queue || queue.length === 0) {
             return [];
         }
-        const messages = queue.splice(0).map((entry) => entry.message);
+        const inputs = queue.splice(0).map((entry) => ({
+            message: entry.message,
+            ...(entry.config.origin === undefined
+                ? {}
+                : { origin: entry.config.origin }),
+        }));
         this.publishQueue(sessionId);
-        return messages;
+        return inputs;
     }
 
     private publishQueue(sessionId: string): void {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
 import { caretContext, composerExtensions, composerMarkdown } from './composer-editor'
+import { encodeMentions, resolveMentions } from '@/lib/spaces-presentation'
 
 // The composer's contract: what the editor holds serializes back to the
 // exact markdown the wire (and every downstream consumer: drafts, slash
@@ -93,6 +94,30 @@ describe('formatting commands produce wire markdown', () => {
         expect(e.getText()).toBe('a * b _c_')
         // Whatever escaping the serializer chose, it must parse back to the same text.
         expect(makeEditor(md).getText()).toBe('a * b _c_')
+    })
+})
+
+describe('inline message editor round trip', () => {
+    // The edit box seeds the editor with the posted body (mentions resolved to
+    // names) and saves what it serializes back (mentions re-encoded). Opening
+    // an edit and saving it untouched must reproduce the wire body exactly —
+    // otherwise editing rewrites messages nobody changed.
+    const members = [
+        { id: '01HXAMPLEULIDHARSH000000', displayName: 'Harsh' },
+        { id: '01HXAMPLEULIDRAMNIQUE000', displayName: 'Ramnique Singh' },
+    ]
+    const names = new Map(members.map((m) => [m.id, m.displayName]))
+    const bodies: [string, string][] = [
+        ['a mention', '@01HXAMPLEULIDHARSH000000 see a bunch of things like this'],
+        ['a multi-word mention', 'hey @01HXAMPLEULIDRAMNIQUE000 can you look?'],
+        ['two mentions and formatting', '@01HXAMPLEULIDHARSH000000 **please** ping @01HXAMPLEULIDRAMNIQUE000'],
+        ['@rowboat and @here keep their handles', '@rowboat summarise for @here'],
+        ['a mention mid-list', '- ask @01HXAMPLEULIDHARSH000000\n- then ship'],
+        ['an id cited in code stays literal', 'the id `@01HXAMPLEULIDHARSH000000` is the wire form'],
+    ]
+    it.each(bodies)('%s', (_name, body) => {
+        const editor = makeEditor(resolveMentions(body, names))
+        expect(encodeMentions(composerMarkdown(editor), members)).toBe(body)
     })
 })
 

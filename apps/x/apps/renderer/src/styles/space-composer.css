@@ -7,6 +7,12 @@
   overflow-y: auto;
 }
 
+/* The inline message editor grows further than the send box — Slack's cap:
+   half the window, then the box scrolls internally. */
+.space-composer.space-composer-edit {
+  max-height: 50vh;
+}
+
 .space-composer .ProseMirror {
   outline: none;
   min-height: 2.25rem;

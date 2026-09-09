@@ -112,6 +112,24 @@ function delta(turnId: string, text: string): TurnBusEvent {
 }
 
 describe('useSessionChat', () => {
+  it('keeps captured actions bound to their original session after switching tabs', async () => {
+    const { deps, calls } = makeDeps()
+    const { result, rerender } = renderHook(({ sessionId }) => useSessionChat(sessionId, deps), {
+      initialProps: { sessionId: S1 as string | null },
+    })
+    await waitFor(() => expect(result.current.latestTurnId).toBe('turn-1'))
+    const original = result.current
+    rerender({ sessionId: null })
+    expect(result.current.chatState).toBeNull()
+    expect(result.current.queued).toEqual([])
+    await act(async () => {
+      await original.removeQueued('queue-1')
+      await original.stop()
+    })
+    expect(calls).toContainEqual({ method: 'removeQueued', args: [S1, 'queue-1'] })
+    expect(calls).toContainEqual({ method: 'stopTurn', args: ['turn-1'] })
+    expect(result.current.sessionId).toBeNull()
+  })
   it('seeds from the session, follows live events, and routes actions', async () => {
     const { deps, calls, emit, deltaSubs } = makeDeps()
     const { result } = renderHook(() => useSessionChat(S1, deps), { wrapper: StrictMode })

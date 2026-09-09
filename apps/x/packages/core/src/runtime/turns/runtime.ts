@@ -167,6 +167,7 @@ export class TurnRuntime implements ITurnRuntime {
             context: input.context,
             input: input.input,
             analytics: input.analytics ?? { useCase: "copilot_chat" },
+            ...(input.origin === undefined ? {} : { origin: input.origin }),
             config: {
                 autoPermission: input.config.autoPermission ?? false,
                 humanAvailable: input.config.humanAvailable,
@@ -591,18 +592,19 @@ class TurnAdvance {
         if (!this.takeInputs || this.signal.aborted) {
             return;
         }
-        const messages = await this.takeInputs();
-        if (messages.length === 0) {
+        const inputs = await this.takeInputs();
+        if (inputs.length === 0) {
             return;
         }
         await this.appendWith(() => {
             const base = this.state.addedInputs.length;
-            return messages.map((message, i) => ({
+            return inputs.map(({ message, origin }, i) => ({
                 type: "input_added" as const,
                 turnId: this.turnId,
                 ts: this.now(),
                 inputIndex: base + i + 1,
                 message,
+                ...(origin === undefined ? {} : { origin }),
             }));
         });
     }

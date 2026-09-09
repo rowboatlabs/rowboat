@@ -21,6 +21,7 @@ import { UserMessage, UserMessageContent } from './message.js';
 import { RequestedAgent, type TurnBusEvent, type TurnEvent } from './turns.js';
 import type { QueuedSessionMessage, SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
+import { RecommendationRowSchema, RecommendationSlot } from './recommendation-update.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
@@ -1026,6 +1027,49 @@ export const ipcSchemas = {
     res: z.object({
       success: z.literal(true),
     }),
+  },
+  // The "Rowboat now recommends…" prompt (core/models/recommendation-update):
+  // the per-slot diff between the backend's current recommendation for the
+  // provider serving the assistant model and the saved config, offered once
+  // per recommendation version. shouldShow false = nothing pending (no
+  // assistant, no recommendation for its flavor, already answered, config
+  // already matches, or the provider's list failed to load).
+  'models:checkRecommendationUpdate': {
+    req: z.null(),
+    res: z.union([
+      z.object({ shouldShow: z.literal(false) }),
+      z.object({
+        shouldShow: z.literal(true),
+        flavor: z.string(),
+        providerId: z.string(),
+        // Content hash of the recommendation the rows were computed from;
+        // echoed back on resolve so a stale dialog can't apply over edits.
+        hash: z.string(),
+        // The assistant as saved now, for rendering inherit rows.
+        assistantModel: ModelSelection,
+        rows: z.array(RecommendationRowSchema),
+      }),
+    ]),
+  },
+  // The user's answer: `apply` = the checked slots (empty = "Not now").
+  // Rows are recomputed main-side before writing; the recommendation is
+  // recorded as seen either way. `applied` = the slots actually written.
+  'models:resolveRecommendationUpdate': {
+    req: z.object({
+      flavor: z.string(),
+      hash: z.string(),
+      apply: z.array(RecommendationSlot),
+    }),
+    res: z.object({
+      applied: z.array(RecommendationSlot),
+    }),
+  },
+  // Record the flavor's current recommendation as seen — the renderer's
+  // provider-connect flow calls this right after seeding the initial
+  // selection (the Rowboat sign-in path does the same main-side).
+  'models:markRecommendationSeen': {
+    req: z.object({ flavor: z.string() }),
+    res: z.object({ success: z.literal(true) }),
   },
   'oauth:connect': {
     req: z.object({
@@ -2626,6 +2670,14 @@ export const ipcSchemas = {
     req: z.object({ requestId: z.string() }),
     res: z.object({}),
   },
+  // Dictation cleanup: the Spaces composer sends the raw STT transcript and
+  // places the returned Slack-ready text (background-agents task model) into
+  // the input box as an editable draft. null = unusable input or no usable
+  // output — the caller falls back to the raw transcript.
+  'voice:formatDictation': {
+    req: z.object({ text: z.string() }),
+    res: z.object({ text: z.string().nullable() }),
+  },
   // Push channel: main → renderer with streaming TTS audio. `done: true`
   // (possibly with a final chunk) ends the stream; `error` aborts it.
   'voice:tts-chunk': {
@@ -3722,6 +3774,10 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), name: z.string() }),
     res: z.object({ space: z.custom<SpacesTypes.Space>() }),
   },
+  'spaces:renameSpace': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), name: z.string() }),
+    res: z.object({ space: z.custom<SpacesTypes.Space>() }),
+  },
   // Direct messages: get-or-create the DM with another org member. No
   // invite, no acceptance — the other side learns of it by a space_added
   // frame on 'spaces:events' and shows it in their sidebar.
@@ -3982,6 +4038,28 @@ export const ipcSchemas = {
   'spaces:topicSession': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string() }),
     res: z.object({ sessionId: z.string().nullable() }),
+  },
+  // The run behind ONE agent-posted message (core/spaces/response-index):
+  // the message row's "Open agent chat". found = open the session at that
+  // input; gone = the link's session was deleted since (say so, never fall
+  // through to the thread's recreated session); unknown = nothing recorded
+  // (pre-index post, or not this member's Rowboat) — the caller may fall
+  // back to spaces:topicSession.
+  'spaces:responseSession': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), messageId: z.string() }),
+    res: z.discriminatedUnion('status', [
+      z.object({ status: z.literal('found'), sessionId: z.string(), turnId: z.string(), inputIndex: z.number().int().optional() }),
+      z.object({ status: z.literal('gone') }),
+      z.object({ status: z.literal('unknown') }),
+    ]),
+  },
+  // The stop square on the working chip: cancel the thread session's live
+  // turn without leaving the space. Invoker-only by construction — the
+  // topic→session registry is local, so only the member whose Rowboat runs
+  // here has anything to stop. stopped:false = nothing was running.
+  'spaces:stopRowboat': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string() }),
+    res: z.object({ stopped: z.boolean() }),
   },
   // Upload phase 1 (spec §6): bytes in, {hash, size, mime} out. Bytes travel
   // either inline (clipboard pastes — ArrayBuffer over structured clone) or as

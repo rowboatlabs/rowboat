@@ -368,6 +368,23 @@ describe("createSession and listing", () => {
             expect.objectContaining({ kind: "index-changed", sessionId }),
         ]);
     });
+
+    it("stamps a session origin on session_created and folds it into the index entry", async () => {
+        const { sessions, repo } = makeSessions();
+        const origin = {
+            kind: "space_thread" as const,
+            orgId: "org-1",
+            spaceId: "space-1",
+            threadRootId: "root-1",
+            spaceName: "Roadboard",
+        };
+        const sessionId = await sessions.createSession({ title: "SSO first?", origin });
+        const [created] = await (repo as InMemorySessionRepo).read(sessionId);
+        expect(created).toEqual(expect.objectContaining({ type: "session_created", origin }));
+        expect(sessions.listSessions()).toEqual([
+            expect.objectContaining({ sessionId, title: "SSO first?", origin }),
+        ]);
+    });
 });
 
 describe("sendMessage (13.3)", () => {
@@ -1350,10 +1367,74 @@ describe("pending queue (sendOrQueueMessage, steering, promotion)", () => {
         const takeInputs = fake.advanceCalls[0].takeInputs;
         expect(takeInputs).toBeDefined();
         // The loop draining the source consumes the queue.
-        expect(await takeInputs!()).toEqual([user("steer me in")]);
+        expect(await takeInputs!()).toEqual([{ message: user("steer me in") }]);
         expect(sessions.listQueued(sessionId)).toEqual([]);
         // A second drain finds nothing.
         expect(await takeInputs!()).toEqual([]);
+    });
+
+    it("carries the send config's origin onto the queue entry and the steer drain", async () => {
+        const origin = {
+            kind: "space_mention" as const,
+            orgId: "org-1",
+            spaceId: "space-1",
+            threadRootId: "root-1",
+            messageId: "msg-1",
+        };
+        const { sessions, fake } = makeSessions();
+        fake.script = () => ({
+            pending: new Promise<TurnOutcome>(() => {}),
+        });
+        const sessionId = await sessions.createSession();
+        await sessions.sendMessage(sessionId, user("first"), {
+            agent: { agentId: "copilot" },
+        });
+        await sessions.sendOrQueueMessage(sessionId, user("from a thread"), {
+            agent: { agentId: "copilot" },
+            origin,
+        });
+        expect(sessions.listQueued(sessionId)).toMatchObject([{ message: user("from a thread"), origin }]);
+        const takeInputs = fake.advanceCalls[0].takeInputs;
+        expect(await takeInputs!()).toEqual([{ message: user("from a thread"), origin }]);
+    });
+
+    it("stamps the origin on the turn a message starts, immediately or by promotion", async () => {
+        const origin = {
+            kind: "space_mention" as const,
+            orgId: "org-1",
+            spaceId: "space-1",
+            threadRootId: "root-1",
+            messageId: "msg-1",
+        };
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        // Immediate start: the config's origin is on createTurn's input.
+        let settle!: (outcome: TurnOutcome) => void;
+        fake.script = () => ({
+            pending: new Promise<TurnOutcome>((resolve) => {
+                settle = resolve;
+            }),
+        });
+        const { turnId } = await sessions.sendMessage(sessionId, user("first"), {
+            agent: { agentId: "copilot" },
+            origin,
+        });
+        expect(fake.createTurnInputs[0]).toMatchObject({ origin });
+        // Promotion: the queued entry's own origin, not the live turn's.
+        await sessions.sendOrQueueMessage(sessionId, user("after you finish"), {
+            agent: { agentId: "copilot" },
+            origin: { ...origin, messageId: "msg-2" },
+        });
+        fake.script = undefined;
+        fake.setLog(turnId, turnLog(turnId, sessionId, "completed"));
+        settle(completedOutcome());
+        await flush();
+        await flush();
+        expect(fake.createTurnInputs).toHaveLength(2);
+        expect(fake.createTurnInputs[1]).toMatchObject({
+            input: user("after you finish"),
+            origin: { ...origin, messageId: "msg-2" },
+        });
     });
 
     it("promotes the pending head into a new turn when the running turn settles", async () => {

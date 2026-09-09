@@ -22,6 +22,7 @@ import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markRead, markTopicRead } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
+import { openResponseChat } from '@/lib/spaces-response-chat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -44,7 +45,7 @@ const NEW_FADE_MS = 800
 const PIN_BANNER_MAX = 3
 
 export function GeneralStream({
-    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onClose, visible = true,
+    org, space, stream, presence, members, memberNames, entries = [], onOpenThread, onOpenSession, onClose, visible = true,
 }: {
     org: OrgWithSpaces
     space: spaces.Space
@@ -56,6 +57,8 @@ export function GeneralStream({
     entries?: spaces.SpacesAssetEntry[]
     /** Open a thread pane on this root (replying to a fresh message included — no draft state exists). */
     onOpenThread: (rootMessageId: string) => void
+    /** Navigate to a chat session — the working strip's "Open chat" affordance. */
+    onOpenSession?: (sessionId: string) => void
     /** Set while a doc column sits beside the chat: closes THIS column, the doc takes the width. */
     onClose?: () => void
     /**
@@ -222,6 +225,33 @@ export function GeneralStream({
     // Reply creates NOTHING: the thread pane opens on the message itself —
     // a thread with zero replies is just a thread (annotation model).
     const replyInThread = (parent: spaces.Message) => onOpenThread(parent.id)
+
+    // The working strip's "Open chat": the thread's agent session, one click.
+    const openAgentChat = async (rootMessageId: string) => {
+        try {
+            const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            if (sessionId && onOpenSession) onOpenSession(sessionId)
+            else if (!sessionId) toast('No agent chat for this thread yet', 'info')
+        } catch {
+            toast('Could not open the agent chat', 'error')
+        }
+    }
+
+    // "Open agent chat" on one of your Rowboat's posts: the run that wrote it.
+    const openResponse = (message: spaces.Message) => {
+        if (onOpenSession) void openResponseChat({ orgId: org.id, spaceId: space.id, message, onOpenSession })
+    }
+
+    // The working strip's stop square: cancel your Rowboat's run right here.
+    // The chip clears when the cancelled turn releases its presence lease.
+    const stopAgent = async (rootMessageId: string) => {
+        try {
+            const { stopped } = await window.ipc.invoke('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            if (!stopped) toast('Nothing to stop — the run already finished', 'info')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not stop the run', 'error')
+        }
+    }
 
     const askRowboat = (message: spaces.Message) => {
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
@@ -587,6 +617,9 @@ export function GeneralStream({
                 selfMemberId={org.memberId}
                 onOpenThread={onOpenThread}
                 onPrefetchThread={(id) => prefetchThread(org.id, space.id, id)}
+                onOpenAgentChat={onOpenSession ? (id) => void openAgentChat(id) : undefined}
+                onOpenResponseChat={onOpenSession ? openResponse : undefined}
+                onStopAgent={(id) => void stopAgent(id)}
                 onReplyInThread={replyInThread}
                 onAskRowboat={askRowboat}
                 onCopyLink={(m) => void copyLink(m)}
@@ -682,7 +715,13 @@ export function GeneralStream({
                     <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading messages…</div>
                 )}
                 {stream.ready && rows.length === 0 && (
-                    <div className="px-2 py-6 text-sm text-muted-foreground">Nothing here yet — say hello, or @rowboat to ask your agent.</div>
+                    <div className="px-2 py-6 text-sm text-muted-foreground">
+                        {space.kind === 'direct' && (space.participants ?? []).length === 1
+                            ? 'Your notes to self — drafts, links, files for later. Only you can see this, and @rowboat works here too.'
+                            : space.kind === 'direct'
+                                ? 'Private to the two of you — say hello, or @rowboat to ask your agent.'
+                                : 'Nothing here yet — say hello, or @rowboat to ask your agent.'}
+                    </div>
                 )}
                 {rows}
                 <TypingIndicator names={typingNames} />

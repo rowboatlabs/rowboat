@@ -54,8 +54,13 @@ export const Space = z.object({
   name: z.string().min(1).max(128),
   createdAt: z.iso.datetime(),
   kind: SpaceKind.default('shared'),
-  /** Direct spaces only: the fixed member set, sorted — the DM's identity. Absent on shared spaces. */
-  participants: z.array(MemberId).min(2).optional(),
+  /**
+   * Direct spaces only: the fixed member set, sorted — the DM's identity.
+   * Absent on shared spaces. ONE element = the member's self-DM (notes to
+   * self, 2026-09-08): the same private space, reachable from every device
+   * and by the member's own agent.
+   */
+  participants: z.array(MemberId).min(1).optional(),
 });
 export type Space = z.infer<typeof Space>;
 

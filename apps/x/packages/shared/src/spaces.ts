@@ -157,10 +157,29 @@ export interface SpacesProposeInput {
 }
 
 /** Envelope for 'spaces:events' pushes: which org the live frame came from. */
-export interface SpacesBusEvent {
-  orgId: string;
-  frame: ServerFrame;
+/**
+ * One thread where this member's Rowboat is working (or waiting to) on a
+ * space mention — the agent-activity feed's unit (core/spaces/agent-activity).
+ * `running` = a live turn was created from, or steered with, a mention in the
+ * thread; `queued` = the mention waits in the session's pending queue.
+ */
+export interface SpaceAgentActivity {
+  spaceId: string;
+  threadRootId: string;
+  state: 'queued' | 'running';
+  /** The thread's agent session — the chip's click target. */
+  sessionId: string;
+  /** The live turn, when running. */
+  turnId?: string;
 }
+
+// What rides 'spaces:events': the org's live frames (per-space subscription
+// + member-addressed), and the agent-activity feed — the WHOLE list for the
+// org on every change, replaced wholesale by the renderer (queue-changed's
+// posture: small by nature).
+export type SpacesBusEvent =
+  | { orgId: string; frame: ServerFrame }
+  | { orgId: string; agentActivity: SpaceAgentActivity[] };
 
 // ---------------------------------------------------------------------------
 // Whiteboard — the app-side vocabulary inside the org's opaque `payload`

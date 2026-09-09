@@ -235,6 +235,7 @@ export const RPC_CHANNELS = [
   // voice:tts-chunk push channel (renderers filter by requestId).
   'voice:synthesizeStreamStart',
   'voice:synthesizeStreamCancel',
+  'voice:formatDictation',
   // Phase 5 (SEPARATION_PLAN.md): code-mode & terminal — the PTY lives with
   // core now (RFC Q13: the terminal shows the machine core runs on).
   // codeMode:provisionEngine stays client-local (sender-scoped progress).
@@ -308,6 +309,8 @@ export const RPC_CHANNELS = [
   'spaces:endPoll',
   'spaces:invokeRowboat',
   'spaces:topicSession',
+  'spaces:responseSession',
+  'spaces:stopRowboat',
   'spaces:subscribeSpace',
   'spaces:unsubscribeSpace',
   'spaces:presence',

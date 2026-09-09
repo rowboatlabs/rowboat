@@ -59,6 +59,7 @@ import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';
 import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled, bridgeDeltaSubscribe, bridgeDeltaUnsubscribe, childServerMode, getConnectionInfo, connectRemoteServer, disconnectRemoteServer } from './server-host.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
 import { getImageModelCatalog, getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { checkRecommendationUpdate, markRecommendationSeen, resolveRecommendationUpdate } from '@x/core/dist/models/recommendation-update.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
@@ -114,6 +115,7 @@ function updateSelfCaptureState() {
 import * as composioHandler from '@x/core/dist/composio/flows.js';
 import { oauthConnectBus, composioConnectBus, chatgptStatusBus } from '@x/core/dist/auth/connector-events.js';
 import { subscribeTtsChunks } from '@x/core/dist/voice/tts-bus.js';
+import { formatDictation } from '@x/core/dist/voice/format_dictation.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
@@ -1614,6 +1616,16 @@ export function setupIpcHandlers() {
       await repo.updateConfig(args);
       return { success: true };
     },
+    'models:checkRecommendationUpdate': async () => {
+      return await checkRecommendationUpdate();
+    },
+    'models:resolveRecommendationUpdate': async (_event, args) => {
+      return await resolveRecommendationUpdate(args);
+    },
+    'models:markRecommendationSeen': async (_event, args) => {
+      await markRecommendationSeen(args.flavor);
+      return { success: true };
+    },
     'oauth:connect': async (_event, args) => {
       const credentials = args.clientId && args.clientSecret
         ? { clientId: args.clientId.trim(), clientSecret: args.clientSecret.trim() }
@@ -2615,6 +2627,9 @@ export function setupIpcHandlers() {
       activeTtsStreams.get(args.requestId)?.abort();
       activeTtsStreams.delete(args.requestId);
       return {};
+    },
+    'voice:formatDictation': async (_event, args) => {
+      return { text: await formatDictation(args.text) };
     },
     'voice:ensureMicAccess': async () => {
       if (process.platform !== 'darwin') return { granted: true };

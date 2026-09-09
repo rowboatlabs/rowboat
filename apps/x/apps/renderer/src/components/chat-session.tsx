@@ -29,6 +29,7 @@ import { ChatInputWithMentions, type CallPreset, type PermissionMode, type Stage
 import { type ChatTab } from './tab-bar'
 import { useReportTabMeta } from '@/lib/tab-meta'
 import { useSessionTitle } from '@/lib/session-title'
+import { consumeChatJump, usePendingChatJump } from '@/lib/chat-jump'
 import {
   type ChatTabViewState,
   type ChatViewportAnchorState,
@@ -129,6 +130,17 @@ export function ChatSessionPane({
   const askBatchTotal = askBatchMaxRef.current
   const currentAsk = pendingAsks[0]
 
+  // A deep link into this session (lib/chat-jump.ts): claim it once the pane
+  // is mounted for that session and hand it to the Conversation; the scroll
+  // controller pins the row when the transcript renders it.
+  const pendingJump = usePendingChatJump(tab.runId)
+  const [jump, setJump] = React.useState<{ messageId: string; key: number } | null>(null)
+  React.useEffect(() => {
+    if (!pendingJump || !tab.runId) return
+    const messageId = consumeChatJump(tab.runId)
+    if (messageId) setJump((prev) => ({ messageId, key: (prev?.key ?? 0) + 1 }))
+  }, [pendingJump, tab.runId])
+
   const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
   // Store-backed chats stream through synthetic conversation items that carry
   // their durable ids (turn-view.ts), so completion updates the mounted nodes
@@ -162,6 +174,8 @@ export function ChatSessionPane({
         scrollMemoryKey={tab.chatId}
         anchorMessageId={viewportAnchor?.messageId}
         anchorRequestKey={viewportAnchor?.requestKey}
+        jumpMessageId={jump?.messageId}
+        jumpRequestKey={jump?.key}
         className="relative flex-1"
       >
         <ConversationContent className={tabConversationContentClassName}>
@@ -391,6 +405,7 @@ export function ChatSessionComposer({
         </div>
       )}
       <ChatInputWithMentions
+        draftKey={tab.chatId}
         knowledgeFiles={knowledgeFiles}
         recentFiles={recentFiles}
         visibleFiles={visibleFiles}

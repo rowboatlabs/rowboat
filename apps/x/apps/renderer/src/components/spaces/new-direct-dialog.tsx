@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { useOrgRoster } from '@/hooks/use-space-members'
 import { refreshSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { otherParticipant } from '@/lib/spaces-direct'
+import { isSelfDirect, otherParticipant } from '@/lib/spaces-direct'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -30,16 +30,21 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
     const existing = useMemo(() => {
         const set = new Set<string>()
         for (const dm of org.directs) {
+            if (isSelfDirect(dm, org.memberId)) set.add(org.memberId)
             const other = otherParticipant(dm, org.memberId)
             if (other) set.add(other)
         }
         return set
     }, [org.directs, org.memberId])
+    // You are always first: notes to self is the one DM everyone has.
     const candidates = useMemo(() => {
         const q = query.trim().toLowerCase()
-        return roster
+        const me = roster.find((m) => m.id === org.memberId)
+        const self = me && (!q || 'you'.includes(q) || 'me'.includes(q) || me.displayName.toLowerCase().includes(q)) ? [me] : []
+        const others = roster
             .filter((m) => m.id !== org.memberId && (!q || m.displayName.toLowerCase().includes(q)))
             .sort((a, b) => Number(existing.has(b.id)) - Number(existing.has(a.id)))
+        return self.concat(others)
     }, [roster, org.memberId, query, existing])
 
     useEffect(() => {
@@ -107,8 +112,8 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                 <div ref={listRef} className="max-h-72 overflow-y-auto border-t border-border p-1.5">
                     {candidates.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                            {roster.length <= 1
-                                ? 'Nobody to message yet — you can DM anyone you share a space with.'
+                            {roster.length === 0
+                                ? 'Nobody to message yet — you can DM anyone you share a space with, or yourself.'
                                 : 'No one matches.'}
                         </div>
                     ) : (
@@ -125,7 +130,10 @@ export function NewDirectDialog({ org, open, onOpenChange, onOpened }: {
                                 )}
                             >
                                 <MemberAvatar id={m.id} name={m.displayName} size="md" />
-                                <span className="min-w-0 flex-1 truncate">{m.displayName}</span>
+                                <span className="min-w-0 flex-1 truncate">
+                                    {m.displayName}
+                                    {m.id === org.memberId && <span className="text-muted-foreground"> (you) · notes to self</span>}
+                                </span>
                                 {opening === m.id ? (
                                     <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                                 ) : existing.has(m.id) ? (

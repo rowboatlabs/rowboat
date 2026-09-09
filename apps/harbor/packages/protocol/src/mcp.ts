@@ -42,7 +42,8 @@ export const listSpaces = tool({
     'do not guess spaceIds or file paths. Shared spaces only by default; pass includeDirect to ' +
     'also list your direct messages (kind "direct": a private conversation with exactly one other ' +
     'member — its participants are listed; label it by the other member, its name is a placeholder). ' +
-    'Every other tool works on a DM exactly as on a space.',
+    'A DM flagged self: true is your person\'s own notes-to-self space (they are its only participant) — ' +
+    'the right place for "save this for me". Every other tool works on a DM exactly as on a space.',
   input: z.object({
     /** Also list the member's direct messages (kind 'direct'). Default false: pre-DM skills never see one. */
     includeDirect: z.boolean().optional(),
@@ -53,8 +54,10 @@ export const listSpaces = tool({
         id: SpaceId,
         name: z.string(),
         kind: SpaceKind,
-        /** Direct spaces only: the two member ids. */
+        /** Direct spaces only: the member ids (one = a self-DM). */
         participants: z.array(MemberId).optional(),
+        /** Direct spaces only: true when the caller is the only participant — their notes to self. */
+        self: z.boolean().optional(),
         memberCount: z.number().int().nonnegative(),
         assets: z.array(
           z.object({

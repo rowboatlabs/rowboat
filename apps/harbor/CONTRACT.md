@@ -201,7 +201,11 @@ team and a Roadboard space (`src/main.ts`).
   `openDirect` is get-or-create and idempotent from either side — concurrent
   opens converge on one space (`created` says who made it). No invite, no
   acceptance: the org is the trust boundary, as inside one Slack workspace;
-  self-DM (`invalid_request`) and unknown members (`not_found`) refuse. **A
+  unknown members refuse (`not_found`). **Your own id opens your self-DM**
+  (2026-09-08): one participant, one membership, one `joined` event, no
+  `space_added` (nobody to tell) — notes to self that live on the org, seen
+  by every device and by your agent through the same face; the agent face
+  flags it `self: true`. **A
   direct space is private forever** — any future path that opens spaces to
   non-members (browse, self-join) MUST require `kind === 'shared'`. Its stored
   `name` is a constant placeholder; clients label a DM by the other
@@ -221,6 +225,8 @@ team and a Roadboard space (`src/main.ts`).
   Stateless transport (per-request server bound to the caller's token).
 
 ## The six wire decisions
+
+> **Substrate note — why this is a bespoke contract and not Nostr** *(recorded 2026-08-25; full rationale in the spec, §6)*. Considered and rejected, three structural mismatches: (1) the org must **compute content** — the three-way merge under the space lock produces bytes no client signed, which inverts Nostr's verify-signatures-trust-no-relay premise; (2) replay/resume rest on **server-assigned per-space offsets**, where Nostr has client-set timestamps and no gap-free order; (3) members are **org-scoped OIDC identities** (invite-bind, revocation, IdP-swappable), not self-custodied keypairs on public-read relays. Systems that need those properties on Nostr (buzz) end up writing a bespoke relay anyway. We port that ecosystem's *patterns* (content-addressed blobs, upload-then-reference) and keep the substrate ours; signing our own events later keeps any federation door open.
 
 **1. Change-sets are full content against a declared base** (`changeset.ts`). `ProposeChange = {assetPath, baseVersion, newContent, reason?, actingMode}`. The org runs a line-level three-way merge. No operation encoding, no diffs on the wire — v1 assets are small text files; simplicity beats cleverness. Three outcomes, all HTTP 200: `applied` (base was current), `merged` (stale but clean — **the returned `mergedContent` is what now exists; the proposer must adopt it**), `conflict` (nothing written; adjust and re-propose). Spec §6.
 

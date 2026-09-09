@@ -165,6 +165,16 @@ export class SpacesClient {
     return (await this.request('POST', routes.createSpace.path, routes.createSpace.response, { name })).space;
   }
 
+  /** Rename a shared space (api.ts renameSpace). Identical name = idempotent no-op. */
+  async renameSpace(spaceId: string, name: string): Promise<Space> {
+    return (
+      await this.request('POST', this.space(spaceId, '/rename'), routes.renameSpace.response, {
+        name,
+        actingMode: 'direct',
+      })
+    ).space;
+  }
+
   async listMembers(spaceId: string): Promise<Member[]> {
     return (await this.request('GET', this.space(spaceId, '/members'), routes.listMembers.response)).members;
   }

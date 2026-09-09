@@ -5,7 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { sessions as sessionsShared } from '@x/shared';
+import { sessions as sessionsShared } from '@x/shared';
 
 import * as analytics from '@/lib/analytics';
 import { useConnection } from '@/lib/connection';
@@ -26,7 +26,12 @@ export function DrawerContent(props: DrawerContentComponentProps) {
     if (!sessions) return;
     try {
       const result = await sessions.list();
-      setEntries([...result.sessions].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)));
+      // Space-thread sessions belong to Spaces, not the Mac chat list (main 9bc0e44e).
+      setEntries(
+        result.sessions
+          .filter(sessionsShared.isChatListSession)
+          .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+      );
     } catch {
       // keep the last list; the connection row shows the state
     }

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Pencil, ShieldAlert, Tag, X } from 'lucide-react'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,6 +15,7 @@ import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/mes
 import type { ChatMessage, SpacePresence } from '@/hooks/use-space-chat'
 import { buildPendingMessage, getThreadSnapshot, ingestTopic, putThreadSnapshot, removeTopicByRoot, updateStreamMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
+import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
@@ -26,6 +27,7 @@ import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
 import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
+import { openResponseChat } from '@/lib/spaces-response-chat'
 import { toast } from '@/lib/toast'
 import * as analytics from '@/lib/analytics'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
@@ -202,6 +204,7 @@ export function ThreadPane({
     }
 
     const workingAgents = presence.working.get(rootMessageId) ?? []
+    const ownActivity = useSpaceAgentActivity(org.id, space.id)
     // Your own agent, blocked mid-turn on a tool permission: surface it here
     // instead of letting it idle behind a "working…" spinner (or silence).
     const permissionWait = useTopicAgentPermissionWait(org.id, space.id, rootMessageId, visible)
@@ -528,12 +531,58 @@ export function ThreadPane({
     }
 
     const openTopicSession = async () => {
+        // A live record names the session outright; the registry lookup
+        // covers a thread whose agent is idle.
+        const live = ownActivity.get(rootMessageId)
+        if (live && onOpenSession) {
+            onOpenSession(live.sessionId)
+            return
+        }
         try {
             const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (sessionId && onOpenSession) onOpenSession(sessionId)
             else if (!sessionId) toast('No agent session for this thread yet', 'info')
         } catch {
             toast('Could not open the agent session', 'error')
+        }
+    }
+
+    // "Open agent chat" on one of your Rowboat's replies: the run that wrote
+    // it, not merely the thread's session (see lib/spaces-response-chat.ts).
+    const openResponse = (message: spaces.Message) => {
+        if (onOpenSession) void openResponseChat({ orgId: org.id, spaceId: space.id, message, onOpenSession })
+    }
+
+    // Whether an agent session exists for this thread — powers the header's
+    // persistent "Chat" link (the working chip only exists while a turn runs).
+    const [hasSession, setHasSession] = useState(false)
+    useEffect(() => {
+        let cancelled = false
+        void window.ipc
+            .invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            .then((res) => {
+                if (!cancelled) setHasSession(!!res.sessionId)
+            })
+            .catch(() => {})
+        return () => {
+            cancelled = true
+        }
+        // workingAgents.length: the session is born on first invoke — the
+        // moment a chip appears is the moment the link becomes real.
+    }, [org.id, space.id, rootMessageId, refreshTick, workingAgents.length])
+
+    // The stop square beside your working chip: cancel the run from here.
+    // The chip clears when the cancelled turn releases its presence lease.
+    const [stopping, setStopping] = useState(false)
+    const stopRowboat = async () => {
+        setStopping(true)
+        try {
+            const { stopped } = await window.ipc.invoke('spaces:stopRowboat', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
+            if (!stopped) toast('Nothing to stop — the run already finished', 'info')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not stop the run', 'error')
+        } finally {
+            setStopping(false)
         }
     }
 
@@ -563,6 +612,7 @@ export function ThreadPane({
                 onForward={setForwarding}
                 onToggleSave={toggleSave}
                 saved={savedIds.has(message.id)}
+                onOpenResponseChat={onOpenSession ? openResponse : undefined}
                 onRetryFailed={retryFailed}
                 onDiscardFailed={discardFailed}
                 onVotePoll={(m, answerIds) => void votePoll(m, answerIds)}
@@ -614,6 +664,14 @@ export function ThreadPane({
                     )}
                 </span>
                 <span className="flex-1" />
+                {hasSession && onOpenSession && (
+                    // Persistent, unlike the working chip: the conversation the
+                    // agent had about this thread stays one click away after
+                    // the run ends.
+                    <Button variant="ghost" size="xs" className="gap-1 px-2 text-muted-foreground" onClick={() => void openTopicSession()} title="Open the agent chat for this thread">
+                        <Bot className="size-3.5" /> Chat
+                    </Button>
+                )}
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -760,9 +818,20 @@ export function ThreadPane({
                             const own = memberId === org.memberId
                             const label = own ? 'Your Rowboat is working…' : <><MemberName id={memberId} />’s Rowboat is working…</>
                             return own ? (
-                                <button key={memberId} className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent session for this thread" onClick={() => void openTopicSession()}>
-                                    <Loader2 className="size-3 animate-spin" />{label}
-                                </button>
+                                <span key={memberId} className="flex items-center gap-1">
+                                    <button className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground" title="Open the agent chat for this thread" onClick={() => void openTopicSession()}>
+                                        <Loader2 className="size-3 animate-spin" />{label}
+                                        <span className="font-medium text-[var(--stream-link)]">Open chat</span>
+                                    </button>
+                                    <button
+                                        className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60"
+                                        title="Stop your Rowboat"
+                                        disabled={stopping}
+                                        onClick={() => void stopRowboat()}
+                                    >
+                                        {stopping ? <Loader2 className="size-2.5 animate-spin" /> : <Square className="size-2.5 fill-current" />} Stop
+                                    </button>
+                                </span>
                             ) : (
                                 <span key={memberId} className="flex items-center gap-1.5 rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground"><Bot className="size-3" />{label}</span>
                             )

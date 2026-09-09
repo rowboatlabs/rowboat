@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RECLAIMED_TURN_REASON } from '../runtime/sessions/api.js';
-import { backstopBody, buildInvocationMessage, describeTurnError, finalAssistantText, isTopicReceiptCall } from './topic-agent.js';
+import { buildInvocationMessage, mentionOrigin, threadOrigin } from './topic-agent.js';
 
 const input = {
     orgId: 'org-1',
@@ -39,81 +38,26 @@ describe('buildInvocationMessage', () => {
     });
 });
 
-describe('isTopicReceiptCall', () => {
-    const receipt = {
-        type: 'tool_invocation_requested',
-        toolName: 'executeMcpTool',
-        input: {
-            serverName: 'spaces-rowboat-labs-dev',
-            toolName: 'post_message',
-            arguments: { spaceId: input.spaceId, threadRoot: input.threadRootId, body: 'Moved SSO to P1 in roadmap.md.' },
-        },
-    };
-
-    it('matches the receipt call into this thread', () => {
-        expect(isTopicReceiptCall(receipt, input.threadRootId)).toBe(true);
-    });
-
-    it('rejects other tools, other threads, and non-invocation events', () => {
-        expect(isTopicReceiptCall({ ...receipt, input: { ...receipt.input, toolName: 'propose_change' } }, input.threadRootId)).toBe(false);
-        expect(isTopicReceiptCall(receipt, 'someother-root')).toBe(false);
-        expect(isTopicReceiptCall({ ...receipt, type: 'tool_result' }, input.threadRootId)).toBe(false);
-        // post_message WITHOUT threadRoot posts a new stream root — that is not the receipt
-        expect(
-            isTopicReceiptCall(
-                { ...receipt, input: { ...receipt.input, arguments: { spaceId: input.spaceId, body: 'hi' } } },
-                input.threadRootId,
-            ),
-        ).toBe(false);
+describe('mentionOrigin', () => {
+    it('is the typed space_mention origin the activity feed keys on', () => {
+        expect(mentionOrigin(input)).toEqual({
+            kind: 'space_mention',
+            orgId: 'org-1',
+            spaceId: '01M07B68G1BQFP70TX5RPHJX89',
+            threadRootId: '01M07ROOTAAAAAAAAAAAAAAAA1',
+            messageId: '01M07MSGAAAAAAAAAAAAAAAAA1',
+        });
     });
 });
 
-describe('finalAssistantText', () => {
-    it('reads string output, message arrays, and part arrays', () => {
-        expect(finalAssistantText('done')).toBe('done');
-        expect(finalAssistantText([{ role: 'assistant', content: 'all set' }])).toBe('all set');
-        expect(
-            finalAssistantText([
-                { role: 'assistant', content: 'draft' },
-                { role: 'assistant', content: [{ type: 'text', text: 'final ' }, { type: 'text', text: 'answer' }] },
-            ]),
-        ).toBe('final answer');
-    });
-
-    it('returns null when nothing usable exists', () => {
-        expect(finalAssistantText(undefined)).toBeNull();
-        expect(finalAssistantText([])).toBeNull();
-        expect(finalAssistantText([{ role: 'user', content: 'hi' }])).toBeNull();
-    });
-});
-
-describe('describeTurnError', () => {
-    it('turns auth failures into a sign-in hint and keeps other errors verbatim', () => {
-        expect(describeTurnError('unexpected HTTP response status code')).toMatch(/isn't signed in/);
-        expect(describeTurnError('401 Unauthorized')).toMatch(/isn't signed in/);
-        expect(describeTurnError('429 Too Many Requests')).toMatch(/rate-limited/);
-        expect(describeTurnError('tool foo exploded')).toBe('tool foo exploded');
-        expect(describeTurnError(undefined)).toBe('unknown error');
-    });
-});
-
-describe('backstopBody', () => {
-    it('tells a reclaimed crash-orphaned turn apart from a person pressing Stop', () => {
-        expect(backstopBody({ type: 'turn_cancelled', reason: RECLAIMED_TURN_REASON })).toBe(
-            '⚠️ An earlier Rowboat run here was interrupted — picking up your latest message now.',
-        );
-        expect(backstopBody({ type: 'turn_cancelled' })).toBe(
-            "⚠️ Rowboat's run was stopped before it finished.",
-        );
-        expect(backstopBody({ type: 'turn_cancelled', reason: 'user asked' })).toBe(
-            "⚠️ Rowboat's run was stopped before it finished.",
-        );
-    });
-
-    it('keeps the failed and no-receipt wordings', () => {
-        expect(backstopBody({ type: 'turn_failed', error: '401' })).toMatch(/isn't signed in/);
-        expect(backstopBody({ type: 'turn_completed' })).toBe(
-            'Rowboat finished without posting a receipt or leaving a note.',
-        );
+describe('threadOrigin', () => {
+    it('identifies the thread and carries the space name as a display fallback — no message id', () => {
+        expect(threadOrigin(input)).toEqual({
+            kind: 'space_thread',
+            orgId: 'org-1',
+            spaceId: '01M07B68G1BQFP70TX5RPHJX89',
+            threadRootId: '01M07ROOTAAAAAAAAAAAAAAAA1',
+            spaceName: 'Roadboard',
+        });
     });
 });

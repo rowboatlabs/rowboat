@@ -2,10 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Common } from 'googleapis';
 import {
     IN_REQUEST_RETRY_FALLBACK_MS,
+    gmailCooldownInfo,
+    gmailQuotaTight,
     gmailRateLimitCooldownMs,
     inRequestRetryWaitMs,
     isRateLimitError,
     noteGmailRateLimit,
+    noteGmailSuccess,
     rateLimitDeadlineMs,
     resetGmailRateLimitForTests,
 } from './gmail-rate-limit.js';
@@ -18,6 +21,7 @@ function gaxiosError(opts: {
     headers?: Record<string, string> | Headers;
     reasons?: string[];
     dataMessage?: string;
+    dataRaw?: string;
 } = {}): Common.GaxiosError {
     return {
         message: opts.message ?? 'Request failed',
@@ -26,7 +30,7 @@ function gaxiosError(opts: {
         response: {
             status: opts.status,
             headers: opts.headers ?? {},
-            data: {
+            data: opts.dataRaw ?? {
                 error: {
                     message: opts.dataMessage,
                     errors: (opts.reasons ?? []).map((reason) => ({ reason })),
@@ -156,5 +160,80 @@ describe('cross-cycle cooldown', () => {
         noteGmailRateLimit(far, NOW);
         noteGmailRateLimit(near, NOW + 1_000);
         expect(gmailRateLimitCooldownMs(NOW + 2_000)).toBe(Date.parse('2026-08-27T02:00:00.000Z') - (NOW + 2_000));
+    });
+});
+
+describe('deadline format tolerance', () => {
+    it('parses a space-separated timestamp with a UTC suffix', () => {
+        const err = gaxiosError({ status: 429, message: 'User-rate limit exceeded. Retry after 2026-08-31 17:26:00 UTC' });
+        expect(rateLimitDeadlineMs(err, NOW)).toBe(Date.parse('2026-08-31T17:26:00Z'));
+    });
+
+    it('assumes UTC when the timestamp names no zone', () => {
+        const err = gaxiosError({ status: 429, message: 'Retry after 2026-08-31T17:26:00.500' });
+        expect(rateLimitDeadlineMs(err, NOW)).toBe(Date.parse('2026-08-31T17:26:00.500Z'));
+    });
+
+    it('parses an offset without a colon', () => {
+        const err = gaxiosError({ status: 429, message: 'Retry after 2026-08-31T22:56:00+0530' });
+        expect(rateLimitDeadlineMs(err, NOW)).toBe(Date.parse('2026-08-31T22:56:00+05:30'));
+    });
+
+    it('reads the deadline from a raw string response body', () => {
+        const err = gaxiosError({ status: 429, dataRaw: 'User-rate limit exceeded.  Retry after 2026-08-31T17:26:00.000Z' });
+        expect(rateLimitDeadlineMs(err, NOW)).toBe(Date.parse('2026-08-31T17:26:00.000Z'));
+    });
+});
+
+describe('no-slide and recovery semantics', () => {
+    const bare = () => gaxiosError({ status: 429 });
+
+    it('a no-deadline failure never extends an active cooldown', () => {
+        expect(noteGmailRateLimit(bare(), NOW)).toBe(NOW + 60_000);
+        expect(noteGmailRateLimit(bare(), NOW + 30_000)).toBe(NOW + 60_000);
+        expect(gmailRateLimitCooldownMs(NOW + 30_000)).toBe(30_000);
+        // ...and it did not burn a strike: the next episode escalates to 2m.
+        expect(noteGmailRateLimit(bare(), NOW + 61_000)).toBe(NOW + 61_000 + 120_000);
+    });
+
+    it("a Gmail-named deadline may extend an active cooldown — it is Gmail's word", () => {
+        noteGmailRateLimit(bare(), NOW);
+        const err = gaxiosError({ status: 429, message: 'Retry after 2026-08-27T01:40:00.000Z' });
+        expect(noteGmailRateLimit(err, NOW + 30_000)).toBe(Date.parse('2026-08-27T01:40:00.000Z'));
+        expect(gmailCooldownInfo(NOW + 31_000)?.source).toBe('gmail');
+    });
+
+    it('an earlier Gmail deadline never shortens a later active one', () => {
+        const far = gaxiosError({ status: 429, message: 'Retry after 2026-08-27T02:00:00.000Z' });
+        const near = gaxiosError({ status: 429, message: 'Retry after 2026-08-27T01:32:00.000Z' });
+        noteGmailRateLimit(far, NOW);
+        expect(noteGmailRateLimit(near, NOW + 1_000)).toBe(Date.parse('2026-08-27T02:00:00.000Z'));
+    });
+
+    it('noteGmailSuccess clears the cooldown and resets the ladder', () => {
+        const err = gaxiosError({ status: 429, message: 'Retry after 2026-08-27T02:00:00.000Z' });
+        noteGmailRateLimit(err, NOW);
+        noteGmailSuccess();
+        expect(gmailRateLimitCooldownMs(NOW + 1_000)).toBe(0);
+        expect(noteGmailRateLimit(bare(), NOW + 2_000)).toBe(NOW + 2_000 + 60_000);
+    });
+});
+
+describe('gmailQuotaTight', () => {
+    it('is false when nothing was ever armed', () => {
+        expect(gmailQuotaTight(NOW)).toBe(false);
+    });
+
+    it('covers the active cooldown and a 60s grace after it', () => {
+        noteGmailRateLimit(gaxiosError({ status: 429 }), NOW);
+        expect(gmailQuotaTight(NOW + 30_000)).toBe(true);
+        expect(gmailQuotaTight(NOW + 60_000 + 30_000)).toBe(true);
+        expect(gmailQuotaTight(NOW + 60_000 + 61_000)).toBe(false);
+    });
+
+    it('ends immediately on a successful probe', () => {
+        noteGmailRateLimit(gaxiosError({ status: 429 }), NOW);
+        noteGmailSuccess();
+        expect(gmailQuotaTight(NOW + 1_000)).toBe(false);
     });
 });

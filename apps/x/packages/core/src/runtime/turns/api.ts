@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { TurnAnalytics } from "@x/shared/dist/analytics.js";
 import type { AssistantMessage, UserMessage } from "@x/shared/dist/message.js";
+import type { InputOrigin } from "@x/shared/dist/origins.js";
 import type {
     JsonValue,
     RequestedAgent,
@@ -18,6 +19,8 @@ export interface CreateTurnInput {
     context: z.infer<typeof TurnContext>;
     input: z.infer<typeof UserMessage>;
     analytics?: TurnAnalytics;
+    // Persisted verbatim as turn_created.origin (see @x/shared origins).
+    origin?: InputOrigin;
     config: {
         autoPermission?: boolean;
         humanAvailable: boolean;
@@ -34,12 +37,16 @@ export interface CreateTurnInput {
 // are treated as consumed and appended durably as input_added events, so
 // they ride the very next request. The dual of the abort signal: both are
 // ephemeral per-invocation channels into a live advance that become durable
-// only when acted on. The turn layer never learns where the messages come
-// from (session queue, test fixture); an accepted input resets the
-// model-call budget.
-export type TakeAddedInputs = () =>
-    | Array<z.infer<typeof UserMessage>>
-    | Promise<Array<z.infer<typeof UserMessage>>>;
+// only when acted on. The turn layer never learns which SOURCE drains
+// (session queue, test fixture); each message may carry an origin label
+// (what outside the runtime caused it — see @x/shared origins) that is
+// written onto its input_added verbatim and never acted on. An accepted
+// input resets the model-call budget.
+export interface AddedInput {
+    message: z.infer<typeof UserMessage>;
+    origin?: InputOrigin;
+}
+export type TakeAddedInputs = () => AddedInput[] | Promise<AddedInput[]>;
 
 // Exactly one external input per advanceTurn invocation.
 export type TurnExternalInput =

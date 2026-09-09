@@ -12,6 +12,9 @@ import {
     formatFeedTime,
     initials,
     isUnreadChange,
+    joinImageEmbeds,
+    mentionEndingAtCaret,
+    splitImageEmbeds,
     orgMonogram,
     parseAssetWireUrl,
     parseBlobAppUrl,
@@ -234,6 +237,12 @@ describe('mentions — compose names, wire ids', () => {
             .toBe('hey **@Ramnique Singh**')
     })
 
+    it('resolve then encode round-trips a wire body — the inline editor trip', () => {
+        const names = new Map(members.map((m) => [m.id, m.displayName]))
+        const body = '@01HXAMPLEULIDRAMNIQUE0000 see a bunch of things like this'
+        expect(encodeMentions(resolveMentions(body, names), members)).toBe(body)
+    })
+
     it('resolveMentions renders names without markup — for titles, crumbs, reasons', () => {
         const names = new Map(members.map((m) => [m.id, m.displayName]))
         expect(resolveMentions('ask @01HXAMPLEULIDHARSH000000 about it', names))
@@ -241,6 +250,25 @@ describe('mentions — compose names, wire ids', () => {
         expect(resolveMentions('`@01HXAMPLEULIDHARSH000000` in code, @unknown alone', names))
             .toBe('`@01HXAMPLEULIDHARSH000000` in code, @unknown alone')
         expect(resolveMentions('@rowboat plan this', names)).toBe('@rowboat plan this')
+    })
+
+    it('mentionEndingAtCaret finds the whole token backspace should take', () => {
+        const names = members.map((m) => m.displayName)
+        expect(mentionEndingAtCaret('ping @Harsh', names)).toBe(5)
+        expect(mentionEndingAtCaret('@Harsh', names)).toBe(0)
+        expect(mentionEndingAtCaret('(@harsh', names)).toBe(1) // boundary + case-insensitive
+        expect(mentionEndingAtCaret('hey @Ramnique Singh', names)).toBe(4) // the full long name, whole
+        expect(mentionEndingAtCaret('@rowboat', [])).toBe(0)
+        expect(mentionEndingAtCaret('@here', [])).toBe(0)
+    })
+
+    it('mentionEndingAtCaret stays out of non-mentions', () => {
+        const names = members.map((m) => m.displayName)
+        expect(mentionEndingAtCaret('email@Harsh', names)).toBeNull() // no boundary before @
+        expect(mentionEndingAtCaret('ping @Hars', names)).toBeNull() // caret mid-name
+        expect(mentionEndingAtCaret('ping @Harsh ', names)).toBeNull() // caret past the token
+        expect(mentionEndingAtCaret('`@Harsh', names)).toBeNull() // an opening cite, not an address
+        expect(mentionEndingAtCaret('@Nobody', names)).toBeNull()
     })
 })
 
@@ -332,5 +360,46 @@ describe('separateImageParagraphs — old messages get the tile-row layout too',
         expect(separateImageParagraphs(inline)).toBe(inline)
         const fenced = '```\ntext\n![x](y.png)\n```'
         expect(separateImageParagraphs(fenced)).toBe(fenced)
+    })
+})
+
+describe('splitImageEmbeds / joinImageEmbeds — the inline editor round trip', () => {
+    const img = (n: string) => `![${n}](https://org.example/s/${'A'.repeat(26)}/b/${'a'.repeat(64)}?name=${n})`
+    it('a composer-shaped body round-trips byte-identical', () => {
+        const body = `some text\n\n${img('a.png')}\n${img('b.png')}`
+        const { text, images } = splitImageEmbeds(body)
+        expect(text).toBe('some text')
+        expect(images.map((i) => i.alt)).toEqual(['a.png', 'b.png'])
+        expect(joinImageEmbeds(text, images)).toBe(body)
+    })
+    it('an image-only body leaves the text empty', () => {
+        const body = img('a.png')
+        const { text, images } = splitImageEmbeds(body)
+        expect(text).toBe('')
+        expect(images).toHaveLength(1)
+        expect(joinImageEmbeds(text, images)).toBe(body)
+    })
+    it('removing every image leaves just the text', () => {
+        const { text } = splitImageEmbeds(`keep me\n\n${img('a.png')}`)
+        expect(joinImageEmbeds(text, [])).toBe('keep me')
+    })
+    it('inline images move to trailing lines; interleaved text collapses cleanly', () => {
+        const { text, images } = splitImageEmbeds(`before\n${img('a.png')}\nafter`)
+        expect(text).toBe('before\nafter')
+        expect(joinImageEmbeds(text, images)).toBe(`before\nafter\n\n${img('a.png')}`)
+    })
+    it('embeds inside code regions stay literal text', () => {
+        const fenced = '```\n![x](y.png)\n```'
+        const { text, images } = splitImageEmbeds(fenced)
+        expect(images).toHaveLength(0)
+        expect(text).toBe(fenced)
+        const cite = 'see `![x](y.png)` for the syntax'
+        expect(splitImageEmbeds(cite).text).toBe(cite)
+    })
+    it('a markdown title suffix survives the round trip', () => {
+        const body = `![a](https://x.example/a.png "hover text")`
+        const { images } = splitImageEmbeds(body)
+        expect(images[0]!.url).toBe('https://x.example/a.png')
+        expect(joinImageEmbeds('', images)).toBe(body)
     })
 })

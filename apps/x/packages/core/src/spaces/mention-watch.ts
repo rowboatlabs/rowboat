@@ -230,16 +230,20 @@ function makeHandler(
   spaceId: string,
   spaceName: string,
   me: MentionIdentity,
-  opts: { direct?: boolean } = {},
+  opts: { direct?: boolean; self?: boolean } = {},
 ): (frame: ServerFrame) => void {
   const k = key(orgId, spaceId);
   const direct = opts.direct === true;
+  const self = opts.self === true;
   return (frame) => {
     if (frame.kind !== 'event') return;
     noteOffset(k, frame.offset);
     if (frame.event.type !== 'message') return;
     const message = frame.event.message;
-    if (message.author.memberId === me.id) return;
+    // Your own words never notify you. Your own AGENT's do in one place: your
+    // self-DM, where its posts (a scheduled digest, a job's result) are
+    // addressed to nobody but you.
+    if (message.author.memberId === me.id && !(self && message.author.actingMode !== 'direct')) return;
     // Do-not-disturb drops everything, mentions included — and nothing is
     // summarised after it lifts (Slack's posture: DND is silence, not a queue).
     if (dndActive()) return;
@@ -277,7 +281,9 @@ function makeHandler(
       spaceName,
       ...(direct ? { direct: true } : {}),
       threadRootId,
-      authorName: authorName(k, message.author.memberId),
+      authorName: self && message.author.memberId === me.id
+        ? `${message.author.agentName ?? 'Your agent'} (your agent)`
+        : authorName(k, message.author.memberId),
       // The wire carries "@<memberId>" addresses — show people, not ids.
       body: resolveMentions(message.body, memberNames.get(k) ?? new Map()),
       kind,
@@ -340,13 +346,14 @@ export async function syncSpaceMentionWatch(opts?: { force?: boolean }): Promise
 
         const myName = memberNames.get(k)?.get(org.auth.memberId);
         const direct = space.kind === 'direct';
-        // A DM is labelled by the other person (its stored name is a placeholder).
-        const other = direct ? (space.participants ?? []).find((id) => id !== org.auth.memberId) : undefined;
-        const label = direct ? authorName(k, other ?? '') : space.name;
+        const self = direct && (space.participants ?? []).length === 1;
+        // A DM is labelled by the other person (its stored name is a placeholder); the self-DM by "notes".
+        const other = direct && !self ? (space.participants ?? []).find((id) => id !== org.auth.memberId) : undefined;
+        const label = self ? 'your notes' : direct ? authorName(k, other ?? '') : space.name;
         const handler = makeHandler(org.id, space.id, label, {
           id: org.auth.memberId,
           ...(myName ? { displayName: myName } : {}),
-        }, { direct });
+        }, { direct, self });
         // A shared space we have never watched starts live-only (no replay
         // flood on first sight). A DM starts from offset 0: its log is a few
         // events long, and the opener's first message may already be on it —

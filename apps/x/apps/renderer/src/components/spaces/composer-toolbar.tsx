@@ -186,9 +186,10 @@ export function FormattingToolbar({ textareaRef, value, onChange, onCaret, class
 }
 
 // ---------------------------------------------------------------------------
-// The same bar, driven by the rich composer's TipTap editor: real commands
-// with pressed states instead of string transforms. (The message editor's
-// textarea still uses FormattingToolbar above.)
+// The same bar, driven by a TipTap editor: real commands with pressed states
+// instead of string transforms. Both mention surfaces — the composer and the
+// inline message editor — use this one; FormattingToolbar above is the
+// textarea-era version, now without a caller.
 // ---------------------------------------------------------------------------
 
 type RichToolKey = 'bold' | 'italic' | 'strike' | 'ordered' | 'bullet' | 'quote' | 'code' | 'codeblock'

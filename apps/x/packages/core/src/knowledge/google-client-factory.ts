@@ -2,6 +2,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { google, gmail_v1 } from 'googleapis';
 import {
     IN_REQUEST_RETRY_FALLBACK_MS,
+    gmailCooldownInfo,
     inRequestRetryWaitMs,
     isRateLimitError,
     noteGmailRateLimit,
@@ -360,7 +361,8 @@ export class GoogleClientFactory {
                     const attempt = err.config.retryConfig?.currentRetryAttempt ?? 0;
                     if (attempt < 1 && inRequestRetryWaitMs(err) !== null) return true;
                     const until = noteGmailRateLimit(err);
-                    console.warn(`[Gmail] rate limited — cooling down until ${new Date(until).toISOString()}`);
+                    const source = gmailCooldownInfo()?.source === 'gmail' ? "Gmail's stated deadline" : 'default backoff';
+                    console.warn(`[Gmail] rate limited — cooling down until ${new Date(until).toISOString()} (${source})`);
                     return false;
                 },
                 retryBackoff: (err) => {

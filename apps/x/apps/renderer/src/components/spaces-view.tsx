@@ -20,7 +20,7 @@ import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useSpaceMembers } from '@/hooks/use-space-members'
 import { findSpace, useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { directLabel, otherParticipant } from '@/lib/spaces-direct'
+import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
 import { useSpaceNotifyPrefs, type NotifyLevel } from '@/hooks/use-spaces-notify'
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
@@ -215,7 +215,8 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
     // A direct message is this same pane with a two-person roster: named by
     // the other person, no invites, every message notifies by default.
     const isDirect = space.kind === 'direct'
-    const directOtherId = otherParticipant(space, org.memberId)
+    const isSelf = isSelfDirect(space, org.memberId)
+    const directOtherId = directAvatarId(space, org.memberId)
     const spaceTitle = isDirect ? directLabel(space, members, org.memberId) : space.name
     const notifyDefault: NotifyLevel = isDirect ? 'all' : 'mentions'
 
@@ -649,7 +650,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             <OrgMonogram org={org} />
                             <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
                                 {isDirect
-                                    ? <MemberAvatar id={directOtherId ?? space.id} name={spaceTitle} size="sm" />
+                                    ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
                                     : <Hash className="size-4 shrink-0 text-muted-foreground" />}
                                 <h1 className="truncate text-[15px] font-semibold">{spaceTitle}</h1>
                             </span>
@@ -664,12 +665,14 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             <OrgMonogram org={org} size="xl" />
                             <div className={cn('mt-3 flex items-center text-lg font-semibold leading-tight', isDirect ? 'gap-1.5' : 'gap-0.5')}>
                                 {isDirect
-                                    ? <MemberAvatar id={directOtherId ?? space.id} name={spaceTitle} size="sm" />
+                                    ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />
                                     : <Hash className="size-4 text-muted-foreground" />}
                                 <span className="truncate">{spaceTitle}</span>
                             </div>
                             <div className="mt-0.5 text-xs text-muted-foreground">
-                                {isDirect ? `A direct message in ${org.name} — just the two of you` : `A space in ${org.name}`}
+                                {isSelf
+                                    ? `Your notes in ${org.name} — just you and your agent`
+                                    : isDirect ? `A direct message in ${org.name} — just the two of you` : `A space in ${org.name}`}
                             </div>
                         </div>
                         <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px]">
@@ -918,6 +921,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                             memberNames={memberNames}
                             entries={entries}
                             onOpenThread={(id) => select({ kind: 'thread', rootMessageId: id })}
+                            onOpenSession={onOpenSession}
                             onClose={split ? closeChat : undefined}
                             visible={active && showChat && !chatRootId}
                         />

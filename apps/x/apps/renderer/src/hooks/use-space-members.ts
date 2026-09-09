@@ -133,6 +133,16 @@ export function useSpaceMembers(orgId: string, spaceId: string): spaces.Member[]
 }
 
 /**
+ * Your own display name on an org — the sidebar's self-DM row shows it the
+ * way Slack does ("<name>  you"). Read from any roster already fetched (the
+ * self-DM's own, else the first shared space's, warmed here); null until one lands.
+ */
+export function useSelfDisplayName(orgId: string, memberId: string, spaceIds: readonly string[]): string | null {
+    const roster = useOrgRoster(orgId, spaceIds)
+    return roster.find((m) => m.id === memberId)?.displayName ?? null
+}
+
+/**
  * Everyone your person shares a space with on this org, A–Z — the people a
  * DM can be opened with. There is no org roster route yet; the rosters the
  * app already fetches ARE the directory (Discord's "people you share a

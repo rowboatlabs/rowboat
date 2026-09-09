@@ -87,6 +87,7 @@ function seedDisplayName(identity: BindIdentity): string {
 }
 
 type NewMessage = z.infer<Routes['postMessage']['request']>;
+type RenameSpaceInput = z.infer<Routes['renameSpace']['request']>;
 type CreateTopicInput = z.infer<Routes['createTopic']['request']>;
 type ManageTopicAction = z.infer<Routes['manageTopic']['request']>;
 type ReactInput = z.infer<Routes['reactToMessage']['request']>;
@@ -192,6 +193,35 @@ export class HarborService {
   }
 
   /**
+   * Rename a space (api.ts renameSpace): any member, Slack channel
+   * semantics. Direct spaces refuse — their label derives from the
+   * participants, not the stored name. Identical-name renames are an
+   * idempotent no-op with no event; a real rename appends `space_renamed`
+   * under the space lock so every follower updates its listing.
+   */
+  async renameSpace(ctx: ActorCtx, spaceId: string, input: RenameSpaceInput): Promise<Space> {
+    const space = await this.requireMember(ctx, spaceId);
+    if (space.kind === 'direct') {
+      throw new HarborError('invalid_request', 'a direct message cannot be renamed — its name is the other person');
+    }
+    this.guardWrite();
+    const by: Attribution = {
+      memberId: ctx.memberId,
+      actingMode: input.actingMode,
+      ...(input.agentName ? { agentName: input.agentName } : {}),
+    };
+    return this.store.withSpaceLock(spaceId, async () => {
+      const current = (await this.store.getSpace(spaceId)) ?? space;
+      if (current.name === input.name) return current; // idempotent, no event
+      const updated: Space = { ...current, name: input.name };
+      await this.store.putSpace(updated);
+      const offset = (await this.store.head(spaceId)) + 1;
+      await this.append(spaceId, offset, this.now(), { type: 'space_renamed', space: updated, by });
+      return updated;
+    });
+  }
+
+  /**
    * Direct messages (api.ts openDirect): get-or-create the one DM between
    * the caller and `otherMemberId`. Membership is written for both under the
    * new space's lock — two `joined` events are the whole membership history
@@ -200,14 +230,19 @@ export class HarborService {
    * boundary, so there is no acceptance step. Two participants opening the
    * same DM at once both pass the lookup; the store's direct-key uniqueness
    * refuses the second row and that caller re-reads the winner's space.
+   *
+   * Your own id opens your SELF-DM (2026-09-08): one participant, one
+   * membership, one `joined` event, nobody to tell. Notes to self that live
+   * on the org — every device sees them, and so does your agent, through
+   * the same face as any space.
    */
   async openDirect(ctx: ActorCtx, otherMemberId: string): Promise<{ space: Space; created: boolean }> {
-    if (otherMemberId === ctx.memberId) {
-      throw new HarborError('invalid_request', 'a direct message needs someone else — there is no self-DM');
+    const self = otherMemberId === ctx.memberId;
+    if (!self) {
+      const other = await this.store.getMember(otherMemberId);
+      if (!other) throw new HarborError('not_found', 'no such member on this org');
     }
-    const other = await this.store.getMember(otherMemberId);
-    if (!other) throw new HarborError('not_found', 'no such member on this org');
-    const participants = [ctx.memberId, otherMemberId].sort();
+    const participants = self ? [ctx.memberId] : [ctx.memberId, otherMemberId].sort();
     const key = directKeyFor(participants);
     const existing = await this.store.getDirectSpace(key);
     if (existing) return { space: existing, created: false };
@@ -230,7 +265,7 @@ export class HarborService {
         await this.append(space.id, ++offset, now, { type: 'membership', membership, action: 'joined' });
       }
     });
-    this.hub.publishToMember(otherMemberId, {
+    if (!self) this.hub.publishToMember(otherMemberId, {
       kind: 'space_added',
       spaceId: space.id,
       spaceKind: 'direct',

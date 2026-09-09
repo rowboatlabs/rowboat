@@ -423,7 +423,7 @@ function LaunchAtLoginSetting() {
 }
 
 function AppearanceSettings() {
-  const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize } = useTheme()
+  const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize, assistantPresentation, setAssistantPresentation } = useTheme()
 
   return (
     <div className="space-y-6">
@@ -458,7 +458,15 @@ function AppearanceSettings() {
         </div>
       </div>
       <div>
-        <h4 className="text-sm font-medium mb-3">Chat</h4>
+        <h4 className="text-sm font-medium mb-3">Assistant presentation</h4>
+        <div className="grid grid-cols-2 gap-3">
+          <ThemeOption label="Sidebar (default)" icon={PanelRight} isSelected={assistantPresentation === "sidebar"} onClick={() => setAssistantPresentation("sidebar")} />
+          <ThemeOption label="Bottom tabs" icon={MessageCircle} isSelected={assistantPresentation === "bottom-tabs"} onClick={() => setAssistantPresentation("bottom-tabs")} />
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Bottom tabs keep multiple chats within reach without resizing your workspace. Code keeps its workspace layout; the embedded browser uses a side-by-side chat.
+        </p>
+        <h4 className="mt-6 text-sm font-medium mb-3">Sidebar placement</h4>
         <p className="text-xs text-muted-foreground mb-4">
           Choose where chat sits when another pane is open
         </p>

@@ -132,7 +132,7 @@ async function dispatch(service: HarborService, actor: McpActor, name: string, a
             id: space.id,
             name: space.name,
             kind: space.kind,
-            ...(space.participants ? { participants: space.participants } : {}),
+            ...(space.participants ? { participants: space.participants, self: space.participants.length === 1 } : {}),
             memberCount: (await service.listMembers(ctx, space.id)).length,
             assets: await service.listAssets(ctx, space.id),
           })),

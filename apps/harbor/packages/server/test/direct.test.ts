@@ -112,9 +112,27 @@ describe.each([['memory'], ['postgres']] as const)('direct messages (%s store)',
     expect((await ramnique.get(`/v1/spaces/${dm.id}/members`)).body.members).toHaveLength(2);
   });
 
-  it('refuses a self-DM and an unknown member', async () => {
-    const self = await ramnique.post('/v1/direct', { memberId: 'ramnique' });
-    expect(self.status).toBe(400);
+  it('your own id opens your self-DM: one participant, one membership, get-or-create, invisible to everyone else', async () => {
+    const r = await ramnique.post('/v1/direct', { memberId: 'ramnique' });
+    expect(r.status).toBe(200);
+    expect(r.body.created).toBe(true);
+    const id: string = r.body.space.id;
+    expect(r.body.space).toMatchObject({ kind: 'direct', participants: ['ramnique'] });
+    const again = await ramnique.post('/v1/direct', { memberId: 'ramnique' });
+    expect(again.body).toMatchObject({ created: false, space: { id } });
+    expect((await ramnique.get(`/v1/spaces/${id}/members`)).body.members.map((m: any) => m.id)).toEqual(['ramnique']);
+    expect((await harbor.service.eventsAfter(id, 0)).map((e) => e.event.type)).toEqual(['membership']);
+    // Private to one: nobody else can read it or see it listed, and it cannot grow.
+    expect((await harsh.get(`/v1/spaces/${id}/stream`)).status).toBe(403);
+    expect((await harsh.get('/v1/spaces?includeDirect=1')).body.spaces.map((s: Space) => s.id)).not.toContain(id);
+    expect((await ramnique.post('/v1/invites', { spaceId: id })).status).toBe(400);
+    // It talks like any space.
+    const post = await ramnique.post(`/v1/spaces/${id}/messages`, { body: 'remember: rotate the staging key Friday', actingMode: 'direct' });
+    expect(post.status).toBe(200);
+    expect((await ramnique.get('/v1/spaces?includeDirect=1')).body.spaces.filter((s: Space) => s.kind === 'direct' && s.participants?.length === 1)).toHaveLength(1);
+  });
+
+  it('refuses an unknown member', async () => {
     const nobody = await ramnique.post('/v1/direct', { memberId: 'nobody' });
     expect(nobody.status).toBe(404);
   });
@@ -171,13 +189,17 @@ describe.each([['memory'], ['postgres']] as const)('direct messages (%s store)',
     const agent: Client = await agentClient(harbor, 'dev-ramnique', { agentName: 'Rowboat' });
     const plain = await callStructured<{ spaces: Array<{ id: string; kind: string }> }>(agent, 'list_spaces', {});
     expect(plain.spaces.every((s) => s.kind === 'shared')).toBe(true);
-    const all = await callStructured<{ spaces: Array<{ id: string; kind: string; participants?: string[] }> }>(
+    const all = await callStructured<{ spaces: Array<{ id: string; kind: string; participants?: string[]; self?: boolean }> }>(
       agent,
       'list_spaces',
       { includeDirect: true },
     );
     const mine = all.spaces.find((s) => s.id === dm.id);
-    expect(mine).toMatchObject({ kind: 'direct', participants: ['harsh', 'ramnique'] });
+    expect(mine).toMatchObject({ kind: 'direct', participants: ['harsh', 'ramnique'], self: false });
+    // The self-DM is flagged so an agent can find "my person's notes" mechanically.
+    const notes = all.spaces.filter((s) => (s as { self?: boolean }).self === true);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.participants).toEqual(['ramnique']);
     try {
       const posted = await callStructured<{ messageId: string }>(agent, 'post_message', {
         spaceId: dm.id,

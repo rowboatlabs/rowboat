@@ -444,7 +444,8 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
     const left = Math.ceil(rect.left * zoomFactor)
     const top = Math.ceil(rect.top * zoomFactor)
     const right = Math.floor(clampedRightCss * zoomFactor)
-    const bottom = Math.floor(rect.bottom * zoomFactor)
+    const dock = el.ownerDocument.querySelector<HTMLElement>('[data-assistant-dock]')
+    const bottom = Math.floor(Math.min(rect.bottom, dock?.getBoundingClientRect().top ?? rect.bottom) * zoomFactor)
     const width = right - left
     const height = bottom - top
 

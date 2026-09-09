@@ -303,6 +303,25 @@ export function encodeMentions(body: string, members: readonly { id: string; dis
         .join('')
 }
 
+/**
+ * Where a mention token ending exactly at the caret starts: for "ping @Name"
+ * with the caret right after the name, the index of its "@" — null when the
+ * caret isn't at the end of a known mention. Backspace handlers use this to
+ * delete the whole token in one press (the Discord behavior). Matching
+ * mirrors encodeMentions — a boundary before the "@", case-insensitive —
+ * and the @rowboat and @here handles count too.
+ */
+export function mentionEndingAtCaret(textBeforeCaret: string, names: readonly string[]): number | null {
+    for (const name of new Set(['rowboat', 'here', ...names])) {
+        if (!name) continue
+        const start = textBeforeCaret.length - name.length - 1
+        if (start < 0 || textBeforeCaret[start] !== '@') continue
+        if (textBeforeCaret.slice(start + 1).toLowerCase() !== name.toLowerCase()) continue
+        if (start === 0 || /[\s([{]/.test(textBeforeCaret[start - 1]!)) return start
+    }
+    return null
+}
+
 // ---------------------------------------------------------------------------
 // File links — plain relative markdown links resolve against the space's file
 // tree (GitHub README semantics): in a file, against the file's own folder; in
@@ -427,6 +446,62 @@ export function separateImageParagraphs(body: string): string {
         out.push(line)
     }
     return out.join('\n')
+}
+
+/** One `![alt](url)` embed lifted out of a body by splitImageEmbeds. */
+export interface ImageEmbed {
+    alt: string
+    url: string
+    /** The optional markdown title suffix (` "…"`), kept verbatim for reassembly. */
+    title?: string
+}
+
+/**
+ * Pull the image embeds out of a body for the inline editor: the text edits
+ * bare in the textarea, the images ride below it as thumbnails (the Slack
+ * model). Code regions are cites — an embed inside one stays literal text.
+ * joinImageEmbeds reassembles the shape the composer sends: text, blank
+ * line, one image per line.
+ */
+export function splitImageEmbeds(body: string): { text: string; images: ImageEmbed[] } {
+    const images: ImageEmbed[] = []
+    const out: string[] = []
+    let fence: string | null = null
+    for (const line of body.split('\n')) {
+        const fenceMark = line.match(/^\s*(```+|~~~+)/)?.[1]
+        if (fenceMark) {
+            if (fence === null) fence = fenceMark[0]!
+            else if (fenceMark[0] === fence) fence = null
+            out.push(line)
+            continue
+        }
+        if (fence !== null) {
+            out.push(line)
+            continue
+        }
+        // Inline code spans are cites too — split them out, lift embeds only
+        // from the literal segments.
+        const stripped = line
+            .split(/(`[^`\n]*`)/g)
+            .map((seg, i) => {
+                if (i % 2 === 1) return seg
+                return seg.replace(/!\[([^\]]*)\]\(([^()\s]+)(\s+"[^"]*")?\)/g, (_m, alt: string, url: string, title?: string) => {
+                    images.push({ alt, url, ...(title ? { title } : {}) })
+                    return ''
+                })
+            })
+            .join('')
+        // A line that was only embeds disappears with its newline — no phantom
+        // paragraph break where the image sat. Anything else keeps its place.
+        if (stripped.trim() === '' && line.trim() !== '') continue
+        out.push(stripped.replace(/[^\S\n]+$/, ''))
+    }
+    return { text: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(), images }
+}
+
+export function joinImageEmbeds(text: string, images: ImageEmbed[]): string {
+    const lines = images.map((i) => `![${i.alt}](${i.url}${i.title ?? ''})`)
+    return [text.trim(), lines.join('\n')].filter(Boolean).join('\n\n')
 }
 
 /**
