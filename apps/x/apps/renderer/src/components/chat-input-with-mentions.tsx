@@ -211,6 +211,7 @@ const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: 
 ]
 
 interface ChatInputInnerProps {
+  draftKey?: string
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
@@ -278,7 +279,10 @@ interface ChatInputInnerProps {
   focusSignal?: number
 }
 
+const attachmentsByDraft = new Map<string, StagedAttachment[]>()
+
 function ChatInputInner({
+  draftKey,
   onSubmit,
   onStop,
   isProcessing,
@@ -320,7 +324,12 @@ function ChatInputInner({
   // and stayed wrong after a rebind).
   const summonShortcut = useQuickAskShortcut()
   const summonShortcutLabel = quickAskShortcut.formatShortcut(summonShortcut.accelerator, isMac)
-  const [attachments, setAttachments] = useState<StagedAttachment[]>([])
+  const [attachments, setAttachments] = useState<StagedAttachment[]>(() => draftKey ? attachmentsByDraft.get(draftKey) ?? [] : [])
+  useEffect(() => {
+    if (!draftKey) return
+    if (attachments.length) attachmentsByDraft.set(draftKey, attachments)
+    else attachmentsByDraft.delete(draftKey)
+  }, [attachments, draftKey])
   const [focusNonce, setFocusNonce] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canSubmit = (Boolean(message.trim()) || attachments.length > 0)
@@ -1495,6 +1504,7 @@ export function VoiceWaveform({ audioLevelsRef }: { audioLevelsRef?: React.Mutab
 }
 
 export interface ChatInputWithMentionsProps {
+  draftKey?: string
   knowledgeFiles: string[]
   recentFiles: string[]
   visibleFiles: string[]
@@ -1544,6 +1554,7 @@ export interface ChatInputWithMentionsProps {
 }
 
 export function ChatInputWithMentions({
+  draftKey,
   knowledgeFiles,
   recentFiles,
   visibleFiles,
@@ -1584,6 +1595,7 @@ export function ChatInputWithMentions({
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
       <ChatInputInner
+        draftKey={draftKey}
         onSubmit={onSubmit}
         onStop={onStop}
         isProcessing={isProcessing}

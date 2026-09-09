@@ -391,6 +391,7 @@ export function ChatSessionComposer({
         </div>
       )}
       <ChatInputWithMentions
+        draftKey={tab.chatId}
         knowledgeFiles={knowledgeFiles}
         recentFiles={recentFiles}
         visibleFiles={visibleFiles}

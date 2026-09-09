@@ -1,12 +1,14 @@
 "use client"
 
 import * as React from "react"
+import { readAssistantPreference, writeAssistantPreference } from '@/lib/assistant-dock'
 
 import { getSystemTheme, readStoredTheme, resolveTheme, THEME_STORAGE_KEY, type Theme } from "@/lib/theme"
 
 export type { Theme }
 export type ChatPanePlacement = "right" | "middle"
 export type ChatPaneSize = "chat-smaller" | "chat-equal" | "chat-bigger"
+export type AssistantPresentation = "sidebar" | "bottom-tabs"
 
 type ThemeContextProps = {
   theme: Theme
@@ -16,6 +18,8 @@ type ThemeContextProps = {
   setChatPanePlacement: (placement: ChatPanePlacement) => void
   chatPaneSize: ChatPaneSize
   setChatPaneSize: (size: ChatPaneSize) => void
+  assistantPresentation: AssistantPresentation
+  setAssistantPresentation: (presentation: AssistantPresentation) => void
 }
 
 const ThemeContext = React.createContext<ThemeContextProps | null>(null)
@@ -23,6 +27,7 @@ const ThemeContext = React.createContext<ThemeContextProps | null>(null)
 const STORAGE_KEY = THEME_STORAGE_KEY
 const CHAT_PANE_PLACEMENT_STORAGE_KEY = "rowboat-chat-pane-placement"
 const CHAT_PANE_SIZE_STORAGE_KEY = "rowboat-chat-pane-size"
+const ASSISTANT_PRESENTATION_STORAGE_KEY = "rowboat-assistant-presentation"
 
 function isChatPanePlacement(value: string | null): value is ChatPanePlacement {
   return value === "right" || value === "middle"
@@ -47,6 +52,13 @@ export function ThemeProvider({
   defaultTheme?: Theme
   children: React.ReactNode
 }) {
+  const [assistantPresentation, setAssistantPresentationState] = React.useState<AssistantPresentation>(() => {
+    return readAssistantPreference(ASSISTANT_PRESENTATION_STORAGE_KEY) === "bottom-tabs" ? "bottom-tabs" : "sidebar"
+  })
+  const setAssistantPresentation = React.useCallback((presentation: AssistantPresentation) => {
+    setAssistantPresentationState(presentation)
+    writeAssistantPreference(ASSISTANT_PRESENTATION_STORAGE_KEY, presentation)
+  }, [])
   const [theme, setThemeState] = React.useState<Theme>(() => readStoredTheme(defaultTheme))
   const [chatPanePlacement, setChatPanePlacementState] = React.useState<ChatPanePlacement>(() => {
     if (typeof window === "undefined") return "right"
@@ -123,8 +135,10 @@ export function ThemeProvider({
       setChatPanePlacement,
       chatPaneSize,
       setChatPaneSize,
+      assistantPresentation,
+      setAssistantPresentation,
     }),
-    [theme, resolvedTheme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize]
+    [theme, resolvedTheme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize, assistantPresentation, setAssistantPresentation]
   )
 
   return (
