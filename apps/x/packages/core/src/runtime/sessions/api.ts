@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { UseCase } from "@x/shared/dist/analytics.js";
 import type { UserMessage } from "@x/shared/dist/message.js";
+import type { InputOrigin } from "@x/shared/dist/origins.js";
 import type {
     QueuedSessionMessage,
     SessionIndexEntry,
@@ -16,8 +17,8 @@ import type { Turn } from "../turns/api.js";
 /**
  * The cancel reason sendOrQueueMessage records when it reclaims a
  * crash-orphaned turn (idle in the log, no live advance — nothing will ever
- * settle it). Consumers that narrate turn endings (e.g. the spaces topic
- * watchdog) match on it to tell a reclaim apart from a person pressing Stop.
+ * settle it). Consumers that narrate turn endings can match on it to tell a
+ * reclaim apart from a person pressing Stop.
  */
 export const RECLAIMED_TURN_REASON =
     "interrupted: the app quit or crashed while this turn was running";
@@ -34,6 +35,11 @@ export interface SendMessageConfig {
     humanAvailable?: boolean;
     maxModelCalls?: number;
     reasoningEffort?: "low" | "medium" | "high";
+    // What outside the runtime caused this message (a space mention, ...).
+    // Lands on turn_created when the message starts a turn, on input_added
+    // when it is steered into a live one; a queued entry carries it until
+    // then. Recorded, never read, by the runtime — see @x/shared origins.
+    origin?: InputOrigin;
 }
 
 export interface ISessions {

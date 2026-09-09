@@ -476,6 +476,14 @@ choice):
   the head becomes a new turn via the normal locked send path, using the
   config it arrived with; the remainder stays queued and steers the new
   turn at its first boundary (call 0) — the earliest the model can see it.
+- A steered entry joins the live turn, whose configuration wins — except
+  the config's `origin` (what outside the runtime caused the message: a
+  space mention today; `@x/shared` origins.ts), which rides along on BOTH
+  paths: `turn_created.origin` at promotion, `input_added.origin` at steer.
+  The queue entry exposes it too (`QueuedSessionMessage.origin`), so a
+  consumer can show a queued mention before it is delivered. The runtime
+  records origins and never reads them; consumers (the spaces
+  agent-activity feed) match on them from bus events alone.
 - The enqueue and the settled-check share one session-lock hold, and
   promotion re-checks everything under the same lock, so a concurrent
   settle cannot strand a message (no lost wakeup).

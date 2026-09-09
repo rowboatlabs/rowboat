@@ -3240,7 +3240,7 @@ describe("added inputs (steering)", () => {
                 return [];
             }
             state.armed = false;
-            return [user(text)];
+            return [{ message: user(text) }];
         };
         return { state, takeInputs };
     }
@@ -3295,8 +3295,45 @@ describe("added inputs (steering)", () => {
         expect(wire[wire.length - 1]).toEqual(user("also check the tests"));
     });
 
+    it("writes a steered message's origin onto its input_added, verbatim", async () => {
+        const origin = {
+            kind: "space_mention" as const,
+            orgId: "org-1",
+            spaceId: "space-1",
+            threadRootId: "root-1",
+            messageId: "msg-1",
+        };
+        const pending = [{ message: user("from a space thread"), origin }];
+        const { runtime, repo } = makeRuntime({
+            models: [respond(completedResp(assistantText("done")))],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId, undefined, {
+            takeInputs: () => pending.splice(0),
+        });
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, turnId);
+        const added = log.find((e) => e.type === "input_added");
+        expect(added).toMatchObject({ message: user("from a space thread"), origin });
+    });
+
+    it("persists a createTurn origin on turn_created and omits the field otherwise", async () => {
+        const origin = {
+            kind: "space_mention" as const,
+            orgId: "org-1",
+            spaceId: "space-1",
+            threadRootId: "root-1",
+            messageId: "msg-1",
+        };
+        const { runtime, repo } = makeRuntime({ models: [] });
+        const tagged = await newTurn(runtime, { origin });
+        const plain = await newTurn(runtime);
+        expect((await persisted(repo, tagged))[0]).toMatchObject({ type: "turn_created", origin });
+        expect((await persisted(repo, plain))[0]).not.toHaveProperty("origin");
+    });
+
     it("injects a message already pending before the first model call on call 0", async () => {
-        const pending = [user("and one more thing")];
+        const pending = [{ message: user("and one more thing") }];
         const { runtime, repo, models } = makeRuntime({
             models: [respond(completedResp(assistantText("done")))],
         });
@@ -3367,7 +3404,7 @@ describe("added inputs (steering)", () => {
         expect(first.outcome?.status).toBe("suspended");
 
         // The message typed while suspended rides the resuming advance.
-        const pending = [user("typed while waiting")];
+        const pending = [{ message: user("typed while waiting") }];
         const { outcome } = await advanceAndSettle(
             runtime,
             turnId,

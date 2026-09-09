@@ -15,6 +15,7 @@ import { MessageRow, NewDivider, TypingIndicator } from '@/components/spaces/mes
 import type { ChatMessage, SpacePresence } from '@/hooks/use-space-chat'
 import { buildPendingMessage, getThreadSnapshot, ingestTopic, putThreadSnapshot, removeTopicByRoot, updateStreamMessage, usePresenceSender } from '@/hooks/use-space-chat'
 import { useTopicAgentPermissionWait } from '@/hooks/use-topic-agent-permission'
+import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { subscribeComposeInsert } from '@/lib/spaces-compose'
 import { applyReaction, artifactsForThread, isContinuation, mergeMessages, threadLabelOf } from '@/lib/spaces-conventions'
@@ -202,6 +203,7 @@ export function ThreadPane({
     }
 
     const workingAgents = presence.working.get(rootMessageId) ?? []
+    const ownActivity = useSpaceAgentActivity(org.id, space.id)
     // Your own agent, blocked mid-turn on a tool permission: surface it here
     // instead of letting it idle behind a "working…" spinner (or silence).
     const permissionWait = useTopicAgentPermissionWait(org.id, space.id, rootMessageId, visible)
@@ -528,6 +530,13 @@ export function ThreadPane({
     }
 
     const openTopicSession = async () => {
+        // A live record names the session outright; the registry lookup
+        // covers a thread whose agent is idle.
+        const live = ownActivity.get(rootMessageId)
+        if (live && onOpenSession) {
+            onOpenSession(live.sessionId)
+            return
+        }
         try {
             const { sessionId } = await window.ipc.invoke('spaces:topicSession', { orgId: org.id, spaceId: space.id, threadRootId: rootMessageId })
             if (sessionId && onOpenSession) onOpenSession(sessionId)

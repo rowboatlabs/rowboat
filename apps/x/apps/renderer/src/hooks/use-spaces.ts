@@ -178,7 +178,7 @@ export function useSpaceLive(
         let cancelled = false
         const release = acquireSpaceLive(orgId, spaceId)
         const unsubscribe = subscribeSpacesFeed((event) => {
-            if (cancelled || event.orgId !== orgId) return
+            if (cancelled || event.orgId !== orgId || !('frame' in event)) return
             const frame = event.frame
             if ('spaceId' in frame && frame.spaceId === spaceId) handlerRef.current(frame)
         })
@@ -266,6 +266,7 @@ function wireFeedBus(): void {
     if (feedBusWired) return
     feedBusWired = true
     subscribeSpacesFeed((event) => {
+        if (!('frame' in event)) return
         const frame = event.frame
         if (frame.kind === 'space_added') {
             // Someone opened a DM with us. The listing is how we learn its
