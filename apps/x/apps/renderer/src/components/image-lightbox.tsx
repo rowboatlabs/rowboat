@@ -178,7 +178,7 @@ export function ImageLightbox({
               if (event.key === 'ArrowRight' && navigation.index < navigation.count - 1) navigation.onNext()
             }
           }}
-          className="fixed inset-0 z-50 flex items-center justify-center outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+          className="titlebar-no-drag fixed inset-0 z-50 flex items-center justify-center outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
         >
           <DialogPrimitive.Title className="sr-only">{name}</DialogPrimitive.Title>
           <ZoomableImage
@@ -213,7 +213,8 @@ export function ImageLightbox({
               </div>
             </>
           )}
-          <div className="absolute right-4 top-4 flex items-center gap-1.5">
+          {/* Keep controls below Electron's 40px titlebar hit region. */}
+          <div className="titlebar-no-drag absolute right-4 top-14 flex items-center gap-1.5">
             {actions && <div className="flex items-center gap-3 text-xs" onClick={(event) => event.stopPropagation()}>{actions}</div>}
             {onDownload && <ImageOverlayButton label={`Download ${name}`} onClick={onDownload}>
               <Download className="h-3.5 w-3.5" />
