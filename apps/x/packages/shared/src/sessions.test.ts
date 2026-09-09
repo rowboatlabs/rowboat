@@ -5,6 +5,7 @@ import {
     SessionCreated,
     SessionEvent,
     SessionTurnAppended,
+    isChatListSession,
     reduceSession,
     sessionIndexEntry,
 } from "./sessions.js";
@@ -13,6 +14,13 @@ type SEvent = z.infer<typeof SessionEvent>;
 
 const SESSION_ID = "2026-07-02T09-00-00Z-0000042-000";
 const MODEL = { provider: "openai", model: "gpt-test" };
+const SPACE_ORIGIN = {
+    kind: "space_thread" as const,
+    orgId: "org-1",
+    spaceId: "space-1",
+    threadRootId: "root-1",
+    spaceName: "Roadboard",
+};
 
 function sessionCreated(
     overrides: Partial<z.infer<typeof SessionCreated>> = {},
@@ -197,5 +205,23 @@ describe("sessionIndexEntry", () => {
         expect(entry.turnCount).toBe(0);
         expect(entry.lastAgentId).toBeUndefined();
         expect(entry.latestTurnStatus).toBe("none");
+    });
+
+    it("carries the session origin from session_created into the entry, absent otherwise", () => {
+        const owned = sessionIndexEntry(
+            reduceSession([sessionCreated({ title: "SSO first?", origin: SPACE_ORIGIN })]),
+            "none",
+        );
+        expect(owned.origin).toEqual(SPACE_ORIGIN);
+        const own = sessionIndexEntry(reduceSession([sessionCreated()]), "none");
+        expect("origin" in own).toBe(false);
+    });
+});
+
+describe("isChatListSession", () => {
+    it("keeps a person's own chats and drops sessions something else owns", () => {
+        expect(isChatListSession({})).toBe(true);
+        expect(isChatListSession({ origin: undefined })).toBe(true);
+        expect(isChatListSession({ origin: SPACE_ORIGIN })).toBe(false);
     });
 });

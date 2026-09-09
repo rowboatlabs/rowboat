@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import type { UseCase } from "@x/shared/dist/analytics.js";
 import type { UserMessage } from "@x/shared/dist/message.js";
-import type { InputOrigin } from "@x/shared/dist/origins.js";
+import type { InputOrigin, SessionOrigin } from "@x/shared/dist/origins.js";
 import type {
     QueuedSessionMessage,
     SessionIndexEntry,
@@ -47,7 +47,10 @@ export interface ISessions {
     // each session's latest turn for status). Must run before listSessions.
     initialize(): Promise<void>;
 
-    createSession(input?: { title?: string }): Promise<string>;
+    // origin: what owns the session when something outside the runtime
+    // does (a space thread). Main-process callers only — the renderer's
+    // sessions:create contract deliberately accepts title alone.
+    createSession(input?: { title?: string; origin?: SessionOrigin }): Promise<string>;
     listSessions(): SessionIndexEntry[];
     getSession(sessionId: string): Promise<SessionState>;
     getTurn(turnId: string): Promise<Turn>;
