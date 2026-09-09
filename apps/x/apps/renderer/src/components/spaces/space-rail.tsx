@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, ArchiveRestore, ArrowLeft, Bell, BellOff, Bot, Check, CornerDownRight, FileText, FolderPlus, MessageSquare, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bell, BellOff, Bot, Check, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import {
@@ -14,7 +14,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { toast } from '@/lib/toast'
 import { SecondaryRail, type SecondaryRailContext } from '@/components/secondary-rail'
 import { FileTree } from '@/components/spaces/files-tab'
-import { refreshSpaceFeed } from '@/hooks/use-spaces'
+import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
+import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
+import { refreshSpaceFeed, type OrgWithSpaces } from '@/hooks/use-spaces'
 import type { NotifyLevel, SpaceNotifyHandle } from '@/hooks/use-spaces-notify'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import { prefetchThread, STREAM_READ_KEY } from '@/hooks/use-space-chat'
@@ -24,26 +26,9 @@ import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import { getTopicLastReadAt } from '@/lib/spaces-read-state'
 import type { RailSelection } from '@/lib/spaces-selection'
 
-// The space's edge rail: one collapsible strip carrying the same sidebar on
-// every surface. Two stacked panes, each with its own scroll — Chat
-// (Messages, then the discussions) on top and Files (the tree; boards are
-// files at whiteboards/<name>.excalidraw and live there with a pen icon)
-// pinned to the bottom. They split the height 60/40 until the divider is
-// dragged (then the Files height sticks, persisted); collapsing either
-// (click its label) hands the whole height to the other. No counts, no
-// filter chips, no search box — ⌘K searches, bold + dot mark unread, and
-// archived discussions get their own view (Chat's ⋯ menu → back row).
-// Each pane's actions sit on its label and appear on hover anywhere in the
-// pane. The Discussions section lists ONLY
-// deliberate topic annotations (annotation model): threads someone gave a
-// goal. Plain reply chains stay behind their chips in the stream — the rail
-// holds intentions, not accidents.
-//
-// The rail chrome (docked width + drag-resize, the collapsed sliver, the
-// hover peek drawer) is the shared SecondaryRail shell — Email's filter
-// rail uses the same one. This file owns only what's IN the rail. The
-// shell sidebar contracts to the dock while in Spaces, so this is THE
-// sidebar here.
+// Server spaces and their nested discussions, then DMs, share the upper
+// scrolling pane. The selected space's files retain their resizable lower
+// pane. SecondaryRail owns docking, resizing, and the hover drawer.
 
 const NOTIFY_CHOICES: { level: NotifyLevel; label: string }[] = [
     { level: 'all', label: 'All messages' },
@@ -51,7 +36,7 @@ const NOTIFY_CHOICES: { level: NotifyLevel; label: string }[] = [
     { level: 'mute', label: 'Muted' },
 ]
 
-type RailSection = 'chat' | 'files'
+type RailSection = 'files'
 /** Collapsed sections persist like the rail's own pin. */
 const COLLAPSED_KEY = 'spaces:railCollapsed'
 /** A dragged Files height persists too (null = the 60/40 default). */
@@ -62,9 +47,12 @@ const FILES_MIN = 96
 const CHAT_MIN = 120
 
 export function SpaceRail({
-    orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, notify, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    org, onOpenSpace, onOpenDiscussion, orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, notify, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, onTogglePin,
 }: {
+    org: OrgWithSpaces
+    onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenDiscussion: (spaceId: string, selection: RailSelection) => void
     orgId: string
     spaceId: string
     selfMemberId: string
@@ -97,9 +85,9 @@ export function SpaceRail({
     const [creatingFile, setCreatingFile] = useState<{ prefix: string } | null>(null)
     const [creatingFolder, setCreatingFolder] = useState(false)
     const [creatingBoard, setCreatingBoard] = useState(false)
-    // Chat shows the live discussions, or — via its ⋯ menu — the archived
-    // ones as a view of their own with a back row.
-    const [chatView, setChatView] = useState<'live' | 'archived'>('live')
+    // Archived discussions can be included alongside live discussions.
+    const archivedKey = `spaces:showArchived:${orgId}`
+    const [showArchived, setShowArchived] = useState(() => sessionStorage.getItem(archivedKey) === 'true')
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
     // Resizable panes: null = the 60/40 default until the divider is dragged;
@@ -199,9 +187,7 @@ export function SpaceRail({
     const byActivity = (a: { topic: spaces.TopicListing }, b: { topic: spaces.TopicListing }) => b.topic.lastActivityAt.localeCompare(a.topic.lastActivityAt)
     const titled = topics.map((t) => ({ topic: t, title: resolveMentions(t.title, memberNames) }))
     const liveRows = titled.filter((x) => !x.topic.archived).sort(byActivity)
-    const archivedRows = titled.filter((x) => x.topic.archived).sort(byActivity)
-    const archivedView = chatView === 'archived'
-    const topicRows = archivedView ? archivedRows : liveRows
+    const topicRows = showArchived ? titled.sort(byActivity) : liveRows
 
     const selectedRootId = selection.kind === 'thread' ? selection.rootMessageId : null
     // A board is a file in the same tree, so either selection kind highlights its row.
@@ -222,12 +208,11 @@ export function SpaceRail({
         topics.filter((t) => !t.archived && isUnread(t) && effectiveLevel(t.rootMessageId) !== 'mute').length + (generalBadge > 0 ? 1 : 0)
     const badge = unreadTopics + unreadPaths.size
 
-    const chatCollapsed = collapsed.has('chat')
     const filesCollapsed = collapsed.has('files')
-    const bothOpen = !chatCollapsed && !filesCollapsed
+    const bothOpen = !filesCollapsed
     // A collapsed pane is just its label; the other takes everything left.
     // With both open, a dragged Files height wins over the 60/40 default.
-    const chatStyle: React.CSSProperties = chatCollapsed ? { flex: '0 0 auto' } : !bothOpen || filesHeight !== null ? { flex: '1 1 0%' } : { flex: '60 1 0%' }
+    const chatStyle: React.CSSProperties = !bothOpen || filesHeight !== null ? { flex: '1 1 0%' } : { flex: '60 1 0%' }
     const filesStyle: React.CSSProperties = filesCollapsed
         ? { flex: '0 0 auto' }
         : !bothOpen
@@ -241,29 +226,9 @@ export function SpaceRail({
     const renderBody = ({ togglePin, onMenuOpenChange }: SecondaryRailContext) => (
         <div ref={bodyRef} className={cn('spaces-navigation flex h-full min-h-0 flex-col', resizing && 'select-none')}>
             <section style={chatStyle} className="group/section flex min-h-0 flex-col">
-                <SectionHeader label="Chat" collapsed={chatCollapsed} count={liveRows.length} onToggle={() => toggleSection('chat')}>
-                    <DropdownMenu onOpenChange={onMenuOpenChange}>
-                        <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                aria-label="Chat options"
-                                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100 data-[state=open]:opacity-100"
-                            >
-                                <MoreHorizontal className="size-3.5" />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            {archivedView ? (
-                                <DropdownMenuItem onClick={() => setChatView('live')}>
-                                    <ArrowLeft className="size-3.5 mr-2" /> Back to chat
-                                </DropdownMenuItem>
-                            ) : (
-                                <DropdownMenuItem onClick={() => setChatView('archived')}>
-                                    <Archive className="size-3.5 mr-2" /> View archived{archivedRows.length > 0 ? ` (${archivedRows.length})` : ''}
-                                </DropdownMenuItem>
-                            )}
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                <div className="flex shrink-0 items-center gap-0.5 px-2 py-1">
+                    <span className="min-w-0 flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
+                    <ServerOptionsMenu org={org} showArchived={showArchived} onToggleArchived={() => setShowArchived((value) => { sessionStorage.setItem(archivedKey, String(!value)); return !value })} onMenuOpenChange={onMenuOpenChange} />
                     {/* Docked: close. Peeked: the lock — dock it. Same spot, flipped glyph. */}
                     <button
                         type="button"
@@ -273,40 +238,12 @@ export function SpaceRail({
                     >
                         {open ? <PanelLeftClose className="size-3.5" /> : <PanelLeftOpen className="size-3.5" />}
                     </button>
-                </SectionHeader>
-                {!chatCollapsed && (
+                </div>
                     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
-                        {archivedView ? (
-                            <button
-                                type="button"
-                                onClick={() => setChatView('live')}
-                                title="Back to chat"
-                                className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13.5px] text-foreground/90 hover:bg-accent/50"
-                            >
-                                <ArrowLeft className="size-3.5 shrink-0 text-muted-foreground" />
-                                <span className="flex-1 truncate font-medium">Archived</span>
-                                {archivedRows.length > 0 && <span className="text-[11px] tabular-nums text-muted-foreground">{archivedRows.length}</span>}
-                            </button>
-                        ) : (
-                            <button
-                                type="button"
-                                aria-current={selection.kind === 'general' ? 'page' : undefined}
-                                onClick={() => onSelect({ kind: 'general' })}
-                                className={cn(
-                                    'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13.5px]',
-                                    selection.kind === 'general' ? 'bg-[var(--stream-mention-wash)] font-semibold text-[var(--stream-link)]' : 'text-foreground/90 hover:bg-accent/50',
-                                )}
-                            >
-                                <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-                                <span className={cn('flex-1 truncate', generalBadge > 0 && selection.kind !== 'general' && 'font-semibold')}>Messages</span>
-                                {generalBadge > 0 && selection.kind !== 'general' && (
-                                    <span className="text-[11px] font-semibold tabular-nums">{generalBadge}</span>
-                                )}
-                                {(presence.typing.get('') ?? []).length > 0 && <span className="size-1.5 rounded-full bg-[var(--rowboat-success)]" title="someone is typing" />}
-                            </button>
-                        )}
-
-                        {topicRows.map(({ topic, title }) => {
+                        <ServerSpaceNavigation org={org} spaceId={spaceId} onOpenSpace={onOpenSpace}
+                            onOpenDiscussion={onOpenDiscussion} activeDiscussionCount={topicRows.length} showArchived={showArchived}
+                            renderActiveDiscussions={(limit) => <>
+                        {topicRows.slice(0, limit).map(({ topic, title }) => {
                             const active = topic.rootMessageId === selectedRootId
                             const muted = effectiveLevel(topic.rootMessageId) === 'mute'
                             // Muted topics don't clamor: no bold, no dot,
@@ -463,13 +400,10 @@ export function SpaceRail({
                                 </div>
                             )
                         })}
-                        {topicRows.length === 0 && (
-                            <div className="px-2 py-2 text-xs text-muted-foreground">
-                                {archivedView ? 'Nothing archived.' : 'No discussions yet — give a thread a goal to put it here.'}
-                            </div>
-                        )}
+
+                            </>}
+                        />
                     </div>
-                )}
             </section>
 
             <section
@@ -631,6 +565,7 @@ function SectionHeader({ label, collapsed, count, onToggle, children }: {
             <button
                 type="button"
                 onClick={onToggle}
+                aria-expanded={!collapsed}
                 title={collapsed ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`}
                 className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-[13px] font-semibold text-muted-foreground hover:text-foreground"
             >
