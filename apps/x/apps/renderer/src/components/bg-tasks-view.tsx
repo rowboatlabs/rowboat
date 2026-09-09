@@ -4,7 +4,7 @@ import {
     ListChecks, Play, Square, Loader2, Trash2, Plus, X, AlertCircle,
     Repeat, Clock, Zap, ChevronLeft, ChevronDown, ChevronRight,
     Pencil, Check, PanelRightClose, PanelRightOpen, Sparkles,
-    Code2, FolderOpen, LayoutTemplate, MoreVertical, Info,
+    Code2, FolderOpen, LayoutTemplate, MoreVertical,
 } from 'lucide-react'
 import type { BackgroundTask, BackgroundTaskSummary, Triggers } from '@x/shared/dist/background-task.js'
 import { Button } from '@/components/ui/button'
@@ -14,10 +14,10 @@ import { Textarea } from '@/components/ui/textarea'
 import {
     DropdownMenu,
     DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { BgTaskMenuItems } from '@/components/bg-task-menu-items'
 import {
     Dialog,
     DialogContent,
@@ -1751,6 +1751,8 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
     // as `LiveNotesView` uses for its toggle / stop buttons.
     const [updatingSlugs, setUpdatingSlugs] = useState<Set<string>>(new Set())
     const [stoppingSlugs, setStoppingSlugs] = useState<Set<string>>(new Set())
+    const [startingSlugs, setStartingSlugs] = useState<Set<string>>(new Set())
+    const startingSlugsRef = useRef(new Set<string>())
     const [detailsTask, setDetailsTask] = useState<BackgroundTaskSummary | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<BackgroundTaskSummary | null>(null)
     const [deleting, setDeleting] = useState(false)
@@ -1801,6 +1803,22 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
             })
         }
     }, [])
+
+    const handleRunNow = useCallback(async (slug: string) => {
+        if (startingSlugsRef.current.has(slug) || agentStatus.get(slug)?.status === 'running') return
+        startingSlugsRef.current.add(slug)
+        setStartingSlugs(new Set(startingSlugsRef.current))
+        try {
+            analytics.bgAgentRunClicked()
+            const result = await window.ipc.invoke('bg-task:run', { slug })
+            if (!result.success) toast(result.error ?? 'Run failed', 'error')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Run failed', 'error')
+        } finally {
+            startingSlugsRef.current.delete(slug)
+            setStartingSlugs(new Set(startingSlugsRef.current))
+        }
+    }, [agentStatus])
 
     const handleStop = useCallback(async (slug: string) => {
         setStoppingSlugs(prev => new Set(prev).add(slug))
@@ -1921,112 +1939,119 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                     const isStopping = stoppingSlugs.has(task.slug)
                                     const hasError = !isRunning && !!task.lastRunError
                                     const instructionsPreview = task.instructions.split('\n')[0].trim()
+                                    const menuProps = {
+                                        active: task.active,
+                                        busy: isRunning || isStopping || startingSlugs.has(task.slug),
+                                        updating: isUpdating,
+                                        onOpen: () => setSelectedSlug(task.slug),
+                                        onDetails: () => setDetailsTask(task),
+                                        onToggleActive: () => { void handleToggleActive(task.slug, !task.active) },
+                                        onRun: () => { void handleRunNow(task.slug) },
+                                        onDelete: () => setDeleteTarget(task),
+                                    }
                                     return (
-                                        <tr
-                                            key={task.slug}
-                                            className={`border-b border-border/50 last:border-b-0 transition-colors ${isRunning ? 'bg-primary/5' : 'hover:bg-muted/20'}`}
-                                        >
-                                            <td className="px-4 py-3 align-top">
-                                                <div className="flex min-w-0 flex-col gap-1">
-                                                    <div className="flex items-center gap-1.5">
-                                                        {hasError && (
-                                                            <AlertCircle
-                                                                className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
-                                                                aria-label="Last run failed"
-                                                            >
-                                                                <title>Last run failed: {task.lastRunError}</title>
-                                                            </AlertCircle>
-                                                        )}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setSelectedSlug(task.slug)}
-                                                            className="truncate text-left text-sm font-medium text-foreground hover:text-primary"
-                                                            title={task.name}
-                                                        >
-                                                            {task.name}
-                                                        </button>
-                                                    </div>
-                                                    <div className="truncate font-mono text-[11px] text-muted-foreground">
-                                                        {task.slug}
-                                                    </div>
-                                                    {instructionsPreview && (
-                                                        <div className="truncate text-xs text-muted-foreground/80" title={task.instructions}>
-                                                            {instructionsPreview}
+                                        <ContextMenu key={task.slug}>
+                                            <ContextMenuTrigger asChild>
+                                                <tr
+                                                    className={`border-b border-border/50 last:border-b-0 transition-colors ${isRunning ? 'bg-primary/5' : 'hover:bg-muted/20'}`}
+                                                >
+                                                    <td className="px-4 py-3 align-top">
+                                                        <div className="flex min-w-0 flex-col gap-1">
+                                                            <div className="flex items-center gap-1.5">
+                                                                {hasError && (
+                                                                    <AlertCircle
+                                                                        className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+                                                                        aria-label="Last run failed"
+                                                                    >
+                                                                        <title>Last run failed: {task.lastRunError}</title>
+                                                                    </AlertCircle>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setSelectedSlug(task.slug)}
+                                                                    className="truncate text-left text-sm font-medium text-foreground hover:text-primary"
+                                                                    title={task.name}
+                                                                >
+                                                                    {task.name}
+                                                                </button>
+                                                            </div>
+                                                            <div className="truncate font-mono text-[11px] text-muted-foreground">
+                                                                {task.slug}
+                                                            </div>
+                                                            {instructionsPreview && (
+                                                                <div className="truncate text-xs text-muted-foreground/80" title={task.instructions}>
+                                                                    {instructionsPreview}
+                                                                </div>
+                                                            )}
+                                                            {hasError && task.lastRunError && (
+                                                                <div className="truncate text-xs text-amber-600 dark:text-amber-400" title={task.lastRunError}>
+                                                                    {task.lastRunError}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    )}
-                                                    {hasError && task.lastRunError && (
-                                                        <div className="truncate text-xs text-amber-600 dark:text-amber-400" title={task.lastRunError}>
-                                                            {task.lastRunError}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-foreground/80">
-                                                {summarizeSchedule(task.triggers)}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-foreground/80">
-                                                {formatLastRanLabel(task.lastRunAt)}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {isRunning ? (
-                                                    <div className="flex flex-wrap items-center gap-2">
-                                                        <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
-                                                            <Loader2 className="size-3 animate-spin" />
-                                                            Updating
-                                                        </span>
-                                                        <Button
-                                                            variant="destructive"
-                                                            size="sm"
-                                                            onClick={() => handleStop(task.slug)}
-                                                            disabled={isStopping}
-                                                            className="h-auto gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium"
-                                                        >
-                                                            {isStopping ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
-                                                            Stop
-                                                        </Button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex items-center gap-3">
-                                                        <Switch
-                                                            checked={task.active}
-                                                            onCheckedChange={(checked) => { void handleToggleActive(task.slug, checked) }}
-                                                            disabled={isUpdating}
-                                                        />
-                                                        <span className="min-w-16 text-xs font-medium text-foreground/80">
-                                                            {task.active ? 'Active' : 'Inactive'}
-                                                        </span>
-                                                        {isUpdating && (
-                                                            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                                                    </td>
+                                                    <td className="px-4 py-3 text-sm text-foreground/80">
+                                                        {summarizeSchedule(task.triggers)}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-sm text-foreground/80">
+                                                        {formatLastRanLabel(task.lastRunAt)}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        {isRunning ? (
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
+                                                                    <Loader2 className="size-3 animate-spin" />
+                                                                    Updating
+                                                                </span>
+                                                                <Button
+                                                                    variant="destructive"
+                                                                    size="sm"
+                                                                    onClick={() => handleStop(task.slug)}
+                                                                    disabled={isStopping}
+                                                                    className="h-auto gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium"
+                                                                >
+                                                                    {isStopping ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+                                                                    Stop
+                                                                </Button>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center gap-3">
+                                                                <Switch
+                                                                    checked={task.active}
+                                                                    onCheckedChange={(checked) => { void handleToggleActive(task.slug, checked) }}
+                                                                    disabled={isUpdating}
+                                                                />
+                                                                <span className="min-w-16 text-xs font-medium text-foreground/80">
+                                                                    {task.active ? 'Active' : 'Inactive'}
+                                                                </span>
+                                                                {isUpdating && (
+                                                                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                                                                )}
+                                                            </div>
                                                         )}
-                                                    </div>
-                                                )}
-                                            </td>
-                                            <td className="px-2 py-3">
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <button
-                                                            type="button"
-                                                            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                                                            aria-label={`Options for ${task.name}`}
-                                                        >
-                                                            <MoreVertical className="size-4" />
-                                                        </button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="w-44">
-                                                        <DropdownMenuItem onClick={() => setDetailsTask(task)}>
-                                                            <Info className="size-3.5" /> View details
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem
-                                                            variant="destructive"
-                                                            onClick={() => setDeleteTarget(task)}
-                                                        >
-                                                            <Trash2 className="size-3.5" /> Delete task
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </td>
-                                        </tr>
+                                                    </td>
+                                                    <td className="px-2 py-3">
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild>
+                                                                <button
+                                                                    type="button"
+                                                                    className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                                                                    aria-label={`Options for ${task.name}`}
+                                                                >
+                                                                    <MoreVertical className="size-4" />
+                                                                </button>
+                                                            </DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end" className="w-44">
+                                                                <BgTaskMenuItems {...menuProps} />
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
+                                                    </td>
+                                                </tr>
+                                            </ContextMenuTrigger>
+                                            <ContextMenuContent className="w-44">
+                                                <BgTaskMenuItems context {...menuProps} />
+                                            </ContextMenuContent>
+                                        </ContextMenu>
                                     )
                                 })}
                             </tbody>

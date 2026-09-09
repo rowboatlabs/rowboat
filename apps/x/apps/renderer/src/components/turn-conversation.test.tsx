@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { TurnConversation } from './turn-conversation'
 import type { ConversationItem } from '@/lib/chat-conversation'
 
@@ -35,6 +35,12 @@ const durableItem: ConversationItem = {
 }
 
 describe('TurnConversation — streaming → durable identity', () => {
+  it('opens a copy menu on the rendered assistant message', () => {
+    render(<TurnConversation items={[durableItem]} />)
+    fireEvent.contextMenu(screen.getByText(durableItem.content), { button: 2 })
+    expect(screen.getByRole('menuitem', { name: 'Copy message' })).toBeTruthy()
+  })
+
   it('keeps the assistant message DOM node across the swap (no remount flash)', () => {
     const { rerender } = render(<TurnConversation items={[streamingItem]} />)
     const before = document.querySelector('[data-message-id="turn-1:a0"]')

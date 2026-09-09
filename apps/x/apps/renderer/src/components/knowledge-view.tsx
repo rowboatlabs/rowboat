@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { FileListContextMenu } from '@/components/file-list-context-menu'
 import {
   ChevronRight,
   Copy,
@@ -232,6 +233,11 @@ export function KnowledgeView({
           {basisContent}
         </div>
       ) : (
+      <FileListContextMenu actions={[
+        { label: 'New note', onSelect: () => actions.createNote(currentFolder?.path) },
+        { label: 'New folder', onSelect: () => { void actions.createFolder(currentFolder?.path).then(setRenameTarget).catch(() => {}) } },
+        { label: 'Add Google Doc', onSelect: () => actions.addGoogleDoc(currentFolder?.path) },
+      ]}>
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1120px] px-[30px] py-6">
           {currentFolder ? (
@@ -299,6 +305,7 @@ export function KnowledgeView({
           />
         </div>
       </div>
+      </FileListContextMenu>
       )}
     </div>
   )

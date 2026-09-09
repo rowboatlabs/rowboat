@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { FileListContextMenu } from '@/components/file-list-context-menu'
 import { Archive, ArchiveRestore, Bell, BellOff, Bot, Check, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
@@ -473,6 +474,12 @@ export function SpaceRail({
                     </DropdownMenu>
                 </SectionHeader>
                 {!filesCollapsed && (
+                    <FileListContextMenu onOpenChange={onMenuOpenChange} actions={[
+                        { label: 'New file', onSelect: () => { setCreatingBoard(false); setCreatingFile({ prefix: '' }) } },
+                        { label: 'New folder', onSelect: () => { setCreatingBoard(false); setCreatingFolder(true) } },
+                        { label: 'New board', onSelect: () => { setCreatingFile(null); setCreatingFolder(false); setCreatingBoard(true) } },
+                        { label: 'Upload files…', onSelect: () => uploadInputRef.current?.click() },
+                    ]}>
                     <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                         <FileTree
                             orgId={orgId}
@@ -513,6 +520,7 @@ export function SpaceRail({
                             </div>
                         )}
                     </div>
+                    </FileListContextMenu>
                 )}
             </section>
         </div>

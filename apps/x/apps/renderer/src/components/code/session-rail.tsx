@@ -24,6 +24,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { projectLabel, type ProjectRow } from './use-code-sessions'
 import { AGENT_LABEL, isAgentReady, type CodeAgentsStatus } from './code-agent-status'
 
@@ -31,6 +34,60 @@ import { AGENT_LABEL, isAgentReady, type CodeAgentsStatus } from './code-agent-s
 // cap, never a deletion policy.
 const DONE_VISIBLE_LIMIT = 25
 const DONE_OPEN_STORAGE_KEY = 'x:code-done-open'
+
+// Both menu entry points use the same actions and availability rules.
+function SessionMenuItems({ context = false, done, onSetDone, onDelete }: {
+  context?: boolean
+  done: boolean
+  onSetDone: (done: boolean) => void
+  onDelete: () => void
+}) {
+  const Item = context ? ContextMenuItem : DropdownMenuItem
+  const Separator = context ? ContextMenuSeparator : DropdownMenuSeparator
+  const Icon = done ? RotateCcw : Check
+  return (
+    <>
+      <Item onSelect={() => onSetDone(!done)}>
+        <Icon className="size-4" /> {done ? 'Reopen' : 'Mark as done'}
+      </Item>
+      <Separator />
+      <Item onSelect={onDelete}>
+        <Trash2 className="size-4" /> Delete session
+      </Item>
+    </>
+  )
+}
+
+function ProjectMenuItems({ context = false, projectId, agentsStatus, onNewSession, onRemoveProject }: {
+  context?: boolean
+  projectId: string
+  agentsStatus: CodeAgentsStatus | null
+  onNewSession: (projectId: string, agent?: CodingAgent) => void
+  onRemoveProject: (projectId: string) => void
+}) {
+  const Item = context ? ContextMenuItem : DropdownMenuItem
+  const Separator = context ? ContextMenuSeparator : DropdownMenuSeparator
+  return (
+    <>
+      <Item onSelect={() => onNewSession(projectId)}>
+        <Plus className="size-4" /> New session
+      </Item>
+      {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
+        <Item
+          key={agent}
+          disabled={agentsStatus !== null && !isAgentReady(agentsStatus, agent)}
+          onSelect={() => onNewSession(projectId, agent)}
+        >
+          <span className="size-4" /> New {AGENT_LABEL[agent]} session
+        </Item>
+      ))}
+      <Separator />
+      <Item onSelect={() => onRemoveProject(projectId)}>
+        <Trash2 className="size-4" /> Remove project
+      </Item>
+    </>
+  )
+}
 
 function readDoneOpen(): boolean {
   if (typeof window === 'undefined') return false
@@ -92,81 +149,81 @@ function SessionRow({
   const ToggleIcon = done ? RotateCcw : Check
   const toggleLabel = done ? 'Reopen' : 'Mark as done'
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      title={`${session.title}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${worktree.branch}` : ''}`}
-      className={cn(
-        'group relative mt-0.5 flex cursor-pointer items-start gap-2.5 rounded-lg py-1.5 pl-2.5 pr-1.5',
-        indent && 'ml-3',
-        selected ? 'bg-accent text-foreground' : 'hover:bg-accent/60',
-      )}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect()
-        }
-      }}
-    >
-      <StatusDot status={done ? 'idle' : status} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className={cn('min-w-0 flex-1 truncate text-[13px] leading-5', selected ? 'font-medium' : 'text-foreground/90')}>
-            {prefix && <span className="text-muted-foreground">{prefix} · </span>}
-            {session.title}
-          </span>
-          {/* The time's slot is exactly as wide as the hover actions, so the
-              actions replace the time — never the title beside it. */}
-          <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0 group-has-[[data-state=open]]:opacity-0">
-            {when}
-          </span>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          role="button"
+          tabIndex={0}
+          title={`${session.title}\n${AGENT_LABEL[session.agent] ?? session.agent}${worktree ? ` · ${worktree.branch}` : ''}`}
+          className={cn(
+            'group relative mt-0.5 flex cursor-pointer items-start gap-2.5 rounded-lg py-1.5 pl-2.5 pr-1.5',
+            indent && 'ml-3',
+            selected ? 'bg-accent text-foreground' : 'hover:bg-accent/60',
+          )}
+          onClick={onSelect}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget) return
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              onSelect()
+            }
+          }}
+        >
+          <StatusDot status={done ? 'idle' : status} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <span className={cn('min-w-0 flex-1 truncate text-[13px] leading-5', selected ? 'font-medium' : 'text-foreground/90')}>
+                {prefix && <span className="text-muted-foreground">{prefix} · </span>}
+                {session.title}
+              </span>
+              {/* The time's slot is exactly as wide as the hover actions, so the
+                  actions replace the time — never the title beside it. */}
+              <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/70 transition-opacity group-hover:opacity-0 group-has-[[data-state=open]]:opacity-0">
+                {when}
+              </span>
+            </div>
+            <div className="truncate text-[11px] leading-4 text-muted-foreground/70">{detail}</div>
+          </div>
+          {/* Hover actions sit in the time's reserved slot so the card never
+              reflows and nothing overlaps the text. */}
+          <div className="absolute right-1.5 top-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                  onClick={(e) => { e.stopPropagation(); onSetDone(!done) }}
+                  aria-label={toggleLabel}
+                >
+                  <ToggleIcon className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{toggleLabel}</TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 shrink-0 p-0 text-muted-foreground"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Session actions"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
+                <SessionMenuItems done={done} onSetDone={onSetDone} onDelete={onDelete} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
-        <div className="truncate text-[11px] leading-4 text-muted-foreground/70">{detail}</div>
-      </div>
-      {/* Hover actions sit in the time's reserved slot so the card never
-          reflows and nothing overlaps the text. */}
-      <div className="absolute right-1.5 top-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 has-[[data-state=open]]:opacity-100">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-              onClick={(e) => { e.stopPropagation(); onSetDone(!done) }}
-              aria-label={toggleLabel}
-            >
-              <ToggleIcon className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{toggleLabel}</TooltipContent>
-        </Tooltip>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 shrink-0 p-0 text-muted-foreground"
-              onClick={(e) => e.stopPropagation()}
-              aria-label="Session actions"
-            >
-              <MoreHorizontal className="size-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
-            <DropdownMenuItem onClick={() => onSetDone(!done)}>
-              <ToggleIcon className="size-4" />
-              {toggleLabel}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onDelete}>
-              <Trash2 className="size-4" />
-              Delete session
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <SessionMenuItems context done={done} onSetDone={onSetDone} onDelete={onDelete} />
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -281,88 +338,75 @@ export function SessionRail({
             : projectSessions
           return (
             <div key={project.id} className="mb-2">
-              <div className="group flex h-8 items-center gap-1 rounded-lg pl-1 pr-1 hover:bg-accent/60">
-                <button
-                  type="button"
-                  onClick={() => toggleCollapsed(project.id)}
-                  className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
-                  aria-label={isCollapsed ? 'Expand project' : 'Collapse project'}
-                >
-                  {isCollapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-                </button>
-                {/* Deliberate hover delay — the full path is reference info,
-                    not something that should pop up on a passing cursor. */}
-                <Tooltip delayDuration={1000}>
-                  <TooltipTrigger asChild>
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <div className="group flex h-8 items-center gap-1 rounded-lg pl-1 pr-1 hover:bg-accent/60">
                     <button
                       type="button"
                       onClick={() => toggleCollapsed(project.id)}
-                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                      className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+                      aria-label={isCollapsed ? 'Expand project' : 'Collapse project'}
                     >
-                      <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium" dir="rtl">
-                        {/* Right-to-left truncation: when the label doesn't fit,
-                            the leaf folder — the part that tells packages apart —
-                            survives and the ellipsis eats the root end. */}
-                        <span dir="ltr">
-                          {label}
-                          {parentHint && (
-                            <span className="ml-1.5 font-normal text-muted-foreground/60">
-                              {compactPath(parentHint, 22)}
-                            </span>
-                          )}
-                        </span>
-                      </span>
+                      {isCollapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
                     </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="max-w-[420px] break-all font-mono text-xs">
-                    {project.path}
-                  </TooltipContent>
-                </Tooltip>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                  onClick={() => onNewSession(project.id)}
-                  title="New session"
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                    {/* Deliberate hover delay — the full path is reference info,
+                        not something that should pop up on a passing cursor. */}
+                    <Tooltip delayDuration={1000}>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => toggleCollapsed(project.id)}
+                          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                        >
+                          <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate text-[13px] font-medium" dir="rtl">
+                            {/* Right-to-left truncation: when the label doesn't fit,
+                                the leaf folder — the part that tells packages apart —
+                                survives and the ellipsis eats the root end. */}
+                            <span dir="ltr">
+                              {label}
+                              {parentHint && (
+                                <span className="ml-1.5 font-normal text-muted-foreground/60">
+                                  {compactPath(parentHint, 22)}
+                                </span>
+                              )}
+                            </span>
+                          </span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[420px] break-all font-mono text-xs">
+                        {project.path}
+                      </TooltipContent>
+                    </Tooltip>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 w-6 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100"
+                      className="h-6 w-6 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={() => onNewSession(project.id)}
+                      title="New session"
                     >
-                      <MoreHorizontal className="size-3.5" />
+                      <Plus className="size-3.5" />
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem onClick={() => onNewSession(project.id)}>
-                      <Plus className="size-4" />
-                      New session
-                    </DropdownMenuItem>
-                    {/* The explicit picks — the plain entry (and the + button)
-                        take the agent you last worked with. */}
-                    {(['claude', 'codex'] as CodingAgent[]).map((agent) => (
-                      <DropdownMenuItem
-                        key={agent}
-                        disabled={agentsStatus !== null && !isAgentReady(agentsStatus, agent)}
-                        onClick={() => onNewSession(project.id, agent)}
-                      >
-                        <span className="size-4" />
-                        New {AGENT_LABEL[agent]} session
-                      </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => onRemoveProject(project.id)}>
-                      <Trash2 className="size-4" />
-                      Remove project
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100"
+                        >
+                          <MoreHorizontal className="size-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start">
+                        <ProjectMenuItems projectId={project.id} agentsStatus={agentsStatus} onNewSession={onNewSession} onRemoveProject={onRemoveProject} />
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ProjectMenuItems context projectId={project.id} agentsStatus={agentsStatus} onNewSession={onNewSession} onRemoveProject={onRemoveProject} />
+                </ContextMenuContent>
+              </ContextMenu>
               {!isCollapsed && projectSessions.length === 0 && (
                 <button
                   type="button"

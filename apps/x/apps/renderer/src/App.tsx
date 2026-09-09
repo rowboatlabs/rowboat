@@ -89,7 +89,8 @@ import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
-import { type ChatTab } from '@/components/tab-bar'
+import { TabBar, type ChatTab } from '@/components/tab-bar'
+import { closeTabs } from '@/lib/close-tabs'
 import { CaffeinateToggle } from '@/components/caffeinate-toggle'
 import {
   type ChatMessage,
@@ -878,6 +879,13 @@ function App() {
 
   // File browser state (for Knowledge section)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [openFilePaths, setOpenFilePaths] = useState<string[]>([])
+  const openFilePathsRef = useRef(openFilePaths)
+  openFilePathsRef.current = openFilePaths
+  const fileTabNavigationRef = useRef(0)
+  useEffect(() => {
+    if (selectedPath) setOpenFilePaths((prev) => prev.includes(selectedPath) ? prev : [...prev, selectedPath])
+  }, [selectedPath])
   const [, setFileContent] = useState<string>('')
   const [editorContent, setEditorContent] = useState<string>('')
   const editorContentRef = useRef<string>('')
@@ -2815,13 +2823,16 @@ function App() {
       permissionResponses: new Map(permissionResponses),
       autoPermissionDecisions: new Map(autoPermissionDecisions),
     }
-    setChatViewStateByTab((prev) => ({ ...prev, [activeChatTabId]: snapshot }))
+    const liveSnapshot = sessionChat.sessionId === runId && sessionChat.chatState
+      ? { runId, ...sessionChat.chatState } : snapshot
+    setChatViewStateByTab((prev) => ({ ...prev, [activeChatTabId]: liveSnapshot }))
   }, [
     activeChatTabId,
     runId,
     conversation,
     currentAssistantMessage,
     sessionChat.chatState,
+    sessionChat.sessionId,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
@@ -3131,6 +3142,18 @@ function App() {
         return []
       })()
       const selectedPathAtEvent = selectedPathRef.current
+      if (event.type === 'moved') {
+        const movedPath = (path: string) => path === event.from || path.startsWith(`${event.from}/`)
+          ? event.to + path.slice(event.from.length) : path
+        setOpenFilePaths((prev) => [...new Set(prev.map(movedPath))])
+        if (selectedPathAtEvent && selectedPathAtEvent.startsWith(`${event.from}/`)) setSelectedPath(movedPath(selectedPathAtEvent))
+      } else if (event.type === 'deleted') {
+        setOpenFilePaths((prev) => prev.filter((path) => path !== event.path && !path.startsWith(`${event.path}/`)))
+        if (selectedPathAtEvent && (selectedPathAtEvent === event.path || selectedPathAtEvent.startsWith(`${event.path}/`))) {
+          setSelectedPath(null)
+          setIsKnowledgeViewOpen(true)
+        }
+      }
 
       // Initial hydration owns its read until editorPath/baseline are ready.
       // Record every Markdown event so that loader can detect an in-flight
@@ -4613,7 +4636,7 @@ function App() {
     setIsBrowserOpen(false)
   }, [])
 
-  const handleNewChat = useCallback(() => {
+  const handleNewChat = useCallback((preserveDraft = false) => {
     // Invalidate any in-flight run loads (rapid switching can otherwise "pop" old conversations back in)
     loadRunRequestIdRef.current += 1
     setConversation([])
@@ -4636,8 +4659,10 @@ function App() {
     // A brand-new chat starts with no work directory and restarts its
     // selection from the settings pair (the composer re-seeds when its
     // runId prop drops to null; clearing here keeps the map in lockstep).
-    setWorkDirByTab(prev => ({ ...prev, [activeChatTabIdRef.current]: null }))
-    selectionByTabRef.current.delete(chatIdForTab(activeChatTabIdRef.current))
+    if (!preserveDraft) {
+      setWorkDirByTab(prev => ({ ...prev, [activeChatTabIdRef.current]: null }))
+      selectionByTabRef.current.delete(chatIdForTab(activeChatTabIdRef.current))
+    }
   }, [setChatViewportAnchor])
 
   const activateAssistantTab = useCallback((tab: ChatTab) => {
@@ -4688,11 +4713,36 @@ function App() {
     }
   }, [activateAssistantTab])
 
-  // Bind the single chat surface to a session. THE one way any part of the
-  // app points the chat at a conversation (recents, history, Home threads,
-  // code sessions, quick-ask). No-ops when already bound; otherwise rebinds
-  // with a fresh chat identity (remounts pane + composer, drops drafts).
+  const switchChatTab = useCallback((tabId: string) => {
+    const tab = chatTabsRef.current.find((entry) => entry.id === tabId)
+    if (!tab || tabId === activeChatTabIdRef.current) return
+    activateAssistantTab(tab)
+  }, [activateAssistantTab])
+
+  const closeChatTabs = useCallback((ids: string[]) => {
+    const next = closeTabs(chatTabsRef.current, activeChatTabIdRef.current, ids, (tab) => tab.id)
+    if (!next.activeId) return // Keep one chat, matching the tab strip's close rules.
+    switchChatTab(next.activeId)
+    chatTabsRef.current = next.tabs
+    setChatTabs(next.tabs)
+  }, [switchChatTab])
+
+  const createChatTab = useCallback(() => {
+    cancelRecordingIfActive()
+    const id = crypto.randomUUID()
+    const tab: ChatTab = { id, runId: null, chatId: id }
+    chatTabsRef.current = [...chatTabsRef.current, tab]
+    setChatTabs(chatTabsRef.current)
+    activeChatTabIdRef.current = id
+    setActiveChatTabId(id)
+    handleNewChat()
+    return tab
+  }, [cancelRecordingIfActive, handleNewChat])
+
+  // Reuse an existing session tab, or open a new one without replacing a draft.
   const bindChatToRun = useCallback((rid: string) => {
+    const existing = chatTabsRef.current.find((tab) => tab.runId === rid)
+    if (existing) { switchChatTab(existing.id); return }
     const active = chatTabsRef.current.find((t) => t.id === activeChatTabIdRef.current)
     if (active?.runId === rid) return
     if (useBottomTabs || chatTabsRef.current.length > 1) {
@@ -4704,14 +4754,16 @@ function App() {
     }
     // Cancel any active dictation — its transcript belongs to the old chat.
     cancelRecordingIfActive()
+    if (active?.runId || (active && chatDraftsRef.current.get(active.chatId))) createChatTab()
+    const targetTabId = activeChatTabIdRef.current
     setChatTabs((prev) => prev.map((t) => (
       // Rebinding to a different session = a different chat identity — but a
       // DETERMINISTIC one (the session id), so switching A→B→A restores A's
       // draft/selection instead of silently dropping half-typed input.
-      t.id === activeChatTabIdRef.current ? { ...t, runId: rid, chatId: rid } : t
+      t.id === targetTabId ? { ...t, runId: rid, chatId: rid } : t
     )))
     void loadRun(rid)
-  }, [cancelRecordingIfActive, loadRun, useBottomTabs, activateAssistantTab])
+  }, [cancelRecordingIfActive, loadRun, switchChatTab, createChatTab, useBottomTabs, activateAssistantTab])
   bindChatToRunRef.current = bindChatToRun
 
   // A code session was selected in the Code view: bind the chat to it — the
@@ -4849,19 +4901,17 @@ function App() {
       }
       return
     }
-    // Single-chat model: reset the one conversation in place instead of
-    // opening a new tab. Fresh chatId = fresh chat-session instance.
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId: crypto.randomUUID() }])
+    // A fresh tab keeps the other conversations and drafts available.
+    createChatTab()
     dismissBrowserOverlay()
-    handleNewChat()
     // "New chat" opens the full-screen chat; remember where we came from so
     // closing it can restore the section.
     const from = currentViewState.type === 'chat' ? null : currentViewState
     closeAllSections()
     setExpandedFrom(from)
-  }, [dismissBrowserOverlay, handleNewChat, closeAllSections, currentViewState, useBottomTabs, addAssistantTab, isCodeOpen])
+  }, [dismissBrowserOverlay, closeAllSections, currentViewState, createChatTab, useBottomTabs, addAssistantTab, isCodeOpen])
 
-  // Sidebar variant: reset the chat in place without leaving file/graph context.
+  // Sidebar variant: add a chat without leaving file/graph context.
   // A caller with a selection already chosen for the fresh chat (the Home
   // composer handoff) passes it here so the map entry exists BEFORE the
   // rebind commit — the remounted composer's initialSelection then shows the
@@ -4871,11 +4921,9 @@ function App() {
       addAssistantTab(initialSelection)
       return
     }
-    const chatId = crypto.randomUUID()
+    const { chatId } = createChatTab()
     if (initialSelection) selectionByTabRef.current.set(chatId, initialSelection)
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId }])
-    handleNewChat()
-  }, [handleNewChat, useBottomTabs, addAssistantTab])
+  }, [createChatTab, useBottomTabs, addAssistantTab])
 
   // A chat was deleted (sessions:delete succeeded): drop it from the recents
   // list, and if it was the one on screen, reset the chat surface in place to
@@ -4893,8 +4941,9 @@ function App() {
       closeAssistantTab(openTab.id)
       return
     }
-    handleNewChatTabInSidebar()
-  }, [chatTabs, handleNewChatTabInSidebar, useBottomTabs, closeAssistantTab])
+    if (chatTabs.length === 1) createChatTab()
+    closeChatTabs([openTab.id])
+  }, [chatTabs, createChatTab, closeChatTabs, useBottomTabs, closeAssistantTab])
 
   // The companion's "+": a fresh COMPANION conversation for its next
   // question. The app window's chat is untouched.
@@ -5478,6 +5527,46 @@ function App() {
   const navigateToFile = useCallback((path: string) => {
     void navigateToView({ type: 'file', path })
   }, [navigateToView])
+
+  const saveTabMarkdown = useCallback(async (paths: string[]) => {
+    for (const path of paths) {
+      if (!path.endsWith('.md')) continue
+      const content = editorContentByPathRef.current.get(path)
+      const baseline = initialContentByPathRef.current.get(path)
+      if (content === undefined || baseline === undefined || content === baseline) continue
+      await window.ipc.invoke('workspace:writeFile', {
+        path, data: joinFrontmatter(frontmatterByPathRef.current.get(path) ?? null, content),
+      })
+      setInitialContentForPath(path, content)
+    }
+  }, [setInitialContentForPath])
+
+  const switchFileTab = useCallback((path: string) => {
+    const request = ++fileTabNavigationRef.current
+    void (async () => {
+      try {
+        await saveTabMarkdown(selectedPathRef.current ? [selectedPathRef.current] : [])
+        if (request !== fileTabNavigationRef.current) return
+        navigateToFile(path)
+      } catch { toast.error('Could not save the current file; tab kept open') }
+    })()
+  }, [saveTabMarkdown, navigateToFile])
+
+  const closeFileTabs = useCallback((paths: string[]) => {
+    ++fileTabNavigationRef.current // A close supersedes an in-flight tab switch.
+    void (async () => {
+      try {
+        await saveTabMarkdown(paths)
+        const next = closeTabs(openFilePathsRef.current, selectedPathRef.current, paths, (path) => path)
+        openFilePathsRef.current = next.tabs
+        setOpenFilePaths(next.tabs)
+        if (next.activeId !== selectedPathRef.current) {
+          if (next.activeId) navigateToFile(next.activeId)
+          else void navigateToView({ type: 'knowledge-view', mode: 'files' })
+        }
+      } catch { toast.error('Could not save files; tabs kept open') }
+    })()
+  }, [saveTabMarkdown, navigateToFile, navigateToView])
 
   // Deep-link handler kept in a ref so the useEffect below can register the
   // IPC listener (and run the one-time pending-link drain) just once on mount,
@@ -6895,7 +6984,7 @@ function App() {
   // The active chat's view state, backed by the sessions hook (legacy
   // standalone states remain only as the pre-load fallback until stage 7).
   const activeChatTabState = React.useMemo<ChatTabViewState>(() => (
-    sessionChat.chatState
+    sessionChat.sessionId === runId && sessionChat.chatState
       ? { runId, ...sessionChat.chatState }
       : {
           runId,
@@ -6909,6 +6998,7 @@ function App() {
         }
   ), [
     runId,
+    sessionChat.sessionId,
     sessionChat.chatState,
     sessionLoadErrorItems,
     conversation,
@@ -7135,9 +7225,19 @@ function App() {
                     onSelectRun={openAssistantRun}
                     onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                   />
+                ) : currentViewState.type === 'file' && selectedPath ? (
+                  <TabBar
+                    tabs={openFilePaths.includes(selectedPath) ? openFilePaths : [...openFilePaths, selectedPath]}
+                    activeTabId={selectedPath}
+                    getTabId={(path) => path}
+                    getTabTitle={(path) => path.split('/').pop() ?? path}
+                    onSwitchTab={switchFileTab}
+                    onCloseTab={(path) => closeFileTabs([path])}
+                    onCloseTabs={closeFileTabs}
+                    layout="scroll"
+                    allowSingleTabClose
+                  />
                 ) : (
-                  // No tabs: the header names the section (or open file). It is
-                  // part of the titlebar drag region — static text drags fine.
                   <div className="flex min-w-0 flex-1 items-center self-center">
                     <span className="truncate text-sm font-medium text-foreground/80">
                       {currentViewTitle}
@@ -7760,6 +7860,11 @@ function App() {
               {activeMiddle === 'chat' && !useBottomTabs && (
               <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }} onOpenFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex h-9 shrink-0 border-b border-border">
+                  <TabBar tabs={chatTabs} activeTabId={activeChatTabId} getTabId={(tab) => tab.id}
+                    getTabTitle={getChatTabTitle} onSwitchTab={switchChatTab}
+                    onCloseTab={(id) => closeChatTabs([id])} onCloseTabs={closeChatTabs} layout="scroll" />
+                </div>
                 <div className="relative min-h-0 flex-1">
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId
@@ -7891,6 +7996,8 @@ function App() {
                 isOpen={dockFullScreen || chatPaneOpen}
                 isMaximized={dockFullScreen || isRightPaneMaximized}
                 chatTabs={chatTabs}
+                onSwitchChatTab={switchChatTab}
+                onCloseChatTabs={closeChatTabs}
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
                 onNewChatTab={() => handleNewChatTabInSidebar()}

@@ -1,5 +1,6 @@
 "use client"
 
+import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
@@ -1139,13 +1140,21 @@ export function SidebarContentPanel({
                         </div>
                       ) : (
                         <>
-                          <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
-                            <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
-                            {pinnedChatIds.includes(chat.id) && (
-                              <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
-                            )}
-                          </SidebarMenuButton>
+                          <SidebarChatContextMenu
+                            pinned={pinnedChatIds.includes(chat.id)}
+                            onOpen={onOpenRun ? () => onOpenRun(chat.id) : undefined}
+                            onTogglePin={() => toggleChatPin(chat.id)}
+                            onRename={onRenameRun ? () => { setRenameDraft(chat.title || ''); setRenamingChatId(chat.id) } : undefined}
+                            onRequestDelete={onDeleteRun ? () => setDeleteChatTarget({ id: chat.id, title: chat.title || '(Untitled chat)' }) : undefined}
+                          >
+                            <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
+                              <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                              <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
+                              {pinnedChatIds.includes(chat.id) && (
+                                <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
+                              )}
+                            </SidebarMenuButton>
+                          </SidebarChatContextMenu>
                           {onRenameRun && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
