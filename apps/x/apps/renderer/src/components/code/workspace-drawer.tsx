@@ -114,7 +114,7 @@ export function CodeWorkspaceDrawer({
 
   const maxAllowedWidth = useCallback(() => {
     const root = rootRef.current
-    const chat = root?.parentElement?.querySelector<HTMLElement>('[data-chat-sidebar-root]')
+    const chat = root?.parentElement?.querySelector<HTMLElement>('[data-docked-chat]')
     const chatWidth = chat?.getBoundingClientRect().width ?? 0
     const split = chatWidth + (root?.getBoundingClientRect().width ?? 0)
     if (split <= 0) return MAX_WIDTH
@@ -126,7 +126,7 @@ export function CodeWorkspaceDrawer({
   // chat. Shrink-only, so it can't fight the user's own resize.
   useEffect(() => {
     const root = rootRef.current
-    const chat = root?.parentElement?.querySelector<HTMLElement>('[data-chat-sidebar-root]')
+    const chat = root?.parentElement?.querySelector<HTMLElement>('[data-docked-chat]')
     if (!chat) return
     const clamp = () => setWidth((w) => Math.min(w, maxAllowedWidth()))
     clamp()

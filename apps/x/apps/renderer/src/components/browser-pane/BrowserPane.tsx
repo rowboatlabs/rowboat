@@ -432,7 +432,7 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
 
     const zoomFactor = Math.max(window.electronUtils.getZoomFactor(), 0.01)
     const rect = el.getBoundingClientRect()
-    const chatSidebar = el.ownerDocument.querySelector<HTMLElement>('[data-chat-sidebar-root]')
+    const chatSidebar = el.ownerDocument.querySelector<HTMLElement>('[data-docked-chat]')
     const chatSidebarRect = chatSidebar?.getBoundingClientRect()
     const clampedRightCss = chatSidebarRect && chatSidebarRect.width > 0
       ? Math.min(rect.right, chatSidebarRect.left)
@@ -527,7 +527,7 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
     if (!el) return
 
     const sidebarInset = el.closest<HTMLElement>('[data-slot="sidebar-inset"]')
-    const chatSidebar = el.ownerDocument.querySelector<HTMLElement>('[data-chat-sidebar-root]')
+    const chatSidebar = el.ownerDocument.querySelector<HTMLElement>('[data-docked-chat]')
     const documentElement = el.ownerDocument.documentElement
 
     let pendingRaf: number | null = null

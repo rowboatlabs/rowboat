@@ -17,6 +17,14 @@ export function createAssistantTab(runId: string | null = null): ChatTab {
   return { id: crypto.randomUUID(), chatId: runId ?? crypto.randomUUID(), runId }
 }
 
+export function replaceAssistantTab(tabs: ChatTab[], tabId: string, runId: string | null, chatId: string) {
+  return tabs.map((tab) => tab.id === tabId ? { ...tab, runId, chatId } : tab)
+}
+
+export function assistantDockTabs(tabs: ChatTab[], dockedId: string | null, fullScreenId: string | null) {
+  return tabs.filter((tab) => tab.id !== (fullScreenId ?? dockedId))
+}
+
 export function restoreAssistantTabs(raw: string | null): ChatTab[] {
   try {
     const parsed: unknown = JSON.parse(raw ?? 'null')

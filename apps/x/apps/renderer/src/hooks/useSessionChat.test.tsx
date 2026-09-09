@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { TurnBusEvent } from '@x/shared/src/turns.js'
 import type { SessionsClient } from '@/lib/session-chat/client'
 import {
@@ -168,6 +168,39 @@ describe('useSessionChat', () => {
       { method: 'respondToPermission', args: ['turn-2', 'tc1', 'deny', undefined] },
       { method: 'stopTurn', args: ['turn-2'] },
     ])
+  })
+
+  it('shares one seed and subscription across panels and the active chat', async () => {
+    const { deps, getUnsubscribed } = makeDeps()
+    const get = vi.spyOn(deps.client, 'get')
+    const first = renderHook(() => useSessionChat(S1, deps))
+    await waitFor(() => expect(first.result.current.latestTurnId).toBe('turn-1'))
+    const second = renderHook(() => useSessionChat(S1, deps))
+    expect(second.result.current.chatState).toBe(first.result.current.chatState)
+    expect(get).toHaveBeenCalledTimes(1)
+    first.unmount()
+    expect(getUnsubscribed()).toBe(0)
+    second.unmount()
+    expect(getUnsubscribed()).toBe(1)
+  })
+
+  it('keeps minimized sessions warm without rendering each streaming delta', async () => {
+    const { deps, emit } = makeDeps()
+    const get = vi.spyOn(deps.client, 'get')
+    const { result, rerender, unmount } = renderHook(({ live }) => useSessionChat(S1, deps, live), { initialProps: { live: true } })
+    await waitFor(() => expect(result.current.latestTurnId).toBe('turn-1'))
+    rerender({ live: false })
+    const frozen = result.current.chatState
+    act(() => {
+      emit(durable('turn-2', created('turn-2', S1, user('q2')), 1))
+      emit(durable('turn-2', requested('turn-2', 0), 2))
+      emit(delta('turn-2', 'Live answer'))
+    })
+    expect(result.current.chatState).toBe(frozen)
+    rerender({ live: true })
+    expect(result.current.chatState?.currentAssistantMessage).toBe('Live answer')
+    expect(get).toHaveBeenCalledTimes(1)
+    unmount()
   })
 
   it('unsubscribes from the feed on unmount (StrictMode double-mounts included)', async () => {
