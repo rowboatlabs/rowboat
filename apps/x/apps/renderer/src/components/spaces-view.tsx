@@ -16,8 +16,8 @@ import { FileColumn, TrashDialog, UploadFilesDialog } from '@/components/spaces/
 import { GeneralStream } from '@/components/spaces/general-stream'
 import { ScheduledDialog } from '@/components/spaces/scheduled-dialog'
 import { SelectionCopy } from '@/components/spaces/selection-copy'
-import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSwitcher } from '@/components/spaces/server-switcher'
+import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceSearch } from '@/components/spaces/space-search'
@@ -160,9 +160,14 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
             onSelect({ orgId, spaceId })
             onRailSelect({ kind: 'general' })
         }
-        return <div className="flex min-h-0 flex-1">
+        return <div className="spaces-surface flex min-h-0 flex-1 flex-col">
+            <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
+                <ServerSwitcher org={selectedOrg} onOpenSpace={openSpace} />
+            </header>
+            <div className="flex min-h-0 flex-1">
             <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-[var(--rowboat-panel-soft)] p-2">
-                <div className="flex items-center"><ServerSwitcher org={selectedOrg} onOpenSpace={openSpace} />
+                <div className="flex h-8 items-center">
+                    <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                     <ServerOptionsMenu org={selectedOrg} showArchived={emptyShowArchived} onToggleArchived={() => setEmptyShowArchived((value) => !value)} onMenuOpenChange={() => {}} />
                 </div>
                 <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={openSpace}
@@ -170,6 +175,7 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
             </aside>
             <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
                 {selectedOrg.error ? 'This server is unreachable. Retry or sign in from the server options.' : 'Create a space to start a conversation.'}
+            </div>
             </div>
         </div>
     }
@@ -688,18 +694,15 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
             {/* One per pane — covers the stream and thread panes alike. */}
             {active && <SelectionCopy />}
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
-                {/* Left: the org's mark, then # the space. Hover it for what the
-                    old identity card said — server name, who you are. The address
-                    is deliberately absent (decision 2026-09-07: names are the
-                    identity; the address is plumbing). Inviting lives with the
-                    members; nothing here repeats it. */}
+                <ServerSwitcher org={org} onOpenSpace={onSwitchSpace} />
+                <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">/</span>
+                {/* The space breadcrumb retains its identity hover card. */}
                 <HoverCard openDelay={200} closeDelay={150}>
                     <HoverCardTrigger asChild>
                         <button
                             type="button"
-                            className="flex h-9 max-w-[320px] shrink-0 items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
+                            className="flex h-9 min-w-0 max-w-[320px] shrink items-center gap-2 rounded-md pl-1 pr-2 hover:bg-accent/60 data-[state=open]:bg-accent/60"
                         >
-                            <OrgMonogram org={org} />
                             <span className={cn('flex min-w-0 items-center', isDirect ? 'gap-1.5' : 'gap-0.5')}>
                                 {isDirect
                                     ? <MemberAvatar id={directOtherId} name={spaceTitle} size="sm" />

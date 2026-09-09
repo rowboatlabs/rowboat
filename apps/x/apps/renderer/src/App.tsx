@@ -1,4 +1,5 @@
 import { DocumentFileViewer } from '@/components/document-file-viewer'
+import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 import * as React from 'react'
 import { Activity, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react'
 import { workspace, quickAskShortcut, pttKey, type ipc } from '@x/shared';
@@ -37,7 +38,7 @@ import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { SpacesView, type SpaceSelection } from '@/components/spaces-view';
 import { railKey, type RailSelection } from '@/lib/spaces-selection';
-import { findSpace, useSpacesOrgs } from '@/hooks/use-spaces';
+import { findSpace, getSpacesOrgs, refreshSpacesOrgs, useSpacesOrgs } from '@/hooks/use-spaces';
 import { spaceDisplayName } from '@/lib/spaces-direct';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
@@ -4783,7 +4784,7 @@ function App() {
 
   // Header title for the current view (the tab strip is gone — the header
   // names where you are instead).
-  const { orgs: spacesOrgs } = useSpacesOrgs()
+  const { orgs: spacesOrgs, loading: spacesLoading } = useSpacesOrgs()
   const currentViewTitle = React.useMemo(() => {
     switch (currentViewState.type) {
       case 'home': return 'Home'
@@ -5313,7 +5314,7 @@ function App() {
         // through here. With the flag off, closeAllSections has already run,
         // so the app lands on the default full-screen chat.
         if (!SPACES_ENABLED) return
-        if (view.orgId && view.spaceId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId })
+        if (view.orgId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId ?? '' })
         setRailSelection(view.rail ?? { kind: 'general' })
         // Spaces carries its own conversation surface, so entering it
         // collapses the assistant chat pane by default; in-space navigation
@@ -5403,6 +5404,12 @@ function App() {
   const openSpace = useCallback((orgId: string, spaceId: string) => {
     void navigateToView({ type: 'spaces', orgId, spaceId })
   }, [navigateToView])
+
+  const openSpaces = useCallback(async () => {
+    if (spacesLoading) await refreshSpacesOrgs()
+    const target = resolveSpacesLocation(getSpacesOrgs(), spaceSelection ?? readLastSpace())
+    void navigateToView(target ? { type: 'spaces', ...target } : { type: 'spaces' })
+  }, [spacesLoading, spaceSelection, navigateToView])
 
   const openMeetingsView = useCallback(() => {
     void navigateToView({ type: 'meetings' })
@@ -7037,6 +7044,7 @@ function App() {
     onOpenApps: openAppsGrid,
     onOpenApp: (folder: string) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() },
     onOpenSpace: openSpace,
+    onOpenSpaces: () => { void openSpaces() },
     activeSpace: isSpacesOpen ? spaceSelection : null,
     recentRuns: chatRuns,
     onOpenRun: openAssistantRun,

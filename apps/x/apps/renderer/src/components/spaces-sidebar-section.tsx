@@ -1,104 +1,45 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronRight, CornerDownRight, Hash, Loader2, MessagesSquare, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
-import { RemoveServerDialog } from '@/components/spaces/remove-server-dialog'
-import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
-import { AddOrgDialog, OrgMonogram, type SpaceSelection } from '@/components/spaces-view'
+import { type SpaceSelection } from '@/components/spaces-view'
 import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
 import { MemberAvatar } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
 import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
-import { bumpSpaceUse } from '@/lib/space-usage'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
 
 const MAX_VISIBLE_DIRECTS = 3
 
-export function SpacesSidebarSection({ activeSpace, onOpenSpace }: {
-    activeSpace: SpaceSelection
-    onOpenSpace: (orgId: string, spaceId: string) => void
+export function SpacesSidebarSection({ active, onOpenSpaces }: {
+    active: boolean
+    onOpenSpaces: () => void
 }) {
-    const { orgs, loading, refresh } = useSpacesOrgs()
-    const unread = useSpacesUnreadCounts()
-    const [expanded, setExpanded] = useState(true)
-    const [addOrgOpen, setAddOrgOpen] = useState(false)
-    const openSpace = (orgId: string, spaceId: string) => {
-        bumpSpaceUse(orgId, spaceId)
-        onOpenSpace(orgId, spaceId)
-    }
-
-    return (
-        <SidebarGroup className="flex flex-col pt-0">
-            <SidebarGroupContent>
-                <div className="group/spaces-head flex items-center pr-1.5">
-                    <button
-                        type="button"
-                        data-tour-id="nav-spaces"
-                        onClick={() => setExpanded((v) => !v)}
-                        className="flex h-8 flex-1 items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                    >
+    return <SidebarGroup className="pt-0">
+        <SidebarGroupContent>
+            <SidebarMenu>
+                <SidebarMenuItem>
+                    <SidebarMenuButton data-tour-id="nav-spaces" isActive={active} onClick={onOpenSpaces}>
                         <MessagesSquare className="size-4 shrink-0" />
-                        <span className="flex-1 truncate text-left">Spaces</span>
-                        <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-90')} />
-                    </button>
-                    <button
-                        type="button"
-                        aria-label="Add a server"
-                        title="Add a server"
-                        onClick={() => setAddOrgOpen(true)}
-                        className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/spaces-head:opacity-100"
-                    >
-                        <Plus className="size-3.5" />
-                    </button>
-                </div>
-                {expanded && (
-                    loading ? (
-                        <div className="flex items-center gap-2 pl-6 pr-4 pb-2 text-[11.5px] text-muted-foreground">
-                            <Loader2 className="size-3 animate-spin" /> Loading…
-                        </div>
-                    ) : orgs.length === 0 ? (
-                        <button
-                            type="button"
-                            onClick={() => setAddOrgOpen(true)}
-                            className="pl-6 pr-4 pb-2 text-left text-[11.5px] italic text-muted-foreground hover:text-foreground"
-                        >
-                            Add a server to see its spaces here.
-                        </button>
-                    ) : (
-                        <SidebarMenu>
-                            {orgs.map((org) => (
-                                <OrgRows
-                                    key={org.id}
-                                    org={org}
-                                    activeSpace={activeSpace}
-                                    unread={unread}
-                                    onOpenSpace={openSpace}
-                                    onChanged={() => void refresh()}
-                                />
-                            ))}
-                        </SidebarMenu>
-                    )
-                )}
-            </SidebarGroupContent>
-            <AddOrgDialog open={addOrgOpen} onOpenChange={setAddOrgOpen} onAdded={() => void refresh()} />
-        </SidebarGroup>
-    )
+                        <span>Spaces</span>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            </SidebarMenu>
+        </SidebarGroupContent>
+    </SidebarGroup>
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
     unread: Map<string, number>
-    rail?: boolean
     showArchived?: boolean
     activeDiscussionCount?: number
     renderDiscussions?: (spaceId: string) => ReactNode
@@ -113,7 +54,6 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
     const [renameValue, setRenameValue] = useState('')
     const [newDirectOpen, setNewDirectOpen] = useState(false)
     const [showAllDirects, setShowAllDirects] = useState(() => sessionStorage.getItem(`spaces:directsExpanded:${org.id}`) === 'true')
-    const [confirmRemove, setConfirmRemove] = useState(false)
     // A dead OAuth session shows as a gentle "Sign in again" (org.authError, from core);
     // an unreachable org shows Retry.
     const needsSignIn = !!org.authError
@@ -199,18 +139,9 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
         <>
             <SidebarMenuItem>
                 <div className="group/org flex h-7 items-center gap-1.5 rounded-md pl-6 pr-2 text-[11.5px] text-muted-foreground" title={`You are ${org.memberId}`}>
-                    {rail ? (
-                        <button type="button" onClick={() => setCreating(true)} className="flex flex-1 items-center gap-1.5 text-left hover:text-foreground">
-                            <Plus className="size-3.5" /> New space
-                        </button>
-                    ) : <>
-                    <OrgMonogram org={org} size="sm" />
-                    <button type="button" className={cn('flex-1 truncate text-left hover:text-foreground', activeSpace?.orgId === org.id && 'font-semibold text-foreground')}
-                        aria-current={!rail && activeSpace?.orgId === org.id ? 'page' : undefined}
-                        onClick={() => onOpenSpace(org.id, activeSpace?.orgId === org.id ? activeSpace.spaceId : (org.spaces[0]?.id ?? org.directs[0]?.id ?? ''))}>
-                        {org.name}
+                    <button type="button" onClick={() => setCreating(true)} className="flex flex-1 items-center gap-1.5 text-left hover:text-foreground">
+                        <Plus className="size-3.5" /> New space
                     </button>
-                    </>}
                     {needsSignIn ? (
                         <button
                             type="button"
@@ -231,29 +162,10 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
                             Retry
                         </button>
                     ) : null}
-                    {!rail && <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                aria-label="Server options"
-                                className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/org:opacity-100 data-[state=open]:opacity-100"
-                            >
-                                <MoreVertical className="size-3.5" />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent side="right" align="start" onCloseAutoFocus={(event) => { if (confirmRemove) event.preventDefault() }}>
-                            <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onClick={() => setConfirmRemove(true)}
-                            >
-                                <Trash2 className="mr-2 size-3.5" /> Remove server
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>}
-                    <RemoveServerDialog org={org} open={confirmRemove} onOpenChange={setConfirmRemove} onRemoved={onChanged} />
+
                 </div>
             </SidebarMenuItem>
-            {rail && org.spaces.map((space) => {
+            {org.spaces.map((space) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
                 const count = unread.get(`${org.id}/${space.id}`) ?? 0
                 if (renamingId === space.id) {
@@ -307,7 +219,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
                     </CollapsibleSpace>
                 )
             })}
-            {rail && org.spaces.length === 0 && !org.error && !creating && (
+            {org.spaces.length === 0 && !org.error && !creating && (
                 <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => setCreating(true)} className="pl-6 text-muted-foreground">
                         <Plus className="size-3.5 shrink-0" />
@@ -318,7 +230,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
             {/* Direct messages: the org's people you talk to, most recent first.
                 A DM is a space with a two-person roster (contract 2026-09-07);
                 the row is the person, not a channel. */}
-            {rail && !org.error && (
+            {!org.error && (
                 <SidebarMenuItem>
                     <button type="button" aria-expanded={!directsCollapsed} onClick={() => setDirectsCollapsed((v) => { sessionStorage.setItem(`spaces:directsCollapsed:${org.id}`, String(!v)); return !v })} className="flex h-8 w-full items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground">
                         <ChevronRight className={cn("size-3.5", !directsCollapsed && "rotate-90")} />
@@ -326,7 +238,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
                     </button>
                 </SidebarMenuItem>
             )}
-            {rail && !directsCollapsed && !org.error && visibleDirects.map((dm) => {
+            {!directsCollapsed && !org.error && visibleDirects.map((dm) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
                 const count = unread.get(`${org.id}/${dm.id}`) ?? 0
                 const self = isSelfDirect(dm, org.memberId)
@@ -356,7 +268,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
                 )
             })}
             {/* Not created yet: the same row, waiting for its first click. */}
-            {rail && !directsCollapsed && !org.error && !selfDm && (
+            {!directsCollapsed && !org.error && !selfDm && (
                 <SidebarMenuItem>
                     <SidebarMenuButton
                         onClick={() => void openSelf()}
@@ -373,7 +285,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             )}
-            {rail && !directsCollapsed && !org.error && directs.length > MAX_VISIBLE_DIRECTS && (
+            {!directsCollapsed && !org.error && directs.length > MAX_VISIBLE_DIRECTS && (
                 <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => setShowAllDirects((v) => { sessionStorage.setItem(`spaces:directsExpanded:${org.id}`, String(!v)); return !v })} className="pl-6 text-muted-foreground">
                         <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', showAllDirects && 'rotate-90')} />
@@ -381,7 +293,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, rail, rende
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             )}
-            {rail && !org.error && (
+            {!org.error && (
                 <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => setNewDirectOpen(true)} className="pl-6 text-muted-foreground">
                         <Plus className="size-3.5 shrink-0" />
@@ -430,7 +342,7 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenDiscuss
     const { refresh } = useSpacesOrgs()
     const unread = useSpacesUnreadCounts()
     return <SidebarMenu>
-        <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} rail showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
+        <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
             onOpenSpace={onOpenSpace} onChanged={() => void refresh()}
             renderDiscussions={(id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}

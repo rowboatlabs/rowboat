@@ -197,6 +197,7 @@ type SidebarContentPanelProps = {
   onOpenApp?: (folder: string) => void
   /** Open one space (org + space) in the Spaces view. */
   onOpenSpace?: (orgId: string, spaceId: string) => void
+  onOpenSpaces?: () => void
   /** The space currently open, for highlighting its sidebar row. */
   activeSpace?: SpaceSelection
   onOpenAgent?: (slug: string) => void
@@ -456,8 +457,7 @@ export function SidebarContentPanel({
   onOpenBgTasks,
   onOpenApps,
   onOpenApp,
-  onOpenSpace,
-  activeSpace = null,
+  onOpenSpaces,
   recentRuns = [],
   onOpenRun,
   onRenameRun,
@@ -866,10 +866,10 @@ export function SidebarContentPanel({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Spaces — orgs and their spaces, with unread counts */}
+        {/* Spaces returns to the last active server and space. */}
         {SPACES_ENABLED && (
           <>
-            <SpacesSidebarSection activeSpace={activeSpace} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
+            <SpacesSidebarSection active={activeNav === 'spaces'} onOpenSpaces={() => onOpenSpaces?.()} />
             <div className="mx-3 my-2 border-t border-border" />
           </>
         )}

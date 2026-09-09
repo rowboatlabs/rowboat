@@ -19,10 +19,16 @@ export function ServerSwitcher({ org, onOpenSpace, onMenuOpenChange }: {
     return <>
         <DropdownMenu open={menuOpen} onOpenChange={(open) => { setMenuOpen(open); onMenuOpenChange?.(open || action !== null) }}>
             <DropdownMenuTrigger asChild>
-                <button type="button" aria-label={`Switch server: ${org.name}`}
-                    className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-left hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <OrgMonogram org={org} className="size-8 rounded-lg text-xs font-medium" />
-                    <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">{org.name}</span>
+                <button type="button" aria-label={`Switch server: ${org.name}`} title={orgs.length > 1 ? 'Switch server · more servers available' : 'Switch server'}
+                    className="flex h-9 min-w-0 max-w-64 shrink items-center gap-2 rounded-md px-1.5 text-left hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <span className="relative isolate flex size-7 shrink-0 items-start justify-start">
+                        {orgs.length > 1 && <span aria-hidden="true" className="pointer-events-none absolute inset-0">
+                            <span className="absolute left-1 top-1 size-6 rounded-md border border-foreground/20 bg-muted" />
+                            <span className="absolute left-0.5 top-0.5 size-6 rounded-md border border-foreground/25 bg-muted" />
+                        </span>}
+                        <OrgMonogram org={org} className="relative size-6 rounded-md text-[10px] font-medium" />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">{org.name}</span>
                     <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
                 </button>
             </DropdownMenuTrigger>

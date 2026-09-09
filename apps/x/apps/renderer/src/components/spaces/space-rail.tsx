@@ -15,7 +15,6 @@ import { toast } from '@/lib/toast'
 import { SecondaryRail, type SecondaryRailContext } from '@/components/secondary-rail'
 import { FileTree } from '@/components/spaces/files-tab'
 import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
-import { ServerSwitcher } from '@/components/spaces/server-switcher'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { refreshSpaceFeed, type OrgWithSpaces } from '@/hooks/use-spaces'
 import type { NotifyLevel, SpaceNotifyHandle } from '@/hooks/use-spaces-notify'
@@ -228,7 +227,7 @@ export function SpaceRail({
         <div ref={bodyRef} className={cn('spaces-navigation flex h-full min-h-0 flex-col', resizing && 'select-none')}>
             <section style={chatStyle} className="group/section flex min-h-0 flex-col">
                 <div className="flex shrink-0 items-center gap-0.5 px-2 py-1">
-                    <ServerSwitcher org={org} onOpenSpace={onOpenSpace} onMenuOpenChange={onMenuOpenChange} />
+                    <span className="min-w-0 flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                     <ServerOptionsMenu org={org} showArchived={showArchived} onToggleArchived={() => setShowArchived((value) => { sessionStorage.setItem(archivedKey, String(!value)); return !value })} onMenuOpenChange={onMenuOpenChange} />
                     {/* Docked: close. Peeked: the lock — dock it. Same spot, flipped glyph. */}
                     <button

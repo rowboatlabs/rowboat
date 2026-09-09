@@ -29,13 +29,14 @@ beforeEach(() => { vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, ad
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.unstubAllGlobals() })
 
 describe('server and space navigation', () => {
-    it('shows only servers in the main sidebar and opens their first space', () => {
-        const onOpenSpace = vi.fn()
-        render(<SpacesSidebarSection activeSpace={null} onOpenSpace={onOpenSpace} />)
+    it('shows one Spaces entry and invokes the return-to-Spaces action', () => {
+        const onOpenSpaces = vi.fn()
+        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpaces={onOpenSpaces} /></SidebarProvider>)
+        expect(screen.queryByText('Our server')).toBeNull()
         expect(screen.queryByText('main')).toBeNull()
         expect(screen.queryByText('Direct messages')).toBeNull()
-        fireEvent.click(screen.getByText('Our server'))
-        expect(onOpenSpace).toHaveBeenCalledWith('server', 'main')
+        fireEvent.click(screen.getByRole('button', { name: 'Spaces' }))
+        expect(onOpenSpaces).toHaveBeenCalledTimes(1)
     })
     it('nests three recent discussions, expands and collapses them, and folds DMs', () => {
         const onOpenDiscussion = vi.fn()
@@ -61,11 +62,10 @@ describe('server and space navigation', () => {
 })
 
 describe('server removal menus', () => {
-    it.each(['sidebar', 'rail'])('%s can cancel removal and then reopen and confirm', async (surface) => {
+    it('can cancel removal and then reopen and confirm from the rail', async () => {
         const invoke = vi.fn().mockResolvedValue({})
         vi.stubGlobal('ipc', { invoke })
-        if (surface === 'sidebar') render(<SpacesSidebarSection activeSpace={null} onOpenSpace={vi.fn()} />)
-        else render(<ServerOptionsMenu org={org} showArchived={false} onToggleArchived={vi.fn()} onMenuOpenChange={vi.fn()} />)
+        render(<ServerOptionsMenu org={org} showArchived={false} onToggleArchived={vi.fn()} onMenuOpenChange={vi.fn()} />)
         const openMenu = () => fireEvent.keyDown(screen.getByRole('button', { name: 'Server options' }), { key: 'Enter' })
         openMenu()
         expect(screen.queryByRole('menuitem', { name: 'New message' })).toBeNull()

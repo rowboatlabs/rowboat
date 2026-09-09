@@ -1,5 +1,7 @@
 "use client"
 
+import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
+
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
@@ -101,7 +103,7 @@ const RAIL_ICON_PX = 18
 
 /** The most recently opened space — App writes it on every space navigation;
     the ⌥Tab switcher lands there instead of opening the flyout. */
-export const LAST_SPACE_STORAGE_KEY = 'x:last-space'
+export { LAST_SPACE_STORAGE_KEY } from '@/lib/spaces-navigation'
 
 /** Where flyout panels (Chats / Spaces) sit, just right of the rail. */
 const DOCK_FLYOUT_LEFT_PX = DOCK_GUTTER_PX + 8
@@ -147,6 +149,7 @@ export type DockSidebarProps = {
   onOpenApp?: (folder: string) => void
   /** Open one space (org + space) in the Spaces view. */
   onOpenSpace?: (orgId: string, spaceId: string) => void
+  onOpenSpaces?: () => void
   /** The space currently open, for highlighting its flyout row. */
   activeSpace?: SpaceSelection
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
@@ -546,6 +549,7 @@ export function DockSidebar({
   onOpenApps,
   onOpenApp,
   onOpenSpace,
+  onOpenSpaces,
   activeSpace = null,
   recentRuns = [],
   onOpenRun,
@@ -888,22 +892,12 @@ export function DockSidebar({
   // (persisted by App), falling back to the first space anywhere; only when
   // there is none at all does it fall back to the flyout.
   const openLastSpace = useCallback((): boolean => {
-    let last: { orgId: string; spaceId: string } | null = null
-    try {
-      last = JSON.parse(window.localStorage.getItem(LAST_SPACE_STORAGE_KEY) ?? 'null') as { orgId: string; spaceId: string } | null
-    } catch { /* ignore */ }
-    const isValid = last != null
-      && orgs.some((o) => o.id === last.orgId && (o.spaces.some((s) => s.id === last.spaceId) || o.directs.some((s) => s.id === last.spaceId)))
-    const target = isValid && last
-      ? last
-      : (() => {
-        const org = orgs.find((o) => o.spaces.length > 0)
-        return org ? { orgId: org.id, spaceId: org.spaces[0].id } : null
-      })()
+    if (onOpenSpaces) { onOpenSpaces(); return true }
+    const target = resolveSpacesLocation(orgs, readLastSpace())
     if (!target) return false
     onOpenSpace?.(target.orgId, target.spaceId)
     return true
-  }, [orgs, onOpenSpace])
+  }, [orgs, onOpenSpace, onOpenSpaces])
 
   // ----- derived: meetings sublabel -----
   const previewEmail = emailThreads[0]
