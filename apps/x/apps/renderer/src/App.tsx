@@ -2584,6 +2584,10 @@ function App() {
   // Runs history state
   type RunListItem = { id: string; title?: string; createdAt: string; modifiedAt: string; agentId: string; useCase?: string }
   const [runs, setRuns] = useState<RunListItem[]>([])
+  const [codeSessionIds, setCodeSessionIds] = useState<Set<string>>(() => new Set())
+  // General chat navigation excludes sessions owned by Code, including pinned
+  // chats and the Assistant button's most-recent-chat destination.
+  const generalRuns = useMemo(() => runs.filter((run) => !codeSessionIds.has(run.id)), [runs, codeSessionIds])
 
   // Chat tab state
   const [chatTabs, setChatTabs] = useState<ChatTab[]>(() => [{ id: 'default-chat-tab', runId: null, chatId: crypto.randomUUID() }])
@@ -3434,7 +3438,12 @@ function App() {
   // Load runs list (all pages)
   const loadRuns = useCallback(async () => {
     try {
-      const { sessions } = await window.ipc.invoke('sessions:list', {})
+      const [{ sessions }, { sessions: codeSessions }] = await Promise.all([
+        window.ipc.invoke('sessions:list', {}),
+        window.ipc.invoke('codeSession:list', null),
+      ])
+      // Preserve adoptions received while these snapshots were loading.
+      setCodeSessionIds((prev) => new Set([...prev, ...codeSessions.map((session) => session.id)]))
       setRuns(sessions.map((entry) => ({
         id: entry.sessionId,
         title: entry.title ?? 'New chat',
@@ -3457,6 +3466,10 @@ function App() {
   // list stays current without re-fetching.
   useEffect(() => {
     return subscribeSessionFeed((event) => {
+      if (event.kind === 'code-adopted') {
+        setCodeSessionIds((prev) => new Set([...prev, event.sessionId]))
+        return
+      }
       if (event.kind !== 'index-changed') return
       setRuns((prev) => {
         if (event.entry === null) {
@@ -6845,7 +6858,7 @@ function App() {
     onOpenApp: (folder: string) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() },
     onOpenSpace: openSpace,
     activeSpace: isSpacesOpen ? spaceSelection : null,
-    recentRuns: runs,
+    recentRuns: generalRuns,
     onOpenRun: (rid: string) => void navigateToView({ type: 'chat', runId: rid }),
     onRenameRun: (rid: string, title: string) => {
       void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
@@ -6928,7 +6941,7 @@ function App() {
                       return activeTab ? getChatTabTitle(activeTab) : 'New chat'
                     })()}
                     onNewChatTab={handleNewChatTab}
-                    recentRuns={runs}
+                    recentRuns={generalRuns}
                     activeRunId={runId}
                     sessionUsage={activeChatTabState.sessionUsage}
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
@@ -7347,7 +7360,7 @@ function App() {
               {activeMiddle === 'chat-history' && (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <ChatHistoryView
-                    runs={runs}
+                    runs={generalRuns}
                     currentRunId={runId}
                     processingRunIds={processingRunIds}
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
@@ -7710,7 +7723,7 @@ function App() {
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
                 onNewChatTab={() => handleNewChatTabInSidebar()}
-                recentRuns={runs}
+                recentRuns={generalRuns}
                 onSelectRun={bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
