@@ -103,7 +103,7 @@ export function FileTree({ orgId, spaceId, entries, draftFolders = [], selectedP
 
     // Row actions. Rename/move edits the FULL path inline (folders are key
     // prefixes — typing a new prefix moves the file); the server's change
-    // event refreshes every pane. Delete asks for an optional reason.
+    // event refreshes every pane. Deleting confirms the move to Trash.
     const [renaming, setRenaming] = useState<{ path: string; value: string } | null>(null)
     const [deleting, setDeleting] = useState<spaces.SpacesAssetEntry | null>(null)
     const commitMove = async (entry: spaces.SpacesAssetEntry, toPath: string) => {
@@ -1018,14 +1018,12 @@ export function DeleteAssetDialog({ orgId, spaceId, entry, onClose, onDeleted }:
     onClose: () => void
     onDeleted?: () => void
 }) {
-    const [reason, setReason] = useState('')
     const [busy, setBusy] = useState(false)
     const confirm = async () => {
         setBusy(true)
         try {
             const res = await window.ipc.invoke('spaces:deleteAsset', {
                 orgId, spaceId, path: entry.path, baseVersion: entry.version,
-                ...(reason.trim() ? { reason: reason.trim() } : {}),
             })
             if (res.outcome === 'conflict') {
                 toast(`${entry.path} changed meanwhile — review and try again`, 'error')
@@ -1044,24 +1042,16 @@ export function DeleteAssetDialog({ orgId, spaceId, entry, onClose, onDeleted }:
         <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
             <DialogContent className="max-w-sm">
                 <DialogHeader>
-                    <DialogTitle className="text-sm">Delete <code className="font-mono text-[12px]">{entry.path}</code>?</DialogTitle>
+                    <DialogTitle className="break-words text-sm">Move “{entry.path}” to Trash?</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">
-                        It moves to Trash — history stays, and anyone can restore it. The feed will show who deleted it and why.
+                        This removes the file from Space files for everyone. You can restore it from Trash.
                     </p>
-                    <Input
-                        value={reason}
-                        placeholder="Why? (optional — shows in the feed and history)"
-                        className="h-7 text-xs"
-                        disabled={busy}
-                        onChange={(e) => setReason(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') void confirm() }}
-                    />
                     <div className="flex justify-end gap-2">
                         <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={busy} onClick={onClose}>Cancel</Button>
                         <Button variant="destructive" size="sm" className="h-7 text-xs" disabled={busy} onClick={() => void confirm()}>
-                            {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Trash2 className="size-3 mr-1" />} Delete
+                            {busy ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Trash2 className="size-3 mr-1" />} Move to Trash
                         </Button>
                     </div>
                 </div>
