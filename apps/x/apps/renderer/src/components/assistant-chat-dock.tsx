@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronUp, Loader2, MessageCircle, Plus, X } from 'lucide-react'
-import { useSessionChatStatus } from '@/hooks/useSessionChat'
+import { useSessionChat } from '@/hooks/useSessionChat'
 import { useSessionTitle } from '@/lib/session-title'
 import { cn } from '@/lib/utils'
 import type { ChatTab } from './tab-bar'
@@ -11,7 +11,6 @@ interface AssistantChatDockProps {
   tabs: ChatTab[]
   activeId: string
   expanded: boolean
-  expandedIds?: string[]
   getTitle: (tab: ChatTab) => string
   onSelect: (tab: ChatTab) => void
   onClose: (tabId: string) => void
@@ -27,11 +26,11 @@ function DockTab({ tab, active, expanded, title, onSelect, onClose, onStatus }: 
   onClose: () => void
   onStatus: (tabId: string, status: string) => void
 }) {
-  const sessionStatus = useSessionChatStatus(tab.runId)
+  const session = useSessionChat(tab.runId)
   const sessionTitle = useSessionTitle(tab.runId)
-  const working = sessionStatus === 'working' || sessionStatus === 'waiting'
-  const waiting = sessionStatus === 'waiting'
-  const reading = expanded
+  const working = session.chatState?.isProcessing ?? false
+  const waiting = session.chatState?.isWaitingOnHuman ?? false
+  const reading = active && expanded
   const [activity, setActivity] = useState({ working, reading, unread: false })
   if (activity.working !== working || activity.reading !== reading) {
     setActivity({ working, reading, unread: reading ? false : activity.unread || (activity.working && !working) })
@@ -47,7 +46,7 @@ function DockTab({ tab, active, expanded, title, onSelect, onClose, onStatus }: 
         data-assistant-tab={tab.id}
         className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-tl-lg px-3 text-left text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={onSelect}
-        aria-expanded={expanded}
+        aria-expanded={active && expanded}
         aria-label={`${label}${status ? ` — ${status}` : ''}`}
         title={`${label}${status ? ` — ${status}` : ''}`}
       >
@@ -63,7 +62,7 @@ function DockTab({ tab, active, expanded, title, onSelect, onClose, onStatus }: 
   )
 }
 
-export function AssistantChatDock({ tabs, activeId, expanded, expandedIds, getTitle, onSelect, onClose, onNew, hidden = false }: AssistantChatDockProps) {
+export function AssistantChatDock({ tabs, activeId, expanded, getTitle, onSelect, onClose, onNew, hidden = false }: AssistantChatDockProps) {
   const dockRef = useRef<HTMLDivElement>(null)
   const [capacity, setCapacity] = useState(3)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -89,7 +88,7 @@ export function AssistantChatDock({ tabs, activeId, expanded, expandedIds, getTi
     <div ref={dockRef} data-assistant-dock={hidden ? undefined : ''} role="region" aria-label="Assistant chats" hidden={hidden} className={cn('titlebar-no-drag pointer-events-none fixed bottom-0 right-3 z-30 h-11 w-[min(760px,calc(100vw-88px))] items-end justify-end gap-1.5', hidden ? 'hidden' : 'flex')}>
       {tabs.map((tab) => (
         <div key={tab.id} className={visibleIds.has(tab.id) ? 'pointer-events-auto min-w-0 flex-[0_1_240px]' : 'hidden'}>
-          <DockTab tab={tab} active={tab.id === activeId} expanded={expandedIds ? expandedIds.includes(tab.id) : tab.id === activeId && expanded} title={getTitle(tab)} onSelect={() => onSelect(tab)} onClose={() => onClose(tab.id)} onStatus={onStatus} />
+          <DockTab tab={tab} active={tab.id === activeId} expanded={expanded} title={getTitle(tab)} onSelect={() => onSelect(tab)} onClose={() => onClose(tab.id)} onStatus={onStatus} />
         </div>
       ))}
       {overflow.length > 0 && (
