@@ -1563,13 +1563,13 @@ const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string
   },
   {
     key: "space_mention",
-    label: "Space mentions",
-    description: "When a teammate @mentions you in a space. Click to open the conversation. Only shown while the app is in the background.",
+    label: "Space reminders",
+    description: "Reminders you set in a space, and scheduled messages that could not be sent. Click to open the conversation.",
   },
 ]
 
 // With Spaces dark, its notification category stays out of the settings UI
-// (the mention watcher that emits it is gated on the same flag in main).
+// (the scheduler that emits it is gated on the same flag where core runs).
 const NOTIFICATION_CATEGORIES = ALL_NOTIFICATION_CATEGORIES.filter((cat) => SPACES_ENABLED || cat.key !== "space_mention")
 
 function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {

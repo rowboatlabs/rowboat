@@ -2,8 +2,6 @@ import fs from 'node:fs/promises';
 import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
-import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
-import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
@@ -85,7 +83,6 @@ type SpacesRpcChannel =
   | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive'
-  | 'spaces:getNotifyPrefs' | 'spaces:setNotifyPref' | 'spaces:getDnd' | 'spaces:setDnd'
   | 'spaces:schedule' | 'spaces:listScheduled' | 'spaces:cancelScheduled';
 type SpacesHandlers = {
   [K in SpacesRpcChannel]: (
@@ -98,7 +95,6 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:addOrg': async (args) => {
     const org = orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
-    void syncSpaceMentionWatch({ force: true });
     return { org };
   },
 
@@ -109,7 +105,6 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:joinInvite': async (args) => {
     const { org, result } = await spacesOAuth.joinViaInviteLink({ url: args.url, openBrowser });
-    void syncSpaceMentionWatch({ force: true });
     return { org: orgSummary(org), space: result.space };
   },
 
@@ -122,7 +117,6 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:createOrg': async (args) => {
     const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
-    void syncSpaceMentionWatch({ force: true });
     return { org };
   },
 
@@ -135,7 +129,6 @@ export const spacesRpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (args) => {
-    void syncSpaceMentionWatch({ force: true });
     for (const [key, entry] of liveSubscriptions) {
       if (key.startsWith(`${args.orgId}/`)) {
         entry.unsubscribe();
@@ -148,22 +141,16 @@ export const spacesRpcHandlers: SpacesHandlers = {
 
   'spaces:listSpaces': async (args) => {
     const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
-    // The renderer just reached this org — if it was down at boot (or restarted),
-    // this is the earliest signal that its spaces are watchable again. Unforced:
-    // repeated refreshes collapse into one sync.
-    void syncSpaceMentionWatch();
     return { spaces };
   },
 
   'spaces:createSpace': async (args) => {
     const space = await orgs.getClient(args.orgId).createSpace(args.name);
-    void syncSpaceMentionWatch({ force: true });
     return { space };
   },
 
   'spaces:openDirect': async (args) => {
     const result = await orgs.getClient(args.orgId).openDirect(args.memberId);
-    if (result.created) void syncSpaceMentionWatch({ force: true });
     return result;
   },
 
@@ -380,23 +367,7 @@ export const spacesRpcHandlers: SpacesHandlers = {
     return { success: true };
   },
 
-  // Notify prefs + DND: read by the mention watcher in THIS process through
-  // notify-prefs' in-memory cache, so the writes have to happen here as well.
-  'spaces:getNotifyPrefs': async (args) => getNotifyPrefs(args.orgId, args.spaceId),
-
-  'spaces:setNotifyPref': async (args) => {
-    setNotifyPref(args.orgId, args.spaceId, args.topicId, args.level);
-    return { success: true };
-  },
-
-  'spaces:getDnd': async () => ({ until: getDndUntil() }),
-
-  'spaces:setDnd': async (args) => {
-    setDndUntil(args.until);
-    return { success: true };
-  },
-
-  // Scheduled sends + reminders: same story — the 20s scheduler tick lives here.
+  // Scheduled sends + reminders: the 20s scheduler tick lives in this process.
   'spaces:schedule': async (args) => ({
     id: scheduleItem({
       kind: args.kind,

@@ -5,8 +5,6 @@ import { ipc, spaces as spacesShared } from '@x/shared';
 import * as orgs from '@x/core/dist/spaces/orgs.js';
 import * as blobCache from './blob-cache.js';
 import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
-import { syncSpaceMentionWatch } from '@x/core/dist/spaces/mention-watch.js';
-import { getDndUntil, getNotifyPrefs, setDndUntil, setNotifyPref } from '@x/core/dist/spaces/notify-prefs.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
@@ -67,13 +65,9 @@ type SpacesHandlers = {
   'spaces:topicSession': InvokeHandler<'spaces:topicSession'>;
   'spaces:responseSession': InvokeHandler<'spaces:responseSession'>;
   'spaces:stopRowboat': InvokeHandler<'spaces:stopRowboat'>;
-  'spaces:getNotifyPrefs': InvokeHandler<'spaces:getNotifyPrefs'>;
-  'spaces:setNotifyPref': InvokeHandler<'spaces:setNotifyPref'>;
   'spaces:schedule': InvokeHandler<'spaces:schedule'>;
   'spaces:listScheduled': InvokeHandler<'spaces:listScheduled'>;
   'spaces:cancelScheduled': InvokeHandler<'spaces:cancelScheduled'>;
-  'spaces:getDnd': InvokeHandler<'spaces:getDnd'>;
-  'spaces:setDnd': InvokeHandler<'spaces:setDnd'>;
   'spaces:subscribeSpace': InvokeHandler<'spaces:subscribeSpace'>;
   'spaces:unsubscribeSpace': InvokeHandler<'spaces:unsubscribeSpace'>;
   'spaces:presence': InvokeHandler<'spaces:presence'>;
@@ -136,7 +130,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:addOrg': async (_event, args) => {
     const org = orgSummary(await orgs.addDevOrg({ baseUrl: args.baseUrl, memberId: args.memberId }));
-    void syncSpaceMentionWatch({ force: true });
     return { org };
   },
 
@@ -147,7 +140,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:joinInvite': async (_event, args) => {
     const { org, result } = await spacesOAuth.joinViaInviteLink({ url: args.url, openBrowser });
-    void syncSpaceMentionWatch({ force: true });
     return { org: orgSummary(org), space: result.space };
   },
 
@@ -160,7 +152,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:createOrg': async (_event, args) => {
     const org = orgSummary(await spacesOAuth.createOrgOnDeployment({ name: args.name, openBrowser }));
-    void syncSpaceMentionWatch({ force: true });
     return { org };
   },
 
@@ -173,7 +164,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
   },
 
   'spaces:removeOrg': async (_event, args) => {
-    void syncSpaceMentionWatch({ force: true });
     for (const [key, entry] of liveSubscriptions) {
       if (key.startsWith(`${args.orgId}/`)) {
         entry.unsubscribe();
@@ -186,16 +176,11 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:listSpaces': async (_event, args) => {
     const spaces = await orgs.getClient(args.orgId).listSpaces({ includeDirect: args.includeDirect ?? false });
-    // The renderer just reached this org — if it was down at boot (or restarted),
-    // this is the earliest signal that its spaces are watchable again. Unforced:
-    // repeated refreshes collapse into one sync.
-    void syncSpaceMentionWatch();
     return { spaces };
   },
 
   'spaces:createSpace': async (_event, args) => {
     const space = await orgs.getClient(args.orgId).createSpace(args.name);
-    void syncSpaceMentionWatch({ force: true });
     return { space };
   },
 
@@ -205,7 +190,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:openDirect': async (_event, args) => {
     const result = await orgs.getClient(args.orgId).openDirect(args.memberId);
-    if (result.created) void syncSpaceMentionWatch({ force: true });
     return result;
   },
 
@@ -408,13 +392,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:stopRowboat': async (_event, args) => stopTopicAgent(args),
 
-  'spaces:getNotifyPrefs': async (_event, args) => getNotifyPrefs(args.orgId, args.spaceId),
-
-  'spaces:setNotifyPref': async (_event, args) => {
-    setNotifyPref(args.orgId, args.spaceId, args.topicId, args.level);
-    return { success: true };
-  },
-
   'spaces:schedule': async (_event, args) => ({
     id: scheduleItem({
       kind: args.kind,
@@ -430,13 +407,6 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:cancelScheduled': async (_event, args) => {
     cancelScheduled(args.id);
-    return { success: true };
-  },
-
-  'spaces:getDnd': async () => ({ until: getDndUntil() }),
-
-  'spaces:setDnd': async (_event, args) => {
-    setDndUntil(args.until);
     return { success: true };
   },
 

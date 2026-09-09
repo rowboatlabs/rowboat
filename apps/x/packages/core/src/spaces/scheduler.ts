@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import { WorkDir } from '../config/config.js';
-import { mentionExcerpt, mentionLink } from './mention-watch.js';
 import { getClient } from './orgs.js';
 
 // Scheduled sends and reminders — one main-side queue, persisted, fired by a
@@ -30,6 +29,23 @@ export interface ScheduledItem {
 }
 
 const FILE = path.join(WorkDir, 'config', 'spaces_scheduled.json');
+
+/** Message body → one notification-sized line (markdown scaffolding dropped). */
+function excerpt(body: string, max = 140): string {
+  const flat = body
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .replace(/^[ \t]*>.*$/gm, ' ')
+    .replace(/[`*_#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/** The deep link a reminder click opens: the space, or one thread in it. */
+function spaceLink(orgId: string, spaceId: string, threadRootId?: string): string {
+  const thread = threadRootId ? `&threadRootId=${encodeURIComponent(threadRootId)}` : '';
+  return `rowboat://open?type=spaces&orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}${thread}`;
+}
 const TICK_MS = 20_000;
 const MAX_ATTEMPTS = 5;
 
@@ -72,8 +88,8 @@ async function fire(item: ScheduledItem): Promise<void> {
   if (item.kind === 'reminder') {
     void notifyIfEnabled('space_mention', {
       title: 'Reminder',
-      message: mentionExcerpt(item.body),
-      link: mentionLink(item.orgId, item.spaceId, item.threadRootId),
+      message: excerpt(item.body),
+      link: spaceLink(item.orgId, item.spaceId, item.threadRootId),
     });
     return;
   }
@@ -102,8 +118,8 @@ async function tick(): Promise<void> {
           persist();
           void notifyIfEnabled('space_mention', {
             title: 'Scheduled message failed',
-            message: mentionExcerpt(item.body),
-            link: mentionLink(item.orgId, item.spaceId, item.threadRootId),
+            message: excerpt(item.body),
+            link: spaceLink(item.orgId, item.spaceId, item.threadRootId),
           });
         } else {
           persist();

@@ -307,10 +307,10 @@ export function containsRowboatAddress(body: string): boolean {
 }
 
 /**
- * The @here address — everyone in the space whose app is online, Slack-style.
- * There is no server fan-out: every member's client scans incoming messages
- * itself (mention-watch), so "online" is exactly "the app is running to see
- * this arrive"; whoever was away catches it in the missed-replay summary.
+ * The @here address — everyone in the space, Slack-style. Who it reaches, and
+ * how, becomes the org's call once notification policy moves server-side (the
+ * client-side scanner that acted on it was removed 2026-09-09); the grammar
+ * stays here so the composer and the server-side scan agree on what counts.
  */
 export function containsHereAddress(body: string): boolean {
   return containsMemberAddress(body, 'here');

@@ -10,6 +10,10 @@ import { z } from 'zod';
  * - todo:             a delegated to-do item finished or needs review (Home)
  * - meeting_detection: popup when Rowboat detects you're in a call/meeting
  * - meeting_notes_ready: meeting notes finished generating after a call
+ * - space_mention:    a reminder set in a space fired, or a scheduled message
+ *                     failed to send. The key predates the removal of the
+ *                     client-side mention watcher (2026-09-09) and is kept so
+ *                     saved settings keep parsing.
  */
 export const NotificationCategorySchema = z.enum([
   'chat_completion',

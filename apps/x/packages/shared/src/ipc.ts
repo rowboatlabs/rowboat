@@ -4135,29 +4135,6 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
-  // Notification levels for the mention watcher: a space-wide level plus
-  // per-thread overrides. null = inherit (thread → space → the 'mentions'
-  // default). Stored main-side (the watcher runs there, screen or no screen).
-  // `topicId` is the thread's ROOT MESSAGE id, never a Topic row id: the
-  // watcher resolves a message to `threadRoot ?? id` and looks up by that.
-  'spaces:getNotifyPrefs': {
-    req: z.object({ orgId: z.string(), spaceId: z.string() }),
-    res: z.object({
-      spaceLevel: z.enum(['all', 'mentions', 'mute']).nullable(),
-      topics: z.record(z.string(), z.enum(['all', 'mentions', 'mute'])),
-    }),
-  },
-  'spaces:setNotifyPref': {
-    req: z.object({
-      orgId: z.string(),
-      spaceId: z.string(),
-      /** Absent = set the space-wide level. */
-      topicId: z.string().optional(),
-      /** null clears the override back to inherit. */
-      level: z.enum(['all', 'mentions', 'mute']).nullable(),
-    }),
-    res: z.object({ success: z.literal(true) }),
-  },
   // Scheduled sends and reminders — the main-side queue (core scheduler).
   // 'message' posts to the topic at `at`; 'reminder' notifies the member.
   'spaces:schedule': {
@@ -4193,15 +4170,6 @@ export const ipcSchemas = {
   },
   'spaces:cancelScheduled': {
     req: z.object({ id: z.string() }),
-    res: z.object({ success: z.literal(true) }),
-  },
-  // Do-not-disturb: one global until-instant gating the mention watcher.
-  'spaces:getDnd': {
-    req: z.null(),
-    res: z.object({ until: z.string().nullable() }),
-  },
-  'spaces:setDnd': {
-    req: z.object({ until: z.string().nullable() }),
     res: z.object({ success: z.literal(true) }),
   },
   // Ephemeral presence from the human surface (viewing / typing / idle), scoped
