@@ -458,6 +458,8 @@ export function SidebarContentPanel({
   onOpenApps,
   onOpenApp,
   onOpenSpaces,
+  onOpenSpace,
+  activeSpace = null,
   recentRuns = [],
   onOpenRun,
   onRenameRun,
@@ -869,7 +871,7 @@ export function SidebarContentPanel({
         {/* Spaces returns to the last active server and space. */}
         {SPACES_ENABLED && (
           <>
-            <SpacesSidebarSection active={activeNav === 'spaces'} onOpenSpaces={() => onOpenSpaces?.()} />
+            <SpacesSidebarSection active={activeNav === 'spaces'} activeSpace={activeSpace} onOpenSpaces={() => onOpenSpaces?.()} onOpenSpace={(orgId, spaceId) => onOpenSpace?.(orgId, spaceId)} />
             <div className="mx-3 my-2 border-t border-border" />
           </>
         )}

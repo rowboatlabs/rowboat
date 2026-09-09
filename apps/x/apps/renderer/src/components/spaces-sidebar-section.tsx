@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
+import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -9,19 +9,25 @@ import { Input } from '@/components/ui/input'
 import { type SpaceSelection } from '@/components/spaces-view'
 import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
-import { MemberAvatar } from '@/components/spaces/atoms'
+import { AddOrgDialog, MemberAvatar } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
 import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
+import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
 
 const MAX_VISIBLE_DIRECTS = 3
 
-export function SpacesSidebarSection({ active, onOpenSpaces }: {
+export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpenSpace }: {
     active: boolean
+    activeSpace: SpaceSelection
     onOpenSpaces: () => void
+    onOpenSpace: (orgId: string, spaceId: string) => void
 }) {
+    const { orgs, refresh } = useSpacesOrgs()
+    const [addOrgOpen, setAddOrgOpen] = useState(false)
+    const current = resolveSpacesLocation(orgs, activeSpace ?? readLastSpace())
     return <SidebarGroup className="pt-0">
         <SidebarGroupContent>
             <SidebarMenu>
@@ -30,9 +36,30 @@ export function SpacesSidebarSection({ active, onOpenSpaces }: {
                         <MessagesSquare className="size-4 shrink-0" />
                         <span>Spaces</span>
                     </SidebarMenuButton>
+                    <SidebarMenuAction type="button" showOnHover aria-label="Add a server" title="Add a server"
+                        onClick={() => setAddOrgOpen(true)}>
+                        <Plus />
+                    </SidebarMenuAction>
+                    {orgs.length > 0 && <SidebarMenu className="ml-4 w-auto gap-0 border-l border-sidebar-border pl-2">
+                        {orgs.map((org) => {
+                            const selected = current?.orgId === org.id
+                            return <SidebarMenuItem key={org.id}>
+                                <SidebarMenuButton
+                                    aria-current={active && selected ? 'page' : undefined}
+                                    className="h-7 text-[13px]"
+                                    onClick={() => {
+                                        if (selected) onOpenSpaces()
+                                        else onOpenSpace(org.id, org.spaces[0]?.id ?? org.directs[0]?.id ?? '')
+                                    }}>
+                                    <span className={cn('truncate', selected ? 'font-medium text-sidebar-foreground' : 'font-normal text-muted-foreground')}>{org.name}</span>
+                                </SidebarMenuButton>
+                            </SidebarMenuItem>
+                        })}
+                    </SidebarMenu>}
                 </SidebarMenuItem>
             </SidebarMenu>
         </SidebarGroupContent>
+        <AddOrgDialog open={addOrgOpen} onOpenChange={setAddOrgOpen} onAdded={() => void refresh()} />
     </SidebarGroup>
 }
 

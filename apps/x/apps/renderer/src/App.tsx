@@ -7045,7 +7045,7 @@ function App() {
     onOpenApp: (folder: string) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() },
     onOpenSpace: openSpace,
     onOpenSpaces: () => { void openSpaces() },
-    activeSpace: isSpacesOpen ? spaceSelection : null,
+    activeSpace: spaceSelection,
     recentRuns: chatRuns,
     onOpenRun: openAssistantRun,
     onRenameRun: (rid: string, title: string) => {

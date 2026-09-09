@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SpacesSidebarSection, ServerSpaceNavigation } from './spaces-sidebar-section'
 import { ServerOptionsMenu } from './spaces/server-options-menu'
 import { SidebarProvider } from '@/components/ui/sidebar'
-import type { OrgWithSpaces } from '@/hooks/use-spaces'
+import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 
 const { org, topics } = vi.hoisted(() => ({
     org: {
@@ -14,11 +14,11 @@ const { org, topics } = vi.hoisted(() => ({
     },
     topics: [{ id: 'archived', rootMessageId: 'archived', title: 'Archived discussion', lastActivityAt: '2026-09-05', archived: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: `topic${i}`, rootMessageId: `root${i}`, title: `Discussion ${i}`, lastActivityAt: `2026-09-0${i + 1}` }))],
 }))
-vi.mock('@/hooks/use-spaces', () => ({ useSpacesOrgs: () => ({ orgs: [org], loading: false, refresh: vi.fn() }), useSpaceFeed: () => ({ topics, loaded: true }), openSelfDirect: vi.fn() }))
+vi.mock('@/hooks/use-spaces', () => ({ useSpacesOrgs: vi.fn(() => ({ orgs: [org], loading: false, refresh: vi.fn() })), useSpaceFeed: () => ({ topics, loaded: true }), openSelfDirect: vi.fn() }))
 vi.mock('@/hooks/use-space-chat', () => ({ useSpacesUnreadCounts: () => new Map(), prefetchStream: vi.fn(), spaceLastActivityAt: () => null }))
 vi.mock('@/hooks/use-space-members', () => ({ prefetchMembers: vi.fn(), useSelfDisplayName: () => 'Me' }))
 vi.mock('@/components/spaces-view', () => ({ AddOrgDialog: () => null, OrgMonogram: () => null }))
-vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null }))
+vi.mock('@/components/spaces/atoms', () => ({ MemberAvatar: () => null, AddOrgDialog: () => null }))
 vi.mock('@/components/spaces/new-direct-dialog', () => ({ NewDirectDialog: () => null }))
 vi.mock('@/lib/spaces-direct', () => ({
     directAvatarId: () => '', isSelfDirect: () => false, isSelfDirectUnsupported: () => false,
@@ -29,14 +29,27 @@ beforeEach(() => { vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, ad
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.unstubAllGlobals() })
 
 describe('server and space navigation', () => {
-    it('shows one Spaces entry and invokes the return-to-Spaces action', () => {
+    it('shows nested server names and preserves the current location when returning to Spaces', () => {
         const onOpenSpaces = vi.fn()
-        render(<SidebarProvider><SpacesSidebarSection active={false} onOpenSpaces={onOpenSpaces} /></SidebarProvider>)
-        expect(screen.queryByText('Our server')).toBeNull()
+        render(<SidebarProvider><SpacesSidebarSection active={false} activeSpace={{ orgId: org.id, spaceId: 'founders' }} onOpenSpaces={onOpenSpaces} onOpenSpace={vi.fn()} /></SidebarProvider>)
+        expect(screen.getByText('Our server')).toHaveClass('font-medium')
+        expect(screen.getByText('Our server').closest('button')?.querySelector('svg')).toBeNull()
         expect(screen.queryByText('main')).toBeNull()
         expect(screen.queryByText('Direct messages')).toBeNull()
         fireEvent.click(screen.getByRole('button', { name: 'Spaces' }))
         expect(onOpenSpaces).toHaveBeenCalledTimes(1)
+        fireEvent.click(screen.getByText('Our server'))
+        expect(onOpenSpaces).toHaveBeenCalledTimes(2)
+    })
+    it('navigates to a different server when its name is clicked', () => {
+        const other = { ...org, id: 'other', name: 'Other server', spaces: [{ id: 'welcome', name: 'welcome' }] }
+        vi.mocked(useSpacesOrgs).mockReturnValueOnce({ orgs: [org, other] as unknown as OrgWithSpaces[], loading: false, refresh: vi.fn() })
+        const onOpenSpace = vi.fn()
+        render(<SidebarProvider><SpacesSidebarSection active activeSpace={{ orgId: org.id, spaceId: 'founders' }}
+            onOpenSpaces={vi.fn()} onOpenSpace={onOpenSpace} /></SidebarProvider>)
+        expect(screen.getByText('Other server')).toHaveClass('font-normal')
+        fireEvent.click(screen.getByText('Other server'))
+        expect(onOpenSpace).toHaveBeenCalledWith('other', 'welcome')
     })
     it('nests three recent discussions, expands and collapses them, and folds DMs', () => {
         const onOpenDiscussion = vi.fn()
