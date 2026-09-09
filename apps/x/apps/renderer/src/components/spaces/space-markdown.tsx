@@ -143,11 +143,13 @@ function MessageImageGallery({ children }: { children: ReactNode }) {
 /** Source-specific actions always follow the currently selected image. */
 function SpaceImageActions({ src }: { src: string }) {
     const [saving, setSaving] = useState(false)
+    const [error, setError] = useState<string | null>(null)
     const [saveOpen, setSaveOpen] = useState(false)
     const parsed = parseBlobAppUrl(src)
     const save = async () => {
         if (saving) return
         setSaving(true)
+        setError(null)
         try {
             const res = parsed
                 ? await window.ipc.invoke('spaces:saveBlob', {
@@ -157,7 +159,7 @@ function SpaceImageActions({ src }: { src: string }) {
                 : await window.ipc.invoke('spaces:saveImageUrl', { url: src })
             if (res.saved) toast('Saved', 'success')
         } catch (err) {
-            toast(err instanceof Error ? err.message : 'Could not download', 'error')
+            setError(err instanceof Error ? err.message : 'Could not download')
         } finally {
             setSaving(false)
         }
@@ -172,6 +174,7 @@ function SpaceImageActions({ src }: { src: string }) {
             ) : (
                 <a href={src} target="_blank" rel="noreferrer" className="text-white/80 hover:text-white hover:underline">Open original</a>
             )}
+            {error && <p role="alert" className="absolute right-0 top-full mt-2 w-72 rounded-md bg-background p-3 text-xs text-destructive shadow-lg">{error}</p>}
             {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
         </>
     )
@@ -362,16 +365,7 @@ export function BlobImage({ src, alt }: { src: string; alt: string }) {
             {parsed && <button type="button" title="Save to space files" aria-label={`Save ${alt || 'image'} to space files`} onClick={() => setSaveOpen(true)} className="absolute bottom-3 right-3 rounded-md border border-border bg-background p-1.5 text-foreground shadow-sm hover:bg-accent"><FilePlus2 className="size-3.5" /></button>}
             </span>
             <ImageLightbox src={src} alt={alt} open={open} onOpenChange={setOpen}>
-                {parsed && (
-                    <>
-                        <button type="button" onClick={() => void save()} className="text-white/80 hover:text-white hover:underline">
-                            {saving ? 'Saving…' : 'Download'}
-                        </button>
-                        <button type="button" onClick={() => setSaveOpen(true)} className="text-white/80 hover:text-white hover:underline">
-                            Save to space files
-                        </button>
-                    </>
-                )}
+                <SpaceImageActions src={src} />
             </ImageLightbox>
             {saveOpen && <SaveToSpaceDialog src={src} onClose={() => setSaveOpen(false)} />}
         </>

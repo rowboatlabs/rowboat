@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AttachmentColumn, SpaceMarkdown, SpaceNavProvider, SpaceRefsProvider } from './space-markdown'
+import { AttachmentColumn, BlobImage, SpaceMarkdown, SpaceNavProvider, SpaceRefsProvider } from './space-markdown'
 import { blobWireUrl } from '@/lib/spaces-presentation'
 
 const refs = { orgId: 'org', spaceId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', orgAddress: 'spaces.example.com' }
@@ -9,7 +9,7 @@ const secondHash = 'b'.repeat(64)
 const body = `Photos\n\n![First](${blobWireUrl(refs, firstHash, 'first.png')})\n\n![Second](${blobWireUrl(refs, secondHash, 'second.png')})\n\n![Third](https://example.com/third.png)`
 const invoke = vi.fn().mockResolvedValue({ saved: true })
 
-beforeEach(() => { Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } }); invoke.mockClear() })
+beforeEach(() => { Object.defineProperty(window, 'ipc', { configurable: true, value: { invoke } }); invoke.mockReset().mockResolvedValue({ saved: true }) })
 afterEach(cleanup)
 
 describe('Spaces message image carousel', () => {
@@ -121,5 +121,50 @@ describe('Space file attachments', () => {
         fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
         expect(await screen.findByRole('button', { name: 'Keep both' })).toBeEnabled()
         expect(screen.getByRole('textbox', { name: 'File name' })).toHaveValue('notes.txt')
+    })
+})
+
+
+describe.each(['carousel', 'standalone'] as const)('%s image preview actions', (kind) => {
+    const src = `app://space-blob/org/${refs.spaceId}/${secondHash}?name=second.png`
+    async function openPreview() {
+        if (kind === 'carousel') {
+            render(<SpaceRefsProvider refs={refs}><SpaceNavProvider onOpenFile={vi.fn()} onOpenAttachment={vi.fn()}><SpaceMarkdown body={body} /></SpaceNavProvider></SpaceRefsProvider>)
+        } else render(<BlobImage src={src} alt="Second" />)
+        fireEvent.click(await screen.findByRole('button', { name: 'Preview Second' }))
+        return screen.getByRole('dialog')
+    }
+
+    it('opens the save form and saves the selected image without dismissing the preview', async () => {
+        invoke.mockImplementation(async (channel) => channel === 'spaces:listAssets' ? { entries: [] } : { outcome: 'applied' })
+        const lightbox = await openPreview()
+        expect(lightbox).toHaveClass('titlebar-no-drag')
+        const action = within(lightbox).getByRole('button', { name: 'Save to space files' })
+        expect(action.parentElement?.parentElement).toHaveClass('titlebar-no-drag', 'top-14')
+        fireEvent.click(action)
+        const form = screen.getByRole('dialog', { name: 'Save to space files' })
+        const input = within(form).getByRole('textbox', { name: 'File name' })
+        expect(input).toHaveValue('second.png')
+        fireEvent.keyDown(input, { key: 'ArrowLeft' })
+        fireEvent.change(input, { target: { value: 'saved-photo.png' } })
+        fireEvent.click(within(form).getByRole('button', { name: /^Save$/ }))
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Save to space files' })).not.toBeInTheDocument())
+        expect(invoke).toHaveBeenCalledWith('spaces:proposeChange', {
+            orgId: refs.orgId, spaceId: refs.spaceId,
+            input: { assetPath: 'saved-photo.png', baseVersion: 0, blob: secondHash, reason: 'saved from chat' },
+        })
+        expect(within(screen.getByRole('dialog')).getByRole('img', { name: 'Second' })).toBeVisible()
+    })
+
+    it('shows download failures and retries the selected image', async () => {
+        invoke.mockRejectedValueOnce(new Error('Could not fetch image')).mockResolvedValue({ saved: true })
+        const lightbox = await openPreview()
+        fireEvent.click(within(lightbox).getByRole('button', { name: 'Download' }))
+        expect(await within(lightbox).findByRole('alert')).toHaveTextContent('Could not fetch image')
+        fireEvent.click(within(lightbox).getByRole('button', { name: 'Download' }))
+        await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2))
+        expect(invoke).toHaveBeenLastCalledWith('spaces:saveBlob', { orgId: refs.orgId, spaceId: refs.spaceId, hash: secondHash, suggestedName: 'second.png' })
+        expect(within(lightbox).queryByRole('alert')).not.toBeInTheDocument()
+        expect(lightbox).toBeInTheDocument()
     })
 })
