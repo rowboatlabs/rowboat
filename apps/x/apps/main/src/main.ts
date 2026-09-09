@@ -48,7 +48,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import container, { registerBrowserControlService, registerNotificationService, registerScreenPointerService, registerTextInsertService } from "@x/core/dist/di/container.js";
 import { forwardRpc } from "./rpc-forwarder.js";
-import { bounceAllLive } from "@x/core/dist/spaces/orgs.js";
+import { bounceAllLive, getClient as getSpaceClient } from "@x/core/dist/spaces/orgs.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
@@ -232,6 +232,33 @@ function registerAppProtocol() {
           return new Response("Forbidden", { status: 403 });
         }
       })();
+    }
+
+    // File-based URLs keep HTML's relative assets inside the same space.
+    if (url.host === "space-document") {
+      try {
+        const [orgId, spaceId, ...segments] = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        if (!orgId || !spaceId || !segments.length || segments.some((part) => part === '..' || part.includes('/') || part.includes('\\'))) {
+          return new Response("Not Found", { status: 404 });
+        }
+        const assetPath = segments.join('/');
+        const asset = await getSpaceClient(orgId).readAsset(spaceId, assetPath);
+        const blob = asset.blob ? await spaceBlobCache.getBlob(orgId, spaceId, asset.blob.hash) : null;
+        const ext = path.extname(assetPath).toLowerCase();
+        const textTypes: Record<string, string> = {
+          '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css',
+          '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',
+        };
+        return new Response(blob ? new Uint8Array(blob.bytes) : asset.content, {
+          headers: {
+            'content-type': textTypes[ext] ?? blob?.mime ?? 'text/plain',
+            'cache-control': 'no-cache',
+            'x-content-type-options': 'nosniff',
+          },
+        });
+      } catch {
+        return new Response("Not Found", { status: 404 });
+      }
     }
 
     // Space blobs: app://space-blob/<orgId>/<spaceId>/<hash>
@@ -479,7 +506,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   // navigation untouched so the embeds keep working.
   win.webContents.on("will-frame-navigate", (event) => {
     if (event.isMainFrame) return;
-    if (!event.frame?.url.startsWith("app://workspace/")) return;
+    if (!event.frame?.url.startsWith("app://workspace/") && !event.frame?.url.startsWith("app://space-document/")) return;
     if (routeExternalNavigation(event.url)) event.preventDefault();
   });
 

@@ -1,5 +1,6 @@
 import '@/styles/spaces.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
+import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, BellOff, Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
@@ -1005,7 +1006,7 @@ function SpacePane({ org, space, selection, onSelect, onOpenSession, active = tr
                                 />
                             </Suspense>
                         ) : centerPath ? (
-                            <div className={cn('flex min-w-0 min-h-0 flex-1', !split && 'mx-auto max-w-[880px]')}>
+                            <div className={cn('flex min-w-0 min-h-0 flex-1', !split && !getViewerType(centerPath) && 'mx-auto max-w-[880px]')}>
                                 <FileColumn
                                     key={centerPath}
                                     org={org}

@@ -1,3 +1,4 @@
+import { useFileViewerSource } from './file-viewer-source'
 import {
   Component,
   useCallback,
@@ -210,6 +211,7 @@ function textSignature(paras: readonly { runs: readonly { text: string }[] }[]):
 }
 
 export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
+  const source = useFileViewerSource()
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [baseDeck, setBaseDeck] = useState<SlideDeck | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -269,11 +271,11 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
   if (fileSyncRef.current === null) {
     fileSyncRef.current = createDeckFileSync({
       read: async () => {
-        const res = await window.ipc.invoke('workspace:readFile', { path, encoding: 'base64' })
+        const res = await source.read({ path, encoding: 'base64' })
         return { data: res.data, etag: res.etag, stat: { mtimeMs: res.stat.mtimeMs, size: res.stat.size } }
       },
       write: async (data, expectedEtag) => {
-        const res = await window.ipc.invoke('workspace:writeFile', {
+        const res = await source.write({
           path,
           data,
           opts: { encoding: 'base64', ...(expectedEtag !== null ? { expectedEtag } : {}) },
@@ -282,7 +284,7 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
       },
       stat: async () => {
         try {
-          const s = await window.ipc.invoke('workspace:stat', { path })
+          const s = await source.stat({ path })
           return { mtimeMs: s.mtimeMs, size: s.size }
         } catch {
           return null
@@ -375,7 +377,7 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
       void savePipeline.flush()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path])
+  }, [path, source])
 
   // App.tsx keys this component by path, so a different file is a fresh mount.
   useEffect(() => {
@@ -533,6 +535,8 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
       externalSignalBusyRef.current = false
     }
   }, [fileSync, savePipeline, reloadFromDisk])
+
+  useEffect(() => source.subscribe?.(() => { void handleExternalSignal() }), [source, handleExternalSignal])
 
   // The workspace watcher only covers allowlisted roots, so assistant deck
   // tools additionally announce their writes via this window event (App.tsx).
@@ -1445,14 +1449,14 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
   // ---------------------------------------------------------------- render
 
   const openExternally = useCallback(() => {
-    void window.ipc.invoke('shell:openPath', { path })
-  }, [path])
+    void source.open({ path })
+  }, [path, source])
 
   /** Saves a copy elsewhere. Flushes first so the copy has the latest edits. */
   const exportCopy = useCallback(async () => {
     try {
       await savePipeline.flush()
-      const result = await window.ipc.invoke('workspace:exportCopy', { path })
+      const result = await source.exportCopy({ path })
       if (result.error) {
         toast.error(`Could not export a copy: ${result.error}`)
         return
@@ -1466,7 +1470,7 @@ export function PptxEditor({ path, onSlideChange }: PptxEditorProps) {
       const message = err instanceof Error ? err.message : String(err)
       toast.error('Could not export a copy.', { description: message })
     }
-  }, [path, savePipeline])
+  }, [path, savePipeline, source])
 
   if (loadState === 'error') return <FailurePanel path={path} onOpen={openExternally} />
 

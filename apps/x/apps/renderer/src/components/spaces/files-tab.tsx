@@ -1,3 +1,7 @@
+import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
+import { MarkdownEditor } from '@/components/markdown-editor'
+import { SpaceDocumentViewer } from './document-viewer'
+import { getViewerType } from '@/lib/file-types'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, Check, Clock, Download, Eye, FileText, Folder, FolderOpen, History, Image as ImageIcon, Loader2, MoreHorizontal, Pencil, PenTool, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -14,7 +18,7 @@ import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import type { OrgWithSpaces } from '@/hooks/use-spaces'
 import { MemberText } from '@/components/spaces/member-text'
 import {
-    attributionLabel, blobAppUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime,
+    attributionLabel, blobAppUrl, blobWireUrl, buildFileTree, formatBytes, formatFeedTime, isImageMime,
     parseAssetWireUrl, parseBlobAppUrl, resolveSpaceLink, rewriteBlobLinks, rewriteRelativeImages, toggleTaskAt,
     type FileTreeNode,
 } from '@/lib/spaces-presentation'
@@ -24,9 +28,8 @@ import { uploadInputFor } from '@/lib/spaces-upload'
 
 // Files: the tree (README first) and the file column — rendered file
 // with one-tap checkboxes, Edit → draft→apply (merged / conflict handled),
-// History with diffs. Binary files (uploads, spec §6) render a preview or a
-// download card instead of the editor; Replace is the binary "edit" (a new
-// upload proposed at the same path against the current version).
+// History with diffs. Supported documents reuse the workspace viewers/editors;
+// other binary files retain the download card and versioned Replace action.
 
 // ---------------------------------------------------------------------------
 // Files rail — the space's tree, README first, unread dots on moved files
@@ -804,12 +807,42 @@ export function FileColumn({ org, space, path, entries = [], memberNames, refres
             )}
             <div className="flex-1 min-h-0 flex">
                 <div className="flex-1 min-w-0 min-h-0 overflow-y-auto">
-                    {draft ? (
+                    {draft && /\.md$/i.test(path) ? (
+                        <MarkdownEditor
+                            content={splitFrontmatter(draft.text).body}
+                            frontmatter={splitFrontmatter(draft.text).raw}
+                            onFrontmatterChange={(raw) => setDraft({ ...draft, text: joinFrontmatter(raw, splitFrontmatter(draft.text).body), conflict: null })}
+                            onChange={(text) => setDraft({ ...draft, text: joinFrontmatter(splitFrontmatter(draft.text).raw, text), conflict: null })}
+                            onExport={async (format) => {
+                                try {
+                                    await window.ipc.invoke('export:note', { markdown: draft.text, format, title: fileName })
+                                } catch (err) {
+                                    toast(err instanceof Error ? err.message : 'Could not export', 'error')
+                                }
+                            }}
+                            onImageUpload={async (file) => {
+                                const uploaded = await window.ipc.invoke('spaces:uploadBlob', {
+                                    orgId: org.id, spaceId: space.id, name: file.name,
+                                    ...(await uploadInputFor(file)),
+                                    ...(file.type ? { mime: file.type } : {}),
+                                })
+                                return blobWireUrl(wireRefs, uploaded.blob.hash, file.name)
+                            }}
+                        />
+                    ) : draft ? (
                         <Textarea
                             value={draft.text}
                             spellCheck={false}
                             className="w-full h-full min-h-full rounded-none border-0 font-mono text-sm resize-none focus-visible:ring-0 px-5 py-4"
                             onChange={(e) => setDraft({ ...draft, text: e.target.value, conflict: null })}
+                        />
+                    ) : asset && getViewerType(path) ? (
+                        <SpaceDocumentViewer
+                            key={`${org.id}:${space.id}:${path}:${['docx', 'pptx'].includes(getViewerType(path)!) ? 'editor' : asset.version}`}
+                            orgId={org.id}
+                            spaceId={space.id}
+                            asset={asset}
+                            onChanged={onChanged}
                         />
                     ) : blob ? (
                         <div className="p-5">
