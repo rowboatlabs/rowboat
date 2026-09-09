@@ -435,6 +435,17 @@ module.exports = {
                 stdio: 'inherit'
             });
 
+            // Fail Windows packaging if the shortcut identity, running-window
+            // identity, taskbar relaunch metadata, compiled bundle, or ICO
+            // frame set drifts out of alignment.
+            if (platform === 'win32') {
+                console.log('Verifying Windows taskbar identity and icon packaging...');
+                execSync('node scripts/verify-windows-packaging.mjs --require-bundle', {
+                    cwd: __dirname,
+                    stdio: 'inherit'
+                });
+            }
+
             // Copy preload dist into staging directory
             console.log('Copying preload...');
             const preloadSrc = path.join(__dirname, '../preload/dist');
