@@ -157,13 +157,13 @@ export function buildFileTree(entries: spaces.SpacesAssetEntry[], draftFolders: 
 }
 
 // ---------------------------------------------------------------------------
-// Unread — client-side read marks (the protocol has no read cursors yet; a
-// Latitude item). A change is unread when it landed after the member's mark
-// and the member didn't make it themselves (chat unread lives in use-space-chat).
+// Unread — the org-owned stream mark, an offset (spaces-read-state). A change
+// is unread when it landed after the member's mark and the member didn't make
+// it themselves (chat unread lives in spaces-read-state too).
 // ---------------------------------------------------------------------------
 
-export function isUnreadChange(cs: spaces.ChangeSet, lastReadAt: string | null, selfMemberId: string): boolean {
-    if (lastReadAt && cs.committedAt <= lastReadAt) return false
+export function isUnreadChange(cs: spaces.ChangeSet, readOffset: number, selfMemberId: string): boolean {
+    if (cs.offset <= readOffset) return false
     return cs.attribution.memberId !== selfMemberId || cs.attribution.actingMode !== 'direct'
 }
 

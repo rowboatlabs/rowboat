@@ -20,6 +20,7 @@ import {
   type Space,
   type Topic,
   type TopicListing,
+  type UnreadSnapshot,
 } from '@rowboat/spaces-protocol';
 import type { z } from 'zod';
 
@@ -360,7 +361,7 @@ export class SpacesClient {
   async listStream(
     spaceId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; readOffset: number }> {
     return this.request('GET', this.space(spaceId, `/stream${this.windowQuery(opts)}`), routes.listStream.response);
   }
 
@@ -369,12 +370,45 @@ export class SpacesClient {
     spaceId: string,
     rootMessageId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ root: Message; topic: Topic | null; messages: Message[]; hasMore: boolean }> {
+  ): Promise<{
+    root: Message;
+    topic: Topic | null;
+    messages: Message[];
+    hasMore: boolean;
+    readOffset: number | null;
+    following: boolean;
+  }> {
     return this.request(
       'GET',
       this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}${this.windowQuery(opts)}`),
       routes.listThread.response,
     );
+  }
+
+  // --- read state -----------------------------------------------------------
+  // The org owns the cursors (offsets, per member); these are pass-throughs.
+
+  /** Advance the stream mark (no threadRootId) or a followed thread's. Monotone; null = not following. */
+  async markRead(spaceId: string, input: { threadRootId?: string; offset: number }): Promise<{ readOffset: number | null }> {
+    return this.request('POST', this.space(spaceId, '/read'), routes.markRead.response, input);
+  }
+
+  async followThread(
+    spaceId: string,
+    rootMessageId: string,
+    following: boolean,
+  ): Promise<{ following: boolean; readOffset: number }> {
+    return this.request(
+      'POST',
+      this.space(spaceId, `/threads/${encodeURIComponent(rootMessageId)}/follow`),
+      routes.followThread.response,
+      { following },
+    );
+  }
+
+  /** The unread snapshot: every space with its cursor, unread roots, and unread followed threads. */
+  async unread(): Promise<UnreadSnapshot> {
+    return this.request('GET', routes.unread.path, routes.unread.response);
   }
 
   /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */

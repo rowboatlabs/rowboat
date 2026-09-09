@@ -25,7 +25,7 @@ import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useSpaceMembers } from '@/hooks/use-space-members'
-import { findSpace, useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { findSpace, useSpaceFeed, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
@@ -33,7 +33,7 @@ import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces
 import { AttachmentColumn, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
-import { markRead, markTopicRead } from '@/lib/spaces-read-state'
+import { getSpaceReadState, markStreamRead, markThreadRead, useStreamReadOffset } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import * as analytics from '@/lib/analytics'
@@ -238,7 +238,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const feed = useSpaceFeed(org.id, space.id)
     const stream = useStream(org.id, space.id)
     const presence = useSpacePresence(org.id, space.id, org.memberId)
-    const lastReadAt = useSpaceLastReadAt(org.id, space.id)
+    const readOffset = useStreamReadOffset(org.id, space.id)
     // The roster comes from the module store (cached, hydrated in render) so
     // names resolve in the same first frame as the stream's cached tail.
     const members = useSpaceMembers(org.id, space.id)
@@ -310,19 +310,19 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const [scheduledOpen, setScheduledOpen] = useState(false)
 
     const markAllRead = () => {
-        markRead(org.id, space.id)
-        markTopicRead(org.id, space.id, STREAM_READ_KEY)
-        for (const t of feed.topics) markTopicRead(org.id, space.id, t.rootMessageId)
-        for (const m of stream.messages) {
-            if (!m.pending && !m.failed && (m.replyCount ?? 0) > 0) markTopicRead(org.id, space.id, m.id)
-        }
+        // Everything: the stream up to head (or the newest loaded root, if
+        // that is further), and every followed thread up to its newest reply.
+        const state = getSpaceReadState(org.id, space.id)
+        const newest = stream.messages.reduce((max, m) => (!m.pending && !m.failed && m.offset > max ? m.offset : max), 0)
+        markStreamRead(org.id, space.id, Math.max(state?.head ?? 0, newest))
+        for (const [root, t] of state?.threads ?? []) if (t.following) markThreadRead(org.id, space.id, root, t.lastReplyOffset)
     }
 
     const unreadPaths = useMemo(
         // Boards are excluded: their saves are throttled snapshots, not reading
         // material — the boards rail is their surface, not the files tree.
-        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, lastReadAt, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetPath)),
-        [feed.changeSets, lastReadAt, org.memberId],
+        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetPath)),
+        [feed.changeSets, readOffset, org.memberId],
     )
 
     // ------------------------------------------------------------------

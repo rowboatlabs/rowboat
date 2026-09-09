@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { SPACES_ENABLED } from '@/lib/feature-flags'
-import { getLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
+import { loadUnread } from '@/lib/spaces-read-state'
 
 export interface OrgWithSpaces extends spaces.SpacesOrgSummary {
     /** Shared spaces — what every "the spaces" surface renders. */
@@ -80,6 +80,9 @@ export function refreshSpacesOrgs(): Promise<void> {
                 }),
             )
             orgsState = { orgs: withSpaces, loading: false }
+            // The org-owned read state rides the same moment: one snapshot per
+            // reachable org, folded live from here on (spaces-read-state).
+            for (const org of withSpaces) if (!org.error) void loadUnread(org.id, org.memberId)
         } catch {
             orgsState = { ...orgsState, loading: false }
         } finally {
@@ -338,8 +341,4 @@ export function useSpaceFeed(orgId: string | null, spaceId: string | null): Spac
     }, [orgId, spaceId])
     if (!orgId || !spaceId) return EMPTY_FEED
     return state.get(liveKey(orgId, spaceId)) ?? EMPTY_FEED
-}
-
-export function useSpaceLastReadAt(orgId: string, spaceId: string): string | null {
-    return useSyncExternalStore(subscribeReadState, () => getLastReadAt(orgId, spaceId))
 }

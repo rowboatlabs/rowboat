@@ -1,29 +1,38 @@
-// Per-space read marks, kept on this install (localStorage). The protocol has
-// no read cursors in v0 (a Latitude item per api.ts) — until it does, "unread"
-// is what moved since the member last pressed Mark read / opened the space.
+import { useSyncExternalStore } from 'react'
+import type { spaces } from '@x/shared'
+import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 
-const KEY_PREFIX = 'spaces:lastRead:'
+// Read state, org-owned (2026-09-09). The org keeps per-member cursors in
+// OFFSETS — a stream mark per space, a mark per FOLLOWED thread — so every
+// device agrees. This store mirrors them per org: a snapshot from
+// spaces:getUnread at boot and on every resync, live frames folded on top,
+// and the reader's own marks applied optimistically before the org confirms
+// (sent debounced — Slack's advice: don't mark on every scroll tick). Threads
+// nobody follows have no unread state at all; the org decides what follows.
 
+export interface ThreadReadState {
+    following: boolean
+    readOffset: number
+    /** Newest live reply's offset known to us; 0 = none. */
+    lastReplyOffset: number
+    /** Live replies past readOffset by others, when the org told us; null = unknown (the pane derives it). */
+    unreadReplies: number | null
+}
+
+export interface SpaceReadState {
+    head: number
+    readOffset: number
+    unreadRoots: number
+    threads: Map<string, ThreadReadState>
+}
+
+const orgs = new Map<string, Map<string, SpaceReadState>>()
+const memberIds = new Map<string, string>()
 const listeners = new Set<() => void>()
+let version = 0
 
-function key(orgId: string, spaceId: string): string {
-    return `${KEY_PREFIX}${orgId}/${spaceId}`
-}
-
-export function getLastReadAt(orgId: string, spaceId: string): string | null {
-    try {
-        return window.localStorage.getItem(key(orgId, spaceId))
-    } catch {
-        return null
-    }
-}
-
-export function markRead(orgId: string, spaceId: string, at: string = new Date().toISOString()): void {
-    try {
-        window.localStorage.setItem(key(orgId, spaceId), at)
-    } catch {
-        // storage unavailable — unread just stays visible
-    }
+function emit(): void {
+    version += 1
     for (const listener of listeners) listener()
 }
 
@@ -34,27 +43,349 @@ export function subscribeReadState(listener: () => void): () => void {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Per-topic marks (chat-first model): general and each thread keep their own.
-// ---------------------------------------------------------------------------
-
-function topicKey(orgId: string, spaceId: string, topicId: string): string {
-    return `${KEY_PREFIX}${orgId}/${spaceId}/${topicId}`
+function space(orgId: string, spaceId: string, create: true): SpaceReadState
+function space(orgId: string, spaceId: string, create?: false): SpaceReadState | undefined
+function space(orgId: string, spaceId: string, create = false): SpaceReadState | undefined {
+    let byOrg = orgs.get(orgId)
+    if (!byOrg) {
+        if (!create) return undefined
+        byOrg = new Map()
+        orgs.set(orgId, byOrg)
+    }
+    let state = byOrg.get(spaceId)
+    if (!state && create) {
+        state = { head: 0, readOffset: 0, unreadRoots: 0, threads: new Map() }
+        byOrg.set(spaceId, state)
+    }
+    return state
 }
 
-export function getTopicLastReadAt(orgId: string, spaceId: string, topicId: string): string | null {
-    try {
-        return window.localStorage.getItem(topicKey(orgId, spaceId, topicId))
-    } catch {
-        return null
+// --- reads ------------------------------------------------------------------
+
+export function getSpaceReadState(orgId: string, spaceId: string): SpaceReadState | undefined {
+    return space(orgId, spaceId)
+}
+
+/** The stream mark; 0 = never marked. */
+export function getStreamReadOffset(orgId: string, spaceId: string): number {
+    return space(orgId, spaceId)?.readOffset ?? 0
+}
+
+export function getThreadReadState(orgId: string, spaceId: string, rootMessageId: string): ThreadReadState | undefined {
+    return space(orgId, spaceId)?.threads.get(rootMessageId)
+}
+
+function threadUnread(t: ThreadReadState): boolean {
+    return t.following && t.lastReplyOffset > t.readOffset && (t.unreadReplies === null || t.unreadReplies > 0)
+}
+
+/** Followed, with live replies past the mark. A thread you don't follow is never unread. */
+export function isThreadUnread(orgId: string, spaceId: string, rootMessageId: string): boolean {
+    const t = getThreadReadState(orgId, spaceId, rootMessageId)
+    return !!t && threadUnread(t)
+}
+
+/** The sidebar number: unread roots plus followed threads with unread replies. */
+export function countUnread(orgId: string, spaceId: string): number {
+    const s = space(orgId, spaceId)
+    if (!s) return 0
+    let count = s.unreadRoots
+    for (const t of s.threads.values()) if (threadUnread(t)) count += 1
+    return count
+}
+
+export function useStreamReadOffset(orgId: string, spaceId: string): number {
+    return useSyncExternalStore(subscribeReadState, () => getStreamReadOffset(orgId, spaceId))
+}
+
+/** Bumps on every change — for components that read the store imperatively during render. */
+export function useReadStateVersion(): number {
+    return useSyncExternalStore(subscribeReadState, () => version)
+}
+
+// --- the snapshot -----------------------------------------------------------
+
+const inflight = new Map<string, Promise<void>>()
+const reloadTimers = new Map<string, ReturnType<typeof setTimeout>>()
+let busWired = false
+
+/** Fetch the org's snapshot and replace what we hold (panes' knowledge of quiet followed threads survives). */
+export function loadUnread(orgId: string, memberId: string): Promise<void> {
+    memberIds.set(orgId, memberId)
+    wireBus()
+    const running = inflight.get(orgId)
+    if (running) return running
+    const promise = (async () => {
+        try {
+            const snapshot = await window.ipc.invoke('spaces:getUnread', { orgId })
+            const prev = orgs.get(orgId)
+            const next = new Map<string, SpaceReadState>()
+            for (const s of snapshot.spaces) {
+                const threads = new Map<string, ThreadReadState>()
+                // The org lists only followed threads with unread replies; a
+                // followed thread we learned about from its pane and that the
+                // org left out is, by that omission, read.
+                for (const [root, t] of prev?.get(s.spaceId)?.threads ?? []) {
+                    if (t.following) threads.set(root, { ...t, unreadReplies: 0 })
+                }
+                for (const t of s.threads) {
+                    threads.set(t.rootMessageId, {
+                        following: true,
+                        readOffset: t.readOffset,
+                        lastReplyOffset: t.lastReplyOffset,
+                        unreadReplies: t.unreadReplies,
+                    })
+                }
+                next.set(s.spaceId, { head: s.head, readOffset: s.readOffset, unreadRoots: s.unreadRoots, threads })
+            }
+            orgs.set(orgId, next)
+            emit()
+            migrateLegacyMarks(orgId, [...next.keys()])
+        } catch {
+            // org unreachable — keep what we hold; the next resync retries
+        } finally {
+            inflight.delete(orgId)
+        }
+    })()
+    inflight.set(orgId, promise)
+    return promise
+}
+
+/** Coalesced refetch — for moments the org knows more than the fold can (partial marks, unknown threads, resyncs). */
+function scheduleReload(orgId: string, delayMs = 1_500): void {
+    const memberId = memberIds.get(orgId)
+    if (!memberId || reloadTimers.has(orgId)) return
+    reloadTimers.set(
+        orgId,
+        setTimeout(() => {
+            reloadTimers.delete(orgId)
+            void loadUnread(orgId, memberId)
+        }, delayMs),
+    )
+}
+
+export function forgetOrg(orgId: string): void {
+    orgs.delete(orgId)
+    memberIds.delete(orgId)
+    const t = reloadTimers.get(orgId)
+    if (t) clearTimeout(t)
+    reloadTimers.delete(orgId)
+    emit()
+}
+
+// --- marking ----------------------------------------------------------------
+
+const pendingMarks = new Map<string, { timer: ReturnType<typeof setTimeout>; offset: number }>()
+const MARK_DEBOUNCE_MS = 1_200
+
+function queueMark(orgId: string, spaceId: string, threadRootId: string | undefined, offset: number): void {
+    const key = `${orgId}/${spaceId}/${threadRootId ?? 'stream'}`
+    const pending = pendingMarks.get(key)
+    if (pending) {
+        pending.offset = Math.max(pending.offset, offset)
+        return
+    }
+    const entry = {
+        offset,
+        timer: setTimeout(() => {
+            pendingMarks.delete(key)
+            void window.ipc
+                .invoke('spaces:markRead', { orgId, spaceId, ...(threadRootId ? { threadRootId } : {}), offset: entry.offset })
+                .catch(() => {
+                    // the org disagreed or was unreachable — the next snapshot is the truth
+                })
+        }, MARK_DEBOUNCE_MS),
+    }
+    pendingMarks.set(key, entry)
+}
+
+/**
+ * The reader has seen the stream up to `offset` (the newest root on screen —
+ * never head, unless marking everything). Local state moves at once; the org
+ * hears about it debounced. `sync: false` = the org already knows (a post).
+ */
+export function markStreamRead(orgId: string, spaceId: string, offset: number, opts?: { sync?: boolean }): void {
+    const s = space(orgId, spaceId, true)
+    if (offset > s.head) s.head = offset
+    if (offset <= s.readOffset) return
+    s.readOffset = offset
+    if (offset >= s.head) s.unreadRoots = 0
+    else scheduleReload(orgId) // a partial read — the org recounts what's left
+    emit()
+    if (opts?.sync !== false) queueMark(orgId, spaceId, undefined, offset)
+}
+
+/** Same for a followed thread. A thread we don't follow takes no mark (the org would record nothing either). */
+export function markThreadRead(orgId: string, spaceId: string, rootMessageId: string, offset: number, opts?: { sync?: boolean }): void {
+    const t = space(orgId, spaceId)?.threads.get(rootMessageId)
+    if (!t?.following || offset <= t.readOffset) return
+    t.readOffset = offset
+    if (offset >= t.lastReplyOffset) t.unreadReplies = 0
+    else {
+        t.unreadReplies = null
+        scheduleReload(orgId)
+    }
+    emit()
+    if (opts?.sync !== false) queueMark(orgId, spaceId, rootMessageId, offset)
+}
+
+/** The stream's mark as a page read carried it (listStream) — merged, never regressed. */
+export function noteStreamReadOffset(orgId: string, spaceId: string, readOffset: number): void {
+    const s = space(orgId, spaceId, true)
+    if (readOffset <= s.readOffset) return
+    s.readOffset = readOffset
+    emit()
+}
+
+/**
+ * What the org said about a thread for us (listThread, or our own reply which
+ * follows it): the follow flag and the mark. Merged, never regressed.
+ */
+export function noteThread(
+    orgId: string,
+    spaceId: string,
+    rootMessageId: string,
+    info: { following: boolean; readOffset: number | null; lastReplyOffset?: number },
+): void {
+    const s = space(orgId, spaceId, true)
+    const prev = s.threads.get(rootMessageId)
+    const readOffset = Math.max(prev?.readOffset ?? 0, info.readOffset ?? 0)
+    const lastReplyOffset = Math.max(prev?.lastReplyOffset ?? 0, info.lastReplyOffset ?? 0)
+    const unreadReplies = !info.following || readOffset >= lastReplyOffset ? 0 : (prev?.unreadReplies ?? null)
+    s.threads.set(rootMessageId, { following: info.following, readOffset, lastReplyOffset, unreadReplies })
+    emit()
+}
+
+// --- the live fold ----------------------------------------------------------
+
+function applyFrame(orgId: string, frame: spaces.ServerFrame): void {
+    switch (frame.kind) {
+        case 'read_mark': {
+            // One of our other connections moved a mark.
+            const s = space(orgId, frame.spaceId, true)
+            if (frame.threadRootId !== undefined) {
+                const t = s.threads.get(frame.threadRootId)
+                if (!t || frame.offset <= t.readOffset) return
+                t.readOffset = frame.offset
+                if (frame.offset >= t.lastReplyOffset) t.unreadReplies = 0
+                else scheduleReload(orgId)
+            } else {
+                if (frame.offset <= s.readOffset) return
+                s.readOffset = frame.offset
+                if (frame.offset >= s.head) s.unreadRoots = 0
+                else scheduleReload(orgId)
+            }
+            emit()
+            return
+        }
+        case 'space_added':
+            scheduleReload(orgId, 0)
+            return
+        case 'subscribed':
+            // A (re)subscription is the resync moment: replay may have carried
+            // things we folded blind. Boot subscriptions coalesce into the
+            // snapshot the orgs store already asked for.
+            if (orgs.has(orgId)) scheduleReload(orgId)
+            return
+        case 'event': {
+            const s = space(orgId, frame.spaceId, true)
+            if (frame.offset > s.head) s.head = frame.offset
+            const event = frame.event
+            if (event.type === 'message') {
+                const m = event.message
+                const me = memberIds.get(orgId)
+                const mine = me !== undefined && m.author.memberId === me
+                const direct = m.author.actingMode === 'direct'
+                if (m.threadRoot === undefined) {
+                    // A root. Ours (posted directly) read the stream up to itself.
+                    if (mine) {
+                        if (direct && m.offset > s.readOffset) {
+                            s.readOffset = m.offset
+                            s.unreadRoots = 0
+                        }
+                    } else if (m.offset > s.readOffset) {
+                        s.unreadRoots += 1
+                    }
+                } else {
+                    const t = s.threads.get(m.threadRoot)
+                    if (t) {
+                        if (m.offset > t.lastReplyOffset) t.lastReplyOffset = m.offset
+                        if (mine) {
+                            if (direct) {
+                                t.following = true
+                                if (m.offset > t.readOffset) t.readOffset = m.offset
+                                t.unreadReplies = 0
+                            }
+                        } else if (t.following && m.offset > t.readOffset) {
+                            t.unreadReplies = (t.unreadReplies ?? 0) + 1
+                        }
+                    } else if (mine && direct) {
+                        // Replying follows (the org's rule); our mark rides the reply.
+                        s.threads.set(m.threadRoot, { following: true, readOffset: m.offset, lastReplyOffset: m.offset, unreadReplies: 0 })
+                    } else if (!mine) {
+                        // A reply in a thread we hold nothing on: we may follow it
+                        // (a root of ours gets followed at its first reply) — the org knows.
+                        scheduleReload(orgId)
+                    }
+                }
+                emit()
+                return
+            }
+            if (event.type === 'message_deleted' && event.deletion.threadRoot !== undefined && s.threads.has(event.deletion.threadRoot)) {
+                scheduleReload(orgId) // the newest-live-reply offset may have moved back
+            }
+            emit() // head moved
+            return
+        }
+        default:
+            return
     }
 }
 
-export function markTopicRead(orgId: string, spaceId: string, topicId: string, at: string = new Date().toISOString()): void {
+function wireBus(): void {
+    if (busWired) return
+    busWired = true
+    subscribeSpacesFeed((event) => {
+        if ('frame' in event) applyFrame(event.orgId, event.frame)
+    })
+}
+
+// --- one-time migration off the per-install marks ---------------------------
+// Until 2026-09-09 marks were localStorage timestamps on this install. On the
+// first snapshot after the switch, a space the org has no mark for yet takes
+// its old mark: the cached stream tail says which offset that timestamp
+// reached. Then the legacy keys go — nothing reads them any more.
+
+function migrateLegacyMarks(orgId: string, spaceIds: string[]): void {
+    const flag = `spaces:readMarksMigrated:${orgId}`
     try {
-        window.localStorage.setItem(topicKey(orgId, spaceId, topicId), at)
+        if (window.localStorage.getItem(flag)) return
     } catch {
-        // storage unavailable — unread just stays visible
+        return
     }
-    for (const listener of listeners) listener()
+    for (const spaceId of spaceIds) {
+        const s = space(orgId, spaceId)
+        if (!s || s.readOffset > 0) continue
+        try {
+            const legacy =
+                window.localStorage.getItem(`spaces:lastRead:${orgId}/${spaceId}/stream`) ??
+                window.localStorage.getItem(`spaces:lastRead:${orgId}/${spaceId}`)
+            const cache = window.localStorage.getItem(`spaces:general:${orgId}/${spaceId}`)
+            if (!legacy || !cache) continue
+            const parsed = JSON.parse(cache) as { messages?: Array<{ offset: number; postedAt: string }> }
+            const offset = (parsed.messages ?? []).reduce((max, m) => (m.postedAt <= legacy && m.offset > max ? m.offset : max), 0)
+            if (offset > 0) markStreamRead(orgId, spaceId, offset)
+        } catch {
+            // a corrupt entry migrates nothing
+        }
+    }
+    try {
+        window.localStorage.setItem(flag, '1')
+        for (let i = window.localStorage.length - 1; i >= 0; i--) {
+            const key = window.localStorage.key(i)
+            if (key?.startsWith(`spaces:lastRead:${orgId}/`)) window.localStorage.removeItem(key)
+        }
+    } catch {
+        // storage unavailable — nothing to clean
+    }
 }

@@ -23,7 +23,6 @@ interface PhoneRegistration {
 }
 
 const REG_FILE = path.join(WorkDir, 'config', 'phone_push.json');
-const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
 function load(): Record<string, PhoneRegistration> {
   try {

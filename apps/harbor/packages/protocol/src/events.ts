@@ -164,6 +164,21 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     at: z.iso.datetime(),
   }),
   /**
+   * Addressed to a MEMBER (read state, 2026-09-09): one of your own
+   * connections advanced a read mark — the stream's (no threadRootId) or a
+   * followed thread's — so your other devices apply it and badges agree
+   * everywhere (Slack broadcasts marks to the member's connections the same
+   * way). Ephemeral, never replayed: a mark is private per-member state, not
+   * a space fact; a reconnecting client refetches GET /v1/unread instead.
+   */
+  z.object({
+    kind: z.literal('read_mark'),
+    spaceId: SpaceId,
+    threadRootId: MessageId.optional(),
+    offset: StreamOffset,
+    at: z.iso.datetime(),
+  }),
+  /**
    * Ephemeral whiteboard collaboration traffic (scene diffs, cursors, idle
    * state), fanned out to the space's subscribers. The payload is opaque to
    * the org on purpose — the same content-blind posture as the relay servers

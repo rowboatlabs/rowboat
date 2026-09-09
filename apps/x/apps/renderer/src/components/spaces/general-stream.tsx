@@ -19,7 +19,7 @@ import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { resolveMentions } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
-import { getTopicLastReadAt, markRead, markTopicRead } from '@/lib/spaces-read-state'
+import { getSpaceReadState, getStreamReadOffset, getThreadReadState, isThreadUnread, markStreamRead, markThreadRead } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
@@ -79,7 +79,11 @@ export function GeneralStream({
     // from then on — but only while actually on screen. A kept-alive hidden
     // stream must not mark messages read as they arrive; the flip back to
     // visible re-runs this and marks the catch-up read.
-    const [newSince, setNewSince] = useState<string | null>(() => getTopicLastReadAt(org.id, space.id, STREAM_READ_KEY))
+    // Marks are offsets now (org-owned); 0 = never marked = no line.
+    const markOrNull = (offset: number): number | null => (offset > 0 ? offset : null)
+    const newestSettledOffset = (): number =>
+        stream.messages.reduce((max, m) => (!m.pending && !m.failed && m.offset > max ? m.offset : max), 0)
+    const [newSince, setNewSince] = useState<number | null>(() => markOrNull(getStreamReadOffset(org.id, space.id)))
     const [newFading, setNewFading] = useState(false)
     // Each return to the stream re-arms the line at the catch-up point: the
     // read mark as it stood while hidden. Declared BEFORE the mark-read
@@ -90,11 +94,14 @@ export function GeneralStream({
         newArmedVisibleRef.current = visible
         if (!visible || was) return
         setNewFading(false)
-        setNewSince(getTopicLastReadAt(org.id, space.id, STREAM_READ_KEY))
+        setNewSince(markOrNull(getStreamReadOffset(org.id, space.id)))
     }, [visible, org.id, space.id])
     useEffect(() => {
         if (!visible || !stream.ready) return
-        markTopicRead(org.id, space.id, STREAM_READ_KEY)
+        // The newest root on screen, never head (Slack's rule).
+        const newest = newestSettledOffset()
+        if (newest > 0) markStreamRead(org.id, space.id, newest)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [org.id, space.id, stream.ready, stream.messages.length, visible])
 
     // First paint: start at the bottom — the newest messages, always. After
@@ -147,7 +154,7 @@ export function GeneralStream({
     // Once the reader is with the new messages (on screen, at the tail) the
     // line has done its job: linger a beat, fade, drop. Keep-alive means no
     // remount ever resets it — without this it would sit in history forever.
-    const hasNewLine = !!newSince && stream.messages.some((m) => m.postedAt > newSince && m.author.memberId !== org.memberId)
+    const hasNewLine = !!newSince && stream.messages.some((m) => m.offset > newSince && m.author.memberId !== org.memberId)
     useEffect(() => {
         if (!visible || !stream.ready || awayFromBottom || !hasNewLine || newFading) return
         const t = window.setTimeout(() => setNewFading(true), NEW_LINGER_MS)
@@ -179,17 +186,15 @@ export function GeneralStream({
         const workingAgents = presence.working.get(message.id) ?? []
         if (replyCount === 0 && !topic && workingAgents.length === 0) return null
         const lastActivityAt = message.lastReplyAt ?? message.postedAt
-        const mark = getTopicLastReadAt(org.id, space.id, message.id)
-        // Archived topics never read as unread — consistent with the rail
-        // badge and countSpaceUnread, which both skip archived ones.
-        const hasNew = !topic?.archived && !!message.lastReplyAt && (!mark || message.lastReplyAt > mark)
+        // Followed threads only (org-owned read state); archived topics never read as unread.
+        const hasNew = !topic?.archived && isThreadUnread(org.id, space.id, message.id)
         return {
             rootMessageId: message.id,
             archived: topic?.archived ?? false,
             replyCount,
             lastActivityAt,
-            // Count isn't known without the thread's messages; 1 reads as "has new" on the row.
-            unreadCount: hasNew && replyCount > 0 ? 1 : 0,
+            // The org's count when it told us one; else 1 reads as "has new" on the row.
+            unreadCount: hasNew && replyCount > 0 ? (getThreadReadState(org.id, space.id, message.id)?.unreadReplies || 1) : 0,
             workingAgents,
             title: topic ? resolveMentions(topic.title, memberNames) : null,
         }
@@ -202,12 +207,12 @@ export function GeneralStream({
     const post = async (body: string, agent?: AgentOptions) => {
         const pending = buildPendingMessage(space.id, org.memberId, body)
         ingestStreamMessage(org.id, space.id, pending)
-        markTopicRead(org.id, space.id, STREAM_READ_KEY)
         void window.ipc
             .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, body })
             .then((result) => {
                 resolvePendingStreamMessage(org.id, space.id, pending.id, result.message)
-                markTopicRead(org.id, space.id, STREAM_READ_KEY)
+                // The org read the stream up to our own post; mirror it.
+                markStreamRead(org.id, space.id, result.message.offset, { sync: false })
                 analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: containsRowboatAddress(body) })
                 // @rowboat on a fresh stream message: the agent works the thread
                 // under it — its receipt lands as the first reply.
@@ -297,7 +302,7 @@ export function GeneralStream({
         try {
             const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, input })
             ingestStreamMessage(org.id, space.id, posted)
-            markTopicRead(org.id, space.id, STREAM_READ_KEY)
+            markStreamRead(org.id, space.id, posted.offset, { sync: false })
             analytics.spacesMessagePosted({ kind: 'general', mentionsRowboat: false })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
@@ -532,7 +537,7 @@ export function GeneralStream({
         setNewJumped(false)
     }
     const newCount = newSince
-        ? stream.messages.filter((m) => !m.deletedAt && !m.pending && !m.failed && m.postedAt > newSince && m.author.memberId !== org.memberId).length
+        ? stream.messages.filter((m) => !m.deletedAt && !m.pending && !m.failed && m.offset > newSince && m.author.memberId !== org.memberId).length
         : 0
     const jumpToNew = () => {
         setRenderCap((c) => Math.max(c, stream.messages.length + 10))
@@ -604,7 +609,7 @@ export function GeneralStream({
             prevDay = day
             prev = undefined
         }
-        if (!newShown && newSince && message.postedAt > newSince && message.author.memberId !== org.memberId) {
+        if (!newShown && newSince && message.offset > newSince && message.author.memberId !== org.memberId) {
             rows.push(<NewDivider key="new" fading={newFading} />)
             newShown = true
             prev = undefined
@@ -819,12 +824,9 @@ export function GeneralStream({
                         name: 'read',
                         hint: 'Mark everything in this space read',
                         run: () => {
-                            markRead(org.id, space.id)
-                            markTopicRead(org.id, space.id, STREAM_READ_KEY)
-                            for (const m of stream.messages) {
-                                if (!m.pending && !m.failed && (m.replyCount ?? 0) > 0) markTopicRead(org.id, space.id, m.id)
-                            }
-                            for (const root of stream.topicsByRoot.keys()) markTopicRead(org.id, space.id, root)
+                            const state = getSpaceReadState(org.id, space.id)
+                            markStreamRead(org.id, space.id, Math.max(state?.head ?? 0, newestSettledOffset()))
+                            for (const [root, t] of state?.threads ?? []) if (t.following) markThreadRead(org.id, space.id, root, t.lastReplyOffset)
                             toast('Marked read', 'success')
                         },
                     },

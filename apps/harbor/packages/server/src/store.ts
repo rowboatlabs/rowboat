@@ -129,6 +129,21 @@ export interface AssetSearchRow {
   snippet?: string;
 }
 
+/** A member's row for one thread: the follow flag and the cursor (read state, 2026-09-09). */
+export interface ThreadReadMark {
+  following: boolean;
+  readOffset: number;
+}
+
+/** One followed thread with unread replies — the unread snapshot's thread entry. */
+export interface UnreadThreadRow {
+  rootMessageId: string;
+  readOffset: number;
+  lastReplyOffset: number;
+  /** Live replies past readOffset, not the member's own. Always ≥ 1 in a listing. */
+  unreadReplies: number;
+}
+
 export interface Store {
   // members (org-level)
   getMember(id: string): Promise<Member | undefined>;
@@ -275,6 +290,38 @@ export interface Store {
   // invites
   putInvite(invite: StoredInvite): Promise<void>;
   getInvite(token: string): Promise<StoredInvite | undefined>;
+
+  // read state (2026-09-09) — per-member cursors in offsets, never on the log.
+  // Stream marks: one per (space, member). Thread marks: one per (space,
+  // root, member), existing only for threads the member follows (or once
+  // followed — `following` false keeps the cursor).
+  /** The member's stream mark; 0 = never marked. */
+  getStreamReadMark(spaceId: string, memberId: string): Promise<number>;
+  /** Monotone upsert — greatest(stored, offset). Returns the stored mark. */
+  advanceStreamReadMark(spaceId: string, memberId: string, offset: number, at: string): Promise<number>;
+  getThreadReadMark(spaceId: string, rootMessageId: string, memberId: string): Promise<ThreadReadMark | undefined>;
+  /** Create the row (mark 0) or flip `following` on the existing one; the mark survives an unfollow. */
+  setThreadFollowing(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    following: boolean,
+    at: string,
+  ): Promise<ThreadReadMark>;
+  /** Monotone; undefined when the member is not following the thread (nothing recorded). */
+  advanceThreadReadMark(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    offset: number,
+    at: string,
+  ): Promise<number | undefined>;
+  /** Roots after `afterOffset` that are neither the member's nor tombstoned. */
+  countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
+  /** Followed threads with ≥1 live reply past the member's mark by someone else, newest activity first. */
+  listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]>;
+  /** Every mark the member holds in the space (leave / removal). */
+  deleteReadMarks(spaceId: string, memberId: string): Promise<void>;
 
   // event log (one durable sequence per space, offsets start at 1)
   head(spaceId: string): Promise<number>;

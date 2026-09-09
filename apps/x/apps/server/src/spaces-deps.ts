@@ -83,6 +83,7 @@ type SpacesRpcChannel =
   | 'spaces:invokeRowboat' | 'spaces:topicSession' | 'spaces:responseSession' | 'spaces:stopRowboat'
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive'
+  | 'spaces:markRead' | 'spaces:followThread' | 'spaces:getUnread'
   | 'spaces:schedule' | 'spaces:listScheduled' | 'spaces:cancelScheduled';
 type SpacesHandlers = {
   [K in SpacesRpcChannel]: (
@@ -366,6 +367,17 @@ export const spacesRpcHandlers: SpacesHandlers = {
     orgs.bounceAllLive();
     return { success: true };
   },
+
+  // Read state: the org owns the cursors (offsets, per member) — pass-throughs.
+  'spaces:markRead': async (args) =>
+    orgs.getClient(args.orgId).markRead(args.spaceId, {
+      ...(args.threadRootId ? { threadRootId: args.threadRootId } : {}),
+      offset: args.offset,
+    }),
+
+  'spaces:followThread': async (args) => orgs.getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
+
+  'spaces:getUnread': async (args) => orgs.getClient(args.orgId).unread(),
 
   // Scheduled sends + reminders: the 20s scheduler tick lives in this process.
   'spaces:schedule': async (args) => ({

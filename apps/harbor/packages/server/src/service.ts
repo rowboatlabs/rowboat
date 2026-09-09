@@ -95,6 +95,8 @@ type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 type VotePollInput = z.infer<Routes['votePoll']['request']>;
 type EndPollInput = z.infer<Routes['endPoll']['request']>;
+type MarkReadInput = z.infer<Routes['markRead']['request']>;
+type UnreadSnapshot = z.infer<Routes['unread']['response']>;
 
 /** Poll duration when the create request names none — Discord's default. */
 const DEFAULT_POLL_HOURS = 24;
@@ -321,6 +323,7 @@ export class HarborService {
       const membership = await this.store.getMembership(spaceId, ctx.memberId);
       if (!membership) return;
       await this.store.deleteMembership(spaceId, ctx.memberId);
+      await this.store.deleteReadMarks(spaceId, ctx.memberId);
       const offset = (await this.store.head(spaceId)) + 1;
       await this.append(spaceId, offset, this.now(), { type: 'membership', membership, action: 'left' });
     });
@@ -984,7 +987,7 @@ export class HarborService {
     ctx: ActorCtx,
     spaceId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; readOffset: number }> {
     await this.requireMember(ctx, spaceId);
     // Newest page by default — never the full history. One extra row answers
     // hasMore without a count query.
@@ -1001,7 +1004,12 @@ export class HarborService {
       const topic = await this.store.getTopicByRoot(spaceId, m.id);
       if (topic) topics.push(topic);
     }
-    return { messages: await this.foldPage(spaceId, roots), topics, hasMore };
+    return {
+      messages: await this.foldPage(spaceId, roots),
+      topics,
+      hasMore,
+      readOffset: await this.store.getStreamReadMark(spaceId, ctx.memberId),
+    };
   }
 
   /** A reply's id resolves to its root — callers always land on the thread. */
@@ -1019,7 +1027,14 @@ export class HarborService {
     spaceId: string,
     rootMessageId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ root: Message; topic: Topic | null; messages: Message[]; hasMore: boolean }> {
+  ): Promise<{
+    root: Message;
+    topic: Topic | null;
+    messages: Message[];
+    hasMore: boolean;
+    readOffset: number | null;
+    following: boolean;
+  }> {
     await this.requireMember(ctx, spaceId);
     const root = await this.resolveRoot(spaceId, rootMessageId);
     const limit = this.pageLimit(opts?.limit);
@@ -1030,11 +1045,14 @@ export class HarborService {
     const hasMore = window.length > limit;
     const replies = hasMore ? window.slice(1) : window;
     const [foldedRoot] = await this.foldPage(spaceId, [root]);
+    const mark = await this.store.getThreadReadMark(spaceId, root.id, ctx.memberId);
     return {
       root: foldedRoot!,
       topic: (await this.store.getTopicByRoot(spaceId, root.id)) ?? null,
       messages: await this.foldPage(spaceId, replies),
       hasMore,
+      readOffset: mark?.following ? mark.readOffset : null,
+      following: mark?.following ?? false,
     };
   }
 
@@ -1093,6 +1111,19 @@ export class HarborService {
         await this.store.appendMessage(message);
         await this.store.refreshReplyStats(spaceId, root.id);
         await this.append(spaceId, offset, at, { type: 'message', message });
+        // Read state (2026-09-09), the provisional follow rules: replying
+        // follows the thread, and a root's author follows it from the first
+        // reply on (lazily — a reply-less root holds no row). The replier's
+        // mark advances to the reply (posting reads). Direct acts only: an
+        // agent's 3am reply must not read as you having seen the thread.
+        if (author.actingMode === 'direct') {
+          await this.store.setThreadFollowing(spaceId, root.id, ctx.memberId, true, at);
+          await this.store.advanceThreadReadMark(spaceId, root.id, ctx.memberId, offset, at);
+        }
+        if (root.author.memberId !== ctx.memberId && !(await this.store.getThreadReadMark(spaceId, root.id, root.author.memberId))) {
+          await this.store.setThreadFollowing(spaceId, root.id, root.author.memberId, true, at);
+          await this.store.advanceThreadReadMark(spaceId, root.id, root.author.memberId, root.offset, at);
+        }
         // Gmail semantics: activity returns an archived topic to the rail.
         const topic = await this.store.getTopicByRoot(spaceId, root.id);
         if (topic?.archived) {
@@ -1124,6 +1155,8 @@ export class HarborService {
       };
       await this.store.appendMessage(message);
       await this.append(spaceId, offset, at, { type: 'message', message });
+      // Posting directly reads the stream up to your own message (read state, 2026-09-09).
+      if (author.actingMode === 'direct') await this.store.advanceStreamReadMark(spaceId, ctx.memberId, offset, at);
       return { message };
     });
     // Push decisions run OUTSIDE the lock and never block the reply
@@ -1194,6 +1227,7 @@ export class HarborService {
         };
         await this.store.appendMessage(root);
         await this.append(spaceId, offset, at, { type: 'message', message: root });
+        if (by.actingMode === 'direct') await this.store.advanceStreamReadMark(spaceId, ctx.memberId, root.offset, at);
         offset += 1;
       }
 
@@ -1597,6 +1631,72 @@ export class HarborService {
   }
 
   // --- live ------------------------------------------------------------------
+
+  // --- read state ------------------------------------------------------------
+  // Per-member cursors the org owns (read state, 2026-09-09) so every device
+  // agrees. Offsets, never timestamps. Never on the log: a mark is private
+  // member state, not a space fact — the member's other connections learn by
+  // an ephemeral read_mark frame, and a reconnecting client refetches unread().
+
+  /** Advance the stream mark, or a followed thread's mark. Monotone; past head refuses. */
+  async markRead(ctx: ActorCtx, spaceId: string, input: MarkReadInput): Promise<{ readOffset: number | null }> {
+    await this.requireMember(ctx, spaceId);
+    const head = await this.store.head(spaceId);
+    if (input.offset > head) {
+      throw new HarborError('invalid_request', `offset ${input.offset} is past the space's head (${head})`);
+    }
+    const at = this.now();
+    let threadRootId: string | undefined;
+    let readOffset: number | undefined;
+    if (input.threadRootId !== undefined) {
+      const root = await this.resolveRoot(spaceId, input.threadRootId);
+      threadRootId = root.id;
+      readOffset = await this.store.advanceThreadReadMark(spaceId, root.id, ctx.memberId, input.offset, at);
+      // Not following: nothing is recorded (v1 tracks followed threads only).
+      if (readOffset === undefined) return { readOffset: null };
+    } else {
+      readOffset = await this.store.advanceStreamReadMark(spaceId, ctx.memberId, input.offset, at);
+    }
+    this.hub.publishToMember(ctx.memberId, {
+      kind: 'read_mark',
+      spaceId,
+      ...(threadRootId !== undefined ? { threadRootId } : {}),
+      offset: readOffset,
+      at,
+    });
+    return { readOffset };
+  }
+
+  /** Follow or unfollow a thread; the mark survives an unfollow. */
+  async followThread(
+    ctx: ActorCtx,
+    spaceId: string,
+    rootMessageId: string,
+    following: boolean,
+  ): Promise<{ following: boolean; readOffset: number }> {
+    await this.requireMember(ctx, spaceId);
+    const root = await this.resolveRoot(spaceId, rootMessageId);
+    const mark = await this.store.setThreadFollowing(spaceId, root.id, ctx.memberId, following, this.now());
+    return { following: mark.following, readOffset: mark.readOffset };
+  }
+
+  /** Every space the member is in (DMs included): cursor, unread roots, unread followed threads. */
+  async unread(ctx: ActorCtx): Promise<UnreadSnapshot> {
+    const spaces = await this.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    const out: UnreadSnapshot['spaces'] = [];
+    for (const space of spaces) {
+      const head = await this.store.head(space.id);
+      const readOffset = await this.store.getStreamReadMark(space.id, ctx.memberId);
+      out.push({
+        spaceId: space.id,
+        head,
+        readOffset,
+        unreadRoots: await this.store.countUnreadRoots(space.id, ctx.memberId, readOffset),
+        threads: await this.store.listUnreadFollowedThreads(space.id, ctx.memberId),
+      });
+    }
+    return { spaces: out };
+  }
 
   async publishPresence(
     ctx: ActorCtx,

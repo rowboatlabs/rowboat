@@ -29,6 +29,8 @@ import type {
   Space,
   Topic,
   TopicListing,
+  UnreadSnapshot,
+  UnreadSpace,
 } from '@rowboat/spaces-protocol';
 
 // Renderer-facing surface for Spaces. The wire contract's single source of
@@ -69,6 +71,10 @@ export type {
   Topic,
   TopicListing,
 };
+
+/** The unread snapshot (read state, 2026-09-09): org-owned cursors in offsets. */
+export type SpacesUnreadSnapshot = UnreadSnapshot;
+export type SpacesUnreadSpace = UnreadSpace;
 
 /**
  * Poll creation as the renderer sends it (the wire's `NewPoll` block on
@@ -114,6 +120,8 @@ export interface SpacesStreamPage {
   topics: Topic[];
   /** Older roots exist below the returned window (listStream is windowed, newest-first). */
   hasMore: boolean;
+  /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
+  readOffset: number;
 }
 
 /** One flat thread: the root, its annotation (null = a plain thread), windowed replies. */
@@ -122,6 +130,9 @@ export interface SpacesThreadPage {
   topic: Topic | null;
   messages: Message[];
   hasMore: boolean;
+  /** The caller's mark in this thread; null = not following (no mark is kept). */
+  readOffset: number | null;
+  following: boolean;
 }
 
 export interface SpacesPostResult {

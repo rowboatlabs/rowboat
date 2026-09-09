@@ -24,6 +24,8 @@ import { type PushLevel,
   type StoredPollVote,
   type StoredReaction,
   type StoredSpaceBlob,
+  type ThreadReadMark,
+  type UnreadThreadRow,
 } from './store.js';
 
 // The real Harbor's storage: mergeable text lives inline in Postgres (≤1MB,
@@ -138,6 +140,7 @@ interface MessageRow {
   posted_at: string;
   reply_count: number;
   last_reply_at: string | null;
+  last_reply_offset: number | null;
   anchor_change_set_id: string | null;
   deleted_at: string | null;
   edited_at: string | null;
@@ -156,6 +159,7 @@ function rowToMessage(r: MessageRow): Message {
     offset: r.stream_offset,
     replyCount: r.reply_count,
     ...(r.last_reply_at !== null ? { lastReplyAt: r.last_reply_at } : {}),
+    ...(r.last_reply_offset !== null && r.last_reply_offset !== undefined ? { lastReplyOffset: r.last_reply_offset } : {}),
     ...(r.anchor_change_set_id !== null ? { anchorChangeSetId: r.anchor_change_set_id } : {}),
     ...(r.deleted_at !== null ? { deletedAt: r.deleted_at } : {}),
     ...(r.edited_at !== null ? { editedAt: r.edited_at } : {}),
@@ -811,8 +815,11 @@ export class PgStore implements Store {
     await this.sql.query(
       `update messages r set
          reply_count = coalesce(s.cnt, 0),
-         last_reply_at = s.last_at
-       from (select count(*) filter (where deleted_at is null) as cnt, max(posted_at) as last_at
+         last_reply_at = s.last_at,
+         last_reply_offset = s.last_offset
+       from (select count(*) filter (where deleted_at is null) as cnt,
+                    max(posted_at) as last_at,
+                    max(stream_offset) filter (where deleted_at is null) as last_offset
              from messages where space_id = $1 and thread_root = $2) s
        where r.space_id = $1 and r.id = $2`,
       [spaceId, rootMessageId],
@@ -987,6 +994,118 @@ export class PgStore implements Store {
   }
 
   // --- event log -------------------------------------------------------------
+
+  // --- read state ------------------------------------------------------------
+
+  async getStreamReadMark(spaceId: string, memberId: string): Promise<number> {
+    const rows = await this.sql.query<{ read_offset: number }>(
+      'select read_offset from space_read_marks where space_id = $1 and member_id = $2',
+      [spaceId, memberId],
+    );
+    return rows[0]?.read_offset ?? 0;
+  }
+
+  async advanceStreamReadMark(spaceId: string, memberId: string, offset: number, at: string): Promise<number> {
+    const rows = await this.sql.query<{ read_offset: number }>(
+      `insert into space_read_marks (space_id, member_id, read_offset, updated_at) values ($1, $2, $3, $4)
+       on conflict (space_id, member_id) do update set
+         read_offset = greatest(space_read_marks.read_offset, excluded.read_offset),
+         updated_at = case when excluded.read_offset > space_read_marks.read_offset
+                           then excluded.updated_at else space_read_marks.updated_at end
+       returning read_offset`,
+      [spaceId, memberId, offset, at],
+    );
+    return rows[0]!.read_offset;
+  }
+
+  async getThreadReadMark(spaceId: string, rootMessageId: string, memberId: string): Promise<ThreadReadMark | undefined> {
+    const rows = await this.sql.query<{ following: boolean; read_offset: number }>(
+      'select following, read_offset from thread_read_marks where space_id = $1 and root_message_id = $2 and member_id = $3',
+      [spaceId, rootMessageId, memberId],
+    );
+    const r = rows[0];
+    return r ? { following: r.following, readOffset: r.read_offset } : undefined;
+  }
+
+  async setThreadFollowing(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    following: boolean,
+    at: string,
+  ): Promise<ThreadReadMark> {
+    const rows = await this.sql.query<{ following: boolean; read_offset: number }>(
+      `insert into thread_read_marks (space_id, root_message_id, member_id, following, read_offset, updated_at)
+       values ($1, $2, $3, $4, 0, $5)
+       on conflict (space_id, root_message_id, member_id) do update set
+         following = excluded.following, updated_at = excluded.updated_at
+       returning following, read_offset`,
+      [spaceId, rootMessageId, memberId, following, at],
+    );
+    return { following: rows[0]!.following, readOffset: rows[0]!.read_offset };
+  }
+
+  async advanceThreadReadMark(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    offset: number,
+    at: string,
+  ): Promise<number | undefined> {
+    const rows = await this.sql.query<{ read_offset: number }>(
+      `update thread_read_marks set
+         read_offset = greatest(read_offset, $4::int),
+         updated_at = case when $4::int > read_offset then $5 else updated_at end
+       where space_id = $1 and root_message_id = $2 and member_id = $3 and following
+       returning read_offset`,
+      [spaceId, rootMessageId, memberId, offset, at],
+    );
+    return rows[0]?.read_offset;
+  }
+
+  async countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number> {
+    const rows = await this.sql.query<{ n: number }>(
+      `select count(*)::int as n from messages
+       where space_id = $1 and thread_root is null and deleted_at is null
+         and stream_offset > $2 and author->>'memberId' <> $3`,
+      [spaceId, afterOffset, memberId],
+    );
+    return rows[0]?.n ?? 0;
+  }
+
+  async listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]> {
+    const rows = await this.sql.query<{
+      root_message_id: string;
+      read_offset: number;
+      last_reply_offset: number;
+      unread_replies: number;
+    }>(
+      `select * from (
+         select t.root_message_id, t.read_offset, r.last_reply_offset,
+                (select count(*)::int from messages m
+                  where m.space_id = t.space_id and m.thread_root = t.root_message_id
+                    and m.deleted_at is null and m.stream_offset > t.read_offset
+                    and m.author->>'memberId' <> t.member_id) as unread_replies
+           from thread_read_marks t
+           join messages r on r.space_id = t.space_id and r.id = t.root_message_id
+          where t.space_id = $1 and t.member_id = $2 and t.following
+            and r.last_reply_offset is not null and r.last_reply_offset > t.read_offset
+       ) u where u.unread_replies > 0
+       order by u.last_reply_offset desc`,
+      [spaceId, memberId],
+    );
+    return rows.map((r) => ({
+      rootMessageId: r.root_message_id,
+      readOffset: r.read_offset,
+      lastReplyOffset: r.last_reply_offset,
+      unreadReplies: r.unread_replies,
+    }));
+  }
+
+  async deleteReadMarks(spaceId: string, memberId: string): Promise<void> {
+    await this.sql.query('delete from space_read_marks where space_id = $1 and member_id = $2', [spaceId, memberId]);
+    await this.sql.query('delete from thread_read_marks where space_id = $1 and member_id = $2', [spaceId, memberId]);
+  }
 
   async head(spaceId: string): Promise<number> {
     const rows = await this.sql.query<{ head: number }>(

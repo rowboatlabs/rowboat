@@ -19,6 +19,8 @@ import type {
   StoredPollVote,
   StoredReaction,
   StoredSpaceBlob,
+  ThreadReadMark,
+  UnreadThreadRow,
 } from './store.js';
 
 interface SpaceState {
@@ -37,6 +39,8 @@ interface SpaceState {
   reactions: Map<string, StoredReaction[]>; // messageId → oldest first
   pollVotes: Map<string, StoredPollVote[]>; // messageId → oldest first
   events: StoredEvent[]; // offsets start at 1; events[i].offset === i + 1
+  streamMarks: Map<string, { readOffset: number; updatedAt: string }>; // memberId → stream mark
+  threadMarks: Map<string, { following: boolean; readOffset: number; updatedAt: string }>; // `${root}\n${member}`
   lock: Promise<void>;
 }
 
@@ -106,6 +110,8 @@ export class MemoryStore implements Store {
       reactions: new Map(),
       pollVotes: new Map(),
       events: [],
+      streamMarks: new Map(),
+      threadMarks: new Map(),
       lock: Promise.resolve(),
     });
   }
@@ -378,10 +384,13 @@ export class MemoryStore implements Store {
     const replies = s.messages.filter((m) => m.threadRoot === rootMessageId);
     const live = replies.filter((m) => !m.deletedAt);
     const last = replies[replies.length - 1];
+    const lastLive = live[live.length - 1];
+    const { lastReplyOffset: _stale, ...rest } = root;
     this.replace(s, {
-      ...root,
+      ...rest,
       replyCount: live.length,
       ...(last ? { lastReplyAt: last.postedAt } : {}),
+      ...(lastLive ? { lastReplyOffset: lastLive.offset } : {}),
     });
   }
 
@@ -526,6 +535,90 @@ export class MemoryStore implements Store {
 
   async getInvite(token: string): Promise<StoredInvite | undefined> {
     return this.invites.get(token);
+  }
+
+  // --- read state ------------------------------------------------------------
+
+  private threadMarkKey(rootMessageId: string, memberId: string): string {
+    return `${rootMessageId}\n${memberId}`;
+  }
+
+  async getStreamReadMark(spaceId: string, memberId: string): Promise<number> {
+    return this.state(spaceId)?.streamMarks.get(memberId)?.readOffset ?? 0;
+  }
+
+  async advanceStreamReadMark(spaceId: string, memberId: string, offset: number, at: string): Promise<number> {
+    const s = this.must(spaceId);
+    const current = s.streamMarks.get(memberId);
+    if (current && offset <= current.readOffset) return current.readOffset;
+    s.streamMarks.set(memberId, { readOffset: offset, updatedAt: at });
+    return offset;
+  }
+
+  async getThreadReadMark(spaceId: string, rootMessageId: string, memberId: string): Promise<ThreadReadMark | undefined> {
+    const m = this.state(spaceId)?.threadMarks.get(this.threadMarkKey(rootMessageId, memberId));
+    return m ? { following: m.following, readOffset: m.readOffset } : undefined;
+  }
+
+  async setThreadFollowing(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    following: boolean,
+    at: string,
+  ): Promise<ThreadReadMark> {
+    const s = this.must(spaceId);
+    const key = this.threadMarkKey(rootMessageId, memberId);
+    const next = { following, readOffset: s.threadMarks.get(key)?.readOffset ?? 0, updatedAt: at };
+    s.threadMarks.set(key, next);
+    return { following: next.following, readOffset: next.readOffset };
+  }
+
+  async advanceThreadReadMark(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    offset: number,
+    at: string,
+  ): Promise<number | undefined> {
+    const s = this.must(spaceId);
+    const key = this.threadMarkKey(rootMessageId, memberId);
+    const current = s.threadMarks.get(key);
+    if (!current?.following) return undefined;
+    if (offset <= current.readOffset) return current.readOffset;
+    s.threadMarks.set(key, { ...current, readOffset: offset, updatedAt: at });
+    return offset;
+  }
+
+  async countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number> {
+    return this.must(spaceId).messages.filter(
+      (m) => m.threadRoot === undefined && !m.deletedAt && m.offset > afterOffset && m.author.memberId !== memberId,
+    ).length;
+  }
+
+  async listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]> {
+    const s = this.must(spaceId);
+    const out: UnreadThreadRow[] = [];
+    const suffix = `\n${memberId}`;
+    for (const [key, mark] of s.threadMarks) {
+      if (!mark.following || !key.endsWith(suffix)) continue;
+      const rootMessageId = key.slice(0, key.length - suffix.length);
+      const root = s.messagesById.get(rootMessageId);
+      if (!root || root.lastReplyOffset === undefined || root.lastReplyOffset <= mark.readOffset) continue;
+      const unreadReplies = s.messages.filter(
+        (m) => m.threadRoot === rootMessageId && !m.deletedAt && m.offset > mark.readOffset && m.author.memberId !== memberId,
+      ).length;
+      if (unreadReplies === 0) continue;
+      out.push({ rootMessageId, readOffset: mark.readOffset, lastReplyOffset: root.lastReplyOffset, unreadReplies });
+    }
+    return out.sort((a, b) => b.lastReplyOffset - a.lastReplyOffset);
+  }
+
+  async deleteReadMarks(spaceId: string, memberId: string): Promise<void> {
+    const s = this.must(spaceId);
+    s.streamMarks.delete(memberId);
+    const suffix = `\n${memberId}`;
+    for (const key of [...s.threadMarks.keys()]) if (key.endsWith(suffix)) s.threadMarks.delete(key);
   }
 
   async head(spaceId: string): Promise<number> {

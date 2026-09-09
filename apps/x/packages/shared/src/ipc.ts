@@ -4135,6 +4135,23 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
+  // Read state — org-owned cursors in OFFSETS (2026-09-09). markRead advances
+  // the stream mark (no threadRootId) or a followed thread's; the org answers
+  // with the stored mark (null = not following, nothing recorded). getUnread
+  // is the snapshot the renderer folds live frames onto; the org's read_mark
+  // member frames arrive on 'spaces:events' like every other frame.
+  'spaces:markRead': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string().optional(), offset: z.number() }),
+    res: z.object({ readOffset: z.number().nullable() }),
+  },
+  'spaces:followThread': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), following: z.boolean() }),
+    res: z.object({ following: z.boolean(), readOffset: z.number() }),
+  },
+  'spaces:getUnread': {
+    req: z.object({ orgId: z.string() }),
+    res: z.custom<SpacesTypes.SpacesUnreadSnapshot>(),
+  },
   // Scheduled sends and reminders — the main-side queue (core scheduler).
   // 'message' posts to the topic at `at`; 'reminder' notifies the member.
   'spaces:schedule': {

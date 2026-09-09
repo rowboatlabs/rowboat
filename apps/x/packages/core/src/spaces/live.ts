@@ -324,7 +324,10 @@ export class SpacesLive {
       } catch {
         return; // a frame we don't understand is not a reason to drop the socket
       }
-      if (frame.kind === 'space_added') {
+      // Member-addressed frames carry a spaceId but ride no space
+      // subscription: someone put us in a space (space_added), or one of
+      // our own connections moved a read mark (read_mark).
+      if (frame.kind === 'space_added' || frame.kind === 'read_mark') {
         for (const h of this.memberHandlers) h(frame);
         return;
       }

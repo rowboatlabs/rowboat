@@ -13,11 +13,11 @@ import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { refreshSpaceFeed, type OrgWithSpaces } from '@/hooks/use-spaces'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
-import { prefetchThread, STREAM_READ_KEY } from '@/hooks/use-space-chat'
+import { prefetchThread } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
 import { threadRefOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
-import { getTopicLastReadAt } from '@/lib/spaces-read-state'
+import { getStreamReadOffset, isThreadUnread, useReadStateVersion } from '@/lib/spaces-read-state'
 import type { RailSelection } from '@/lib/spaces-selection'
 
 // Server spaces and their nested discussions, then DMs, share the upper
@@ -141,11 +141,14 @@ export function SpaceRail({
         await manageTopic(topicId, { action: 'retitle', title })
     }
 
+    // Read state is org-owned (spaces-read-state); its version re-runs these.
+    const readVersion = useReadStateVersion()
     const generalUnread = useMemo(() => {
         if (!stream.ready) return 0
-        const mark = getTopicLastReadAt(orgId, spaceId, STREAM_READ_KEY)
-        return stream.messages.filter((m) => !m.pending && !m.failed && !m.deletedAt && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
-    }, [stream, orgId, spaceId, selfMemberId])
+        const mark = getStreamReadOffset(orgId, spaceId)
+        return stream.messages.filter((m) => !m.pending && !m.failed && !m.deletedAt && m.offset > mark && m.author.memberId !== selfMemberId).length
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [stream, orgId, spaceId, selfMemberId, readVersion])
 
     const artifactFiles = useMemo(() => {
         const counts = new Map<string, Set<string>>()
@@ -159,10 +162,8 @@ export function SpaceRail({
         return counts
     }, [changeSets])
 
-    const isUnread = (t: spaces.TopicListing) => {
-        const mark = getTopicLastReadAt(orgId, spaceId, t.rootMessageId)
-        return !mark || t.lastActivityAt > mark
-    }
+    // Followed threads only: a discussion you are not in never bolds.
+    const isUnread = (t: spaces.TopicListing) => isThreadUnread(orgId, spaceId, t.rootMessageId)
 
     const memberNames = useMemberNames()
     const byActivity = (a: { topic: spaces.TopicListing }, b: { topic: spaces.TopicListing }) => b.topic.lastActivityAt.localeCompare(a.topic.lastActivityAt)

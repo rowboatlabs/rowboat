@@ -328,14 +328,14 @@ describe('blob links', () => {
 })
 
 describe('unread changes', () => {
-    it('marks a change unread when it landed after the mark and was not my own direct edit', () => {
-        const theirs = cs({ id: 'c2', committedAt: '2026-08-19T18:04:00Z' })
-        const mine = cs({ id: 'self', committedAt: '2026-08-19T17:00:00Z', attribution: { memberId: 'me', actingMode: 'direct' } })
-        const myAgent = cs({ id: 'agent', committedAt: '2026-08-19T17:30:00Z', attribution: { memberId: 'me', actingMode: 'agent', agentName: 'Rowboat' } })
-        expect(isUnreadChange(theirs, '2026-08-18T17:20:00Z', 'me')).toBe(true)
-        expect(isUnreadChange(theirs, '2026-08-19T18:04:00Z', 'me')).toBe(false)
-        expect(isUnreadChange(mine, null, 'me')).toBe(false)
-        expect(isUnreadChange(myAgent, null, 'me')).toBe(true)
+    it('marks a change unread when it landed after the mark (an offset) and was not my own direct edit', () => {
+        const theirs = cs({ id: 'c2', committedAt: '2026-08-19T18:04:00Z', offset: 20 })
+        const mine = cs({ id: 'self', committedAt: '2026-08-19T17:00:00Z', offset: 10, attribution: { memberId: 'me', actingMode: 'direct' } })
+        const myAgent = cs({ id: 'agent', committedAt: '2026-08-19T17:30:00Z', offset: 15, attribution: { memberId: 'me', actingMode: 'agent', agentName: 'Rowboat' } })
+        expect(isUnreadChange(theirs, 5, 'me')).toBe(true)
+        expect(isUnreadChange(theirs, 20, 'me')).toBe(false)
+        expect(isUnreadChange(mine, 0, 'me')).toBe(false)
+        expect(isUnreadChange(myAgent, 0, 'me')).toBe(true)
     })
 })
 

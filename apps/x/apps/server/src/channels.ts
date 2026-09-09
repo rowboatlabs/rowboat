@@ -316,6 +316,9 @@ export const RPC_CHANNELS = [
   'spaces:presence',
   'spaces:whiteboard',
   'spaces:bounceLive',
+  'spaces:markRead',
+  'spaces:followThread',
+  'spaces:getUnread',
   // The scheduler: its tick runs in this process (initCoreServices) and reads
   // its file through an in-memory cache — so the writes must land here too,
   // or an item scheduled in main is invisible until the server restarts.

@@ -73,6 +73,9 @@ type SpacesHandlers = {
   'spaces:presence': InvokeHandler<'spaces:presence'>;
   'spaces:whiteboard': InvokeHandler<'spaces:whiteboard'>;
   'spaces:bounceLive': InvokeHandler<'spaces:bounceLive'>;
+  'spaces:markRead': InvokeHandler<'spaces:markRead'>;
+  'spaces:followThread': InvokeHandler<'spaces:followThread'>;
+  'spaces:getUnread': InvokeHandler<'spaces:getUnread'>;
 };
 
 function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
@@ -391,6 +394,18 @@ export const spacesIpcHandlers: SpacesHandlers = {
   'spaces:responseSession': async (_event, args) => resolveResponseSession(args),
 
   'spaces:stopRowboat': async (_event, args) => stopTopicAgent(args),
+
+  // Read state: the org owns the cursors (offsets, per member) — pass-throughs.
+  'spaces:markRead': async (_event, args) =>
+    orgs.getClient(args.orgId).markRead(args.spaceId, {
+      ...(args.threadRootId ? { threadRootId: args.threadRootId } : {}),
+      offset: args.offset,
+    }),
+
+  'spaces:followThread': async (_event, args) =>
+    orgs.getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
+
+  'spaces:getUnread': async (_event, args) => orgs.getClient(args.orgId).unread(),
 
   'spaces:schedule': async (_event, args) => ({
     id: scheduleItem({

@@ -256,6 +256,12 @@ export const Message = z.object({
   replyCount: z.number().int().nonnegative().default(0),
   /** When the newest reply landed (roots with replies only) — chip recency + rail sorting. */
   lastReplyAt: z.iso.datetime().optional(),
+  /**
+   * Offset of the newest LIVE reply (roots with replies only; tombstoned
+   * replies excluded, unlike lastReplyAt). Read marks compare against it: a
+   * followed thread is unread when this exceeds the member's mark.
+   */
+  lastReplyOffset: StreamOffset.optional(),
   /** Provenance when this root was posted in reply to an activity row (a change-set). */
   anchorChangeSetId: ChangeSetId.optional(),
   /** Set when the author deleted the message (deleter == author, so no separate attribution). */

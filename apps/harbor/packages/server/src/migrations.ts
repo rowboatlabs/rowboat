@@ -516,6 +516,42 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    id: '016-read-marks',
+    statements: [
+      // Read state (2026-09-09): per-member cursors the org owns. The unit is
+      // the space's event offset — `int`, like stream_offset everywhere (the
+      // 2.1B-per-space ceiling is a recorded decision, CONTRACT.md).
+      `create table if not exists space_read_marks (
+        space_id text not null,
+        member_id text not null,
+        read_offset int not null default 0,
+        updated_at text not null,
+        primary key (space_id, member_id)
+      )`,
+      // Followed threads only (v1): the row IS the follow. `following` false
+      // keeps the cursor across an unfollow so re-following never floods.
+      `create table if not exists thread_read_marks (
+        space_id text not null,
+        root_message_id text not null,
+        member_id text not null,
+        following boolean not null default true,
+        read_offset int not null default 0,
+        updated_at text not null,
+        primary key (space_id, root_message_id, member_id)
+      )`,
+      `create index if not exists thread_read_marks_following on thread_read_marks (member_id, space_id) where following`,
+      // The reply denorm gains the newest LIVE reply's offset beside
+      // last_reply_at (which counts tombstones): "thread has unread" is one
+      // comparison against the member's mark.
+      `alter table messages add column if not exists last_reply_offset int`,
+      `update messages r set last_reply_offset = s.o
+        from (select space_id, thread_root, max(stream_offset) as o
+              from messages where thread_root is not null and deleted_at is null
+              group by space_id, thread_root) s
+        where r.space_id = s.space_id and r.id = s.thread_root`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

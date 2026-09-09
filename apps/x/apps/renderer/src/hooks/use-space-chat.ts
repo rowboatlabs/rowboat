@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
-import { applyReaction, mergeMessages, threadRootOf } from '@/lib/spaces-conventions'
+import { applyReaction, mergeMessages } from '@/lib/spaces-conventions'
 import { applyPollVote } from '@/lib/spaces-poll'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
-import { getTopicLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
+import { countUnread, noteStreamReadOffset, subscribeReadState } from '@/lib/spaces-read-state'
 
 // Chat stores for one space under the annotation model (spec §7, 2026-09-01):
 //   stream     — the space's ROOT messages (one flat log; replies live behind
@@ -191,6 +191,9 @@ async function loadStream(orgId: string, spaceId: string): Promise<void> {
         )
         const reachesDeeper = (settled[0]?.offset ?? Infinity) < (res.messages[0]?.offset ?? Infinity)
         streamCacheOnly.delete(k)
+        // The page carries our stream mark — the earliest word on it when a
+        // space opens before the org's snapshot landed.
+        noteStreamReadOffset(orgId, spaceId, res.readOffset)
         setStream(k, {
             messages: [...mergeMessages(settled, res.messages), ...carried],
             topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
@@ -818,34 +821,12 @@ function wireUnread(): void {
     streamListeners.add(bumpUnread)
 }
 
-export function countSpaceUnread(orgId: string, spaceId: string, selfMemberId: string): number {
-    const k = key(orgId, spaceId)
-    const state = streamState.get(k)
-    let count = 0
-    const streamMark = getTopicLastReadAt(orgId, spaceId, STREAM_READ_KEY)
-    if (state?.ready) {
-        // New roots since the stream mark (loaded window — exact enough).
-        count += state.messages.filter(
-            (m) => !m.pending && !m.failed && !m.deletedAt && (!streamMark || m.postedAt > streamMark) && m.author.memberId !== selfMemberId,
-        ).length
-        // Threads with replies past their own mark count once each.
-        for (const m of state.messages) {
-            if (m.pending || m.failed || !m.lastReplyAt || (m.replyCount ?? 0) === 0) continue
-            const root = threadRootOf(m)
-            const mark = getTopicLastReadAt(orgId, spaceId, root)
-            if (!mark || m.lastReplyAt > mark) count += 1
-        }
-        return count
-    }
-    // Stream not loaded: the rail's topic list still says whether anything moved.
-    const feed = getSpaceFeed(orgId, spaceId)
-    if (!feed.loaded) return 0
-    for (const t of feed.topics) {
-        if (t.archived) continue
-        const mark = getTopicLastReadAt(orgId, spaceId, t.rootMessageId)
-        if (!mark || t.lastActivityAt > mark) count += 1
-    }
-    return count
+/**
+ * The sidebar number — the org's count (unread roots + followed threads with
+ * unread replies), folded live by spaces-read-state. No loaded tail needed.
+ */
+export function countSpaceUnread(orgId: string, spaceId: string, _selfMemberId: string): number {
+    return countUnread(orgId, spaceId)
 }
 
 /**
