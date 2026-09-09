@@ -1041,112 +1041,113 @@ describe("startup scan (13.6)", () => {
     });
 });
 
+const skillTool = {
+    toolId: "builtin:file-writeText",
+    name: "file-writeText",
+    description: "Write",
+    inputSchema: {},
+    execution: "sync" as const,
+    requiresHuman: false,
+};
+
+// A completed turn whose history loaded a skill mid-turn.
+function skillLoadLog(
+    turnId: string,
+    sessionId: string,
+    agent: CreateTurnInput["agent"],
+    source = "organize-files",
+): TEvent[] {
+    const created = createdEvent(turnId, {
+        agent,
+        sessionId,
+        context: [],
+        input: user("hi"),
+        config: { humanAvailable: true },
+    });
+    return [
+        created,
+        {
+            type: "model_call_requested",
+            turnId,
+            ts: TS,
+            modelCallIndex: 0,
+            request: { messages: ["input"], parameters: {} },
+        },
+        {
+            type: "model_call_completed",
+            turnId,
+            ts: TS,
+            modelCallIndex: 0,
+            message: {
+                role: "assistant",
+                content: [
+                    {
+                        type: "tool-call",
+                        toolCallId: "A",
+                        toolName: "loadSkill",
+                        arguments: {},
+                    },
+                ],
+            },
+            finishReason: "tool-calls",
+            usage: {},
+        },
+        {
+            type: "tool_invocation_requested",
+            turnId,
+            ts: TS,
+            toolCallId: "A",
+            toolId: "builtin:loadSkill",
+            toolName: "loadSkill",
+            execution: "sync",
+            input: {},
+        },
+        {
+            type: "tool_result",
+            turnId,
+            ts: TS,
+            toolCallId: "A",
+            toolName: "loadSkill",
+            source: "sync",
+            result: { output: { success: true }, isError: false },
+        },
+        {
+            type: "tools_extended",
+            turnId,
+            ts: TS,
+            toolCallId: "A",
+            source,
+            tools: [skillTool],
+        },
+        {
+            type: "model_call_requested",
+            turnId,
+            ts: TS,
+            modelCallIndex: 1,
+            request: { messages: ["assistant:0", "toolResult:A"], parameters: {} },
+        },
+        {
+            type: "model_call_completed",
+            turnId,
+            ts: TS,
+            modelCallIndex: 1,
+            message: assistantText("ok"),
+            finishReason: "stop",
+            usage: {},
+        },
+        {
+            type: "turn_completed",
+            turnId,
+            ts: TS,
+            output: assistantText("ok"),
+            finishReason: "stop",
+            usage: {},
+        },
+    ];
+}
+
+
 describe("active-skill carry-forward", () => {
-    const skillTool = {
-        toolId: "builtin:file-writeText",
-        name: "file-writeText",
-        description: "Write",
-        inputSchema: {},
-        execution: "sync" as const,
-        requiresHuman: false,
-    };
-
-    // A completed turn whose history loaded a skill mid-turn.
-    function skillLoadLog(
-        turnId: string,
-        sessionId: string,
-        agent: CreateTurnInput["agent"],
-        source = "organize-files",
-    ): TEvent[] {
-        const created = createdEvent(turnId, {
-            agent,
-            sessionId,
-            context: [],
-            input: user("hi"),
-            config: { humanAvailable: true },
-        });
-        return [
-            created,
-            {
-                type: "model_call_requested",
-                turnId,
-                ts: TS,
-                modelCallIndex: 0,
-                request: { messages: ["input"], parameters: {} },
-            },
-            {
-                type: "model_call_completed",
-                turnId,
-                ts: TS,
-                modelCallIndex: 0,
-                message: {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "tool-call",
-                            toolCallId: "A",
-                            toolName: "loadSkill",
-                            arguments: {},
-                        },
-                    ],
-                },
-                finishReason: "tool-calls",
-                usage: {},
-            },
-            {
-                type: "tool_invocation_requested",
-                turnId,
-                ts: TS,
-                toolCallId: "A",
-                toolId: "builtin:loadSkill",
-                toolName: "loadSkill",
-                execution: "sync",
-                input: {},
-            },
-            {
-                type: "tool_result",
-                turnId,
-                ts: TS,
-                toolCallId: "A",
-                toolName: "loadSkill",
-                source: "sync",
-                result: { output: { success: true }, isError: false },
-            },
-            {
-                type: "tools_extended",
-                turnId,
-                ts: TS,
-                toolCallId: "A",
-                source,
-                tools: [skillTool],
-            },
-            {
-                type: "model_call_requested",
-                turnId,
-                ts: TS,
-                modelCallIndex: 1,
-                request: { messages: ["assistant:0", "toolResult:A"], parameters: {} },
-            },
-            {
-                type: "model_call_completed",
-                turnId,
-                ts: TS,
-                modelCallIndex: 1,
-                message: assistantText("ok"),
-                finishReason: "stop",
-                usage: {},
-            },
-            {
-                type: "turn_completed",
-                turnId,
-                ts: TS,
-                output: assistantText("ok"),
-                finishReason: "stop",
-                usage: {},
-            },
-        ];
-    }
-
     it("the next turn's composition carries skills recorded by tools_extended", async () => {
         const { sessions, fake } = makeSessions();
         const sessionId = await sessions.createSession();
@@ -1247,6 +1248,72 @@ describe("active-skill carry-forward", () => {
         });
         const second = fake.createTurnInputs[1];
         expect(second.agent).toEqual({ agentId: "copilot" });
+    });
+});
+
+describe("space-thread session pins", () => {
+    const origin = {
+        kind: "space_thread" as const,
+        orgId: "org-1",
+        spaceId: "01M07B68G1BQFP70TX5RPHJX89",
+        threadRootId: "01M07ROOTAAAAAAAAAAAAAAAA1",
+        spaceName: "Roadboard",
+    };
+    const pinned = {
+        org: "org-1",
+        spaceName: "Roadboard",
+        spaceId: "01M07B68G1BQFP70TX5RPHJX89",
+        threadRootId: "01M07ROOTAAAAAAAAAAAAAAAA1",
+    };
+
+    it("pins the thread and the spaces skill on the very first turn — no loadSkill round trip", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession({ title: "t", origin });
+        await sessions.sendMessage(sessionId, user("@rowboat move SSO to P1"), {
+            agent: { agentId: "copilot" },
+        });
+        expect(fake.createTurnInputs[0].agent).toEqual({
+            agentId: "copilot",
+            overrides: { composition: { spaceThread: pinned, activeSkills: ["spaces"] } },
+        });
+    });
+
+    it("pins every turn, whoever sends into the session, and keeps caller composition", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession({ origin });
+        const { turnId } = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        fake.setLog(turnId, turnLog(turnId, sessionId, "completed"));
+        // The person chatting in the thread pane: a plain message, no origin.
+        await sessions.sendMessage(sessionId, user("two"), {
+            agent: { agentId: "copilot", overrides: { composition: { searchEnabled: true } } },
+        });
+        expect(fake.createTurnInputs[1].agent).toMatchObject({
+            overrides: { composition: { searchEnabled: true, spaceThread: pinned, activeSkills: ["spaces"] } },
+        });
+    });
+
+    it("merges the pinned skill with skills the session loaded, carried ones first", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession({ origin });
+        const { turnId } = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        fake.setLog(turnId, skillLoadLog(turnId, sessionId, { agentId: "copilot" }));
+        await sessions.sendMessage(sessionId, user("two"), { agent: { agentId: "copilot" } });
+        expect(fake.createTurnInputs[1].agent).toMatchObject({
+            overrides: { composition: { activeSkills: ["organize-files", "spaces"] } },
+        });
+    });
+
+    it("an ordinary session gets no thread pin", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        await sessions.sendMessage(sessionId, user("hi"), { agent: { agentId: "copilot" } });
+        expect(fake.createTurnInputs[0].agent).toEqual({ agentId: "copilot" });
     });
 });
 

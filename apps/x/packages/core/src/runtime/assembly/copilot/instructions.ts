@@ -5,6 +5,7 @@ import {
     isCodeModeAvailable,
     isComposioAvailable,
     isSlackAvailable,
+    isSpacesAvailable,
 } from "../connections.js";
 
 /** Which native email provider is connected, if any. */
@@ -90,7 +91,7 @@ Load the \`composio-integration\` skill when the user asks to interact with any 
 `;
 }
 
-function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true, slackConnected: boolean = false, slackChannelsHint: string = '', emailProvider: EmailProviderName = null): string {
+function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true, slackConnected: boolean = false, slackChannelsHint: string = '', emailProvider: EmailProviderName = null, spacesConnected: boolean = false): string {
     const emailConnected = emailProvider !== null;
     const emailProduct = emailProductName(emailProvider);
 
@@ -143,6 +144,12 @@ function buildStaticInstructions(composioEnabled: boolean, catalog: string, code
         ? `\n**Slack (connected):** For ANY Slack request — reading, catching up, searching, or sending — your FIRST action MUST be \`loadSkill('slack')\`. Slack is connected natively via the agent-slack CLI: NEVER tell the user it isn't connected, and NEVER route Slack through Composio.${slackChannelsLine}\n`
         : '';
 
+    // Spaces (the team's own workspace on a Rowboat org): one nudge, the
+    // skill carries the rest and attaches the whole toolset on load.
+    const spacesBlock = spacesConnected
+        ? `\n**Spaces (the team's workspace, connected):** For ANY ask about a space, a DM, a teammate's message, "message/DM <person>", "what did the team say about …", "post/reply in <space>", or "push/add … to <space>" — your FIRST action MUST be \`loadSkill('spaces')\`. It attaches the spaces tools; do not answer "I can't reach the team" without loading it.\n`
+        : '';
+
     const slackToolPriority = slackConnected
         ? ` For Slack specifically, load the \`slack\` skill and use the agent-slack CLI — Slack is connected natively, not via Composio.`
         : '';
@@ -188,7 +195,7 @@ Rowboat is an agentic assistant for everyday work - emails, meetings, projects, 
 
 **Email Drafting:** When users ask you to **draft** or **compose** emails (e.g., "draft a follow-up to Monica", "write an email to John about the project"), load the \`draft-emails\` skill first.${emailDraftSuffix}
 
-${thirdPartyBlock}${gmailBlock}${slackBlock}**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first.
+${thirdPartyBlock}${gmailBlock}${slackBlock}${spacesBlock}**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first.
 
 **Presentations & Slide Decks:** Rowboat builds real, editable PowerPoint decks. When users ask for a **presentation, slide deck, pitch deck, slides, a deck, or a .pptx** — including "add a slide about X", "change slide 3", "restyle my deck" — your FIRST action MUST be \`loadSkill('create-presentations')\`, which attaches the \`deck-*\` tools. Presentations MUST be built with \`deck-create\`: never render one as a PDF or HTML, never hand-write a .pptx via \`executeCommand\`/python-pptx/any script, never fabricate one with \`file-writeText\`, and never hand back a markdown outline instead of the file. Only when the user explicitly asks for a **PDF** or a printable handout should you load \`pdf-slides\` instead.
 
@@ -425,12 +432,13 @@ export async function buildCopilotInstructions(): Promise<string> {
     if (cachedInstructions !== null) return cachedInstructions;
     // Connection facts come from the shared checks in connections.ts — the
     // same source the skill catalog's availability gating uses.
-    const [composioEnabled, codeModeEnabled, slackConnected, emailProvider] =
+    const [composioEnabled, codeModeEnabled, slackConnected, emailProvider, spacesConnected] =
         await Promise.all([
             isComposioAvailable(),
             isCodeModeAvailable(),
             isSlackAvailable(),
             getActiveEmailProviderId(),
+            isSpacesAvailable(),
         ]);
     let slackChannelsHint = '';
     if (slackConnected) {
@@ -456,7 +464,7 @@ export async function buildCopilotInstructions(): Promise<string> {
     // the live skill set so disk skills added/removed at runtime (after
     // refreshDiskSkills + cache invalidation) are reflected.
     const catalog = await buildAvailableSkillCatalog();
-    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, slackConnected, slackChannelsHint, emailProvider);
+    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, slackConnected, slackChannelsHint, emailProvider, spacesConnected);
     const composioPrompt = await getComposioToolsPrompt(slackConnected, emailProvider);
     const appsPrompt = await getInstalledAppsPrompt();
     cachedInstructions = baseInstructions

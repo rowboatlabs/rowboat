@@ -366,9 +366,14 @@ export class SessionsImpl implements ISessions {
         // messages promoted after settle), the session's pinned composition
         // is the same — the client's copy is at most a cosmetic hint, and
         // the pins win on conflict.
-        if (this.sessionCompositionPins && !isInlineAgentRequest(agentRequest)) {
-            const pins = await this.sessionCompositionPins(sessionId).catch(() => null);
-            if (pins && Object.keys(pins).length > 0) {
+        if (!isInlineAgentRequest(agentRequest)) {
+            const pins: Record<string, JsonValue> = {
+                ...(this.sessionCompositionPins
+                    ? ((await this.sessionCompositionPins(sessionId).catch(() => null)) ?? {})
+                    : {}),
+                ...spaceThreadPins(state.origin),
+            };
+            if (Object.keys(pins).length > 0) {
                 const provided = agentRequest.overrides?.composition;
                 const base: { [key: string]: JsonValue } =
                     provided !== undefined &&
@@ -377,11 +382,22 @@ export class SessionsImpl implements ISessions {
                     !Array.isArray(provided)
                         ? (provided as { [key: string]: JsonValue })
                         : {};
+                // activeSkills is the one pin that MERGES (a pinned skill
+                // joins whatever the session already loaded) — every other
+                // pin overrides, the session's identity winning on conflict.
+                const merged: { [key: string]: JsonValue } = { ...base, ...pins };
+                if (Array.isArray(pins.activeSkills)) {
+                    const carried = parseActiveSkills(base);
+                    merged.activeSkills = [
+                        ...carried,
+                        ...parseActiveSkills(pins).filter((id) => !carried.includes(id)),
+                    ];
+                }
                 agentRequest = {
                     ...agentRequest,
                     overrides: {
                         ...agentRequest.overrides,
-                        composition: { ...base, ...pins },
+                        composition: merged,
                     },
                 };
             }
@@ -915,6 +931,23 @@ function parseActiveSkills(composition: JsonValue | undefined): string[] {
     return Array.isArray(value)
         ? value.filter((item): item is string => typeof item === "string")
         : [];
+}
+
+// A session born from an @rowboat mention (origin kind 'space_thread') is
+// pinned to its thread on every turn — whoever sends into it (the mention
+// path, the person chatting in the thread pane, a queued steer): the thread
+// procedure composes from token zero and the spaces tools attach at assembly.
+function spaceThreadPins(origin: SessionState["origin"]): Record<string, JsonValue> {
+    if (!origin || origin.kind !== "space_thread") return {};
+    return {
+        spaceThread: {
+            org: origin.orgId,
+            spaceName: origin.spaceName,
+            spaceId: origin.spaceId,
+            threadRootId: origin.threadRootId,
+        },
+        activeSkills: ["spaces"],
+    };
 }
 
 function deriveActiveSkills(turnState: TurnState): string[] {

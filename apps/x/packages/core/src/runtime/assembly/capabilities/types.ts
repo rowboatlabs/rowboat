@@ -46,6 +46,19 @@ export const ModeFlags = z.object({
     // Pinned server-side (sessionCompositionPins) on the one Command Center
     // session — the standing operator channel for Home.
     commandCenter: z.boolean().default(false),
+    // Pinned server-side on a space-thread session (its session origin is
+    // kind 'space_thread'): the thread an @rowboat mention bound this
+    // session to. Renders the thread procedure (receipt contract + privacy)
+    // with the ids filled in, from token zero — no loadSkill round trip.
+    spaceThread: z
+        .object({
+            org: z.string(),
+            spaceName: z.string(),
+            spaceId: z.string(),
+            threadRootId: z.string(),
+        })
+        .nullable()
+        .default(null),
 });
 export type ModeFlags = z.infer<typeof ModeFlags>;
 

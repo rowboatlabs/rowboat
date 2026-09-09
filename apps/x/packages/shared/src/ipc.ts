@@ -3780,6 +3780,12 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
   },
+  // The org roster as the caller sees it: everyone they share a space with
+  // (DMs included), deduped, A–Z — computed by the org (GET /v1/members).
+  'spaces:listOrgMembers': {
+    req: z.object({ orgId: z.string() }),
+    res: z.object({ members: z.array(z.custom<SpacesTypes.Member>()) }),
+  },
   'spaces:createInvite': {
     req: z.object({ orgId: z.string(), spaceId: z.string(), expiresInHours: z.number().optional() }),
     res: z.custom<SpacesTypes.CreateInviteResult>(),

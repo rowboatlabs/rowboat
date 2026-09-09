@@ -12,29 +12,26 @@ const input = {
 };
 
 describe('buildInvocationMessage', () => {
-    it('carries space, thread root, provenance, server name, and the verbatim ask', () => {
+    it('is a one-line header (space, ids) plus the verbatim ask — nothing else', () => {
         const msg = buildInvocationMessage(input, 'spaces-rowboat-labs-dev');
-        expect(msg).toContain('rootMessageId: 01M07ROOTAAAAAAAAAAAAAAAA1');
-        expect(msg).toContain('Space: "Roadboard"');
-        expect(msg).toContain('Org MCP server: spaces-rowboat-labs-dev');
-        expect(msg).toContain('Invoked by feed message: 01M07MSGAAAAAAAAAAAAAAAAA1');
-        expect(msg).toContain('exactly ONE post_message receipt');
-        expect(msg.endsWith('@rowboat move SSO to P1')).toBe(true);
+        const lines = msg.split('\n');
+        expect(lines).toHaveLength(2);
+        expect(lines[0]).toBe(
+            '[@rowboat in "Roadboard" · spaceId 01M07B68G1BQFP70TX5RPHJX89 · thread 01M07ROOTAAAAAAAAAAAAAAAA1 · message 01M07MSGAAAAAAAAAAAAAAAAA1]',
+        );
+        expect(lines[1]).toBe('@rowboat move SSO to P1');
     });
 
-    it('carries NO thread content — the agent pulls the conversation via read_thread on demand', () => {
+    it('carries NO thread content and NO procedure — the session pin (spaceThread) owns the procedure', () => {
         const msg = buildInvocationMessage(input, 'spaces-rowboat-labs-dev');
-        expect(msg).toContain('call read_thread on this rootMessageId FIRST');
         expect(msg).not.toContain('--- recent topic messages');
+        expect(msg).not.toContain('read_thread');
+        expect(msg).not.toContain('post_message');
+        expect(msg).not.toContain('Load the');
     });
 
-    it('omits the server line when no org record resolves', () => {
-        expect(buildInvocationMessage(input, null)).not.toContain('Org MCP server:');
-    });
-
-    it('requires the thread provenance suffix on any change the agent proposes', () => {
-        const msg = buildInvocationMessage(input, null);
-        expect(msg).toContain('end its reason with " · thread:01M07ROOTAAAAAAAAAAAAAAAA1"');
+    it('does not depend on the server name (the org rides the session pin)', () => {
+        expect(buildInvocationMessage(input, null)).toBe(buildInvocationMessage(input, 'spaces-rowboat-labs-dev'));
     });
 });
 

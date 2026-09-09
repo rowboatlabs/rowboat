@@ -57,7 +57,8 @@ export function refreshSpacesOrgs(): Promise<void> {
                         const directs = list.filter((s) => s.kind === 'direct')
                         // A DM is labelled by the other person's CURRENT name — its
                         // stored name is a placeholder. The DM's own two-member
-                        // roster is the lookup (no org roster route exists).
+                        // roster is the lookup (one exact fetch per DM, no
+                        // dependency on the org roster's cache state).
                         const directLabels: Record<string, string> = {}
                         await Promise.all(directs.map(async (dm) => {
                             // One participant = your self-DM; its roster is you.

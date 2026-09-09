@@ -35,6 +35,7 @@ type SpacesHandlers = {
   'spaces:renameSpace': InvokeHandler<'spaces:renameSpace'>;
   'spaces:openDirect': InvokeHandler<'spaces:openDirect'>;
   'spaces:listMembers': InvokeHandler<'spaces:listMembers'>;
+  'spaces:listOrgMembers': InvokeHandler<'spaces:listOrgMembers'>;
   'spaces:createInvite': InvokeHandler<'spaces:createInvite'>;
   'spaces:resolveInvite': InvokeHandler<'spaces:resolveInvite'>;
   'spaces:acceptInvite': InvokeHandler<'spaces:acceptInvite'>;
@@ -210,6 +211,10 @@ export const spacesIpcHandlers: SpacesHandlers = {
 
   'spaces:listMembers': async (_event, args) => ({
     members: await orgs.getClient(args.orgId).listMembers(args.spaceId),
+  }),
+
+  'spaces:listOrgMembers': async (_event, args) => ({
+    members: await orgs.getClient(args.orgId).listOrgMembers(),
   }),
 
   'spaces:createInvite': async (_event, args) =>

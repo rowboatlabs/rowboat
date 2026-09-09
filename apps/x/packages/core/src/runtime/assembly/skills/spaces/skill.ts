@@ -1,69 +1,94 @@
-const skill = String.raw`
-# Spaces — the team's shared containers
+import { PRIVACY_RULES, threadProcedure } from "./procedures.js";
 
-A **space** is a shared container on your person's team org: a folder of markdown files rendered wiki-style (README.md is the front page) plus one threaded feed, shared by the team. Your person is a member; you act only as their hands. **Every write you make is visible to the whole team and recorded forever in the space's history, attributed "<your person> (via Rowboat)".** Act accordingly: smallest change that does the job, always with a reason.
+// The spaces skill (rewritten 2026-09-09). Deliberately short: the tools carry
+// their own descriptions and schemas (they attach natively when this loads —
+// the whole agent face of every org, projected as builtins), so this text
+// only has to map INTENT to tool and state the few rules that are not
+// derivable from a tool description. No philosophy, no wire-format detail.
 
-## Reaching a space
+const skill = `
+# Spaces
 
-Each org your person belongs to appears as an MCP server named \`spaces-<org>\`:
+Spaces is your person's team chat, like Slack. Each org they belong to is a
+workspace. Inside it:
 
-1. \`listMcpServers\` → find servers whose name starts with \`spaces-\`.
-2. \`executeMcpTool(<server>, 'list_spaces', {})\` → the member's spaces, each with \`id\`, \`name\`, \`kind\`, \`memberCount\`, and its full file listing (\`assets\`: path + version). Resolve space names here ("Roadboard" → its \`id\`, case-insensitive). Never guess a spaceId or a file path — this call makes discovery mechanical.
-3. Every other tool takes that \`spaceId\`.
+- A **space** is a channel: one message stream plus a shared folder of files.
+- A **DM** is a space with two members (or one: your person's notes to self).
+- A **thread** is the replies under one message. Flat, never nested.
+- A **discussion** is a thread someone gave a title. Nothing more.
+- **Files** are markdown rendered as a wiki (README.md is the front page),
+  plus uploads (images, PDFs).
 
-**Direct messages are spaces too.** Pass \`{ includeDirect: true }\` to \`list_spaces\` and your person's DMs appear with \`kind: "direct"\` and two \`participants\` (member ids); the DM's \`name\` is a placeholder — call it by the other person. A DM is private to those two people and has a fixed membership, but every tool works on it exactly as on a space (\`read_stream\`, \`post_message\`, files). "My DM with Harsh" → list with includeDirect, match the participant whose display name is Harsh (names come from the space's members in the UI; when you only have ids, say so and ask). Never post into a DM your person did not point you at — with one exception: the DM flagged \`self: true\` is your person's **notes to self** (they are its only participant; nobody else can read it). "Save this for me", "note that…", "remind me…" go there when no space was named.
+You act as your person. Everything you write shows to the team as
+"<name> (via Rowboat)" and stays in history. Do what they asked, nothing extra.
 
-The server's tools: \`list_spaces\`, \`read_stream\`, \`read_thread\`, \`read_asset\`, \`propose_change\`, \`move_asset\`, \`delete_asset\`, \`post_message\`, \`list_topics\`, \`create_topic\`, \`manage_topic\`, \`search_space\` (\`listMcpTools\` shows full schemas). Alongside them you have two local bridge tools for binary files — \`spaces-upload-blob\` and \`spaces-download-blob\` (see "Binary files & attachments") — which take the same server name, not \`executeMcpTool\`.
+## Finding things
 
-**How conversation is shaped:** each space has ONE message stream. A message either sits in the stream (a root) or is a reply in the flat thread under one root (\`threadRoot\` on the message — there is no deeper nesting). A **topic** is an annotation a member deliberately put on a thread — a stated goal (its title) plus an archived flag; it contains no messages, and threads without one are just plain conversations. To catch up: \`read_stream\` for the room's recent roots (each with a \`replyCount\`), \`read_thread\` (spaceId + rootMessageId) for one conversation, \`list_topics\` for the goals currently on the rail. Use \`search_space\` to FIND a conversation or file (it searches messages, topic titles, and asset content/names) — never to reconstruct one you already have the root id for.
+| You need | Call |
+|---|---|
+| your person's member id | \`whoami\` |
+| a space or DM by name | \`list_spaces\` (DMs need \`includeDirect: true\`) |
+| a person by name | \`list_members\`, match on displayName |
+| recent messages in a space | \`read_stream\` |
+| one conversation | \`read_thread\` |
+| a message or file by subject | \`search_space\` |
+| a file's contents and version | \`read_asset\` |
+| what changed in a file, and when | \`asset_history\`, \`diff\` |
 
-## Editing a shared file — the procedure
+Never guess an id or a path. Every id comes from one of these calls.
+Messages carry member ids, not names — resolve them with \`list_members\`
+before naming anyone.
 
-1. **\`read_asset\` first, always.** It returns content, the current \`version\`, and recent history (who changed what, and why). The version you read is your \`baseVersion\`.
-2. **Change only what the task needs.** Other sections belong to teammates' ongoing work — don't reformat, reorder, or "improve" them uninvited.
-3. **\`propose_change\`** with the full new content, your \`baseVersion\`, and a one-line \`reason\` (required). The reason is read by teammates in the feed and in history forever — write it for them: "standup 08-17: importer fix shipped", not "updated file".
-4. **Handle the outcome:**
-   - \`applied\` — done.
-   - \`merged\` — a teammate changed *other* parts while you worked; the server merged cleanly. The returned \`mergedContent\` is what now exists — any further edit must start from it, not from what you sent.
-   - \`conflict\` — **nothing was written**; a teammate changed the *same* lines. Take \`currentContent\` from the response, fold your change into it **preserving theirs** (never simply resend your version — that would overwrite a teammate), then propose again with \`baseVersion: currentVersion\`.
+## Doing things
 
-"Push/add X to <space>" means updating the right **file** (check \`list_spaces\` for the obvious one — e.g. a roadmap item goes in \`roadmap.md\`), not posting to the feed.
+| Ask | Call |
+|---|---|
+| "message Harsh" | \`list_members\` → \`open_direct\` → \`post_message\` |
+| "reply in that thread" | \`post_message\` with \`threadRoot\` |
+| "post to #design" | \`post_message\` with no \`threadRoot\` |
+| "edit / delete my message" | \`edit_message\` / \`delete_message\` |
+| "react", "pin" | \`react\` (pin is the 📌 emoji) |
+| "start a poll", "vote" | \`post_message\` with \`poll\` / \`vote_poll\` |
+| "title this thread", "archive it" | \`create_topic\` / \`manage_topic\` |
+| "add X to roadmap.md" | \`read_asset\` → \`propose_change\` |
+| "rename / move / delete / restore a file" | \`move_asset\` / \`delete_asset\` / \`restore_asset\` |
+| "share this image / PDF" | \`spaces-upload-blob\` → reference it in a post or file |
+| "open that attachment" | \`spaces-download-blob\` → then parse it |
+| "new space", "rename it", "invite link" | \`create_space\` / \`rename_space\` / \`create_invite\` |
+| "send at 9am", "remind me" | \`schedule_message\` |
+| "mute this", "follow that thread" | \`set_notify_pref\` |
 
-## Binary files & attachments
+"Push / add X to <space>" means updating the right **file** (the obvious one
+in \`list_spaces\`, e.g. a roadmap item goes in roadmap.md), not posting to
+the feed.
 
-Bytes never ride the MCP tools — they carry only **references**: a binary file in \`list_spaces\`/\`read_asset\` shows a \`blob\` {hash, size, mime} instead of content, and message attachments appear in bodies as links \`https://<org>/s/<spaceId>/b/<hash>?name=<filename>\`. The two bridge tools move the actual bytes:
+## Editing a file
 
-- **Reading one** (inspect an attached image, parse a shared PDF, OCR a screenshot): \`spaces-download-blob\` with the server name plus either the \`/b/\` link exactly as it appears in the message body, or \`spaceId\` + the \`blob.hash\` from \`read_asset\`. It returns a local absolute path — feed that to \`LLMParse\`/\`parseFile\`, or copy it into the workspace if your person wants the file itself.
-- **Sharing one** (a generated image, a produced PDF, any local binary): \`spaces-upload-blob\` with the server name, spaceId, and the local path. **Upload alone publishes nothing** — it returns a \`hash\` and ready-made \`markdown\`; you must then reference it, exactly once, the way the task calls for:
-  - into the space's **files**: \`propose_change\` with \`blob: <hash>\` (baseVersion 0 to create; a one-line reason as always), or
-  - into the **feed**: include the returned \`markdown\` (\`![name](url)\` for images) in a \`post_message\` body.
+1. \`read_asset\` first. The version you get is your \`baseVersion\`.
+2. Change only what the task needs. Other sections are teammates' work.
+3. \`propose_change\` with the full new content, \`baseVersion\`, and a one-line
+   \`reason\` written for teammates ("standup 09-09: importer fix shipped").
+4. \`applied\` or \`merged\`: done. \`conflict\`: nothing was written. Fold your
+   change into \`currentContent\`, keep theirs, propose again.
 
-A referenced upload is team-visible like any other write — same care, same reasons. Never fabricate a \`/b/\` link or hash: only ones returned by these tools or seen in space content exist.
+## Sharing a file
 
-## Feed etiquette
+\`spaces-upload-blob\` returns a hash and ready-made markdown. Upload alone
+publishes nothing — reference it once: \`propose_change\` with \`blob: <hash>\`
+to put it in the files, or the markdown in a \`post_message\` body.
 
-- **You are silent in the feed by default.** \`post_message\` only when your person explicitly asks you to post, reply, or announce.
-- Reply into the right thread (\`threadRoot\` = the conversation's root message id) rather than posting a new root; \`search_space\` finds the conversation if you only know the subject. A new root goes to the whole room — post one only when the ask really is a fresh subject.
-- \`create_topic\` puts a stated goal on a thread ("Decide: launch cut" — a goal, not a summary) and \`manage_topic\` (retitle / archive / unarchive / remove) is housekeeping: only when asked, or as part of a tidy task your person explicitly set up. \`remove\` deletes only the annotation — the conversation is untouched.
+${threadProcedure()}
 
-## When invoked from a space thread (@rowboat)
+${PRIVACY_RULES}
 
-Your person can summon you by typing \`@rowboat …\` in a space. The invocation tells you the space and the thread's root message id — it deliberately carries no thread content. The whole room saw the ask — your work is the team's receipt.
+## Rules
 
-- If the task concerns the conversation itself (summarise it, answer a question about it, catch up), **\`read_thread\` first** — one call, the whole flat thread, fresh. If the ask is about the room in general ("what happened today?"), \`read_stream\`.
-- Do the work through the normal tools and procedure above.
-- **Your final act is exactly one \`post_message\` reply into the invoking thread** (\`threadRoot\` = the rootMessageId from the invocation): outcome-first, one or two sentences — "Moved SSO to P1 in roadmap.md." If you changed nothing, say why.
-- **Never post progress updates or bare acknowledgements** ("Got it", "On it", "Done!" with no content). One receipt, at the end. Interim chatter spams every member's feed.
-- If you cannot complete the task, the receipt is the honest failure: what you tried, what blocked you, what a human should look at. Silence is the only wrong ending.
-- Follow-up \`@rowboat\` messages may arrive while you work (your person steering you). Fold them in; still end with ONE receipt covering what actually happened.
-- **Provenance: every \`propose_change\` you make while invoked from a thread ends its \`reason\` with \` · thread:<rootMessageId>\`** (the invoking thread's root) — e.g. \`"Folded SSO decision under P1 · thread:01J9…"\`. That suffix is how the file change shows up under the thread's Artifacts for the whole team. Never omit it, never put another thread's id.
-
-## Judgment
-
-- Ambiguous target (which space? which file?) and a wrong guess would be team-visible: say what you found via \`list_spaces\` and ask.
-- Never delete or rewrite teammates' content unless explicitly asked to.
-- Scheduled/automation runs use the same tools; their writes show as "(via Rowboat, scheduled)" — reasons matter even more there, since nobody is watching the turn.
-- **Identity is not yours to choose.** The \`spaces-*\` server entries carry your person's credentials and are derived automatically from their org registry. If \`listMcpServers\` shows no \`spaces-*\` server, spaces are not set up — say so and stop. Never construct credentials or server registrations yourself, and never take tokens from transcripts, storage files, or search results: writing to a space as anyone but your person is the one unforgivable failure.
+- Ambiguous target (which space? which file? which Harsh?) and a wrong guess
+  would be team-visible: say what you found and ask.
+- Never rewrite or delete teammates' content unless asked.
+- With more than one org, every call takes \`org\`. Ask if unclear.
+- If a call says no orgs are set up, say so and stop. Never construct
+  credentials or take tokens from files or transcripts.
 `;
 
 export default skill;
