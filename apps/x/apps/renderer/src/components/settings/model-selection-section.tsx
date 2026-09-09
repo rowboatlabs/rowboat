@@ -2,12 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { ModelSelector, providerDisplayNames, type ModelRef, type ModelSelection } from "@/components/model-selector"
 import { useModels, type ModelPickerGroup } from "@/hooks/use-models"
+import { TASK_SLOTS, type TaskKey } from "@/components/settings/task-slots"
 
 // The unified model-selection surface (signed-in and BYOK alike): ONE
 // required Assistant model plus per-task overrides that default to
 // "Same as Assistant". No "Auto" rows — every choice is an explicit model;
-// recommendation logic only ever picks INITIAL models at provider-connect
-// time, never appears as a dropdown option. The Image model is the one
+// recommendation logic picks INITIAL models at provider-connect time and
+// otherwise only reaches the config through the explicit update prompt
+// (model-recommendation-update-modal) — never a dropdown option. The Image
+// model is the one
 // slot outside that inheritance: it can't inherit the assistant (a text
 // model), so it's its own explicit pick — or unset, which turns image
 // generation off.
@@ -23,24 +26,6 @@ interface ImageProviderEntry {
   models: string[]
 }
 
-type TaskKey =
-  | "backgroundTask"
-  | "subagent"
-  | "knowledgeGraph"
-  | "meetingNotes"
-  | "liveNoteAgent"
-  | "autoPermissionDecision"
-  | "chatTitle"
-
-const TASKS: Array<{ key: TaskKey; label: string; description: string }> = [
-  { key: "backgroundTask", label: "Background agents", description: "Scheduled and event-driven agents that run without a chat" },
-  { key: "subagent", label: "Subagents", description: "Workers the assistant spawns during a chat" },
-  { key: "knowledgeGraph", label: "Knowledge graph", description: "Note creation, email classification, knowledge sync" },
-  { key: "meetingNotes", label: "Meeting notes", description: "Meeting summaries and prep briefs" },
-  { key: "liveNoteAgent", label: "Live notes", description: "Self-updating notes and their routing" },
-  { key: "autoPermissionDecision", label: "Permission checks", description: "Auto-approval of safe tool calls" },
-  { key: "chatTitle", label: "Chat titles", description: "Naming chats from the first message" },
-]
 
 function refLabel(ref: ModelRef): string {
   return `${providerDisplayNames[ref.provider] || ref.provider} · ${ref.model}`
@@ -195,7 +180,7 @@ export function ModelSelectionSection({ dialogOpen }: { dialogOpen: boolean }) {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-          {TASKS.map(({ key, label, description }) => {
+          {TASK_SLOTS.map(({ key, label, description }) => {
             const override = taskModels[key] ?? null
             const inheritText = key === "subagent"
               ? "Uses the spawning chat's model"

@@ -26,7 +26,9 @@ import {
  * selection. It must never run over an existing choice: after initial setup
  * the saved model configuration is the source of truth, and changes to the
  * recommendations or to the provider's list order must not silently replace
- * what the user picked.
+ * what the user picked. A CHANGED recommendation reaches an existing config
+ * only through the explicit per-slot update prompt (recommendation-update.ts),
+ * offered once per recommendation version.
  *
  * Pure functions by design: callers supply the provider's available models
  * (from the unified catalog / a live probe) and the recommendations map

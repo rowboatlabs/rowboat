@@ -87,6 +87,7 @@ import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { extractConferenceLink } from '@/lib/calendar-event'
 import { OnboardingModal } from '@/components/onboarding'
 import { ComposioGoogleMigrationModal } from '@/components/composio-google-migration-modal'
+import { ModelRecommendationUpdateModal, type RecommendationUpdate } from '@/components/model-recommendation-update-modal'
 import { CommandPalette, type CommandPaletteMention, type SearchType } from '@/components/search-dialog'
 import { LiveNoteSidebar } from '@/components/live-note-sidebar'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
@@ -1448,6 +1449,29 @@ function App() {
         }
       } catch (error) {
         console.error('[migration] check-composio-google failed:', error)
+      }
+    }
+    void run()
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      if (event.provider === 'rowboat' && event.success) {
+        void run()
+      }
+    })
+    return cleanup
+  }, [])
+
+  // Recommendation-update prompt: checked at launch and again after a
+  // Rowboat sign-in (sign-in seeds the initial selection main-side and marks
+  // that version seen, so this only fires for a genuinely newer one). The
+  // check is idempotent — a version already answered returns shouldShow
+  // false — and never throws.
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const result = await window.ipc.invoke('models:checkRecommendationUpdate', null)
+        if (result.shouldShow) setRecommendationUpdate(result)
+      } catch (error) {
+        console.error('[models] checkRecommendationUpdate failed:', error)
       }
     }
     void run()
@@ -2855,6 +2879,8 @@ function App() {
 
   // One-time Composio→native Google migration modal
   const [showComposioGoogleMigration, setShowComposioGoogleMigration] = useState(false)
+  // The pending "Rowboat now recommends…" prompt, if any (see the modal).
+  const [recommendationUpdate, setRecommendationUpdate] = useState<RecommendationUpdate | null>(null)
 
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -8174,6 +8200,12 @@ function App() {
           void window.ipc.invoke('oauth:connect', { provider: 'google' })
         }}
       />
+      {!showOnboarding && (
+        <ModelRecommendationUpdateModal
+          update={recommendationUpdate}
+          onClose={() => setRecommendationUpdate(null)}
+        />
+      )}
       <GoogleDocPickerDialog
         open={googleDocPickerOpen}
         targetFolder={googleDocPickerTargetFolder}

@@ -59,6 +59,7 @@ import { forwardRpc, shouldForwardChannel } from './rpc-forwarder.js';
 import { getPairingInfo, rotateKey as rotateServerKey, setLanEnabled as setServerLanEnabled, bridgeDeltaSubscribe, bridgeDeltaUnsubscribe, childServerMode, getConnectionInfo, connectRemoteServer, disconnectRemoteServer } from './server-host.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
 import { getImageModelCatalog, getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { checkRecommendationUpdate, markRecommendationSeen, resolveRecommendationUpdate } from '@x/core/dist/models/recommendation-update.js';
 import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
@@ -1613,6 +1614,16 @@ export function setupIpcHandlers() {
     'models:updateConfig': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
       await repo.updateConfig(args);
+      return { success: true };
+    },
+    'models:checkRecommendationUpdate': async () => {
+      return await checkRecommendationUpdate();
+    },
+    'models:resolveRecommendationUpdate': async (_event, args) => {
+      return await resolveRecommendationUpdate(args);
+    },
+    'models:markRecommendationSeen': async (_event, args) => {
+      await markRecommendationSeen(args.flavor);
       return { success: true };
     },
     'oauth:connect': async (_event, args) => {
