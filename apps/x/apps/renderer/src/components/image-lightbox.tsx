@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Download, ExternalLink, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, ExternalLink, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const ZOOM_MAX = 8
@@ -138,9 +138,11 @@ interface ImageLightboxProps {
   /** Same src the inline image uses — already-loaded bytes, so no refetch. */
   src: string
   name: string
-  onDownload: () => void
-  onOpenInSystem: () => void
+  onDownload?: () => void
+  onOpenInSystem?: () => void
+  actions?: React.ReactNode
   onError?: () => void
+  navigation?: { index: number; count: number; onPrevious: () => void; onNext: () => void }
 }
 
 // Full-bleed image viewer for inline chat images. Built on the same Radix
@@ -156,6 +158,8 @@ export function ImageLightbox({
   onDownload,
   onOpenInSystem,
   onError,
+  navigation,
+  actions,
 }: ImageLightboxProps) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -164,22 +168,59 @@ export function ImageLightbox({
         <DialogPrimitive.Content
           aria-describedby={undefined}
           onClick={() => onOpenChange(false)}
+          onKeyDown={(event) => {
+            if (event.target instanceof Element && event.target.closest('[role="dialog"]') !== event.currentTarget) return
+            if (!navigation || event.altKey || event.ctrlKey || event.metaKey) return
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              event.preventDefault()
+              event.stopPropagation()
+              if (event.key === 'ArrowLeft' && navigation.index > 0) navigation.onPrevious()
+              if (event.key === 'ArrowRight' && navigation.index < navigation.count - 1) navigation.onNext()
+            }
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
         >
           <DialogPrimitive.Title className="sr-only">{name}</DialogPrimitive.Title>
           <ZoomableImage
+            key={src}
             src={src}
             alt={name}
             onError={onError}
             className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain"
           />
+          {navigation && navigation.count > 1 && (
+            <>
+              <button
+                type="button"
+                aria-label="Previous image"
+                disabled={navigation.index === 0}
+                onClick={(event) => { event.stopPropagation(); navigation.onPrevious() }}
+                className="absolute left-4 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              >
+                <ChevronLeft className="size-6" />
+              </button>
+              <button
+                type="button"
+                aria-label="Next image"
+                disabled={navigation.index === navigation.count - 1}
+                onClick={(event) => { event.stopPropagation(); navigation.onNext() }}
+                className="absolute right-4 flex size-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              >
+                <ChevronRight className="size-6" />
+              </button>
+              <div role="status" className="pointer-events-none absolute bottom-4 rounded-full bg-black/60 px-3 py-1.5 text-sm text-white">
+                {navigation.index + 1} of {navigation.count}
+              </div>
+            </>
+          )}
           <div className="absolute right-4 top-4 flex items-center gap-1.5">
-            <ImageOverlayButton label={`Download ${name}`} onClick={onDownload}>
+            {actions && <div className="flex items-center gap-3 text-xs" onClick={(event) => event.stopPropagation()}>{actions}</div>}
+            {onDownload && <ImageOverlayButton label={`Download ${name}`} onClick={onDownload}>
               <Download className="h-3.5 w-3.5" />
-            </ImageOverlayButton>
-            <ImageOverlayButton label={`Open ${name} in the system viewer`} onClick={onOpenInSystem}>
+            </ImageOverlayButton>}
+            {onOpenInSystem && <ImageOverlayButton label={`Open ${name} in the system viewer`} onClick={onOpenInSystem}>
               <ExternalLink className="h-3.5 w-3.5" />
-            </ImageOverlayButton>
+            </ImageOverlayButton>}
             <ImageOverlayButton label="Close image preview" onClick={() => onOpenChange(false)}>
               <X className="h-3.5 w-3.5" />
             </ImageOverlayButton>
