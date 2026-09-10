@@ -1,0 +1,15 @@
+.assistant-composer-editor { min-height: 1.5rem; max-height: 18rem; overflow: auto; outline: none; font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+.assistant-composer-editor p { margin: 0; }
+.assistant-composer-editor > * + * { margin-top: .5rem; }
+.assistant-composer-editor p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; color: var(--muted-foreground); height: 0; pointer-events: none; }
+.assistant-composer-editor ul { list-style: disc; padding-left: 1.5rem; }
+.assistant-composer-editor ol { list-style: decimal; padding-left: 1.5rem; }
+.assistant-composer-editor blockquote { border-left: 2px solid var(--border); padding-left: .75rem; }
+.assistant-composer-editor pre { background: var(--muted); border-radius: .4rem; padding: .5rem; overflow-x: auto; white-space: pre; }
+.assistant-composer-editor code { font-family: monospace; background: var(--muted); }
+.assistant-composer-editor a { color: var(--primary); text-decoration: underline; }
+.assistant-composer-editor table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: .5rem 0; }
+.assistant-composer-editor td, .assistant-composer-editor th { border: 1px solid var(--border); padding: .35rem .5rem; min-width: 4rem; vertical-align: top; position: relative; }
+.assistant-composer-editor th { background: var(--muted); font-weight: 600; text-align: start; }
+.assistant-composer-editor .selectedCell::after { content: ''; position: absolute; inset: 0; background: var(--primary); opacity: .12; pointer-events: none; }
+.assistant-file-mention { background: var(--accent); border-radius: .25rem; padding: 0 .15rem; }

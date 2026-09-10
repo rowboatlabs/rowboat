@@ -188,6 +188,54 @@ export class SessionsImpl implements ISessions {
         return this.index.list();
     }
 
+    async editMessage(sessionId: string, turnId: string, text: string): Promise<{ sessionId: string; turnId: string }> {
+        if (!text.trim()) throw new Error("A revised message cannot be empty");
+        return this.sessionRepo.withLock(sessionId, async () => {
+            const source = await this.getSession(sessionId);
+            if (source.origin) throw new Error("Only personal assistant chats can be revised");
+            const position = source.turns.findIndex(ref => ref.turnId === turnId);
+            if (position < 0) throw new Error("Message does not belong to this conversation");
+            const latest = await this.latestTurnStatus(source);
+            if (!["completed", "failed", "cancelled"].includes(latest)) {
+                throw new Error("Stop the current response before editing a message");
+            }
+            const original = reduceTurn((await this.turnRuntime.getTurn(turnId)).events).definition;
+            const message = original.input;
+            const input: z.infer<typeof UserMessage> = {
+                ...message,
+                content: typeof message.content === "string" ? text.trim() : [
+                    ...message.content.filter(part => part.type !== "text"),
+                    { type: "text" as const, text: text.trim() },
+                ],
+            };
+            // Share immutable historical turn references; never execute old
+            // turns again or mutate a transcript that another tab is reading.
+            // Session deletion intentionally retains referenced turn files.
+            const revisedId = await this.createSession({ title: `${source.title || "Chat"} (edited)` });
+            const preceding = source.turns.slice(0, position);
+            if (preceding.length) {
+                await this.sessionRepo.append(revisedId, preceding.map(ref => ({
+                    type: "turn_appended" as const,
+                    sessionId: revisedId,
+                    ts: this.clock.now(),
+                    turnId: ref.turnId,
+                    sessionSeq: ref.sessionSeq,
+                    agentId: ref.agentId,
+                    model: ref.model,
+                })));
+            }
+            const revised = await this.getSession(revisedId);
+            this.publishEntry(sessionIndexEntry(revised, await this.latestTurnStatus(revised)));
+            const sent = await this.sendMessage(revisedId, input, {
+                agent: original.agent.requested,
+                ...original.config,
+                useCase: original.analytics?.useCase,
+                subUseCase: original.analytics?.subUseCase,
+            });
+            return { sessionId: revisedId, turnId: sent.turnId };
+        });
+    }
+
     async getSession(sessionId: string): Promise<SessionState> {
         return reduceSession(await this.sessionRepo.read(sessionId));
     }

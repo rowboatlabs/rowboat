@@ -662,6 +662,10 @@ export const ipcSchemas = {
     req: z.object({ title: z.string().optional() }),
     res: z.object({ sessionId: z.string() }),
   },
+  'sessions:editMessage': {
+    req: z.object({ sessionId: z.string(), turnId: z.string(), text: z.string().trim().min(1) }),
+    res: z.object({ sessionId: z.string(), turnId: z.string() }),
+  },
   'sessions:list': {
     req: z.object({}),
     res: z.object({ sessions: z.array(z.custom<SessionIndexEntry>()) }),

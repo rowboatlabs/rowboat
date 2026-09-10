@@ -51,6 +51,8 @@ export interface ISessions {
     // does (a space thread). Main-process callers only — the renderer's
     // sessions:create contract deliberately accepts title alone.
     createSession(input?: { title?: string; origin?: SessionOrigin }): Promise<string>;
+    /** Preserve the original and submit a revised prompt with only its preceding history. */
+    editMessage(sessionId: string, turnId: string, text: string): Promise<{ sessionId: string; turnId: string }>;
     listSessions(): SessionIndexEntry[];
     getSession(sessionId: string): Promise<SessionState>;
     getTurn(turnId: string): Promise<Turn>;

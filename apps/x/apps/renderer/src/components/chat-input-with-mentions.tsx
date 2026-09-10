@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { AssistantComposer } from '@/components/assistant-composer'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -59,7 +60,6 @@ import {
   type FileMention,
   type PromptInputMessage,
   PromptInputProvider,
-  PromptInputTextarea,
   usePromptInputController,
 } from '@/components/ai-elements/prompt-input'
 import { toast } from 'sonner'
@@ -717,18 +717,6 @@ function ChatInputInner({
     // turns it off explicitly. (Not persisted across app restarts.)
   }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, permissionMode, workDir, codeSessionLock])
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
-      return
-    }
-    if (e.key === 'Escape' && contextChip) {
-      e.preventDefault()
-      contextChip.onDismiss()
-    }
-  }, [handleSubmit, contextChip])
-
   useEffect(() => {
     if (!isActive) return
     const onDragOver = (e: DragEvent) => {
@@ -904,12 +892,12 @@ function ChatInputInner({
       )}
       {/* Composer: the input line gets real air above the controls row. */}
       <div className="px-4 pt-5 pb-3">
-        <PromptInputTextarea
+        <AssistantComposer
           placeholder={placeholder ?? 'Type your message...'}
-          onKeyDown={handleKeyDown}
-          autoFocus={isActive}
-          focusTrigger={isActive ? `${runId ?? 'new'}:${focusNonce}:${focusSignal ?? 0}` : undefined}
-          className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
+          onSubmit={handleSubmit}
+          onEscape={contextChip?.onDismiss}
+          active={isActive}
+          focusTrigger={`${runId ?? 'new'}:${focusNonce}:${focusSignal ?? 0}`}
         />
       </div>
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">

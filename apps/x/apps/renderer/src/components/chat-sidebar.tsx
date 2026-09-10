@@ -54,6 +54,7 @@ function getInitialPaneWidth(defaultWidth: number): number {
 }
 
 interface ChatSidebarProps {
+  onOpenRevisedChat?: (sessionId: string) => void
   floating?: boolean
   keepMounted?: boolean
   onMinimize?: () => void
@@ -231,6 +232,7 @@ export function ChatSidebar({
   onEndCall,
   callAvailable,
   onComposioConnected,
+  onOpenRevisedChat,
 }: ChatSidebarProps) {
   const { state: sidebarState } = useSidebar()
   // Content-reported tab meta (see lib/tab-meta.ts): the header title prefers
@@ -541,6 +543,7 @@ export function ChatSidebar({
                   const isActive = tab.id === activeChatTabId && isOpen
                   return (
                     <ChatSessionPane
+                      onOpenRevisedChat={onOpenRevisedChat}
                       // Keyed by chat identity — see App's chat panel key.
                       key={tab.chatId}
                       tab={tab}

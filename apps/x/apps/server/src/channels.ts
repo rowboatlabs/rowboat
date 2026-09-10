@@ -13,6 +13,7 @@ export const RPC_CHANNELS = [
   'projects:createChat',
   'sessions:list',
   'sessions:create',
+  'sessions:editMessage',
   'sessions:get',
   'sessions:getTurn',
   'sessions:sendMessage',

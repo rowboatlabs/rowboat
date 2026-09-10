@@ -166,6 +166,7 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
       const sessionId = await sessions().createSession(args);
       return { sessionId };
     },
+    'sessions:editMessage': async (args) => sessions().editMessage(args.sessionId, args.turnId, args.text),
     'sessions:list': async () => {
       await opts?.sessionsIndexReady;
       return { sessions: sessions().listSessions() };

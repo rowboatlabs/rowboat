@@ -60,6 +60,7 @@ export interface ChatSessionPaneProps {
   tabState: ChatTabViewState
   viewportAnchor: ChatViewportAnchorState | undefined
   onPickPrompt: (prompt: string) => void
+  onOpenRevisedChat?: (sessionId: string) => void
   /** `undefined` = no explicit choice; TurnConversation applies the per-tool default. */
   isToolOpenForTab: (tabId: string, toolId: string) => boolean | undefined
   setToolOpenForTab: (tabId: string, toolId: string, open: boolean) => void
@@ -89,6 +90,7 @@ export function ChatSessionPane({
   tabState,
   viewportAnchor,
   onPickPrompt,
+  onOpenRevisedChat,
   isToolOpenForTab,
   setToolOpenForTab,
   onPermissionResponse,
@@ -189,6 +191,10 @@ export function ChatSessionPane({
             <>
               <TurnConversation
                 items={tabState.conversation}
+                onEditMessage={tab.runId && !isCodeSession && !activeIsProcessing && onOpenRevisedChat ? async (messageId, text) => {
+                  const result = await window.ipc.invoke('sessions:editMessage', { sessionId: tab.runId!, turnId: messageId.slice(0, -':user'.length), text })
+                  onOpenRevisedChat(result.sessionId)
+                } : undefined}
                 isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
                 onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
                 permissionRequests={tabState.allPermissionRequests}

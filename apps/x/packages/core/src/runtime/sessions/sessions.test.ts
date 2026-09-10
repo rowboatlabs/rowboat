@@ -343,6 +343,69 @@ function makeSessions(opts: { repo?: ISessionRepo; fake?: FakeTurnRuntime } = {}
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+describe("editing earlier prompts", () => {
+    async function conversation() {
+        const env = makeSessions();
+        const sessionId = await env.sessions.createSession({ title: "Original" });
+        const ids: string[] = [];
+        for (const text of ["First", "Second", "Third"]) {
+            const { turnId } = await env.sessions.sendMessage(sessionId, user(text), { agent: { agentId: "copilot" } });
+            await flush();
+            const completed = turnLog(turnId, sessionId, "completed").slice(1);
+            const created = env.fake.logs.get(turnId)![0];
+            if (created.type === 'turn_created' && !Array.isArray(created.context)) {
+                for (const event of completed) if (event.type === 'model_call_requested') event.request.contextRef = created.context;
+            }
+            env.fake.logs.get(turnId)!.push(...completed);
+            ids.push(turnId);
+        }
+        return { ...env, sessionId, ids };
+    }
+
+    it("revises with only preceding context and never replays or changes the original", async () => {
+        const { sessions, repo, fake, sessionId, ids } = await conversation();
+        const original = await repo.read(sessionId);
+        const calls = fake.advanceCalls.length;
+        const revised = await sessions.editMessage(sessionId, ids[1], "Revised second");
+        expect(revised.sessionId).not.toBe(sessionId);
+        expect(await repo.read(sessionId)).toEqual(original);
+        expect((await sessions.getSession(revised.sessionId)).turns.map(t => t.turnId)).toEqual([ids[0], revised.turnId]);
+        expect(fake.createTurnInputs.at(-1)).toMatchObject({
+            context: { previousTurnId: ids[0] }, input: user("Revised second"),
+        });
+        expect(fake.advanceCalls).toHaveLength(calls + 1);
+    });
+
+    it("editing the first prompt starts without the original answer as context", async () => {
+        const { sessions, fake, sessionId, ids } = await conversation();
+        await sessions.editMessage(sessionId, ids[0], "New first");
+        expect(fake.createTurnInputs.at(-1)?.context).toEqual([]);
+    });
+
+    it("preserves attachments and turn configuration while replacing text", async () => {
+        const { sessions, fake, sessionId, ids } = await conversation();
+        const definition = fake.logs.get(ids[1])![0];
+        if (definition.type !== 'turn_created') throw new Error('fixture');
+        const attachment = { type: 'attachment' as const, path: '/tmp/report.pdf', filename: 'report.pdf', mimeType: 'application/pdf' };
+        definition.input.content = [attachment, { type: 'text', text: 'Old text' }];
+        definition.config.reasoningEffort = 'high';
+        await sessions.editMessage(sessionId, ids[1], "New text");
+        expect(fake.createTurnInputs.at(-1)).toMatchObject({
+            input: { content: [attachment, { type: 'text', text: 'New text' }] },
+            config: { reasoningEffort: 'high' },
+        });
+    });
+
+    it("rejects invalid or busy edits before creating a new session", async () => {
+        const { sessions, fake, sessionId, ids } = await conversation();
+        await expect(sessions.editMessage(sessionId, ids[0], " ")).rejects.toThrow('empty');
+        await expect(sessions.editMessage(sessionId, 'unrelated', "Edit")).rejects.toThrow('belong');
+        fake.logs.set(ids[2], turnLog(ids[2], sessionId, 'idle'));
+        await expect(sessions.editMessage(sessionId, ids[0], "Edit")).rejects.toThrow('Stop');
+        expect(sessions.listSessions()).toHaveLength(1);
+    });
+});
+
 describe("createSession and listing", () => {
     it("persists session_created and publishes an index entry with status none", async () => {
         const { sessions, repo, bus } = makeSessions();
