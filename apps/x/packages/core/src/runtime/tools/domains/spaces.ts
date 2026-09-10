@@ -322,7 +322,6 @@ const blobTools: Record<string, BuiltinTool> = {
 
 // --- local conveniences ---------------------------------------------------------
 
-const NOTIFY_LEVEL = z.enum(["all", "mentions", "mute"]);
 
 const localTools: Record<string, BuiltinTool> = {
     schedule_message: {
@@ -398,52 +397,6 @@ const localTools: Record<string, BuiltinTool> = {
                 const scheduler = await import("../../../spaces/scheduler.js");
                 const cancelled = scheduler.cancelScheduled(input.id);
                 return cancelled ? { success: true } : { success: false, error: "No scheduled item with that id." };
-            } catch (e) {
-                return { success: false, error: e instanceof Error ? e.message : String(e) };
-            }
-        },
-    },
-    get_notify_prefs: {
-        permission: "none",
-        isAvailable: isSpacesAvailable,
-        description:
-            "Your person's notification levels for a space: the space-wide level (null = the default — " +
-            "'mentions' for a shared space, 'all' for a DM) and per-thread overrides, plus whether " +
-            "do-not-disturb is on.",
-        inputSchema: z.object({
-            org: ORG_ARG,
-            spaceId: z.string(),
-        }),
-        execute: async (input: { org?: string; spaceId: string }) => {
-            try {
-                const org = await resolveOrgArg(input.org);
-                const prefs = await import("../../../spaces/notify-prefs.js");
-                const { spaceLevel, topics } = prefs.getNotifyPrefs(org.id, input.spaceId);
-                return { success: true, spaceLevel, threads: topics, dndUntil: prefs.getDndUntil() };
-            } catch (e) {
-                return { success: false, error: e instanceof Error ? e.message : String(e) };
-            }
-        },
-    },
-    set_notify_pref: {
-        permission: "none",
-        isAvailable: isSpacesAvailable,
-        description:
-            "Set your person's notification level for a space, or for one thread in it (\"mute this space\", " +
-            "\"follow this thread\"): 'all' (every message), 'mentions' (only when mentioned), 'mute', or " +
-            "null to clear back to the default. Local to this machine, visible to nobody else.",
-        inputSchema: z.object({
-            org: ORG_ARG,
-            spaceId: z.string(),
-            threadRoot: z.string().optional().describe("Set the level for this thread only; omit for the whole space"),
-            level: NOTIFY_LEVEL.nullable(),
-        }),
-        execute: async (input: { org?: string; spaceId: string; threadRoot?: string; level: "all" | "mentions" | "mute" | null }) => {
-            try {
-                const org = await resolveOrgArg(input.org);
-                const prefs = await import("../../../spaces/notify-prefs.js");
-                prefs.setNotifyPref(org.id, input.spaceId, input.threadRoot, input.level);
-                return { success: true };
             } catch (e) {
                 return { success: false, error: e instanceof Error ? e.message : String(e) };
             }

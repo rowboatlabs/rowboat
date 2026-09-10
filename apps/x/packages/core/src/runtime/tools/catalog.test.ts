@@ -251,8 +251,6 @@ const HISTORICAL_KEY_ORDER = [
     "schedule_message",
     "list_scheduled",
     "cancel_scheduled",
-    "get_notify_prefs",
-    "set_notify_pref",
     "spawn-agent",
 ];
 

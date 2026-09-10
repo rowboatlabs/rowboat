@@ -56,7 +56,6 @@ before naming anyone.
 | "open that attachment" | \`spaces-download-blob\` → then parse it |
 | "new space", "rename it", "invite link" | \`create_space\` / \`rename_space\` / \`create_invite\` |
 | "send at 9am", "remind me" | \`schedule_message\` |
-| "mute this", "follow that thread" | \`set_notify_pref\` |
 
 "Push / add X to <space>" means updating the right **file** (the obvious one
 in \`list_spaces\`, e.g. a roadmap item goes in roadmap.md), not posting to
