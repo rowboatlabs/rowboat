@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FileListContextMenu } from '@/components/file-list-context-menu'
 import {
   ChevronRight,
   Copy,
@@ -485,6 +486,16 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
       />
 
       <div className="flex flex-1 overflow-hidden">
+      <FileListContextMenu actions={isRoot ? [
+        { label: 'Add workspace', onSelect: () => setAddOpen(true) },
+      ] : [
+        { label: 'New note', onSelect: () => actions.createNote(currentPath) },
+        { label: 'New folder', onSelect: () => { void actions.createFolder(currentPath).catch(() => toast('Could not create folder', 'error')) } },
+        { label: 'New presentation', onSelect: () => actions.createPresentation(currentPath) },
+        { label: 'Add Google Doc', onSelect: () => actions.addGoogleDoc(currentPath) },
+        { label: 'Add files…', onSelect: () => filesInputRef.current?.click(), disabled: uploading },
+        { label: 'Add folder…', onSelect: () => folderInputRef.current?.click(), disabled: uploading },
+      ]}>
       <div
         className="relative flex-1 overflow-y-auto"
         onDragEnter={handleDragEnter}
@@ -614,6 +625,7 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
         )}
       </div>
 
+      </FileListContextMenu>
       {!isRoot && chatsOpen && (
         <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-border bg-background">
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">

@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { Globe, Loader2, PanelLeftClose, Plus, X } from 'lucide-react'
+import { Copy, Globe, Loader2, PanelLeftClose, Plus, X } from 'lucide-react'
 
 import type { BrowserTabState } from '@x/shared/dist/browser-control.js'
 
 import { cn } from '@/lib/utils'
+import { toast } from '@/lib/toast'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 
 // The browser's edge rail: vertical tabs, following the Spaces rail pattern
 // (spaces/space-rail.tsx) — a plain sticky sidebar that collapses to a 28px
@@ -60,6 +62,9 @@ export function BrowserTabRail({
   onTogglePin,
   onSwitchTab,
   onCloseTab,
+  onCloseOtherTabs,
+  onReloadTab,
+  onDuplicateTab,
   onNewTab,
 }: {
   tabs: BrowserTabState[]
@@ -68,8 +73,19 @@ export function BrowserTabRail({
   onTogglePin: () => void
   onSwitchTab: (tabId: string) => void
   onCloseTab: (tabId: string) => void
+  onCloseOtherTabs: (tabId: string) => void
+  onReloadTab: (tabId: string) => void
+  onDuplicateTab: (url: string) => void
   onNewTab: () => void
 }) {
+  const copyUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      toast('URL copied', 'success')
+    } catch {
+      toast('Could not copy URL', 'error')
+    }
+  }
   return (
     <aside
       style={{ width: open ? RAIL_OPEN_WIDTH : RAIL_STRIP_WIDTH, transition: 'width 200ms cubic-bezier(0.2,0,0,1)' }}
@@ -135,35 +151,55 @@ export function BrowserTabRail({
             {tabs.map((tab) => {
               const title = getBrowserTabTitle(tab)
               return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => onSwitchTab(tab.id)}
-                  title={title}
-                  className={cn(
-                    'group/tab flex h-8 w-full shrink-0 items-center gap-2 rounded-md px-2 text-left text-[13.5px]',
-                    tab.id === activeTabId
-                      ? 'bg-accent font-medium text-foreground'
-                      : 'text-foreground/90 hover:bg-accent/50',
-                  )}
-                >
-                  <TabFavicon tab={tab} />
-                  <span className="min-w-0 flex-1 truncate">{title}</span>
-                  {/* Main refuses to close the last tab, so don't offer it (same as the old strip). */}
-                  {tabs.length > 1 && (
-                    <span
-                      role="button"
-                      aria-label="Close tab"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onCloseTab(tab.id)
-                      }}
-                      className="flex shrink-0 items-center justify-center rounded-sm p-0.5 opacity-0 transition-all group-hover/tab:opacity-60 hover:opacity-100! hover:bg-foreground/10"
+                <ContextMenu key={tab.id}>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => onSwitchTab(tab.id)}
+                      title={title}
+                      className={cn(
+                        'group/tab flex h-8 w-full shrink-0 items-center gap-2 rounded-md px-2 text-left text-[13.5px]',
+                        tab.id === activeTabId
+                          ? 'bg-accent font-medium text-foreground'
+                          : 'text-foreground/90 hover:bg-accent/50',
+                      )}
                     >
-                      <X className="size-3" />
-                    </span>
-                  )}
-                </button>
+                      <TabFavicon tab={tab} />
+                      <span className="min-w-0 flex-1 truncate">{title}</span>
+                      {/* Main refuses to close the last tab, so don't offer it (same as the old strip). */}
+                      {tabs.length > 1 && (
+                        <span
+                          role="button"
+                          aria-label="Close tab"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onCloseTab(tab.id)
+                          }}
+                          className="flex shrink-0 items-center justify-center rounded-sm p-0.5 opacity-0 transition-all group-hover/tab:opacity-60 hover:opacity-100! hover:bg-foreground/10"
+                        >
+                          <X className="size-3" />
+                        </span>
+                      )}
+                    </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => onReloadTab(tab.id)}>Reload</ContextMenuItem>
+                    <ContextMenuItem
+                      disabled={!tab.url.trim() || /^(javascript:|file:\/\/|chrome:\/\/|chrome-extension:\/\/)/i.test(tab.url.trim())}
+                      onSelect={() => onDuplicateTab(tab.url)}
+                    >Duplicate tab</ContextMenuItem>
+                    <ContextMenuItem disabled={!tab.url.trim()} onSelect={() => { void copyUrl(tab.url) }}>
+                      <Copy /> Copy URL
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem disabled={tabs.length <= 1} onSelect={() => onCloseTab(tab.id)}>
+                      Close tab
+                    </ContextMenuItem>
+                    <ContextMenuItem disabled={tabs.length <= 1} onSelect={() => onCloseOtherTabs(tab.id)}>
+                      Close other tabs
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               )
             })}
             <button

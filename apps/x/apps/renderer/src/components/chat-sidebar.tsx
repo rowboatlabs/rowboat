@@ -9,7 +9,7 @@ import { ChatHeader } from '@/components/chat-header'
 import { CodeSessionHeader, type CodeSessionHeaderProps } from '@/components/code/code-session-header'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
-import { type ChatTab } from '@/components/tab-bar'
+import { TabBar, type ChatTab } from '@/components/tab-bar'
 import { type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from '@/components/chat-input-with-mentions'
 import { ChatSessionPane, ChatSessionComposer } from '@/components/chat-session'
 import type { QueuedSessionMessage } from '@x/shared/src/sessions.js'
@@ -65,6 +65,8 @@ interface ChatSidebarProps {
   paneSize?: ChatPaneSize
   className?: string
   chatTabs: ChatTab[]
+  onSwitchChatTab: (tabId: string) => void
+  onCloseChatTabs: (tabIds: string[]) => void
   activeChatTabId: string
   getChatTabTitle: (tab: ChatTab) => string
   onNewChatTab: () => void
@@ -159,6 +161,8 @@ export function ChatSidebar({
   paneSize = 'chat-smaller',
   className,
   chatTabs,
+  onSwitchChatTab,
+  onCloseChatTabs,
   activeChatTabId,
   getChatTabTitle,
   onNewChatTab,
@@ -522,6 +526,12 @@ export function ChatSidebar({
             {onMinimize && <Button variant="ghost" size="icon" onClick={onMinimize} className="titlebar-no-drag my-1 size-8 shrink-0" aria-label="Minimize chat" title="Minimize chat"><Minus className="size-4" /></Button>}
             {onCloseTab && <Button variant="ghost" size="icon" onClick={onCloseTab} className="titlebar-no-drag my-1 mr-1 size-8 shrink-0" aria-label="Close chat tab" title="Close tab — conversation stays in history"><X className="size-4" /></Button>}
           </header>
+
+          <div className="flex h-9 shrink-0 border-b border-border">
+            <TabBar tabs={chatTabs} activeTabId={activeChatTabId} getTabId={(tab) => tab.id}
+              getTabTitle={getChatTabTitle} onSwitchTab={onSwitchChatTab}
+              onCloseTab={(id) => onCloseChatTabs([id])} onCloseTabs={onCloseChatTabs} layout="scroll" />
+          </div>
 
           <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})} onOpenFile={onOpenFile}>
             <div className="flex min-h-0 flex-1 flex-col">

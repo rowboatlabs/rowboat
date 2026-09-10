@@ -1,3 +1,4 @@
+import { SidebarChatContextMenu } from "./sidebar-chat-context-menu"
 "use client"
 
 import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
@@ -1622,17 +1623,25 @@ function ChatsFlyout({
               </div>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={() => onOpenRun?.(chat.id)}
-                  className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13.5px] text-foreground/90 hover:bg-accent"
+                <SidebarChatContextMenu
+                  pinned={pinnedChatIds.includes(chat.id)}
+                  onOpen={onOpenRun ? () => onOpenRun(chat.id) : undefined}
+                  onTogglePin={() => onTogglePin(chat.id)}
+                  onRename={onRenameRun ? () => { setRenameDraft(chat.title || ''); setRenamingChatId(chat.id) } : undefined}
+                  onRequestDelete={onRequestDelete ? () => onRequestDelete(chat.id, chat.title || '(Untitled chat)') : undefined}
                 >
-                  <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate pr-5">{chat.title || '(Untitled chat)'}</span>
-                  {pinnedChatIds.includes(chat.id) && (
-                    <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/chat-row:opacity-0" />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenRun?.(chat.id)}
+                    className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13.5px] text-foreground/90 hover:bg-accent"
+                  >
+                    <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate pr-5">{chat.title || '(Untitled chat)'}</span>
+                    {pinnedChatIds.includes(chat.id) && (
+                      <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/chat-row:opacity-0" />
+                    )}
+                  </button>
+                </SidebarChatContextMenu>
                 {onRenameRun && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

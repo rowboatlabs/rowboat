@@ -12,6 +12,7 @@ import { prepareEmailHtml, splitPlainTextQuote, stripQuotedReplyText, QUOTED_CLA
 import { BUILTIN_LABELS, labelNameFor, orderedCategoryIds, type EmailLabelInfo } from '@/lib/email-labels'
 import { replyReadyThreads } from '@/lib/email-reply-ready'
 import { EmailRail, type EmailRailSelection } from '@/components/email-rail'
+import { EmailThreadContextMenu } from '@/components/email-thread-context-menu'
 import { useTheme } from '@/contexts/theme-context'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Button } from '@/components/ui/button'
@@ -2381,68 +2382,81 @@ const ThreadRow = memo(function ThreadRow({
   }
   return (
     <div className={cn('gmail-row-group', !isMounted && 'gmail-row-group-cv', isLeaving && 'gmail-row-group-leaving')}>
-      <div
-        className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
-        data-thread-id={thread.threadId}
-        onMouseEnter={() => onHoverIn(thread)}
-        onMouseLeave={onHoverOut}
+      <EmailThreadContextMenu
+        threadId={thread.threadId}
+        unread={isUnread}
+        category={thread.category}
+        section={section}
+        labels={labels}
+        onMarkRead={onMarkRead}
+        onSetImportance={onSetImportance}
+        onSetCategory={onSetCategory}
+        onArchive={onArchive}
+        onTrash={onTrash}
       >
-        <button
-          type="button"
-          className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread', isFocused && 'gmail-row-focused')}
-          onClick={() => onToggle(thread)}
+        <div
+          className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
+          data-thread-id={thread.threadId}
+          onMouseEnter={() => onHoverIn(thread)}
+          onMouseLeave={onHoverOut}
         >
-          <span className="gmail-row-dot" aria-hidden />
-          <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
-          <span className="gmail-row-content">
-            <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
-            <span>{thread.summary ? thread.subject : snippet(thread.preview || latest?.body || thread.latest_email)}</span>
-            {categoryChip && <span className="gmail-row-chip">{categoryChip}</span>}
-            {chip && <span className={cn('gmail-row-chip', chipWaiting ? 'gmail-row-chip-waiting' : 'gmail-row-chip-ready')}>{chip}</span>}
-          </span>
-          <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
-        </button>
-        <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
-          {section && (
+          <button
+            type="button"
+            className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread', isFocused && 'gmail-row-focused')}
+            onClick={() => onToggle(thread)}
+          >
+            <span className="gmail-row-dot" aria-hidden />
+            <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
+            <span className="gmail-row-content">
+              <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
+              <span>{thread.summary ? thread.subject : snippet(thread.preview || latest?.body || thread.latest_email)}</span>
+              {categoryChip && <span className="gmail-row-chip">{categoryChip}</span>}
+              {chip && <span className={cn('gmail-row-chip', chipWaiting ? 'gmail-row-chip-waiting' : 'gmail-row-chip-ready')}>{chip}</span>}
+            </span>
+            <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
+          </button>
+          <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
+            {section && (
+              <button
+                type="button"
+                className="gmail-row-action"
+                title={section === 'important' ? 'Not important — teach the classifier' : 'Important — teach the classifier'}
+                aria-label={section === 'important' ? 'Mark as not important' : 'Mark as important'}
+                onClick={(e) => { stop(e); void onSetImportance(thread.threadId, section === 'important' ? 'other' : 'important') }}
+              >
+                {section === 'important' ? <StarOff size={15} /> : <Star size={15} />}
+              </button>
+            )}
             <button
               type="button"
               className="gmail-row-action"
-              title={section === 'important' ? 'Not important — teach the classifier' : 'Important — teach the classifier'}
-              aria-label={section === 'important' ? 'Mark as not important' : 'Mark as important'}
-              onClick={(e) => { stop(e); void onSetImportance(thread.threadId, section === 'important' ? 'other' : 'important') }}
+              title={isUnread ? 'Mark as read' : 'Mark as unread'}
+              aria-label={isUnread ? 'Mark as read' : 'Mark as unread'}
+              onClick={(e) => { stop(e); void onMarkRead(thread.threadId, isUnread) }}
             >
-              {section === 'important' ? <StarOff size={15} /> : <Star size={15} />}
+              {isUnread ? <CheckCheck size={15} /> : <Mail size={15} />}
             </button>
-          )}
-          <button
-            type="button"
-            className="gmail-row-action"
-            title={isUnread ? 'Mark as read' : 'Mark as unread'}
-            aria-label={isUnread ? 'Mark as read' : 'Mark as unread'}
-            onClick={(e) => { stop(e); void onMarkRead(thread.threadId, isUnread) }}
-          >
-            {isUnread ? <CheckCheck size={15} /> : <Mail size={15} />}
-          </button>
-          <button
-            type="button"
-            className="gmail-row-action"
-            title="Archive"
-            aria-label="Archive"
-            onClick={(e) => { stop(e); void onArchive(thread.threadId) }}
-          >
-            <Archive size={15} />
-          </button>
-          <button
-            type="button"
-            className="gmail-row-action gmail-row-action-danger"
-            title="Delete"
-            aria-label="Delete"
-            onClick={(e) => { stop(e); void onTrash(thread.threadId) }}
-          >
-            <Trash2 size={15} />
-          </button>
+            <button
+              type="button"
+              className="gmail-row-action"
+              title="Archive"
+              aria-label="Archive"
+              onClick={(e) => { stop(e); void onArchive(thread.threadId) }}
+            >
+              <Archive size={15} />
+            </button>
+            <button
+              type="button"
+              className="gmail-row-action gmail-row-action-danger"
+              title="Delete"
+              aria-label="Delete"
+              onClick={(e) => { stop(e); void onTrash(thread.threadId) }}
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
         </div>
-      </div>
+      </EmailThreadContextMenu>
       {/* Drop the detail as soon as the row starts leaving — the collapse
           keyframe assumes row height, and the thread is being removed anyway. */}
       {isMounted && !isLeaving && (

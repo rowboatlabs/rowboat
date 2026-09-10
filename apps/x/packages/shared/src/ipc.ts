@@ -3521,7 +3521,7 @@ export const ipcSchemas = {
     res: z.object({ ok: z.boolean() }),
   },
   'browser:reload': {
-    req: z.null(),
+    req: z.object({ tabId: z.string().min(1) }).nullable(),
     res: z.object({ ok: z.literal(true) }),
   },
   'browser:getState': {

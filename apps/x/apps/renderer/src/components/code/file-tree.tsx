@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, FileText, Folder } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from '@/lib/toast'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 
 interface TreeEntry {
   name: string
@@ -21,12 +23,17 @@ export function CodeFileTree({
   const [childrenByDir, setChildrenByDir] = useState<Record<string, TreeEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
+  const sessionRef = useRef(sessionId)
+  sessionRef.current = sessionId
 
   const loadDir = useCallback(async (relPath: string) => {
     try {
       const res = await window.ipc.invoke('codeSession:readdir', { sessionId, relPath })
+      if (sessionRef.current !== sessionId) return
       setChildrenByDir((prev) => ({ ...prev, [relPath]: res.entries }))
+      setError(null)
     } catch (err) {
+      if (sessionRef.current !== sessionId) return
       setError(err instanceof Error ? err.message : 'Failed to read directory')
     }
   }, [sessionId])
@@ -39,13 +46,13 @@ export function CodeFileTree({
   }, [loadDir])
 
   const toggleDir = (relPath: string) => {
+    if (!expanded.has(relPath) && !childrenByDir[relPath]) void loadDir(relPath)
     setExpanded((prev) => {
       const next = new Set(prev)
       if (next.has(relPath)) {
         next.delete(relPath)
       } else {
         next.add(relPath)
-        if (!childrenByDir[relPath]) void loadDir(relPath)
       }
       return next
     })
@@ -62,40 +69,73 @@ export function CodeFileTree({
         const isOpen = expanded.has(childPath)
         return (
           <div key={childPath}>
-            <button
-              type="button"
-              onClick={() => toggleDir(childPath)}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-muted"
-              style={{ paddingLeft: depth * 12 + 8 }}
-            >
-              {isOpen ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
-              <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">{entry.name}</span>
-            </button>
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => toggleDir(childPath)}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-muted"
+                  style={{ paddingLeft: depth * 12 + 8 }}
+                >
+                  {isOpen ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
+                  <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{entry.name}</span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => toggleDir(childPath)}>{isOpen ? 'Collapse folder' : 'Expand folder'}</ContextMenuItem>
+                <ContextMenuItem onSelect={() => { void loadDir(childPath) }}>Refresh folder</ContextMenuItem>
+                <ContextMenuItem onSelect={() => { void copyPath(childPath) }}>Copy relative path</ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
             {isOpen && renderDir(childPath, depth + 1)}
           </div>
         )
       }
       return (
-        <button
-          key={childPath}
-          type="button"
-          onClick={() => onSelectFile(childPath)}
-          className={cn(
-            'flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-muted',
-            selectedPath === childPath && 'bg-muted font-medium',
-          )}
-          style={{ paddingLeft: depth * 12 + 22 }}
-        >
-          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{entry.name}</span>
-        </button>
+        <ContextMenu key={childPath}>
+          <ContextMenuTrigger asChild>
+            <button
+              type="button"
+              onClick={() => onSelectFile(childPath)}
+              className={cn(
+                'flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-muted',
+                selectedPath === childPath && 'bg-muted font-medium',
+              )}
+              style={{ paddingLeft: depth * 12 + 22 }}
+            >
+              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{entry.name}</span>
+            </button>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onSelect={() => onSelectFile(childPath)}>Open file</ContextMenuItem>
+            <ContextMenuItem onSelect={() => { void copyPath(childPath) }}>Copy relative path</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       )
     })
   }
 
-  if (error) {
-    return <div className="p-3 text-xs text-destructive">{error}</div>
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="min-h-full overflow-auto py-1">
+          {error ? <div className="p-3 text-xs text-destructive">{error}</div> : renderDir('.', 0)}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => { void loadDir('.') }}>Refresh files</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+async function copyPath(path: string) {
+  try {
+    await navigator.clipboard.writeText(path)
+    toast('Path copied', 'success')
+  } catch {
+    toast('Could not copy path', 'error')
   }
-  return <div className="overflow-auto py-1">{renderDir('.', 0)}</div>
 }
