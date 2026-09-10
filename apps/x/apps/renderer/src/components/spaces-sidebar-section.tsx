@@ -15,6 +15,7 @@ import { AddOrgDialog, MemberAvatar } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
 import { prefetchMembers, useSelfDisplayName } from '@/hooks/use-space-members'
+import { isSpaceExpanded, setSpaceExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 import type { RailSelection } from '@/lib/spaces-selection'
 import { toast } from '@/lib/toast'
@@ -441,14 +442,15 @@ function CollapsibleSpace({ orgId, spaceId, name, showArchived, countOverride, d
     children: (expanded: boolean) => ReactNode
 }) {
     const feed = useSpaceFeed(orgId, spaceId)
-    const key = `spaces:spaceExpanded:${orgId}/${spaceId}`
-    const [expanded, setExpanded] = useState(() => sessionStorage.getItem(key) === 'true')
+    // Shared with the rail's expand-all / collapse-all, so one click can move every row.
+    useSpaceExpansionVersion()
+    const expanded = isSpaceExpanded(orgId, spaceId)
     const count = countOverride ?? feed.topics.filter((topic) => showArchived || !topic.archived).length
     return <SidebarMenuItem>
         <div className="flex items-center">
             {count > 0 ? <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} #${name}`} aria-expanded={expanded}
                 className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
-                onClick={() => setExpanded((value) => { sessionStorage.setItem(key, String(!value)); return !value })}>
+                onClick={() => setSpaceExpanded(orgId, spaceId, !expanded)}>
                 <ChevronRight className={cn('size-3.5', expanded && 'rotate-90')} />
             </button> : <span className="w-5.5 shrink-0" />}
             {children(expanded)}

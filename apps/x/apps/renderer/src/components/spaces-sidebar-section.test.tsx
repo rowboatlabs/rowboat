@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SpacesSidebarSection, ServerSpaceNavigation } from './spaces-sidebar-section'
 import { ServerOptionsMenu } from './spaces/server-options-menu'
 import { SidebarProvider } from '@/components/ui/sidebar'
+import { isSpaceExpanded, setSpacesExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import { useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 
 const { org, topics } = vi.hoisted(() => ({
@@ -71,6 +72,34 @@ describe('server and space navigation', () => {
         expect(screen.getByText('Person 0')).toBeTruthy()
         fireEvent.click(screen.getByText('Direct messages'))
         expect(screen.queryByText('Person 0')).toBeNull()
+    })
+    it('moves every space from the rail\'s one expand-all / collapse-all control', () => {
+        // The rail header's control, standing in for space-rail.tsx: the space
+        // rows and the control share one store, so either can move the other.
+        function Navigation() {
+            useSpaceExpansionVersion()
+            const ids = org.spaces.map((space) => space.id)
+            const anyExpanded = ids.some((id) => isSpaceExpanded(org.id, id))
+            return <SidebarProvider>
+                <button type="button" onClick={() => setSpacesExpanded(org.id, ids, !anyExpanded)}>
+                    {anyExpanded ? 'Collapse all discussions' : 'Expand all discussions'}
+                </button>
+                <ServerSpaceNavigation org={org as unknown as OrgWithSpaces} spaceId="" onOpenSpace={vi.fn()}
+                    onOpenDiscussion={vi.fn()} activeDiscussionCount={0} renderActiveDiscussions={() => null} />
+            </SidebarProvider>
+        }
+        render(<Navigation />)
+        fireEvent.click(screen.getByRole('button', { name: 'Expand all discussions' }))
+        expect(screen.getByLabelText('Collapse #main')).toBeTruthy()
+        expect(screen.getByLabelText('Collapse #founders')).toBeTruthy()
+        // A partially expanded server must still offer Collapse all, as one button.
+        fireEvent.click(screen.getByLabelText('Collapse #founders'))
+        expect(screen.getByRole('button', { name: 'Collapse all discussions' })).toBeTruthy()
+        expect(screen.queryByRole('button', { name: 'Expand all discussions' })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Collapse all discussions' }))
+        expect(screen.getByLabelText('Expand #main')).toBeTruthy()
+        expect(screen.getByLabelText('Expand #founders')).toBeTruthy()
+        expect(screen.getByRole('button', { name: 'Expand all discussions' })).toBeTruthy()
     })
 })
 
