@@ -86,16 +86,18 @@ export async function registerWithMac(rpc: RpcClient): Promise<'registered' | 'n
 export async function registerWithHarbor(
   orgs: SpacesOrg[],
   getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>,
-): Promise<'registered' | 'no-permission' | 'unavailable'> {
+): Promise<'registered' | 'no-permission' | 'unavailable' | 'error'> {
   const level = await getPushLevel();
   const token = await getPushToken();
   if (!token) return Device.isDevice ? 'no-permission' : 'unavailable';
-  await Promise.all(
+  const results = await Promise.all(
     orgs.map((org) =>
       new SpacesClient({ baseUrl: `https://${org.address}`, token: getAccessToken })
         .registerPush({ token, level })
-        .catch(() => {}),
+        .then(() => true)
+        .catch(() => false),
     ),
   );
-  return 'registered';
+  // Every org refused/failed = the registration did NOT land — say so.
+  return results.some(Boolean) ? 'registered' : 'error';
 }
