@@ -8099,7 +8099,7 @@ function App() {
                 getChatTabTitle={getChatTabTitle}
                 onNewChatTab={() => { if (projectViewActive && selectedProject) void newProjectChat(selectedProject).catch((e) => toast.error(String(e))); else handleNewChatTabInSidebar() }}
                 embedded={projectViewActive}
-                projectName={projectViewActive ? selectedProject?.name : undefined}
+                projectName={projectViewActive && !selectedProject?.isDefault ? selectedProject?.name : undefined}
                 recentRuns={chatRuns}
                 onSelectRun={projectViewActive ? openAssistantRun : bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
