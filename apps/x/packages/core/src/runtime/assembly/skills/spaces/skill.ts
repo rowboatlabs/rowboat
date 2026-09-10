@@ -26,6 +26,7 @@ You act as your person. Everything you write shows to the team as
 
 | You need | Call |
 |---|---|
+| "what's new for me?", "catch me up", "did anyone need me?" | \`read_activity\` — one call, every space and DM; \`unread: true\` for only what they have not read. Summarise by space, lead with the unread, name people by displayName, offer to open or reply. Never walk spaces one by one for this. |
 | your person's member id | \`whoami\` |
 | a space or DM by name | \`list_spaces\` (DMs need \`includeDirect: true\`) |
 | a person by name | \`list_members\`, match on displayName |

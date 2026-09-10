@@ -77,6 +77,8 @@ type SpacesHandlers = {
   'spaces:markRead': InvokeHandler<'spaces:markRead'>;
   'spaces:followThread': InvokeHandler<'spaces:followThread'>;
   'spaces:getUnread': InvokeHandler<'spaces:getUnread'>;
+  'spaces:getActivity': InvokeHandler<'spaces:getActivity'>;
+  'spaces:markActivitySeen': InvokeHandler<'spaces:markActivitySeen'>;
 };
 
 function orgSummary(record: orgs.OrgRecord): spacesShared.SpacesOrgSummary {
@@ -409,6 +411,8 @@ export const spacesIpcHandlers: SpacesHandlers = {
     orgs.getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
 
   'spaces:getUnread': async (_event, args) => orgs.getClient(args.orgId).unread(),
+  'spaces:getActivity': async (_event, { orgId, ...query }) => orgs.getClient(orgId).activity(query),
+  'spaces:markActivitySeen': async (_event, args) => orgs.getClient(args.orgId).markActivitySeen(args.at),
 
   'spaces:schedule': async (_event, args) => ({
     id: scheduleItem({

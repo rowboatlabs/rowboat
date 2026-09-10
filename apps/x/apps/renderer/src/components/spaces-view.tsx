@@ -19,6 +19,7 @@ import { SelectionCopy } from '@/components/spaces/selection-copy'
 import { ServerSwitcher } from '@/components/spaces/server-switcher'
 import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
+import { ActivityView, type ActivityTarget } from '@/components/spaces/activity-view'
 import { SpaceRail } from '@/components/spaces/space-rail'
 import { SpaceSearch } from '@/components/spaces/space-search'
 import { railKey, type RailSelection } from '@/lib/spaces-selection'
@@ -52,7 +53,12 @@ export { AddOrgDialog, OrgMonogram } from '@/components/spaces/atoms'
 // contract with legacy fallbacks in lib/spaces-conventions.ts.
 
 /** Which space is open (org + space) — the app-level selection the sidebar drives. */
-export type SpaceSelection = { orgId: string; spaceId: string } | null
+export type SpaceSelection = {
+    orgId: string
+    spaceId: string
+    /** An org-level surface instead of a space (spaceId is '' then): Activity, layer 3. */
+    view?: 'activity'
+} | null
 
 /** Chat never squeezes below this beside a doc; the doc takes the rest. */
 const CHAT_FLOOR = 460
@@ -93,13 +99,17 @@ const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 // Root view: the selected space (the org/space list lives in the app sidebar)
 // ---------------------------------------------------------------------------
 
-export function SpacesView({ selection, onSelect, railSelection, onRailSelect, onOpenSession, active = true }: {
+export function SpacesView({ selection, onSelect, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, active = true }: {
     selection: SpaceSelection
     onSelect: (selection: SpaceSelection) => void
     /** What's selected inside the space (general / a topic / a file) — part of the app's history. */
     railSelection: RailSelection
     onRailSelect: (selection: RailSelection) => void
     onOpenSession?: (sessionId: string) => void
+    /** Activity → a message: the host navigates (space or thread, landing on the row). */
+    onOpenMessage?: (target: ActivityTarget) => void
+    /** The org's Activity surface. */
+    onOpenActivity?: (orgId: string) => void
     /**
      * False while the view is kept mounted but hidden (the app shows another
      * section). Gates presence and read marks — a hidden pane must not report
@@ -114,10 +124,12 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
     const selectedOrg = selection ? (orgs.find((o) => o.id === selection.orgId) ?? null) : null
     const selectedSpace = selection && selectedOrg ? (findSpace(selectedOrg, selection.spaceId) ?? null) : null
 
-    // No (valid) selection: land on the first space there is.
+    // No (valid) selection: land on the first space there is. An org-level
+    // surface (Activity) is a valid selection with no space.
     useEffect(() => {
         if (loading) return
         if (selectedOrg && selectedSpace) return
+        if (selectedOrg && selection?.view === 'activity') return
         const first = selectedOrg ?? orgs.find((o) => o.spaces.length > 0 || o.directs.length > 0)
         const space = first?.spaces[0] ?? first?.directs[0]
         if (first && space) {
@@ -149,6 +161,7 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                     onRailSelect(next)
                 }}
                 onOpenSession={onOpenSession}
+                onOpenActivity={onOpenActivity}
                 active={active}
             />
         )
@@ -169,12 +182,17 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                     <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                     <ServerOptionsMenu org={selectedOrg} showArchived={emptyShowArchived} onToggleArchived={() => setEmptyShowArchived((value) => !value)} onMenuOpenChange={() => {}} />
                 </div>
-                <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={openSpace}
+                <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={openSpace} onOpenActivity={onOpenActivity}
+                    activityActive={selection?.view === 'activity'}
                     onOpenDiscussion={() => {}} activeDiscussionCount={0} renderActiveDiscussions={() => null} />
             </aside>
-            <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-                {selectedOrg.error ? 'This server is unreachable. Retry or sign in from the server options.' : 'Create a space to start a conversation.'}
-            </div>
+            {selection?.view === 'activity' && onOpenMessage ? (
+                <ActivityView org={selectedOrg} active={active} onOpenMessage={onOpenMessage} />
+            ) : (
+                <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+                    {selectedOrg.error ? 'This server is unreachable. Retry or sign in from the server options.' : 'Create a space to start a conversation.'}
+                </div>
+            )}
             </div>
         </div>
     }
@@ -216,13 +234,14 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
 // One space: header across the top, then the space rail | the selected thing
 // ---------------------------------------------------------------------------
 
-function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, active = true }: {
+function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSession, onOpenActivity, active = true }: {
     org: OrgWithSpaces
     space: spaces.Space
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     /** The quick switcher can land on another space entirely. */
     onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
+    onOpenActivity?: (orgId: string) => void
     onOpenSession?: (sessionId: string) => void
     /** False while the Spaces view is kept mounted but hidden. */
     active?: boolean
@@ -822,6 +841,7 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
 
             <div ref={paneRef} className="flex-1 min-h-0 flex">
                 <SpaceRail
+                    onOpenActivity={onOpenActivity}
                     org={org}
                     onOpenSpace={(orgId, spaceId) => {
                         if (orgId === org.id && spaceId === space.id) select({ kind: 'general' })

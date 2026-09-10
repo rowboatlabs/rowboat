@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MENTION_GRAMMAR } from './mentions.js';
-import { NewPoll } from './api.js';
+import { ActivityKind, NewPoll } from './api.js';
 import { BlobInfo } from './blob.js';
 import {
   ChangeSet,
@@ -10,7 +10,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
+import { Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
 import { AssetPath, AssetVersion, BlobHash, MemberId, MessageId, SpaceId, TopicId } from './ids.js';
 import { CreateInviteResult } from './invite.js';
 import { SearchKind, SearchLimit, SearchResults } from './search.js';
@@ -492,6 +492,49 @@ export const diff = tool({
   output: z.object({ unified: z.string() }),
 });
 
+/**
+ * Activity (2026-09-10): the one call behind "what's new for me?". Everything
+ * that involves the person across every space and DM, newest first, with the
+ * org's read marks saying what is still unread.
+ */
+export const readActivity = tool({
+  name: 'read_activity',
+  description:
+    "Everything that involves your person, across every space and DM they are in, newest first: " +
+    'messages that name them (`mention`), `@here` announcements (`here`), messages in their DMs (`dm`), ' +
+    'replies in threads they follow (`reply`), and reactions on their own messages (`reaction`, folded per ' +
+    "message and emoji). This is the one call for \"what's new for me?\", \"catch me up\", \"did anyone need " +
+    'me?\": call it once (`unread: true` for only what they have not read — the org\'s read marks decide), ' +
+    'then summarise by space, name people by displayName, lead with the unread items, and offer to open or ' +
+    'reply. Do not walk spaces one by one for this. `truncated` means more: pass `cursor` back to page.',
+  input: z.object({
+    kinds: z.array(ActivityKind).optional(),
+    spaceId: SpaceId.optional(),
+    unread: z.boolean().optional(),
+    cursor: z.string().optional(),
+    limit: z.number().int().positive().max(100).optional(),
+  }),
+  output: z.object({
+    items: z.array(
+      z.object({
+        id: z.string(),
+        kind: ActivityKind,
+        spaceId: SpaceId,
+        spaceKind: SpaceKind,
+        spaceName: z.string(),
+        threadRootId: MessageId.optional(),
+        message: Message,
+        actors: z.array(Attribution.extend({ displayName: z.string() })),
+        emoji: z.string().optional(),
+        at: z.iso.datetime(),
+        unread: z.boolean(),
+      }),
+    ),
+    truncated: z.boolean(),
+    cursor: z.string().optional(),
+  }),
+});
+
 export const mcpTools = [
   whoami,
   listMembers,
@@ -503,6 +546,7 @@ export const mcpTools = [
   createInvite,
   readStream,
   readThread,
+  readActivity,
   searchSpace,
   postMessage,
   editMessage,
@@ -529,6 +573,7 @@ export const readOnlyMcpToolNames: ReadonlySet<string> = new Set([
   listSpaces.name,
   readStream.name,
   readThread.name,
+  readActivity.name,
   searchSpace.name,
   listTopics.name,
   readAsset.name,

@@ -450,5 +450,20 @@ export function buildHttpApp(deps: {
 
   app.get(routes.unread.path, async (c) => reply(c, routes.unread.response, await service.unread(actor(c))));
 
+  app.get(routes.activity.path, async (c) => {
+    const q = parseWith(routes.activity.query, {
+      ...(c.req.query('kinds') !== undefined ? { kinds: c.req.query('kinds') } : {}),
+      ...(c.req.query('spaceId') !== undefined ? { spaceId: c.req.query('spaceId') } : {}),
+      ...(c.req.query('unread') !== undefined ? { unread: c.req.query('unread') } : {}),
+      ...(c.req.query('cursor') !== undefined ? { cursor: c.req.query('cursor') } : {}),
+      ...(c.req.query('limit') !== undefined ? { limit: c.req.query('limit') } : {}),
+    });
+    return reply(c, routes.activity.response, await service.activity(actor(c), q));
+  });
+  app.post(routes.markActivitySeen.path, async (c) => {
+    const body = parseWith(routes.markActivitySeen.request, await c.req.json());
+    return reply(c, routes.markActivitySeen.response, await service.markActivitySeen(actor(c), body.at));
+  });
+
   return app;
 }

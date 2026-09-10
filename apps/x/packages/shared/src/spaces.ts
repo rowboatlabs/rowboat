@@ -32,6 +32,9 @@ import type {
   TopicListing,
   UnreadSnapshot,
   UnreadSpace,
+  ActivityItem,
+  ActivityKind,
+  ActivityPage,
 } from '@rowboat/spaces-protocol';
 
 // Renderer-facing surface for Spaces. The wire contract's single source of
@@ -76,6 +79,11 @@ export type {
 /** The unread snapshot (read state, 2026-09-09): org-owned cursors in offsets. */
 export type SpacesUnreadSnapshot = UnreadSnapshot;
 export type SpacesUnreadSpace = UnreadSpace;
+
+/** Activity (layer 3, 2026-09-10): everything that involves the member, newest first — the org's query, paged. */
+export type SpacesActivityPage = ActivityPage;
+export type SpacesActivityItem = ActivityItem;
+export type SpacesActivityKind = ActivityKind;
 
 /**
  * Poll creation as the renderer sends it (the wire's `NewPoll` block on

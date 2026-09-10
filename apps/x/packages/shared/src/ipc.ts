@@ -4152,6 +4152,22 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string() }),
     res: z.custom<SpacesTypes.SpacesUnreadSnapshot>(),
   },
+  // Activity (layer 3, 2026-09-10): the org's feed of everything involving the member.
+  'spaces:getActivity': {
+    req: z.object({
+      orgId: z.string(),
+      kinds: z.array(z.custom<SpacesTypes.SpacesActivityKind>()).optional(),
+      spaceId: z.string().optional(),
+      unread: z.boolean().optional(),
+      cursor: z.string().optional(),
+      limit: z.number().optional(),
+    }),
+    res: z.custom<SpacesTypes.SpacesActivityPage>(),
+  },
+  'spaces:markActivitySeen': {
+    req: z.object({ orgId: z.string(), at: z.string() }),
+    res: z.object({ seenAt: z.string() }),
+  },
   // Scheduled sends and reminders — the main-side queue (core scheduler).
   // 'message' posts to the topic at `at`; 'reminder' notifies the member.
   'spaces:schedule': {

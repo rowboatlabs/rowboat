@@ -584,6 +584,23 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists topics_search on topics using gin (title_tsv)`,
     ],
   },
+  {
+    id: '018-activity',
+    statements: [
+      // Activity (2026-09-10, layer 3 of the unread arc): a time-ordered,
+      // cross-space query over existing facts, so it needs what no per-space
+      // pager did — messages by time within a space, @here reachable without
+      // a scan, reactions by time — plus the one new fact: the member's
+      // activity-seen mark (reactions have no cursor of their own).
+      `create index if not exists messages_space_posted on messages (space_id, posted_at desc)`,
+      `create index if not exists messages_here on messages (space_id, posted_at desc) where mentions_here`,
+      `create index if not exists reactions_space_at on reactions (space_id, at desc)`,
+      `create table if not exists activity_seen (
+        member_id text primary key,
+        seen_at text not null
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

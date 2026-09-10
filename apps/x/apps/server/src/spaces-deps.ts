@@ -87,6 +87,8 @@ type SpacesRpcChannel =
   | 'spaces:subscribeSpace' | 'spaces:unsubscribeSpace' | 'spaces:presence' | 'spaces:whiteboard'
   | 'spaces:bounceLive'
   | 'spaces:markRead' | 'spaces:followThread' | 'spaces:getUnread'
+  | 'spaces:getActivity'
+  | 'spaces:markActivitySeen'
   | 'spaces:schedule' | 'spaces:listScheduled' | 'spaces:cancelScheduled';
 type SpacesHandlers = {
   [K in SpacesRpcChannel]: (
@@ -381,6 +383,8 @@ export const spacesRpcHandlers: SpacesHandlers = {
   'spaces:followThread': async (args) => orgs.getClient(args.orgId).followThread(args.spaceId, args.rootMessageId, args.following),
 
   'spaces:getUnread': async (args) => orgs.getClient(args.orgId).unread(),
+  'spaces:getActivity': async ({ orgId, ...query }) => orgs.getClient(orgId).activity(query),
+  'spaces:markActivitySeen': async (args) => orgs.getClient(args.orgId).markActivitySeen(args.at),
 
   // Scheduled sends + reminders: the 20s scheduler tick lives in this process.
   'spaces:schedule': async (args) => ({

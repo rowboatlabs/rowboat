@@ -36,11 +36,12 @@ const FILES_MIN = 96
 const CHAT_MIN = 120
 
 export function SpaceRail({
-    org, onOpenSpace, onOpenDiscussion, orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    org, onOpenSpace, onOpenActivity, onOpenDiscussion, orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, onTogglePin,
 }: {
     org: OrgWithSpaces
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenActivity?: (orgId: string) => void
     onOpenDiscussion: (spaceId: string, selection: RailSelection) => void
     orgId: string
     spaceId: string
@@ -219,7 +220,7 @@ export function SpaceRail({
                     </button>
                 </div>
                     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
-                        <ServerSpaceNavigation org={org} spaceId={spaceId} onOpenSpace={onOpenSpace}
+                        <ServerSpaceNavigation org={org} spaceId={spaceId} onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity}
                             onOpenDiscussion={onOpenDiscussion} activeDiscussionCount={topicRows.length} showArchived={showArchived}
                             renderActiveDiscussions={(limit) => <>
                         {topicRows.slice(0, limit).map(({ topic, title }) => {

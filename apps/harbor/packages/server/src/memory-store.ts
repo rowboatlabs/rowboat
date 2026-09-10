@@ -1,3 +1,6 @@
+import type { ActivityKind } from '@rowboat/spaces-protocol';
+import type { ActivityQuery, ActivityRow } from './store.js';
+import { olderThan, sortActivity } from './activity-sort.js';
 import type {
   ChangeSet,
   Member,
@@ -49,6 +52,7 @@ export class MemoryStore implements Store {
   private members = new Map<string, Member>();
   private identities = new Map<string, string>(); // `${iss}\n${sub}` → memberId
   private spaces = new Map<string, SpaceState>();
+  private activitySeen = new Map<string, string>();
   private directKeys = new Map<string, string>(); // direct key → spaceId (the unique index, in memory)
   private invites = new Map<string, StoredInvite>();
   private backfills = new Set<string>();
@@ -637,6 +641,67 @@ export class MemoryStore implements Store {
         m.author.memberId !== memberId &&
         MemoryStore.addresses(m, memberId),
     ).length;
+  }
+
+  // --- activity (2026-09-10) -------------------------------------------------
+
+  async listActivity(memberId: string, q: ActivityQuery): Promise<ActivityRow[]> {
+    const out: ActivityRow[] = [];
+    const seenAt = this.activitySeen.get(memberId) ?? '';
+    const wants = (k: ActivityKind) => !q.kinds || q.kinds.has(k);
+    for (const spaceId of q.spaceIds) {
+      const s = this.spaces.get(spaceId);
+      if (!s) continue;
+      const streamMark = s.streamMarks.get(memberId)?.readOffset ?? 0;
+      for (const m of s.messages) {
+        if (m.deletedAt || m.author.memberId === memberId) continue;
+        const mark = m.threadRoot === undefined ? undefined : s.threadMarks.get(this.threadMarkKey(m.threadRoot, memberId));
+        const kind: ActivityKind | undefined = m.mentions.includes(memberId)
+          ? 'mention'
+          : m.mentionsHere
+            ? 'here'
+            : s.space.kind === 'direct'
+              ? 'dm'
+              : m.threadRoot !== undefined && mark?.following
+                ? 'reply'
+                : undefined;
+        if (!kind || !wants(kind)) continue;
+        const unread = m.threadRoot === undefined ? m.offset > streamMark : m.offset > (mark?.readOffset ?? 0);
+        if (q.unreadOnly && !unread) continue;
+        const row = { id: `m:${m.id}`, kind, spaceId, message: m, actors: [m.author], at: m.postedAt, unread };
+        if (olderThan(row, q.before)) out.push(row);
+      }
+      if (!wants('reaction')) continue;
+      for (const [messageId, reactions] of s.reactions) {
+        const message = s.messagesById.get(messageId);
+        if (!message || message.deletedAt || message.author.memberId !== memberId) continue;
+        const byEmoji = new Map<string, StoredReaction[]>();
+        for (const r of reactions) {
+          if (r.by.memberId === memberId) continue;
+          byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r]);
+        }
+        for (const [emoji, rs] of byEmoji) {
+          const newestFirst = [...rs].sort((a, b) => b.at.localeCompare(a.at) || b.by.memberId.localeCompare(a.by.memberId));
+          const at = newestFirst[0]!.at;
+          const unread = at > seenAt;
+          if (q.unreadOnly && !unread) continue;
+          const row = { id: `r:${messageId}:${emoji}`, kind: 'reaction' as const, spaceId, message, actors: newestFirst.map((r) => r.by), emoji, at, unread };
+          if (olderThan(row, q.before)) out.push(row);
+        }
+      }
+    }
+    return sortActivity(out).slice(0, q.limit);
+  }
+
+  async getActivitySeenAt(memberId: string): Promise<string | undefined> {
+    return this.activitySeen.get(memberId);
+  }
+
+  async advanceActivitySeenAt(memberId: string, at: string): Promise<string> {
+    const current = this.activitySeen.get(memberId);
+    const next = current && current >= at ? current : at;
+    this.activitySeen.set(memberId, next);
+    return next;
   }
 
   async listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]> {

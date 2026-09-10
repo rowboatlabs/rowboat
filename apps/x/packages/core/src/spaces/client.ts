@@ -1,3 +1,4 @@
+import type { ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
 import { createHash } from 'node:crypto';
 import {
   routes,
@@ -54,6 +55,14 @@ export class SpacesRequestError extends Error {
  * was rejected, get a genuinely new one (orgs.ts refreshes + persists).
  */
 export type SpacesTokenProvider = (opts?: { forceRefresh?: boolean }) => Promise<string>;
+
+export interface ActivityQueryInput {
+  kinds?: ActivityKind[];
+  spaceId?: string;
+  unread?: boolean;
+  cursor?: string;
+  limit?: number;
+}
 
 export interface SpacesClientOptions {
   /** e.g. http://localhost:4272 — scheme + host[:port], no trailing slash. */
@@ -409,6 +418,23 @@ export class SpacesClient {
   /** The unread snapshot: every space with its cursor, unread roots, and unread followed threads. */
   async unread(): Promise<UnreadSnapshot> {
     return this.request('GET', routes.unread.path, routes.unread.response);
+  }
+
+  /** Activity: everything that involves the member, newest first, cursor paged (layer 3, 2026-09-10). */
+  async activity(query: ActivityQueryInput = {}): Promise<ActivityPage> {
+    const params = new URLSearchParams();
+    if (query.kinds && query.kinds.length > 0) params.set('kinds', query.kinds.join(','));
+    if (query.spaceId !== undefined) params.set('spaceId', query.spaceId);
+    if (query.unread !== undefined) params.set('unread', String(query.unread));
+    if (query.cursor !== undefined) params.set('cursor', query.cursor);
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    const qs = params.toString();
+    return this.request('GET', `${routes.activity.path}${qs ? `?${qs}` : ''}`, routes.activity.response);
+  }
+
+  /** Reactions through `at` read as seen in Activity. Monotone. */
+  async markActivitySeen(at: string): Promise<{ seenAt: string }> {
+    return this.request('POST', routes.markActivitySeen.path, routes.markActivitySeen.response, { at });
   }
 
   /** A root (no threadRoot) or a reply (threadRoot) — never creates a topic. */
