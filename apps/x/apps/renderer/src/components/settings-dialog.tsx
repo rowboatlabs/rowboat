@@ -1563,8 +1563,8 @@ const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string
   },
   {
     key: "space_mention",
-    label: "Space reminders",
-    description: "Reminders you set in a space, and scheduled messages that could not be sent. Click to open the conversation.",
+    label: "Space mentions & DMs",
+    description: "When someone mentions you, uses @here, messages you directly, or replies in a thread you follow. Also reminders you set in a space. Click to open the conversation. Only shown while the app is in the background.",
   },
 ]
 

@@ -1129,6 +1129,14 @@ export class PgStore implements Store {
     return rows[0]?.n ?? 0;
   }
 
+  async listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]> {
+    const rows = await this.sql.query<{ member_id: string }>(
+      'select member_id from thread_read_marks where space_id = $1 and root_message_id = $2 and following',
+      [spaceId, rootMessageId],
+    );
+    return rows.map((r) => r.member_id);
+  }
+
   async listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]> {
     const rows = await this.sql.query<{
       root_message_id: string;

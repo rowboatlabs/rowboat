@@ -332,6 +332,8 @@ export interface Store {
   countUnreadRootMentions(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
   /** Followed threads with ≥1 live reply past the member's mark by someone else, newest activity first. */
   listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]>;
+  /** Members following a thread (notifications, 2026-09-10): who a reply in it is told about. */
+  listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]>;
   /** Every mark the member holds in the space (leave / removal). */
   deleteReadMarks(spaceId: string, memberId: string): Promise<void>;
 

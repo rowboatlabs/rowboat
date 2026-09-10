@@ -1,65 +1,51 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MemoryStore } from '../src/memory-store.js';
-import { PushSender, classifyFor, levelAllows, buildPushText } from '../src/push.js';
+import type { Notification } from '../src/notify.js';
+import { PushSender, levelAllows } from '../src/push.js';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
 import { restClient } from './helpers.js';
-import { parseMentions, type Message, type Space } from '@rowboat/spaces-protocol';
+import type { Message, Space } from '@rowboat/spaces-protocol';
 
-// Push notifications (PUSH_PLAN.md): the decision matrix, author exclusion,
-// wire-level registration, and dead-token pruning — all against MemoryStore
-// with a mocked Expo endpoint (no real pushes leave a test). "Mention" is the
-// message's STAMP (protocol mentions.ts); the fixture stamps the way the org
-// does, from tokens alone.
+// Push notifications (PUSH_PLAN.md): the phone half of delivery. The
+// decision is notify.ts's (notify.test.ts); this pins the level gate, the
+// author-free fan-out to Expo tokens, dead-token pruning and wire-level
+// registration — against MemoryStore with a mocked Expo endpoint.
 
 const space = (kind: 'shared' | 'direct'): Space =>
   ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind }) as Space;
 
-const msg = (body: string, author = 'harsh'): Message =>
+const msg = (author = 'harsh'): Message =>
   ({
     id: '01HYYYYYYYYYYYYYYYYYYYYYYY',
     spaceId: '01HZZZZZZZZZZZZZZZZZZZZZZZ',
     author: { memberId: author, actingMode: 'direct' },
-    body,
+    body: 'note',
     postedAt: new Date().toISOString(),
     offset: 1,
     replyCount: 0,
     reactions: [],
-    ...(({ members, here, rowboat }) => ({ mentions: members, mentionsHere: here, mentionsRowboat: rowboat }))(parseMentions(body)),
+    mentions: [],
+    mentionsHere: false,
+    mentionsRowboat: false,
   }) as Message;
 
-describe('classification', () => {
-  it('mentions beat dm beats message; only tokens address, and tokens in code are cites', () => {
-    expect(classifyFor('gagan', space('shared'), msg('hello [@Gagan](#member:gagan)'))).toBe('mention');
-    expect(classifyFor('gagan', space('shared'), msg('hi [@here](#here) everyone'))).toBe('mention');
-    expect(classifyFor('gagan', space('direct'), msg('just words'))).toBe('dm');
-    expect(classifyFor('gagan', space('direct'), msg('ping [@Gagan](#member:gagan)'))).toBe('mention');
-    expect(classifyFor('gagan', space('shared'), msg('plain message'))).toBe('message');
-    expect(classifyFor('gagan', space('shared'), msg('a bare @gagan is prose, not an address'))).toBe('message');
-    expect(classifyFor('gagan', space('shared'), msg('`[@Gagan](#member:gagan)` in code'))).toBe('message');
-    expect(classifyFor('gagan', space('shared'), msg('```\n[@Gagan](#member:gagan)\n```'))).toBe('message');
-  });
+const row = (memberId: string, kind: Notification['kind']): Notification => ({ memberId, kind, title: `t:${kind}`, body: 'note' });
 
-  it('levels gate kinds like Slack', () => {
+describe('levels', () => {
+  it("gate like Slack: addressed and followed pass every level but off; dm needs dms; message needs all", () => {
     expect(levelAllows('off', 'mention')).toBe(false);
+    expect(levelAllows('off', 'reply')).toBe(false);
     expect(levelAllows('mentions', 'mention')).toBe(true);
+    expect(levelAllows('mentions', 'here')).toBe(true);
+    expect(levelAllows('mentions', 'reply')).toBe(true);
     expect(levelAllows('mentions', 'dm')).toBe(false);
     expect(levelAllows('dms', 'dm')).toBe(true);
     expect(levelAllows('dms', 'message')).toBe(false);
     expect(levelAllows('all', 'message')).toBe(true);
   });
-
-  it('titles read like the desktop notifier; mentions resolve to names', () => {
-    const names = new Map([['harsh', 'Harsh'], ['gagan', 'Gagan']]);
-    expect(buildPushText({ kind: 'message', space: space('shared'), direct: false, authorName: 'Harsh', body: 'hi [@G](#member:gagan)', names }))
-      .toEqual({ title: 'Harsh · general', body: 'hi @Gagan' });
-    expect(buildPushText({ kind: 'mention', space: space('shared'), direct: false, authorName: 'Harsh', body: 'yo', names }).title)
-      .toBe('Harsh mentioned you · general');
-    expect(buildPushText({ kind: 'dm', space: space('direct'), direct: true, authorName: 'Harsh', body: 'yo', names }).title)
-      .toBe('Harsh');
-  });
 });
 
-describe('PushSender.onMessage', () => {
+describe('PushSender.send', () => {
   async function setup(level: 'off' | 'mentions' | 'dms' | 'all' | null) {
     const store = new MemoryStore();
     const s = space('shared');
@@ -69,6 +55,7 @@ describe('PushSender.onMessage', () => {
       await store.putMembership({ spaceId: s.id, memberId: id, joinedAt: new Date().toISOString() });
     }
     await store.putPushToken('gagan', 'ExponentPushToken[g1]', new Date().toISOString());
+    await store.putPushToken('gagan', 'ExponentPushToken[g2]', new Date().toISOString());
     await store.putPushToken('harsh', 'ExponentPushToken[h1]', new Date().toISOString());
     if (level) await store.setPushLevel('gagan', level);
     const calls: any[] = [];
@@ -81,22 +68,22 @@ describe('PushSender.onMessage', () => {
     return { store, s, sender, calls };
   }
 
-  it('never pushes the author; default level is dms', async () => {
+  it('sends only the rows the member’s level allows, to every device; default level is dms', async () => {
     const { s, sender, calls } = await setup(null);
-    await sender.onMessage(s, msg('plain note', 'harsh'));
+    await sender.send(s, msg('harsh'), [row('gagan', 'message')]);
     expect(calls).toHaveLength(0); // default 'dms': a plain shared message pushes nobody
-    await sender.onMessage(s, msg('hey [@Gagan](#member:gagan)', 'harsh'));
-    expect(calls).toHaveLength(1);
-    expect(calls[0].to).toBe('ExponentPushToken[g1]'); // harsh authored — his token untouched
-    expect(calls[0].title).toBe('Harsh mentioned you · general');
+    await sender.send(s, msg('harsh'), [row('gagan', 'mention')]);
+    expect(calls.map((c) => c.to).sort()).toEqual(['ExponentPushToken[g1]', 'ExponentPushToken[g2]']);
+    expect(calls[0]).toMatchObject({ title: 't:mention', body: 'note', sound: 'default' });
+    expect(calls[0].data).toMatchObject({ kind: 'space', orgId: 'org1', spaceId: s.id, threadRootId: '01HYYYYYYYYYYYYYYYYYYYYYYY' });
   });
 
   it("level 'all' pushes plain messages; 'off' silences mentions", async () => {
     const all = await setup('all');
-    await all.sender.onMessage(all.s, msg('plain note', 'harsh'));
-    expect(all.calls).toHaveLength(1);
+    await all.sender.send(all.s, msg('harsh'), [row('gagan', 'message')]);
+    expect(all.calls).toHaveLength(2);
     const off = await setup('off');
-    await off.sender.onMessage(off.s, msg('hey [@Gagan](#member:gagan)', 'harsh'));
+    await off.sender.send(off.s, msg('harsh'), [row('gagan', 'mention')]);
     expect(off.calls).toHaveLength(0);
   });
 
@@ -104,16 +91,14 @@ describe('PushSender.onMessage', () => {
     const store = new MemoryStore();
     const s = space('shared');
     await store.putSpace(s);
-    await store.putMember({ id: 'harsh', displayName: 'Harsh', role: 'member' });
     await store.putMember({ id: 'gagan', displayName: 'Gagan', role: 'member' });
-    await store.putMembership({ spaceId: s.id, memberId: 'harsh', joinedAt: new Date().toISOString() });
     await store.putMembership({ spaceId: s.id, memberId: 'gagan', joinedAt: new Date().toISOString() });
     await store.putPushToken('gagan', 'ExponentPushToken[dead]', new Date().toISOString());
     await store.setPushLevel('gagan', 'all');
     const fetchImpl = (async () =>
       ({ json: async () => ({ data: [{ status: 'error', details: { error: 'DeviceNotRegistered' } }] }) }) as any) as typeof fetch;
     const sender = new PushSender(store, 'org1', { fetchImpl, receiptDelayMs: 0 });
-    await sender.onMessage(s, msg('note', 'harsh'));
+    await sender.send(s, msg('harsh'), [row('gagan', 'message')]);
     expect(await store.listPushTokens('gagan')).toEqual([]);
   });
 });

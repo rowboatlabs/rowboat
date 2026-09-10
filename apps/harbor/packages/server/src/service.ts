@@ -50,7 +50,7 @@ const MESSAGES_PAGE_MAX = 200;
 import type { z } from 'zod';
 import { blobHash, type BlobStore } from './blobs.js';
 import { HarborError } from './errors.js';
-import type { PushSender } from './push.js';
+import type { Notifier } from './notify.js';
 import { SpaceHub } from './hub.js';
 import { legacyToTokens } from './mentions-backfill.js';
 import { merge3 } from './merge.js';
@@ -142,8 +142,8 @@ export class HarborService {
     org: OrgInfo,
     /** Absent = uploads unconfigured on this org (routes refuse loudly, everything else works). */
     private readonly blobs?: BlobStore,
-    /** Absent = no push notifications on this org (PUSH_PLAN.md). */
-    private readonly push?: PushSender,
+    /** Absent = no notifications on this org (notify.ts: frames + push). */
+    private readonly notifier?: Notifier,
   ) {
     this.org = org;
   }
@@ -1199,9 +1199,10 @@ export class HarborService {
       await this.followMentioned(spaceId, message.id, stamps, ctx.memberId, at);
       return { message };
     });
-    // Push decisions run OUTSIDE the lock and never block the reply
-    // (PUSH_PLAN.md); the sender logs its own failures.
-    if (this.push) void this.push.onMessage(space, result.message);
+    // Notification decisions run OUTSIDE the lock and never block the reply
+    // (notify.ts: the `notify` frame to every connection, push to phones);
+    // the notifier logs its own failures.
+    if (this.notifier) void this.notifier.onMessage(space, result.message);
     return result;
   }
 

@@ -1,3 +1,4 @@
+import { Notifier } from './notify.js';
 import { PushSender } from './push.js';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -111,7 +112,7 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
         ...(org.allowedEmailDomains ? { allowedEmailDomains: org.allowedEmailDomains } : {}),
       },
       options.blobs?.(org.id),
-      new PushSender(store, org.id),
+      new Notifier(store, hub, new PushSender(store, org.id)),
     );
     const auth: AuthDriver = org.issuer ? new OidcAuthDriver({ issuer: org.issuer }) : new DevAuthDriver();
     const app = buildHttpApp({

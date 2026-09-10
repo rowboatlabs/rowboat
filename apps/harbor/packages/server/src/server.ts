@@ -8,6 +8,7 @@ import { SpaceHub } from './hub.js';
 import { handleMcpRequest } from './mcp.js';
 import { MemoryStore } from './memory-store.js';
 import { HarborService } from './service.js';
+import { Notifier } from './notify.js';
 import { PushSender } from './push.js';
 import type { Store } from './store.js';
 import { attachLive } from './ws.js';
@@ -85,7 +86,7 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
       ...(options.allowedEmailDomains ? { allowedEmailDomains: options.allowedEmailDomains } : {}),
     },
     blobs,
-    options.pushSender ?? new PushSender(store, options.orgName ?? 'dev'),
+    new Notifier(store, hub, options.pushSender ?? new PushSender(store, options.orgName ?? 'dev')),
   );
 
   for (const m of options.seedMembers ?? []) {

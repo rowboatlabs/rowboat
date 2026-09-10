@@ -639,6 +639,16 @@ export class MemoryStore implements Store {
     ).length;
   }
 
+  async listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]> {
+    const s = this.must(spaceId);
+    const prefix = `${rootMessageId}\n`;
+    const out: string[] = [];
+    for (const [key, mark] of s.threadMarks) {
+      if (mark.following && key.startsWith(prefix)) out.push(key.slice(prefix.length));
+    }
+    return out;
+  }
+
   async listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]> {
     const s = this.must(spaceId);
     const out: UnreadThreadRow[] = [];

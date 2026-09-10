@@ -102,6 +102,15 @@ export type SpaceEvent = z.infer<typeof SpaceEvent>;
 export const PresenceState = z.enum(['viewing', 'typing', 'agent_working', 'agent_idle', 'idle']);
 export type PresenceState = z.infer<typeof PresenceState>;
 
+/**
+ * Why the org is telling you about a message (notifications, 2026-09-10):
+ * a token named you, `@here` named everyone, it landed in your DM, or it is
+ * a reply in a thread you follow. Priority in that order when several hold.
+ * GitHub's inbox reasons, cut to what the org can decide today.
+ */
+export const NotifyReason = z.enum(['mention', 'here', 'dm', 'reply']);
+export type NotifyReason = z.infer<typeof NotifyReason>;
+
 /** Server → client frames. */
 export const ServerFrame = z.discriminatedUnion('kind', [
   z.object({
@@ -176,6 +185,31 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     spaceId: SpaceId,
     threadRootId: MessageId.optional(),
     offset: StreamOffset,
+    at: z.iso.datetime(),
+  }),
+  /**
+   * Addressed to a MEMBER (notifications, 2026-09-10): the org decided this
+   * message deserves your attention and tells every connection you hold —
+   * Slack's `desktop_notification` shape, where the server decides and the
+   * client only shows. One decision serves every surface: the same rows the
+   * push sender delivers to phones ride here to desktops, so a banner and a
+   * toast never disagree. `title`/`body` are the org's rendering (names
+   * resolved, tokens flattened, excerpt cut); the ids are for the deep link.
+   * Ephemeral, never replayed: a closed client catches up from badges
+   * (`GET /v1/unread`), a phone from push. Policy (levels, DND, presence) is
+   * the org's business too and lands in a later layer; this frame's shape
+   * does not change when it does.
+   */
+  z.object({
+    kind: z.literal('notify'),
+    spaceId: SpaceId,
+    /** The thread the message lives in (absent = a stream root). */
+    threadRootId: MessageId.optional(),
+    messageId: MessageId,
+    reason: NotifyReason,
+    author: Attribution,
+    title: z.string(),
+    body: z.string(),
     at: z.iso.datetime(),
   }),
   /**

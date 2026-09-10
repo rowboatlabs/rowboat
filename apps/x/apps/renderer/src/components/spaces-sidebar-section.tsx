@@ -8,7 +8,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { type SpaceSelection } from '@/components/spaces-view'
 import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts, type SpaceBadge } from '@/hooks/use-space-chat'
+import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
+import { NO_BADGE, streamBadge, threadBadge, useReadStateVersion, type SpaceBadge } from '@/lib/spaces-read-state'
+import { UnreadBadge } from '@/components/spaces/unread-badge'
 import { AddOrgDialog, MemberAvatar } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
@@ -194,7 +196,10 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
             </SidebarMenuItem>
             {org.spaces.map((space) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
-                const badge = unread.get(`${org.id}/${space.id}`) ?? { unread: false, badge: 0 }
+                // Collapsed, the row carries the stream plus every followed
+                // discussion; expanded, the discussions show their own and the
+                // row keeps the stream's.
+                const summed = unread.get(`${org.id}/${space.id}`) ?? NO_BADGE
                 if (renamingId === space.id) {
                     return <SidebarMenuItem key={space.id}>
                         <div className="flex items-center gap-1 py-0.5 pl-9 pr-2">
@@ -211,6 +216,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
                         <CollapsibleSpace key={space.id} orgId={org.id} spaceId={space.id} name={space.name}
                         showArchived={showArchived} countOverride={active ? activeDiscussionCount : undefined}
                         discussions={() => renderDiscussions?.(space.id)}>
+                            {(expanded) => { const badge = expanded ? streamBadge(org.id, space.id, false) : summed; return (
                             <ContextMenu>
                                 <ContextMenuTrigger asChild>
                                     <SidebarMenuButton
@@ -226,10 +232,8 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
                                     >
                                         {/* A space is a channel — # says so. */}
                                         <Hash className="size-3.5 shrink-0 text-muted-foreground" />
-                                        <span className={cn('flex-1 truncate', badge.unread && !active && 'font-medium text-foreground')}>{space.name}</span>
-                                        {badge.badge > 0 && (
-                                            <span className="shrink-0 rounded-full bg-[var(--stream-you-ink)] px-1.5 text-[10px] font-semibold tabular-nums leading-4 text-white" title="messages addressed to you">{badge.badge}</span>
-                                        )}
+                                        <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
+                                        {!active && <UnreadBadge badge={badge} />}
                                     </SidebarMenuButton>
                                 </ContextMenuTrigger>
                                 <ContextMenuContent>
@@ -243,6 +247,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
                                     </ContextMenuItem>
                                 </ContextMenuContent>
                             </ContextMenu>
+                            ) }}
                     </CollapsibleSpace>
                 )
             })}
@@ -267,7 +272,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
             )}
             {!directsCollapsed && !org.error && visibleDirects.map((dm) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
-                const badge = unread.get(`${org.id}/${dm.id}`) ?? { unread: false, badge: 0 }
+                const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
                 const self = isSelfDirect(dm, org.memberId)
                 const label = self ? selfName : spaceDisplayName(org, dm)
                 const other = directAvatarId(dm, org.memberId)
@@ -283,13 +288,11 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
                             className="pl-6"
                         >
                             <MemberAvatar id={other} name={label} size="sm" className="size-4 rounded-[3px] text-[8px]" />
-                            <span className={cn('flex-1 truncate', badge.unread && !active && 'font-medium text-foreground')}>
+                            <span className={cn('flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>
                                 {label}
                                 {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
                             </span>
-                            {badge.badge > 0 && (
-                                <span className="shrink-0 rounded-full bg-[var(--stream-you-ink)] px-1.5 text-[10px] font-semibold tabular-nums leading-4 text-white" title="unread messages">{badge.badge}</span>
-                            )}
+                            {!active && <UnreadBadge badge={badge} direct />}
                         </SidebarMenuButton>
                     </SidebarMenuItem>
                 )
@@ -387,18 +390,22 @@ function SpaceDiscussions({ orgId, spaceId, active, activeCount, renderActive, o
     onSelect: (selection: RailSelection) => void
 }) {
     const feed = useSpaceFeed(orgId, spaceId)
+    useReadStateVersion() // each discussion row reads its own badge
     const foldKey = `spaces:discussionsExpanded:${orgId}/${spaceId}`
     const [showAll, setShowAll] = useState(() => sessionStorage.getItem(foldKey) === 'true')
     const topics = feed.topics.filter((topic) => showArchived || !topic.archived).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
     const count = active ? activeCount : topics.length
     return <div className="ml-3 border-l border-border pl-1">
-        {active ? renderActive(showAll ? Infinity : 3) : (showAll ? topics : topics.slice(0, 3)).map((topic) => (
-            <button key={topic.id} type="button" onClick={() => onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId })}
+        {active ? renderActive(showAll ? Infinity : 3) : (showAll ? topics : topics.slice(0, 3)).map((topic) => {
+            // Followed discussions only: one you are not in never bolds or counts.
+            const badge = threadBadge(orgId, spaceId, topic.rootMessageId, false)
+            return <button key={topic.id} type="button" onClick={() => onSelect({ kind: 'thread', rootMessageId: topic.rootMessageId })}
                 title={topic.title} className={cn('flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-accent/50', topic.archived && 'opacity-60')}>
                 <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">{topic.title}</span>
+                <span className={cn('min-w-0 flex-1 truncate', badge.unread > 0 && 'font-semibold')}>{topic.title}</span>
+                <UnreadBadge badge={badge} />
             </button>
-        ))}
+        })}
         {count > 3 && <button type="button" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground" onClick={() => setShowAll((value) => { sessionStorage.setItem(foldKey, String(!value)); return !value })}>
             {showAll ? 'Show less' : 'View all'}
         </button>}
@@ -412,7 +419,8 @@ function CollapsibleSpace({ orgId, spaceId, name, showArchived, countOverride, d
     showArchived: boolean
     countOverride?: number
     discussions: () => ReactNode
-    children: ReactNode
+    /** The row itself; told whether its discussions are showing, so its badge can step back to the stream's share. */
+    children: (expanded: boolean) => ReactNode
 }) {
     const feed = useSpaceFeed(orgId, spaceId)
     const key = `spaces:spaceExpanded:${orgId}/${spaceId}`
@@ -425,7 +433,7 @@ function CollapsibleSpace({ orgId, spaceId, name, showArchived, countOverride, d
                 onClick={() => setExpanded((value) => { sessionStorage.setItem(key, String(!value)); return !value })}>
                 <ChevronRight className={cn('size-3.5', expanded && 'rotate-90')} />
             </button> : <span className="w-5.5 shrink-0" />}
-            {children}
+            {children(expanded)}
         </div>
         {count > 0 && expanded && discussions()}
     </SidebarMenuItem>

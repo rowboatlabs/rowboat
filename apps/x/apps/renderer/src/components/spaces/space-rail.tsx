@@ -17,7 +17,8 @@ import { prefetchThread } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
 import { threadRefOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
-import { getStreamReadOffset, isThreadUnread, useReadStateVersion } from '@/lib/spaces-read-state'
+import { getStreamReadOffset, isThreadUnread, threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
+import { UnreadBadge } from '@/components/spaces/unread-badge'
 import type { RailSelection } from '@/lib/spaces-selection'
 
 // Server spaces and their nested discussions, then DMs, share the upper
@@ -274,7 +275,7 @@ export function SpaceRail({
                                                         <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
                                                         <span className={cn('min-w-0 flex-1 truncate text-[13px]', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
                                                         {working && <Bot className="size-3 shrink-0 text-muted-foreground" aria-label="a Rowboat is working here" />}
-                                                        {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" aria-label="unread" />}
+                                                        {!active && <UnreadBadge badge={threadBadge(orgId, spaceId, topic.rootMessageId, false)} />}
                                                     </button>
                                                 </ContextMenuTrigger>
                                             </TooltipTrigger>

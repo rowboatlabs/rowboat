@@ -8,6 +8,7 @@ import * as spacesOAuth from '@x/core/dist/spaces/oauth.js';
 import { cancelScheduled, listScheduled, scheduleItem } from '@x/core/dist/spaces/scheduler.js';
 import { invokeTopicAgent, stopTopicAgent, topicSessionId } from '@x/core/dist/spaces/topic-agent.js';
 import { onSpaceAgentActivity, startSpaceAgentActivity } from '@x/core/dist/spaces/agent-activity.js';
+import { startSpaceNotifications } from '@x/core/dist/spaces/notify.js';
 import { resolveResponseSession, startSpaceResponseIndex } from '@x/core/dist/spaces/response-index.js';
 import { SpacesClient } from '@x/core/dist/spaces/client.js';
 import { fetchLinkPreview } from './link-preview.js';
@@ -103,6 +104,8 @@ orgs.onMemberFrame((orgId, frame) => broadcastSpacesEvent({ orgId, frame }));
 // can be sent.
 onSpaceAgentActivity((event) => broadcastSpacesEvent(event));
 void startSpaceAgentActivity().catch((err) => console.error('[spaces] agent activity feed failed to start:', err));
+// The org's `notify` frames become OS notifications (unread arc, 2026-09-10).
+startSpaceNotifications();
 // The per-response index ("which run posted this reply"): same bus, its own
 // consumer — see core/spaces/response-index.
 void startSpaceResponseIndex().catch((err) => console.error('[spaces] response index failed to start:', err));

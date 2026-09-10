@@ -857,7 +857,7 @@ export function spaceLastActivityAt(orgId: string, spaceId: string): string | nu
     return latest
 }
 
-/** `${orgId}/${spaceId}` → what its sidebar row shows (bold, and the number — mentions, or every message in a DM). */
+/** `${orgId}/${spaceId}` → the collapsed row's badge: unread messages, and how many are for me (stream plus followed discussions). */
 export function useSpacesUnreadCounts(): Map<string, SpaceBadge> {
     const version = useSyncExternalStore(
         (l) => {

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
+import { spaceLink } from './links.js';
 import { WorkDir } from '../config/config.js';
 import { getClient } from './orgs.js';
 
@@ -41,11 +42,6 @@ function excerpt(body: string, max = 140): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/** The deep link a reminder click opens: the space, or one thread in it. */
-function spaceLink(orgId: string, spaceId: string, threadRootId?: string): string {
-  const thread = threadRootId ? `&threadRootId=${encodeURIComponent(threadRootId)}` : '';
-  return `rowboat://open?type=spaces&orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}${thread}`;
-}
 const TICK_MS = 20_000;
 const MAX_ATTEMPTS = 5;
 
