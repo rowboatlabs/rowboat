@@ -1,7 +1,7 @@
 import { SecondaryRailToggle } from '@/components/secondary-rail-toggle'
 import { useMemo, useRef, useState } from 'react'
 import { FileListContextMenu } from '@/components/file-list-context-menu'
-import { Archive, ArchiveRestore, Bot, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, ChevronsDownUp, ChevronsUpDown, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -19,6 +19,7 @@ import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
 import { prefetchThread } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
 import { threadRefOf } from '@/lib/spaces-conventions'
+import { isSpaceExpanded, setSpacesExpanded, useSpaceExpansionVersion } from '@/lib/spaces-expansion'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
 import { getStreamReadOffset, isThreadUnread, threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
 import { UnreadBadge } from '@/components/spaces/unread-badge'
@@ -71,6 +72,12 @@ export function SpaceRail({
     const archivedKey = `spaces:showArchived:${orgId}`
     const [showArchived, setShowArchived] = useState(() => sessionStorage.getItem(archivedKey) === 'true')
     const uploadInputRef = useRef<HTMLInputElement | null>(null)
+
+    // Every space row keeps its open/shut flag in the shared expansion store,
+    // so the header can read the whole server's state and move it in one click.
+    useSpaceExpansionVersion()
+    const spaceIds = org.spaces.map((space) => space.id)
+    const anySpaceExpanded = spaceIds.some((id) => isSpaceExpanded(org.id, id))
 
     const {
         bodyRef, bottomRef: filesRef, topStyle: chatStyle, bottomStyle: filesStyle,
@@ -146,6 +153,17 @@ export function SpaceRail({
             <section style={chatStyle} className="group/section flex min-h-0 flex-col">
                 <div className="flex shrink-0 items-center gap-0.5 px-2 py-1">
                     <span className="min-w-0 flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
+                    {/* Same rule as the Projects rail: any space open means the
+                        button collapses everything; only with all shut does it expand. */}
+                    <button
+                        type="button"
+                        aria-label={anySpaceExpanded ? 'Collapse all discussions' : 'Expand all discussions'}
+                        title={anySpaceExpanded ? 'Collapse all discussions' : 'Expand all discussions'}
+                        onClick={() => setSpacesExpanded(org.id, spaceIds, !anySpaceExpanded)}
+                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                        {anySpaceExpanded ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
+                    </button>
                     <ServerOptionsMenu org={org} showArchived={showArchived} onToggleArchived={() => setShowArchived((value) => { sessionStorage.setItem(archivedKey, String(!value)); return !value })} onMenuOpenChange={onMenuOpenChange} />
                     <SecondaryRailToggle open={open} onToggle={togglePin} />
                 </div>
@@ -161,7 +179,7 @@ export function SpaceRail({
                             const working = (presence.working.get(topic.rootMessageId) ?? []).length > 0
                             if (renaming?.topicId === topic.id) {
                                 return (
-                                    <div key={topic.id} className="flex h-7 items-center rounded-md pl-5 pr-2">
+                                    <div key={topic.id} className="flex h-8 items-center rounded-md px-2">
                                         <input
                                             autoFocus
                                             value={renaming.value}
@@ -195,9 +213,11 @@ export function SpaceRail({
                                                         // and touched files ride the tooltip — the list is already
                                                         // sorted by activity.
                                                         className={cn(
-                                                            // One tree step (12px) in from Messages: these nest under it.
-                                                            // pr-7 keeps the title and indicators clear of the ⋯ slot.
-                                                            'flex h-8 w-full items-center gap-2 rounded pl-5 pr-7 text-left',
+                                                            // Same indent as a non-selected space's discussions
+                                                            // (SpaceDiscussions) - the tree step is the wrapper's
+                                                            // ml-3 + rule, not this row. pr-7 keeps the title and
+                                                            // indicators clear of the ⋯ slot.
+                                                            'flex h-8 w-full items-center gap-2 rounded pl-2 pr-7 text-left',
                                                             active ? 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]' : 'hover:bg-accent/50',
                                                             topic.archived && 'opacity-60',
                                                         )}
