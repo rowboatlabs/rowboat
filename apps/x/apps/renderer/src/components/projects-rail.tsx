@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronsDownUp, ChevronsUpDown, ChevronRight, CornerDownRight, File, FilePlus, Folder, FolderOpen, FolderPlus, Loader2, MoreHorizontal, Plus, Presentation, Upload } from 'lucide-react'
+import { FileListContextMenu } from './file-list-context-menu'
 import { SecondaryRail } from './secondary-rail'
 import { SecondaryRailToggle } from './secondary-rail-toggle'
 import { SecondaryRailDivider, SecondaryRailSectionHeader } from './secondary-rail-section'
@@ -162,7 +163,9 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
                                 {expanded.size > 0 ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
                             </button>
                             <button aria-label="New project" onClick={() => { setDialogError(''); setDialog({ kind: 'project', name: '' }) }} className="rounded p-1 hover:bg-accent"><Plus className="size-3.5" /></button></SecondaryRailSectionHeader>
-                        {!projectsCollapsed && <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+                        {!projectsCollapsed && <FileListContextMenu onOpenChange={onMenuOpenChange} actions={[
+                            { label: 'New project', onSelect: () => { setDialogError(''); setDialog({ kind: 'project', name: '' }) } },
+                        ]}><div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                             {!ready && <Loader2 className="m-3 size-4 animate-spin" />}
                             {error && <button className="p-2 text-xs text-destructive" onClick={() => void refresh()}>{error} · Retry</button>}
                             {ready && !error && projects.length === 0 && <p className="p-2 text-xs text-muted-foreground">Create a project to organize chats and local files.</p>}
@@ -175,7 +178,7 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
                                 </div>
                                 {expanded.has(item.id) && <div>{item.chats.map((chat) => <ChatRow key={chat.id} working={processingRunIds.has(chat.id)} chat={chat} selected={selectedChat === chat.id && project?.id === item.id} onOpen={() => onOpenChat(item, chat.id)} />)}{item.chats.length === 0 && <button className="h-8 pl-7 text-xs text-muted-foreground hover:text-foreground" onClick={() => void run(() => onNewChat(item))}>Start a chat with Rowboat</button>}</div>}
                             </div>)}
-                        </div>}
+                        </div></FileListContextMenu>}
                     </section>
                     <section ref={filesRef} className="group/section flex min-h-0 flex-col" style={filesStyle} onDragOver={(e) => { if (project && Array.from(e.dataTransfer.types).includes('Files')) { e.preventDefault(); e.stopPropagation() } }} onDrop={(e) => { if (project && e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); uploadTarget.current = project.path; void upload(Array.from(e.dataTransfer.files)) } }}>
                         <SecondaryRailDivider {...dividerProps} />
@@ -191,7 +194,14 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
                                 <DropdownMenuItem onClick={() => actions.revealInFileManager(project.path, true)}><FolderOpen className="mr-2 size-3.5" />Open local folder</DropdownMenuItem>
                             </DropdownMenuContent></DropdownMenu>}
                         </SecondaryRailSectionHeader>
-                        {!filesCollapsed && <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{project ? renderFiles(find(tree, project.path)?.children ?? []) : <p className="p-2 text-xs text-muted-foreground">Select a project to see its files.</p>}</div>}
+                        {!filesCollapsed && <FileListContextMenu onOpenChange={onMenuOpenChange} actions={project ? [
+                            { label: 'New note', onSelect: () => actions.createNote(project.path) },
+                            { label: 'New folder', onSelect: () => { void run(() => actions.createFolder(project.path)) } },
+                            { label: 'New presentation', onSelect: () => actions.createPresentation(project.path) },
+                            { label: 'Add Google Doc', onSelect: () => actions.addGoogleDoc(project.path) },
+                            { label: 'Add files…', onSelect: () => { uploadTarget.current = project.path; uploadRef.current?.click() } },
+                            { label: 'Add folder…', onSelect: () => { uploadTarget.current = project.path; uploadFolderRef.current?.click() } },
+                        ] : []}><div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{project ? renderFiles(find(tree, project.path)?.children ?? []) : <p className="p-2 text-xs text-muted-foreground">Select a project to see its files.</p>}</div></FileListContextMenu>}
                     </section>
                 </div>
             }}
