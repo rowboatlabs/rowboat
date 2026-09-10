@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, CornerDownRight, File, FilePlus, Folder, FolderOpen, FolderPlus, Loader2, MoreHorizontal, PanelLeftClose, Pin, Plus, Presentation, Upload } from 'lucide-react'
 import { SecondaryRail } from './secondary-rail'
+import { SecondaryRailDivider, SecondaryRailSectionHeader } from './secondary-rail-section'
+import { useSecondaryRailSections } from '@/hooks/use-secondary-rail-sections'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Input } from './ui/input'
@@ -38,18 +40,17 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
     const [open, setOpen] = useState(() => localStorage.getItem('projects:railOpen') !== 'false')
     const [expanded, setExpanded] = useState<Set<string>>(new Set())
     const [folders, setFolders] = useState<Set<string>>(new Set())
-    const [filesCollapsed, setFilesCollapsed] = useState(false)
-    const [projectsCollapsed, setProjectsCollapsed] = useState(false)
-    const [split, setSplit] = useState(() => Number(localStorage.getItem('projects:railSplit')) || 55)
+    const {
+        bodyRef, bottomRef: filesRef, topStyle: projectsStyle, bottomStyle: filesStyle,
+        topCollapsed: projectsCollapsed, bottomCollapsed: filesCollapsed,
+        toggleTop: toggleProjects, toggleBottom: toggleFiles, resizing, dividerProps,
+    } = useSecondaryRailSections({ collapsedKey: 'projects:railCollapsed', heightKey: 'projects:filesHeight', topKey: 'projects' })
     const [dialog, setDialog] = useState<{ kind: 'project' | 'rename'; path?: string; name: string } | null>(null)
     const [busy, setBusy] = useState(false)
     const [dialogError, setDialogError] = useState('')
     const uploadRef = useRef<HTMLInputElement>(null)
     const uploadFolderRef = useRef<HTMLInputElement>(null)
     const uploadTarget = useRef<string | null>(null)
-    const bodyRef = useRef<HTMLDivElement>(null)
-    const dragCleanup = useRef<(() => void) | null>(null)
-    useEffect(() => () => dragCleanup.current?.(), [])
     const project = projects.find((p) => selectedPath === p.path || selectedPath?.startsWith(`${p.path}/`))
     const selectedProjectId = project?.id
     useEffect(() => { if (selectedProjectId) setExpanded((prev) => new Set(prev).add(selectedProjectId)) }, [selectedProjectId])
@@ -138,13 +139,13 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
             persistent={<><input ref={uploadRef} hidden type="file" multiple onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = '' }} /><input ref={uploadFolderRef} hidden type="file" multiple {...{ webkitdirectory: '' }} onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = '' }} /></>}>
             {({ togglePin, onMenuOpenChange }) => {
                 menuChanged = onMenuOpenChange
-                return <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col pt-2">
+                return <div ref={bodyRef} className={cn('flex min-h-0 flex-1 flex-col pt-2', resizing && 'select-none')}>
                     <div className="flex h-9 shrink-0 items-center px-3">
                         <span className="flex-1 text-sm font-semibold">Projects</span>
                         <button title={open ? 'Collapse project rail' : 'Pin project rail'} aria-label={open ? 'Collapse project rail' : 'Pin project rail'} onClick={togglePin} className="rounded p-1 text-muted-foreground hover:bg-accent">{open ? <PanelLeftClose className="size-4" /> : <Pin className="size-4" />}</button>
                     </div>
-                    <section className="flex min-h-0 flex-col" style={{ flex: projectsCollapsed ? '0 0 auto' : filesCollapsed ? '1 1 0' : `0 0 ${split}%` }}>
-                        <div className="flex h-8 shrink-0 items-center px-3"><button onClick={() => setProjectsCollapsed(!projectsCollapsed)} className="flex-1 text-left text-[13px] font-semibold text-muted-foreground">Projects</button><button aria-label="New project" onClick={() => { setDialogError(''); setDialog({ kind: 'project', name: '' }) }} className="rounded p-1 hover:bg-accent"><Plus className="size-3.5" /></button></div>
+                    <section className="group/section flex min-h-0 flex-col" style={projectsStyle}>
+                        <SecondaryRailSectionHeader label="Projects" collapsed={projectsCollapsed} count={projects.length} onToggle={toggleProjects}><button aria-label="New project" onClick={() => { setDialogError(''); setDialog({ kind: 'project', name: '' }) }} className="rounded p-1 hover:bg-accent"><Plus className="size-3.5" /></button></SecondaryRailSectionHeader>
                         {!projectsCollapsed && <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                             {!ready && <Loader2 className="m-3 size-4 animate-spin" />}
                             {error && <button className="p-2 text-xs text-destructive" onClick={() => void refresh()}>{error} · Retry</button>}
@@ -160,19 +161,9 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
                             </div>)}
                         </div>}
                     </section>
-                    <div className="h-1.5 shrink-0 cursor-row-resize border-t border-border hover:bg-primary/20" title="Drag to resize" onMouseDown={(e) => {
-                        if (filesCollapsed || projectsCollapsed) return
-                        e.preventDefault()
-                        const rect = bodyRef.current?.getBoundingClientRect()
-                        if (!rect) return
-                        const move = (ev: MouseEvent) => { const value = Math.min(80, Math.max(20, (ev.clientY - rect.top - 36) / rect.height * 100)); setSplit(value); localStorage.setItem('projects:railSplit', String(value)) }
-                        const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); dragCleanup.current = null }
-                        dragCleanup.current?.()
-                        dragCleanup.current = up
-                        window.addEventListener('mousemove', move); window.addEventListener('mouseup', up)
-                    }} />
-                    <section className="flex min-h-0 flex-col" style={{ flex: filesCollapsed ? '0 0 auto' : '1 1 0' }} onDragOver={(e) => { if (project && Array.from(e.dataTransfer.types).includes('Files')) { e.preventDefault(); e.stopPropagation() } }} onDrop={(e) => { if (project && e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); uploadTarget.current = project.path; void upload(Array.from(e.dataTransfer.files)) } }}>
-                        <div className="flex h-8 shrink-0 items-center px-3"><button onClick={() => setFilesCollapsed(!filesCollapsed)} className="flex-1 text-left text-[13px] font-semibold text-muted-foreground">Files</button>
+                    <section ref={filesRef} className="group/section flex min-h-0 flex-col" style={filesStyle} onDragOver={(e) => { if (project && Array.from(e.dataTransfer.types).includes('Files')) { e.preventDefault(); e.stopPropagation() } }} onDrop={(e) => { if (project && e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); uploadTarget.current = project.path; void upload(Array.from(e.dataTransfer.files)) } }}>
+                        <SecondaryRailDivider {...dividerProps} />
+                        <SecondaryRailSectionHeader label="Files" collapsed={filesCollapsed} count={project ? (find(tree, project.path)?.children?.length ?? 0) : 0} onToggle={toggleFiles}>
                             {project && <DropdownMenu onOpenChange={onMenuOpenChange}><DropdownMenuTrigger asChild><button aria-label="Add to project files" className="rounded p-1 hover:bg-accent"><Plus className="size-3.5" /></button></DropdownMenuTrigger><DropdownMenuContent align="end">
                                 <DropdownMenuItem onClick={() => actions.createNote(project.path)}><FilePlus className="mr-2 size-3.5" />New note</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => void run(() => actions.createFolder(project.path))}><FolderPlus className="mr-2 size-3.5" />New folder</DropdownMenuItem>
@@ -183,7 +174,7 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
                                 <DropdownMenuItem onClick={() => { uploadTarget.current = project.path; uploadFolderRef.current?.click() }}><FolderPlus className="mr-2 size-3.5" />Add folder…</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => actions.revealInFileManager(project.path, true)}><FolderOpen className="mr-2 size-3.5" />Open local folder</DropdownMenuItem>
                             </DropdownMenuContent></DropdownMenu>}
-                        </div>
+                        </SecondaryRailSectionHeader>
                         {!filesCollapsed && <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{project ? renderFiles(find(tree, project.path)?.children ?? []) : <p className="p-2 text-xs text-muted-foreground">Select a project to see its files.</p>}</div>}
                     </section>
                 </div>
