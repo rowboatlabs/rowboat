@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, Check, ChevronDown, Clock, FileText, ListPlus, Loader2, MessageCircle, Pin, Plus, RotateCcw, Sparkles, Square, Trash2, X } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, ChevronDown, FileText, ListPlus, Loader2, MessageCircle, Plus, RotateCcw, Sparkles, Square, Trash2, X } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
@@ -51,7 +51,6 @@ const ROWBOAT_MENTION_RE = /(^|\s)@rowboat\b/i
 // transitions, hierarchy by alpha not size. Rows carry NO borders — hover
 // backgrounds and whitespace do the separating.
 const CHIP = 'inline-flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[11px] font-medium leading-4'
-const ROW_HOVER = 'rounded-md transition-colors duration-100 hover:bg-foreground/[0.045]'
 const SECTION_LABEL = 'text-[12px] font-medium text-muted-foreground'
 const CALLOUT_KEY = 'todo.firstReceiptCalloutDone'
 
@@ -852,17 +851,6 @@ type ArchivedEntry = {
   item: TodoItem
 }
 
-function relativeTime(iso: string): string {
-  const then = Date.parse(iso)
-  if (!Number.isFinite(then)) return ''
-  const mins = Math.round((Date.now() - then) / 60000)
-  if (mins < 1) return 'now'
-  if (mins < 60) return `${mins}m`
-  const h = Math.floor(mins / 60)
-  if (h < 24) return `${h}h`
-  return `${Math.floor(h / 24)}d`
-}
-
 /** Collapse bubble markup for one-line previews: filepath fences become
  * their filenames, other fences a [code] marker, inline markers drop. */
 function stripBubbleMarkup(text: string): string {
@@ -960,129 +948,6 @@ function ArchivedSection({ entries, onRestore, onDelete, onOpenNote }: {
   )
 }
 
-// ---------------------------------------------------------------------------
-// The Deck — the operator band. Two bays: "Underway" (live threads with a
-// one-line activity feed, above the ledger) and "Needs you" (amber, oldest
-// first — the queue J burns to zero, below the tasks). A strip is a
-// projection of a thread — task, code session, or chat — never a second
-// home: clicking one jumps to the item in place or opens the thread in the
-// dock. Each bay collapses to nothing when empty.
-// ---------------------------------------------------------------------------
-
-/** Friendly labels for the registry's raw activity (a builtin tool name). */
-const ACTIVITY_LABELS: Record<string, string> = {
-  starting: 'starting…',
-  thinking: 'thinking…',
-  'web-search': 'searching the web…',
-  'fetch-url': 'reading a page…',
-  code_agent_run: 'coding…',
-  executeCommand: 'running a command…',
-  'file-readText': 'reading files…',
-  'file-write': 'writing…',
-  'file-grep': 'searching files…',
-}
-
-function activityLabel(activity?: string): string {
-  if (!activity) return ''
-  return ACTIVITY_LABELS[activity] ?? `${activity}…`
-}
-
-/** Strip titles are plain text: markdown links and the @rowboat mention
- * collapse away (the row below renders them properly). */
-function stripTitle(thread: HomeThread): string {
-  return thread.title
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/(^|\s)@rowboat\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim() || 'Untitled'
-}
-
-const STRIP_HOVER_BTN = 'shrink-0 rounded-[4px] p-0.5 text-muted-foreground/70 opacity-0 transition-opacity duration-100 hover:bg-foreground/[0.08] hover:text-foreground focus-visible:opacity-100 group-hover/strip:opacity-100'
-
-function DeckStrip({ thread, onJump, onOpen, onTogglePin, onSnooze, onDismiss }: {
-  thread: HomeThread
-  /** Click: spotlight the source in place (falls back to the dock). */
-  onJump: () => void
-  /** ⏎ / the ↗ button: the full conversation in the sidebar. */
-  onOpen: () => void
-  /** The watch flag — pinned strips stay on the Deck and get a number key. */
-  onTogglePin: () => void
-  /** Needs-you bay only: park it for 4h or until the thread moves. */
-  onSnooze?: () => void
-  /** Needs-you bay only: release the claim entirely — no timer, only new
-   * activity brings it back. The ledger's receipts stay visible. */
-  onDismiss?: () => void
-}) {
-  const needs = thread.status === 'needs-you' || thread.status === 'ready'
-  const live = thread.status === 'underway'
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onJump}
-      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onOpen() } }}
-      className={`group/strip relative flex cursor-pointer items-center gap-2 px-2 py-[5px] ${ROW_HOVER} focus-visible:bg-foreground/[0.045] focus-visible:outline-none`}
-    >
-      <span className={`h-4 w-[2px] shrink-0 rounded-full ${needs ? 'bg-amber-500/80' : live ? 'bg-primary/50' : 'bg-foreground/[0.16]'}`} />
-      <span className="w-9 shrink-0 text-[10.5px] lowercase tracking-[0.02em] text-muted-foreground/60">{thread.kind}</span>
-      {thread.unseen && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
-      <span className="max-w-[40%] shrink-0 truncate text-[13px] font-medium">{stripTitle(thread)}</span>
-      {thread.code && (
-        <span className="shrink-0 rounded bg-accent/60 px-1.5 text-[10px] text-muted-foreground">
-          {thread.code.branch ?? thread.code.projectName} · {thread.code.agent}
-        </span>
-      )}
-      {live && <span className="size-1.5 shrink-0 rounded-full bg-primary motion-safe:animate-pulse" />}
-      <span className={`min-w-0 flex-1 truncate text-[12px] ${needs ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
-        {needs ? (thread.attention ?? 'waiting on you') : activityLabel(thread.activity)}
-      </span>
-      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">{relativeTime(thread.startedAt ?? thread.updatedAt)}</span>
-      {thread.pinIndex !== undefined && thread.pinIndex < 9 && (
-        <span
-          title={`Press ${thread.pinIndex + 1} to jump here`}
-          className="shrink-0 rounded border border-border px-1 font-mono text-[9px] leading-4 text-muted-foreground/70"
-        >
-          {thread.pinIndex + 1}
-        </span>
-      )}
-      {onSnooze && (
-        <IconTip label="Snooze 4h — returns early if the thread moves">
-          <button type="button" onClick={(e) => { e.stopPropagation(); onSnooze() }} className={STRIP_HOVER_BTN}>
-            <Clock className="size-3.5" />
-          </button>
-        </IconTip>
-      )}
-      {onDismiss && (
-        <IconTip label="Dismiss — returns only if the thread moves again; receipts stay on the list">
-          <button type="button" onClick={(e) => { e.stopPropagation(); onDismiss() }} className={STRIP_HOVER_BTN}>
-            <X className="size-3.5" />
-          </button>
-        </IconTip>
-      )}
-      <IconTip label={thread.pinned ? 'Unpin — drops off the Deck when idle' : 'Pin to the Deck — stays while idle, gets a number key'}>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onTogglePin() }}
-          className={thread.pinned
-            ? 'shrink-0 rounded p-0.5 text-foreground/70 transition-colors hover:bg-accent'
-            : STRIP_HOVER_BTN}
-        >
-          <Pin className={`size-3.5 ${thread.pinned ? 'fill-current' : ''}`} />
-        </button>
-      </IconTip>
-      <IconTip label={thread.kind === 'code' ? 'Open in the Code section — diffs, terminal, worktree' : 'Open the full conversation in the sidebar'}>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onOpen() }}
-          className={STRIP_HOVER_BTN}
-        >
-          <ArrowUpRight className="size-3.5" />
-        </button>
-      </IconTip>
-    </div>
-  )
-}
-
 export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, onComposeTodo, composeTarget, getRunModel, onOpenCodeSession, attendedSessionId }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
@@ -1094,7 +959,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
   const [conversations, setConversations] = useState<Record<string, TodoChatBubble[]>>({})
   const [archived, setArchived] = useState<ArchivedEntry[]>([])
   const [showCallout, setShowCallout] = useState(false)
-  const [plannerIntroSeen, setPlannerIntroSeen] = useState(() => !!localStorage.getItem('todo.plannerIntroSeen'))
   // The suggestion tray + the planner's Home controls.
   const [suggestions, setSuggestions] = useState<string[]>([])
   // The tray's DOM node — the header's count pill scrolls here.
@@ -1125,7 +989,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
   const [addFocusSignal, setAddFocusSignal] = useState(0)
   const focusAddRow = useCallback(() => setAddFocusSignal((n) => n + 1), [])
   // Attention: triage filter + changed-since-last-look baseline.
-  const [triageFilter, setTriageFilter] = useState<'needs_you' | 'running' | 'done' | null>(null)
   const [sessionUpdatedAt, setSessionUpdatedAt] = useState<Record<string, string>>({})
   const [seenBaseline, setSeenBaseline] = useState<string>(() => localStorage.getItem('todo.seenBaseline') ?? new Date(0).toISOString())
   // Per-session read marks: opening a thread (expand, or into the sidebar)
@@ -1335,40 +1198,13 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
         e.preventDefault()
         onFocusComposer()
       } else if (e.key === 'j') {
-        // The idle-worker key: cycle the needs-you queue, oldest first —
-        // each press jumps to the next thread waiting on you.
-        const strips = deckNeedsYouRef.current
-        if (strips.length > 0) {
+        // The idle-worker key: cycle the threads waiting on you, oldest
+        // first — each press jumps to the next one's row on the list.
+        const waiting = deckNeedsYouRef.current
+        if (waiting.length > 0) {
           e.preventDefault()
-          const target = strips[deckCycleRef.current % strips.length]
+          jumpToThreadRef.current(waiting[deckCycleRef.current % waiting.length])
           deckCycleRef.current += 1
-          lastJumpedRef.current = target
-          jumpToStripRef.current(target)
-        }
-      } else if (e.key >= '1' && e.key <= '9') {
-        // Control groups: pinned strips answer to their number key.
-        const slot = Number(e.key) - 1
-        const target = deckThreadsRef.current.find((t) => t.pinIndex === slot)
-        if (target) {
-          e.preventDefault()
-          lastJumpedRef.current = target
-          jumpToStripRef.current(target)
-        }
-      } else if (e.key === 'h') {
-        // Snooze the J-cursor's last stop (needs-you only) — the tripwire.
-        const target = lastJumpedRef.current
-        if (target && (target.status === 'needs-you' || target.status === 'ready')) {
-          e.preventDefault()
-          snoozeThreadRef.current(target)
-          lastJumpedRef.current = null
-        }
-      } else if (e.key === 'x') {
-        // Dismiss the J-cursor's last stop — release the claim entirely.
-        const target = lastJumpedRef.current
-        if (target && (target.status === 'needs-you' || target.status === 'ready')) {
-          e.preventDefault()
-          dismissThreadRef.current(target)
-          lastJumpedRef.current = null
         }
       }
     }
@@ -1390,11 +1226,12 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
     }
   }, [refetch])
 
-  // ---- The Deck: fed by the main-process thread registry ----
+  // ---- Threads: the main-process registry, read but no longer drawn.
+  // It routes code sessions to the Code section and feeds the J queue.
   const [deckThreads, setDeckThreads] = useState<HomeThread[]>([])
   const deckThreadsRef = useRef(deckThreads)
   deckThreadsRef.current = deckThreads
-  // A strip jump flashes its source row with the spotlight treatment.
+  // A J jump flashes the thread's source row with the spotlight treatment.
   const [flashKey, setFlashKey] = useState<string | null>(null)
   const deckCycleRef = useRef(0)
   useEffect(() => {
@@ -1404,7 +1241,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
         const res = await window.ipc.invoke('home:threads', {})
         if (!cancelled) setDeckThreads(res.threads)
       } catch {
-        // Registry unavailable — the Deck simply stays empty.
+        // Registry unavailable — the queue simply stays empty.
       }
     }
     void fetchThreads()
@@ -1441,9 +1278,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
     onOpenInChat(sessionId)
   }, [markSessionSeen, onOpenInChat, onOpenCodeSession])
 
-  // A Deck strip's click: spotlight the source item in place; threads with
+  // J's landing: spotlight the thread's source item in place; threads with
   // no list row (chats, code sessions) open in the dock instead.
-  const jumpToStrip = useCallback((thread: HomeThread) => {
+  const jumpToThread = useCallback((thread: HomeThread) => {
     if (thread.todoKey) {
       const el = document.querySelector(`[data-todo-key="${CSS.escape(thread.todoKey)}"]`)
       if (el) {
@@ -1459,30 +1296,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
     }
     openInChat(thread.sessionId)
   }, [openInChat])
-  const jumpToStripRef = useRef(jumpToStrip)
-  useEffect(() => { jumpToStripRef.current = jumpToStrip }, [jumpToStrip])
-
-  // ⏎ / ↗ on a strip — openInChat is kind-aware, so code strips land in
-  // the Code section and everything else in the dock.
-  const openStrip = useCallback((thread: HomeThread) => {
-    openInChat(thread.sessionId)
-  }, [openInChat])
-
-  const togglePin = useCallback((thread: HomeThread) => {
-    void window.ipc.invoke('home:setPinned', { sessionId: thread.sessionId, pinned: !thread.pinned })
-  }, [])
-  const snoozeThread = useCallback((thread: HomeThread) => {
-    void window.ipc.invoke('home:snooze', { sessionId: thread.sessionId })
-    toast('Snoozed — back in 4h, or sooner if the thread moves')
-  }, [])
-  const snoozeThreadRef = useRef(snoozeThread)
-  useEffect(() => { snoozeThreadRef.current = snoozeThread }, [snoozeThread])
-  const dismissThread = useCallback((thread: HomeThread) => {
-    void window.ipc.invoke('home:dismiss', { sessionId: thread.sessionId })
-    toast('Dismissed — returns only if the thread moves again')
-  }, [])
-  const dismissThreadRef = useRef(dismissThread)
-  useEffect(() => { dismissThreadRef.current = dismissThread }, [dismissThread])
+  const jumpToThreadRef = useRef(jumpToThread)
+  useEffect(() => { jumpToThreadRef.current = jumpToThread }, [jumpToThread])
 
   // The fallback composer's chat door — the thread lives in the dock now.
   const startChat = useCallback(async (text: string) => {
@@ -1557,44 +1372,16 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
   const itemBlocks = (blocks ?? []).map((b, i) => ({ block: b, index: i }))
   const hasCompleted = itemBlocks.some(({ block }) => block.kind === 'item' && block.item.checked)
 
-  // ---- Attention: triage counts + changed-since-last-look ----
-  const allItems: TodoItem[] = itemBlocks.flatMap(({ block }) =>
-    block.kind === 'item' ? [block.item, ...block.item.children] : [],
-  )
-  const needsYou = (i: TodoItem) => !i.checked && i.receipts.some((r) => r.kind === 'question')
-  const triageMatch = (i: TodoItem): boolean => {
-    if (triageFilter === 'needs_you') return needsYou(i)
-    if (triageFilter === 'running') return running.has(i.key)
-    if (triageFilter === 'done') return i.checked
-    return true
-  }
-  // A parent stays visible when any of its steps match.
-  const blockMatches = (i: TodoItem) => triageMatch(i) || i.children.some(triageMatch)
-  const needsYouCount = allItems.filter(needsYou).length
-  const runningCount = allItems.filter((i) => running.has(i.key)).length
-  const doneCount = allItems.filter((i) => i.checked).length
-
-  // ---- Deck bays: projections of the registry, fixed order ----
-  // Needs-you is the queue: oldest first, so J always serves the longest
-  // wait; snoozed threads are parked out of it (they return on time or on
-  // activity). Underway orders by start; pinned idle threads keep their
-  // strip (the watch flag). The attended thread (the live call's own
-  // conversation) is excluded everywhere — the Deck is for unattended work.
-  const deckVisible = deckThreads.filter((t) => t.sessionId !== attendedSessionId)
-  const deckNeedsYou = deckVisible
+  // ---- The J queue: threads waiting on an answer, oldest first, so J
+  // always serves the longest wait. Snoozed threads are parked out of it
+  // (they return on time or on activity); the attended thread — the live
+  // call's own conversation — never joins, the queue is for unattended work.
+  const deckNeedsYou = deckThreads
+    .filter((t) => t.sessionId !== attendedSessionId)
     .filter((t) => (t.status === 'needs-you' || t.status === 'ready') && !t.snoozed && !t.dismissed)
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
-  const deckUnderway = deckVisible
-    .filter((t) => t.status === 'underway' || (t.pinned && (t.snoozed || t.dismissed || t.status === 'idle')))
-    .sort((a, b) => (a.startedAt ?? a.updatedAt).localeCompare(b.startedAt ?? b.updatedAt))
   const deckNeedsYouRef = useRef(deckNeedsYou)
   deckNeedsYouRef.current = deckNeedsYou
-  // The J-cursor's last stop — what H snoozes.
-  const lastJumpedRef = useRef<HomeThread | null>(null)
-
-  // Live threads only — a bay holding just pinned idle strips shouldn't
-  // count them.
-  const underwayCount = deckVisible.filter((t) => t.status === 'underway').length
 
   const isChanged = (key: string): boolean => {
     const sid = sessions[key]
@@ -1614,47 +1401,17 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
     if (!last) return undefined
     return last.kind === 'error' ? `failed: ${last.text}` : last.text
   }
-  const changedItems = allItems.filter((i) => isChanged(i.key))
-  const changedNeedsYou = changedItems.filter(needsYou).length
-  const changedFinished = changedItems.length - changedNeedsYou
-
-  const markSeenNow = () => {
-    const now = new Date().toISOString()
-    localStorage.setItem('todo.seenBaseline', now)
-    setSeenBaseline(now)
-  }
-
-  const triagePill = (filter: 'needs_you' | 'running' | 'done', label: string, count: number, tone: string) => (
-    count > 0 && (
-      <button
-        type="button"
-        onClick={() => setTriageFilter(triageFilter === filter ? null : filter)}
-        className={`rounded-[4px] px-1.5 py-0.5 text-[12px] transition-colors duration-100 ${
-          triageFilter === filter ? 'bg-foreground/[0.08] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
-        }`}
-      >
-        <span className={`font-medium ${tone}`}>{count}</span> {label}
-      </button>
-    )
-  )
-
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
       <div className="flex-1 overflow-y-auto px-9 pb-8 pt-12">
-        <div className="mx-auto flex max-w-[720px] flex-col gap-5">
+        {/* min-h-full lets the archive's mt-auto push it to the bottom edge
+            on a short list; once the list outgrows the pane it just flows. */}
+        <div className="mx-auto flex min-h-full max-w-[720px] flex-col gap-5">
 
-          {/* Header — Notion page anatomy: the title stands alone; the
-              triage pills sit under it like quiet page properties. */}
+          {/* Header — Notion page anatomy: the title stands alone. */}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-[32px] font-bold leading-tight tracking-[-0.02em]">Todos</h1>
-              {(needsYouCount > 0 || runningCount > 0 || doneCount > 0) && (
-                <div className="mt-1.5 -ml-1.5 flex items-center gap-0.5">
-                  {triagePill('needs_you', 'need you', needsYouCount, 'text-amber-600 dark:text-amber-400')}
-                  {triagePill('running', 'running', runningCount, 'text-primary')}
-                  {triagePill('done', 'done', doneCount, 'text-muted-foreground')}
-                </div>
-              )}
             </div>
             <div className="flex shrink-0 items-center gap-2 pt-1.5">
               {suggestions.length > 0 && (
@@ -1778,7 +1535,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
                     item={item}
                     depth={0}
                     changed={isChanged(item.key)}
-                    dimmed={(triageFilter !== null && !blockMatches(item)) || (spotKey !== null && !blockContainsSpot(item))}
+                    dimmed={spotKey !== null && !blockContainsSpot(item)}
                     spotlight={item.key === spotKey || item.key === flashKey}
                     collapsed={collapsedRows[item.key] ?? (conversations[item.key]?.length ?? 0) > 0}
                     onToggleCollapsed={() => {
@@ -1841,7 +1598,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
                             item={child}
                             depth={1}
                             changed={isChanged(child.key)}
-                            dimmed={triageFilter !== null && !triageMatch(child)}
                             spotlight={child.key === spotKey || child.key === flashKey}
                             collapsed={collapsedRows[child.key] ?? (conversations[child.key]?.length ?? 0) > 0}
                             onToggleCollapsed={() => {
@@ -1912,97 +1668,6 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
             )}
           </div>
 
-          {/* The Needs-you bay — threads waiting on an answer, below the
-              list so the tasks stay first. Oldest first: J serves the
-              longest wait. */}
-          {deckNeedsYou.length > 0 && (
-            <div>
-              <div className="flex items-baseline justify-between px-1 pb-1">
-                <div className="text-[12px] font-medium text-amber-600/90 dark:text-amber-400/90">
-                  Needs you · {deckNeedsYou.length}
-                </div>
-                <div className="text-[11px] text-muted-foreground/50">J cycles the queue</div>
-              </div>
-              {deckNeedsYou.map((t) => (
-                <DeckStrip
-                  key={t.sessionId}
-                  thread={t}
-                  onJump={() => { lastJumpedRef.current = t; jumpToStrip(t) }}
-                  onOpen={() => openStrip(t)}
-                  onTogglePin={() => togglePin(t)}
-                  onSnooze={() => snoozeThread(t)}
-                  onDismiss={() => dismissThread(t)}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* The Underway bay — live threads across the whole app (tasks,
-              code sessions, chats). Collapses to nothing when quiet: a calm
-              morning looks exactly like before. */}
-          {deckUnderway.length > 0 && (
-            <div>
-              <div className={`px-1 pb-1 ${SECTION_LABEL}`}>
-                {/* Count only live threads — a bay holding just pinned
-                    idle strips says "Underway" without the number. */}
-                Underway{underwayCount > 0 ? ` · ${underwayCount}` : ''}
-              </div>
-              {deckUnderway.map((t) => (
-                <DeckStrip
-                  key={t.sessionId}
-                  thread={t}
-                  onJump={() => jumpToStrip(t)}
-                  onOpen={() => openStrip(t)}
-                  onTogglePin={() => togglePin(t)}
-                />
-              ))}
-              {/* Little's law, softly: every thread you start joins the
-                  divisor under everything else. Never a cap. */}
-              {underwayCount >= 6 && (
-                <div className="px-2 pt-1 text-[11px] text-muted-foreground/60">
-                  {underwayCount} underway — landing one beats launching one.
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* While you were away — dismissable catch-up */}
-          {changedItems.length > 0 && (
-            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
-              <span className="size-1.5 shrink-0 rounded-full bg-foreground" />
-              <span className="flex-1">
-                While you were away:
-                {changedFinished > 0 && ` ${changedFinished} item${changedFinished === 1 ? '' : 's'} got updates`}
-                {changedFinished > 0 && changedNeedsYou > 0 && ' ·'}
-                {changedNeedsYou > 0 && ` ${changedNeedsYou} need${changedNeedsYou === 1 ? 's' : ''} you`}
-                {' '}— marked with dots.
-              </span>
-              <button
-                type="button"
-                onClick={markSeenNow}
-                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* First-proposals explainer — shown once, ever */}
-          {!plannerIntroSeen
-            && (suggestions.length > 0 || itemBlocks.some(({ block }) => block.kind === 'item' && block.item.proposed && !block.item.checked)) && (
-            <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-3.5 py-2 text-[13px] text-muted-foreground">
-              <Bot className="size-3.5 shrink-0" />
-              <span className="flex-1">Rowboat has suggestions from your mail and calendar — accept the useful ones to add them to your list; declining teaches it what not to suggest. Nothing is added or run without you.</span>
-              <button
-                type="button"
-                onClick={() => { localStorage.setItem('todo.plannerIntroSeen', '1'); setPlannerIntroSeen(true) }}
-                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )}
-
           {/* First-completion callout — shown once, ever */}
           {showCallout && (
             <div className="flex items-center gap-2 rounded-lg bg-foreground/[0.035] px-4 py-2.5 text-sm">
@@ -2058,27 +1723,31 @@ export function TodoView({ onOpenNote, onOpenInChat, onFocusComposer, composer, 
             </div>
           )}
 
-          {/* Done & dismissed — the archive, restorable */}
-          <ArchivedSection
-            entries={archived}
-            onOpenNote={onOpenNote}
-            onRestore={(entry) => {
-              void (async () => {
-                if (dirtyRef.current) await saveNowRef.current()
-                await window.ipc.invoke('todo:restore', { month: entry.month, blockIndex: entry.blockIndex, key: entry.item.key })
-                await refetch()
-              })()
-            }}
-            onDelete={(entry) => {
-              void (async () => {
-                await window.ipc.invoke('todo:deleteArchived', { month: entry.month, blockIndex: entry.blockIndex, key: entry.item.key })
-                await refetch()
-              })()
-            }}
-          />
+          {/* The page's floor: Done & dismissed — the archive, restorable —
+              and the file note. mt-auto keeps them on the bottom edge
+              instead of trailing right under a short list. */}
+          <div className="mt-auto flex flex-col gap-5">
+            <ArchivedSection
+              entries={archived}
+              onOpenNote={onOpenNote}
+              onRestore={(entry) => {
+                void (async () => {
+                  if (dirtyRef.current) await saveNowRef.current()
+                  await window.ipc.invoke('todo:restore', { month: entry.month, blockIndex: entry.blockIndex, key: entry.item.key })
+                  await refetch()
+                })()
+              }}
+              onDelete={(entry) => {
+                void (async () => {
+                  await window.ipc.invoke('todo:deleteArchived', { month: entry.month, blockIndex: entry.blockIndex, key: entry.item.key })
+                  await refetch()
+                })()
+              }}
+            />
 
-          <div className="text-[11px] text-muted-foreground/60">
-            Saved to <code className="rounded bg-muted px-1">~/.rowboat/todo.md</code> — done items archive to <code className="rounded bg-muted px-1">todo/archive/</code>.
+            <div className="text-[11px] text-muted-foreground/60">
+              Saved to <code className="rounded bg-muted px-1">~/.rowboat/todo.md</code> — done items archive to <code className="rounded bg-muted px-1">todo/archive/</code>.
+            </div>
           </div>
         </div>
       </div>

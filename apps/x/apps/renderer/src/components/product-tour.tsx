@@ -56,8 +56,8 @@ const TOUR_STEPS: TourStep[] = [
     id: 'home',
     targetId: 'nav-home',
     navigate: 'home',
-    title: 'First stop: Home',
-    text: 'Home is your landing spot — a quick overview of what needs your attention to get you back into the flow.',
+    title: 'First stop: Todo',
+    text: 'Todo is your list — a quick overview of what needs your attention to get you back into the flow.',
   },
   {
     id: 'email',
