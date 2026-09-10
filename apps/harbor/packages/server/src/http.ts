@@ -430,5 +430,25 @@ export function buildHttpApp(deps: {
     return reply(c, routes.manageTopic.response, { topic });
   });
 
+  // --- read state ------------------------------------------------------------
+
+  app.post('/v1/spaces/:spaceId/read', async (c) => {
+    const { spaceId } = parseWith(routes.markRead.params, c.req.param());
+    const input = await body(c, routes.markRead.request);
+    return reply(c, routes.markRead.response, await service.markRead(actor(c), spaceId, input));
+  });
+
+  app.post('/v1/spaces/:spaceId/threads/:rootMessageId/follow', async (c) => {
+    const { spaceId, rootMessageId } = parseWith(routes.followThread.params, c.req.param());
+    const input = await body(c, routes.followThread.request);
+    return reply(
+      c,
+      routes.followThread.response,
+      await service.followThread(actor(c), spaceId, rootMessageId, input.following),
+    );
+  });
+
+  app.get(routes.unread.path, async (c) => reply(c, routes.unread.response, await service.unread(actor(c))));
+
   return app;
 }

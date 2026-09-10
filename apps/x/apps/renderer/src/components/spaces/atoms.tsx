@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import { requestComposeInsert } from '@/lib/spaces-compose'
+import { mentionToken } from '@x/shared/dist/spaces.js'
 import { avatarColorClass, initials, orgMonogram } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
@@ -65,9 +66,10 @@ export function MemberProfilePopover({ id, children }: { id: string; children: R
             () => toast('Could not copy', 'error'),
         )
     }
+    // The token, never the name: the composer's seed path parses it into a pill.
     const mention = () => {
         setOpen(false)
-        requestComposeInsert(`@${name} `)
+        requestComposeInsert(`${mentionToken({ kind: 'member', id, label: name })} `)
     }
     return (
         <Popover open={open} onOpenChange={setOpen}>

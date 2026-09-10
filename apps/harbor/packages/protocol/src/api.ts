@@ -75,6 +75,42 @@ export const TopicListing = Topic.extend({
 });
 export type TopicListing = z.infer<typeof TopicListing>;
 
+/**
+ * One space in the unread snapshot (read state, 2026-09-09). Counts exclude
+ * the member's own messages and tombstones; `threads` lists only FOLLOWED
+ * threads with live replies past the member's mark.
+ */
+export const UnreadSpace = z.object({
+  spaceId: SpaceId,
+  /** The space's current head offset. */
+  head: StreamOffset,
+  /** The member's stream mark (0 = never marked). */
+  readOffset: StreamOffset,
+  /** Roots after readOffset, not the member's, not deleted. */
+  unreadRoots: z.number().int().nonnegative(),
+  /**
+   * Messages addressed to the member (a mention token naming them, or @here)
+   * past the mark: unread roots plus the unread replies in followed threads.
+   * The sidebar's number; `unreadRoots` is its bold.
+   */
+  unreadMentions: z.number().int().nonnegative(),
+  threads: z.array(
+    z.object({
+      rootMessageId: MessageId,
+      readOffset: StreamOffset,
+      lastReplyOffset: StreamOffset,
+      /** Live replies after readOffset, not the member's own. */
+      unreadReplies: z.number().int().positive(),
+      /** Of those, the ones addressed to the member. */
+      unreadMentions: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type UnreadSpace = z.infer<typeof UnreadSpace>;
+
+export const UnreadSnapshot = z.object({ spaces: z.array(UnreadSpace) });
+export type UnreadSnapshot = z.infer<typeof UnreadSnapshot>;
+
 export const routes = {
   // --- identity ------------------------------------------------------------
   /** Who am I on this org — the client's only source of its own memberId under OAuth. */
@@ -379,7 +415,13 @@ export const routes = {
       beforeOffset: z.coerce.number().int().positive().optional(),
       limit: z.coerce.number().int().positive().max(200).optional(),
     }),
-    response: z.object({ messages: z.array(Message), topics: z.array(Topic), hasMore: z.boolean() }),
+    response: z.object({
+      messages: z.array(Message),
+      topics: z.array(Topic),
+      hasMore: z.boolean(),
+      /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
+      readOffset: StreamOffset,
+    }),
   },
   /**
    * One flat thread: the root, its topic row (null = a plain thread), and the
@@ -400,6 +442,9 @@ export const routes = {
       topic: Topic.nullable(),
       messages: z.array(Message),
       hasMore: z.boolean(),
+      /** The caller's mark in this thread; null = not following (no mark is kept). */
+      readOffset: StreamOffset.nullable(),
+      following: z.boolean(),
     }),
   },
   /**
@@ -552,6 +597,57 @@ export const routes = {
       z.object({ action: z.literal('remove'), actingMode: ActingMode, agentName: z.string().max(64).optional() }),
     ]),
     response: z.object({ topic: Topic }),
+  },
+
+  // --- read state ----------------------------------------------------------
+  /**
+   * Read marks (2026-09-09): per-member cursors the org owns, so every device
+   * agrees. Two scopes: the space's STREAM (no threadRootId) and one FOLLOWED
+   * thread (threadRootId; a reply's id resolves to its root). The unit is the
+   * space's event offset — the same integer that pages and replays — never a
+   * timestamp. Marks only advance: a lower offset is a 200 no-op returning
+   * the stored mark; an offset past the space's head is refused. Posting
+   * directly advances the author's own mark (Slack/Mattermost posture; an
+   * agent's post does not). A thread mark exists only while the member
+   * follows the thread — marking an unfollowed thread returns null and
+   * records nothing. Every accepted mark is echoed to the member's other
+   * connections as a `read_mark` frame (events.ts).
+   */
+  markRead: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/read',
+    params: z.object({ spaceId: SpaceId }),
+    request: z.object({
+      /** Absent = the stream; present = a followed thread. */
+      threadRootId: MessageId.optional(),
+      offset: StreamOffset,
+    }),
+    response: z.object({ readOffset: StreamOffset.nullable() }),
+  },
+  /**
+   * Follow or unfollow a thread. Only followed threads carry a mark and count
+   * toward unread (v1 tracks followed threads only). Which acts follow
+   * automatically is org behaviour, not client convention — provisional rules
+   * today: replying follows, and a root's author follows from the first reply
+   * on. Unfollowing keeps the mark, so re-following never floods.
+   */
+  followThread: {
+    method: 'POST',
+    path: '/v1/spaces/:spaceId/threads/:rootMessageId/follow',
+    params: z.object({ spaceId: SpaceId, rootMessageId: MessageId }),
+    request: z.object({ following: z.boolean() }),
+    response: z.object({ following: z.boolean(), readOffset: StreamOffset }),
+  },
+  /**
+   * The unread snapshot: one call at boot and on reconnect, every space the
+   * member is in (DMs included) with its cursor, unread roots, and the
+   * followed threads that currently have unread replies. Clients fold live
+   * frames on top between snapshots.
+   */
+  unread: {
+    method: 'GET',
+    path: '/v1/unread',
+    response: UnreadSnapshot,
   },
 
   // --- search ---------------------------------------------------------------

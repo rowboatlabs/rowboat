@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { addressesRowboat, mapMentionTokens, mentionsAsText } from '@rowboat/spaces-protocol';
 import type {
   AcceptInviteResult,
   BlobInfo,
@@ -29,6 +30,8 @@ import type {
   Space,
   Topic,
   TopicListing,
+  UnreadSnapshot,
+  UnreadSpace,
 } from '@rowboat/spaces-protocol';
 
 // Renderer-facing surface for Spaces. The wire contract's single source of
@@ -69,6 +72,10 @@ export type {
   Topic,
   TopicListing,
 };
+
+/** The unread snapshot (read state, 2026-09-09): org-owned cursors in offsets. */
+export type SpacesUnreadSnapshot = UnreadSnapshot;
+export type SpacesUnreadSpace = UnreadSpace;
 
 /**
  * Poll creation as the renderer sends it (the wire's `NewPoll` block on
@@ -114,6 +121,8 @@ export interface SpacesStreamPage {
   topics: Topic[];
   /** Older roots exist below the returned window (listStream is windowed, newest-first). */
   hasMore: boolean;
+  /** The caller's stream mark (0 = never marked) — the New divider's anchor. */
+  readOffset: number;
 }
 
 /** One flat thread: the root, its annotation (null = a plain thread), windowed replies. */
@@ -122,6 +131,9 @@ export interface SpacesThreadPage {
   topic: Topic | null;
   messages: Message[];
   hasMore: boolean;
+  /** The caller's mark in this thread; null = not following (no mark is kept). */
+  readOffset: number | null;
+  following: boolean;
 }
 
 export interface SpacesPostResult {
@@ -254,102 +266,41 @@ export function whiteboardPathForName(name: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Mention scanning — one implementation for the renderer (composer highlight,
-// @rowboat trigger) and main (mention notifications).
-//
-// Address vs. cite rules (ported from buzz's mention scanner): text inside
-// code fences, inline code, and quoted lines is writing ABOUT someone, not
-// addressing them — stripped before scanning. The mention must sit at a word
-// boundary ("email@rowboat.com" never triggers).
+// Mentions — the protocol's link-token grammar (mentions.ts) is the ONLY
+// parser; these are the app's rendering faces of it, shared by the renderer
+// and the phone. Nothing here reads a mention out of a name: a token carries
+// the member id, the roster supplies the current name.
 // ---------------------------------------------------------------------------
 
-export function stripNonAddressRegions(text: string): string {
-  return text
-    .replace(/```[\s\S]*?(```|$)/g, ' ') // fenced code blocks (incl. unterminated)
-    .replace(/`[^`\n]*`/g, ' ') // inline code
-    .replace(/^[ \t]*>.*$/gm, ' '); // markdown-quoted lines (citing someone else's message)
-}
+export {
+  addressesRowboat,
+  mapMentionTokens,
+  mentionToken,
+  mentionsAsText,
+  parseMentions,
+  relabelMentions,
+  MENTION_TOKEN_RE,
+} from '@rowboat/spaces-protocol';
+export type { MentionRef, MentionStamps } from '@rowboat/spaces-protocol';
 
-/** Does the body genuinely ADDRESS @<handle>? Case-insensitive. */
-export function containsMemberAddress(body: string, handle: string): boolean {
-  return addressRegExp(handle).test(stripNonAddressRegions(body));
-}
-
-function addressRegExp(handle: string): RegExp {
-  const escaped = handle.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Negative lookahead: not a longer handle ("@arjun.k", "@Arjun Kumaraswamy"
-  // when matching "Arjun Kumar") — but trailing punctuation ("ping @arjun.")
-  // still counts as addressing.
-  return new RegExp(`(^|[\\s([{])@${escaped}(?!\\w|[.-]\\w)`, 'i');
-}
-
-/** What a mention can name someone by. Ids are opaque (spec §4), so people type the display name. */
-export interface MentionIdentity {
-  id: string;
-  displayName?: string;
-}
-
-/**
- * Does the body address this member? The composer inserts the DISPLAY NAME
- * (an org's member ids are opaque IdP subjects — "@01M0F8S2…" helps nobody
- * reading the log), so that is the primary form; the id still matches so
- * agent-written and older messages keep working.
- */
-export function mentionsMember(body: string, member: MentionIdentity): boolean {
-  const stripped = stripNonAddressRegions(body);
-  const handles = [member.displayName, member.id].filter((h): h is string => !!h && h.trim().length > 0);
-  return handles.some((handle) => addressRegExp(handle).test(stripped));
-}
-
-/** The @rowboat address — always the speaker's own agent (spec §8). */
+/** Does the body deliberately address @rowboat — a token, never the bare word (spec §8)? */
 export function containsRowboatAddress(body: string): boolean {
-  return containsMemberAddress(body, 'rowboat');
+  return addressesRowboat(body);
 }
 
 /**
- * The @here address — everyone in the space whose app is online, Slack-style.
- * There is no server fan-out: every member's client scans incoming messages
- * itself (mention-watch), so "online" is exactly "the app is running to see
- * this arrive"; whoever was away catches it in the missed-replay summary.
- */
-export function containsHereAddress(body: string): boolean {
-  return containsMemberAddress(body, 'here');
-}
-
-/**
- * The one walker that turns wire member addresses ("@<memberId>") into
- * people. Code regions stay literal (same address-vs-cite line the trigger
- * logic draws); unknown ids pass through untouched; @rowboat and @here keep
- * their handles. Every mention-rendering path — renderer surfaces AND main's
- * notification text — goes through here. Fix it once.
- */
-function mapMentions(body: string, memberNames: ReadonlyMap<string, string>, wrap: (handle: string) => string): string {
-  const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g);
-  return parts
-    .map((part, i) => {
-      if (i % 2 === 1) return part; // a code region — cite, not address
-      return part.replace(/(^|[\s([{])@([A-Za-z0-9][\w.-]*)/g, (match, pre: string, id: string) => {
-        if (id.toLowerCase() === 'rowboat') return `${pre}${wrap('@rowboat')}`;
-        if (id.toLowerCase() === 'here') return `${pre}${wrap('@here')}`;
-        const name = memberNames.get(id);
-        return name ? `${pre}${wrap(`@${name}`)}` : match;
-      });
-    })
-    .join('');
-}
-
-/**
- * For markdown surfaces (message bodies): "@<memberId>" becomes
- * "**@Display Name**" so the pipeline sets it off in bold.
+ * For markdown surfaces without the chip renderer (the phone): tokens become
+ * "**@Name**". Ids resolve through the roster; an id the roster no longer
+ * knows keeps the token's label.
  */
 export function decorateMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
-  return mapMentions(body, memberNames, (h) => `**${h}**`);
+  return mapMentionTokens(body, (ref) => `**@${ref.kind === 'member' ? (memberNames.get(ref.id) ?? ref.label) : ref.kind}**`);
 }
 
 /**
- * For plain-text surfaces (topic titles, crumbs, reasons, notification
- * bodies): same resolution, no markup — safe for search haystacks too.
+ * For plain-text surfaces (titles, crumbs, quotes, forwards, copied text,
+ * notification bodies): tokens become "@Name", no markup.
  */
 export function resolveMentions(body: string, memberNames: ReadonlyMap<string, string>): string {
-  return mapMentions(body, memberNames, (h) => h);
+  return mentionsAsText(body, memberNames);
 }

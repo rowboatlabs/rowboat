@@ -132,7 +132,7 @@ export class SpacesLive {
     };
   }
 
-  /** Receive member-addressed frames (`space_added`). Keeps the socket connected while registered. */
+  /** Receive member-addressed frames (`space_added`, `read_mark`, `notify`). Keeps the socket connected while registered. */
   onMemberFrame(handler: SpaceFrameHandler): () => void {
     this.memberHandlers.add(handler);
     this.ensureConnected();
@@ -324,7 +324,11 @@ export class SpacesLive {
       } catch {
         return; // a frame we don't understand is not a reason to drop the socket
       }
-      if (frame.kind === 'space_added') {
+      // Member-addressed frames carry a spaceId but ride no space
+      // subscription: someone put us in a space (space_added), one of our
+      // own connections moved a read mark (read_mark), or the org decided a
+      // message deserves our attention (notify).
+      if (frame.kind === 'space_added' || frame.kind === 'read_mark' || frame.kind === 'notify') {
         for (const h of this.memberHandlers) h(frame);
         return;
       }

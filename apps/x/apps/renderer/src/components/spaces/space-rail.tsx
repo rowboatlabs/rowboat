@@ -1,16 +1,10 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileListContextMenu } from '@/components/file-list-context-menu'
-import { Archive, ArchiveRestore, Bell, BellOff, Bot, Check, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
-import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub,
-    DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import {
-    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub,
-    ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
-} from '@/components/ui/context-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/lib/toast'
 import { SecondaryRail, type SecondaryRailContext } from '@/components/secondary-rail'
@@ -18,24 +12,18 @@ import { FileTree } from '@/components/spaces/files-tab'
 import { ServerOptionsMenu } from '@/components/spaces/server-options-menu'
 import { ServerSpaceNavigation } from '@/components/spaces-sidebar-section'
 import { refreshSpaceFeed, type OrgWithSpaces } from '@/hooks/use-spaces'
-import type { NotifyLevel, SpaceNotifyHandle } from '@/hooks/use-spaces-notify'
 import type { SpacePresence, StreamState } from '@/hooks/use-space-chat'
-import { prefetchThread, STREAM_READ_KEY } from '@/hooks/use-space-chat'
+import { prefetchThread } from '@/hooks/use-space-chat'
 import { useMemberNames } from '@/components/spaces/member-text'
 import { threadRefOf } from '@/lib/spaces-conventions'
 import { formatFeedTime, resolveMentions } from '@/lib/spaces-presentation'
-import { getTopicLastReadAt } from '@/lib/spaces-read-state'
+import { getStreamReadOffset, isThreadUnread, threadBadge, useReadStateVersion } from '@/lib/spaces-read-state'
+import { UnreadBadge } from '@/components/spaces/unread-badge'
 import type { RailSelection } from '@/lib/spaces-selection'
 
 // Server spaces and their nested discussions, then DMs, share the upper
 // scrolling pane. The selected space's files retain their resizable lower
 // pane. SecondaryRail owns docking, resizing, and the hover drawer.
-
-const NOTIFY_CHOICES: { level: NotifyLevel; label: string }[] = [
-    { level: 'all', label: 'All messages' },
-    { level: 'mentions', label: 'Mentions only' },
-    { level: 'mute', label: 'Muted' },
-]
 
 type RailSection = 'files'
 /** Collapsed sections persist like the rail's own pin. */
@@ -48,7 +36,7 @@ const FILES_MIN = 96
 const CHAT_MIN = 120
 
 export function SpaceRail({
-    org, onOpenSpace, onOpenDiscussion, orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, notify, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
+    org, onOpenSpace, onOpenDiscussion, orgId, spaceId, selfMemberId, stream, topics, changeSets, entries, draftFolders, presence, unreadPaths, selection, onSelect, onCreateFile, onCreateBoard, onUploadFiles, onOpenTrash, onAddFolder, onRemoveFolder,
     open, onTogglePin,
 }: {
     org: OrgWithSpaces
@@ -65,8 +53,6 @@ export function SpaceRail({
     draftFolders: readonly string[]
     presence: SpacePresence
     unreadPaths: ReadonlySet<string>
-    /** The pane's notification-prefs state — shared so the header's space-level changes reflect here live. */
-    notify: SpaceNotifyHandle
     selection: RailSelection
     onSelect: (selection: RailSelection) => void
     onCreateFile: (path: string) => void
@@ -156,16 +142,14 @@ export function SpaceRail({
         await manageTopic(topicId, { action: 'retitle', title })
     }
 
-    // Per-thread notification levels (the context/⋯ menus set them; the
-    // main-side watcher reads them), keyed by the thread's root message id.
-    // 'mute' also earns the row a glyph.
-    const effectiveLevel = (dest: string): NotifyLevel => notify.topics[dest] ?? notify.spaceLevel ?? 'mentions'
-
+    // Read state is org-owned (spaces-read-state); its version re-runs these.
+    const readVersion = useReadStateVersion()
     const generalUnread = useMemo(() => {
         if (!stream.ready) return 0
-        const mark = getTopicLastReadAt(orgId, spaceId, STREAM_READ_KEY)
-        return stream.messages.filter((m) => !m.pending && !m.failed && !m.deletedAt && (!mark || m.postedAt > mark) && m.author.memberId !== selfMemberId).length
-    }, [stream, orgId, spaceId, selfMemberId])
+        const mark = getStreamReadOffset(orgId, spaceId)
+        return stream.messages.filter((m) => !m.pending && !m.failed && !m.deletedAt && m.offset > mark && m.author.memberId !== selfMemberId).length
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [stream, orgId, spaceId, selfMemberId, readVersion])
 
     const artifactFiles = useMemo(() => {
         const counts = new Map<string, Set<string>>()
@@ -179,10 +163,8 @@ export function SpaceRail({
         return counts
     }, [changeSets])
 
-    const isUnread = (t: spaces.TopicListing) => {
-        const mark = getTopicLastReadAt(orgId, spaceId, t.rootMessageId)
-        return !mark || t.lastActivityAt > mark
-    }
+    // Followed threads only: a discussion you are not in never bolds.
+    const isUnread = (t: spaces.TopicListing) => isThreadUnread(orgId, spaceId, t.rootMessageId)
 
     const memberNames = useMemberNames()
     const byActivity = (a: { topic: spaces.TopicListing }, b: { topic: spaces.TopicListing }) => b.topic.lastActivityAt.localeCompare(a.topic.lastActivityAt)
@@ -201,12 +183,8 @@ export function SpaceRail({
     }
     const liveFiles = entries.filter((e) => !e.state).length
 
-    // The stream mutes under its own key, like any thread.
-    const generalBadge = effectiveLevel(STREAM_READ_KEY) === 'mute' ? 0 : generalUnread
-
-    // Muted destinations don't badge here either (same posture as the sidebar).
-    const unreadTopics =
-        topics.filter((t) => !t.archived && isUnread(t) && effectiveLevel(t.rootMessageId) !== 'mute').length + (generalBadge > 0 ? 1 : 0)
+    const generalBadge = generalUnread
+    const unreadTopics = topics.filter((t) => !t.archived && isUnread(t)).length + (generalBadge > 0 ? 1 : 0)
     const badge = unreadTopics + unreadPaths.size
 
     const filesCollapsed = collapsed.has('files')
@@ -246,10 +224,7 @@ export function SpaceRail({
                             renderActiveDiscussions={(limit) => <>
                         {topicRows.slice(0, limit).map(({ topic, title }) => {
                             const active = topic.rootMessageId === selectedRootId
-                            const muted = effectiveLevel(topic.rootMessageId) === 'mute'
-                            // Muted topics don't clamor: no bold, no dot,
-                            // greyed like archived (the conversation treatment).
-                            const unread = isUnread(topic) && !muted
+                            const unread = isUnread(topic)
                             const replies = topic.rootMessage?.replyCount ?? 0
                             const files = artifactFiles.get(topic.rootMessageId)
                             const working = (presence.working.get(topic.rootMessageId) ?? []).length > 0
@@ -285,7 +260,7 @@ export function SpaceRail({
                                                         // Hover = intent: warm the replies so the click paints instantly.
                                                         onMouseEnter={() => prefetchThread(orgId, spaceId, topic.rootMessageId)}
                                                         // The row shows only what changes what you do next: unread,
-                                                        // a Rowboat at work, muted. The full title, replies, recency
+                                                        // a Rowboat at work. The full title, replies, recency
                                                         // and touched files ride the tooltip — the list is already
                                                         // sorted by activity.
                                                         className={cn(
@@ -293,15 +268,14 @@ export function SpaceRail({
                                                             // pr-7 keeps the title and indicators clear of the ⋯ slot.
                                                             'flex h-8 w-full items-center gap-2 rounded pl-5 pr-7 text-left',
                                                             active ? 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]' : 'hover:bg-accent/50',
-                                                            (topic.archived || muted) && 'opacity-60',
+                                                            topic.archived && 'opacity-60',
                                                         )}
                                                     >
                                                         {/* In the Messages icon column: a discussion branches off the stream. */}
                                                         <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
                                                         <span className={cn('min-w-0 flex-1 truncate text-[13px]', unread ? 'font-semibold' : 'font-normal')}>{title}</span>
                                                         {working && <Bot className="size-3 shrink-0 text-muted-foreground" aria-label="a Rowboat is working here" />}
-                                                        {muted && <BellOff className="size-3 shrink-0 text-muted-foreground" aria-label="muted" />}
-                                                        {unread && !active && <span className="size-1.5 shrink-0 rounded-full bg-foreground" aria-label="unread" />}
+                                                        {!active && <UnreadBadge badge={threadBadge(orgId, spaceId, topic.rootMessageId, false)} />}
                                                     </button>
                                                 </ContextMenuTrigger>
                                             </TooltipTrigger>
@@ -320,25 +294,6 @@ export function SpaceRail({
                                             <ContextMenuItem onSelect={() => setRenaming({ topicId: topic.id, value: title })}>
                                                 <Pencil className="size-3.5 mr-2" /> Rename
                                             </ContextMenuItem>
-                                            <ContextMenuSub>
-                                                <ContextMenuSubTrigger>
-                                                    <Bell className="size-3.5 mr-2" /> Notifications
-                                                </ContextMenuSubTrigger>
-                                            {/* Overrides key on the thread's ROOT message id, never topic.id: the
-                                                watcher (main) and the unread badge both resolve a message to
-                                                `threadRoot ?? id` and look the level up by that. */}
-                                                <ContextMenuSubContent>
-                                                    {NOTIFY_CHOICES.map((c) => (
-                                                        <ContextMenuItem key={c.level} onSelect={() => notify.setTopicLevel(topic.rootMessageId, c.level)}>
-                                                            <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] !== c.level && 'opacity-0')} /> {c.label}
-                                                        </ContextMenuItem>
-                                                    ))}
-                                                    <ContextMenuSeparator />
-                                                    <ContextMenuItem onSelect={() => notify.setTopicLevel(topic.rootMessageId, null)}>
-                                                        <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] && 'opacity-0')} /> Space default
-                                                    </ContextMenuItem>
-                                                </ContextMenuSubContent>
-                                            </ContextMenuSub>
                                             <ContextMenuSeparator />
                                             {topic.archived ? (
                                                 <ContextMenuItem onSelect={() => void manageTopic(topic.id, { action: 'unarchive' })}>
@@ -368,22 +323,6 @@ export function SpaceRail({
                                             <DropdownMenuItem onClick={() => setRenaming({ topicId: topic.id, value: title })}>
                                                 <Pencil className="size-3.5 mr-2" /> Rename
                                             </DropdownMenuItem>
-                                            <DropdownMenuSub>
-                                                <DropdownMenuSubTrigger>
-                                                    <Bell className="size-3.5 mr-2" /> Notifications
-                                                </DropdownMenuSubTrigger>
-                                                <DropdownMenuSubContent>
-                                                    {NOTIFY_CHOICES.map((c) => (
-                                                        <DropdownMenuItem key={c.level} onClick={() => notify.setTopicLevel(topic.rootMessageId, c.level)}>
-                                                            <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] !== c.level && 'opacity-0')} /> {c.label}
-                                                        </DropdownMenuItem>
-                                                    ))}
-                                                    <DropdownMenuSeparator />
-                                                    <DropdownMenuItem onClick={() => notify.setTopicLevel(topic.rootMessageId, null)}>
-                                                        <Check className={cn('size-3.5 mr-2', notify.topics[topic.rootMessageId] && 'opacity-0')} /> Space default
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuSubContent>
-                                            </DropdownMenuSub>
                                             {topic.archived ? (
                                                 <DropdownMenuItem onClick={() => void manageTopic(topic.id, { action: 'unarchive' })}>
                                                     <ArchiveRestore className="size-3.5 mr-2" /> Unarchive

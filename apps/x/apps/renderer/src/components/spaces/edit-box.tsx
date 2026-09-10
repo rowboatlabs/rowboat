@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
-import { caretContext, composerExtensions, composerMarkdown } from '@/components/spaces/composer-editor'
+import { composerExtensions, composerMarkdown } from '@/components/spaces/composer-editor'
 import { RichFormattingToolbar } from '@/components/spaces/composer-toolbar'
 import { MentionMenu, useMentionAutocomplete } from '@/components/spaces/mention-autocomplete'
 import { useSpaceProfiles } from '@/components/spaces/member-text'
-import { mentionEndingAtCaret } from '@/lib/spaces-presentation'
 import '@/styles/space-composer.css'
 
 /**
@@ -54,16 +53,6 @@ export function MessageEditBox({ initial, onChange, onSave, onCancel, children }
         if (e.key === 'Escape') {
             onCancel()
             return true
-        }
-        if (e.key === 'Backspace' && editor) {
-            // A mention deletes as one unit (the Discord behavior, same as
-            // the composer); caretContext bows out for selections and code.
-            const ctx = caretContext(editor)
-            const start = ctx ? mentionEndingAtCaret(ctx.text, members.map((m) => m.displayName)) : null
-            if (ctx && start !== null) {
-                return editor.chain().focus().deleteRange({ from: ctx.from - (ctx.text.length - start), to: ctx.from }).run()
-            }
-            return false
         }
         if (e.key === 'Enter') {
             // ⌘Enter saves from anywhere, even inside a code fence — the

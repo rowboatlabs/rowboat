@@ -78,3 +78,28 @@ prunes immediately; a receipts check ~15 min later prunes the rest.
 `registerWithMac` grows a sibling: after Spaces sign-in the app calls
 `registerPush` on every org it belongs to, and again when the level
 changes. Same Notifications screen, no UI change.
+
+## Amendment 2026-09-10 — mentions are stamped, not parsed
+
+The classifier no longer scans bodies. Mentions on the wire are link tokens
+(`[@Name](#member:<id>)`, `[@here](#here)`) and the org stamps
+`Message.mentions` / `mentionsHere` at post and edit (CONTRACT.md, the
+mentions bullet); `classifyFor` reads the stamp, so a push and a badge can
+never disagree about whether someone was addressed. The per-member level and
+the Expo delivery path are unchanged; the org-side notification policy that
+replaces the level is a later layer of the unread arc.
+
+## Amendment 2026-09-10 — one decision, two deliveries
+
+The decision moved out of this module into `notify.ts` (CONTRACT.md, the
+notifications bullet): after a message commits, the org decides once, for
+every member of the space, whether and why they should hear about it —
+`mention` > `here` > `dm` > `reply` (a thread they follow) > plain — and the
+same rows reach desktops as a `notify` frame on the member channel and
+phones through this sender. `PushSender.onMessage` became `send(space,
+message, rows)`: level gating and Expo delivery only. Two consequences for
+the phone: replies in followed threads now push (every level but `off`,
+Slack's default-on threads toggle), and a member's own agent addressing them
+pushes them (an agent's post is the agent's act — the same symmetry read
+state keeps). The per-member level is still phone-only and still the
+placeholder for the org-side policy layer.

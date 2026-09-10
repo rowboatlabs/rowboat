@@ -278,7 +278,7 @@ const memberFrameListeners = new Set<MemberFrameListener>();
  * Member-addressed live frames from EVERY org (`space_added`: someone opened
  * a DM with us — direct messages 2026-09-07). One registration covers orgs
  * added later too: each org's socket fans out to this set as it is created.
- * Hosts relay these to the renderer; the mention watcher re-syncs on them.
+ * Hosts relay these to the renderer, whose orgs store refreshes on them.
  */
 export function onMemberFrame(listener: MemberFrameListener): () => void {
   memberFrameListeners.add(listener);

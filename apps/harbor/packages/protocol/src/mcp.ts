@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MENTION_GRAMMAR } from './mentions.js';
 import { NewPoll } from './api.js';
 import { BlobInfo } from './blob.js';
 import {
@@ -245,7 +246,8 @@ export const postMessage = tool({
     'to post a new root into the stream. Posting never creates a topic (use create_topic to give a ' +
     'thread a goal). Replying to an archived topic revives it. Attach a `poll` to post a poll ' +
     '(question + 2–10 answers; the body must still carry a plain-text rendering of it for clients ' +
-    'that cannot show the card). Works on a DM exactly as on a space.',
+    'that cannot show the card). Works on a DM exactly as on a space. ' +
+    MENTION_GRAMMAR,
   input: z.object({
     spaceId: SpaceId,
     threadRoot: MessageId.optional(),
@@ -260,7 +262,8 @@ export const editMessage = tool({
   description:
     "Rewrite the body of one of your person's own messages in place (author-only: you act as " +
     'them, so their messages and nothing else). The old text is gone everywhere; the message ' +
-    'shows an edited mark. Poll messages and deleted messages refuse. Returns the updated message.',
+    'shows an edited mark. Poll messages and deleted messages refuse. Returns the updated message. ' +
+    MENTION_GRAMMAR,
   input: z.object({ spaceId: SpaceId, messageId: MessageId, body: z.string().min(1).max(65_536) }),
   output: z.object({ message: Message }),
 });
@@ -343,7 +346,8 @@ export const createTopic = tool({
     'Give a thread a title (the UI calls it a Discussion), putting it on the rail. Provide ' +
     'rootMessageId to title an existing thread (use its root, not a reply), or body to post a new ' +
     'root message and title it in one step — exactly one of the two. Titles are goals ' +
-    '("Decide: launch cut"), not summaries. At most one topic per thread.',
+    '("Decide: launch cut"), not summaries. At most one topic per thread. ' +
+    MENTION_GRAMMAR,
   input: z.object({
     spaceId: SpaceId,
     rootMessageId: MessageId.optional(),

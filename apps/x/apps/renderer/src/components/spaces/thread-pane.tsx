@@ -1,6 +1,7 @@
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bell, BellOff, Bot, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -25,7 +26,7 @@ import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { attributionLabel, formatFeedTime, resolveMentions, shortId } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
-import { getTopicLastReadAt, markTopicRead } from '@/lib/spaces-read-state'
+import { getThreadReadState, markThreadRead, noteThread, useReadStateVersion } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
@@ -124,7 +125,14 @@ export function ThreadPane({
         return () => window.removeEventListener('keydown', onKey)
     }, [visible, onBack])
 
-    const [newSince, setNewSince] = useState<string | null>(() => getTopicLastReadAt(org.id, space.id, rootMessageId))
+    // Marks are offsets now (org-owned); only a followed thread has one, and 0 = no line.
+    const armedMark = (): number | null => {
+        const t = getThreadReadState(org.id, space.id, rootMessageId)
+        return t?.following && t.readOffset > 0 ? t.readOffset : null
+    }
+    const newestOffset = (list: ChatMessage[], fallback: number): number =>
+        list.reduce((max, m) => (!m.pending && !m.failed && m.offset > max ? m.offset : max), fallback)
+    const [newSince, setNewSince] = useState<number | null>(armedMark)
     const [newFading, setNewFading] = useState(false)
     // Each return to the thread re-arms the line at the catch-up point: the
     // read mark as it stood while hidden. Declared BEFORE the visible
@@ -135,7 +143,8 @@ export function ThreadPane({
         newArmedVisibleRef.current = visible
         if (!visible || was) return
         setNewFading(false)
-        setNewSince(getTopicLastReadAt(org.id, space.id, rootMessageId))
+        setNewSince(armedMark())
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [visible, org.id, space.id, rootMessageId])
 
     useEffect(() => {
@@ -164,7 +173,15 @@ export function ThreadPane({
                 // Keep the stream's copy of the chip data current too.
                 updateStreamMessage(org.id, space.id, res.root)
                 if (res.topic) ingestTopic(org.id, space.id, res.topic)
-                if (visibleRef.current) markTopicRead(org.id, space.id, rootMessageId)
+                // The org's word on this thread for us: following + mark. It
+                // arms the New line when nothing did yet, then reading starts.
+                setNewSince((current) => current ?? (res.following && res.readOffset ? res.readOffset : null))
+                noteThread(org.id, space.id, rootMessageId, {
+                    following: res.following,
+                    readOffset: res.readOffset,
+                    ...(res.root.lastReplyOffset !== undefined ? { lastReplyOffset: res.root.lastReplyOffset } : {}),
+                })
+                if (visibleRef.current) markThreadRead(org.id, space.id, rootMessageId, newestOffset(res.messages, res.root.offset))
             })
             .catch(() => {})
         return () => {
@@ -185,8 +202,9 @@ export function ThreadPane({
     // Refetches that landed while hidden left the thread unread on purpose —
     // becoming visible again is the moment the reader actually sees them.
     useEffect(() => {
-        if (visible && loaded) markTopicRead(org.id, space.id, rootMessageId)
-    }, [visible, loaded, org.id, space.id, rootMessageId])
+        if (visible && loaded && root) markThreadRead(org.id, space.id, rootMessageId, newestOffset(messages, root.offset))
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [visible, loaded, org.id, space.id, rootMessageId, messages.length])
 
     const loadOlderReplies = async () => {
         const oldest = messages.find((m) => !m.pending && !m.failed)
@@ -254,12 +272,12 @@ export function ThreadPane({
 
     // Once the reader has caught up (this pane pins to the bottom, so visible
     // = with the new messages) the line lingers a beat, fades, drops.
-    const hasNewLine = !!newSince && replies.some((m) => !m.deletedAt && m.postedAt > newSince && m.author.memberId !== org.memberId)
+    const hasNewLine = !!newSince && replies.some((m) => !m.deletedAt && m.offset > newSince && m.author.memberId !== org.memberId)
     // Jump-to-unread: the pane opens at the bottom; when the New line sits
     // above the fold a pill scrolls to it. Dismissed by use; re-arms with the
     // divider (adjust-on-change).
     const newCount = newSince
-        ? replies.filter((m) => !m.deletedAt && m.postedAt > newSince && m.author.memberId !== org.memberId).length
+        ? replies.filter((m) => !m.deletedAt && m.offset > newSince && m.author.memberId !== org.memberId).length
         : 0
     const [newJumped, setNewJumped] = useState(false)
     const [lastNewSince, setLastNewSince] = useState(newSince)
@@ -295,13 +313,33 @@ export function ThreadPane({
     /** What @rowboat and sessions call this conversation. */
     const threadLabel = topic?.title ?? threadLabelOf(root?.body ?? '')
 
+    // Following (org-owned read state): only a followed thread badges you.
+    // The org follows you in when you reply, when someone replies to your
+    // root, or when you are mentioned; this is the manual override.
+    useReadStateVersion()
+    const following = getThreadReadState(org.id, space.id, rootMessageId)?.following ?? false
+    const toggleFollow = async () => {
+        const next = !following
+        const current = getThreadReadState(org.id, space.id, rootMessageId)
+        noteThread(org.id, space.id, rootMessageId, {
+            following: next,
+            readOffset: current?.readOffset ?? null,
+            ...(root?.lastReplyOffset !== undefined ? { lastReplyOffset: root.lastReplyOffset } : {}),
+        })
+        try {
+            const res = await window.ipc.invoke('spaces:followThread', { orgId: org.id, spaceId: space.id, rootMessageId, following: next })
+            noteThread(org.id, space.id, rootMessageId, { following: res.following, readOffset: res.readOffset })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not update following', 'error')
+        }
+    }
+
     // Optimistic send, same shape as the stream's: render now (dimmed as
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
     const post = async (body: string, agent?: AgentOptions) => {
         const pending = buildPendingMessage(space.id, org.memberId, body, rootMessageId)
         setMessages((prev) => [...prev, pending])
-        markTopicRead(org.id, space.id, rootMessageId)
         void window.ipc
             .invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             .then((result) => {
@@ -309,7 +347,8 @@ export function ThreadPane({
                     const rest = prev.filter((m) => m.id !== pending.id)
                     return rest.some((m) => m.id === result.message.id) ? rest : [...rest, result.message].sort((a, b) => a.offset - b.offset)
                 })
-                markTopicRead(org.id, space.id, rootMessageId)
+                // Replying follows the thread and reads it up to our reply (the org's rule); mirror it.
+                noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
                 analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: containsRowboatAddress(body) })
                 maybeInvokeRowboat(org, space, { rootMessageId, label: threadLabel }, result.message.id, body, agent)
             })
@@ -329,10 +368,10 @@ export function ThreadPane({
         setFolding(true)
         onFolding?.(true)
         try {
-            const body = `@rowboat fold this thread’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
+            const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             echo(result.message)
-            markTopicRead(org.id, space.id, rootMessageId)
+            noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
             analytics.spacesFoldRequested()
             maybeInvokeRowboat(org, space, { rootMessageId, label: threadLabel }, result.message.id, body)
         } catch (err) {
@@ -392,7 +431,7 @@ export function ThreadPane({
         try {
             const { message: posted } = await postPoll({ orgId: org.id, spaceId: space.id, rootMessageId, input })
             echo(posted)
-            markTopicRead(org.id, space.id, rootMessageId)
+            noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: posted.offset, lastReplyOffset: posted.offset })
             analytics.spacesMessagePosted({ kind: 'topic', mentionsRowboat: false })
         } catch (err) {
             toast(err instanceof Error ? err.message : 'Could not post the poll', 'error')
@@ -596,7 +635,7 @@ export function ThreadPane({
     let prev: spaces.Message | undefined
     let newShown = false
     for (const message of visibleReplies) {
-        if (!newShown && newSince && message.postedAt > newSince && message.author.memberId !== org.memberId) {
+        if (!newShown && newSince && message.offset > newSince && message.author.memberId !== org.memberId) {
             rows.push(<NewDivider key="new" fading={newFading} />)
             newShown = true
             prev = undefined
@@ -673,6 +712,17 @@ export function ThreadPane({
                     // the run ends.
                     <Button variant="ghost" size="xs" className="gap-1 px-2 text-muted-foreground" onClick={() => void openTopicSession()} title="Open the agent chat for this thread">
                         <Bot className="size-3.5" /> Chat
+                    </Button>
+                )}
+                {root && (
+                    <Button
+                        variant="ghost"
+                        size="xs"
+                        className={cn('gap-1 px-2', following ? 'text-foreground' : 'text-muted-foreground')}
+                        onClick={() => void toggleFollow()}
+                        title={following ? 'Following — new replies here badge you. Click to stop.' : 'Follow — new replies here will badge you.'}
+                    >
+                        {following ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />} {following ? 'Following' : 'Follow'}
                     </Button>
                 )}
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}

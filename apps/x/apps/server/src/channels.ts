@@ -316,14 +316,12 @@ export const RPC_CHANNELS = [
   'spaces:presence',
   'spaces:whiteboard',
   'spaces:bounceLive',
-  // Notify prefs, DND and the scheduler: the mention watcher and the
-  // scheduler tick run in this process (initCoreServices), and both read
-  // their files through an in-memory cache — so the writes must land here
-  // too, or a mute set in main is invisible until the server restarts.
-  'spaces:getNotifyPrefs',
-  'spaces:setNotifyPref',
-  'spaces:getDnd',
-  'spaces:setDnd',
+  'spaces:markRead',
+  'spaces:followThread',
+  'spaces:getUnread',
+  // The scheduler: its tick runs in this process (initCoreServices) and reads
+  // its file through an in-memory cache — so the writes must land here too,
+  // or an item scheduled in main is invisible until the server restarts.
   'spaces:schedule',
   'spaces:listScheduled',
   'spaces:cancelScheduled',

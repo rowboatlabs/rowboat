@@ -4135,28 +4135,22 @@ export const ipcSchemas = {
     req: z.object({ orgId: z.string(), spaceId: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
-  // Notification levels for the mention watcher: a space-wide level plus
-  // per-thread overrides. null = inherit (thread → space → the 'mentions'
-  // default). Stored main-side (the watcher runs there, screen or no screen).
-  // `topicId` is the thread's ROOT MESSAGE id, never a Topic row id: the
-  // watcher resolves a message to `threadRoot ?? id` and looks up by that.
-  'spaces:getNotifyPrefs': {
-    req: z.object({ orgId: z.string(), spaceId: z.string() }),
-    res: z.object({
-      spaceLevel: z.enum(['all', 'mentions', 'mute']).nullable(),
-      topics: z.record(z.string(), z.enum(['all', 'mentions', 'mute'])),
-    }),
+  // Read state — org-owned cursors in OFFSETS (2026-09-09). markRead advances
+  // the stream mark (no threadRootId) or a followed thread's; the org answers
+  // with the stored mark (null = not following, nothing recorded). getUnread
+  // is the snapshot the renderer folds live frames onto; the org's read_mark
+  // member frames arrive on 'spaces:events' like every other frame.
+  'spaces:markRead': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), threadRootId: z.string().optional(), offset: z.number() }),
+    res: z.object({ readOffset: z.number().nullable() }),
   },
-  'spaces:setNotifyPref': {
-    req: z.object({
-      orgId: z.string(),
-      spaceId: z.string(),
-      /** Absent = set the space-wide level. */
-      topicId: z.string().optional(),
-      /** null clears the override back to inherit. */
-      level: z.enum(['all', 'mentions', 'mute']).nullable(),
-    }),
-    res: z.object({ success: z.literal(true) }),
+  'spaces:followThread': {
+    req: z.object({ orgId: z.string(), spaceId: z.string(), rootMessageId: z.string(), following: z.boolean() }),
+    res: z.object({ following: z.boolean(), readOffset: z.number() }),
+  },
+  'spaces:getUnread': {
+    req: z.object({ orgId: z.string() }),
+    res: z.custom<SpacesTypes.SpacesUnreadSnapshot>(),
   },
   // Scheduled sends and reminders — the main-side queue (core scheduler).
   // 'message' posts to the topic at `at`; 'reminder' notifies the member.
@@ -4193,15 +4187,6 @@ export const ipcSchemas = {
   },
   'spaces:cancelScheduled': {
     req: z.object({ id: z.string() }),
-    res: z.object({ success: z.literal(true) }),
-  },
-  // Do-not-disturb: one global until-instant gating the mention watcher.
-  'spaces:getDnd': {
-    req: z.null(),
-    res: z.object({ until: z.string().nullable() }),
-  },
-  'spaces:setDnd': {
-    req: z.object({ until: z.string().nullable() }),
     res: z.object({ success: z.literal(true) }),
   },
   // Ephemeral presence from the human surface (viewing / typing / idle), scoped

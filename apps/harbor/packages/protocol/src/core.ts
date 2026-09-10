@@ -224,6 +224,10 @@ export const MessageEdit = z.object({
   body: z.string().min(1).max(65_536),
   by: Attribution,
   at: z.iso.datetime(),
+  /** The re-stamped addresses (mentions.ts) — folding clients update them with the body. */
+  mentions: z.array(MemberId).default([]),
+  mentionsHere: z.boolean().default(false),
+  mentionsRowboat: z.boolean().default(false),
 });
 export type MessageEdit = z.infer<typeof MessageEdit>;
 
@@ -256,6 +260,12 @@ export const Message = z.object({
   replyCount: z.number().int().nonnegative().default(0),
   /** When the newest reply landed (roots with replies only) — chip recency + rail sorting. */
   lastReplyAt: z.iso.datetime().optional(),
+  /**
+   * Offset of the newest LIVE reply (roots with replies only; tombstoned
+   * replies excluded, unlike lastReplyAt). Read marks compare against it: a
+   * followed thread is unread when this exceeds the member's mark.
+   */
+  lastReplyOffset: StreamOffset.optional(),
   /** Provenance when this root was posted in reply to an activity row (a change-set). */
   anchorChangeSetId: ChangeSetId.optional(),
   /** Set when the author deleted the message (deleter == author, so no separate attribution). */
@@ -276,5 +286,14 @@ export const Message = z.object({
    * the poll along with the body.
    */
   poll: Poll.optional(),
+  /**
+   * Who this message addresses — STAMPED by the org at post and edit from the
+   * body's mention tokens (mentions.ts), never from names, and only ids that
+   * are members of the space. Unread counts, Activity, and push read these;
+   * nothing anywhere re-parses text. Defaults keep pre-stamp payloads parsing.
+   */
+  mentions: z.array(MemberId).default([]),
+  mentionsHere: z.boolean().default(false),
+  mentionsRowboat: z.boolean().default(false),
 });
 export type Message = z.infer<typeof Message>;

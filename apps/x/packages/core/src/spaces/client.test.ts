@@ -456,3 +456,28 @@ async function waitFor(pred: () => boolean, label: string, timeoutMs = 3000): Pr
     await new Promise((r) => setTimeout(r, 25));
   }
 }
+
+describe('read state', () => {
+  it('marks are org-owned offsets: posting reads, marking clears, the snapshot agrees', async () => {
+    const space = await ramnique.createSpace('Read marks');
+    const invite = await ramnique.createInvite(space.id);
+    await gagan.acceptInvite(invite.token);
+
+    const { message } = await ramnique.postMessage(space.id, { body: 'hello', actingMode: 'direct' });
+    const before = (await gagan.unread()).spaces.find((s) => s.spaceId === space.id)!;
+    expect(before).toMatchObject({ readOffset: 0, unreadRoots: 1, threads: [] });
+    expect((await gagan.listStream(space.id)).readOffset).toBe(0);
+
+    expect(await gagan.markRead(space.id, { offset: message.offset })).toEqual({ readOffset: message.offset });
+    expect((await gagan.unread()).spaces.find((s) => s.spaceId === space.id)).toMatchObject({ unreadRoots: 0, readOffset: message.offset });
+
+    // Replying follows; the root's author follows from that reply on.
+    const { message: reply } = await gagan.postMessage(space.id, { threadRoot: message.id, body: 'hi back', actingMode: 'direct' });
+    expect(await gagan.listThread(space.id, message.id)).toMatchObject({ following: true, readOffset: reply.offset });
+    expect((await ramnique.unread()).spaces.find((s) => s.spaceId === space.id)!.threads).toEqual([
+      { rootMessageId: message.id, readOffset: message.offset, lastReplyOffset: reply.offset, unreadReplies: 1, unreadMentions: 0 },
+    ]);
+    expect(await ramnique.followThread(space.id, message.id, false)).toEqual({ following: false, readOffset: message.offset });
+    expect((await ramnique.unread()).spaces.find((s) => s.spaceId === space.id)!.threads).toEqual([]);
+  });
+});

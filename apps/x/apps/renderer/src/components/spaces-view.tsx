@@ -2,11 +2,11 @@ import '@/styles/spaces.css'
 import { ThreadResizeHandle, THREAD_DEFAULT_WIDTH, THREAD_MIN_WIDTH, THREAD_DIVIDER_WIDTH, STREAM_MIN_WIDTH } from '@/components/spaces/thread-resize-handle'
 import { getViewerType } from '@/lib/file-types'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BellOff, Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Users } from 'lucide-react'
+import { Check, Clock, Columns2, Copy, FileText, FolderOpen, Hash, Link as LinkIcon, Loader2, MoreHorizontal, PenTool, Plus, Users } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
-    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -25,16 +25,15 @@ import { railKey, type RailSelection } from '@/lib/spaces-selection'
 import { ThreadPane } from '@/components/spaces/thread-pane'
 import { STREAM_READ_KEY, useSpacePresence, useStream } from '@/hooks/use-space-chat'
 import { refreshMembers, useSpaceMembers } from '@/hooks/use-space-members'
-import { findSpace, useSpaceFeed, useSpaceLastReadAt, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
+import { findSpace, useSpaceFeed, useSpaceLive, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
 import { directAvatarId, directLabel, isSelfDirect } from '@/lib/spaces-direct'
-import { useSpaceNotifyPrefs, type NotifyLevel } from '@/hooks/use-spaces-notify'
 import { requestJump } from '@/lib/spaces-jump'
 import { chord } from '@/lib/shortcut'
 import { SpaceMembersProvider, SpaceProfilesProvider } from '@/components/spaces/member-text'
 import { AttachmentColumn, SpaceNavProvider, SpaceRefsProvider } from '@/components/spaces/space-markdown'
 import { artifactsForThread, threadLabelOf } from '@/lib/spaces-conventions'
 import { isUnreadChange, resolveMentions } from '@/lib/spaces-presentation'
-import { markRead, markTopicRead } from '@/lib/spaces-read-state'
+import { getSpaceReadState, markStreamRead, markThreadRead, useStreamReadOffset } from '@/lib/spaces-read-state'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import * as analytics from '@/lib/analytics'
@@ -239,18 +238,17 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
     const feed = useSpaceFeed(org.id, space.id)
     const stream = useStream(org.id, space.id)
     const presence = useSpacePresence(org.id, space.id, org.memberId)
-    const lastReadAt = useSpaceLastReadAt(org.id, space.id)
+    const readOffset = useStreamReadOffset(org.id, space.id)
     // The roster comes from the module store (cached, hydrated in render) so
     // names resolve in the same first frame as the stream's cached tail.
     const members = useSpaceMembers(org.id, space.id)
     const memberNames = useMemo(() => new Map(members.map((m) => [m.id, m.displayName])), [members])
     // A direct message is this same pane with a two-person roster: named by
-    // the other person, no invites, every message notifies by default.
+    // the other person, no invites.
     const isDirect = space.kind === 'direct'
     const isSelf = isSelfDirect(space, org.memberId)
     const directOtherId = directAvatarId(space, org.memberId)
     const spaceTitle = isDirect ? directLabel(space, members, org.memberId) : space.name
-    const notifyDefault: NotifyLevel = isDirect ? 'all' : 'mentions'
 
     // The artifacts rail: open by default when a thread has artifacts, collapsed
     // when it has none; a per-thread pin remembers a manual toggle.
@@ -308,60 +306,23 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
         }
     }
 
-    // Space-wide notification level ('mentions' is the default; topics
-    // override per-row from the rail's menus).
-    const notify = useSpaceNotifyPrefs(org.id, space.id)
-    const notifyChoices: { level: NotifyLevel; label: string }[] = [
-        { level: 'all', label: 'All messages' },
-        { level: 'mentions', label: 'Mentions only' },
-        { level: 'mute', label: 'Muted' },
-    ]
-
-    // Do-not-disturb — one global until-instant; the mention watcher (main)
-    // drops everything while it holds. The bell shows the state.
-    const [dndUntil, setDndUntilState] = useState<string | null>(null)
-    useEffect(() => {
-        void window.ipc.invoke('spaces:getDnd', null).then((r) => setDndUntilState(r.until)).catch(() => {})
-    }, [])
-    // A clock the render may read: ticks every 30s so the bell clears itself
-    // when the DND instant passes (Date.now() in render is impure and never
-    // re-runs on its own).
-    const [now, setNow] = useState(() => Date.now())
-    useEffect(() => {
-        const t = setInterval(() => setNow(Date.now()), 30_000)
-        return () => clearInterval(t)
-    }, [])
-    const dndActive = !!dndUntil && new Date(dndUntil).getTime() > now
-    const setDnd = (minutes: number | null) => {
-        const until = minutes === null ? null : new Date(Date.now() + minutes * 60_000).toISOString()
-        setDndUntilState(until)
-        void window.ipc.invoke('spaces:setDnd', { until }).catch(() => {})
-    }
-    const setDndUntilTomorrow = () => {
-        const t = new Date()
-        t.setDate(t.getDate() + 1)
-        t.setHours(9, 0, 0, 0)
-        setDndUntilState(t.toISOString())
-        void window.ipc.invoke('spaces:setDnd', { until: t.toISOString() }).catch(() => {})
-    }
-
     // The scheduled sends/reminders list (⋯ menu).
     const [scheduledOpen, setScheduledOpen] = useState(false)
 
     const markAllRead = () => {
-        markRead(org.id, space.id)
-        markTopicRead(org.id, space.id, STREAM_READ_KEY)
-        for (const t of feed.topics) markTopicRead(org.id, space.id, t.rootMessageId)
-        for (const m of stream.messages) {
-            if (!m.pending && !m.failed && (m.replyCount ?? 0) > 0) markTopicRead(org.id, space.id, m.id)
-        }
+        // Everything: the stream up to head (or the newest loaded root, if
+        // that is further), and every followed thread up to its newest reply.
+        const state = getSpaceReadState(org.id, space.id)
+        const newest = stream.messages.reduce((max, m) => (!m.pending && !m.failed && m.offset > max ? m.offset : max), 0)
+        markStreamRead(org.id, space.id, Math.max(state?.head ?? 0, newest))
+        for (const [root, t] of state?.threads ?? []) if (t.following) markThreadRead(org.id, space.id, root, t.lastReplyOffset)
     }
 
     const unreadPaths = useMemo(
         // Boards are excluded: their saves are throttled snapshots, not reading
         // material — the boards rail is their surface, not the files tree.
-        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, lastReadAt, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetPath)),
-        [feed.changeSets, lastReadAt, org.memberId],
+        () => new Set(feed.changeSets.filter((c) => isUnreadChange(c, readOffset, org.memberId) && !spaces.isWhiteboardPath(c.assetPath)).map((c) => c.assetPath)),
+        [feed.changeSets, readOffset, org.memberId],
     )
 
     // ------------------------------------------------------------------
@@ -809,45 +770,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                         )}
                     </PopoverContent>
                 </Popover>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <button
-                            type="button"
-                            title={dndActive
-                                ? `Do not disturb until ${new Date(dndUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-                                : `Notifications — ${notifyChoices.find((c) => c.level === (notify.spaceLevel ?? notifyDefault))?.label ?? 'Mentions only'}`}
-                            className={cn(
-                                'inline-flex size-7 items-center justify-center rounded-md hover:bg-accent',
-                                dndActive ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground hover:text-foreground',
-                            )}
-                        >
-                            {dndActive || notify.spaceLevel === 'mute' ? <BellOff className="size-4" /> : <Bell className="size-4" />}
-                        </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        {/* The space's level — what reaches you from here. */}
-                        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">This space</DropdownMenuLabel>
-                        {notifyChoices.map((c) => (
-                            <DropdownMenuItem key={c.level} onClick={() => notify.setSpaceLevel(c.level)}>
-                                <Check className={cn('size-3.5 mr-2', (notify.spaceLevel ?? notifyDefault) !== c.level && 'opacity-0')} /> {c.label}
-                            </DropdownMenuItem>
-                        ))}
-                        <DropdownMenuSeparator />
-                        {/* Do not disturb — everything, for a while. */}
-                        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                            {dndActive ? `Do not disturb until ${new Date(dndUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Do not disturb'}
-                        </DropdownMenuLabel>
-                        {dndActive && (
-                            <DropdownMenuItem onClick={() => setDnd(null)}>
-                                <Bell className="size-3.5 mr-2" /> Turn off
-                            </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem onClick={() => setDnd(30)}>For 30 minutes</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setDnd(60)}>For 1 hour</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setDnd(120)}>For 2 hours</DropdownMenuItem>
-                        <DropdownMenuItem onClick={setDndUntilTomorrow}>Until tomorrow 9:00</DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
                 <BookmarksPopover
                     orgId={org.id}
                     spaceId={space.id}
@@ -919,8 +841,6 @@ function SpacePane({ org, space, selection, onSelect, onSwitchSpace, onOpenSessi
                     draftFolders={draftFolders}
                     presence={presence}
                     unreadPaths={unreadPaths}
-                    notify={notify}
-
                     selection={selection}
                     onSelect={select}
                     onCreateFile={openFile}

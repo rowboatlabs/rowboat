@@ -2,11 +2,12 @@ import type {
   ChangeSet,
   Member,
   Membership,
+  MentionStamps,
   Message,
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
-import { extractSearchText, matchesAllTerms, snippetAround, type SearchQuery } from './search.js';
+import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, type SearchQuery } from './search.js';
 import { type PushLevel, directKeyFor } from './store.js';
 import type {
   AssetRecord,
@@ -19,6 +20,8 @@ import type {
   StoredPollVote,
   StoredReaction,
   StoredSpaceBlob,
+  ThreadReadMark,
+  UnreadThreadRow,
 } from './store.js';
 
 interface SpaceState {
@@ -37,6 +40,8 @@ interface SpaceState {
   reactions: Map<string, StoredReaction[]>; // messageId → oldest first
   pollVotes: Map<string, StoredPollVote[]>; // messageId → oldest first
   events: StoredEvent[]; // offsets start at 1; events[i].offset === i + 1
+  streamMarks: Map<string, { readOffset: number; updatedAt: string }>; // memberId → stream mark
+  threadMarks: Map<string, { following: boolean; readOffset: number; updatedAt: string }>; // `${root}\n${member}`
   lock: Promise<void>;
 }
 
@@ -46,6 +51,7 @@ export class MemoryStore implements Store {
   private spaces = new Map<string, SpaceState>();
   private directKeys = new Map<string, string>(); // direct key → spaceId (the unique index, in memory)
   private invites = new Map<string, StoredInvite>();
+  private backfills = new Set<string>();
   private pushTokens = new Map<string, { memberId: string; updatedAt: string }>(); // token → owner
   private pushLevels = new Map<string, PushLevel>();
 
@@ -65,6 +71,10 @@ export class MemoryStore implements Store {
 
   async putMember(member: Member): Promise<void> {
     this.members.set(member.id, member);
+  }
+
+  async listAllMembers(): Promise<Member[]> {
+    return [...this.members.values()];
   }
 
   async getMemberByIdentity(iss: string, sub: string): Promise<Member | undefined> {
@@ -106,6 +116,8 @@ export class MemoryStore implements Store {
       reactions: new Map(),
       pollVotes: new Map(),
       events: [],
+      streamMarks: new Map(),
+      threadMarks: new Map(),
       lock: Promise.resolve(),
     });
   }
@@ -120,6 +132,10 @@ export class MemoryStore implements Store {
       .map((s) => s.space)
       .filter((s) => opts.includeDirect || s.kind !== 'direct')
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async listAllSpaces(): Promise<Space[]> {
+    return [...this.spaces.values()].map((s) => s.space).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   async getDirectSpace(directKey: string): Promise<Space | undefined> {
@@ -338,7 +354,7 @@ export class MemoryStore implements Store {
     for (let i = messages.length - 1; i >= 0 && out.length < limit; i--) {
       const m = messages[i]!;
       if (m.deletedAt !== undefined) continue;
-      if (matchesAllTerms(m.body, query)) out.push({ message: m, snippet: snippetAround(m.body, query) });
+      if (matchesAllTerms(searchTextFor(m.body), query)) out.push({ message: m, snippet: snippetAround(m.body, query) });
     }
     return out;
   }
@@ -346,7 +362,7 @@ export class MemoryStore implements Store {
   async searchTopics(spaceId: string, query: SearchQuery, limit: number): Promise<Topic[]> {
     if (query.terms.length === 0) return [];
     return [...this.must(spaceId).topics.values()]
-      .filter((t) => matchesAllTerms(t.title, query))
+      .filter((t) => matchesAllTerms(searchTextFor(t.title), query))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
       .slice(0, limit);
   }
@@ -378,10 +394,13 @@ export class MemoryStore implements Store {
     const replies = s.messages.filter((m) => m.threadRoot === rootMessageId);
     const live = replies.filter((m) => !m.deletedAt);
     const last = replies[replies.length - 1];
+    const lastLive = live[live.length - 1];
+    const { lastReplyOffset: _stale, ...rest } = root;
     this.replace(s, {
-      ...root,
+      ...rest,
       replyCount: live.length,
       ...(last ? { lastReplyAt: last.postedAt } : {}),
+      ...(lastLive ? { lastReplyOffset: lastLive.offset } : {}),
     });
   }
 
@@ -392,15 +411,32 @@ export class MemoryStore implements Store {
     s.messagesById.set(message.id, message);
   }
 
-  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void> {
+  private stampFields(stamps: MentionStamps): Pick<Message, 'mentions' | 'mentionsHere' | 'mentionsRowboat'> {
+    return { mentions: [...stamps.members], mentionsHere: stamps.here, mentionsRowboat: stamps.rowboat };
+  }
+
+  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void> {
     const s = this.must(spaceId);
     const existing = s.messagesById.get(messageId);
-    if (existing) this.replace(s, { ...existing, body, editedAt });
+    if (existing) this.replace(s, { ...existing, body, editedAt, ...this.stampFields(stamps) });
     // Rewrite the stored message event too — replay must serve the edit.
     for (let i = 0; i < s.events.length; i++) {
       const e = s.events[i]!;
       if (e.event.type === 'message' && e.event.message.id === messageId) {
-        s.events[i] = { ...e, event: { type: 'message', message: { ...e.event.message, body, editedAt } } };
+        s.events[i] = { ...e, event: { type: 'message', message: { ...e.event.message, body, editedAt, ...this.stampFields(stamps) } } };
+        break;
+      }
+    }
+  }
+
+  async restampMessage(spaceId: string, messageId: string, stamps: MentionStamps): Promise<void> {
+    const s = this.must(spaceId);
+    const existing = s.messagesById.get(messageId);
+    if (existing) this.replace(s, { ...existing, ...this.stampFields(stamps) });
+    for (let i = 0; i < s.events.length; i++) {
+      const e = s.events[i]!;
+      if (e.event.type === 'message' && e.event.message.id === messageId) {
+        s.events[i] = { ...e, event: { type: 'message', message: { ...e.event.message, ...this.stampFields(stamps) } } };
         break;
       }
     }
@@ -410,9 +446,10 @@ export class MemoryStore implements Store {
     const s = this.must(spaceId);
     const existing = s.messagesById.get(messageId);
     if (existing) {
-      // A poll is content the way a body is: deletion redacts both.
+      // A poll is content the way a body is: deletion redacts both — and a
+      // tombstone addresses nobody.
       const { poll: _poll, ...rest } = existing;
-      this.replace(s, { ...rest, body: '', deletedAt });
+      this.replace(s, { ...rest, body: '', deletedAt, mentions: [], mentionsHere: false, mentionsRowboat: false });
     }
     // Votes are content too: they were cast on a poll that no longer exists,
     // and a member-attributed row must not outlive what it attributed.
@@ -423,7 +460,7 @@ export class MemoryStore implements Store {
       const e = s.events[i]!;
       if (e.event.type === 'message' && e.event.message.id === messageId) {
         const { poll: _poll, ...rest } = e.event.message;
-        s.events[i] = { ...e, event: { type: 'message', message: { ...rest, body: '', deletedAt } } };
+        s.events[i] = { ...e, event: { type: 'message', message: { ...rest, body: '', deletedAt, mentions: [], mentionsHere: false, mentionsRowboat: false } } };
         break;
       }
     }
@@ -528,6 +565,121 @@ export class MemoryStore implements Store {
     return this.invites.get(token);
   }
 
+  // --- read state ------------------------------------------------------------
+
+  private threadMarkKey(rootMessageId: string, memberId: string): string {
+    return `${rootMessageId}\n${memberId}`;
+  }
+
+  async getStreamReadMark(spaceId: string, memberId: string): Promise<number> {
+    return this.state(spaceId)?.streamMarks.get(memberId)?.readOffset ?? 0;
+  }
+
+  async advanceStreamReadMark(spaceId: string, memberId: string, offset: number, at: string): Promise<number> {
+    const s = this.must(spaceId);
+    const current = s.streamMarks.get(memberId);
+    if (current && offset <= current.readOffset) return current.readOffset;
+    s.streamMarks.set(memberId, { readOffset: offset, updatedAt: at });
+    return offset;
+  }
+
+  async getThreadReadMark(spaceId: string, rootMessageId: string, memberId: string): Promise<ThreadReadMark | undefined> {
+    const m = this.state(spaceId)?.threadMarks.get(this.threadMarkKey(rootMessageId, memberId));
+    return m ? { following: m.following, readOffset: m.readOffset } : undefined;
+  }
+
+  async setThreadFollowing(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    following: boolean,
+    at: string,
+  ): Promise<ThreadReadMark> {
+    const s = this.must(spaceId);
+    const key = this.threadMarkKey(rootMessageId, memberId);
+    const next = { following, readOffset: s.threadMarks.get(key)?.readOffset ?? 0, updatedAt: at };
+    s.threadMarks.set(key, next);
+    return { following: next.following, readOffset: next.readOffset };
+  }
+
+  async advanceThreadReadMark(
+    spaceId: string,
+    rootMessageId: string,
+    memberId: string,
+    offset: number,
+    at: string,
+  ): Promise<number | undefined> {
+    const s = this.must(spaceId);
+    const key = this.threadMarkKey(rootMessageId, memberId);
+    const current = s.threadMarks.get(key);
+    if (!current?.following) return undefined;
+    if (offset <= current.readOffset) return current.readOffset;
+    s.threadMarks.set(key, { ...current, readOffset: offset, updatedAt: at });
+    return offset;
+  }
+
+  async countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number> {
+    return this.must(spaceId).messages.filter(
+      (m) => m.threadRoot === undefined && !m.deletedAt && m.offset > afterOffset && m.author.memberId !== memberId,
+    ).length;
+  }
+
+  private static addresses(m: Message, memberId: string): boolean {
+    return m.mentionsHere || m.mentions.includes(memberId);
+  }
+
+  async countUnreadRootMentions(spaceId: string, memberId: string, afterOffset: number): Promise<number> {
+    return this.must(spaceId).messages.filter(
+      (m) =>
+        m.threadRoot === undefined &&
+        !m.deletedAt &&
+        m.offset > afterOffset &&
+        m.author.memberId !== memberId &&
+        MemoryStore.addresses(m, memberId),
+    ).length;
+  }
+
+  async listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]> {
+    const s = this.must(spaceId);
+    const prefix = `${rootMessageId}\n`;
+    const out: string[] = [];
+    for (const [key, mark] of s.threadMarks) {
+      if (mark.following && key.startsWith(prefix)) out.push(key.slice(prefix.length));
+    }
+    return out;
+  }
+
+  async listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]> {
+    const s = this.must(spaceId);
+    const out: UnreadThreadRow[] = [];
+    const suffix = `\n${memberId}`;
+    for (const [key, mark] of s.threadMarks) {
+      if (!mark.following || !key.endsWith(suffix)) continue;
+      const rootMessageId = key.slice(0, key.length - suffix.length);
+      const root = s.messagesById.get(rootMessageId);
+      if (!root || root.lastReplyOffset === undefined || root.lastReplyOffset <= mark.readOffset) continue;
+      const unread = s.messages.filter(
+        (m) => m.threadRoot === rootMessageId && !m.deletedAt && m.offset > mark.readOffset && m.author.memberId !== memberId,
+      );
+      if (unread.length === 0) continue;
+      out.push({
+        rootMessageId,
+        readOffset: mark.readOffset,
+        lastReplyOffset: root.lastReplyOffset,
+        unreadReplies: unread.length,
+        unreadMentions: unread.filter((m) => MemoryStore.addresses(m, memberId)).length,
+      });
+    }
+    return out.sort((a, b) => b.lastReplyOffset - a.lastReplyOffset);
+  }
+
+  async deleteReadMarks(spaceId: string, memberId: string): Promise<void> {
+    const s = this.must(spaceId);
+    s.streamMarks.delete(memberId);
+    const suffix = `\n${memberId}`;
+    for (const key of [...s.threadMarks.keys()]) if (key.endsWith(suffix)) s.threadMarks.delete(key);
+  }
+
   async head(spaceId: string): Promise<number> {
     return this.must(spaceId).events.length;
   }
@@ -542,6 +694,14 @@ export class MemoryStore implements Store {
 
   async listEventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]> {
     return this.must(spaceId).events.slice(afterOffset);
+  }
+
+  async backfillDone(id: string): Promise<boolean> {
+    return this.backfills.has(id);
+  }
+
+  async markBackfillDone(id: string): Promise<void> {
+    this.backfills.add(id);
   }
 
   async withSpaceLock<T>(spaceId: string, fn: () => Promise<T>): Promise<T> {

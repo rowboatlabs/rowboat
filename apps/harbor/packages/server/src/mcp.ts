@@ -2,11 +2,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, NewPoll, type ActingMode, type SearchKind } from '@rowboat/spaces-protocol';
+import { mcpTools, NewPoll, type ActingMode, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import type { AuthDriver } from './auth.js';
 import { HarborError } from './errors.js';
-import type { HarborService } from './service.js';
+import type { ActorCtx, HarborService } from './service.js';
 import type { Store } from './store.js';
 
 // The agent face (CONTRACT.md decision 5): the protocol tools served over
@@ -195,9 +195,10 @@ async function dispatch(
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
         limit: a.limit ?? 50,
       });
+      const names = await rosterNames(service, ctx, a.spaceId);
       // Truncation is stated, never silent: the tool description tells the
       // agent to page back with beforeOffset before summarising.
-      return { messages, topics, truncated: hasMore };
+      return { messages: messages.map((m) => relabel(m, names)), topics, truncated: hasMore };
     }
     case 'read_thread': {
       const a = args as { spaceId: string; rootMessageId: string; beforeOffset?: number; limit?: number };
@@ -205,7 +206,8 @@ async function dispatch(
         ...(a.beforeOffset !== undefined ? { beforeOffset: a.beforeOffset } : {}),
         limit: a.limit ?? 50,
       });
-      return { root, topic, messages, truncated: hasMore };
+      const names = await rosterNames(service, ctx, a.spaceId);
+      return { root: relabel(root, names), topic, messages: messages.map((m) => relabel(m, names)), truncated: hasMore };
     }
     case 'read_asset': {
       const a = args as { spaceId: string; path: string; version?: number };
@@ -367,4 +369,15 @@ async function dispatch(
     default:
       throw new HarborError('invalid_request', `unknown tool ${name}`);
   }
+}
+
+// The agent never trusts a mention token's label: every body it reads has
+// its labels re-resolved from the roster's current names (protocol
+// mentions.ts). Ids stay; a departed member keeps their last label.
+async function rosterNames(service: HarborService, ctx: ActorCtx, spaceId: string): Promise<Map<string, string>> {
+  return new Map((await service.listMembers(ctx, spaceId)).map((m) => [m.id, m.displayName]));
+}
+
+function relabel(message: Message, names: ReadonlyMap<string, string>): Message {
+  return { ...message, body: relabelMentions(message.body, names) };
 }

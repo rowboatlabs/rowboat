@@ -74,7 +74,9 @@ import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { SPACES_ENABLED } from "@/lib/feature-flags"
 import { AddOrgDialog, OrgMonogram, type SpaceSelection } from "@/components/spaces-view"
 import { openSelfDirect, useSpacesOrgs, type OrgWithSpaces } from "@/hooks/use-spaces"
-import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from "@/hooks/use-space-chat"
+import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts, type SpaceBadge } from "@/hooks/use-space-chat"
+import { NO_BADGE } from "@/lib/spaces-read-state"
+import { UnreadBadge } from "@/components/spaces/unread-badge"
 import { MemberAvatar } from "@/components/spaces/atoms"
 import { NewDirectDialog } from "@/components/spaces/new-direct-dialog"
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from "@/lib/spaces-direct"
@@ -881,7 +883,7 @@ export function DockSidebar({
   const spacesUnread = useSpacesUnreadCounts()
   const totalSpacesUnread = useMemo(() => {
     let sum = 0
-    for (const count of spacesUnread.values()) sum += count
+    for (const badge of spacesUnread.values()) sum += badge.forYou
     return sum
   }, [spacesUnread])
   const totalSpaces = useMemo(() => orgs.reduce((n, o) => n + o.spaces.length + o.directs.length, 0), [orgs])
@@ -961,7 +963,7 @@ export function DockSidebar({
           key: 'spaces', label: 'Spaces', icon: MessagesSquare, tourId: 'nav-spaces',
           badge: totalSpacesUnread > 0 ? (totalSpacesUnread > 99 ? '99+' : String(totalSpacesUnread)) : undefined,
           status: totalSpacesUnread > 0
-            ? `${totalSpacesUnread} unread`
+            ? `${totalSpacesUnread} for you`
             : totalSpaces > 0 ? `${totalSpaces} space${totalSpaces === 1 ? '' : 's'}` : undefined,
           running: activeNav === 'spaces' || spacesOpen,
           onClick: () => {
@@ -1715,7 +1717,7 @@ function SpacesFlyout({
 }: {
   orgs: OrgWithSpaces[]
   loading: boolean
-  unread: Map<string, number>
+  unread: Map<string, SpaceBadge>
   activeSpace: SpaceSelection
   onOpenSpace: (orgId: string, spaceId: string) => void
   onAddOrg: () => void
@@ -1764,7 +1766,7 @@ function SpacesFlyout({
 function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onRequestRemoveOrg }: {
   org: OrgWithSpaces
   activeSpace: SpaceSelection
-  unread: Map<string, number>
+  unread: Map<string, SpaceBadge>
   onOpenSpace: (orgId: string, spaceId: string) => void
   onChanged: () => void
   onRequestRemoveOrg: (orgId: string, name: string) => void
@@ -1902,7 +1904,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
       </div>
       {org.spaces.map((space) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
-        const count = unread.get(`${org.id}/${space.id}`) ?? 0
+        const badge = unread.get(`${org.id}/${space.id}`) ?? NO_BADGE
         if (renamingId === space.id) {
           return (
             <div key={space.id} className="flex items-center gap-1 py-0.5 pl-5 pr-2">
@@ -1934,10 +1936,8 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
                   active && 'bg-[var(--sidebar-accent)]',
                 )}
               >
-                <span className={cn('min-w-0 flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
-                {count > 0 && (
-                  <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
-                )}
+                <span className={cn('min-w-0 flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
+                {!active && <UnreadBadge badge={badge} />}
               </button>
             </ContextMenuTrigger>
             <ContextMenuContent>
@@ -1971,7 +1971,7 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
       )}
       {!org.error && directs.map((dm) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
-        const count = unread.get(`${org.id}/${dm.id}`) ?? 0
+        const badge = unread.get(`${org.id}/${dm.id}`) ?? NO_BADGE
         const self = isSelfDirect(dm, org.memberId)
         const label = self ? selfName : spaceDisplayName(org, dm)
         return (
@@ -1986,13 +1986,11 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
             )}
           >
             <MemberAvatar id={directAvatarId(dm, org.memberId)} name={label} size="sm" className="size-4 rounded-[3px] text-[8px]" />
-            <span className={cn('min-w-0 flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>
+            <span className={cn('min-w-0 flex-1 truncate', badge.unread > 0 && !active && 'font-medium text-foreground')}>
               {label}
               {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
             </span>
-            {count > 0 && (
-              <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
-            )}
+            {!active && <UnreadBadge badge={badge} direct />}
           </button>
         )
       })}

@@ -157,13 +157,13 @@ export function buildFileTree(entries: spaces.SpacesAssetEntry[], draftFolders: 
 }
 
 // ---------------------------------------------------------------------------
-// Unread — client-side read marks (the protocol has no read cursors yet; a
-// Latitude item). A change is unread when it landed after the member's mark
-// and the member didn't make it themselves (chat unread lives in use-space-chat).
+// Unread — the org-owned stream mark, an offset (spaces-read-state). A change
+// is unread when it landed after the member's mark and the member didn't make
+// it themselves (chat unread lives in spaces-read-state too).
 // ---------------------------------------------------------------------------
 
-export function isUnreadChange(cs: spaces.ChangeSet, lastReadAt: string | null, selfMemberId: string): boolean {
-    if (lastReadAt && cs.committedAt <= lastReadAt) return false
+export function isUnreadChange(cs: spaces.ChangeSet, readOffset: number, selfMemberId: string): boolean {
+    if (cs.offset <= readOffset) return false
     return cs.attribution.memberId !== selfMemberId || cs.attribution.actingMode !== 'direct'
 }
 
@@ -272,54 +272,34 @@ export function formatBytes(size: number): string {
     return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${unit}`
 }
 
-// The wire-address → person walker lives in @x/shared (main's notification
-// text resolves through the same code); re-exported to keep the renderer's
-// import path.
+// The token → person faces live in @x/shared (the phone renders through the
+// same code); re-exported to keep the renderer's import path.
 export { decorateMentions, resolveMentions } from '@x/shared/dist/spaces.js'
+import { mapMentionTokens } from '@x/shared/dist/spaces.js'
 
 /**
- * The inverse, for the composer: people type/pick "@Display Name" but the wire
- * address is "@<memberId>" (that's what mention notifications and agent
- * invocation scan for). Longest name first so "Ramnique Singh" wins over a
- * teammate named "Ramnique"; case-insensitive; code regions stay literal.
- * A member named "rowboat" or "here" never captures those addresses.
+ * Mention tokens → app:// links the space anchor renders as chips (Streamdown's
+ * URL hardening would strip a bare `#member:` fragment href). Code regions
+ * stay literal — the grammar's walker skips them.
  */
-export function encodeMentions(body: string, members: readonly { id: string; displayName: string }[]): string {
-    const ordered = members
-        .filter((m) => m.displayName && m.displayName !== m.id && !['rowboat', 'here'].includes(m.displayName.toLowerCase()))
-        .sort((a, b) => b.displayName.length - a.displayName.length)
-    if (ordered.length === 0) return body
-    const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
-    return parts
-        .map((part, i) => {
-            if (i % 2 === 1) return part // a code region — cite, not address
-            let out = part
-            for (const m of ordered) {
-                const escaped = m.displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                out = out.replace(new RegExp(`(^|[\\s([{])@${escaped}(?![\\w.-])`, 'gi'), `$1@${m.id}`)
-            }
-            return out
-        })
-        .join('')
+export function rewriteMentionLinks(body: string): string {
+    return mapMentionTokens(body, (ref) => {
+        if (ref.kind === 'member') return `[@${ref.label}](${spaceMemberAppUrl(ref.id)})`
+        return `[@${ref.kind}](${ref.kind === 'here' ? HERE_APP_URL : ROWBOAT_APP_URL})`
+    })
 }
 
-/**
- * Where a mention token ending exactly at the caret starts: for "ping @Name"
- * with the caret right after the name, the index of its "@" — null when the
- * caret isn't at the end of a known mention. Backspace handlers use this to
- * delete the whole token in one press (the Discord behavior). Matching
- * mirrors encodeMentions — a boundary before the "@", case-insensitive —
- * and the @rowboat and @here handles count too.
- */
-export function mentionEndingAtCaret(textBeforeCaret: string, names: readonly string[]): number | null {
-    for (const name of new Set(['rowboat', 'here', ...names])) {
-        if (!name) continue
-        const start = textBeforeCaret.length - name.length - 1
-        if (start < 0 || textBeforeCaret[start] !== '@') continue
-        if (textBeforeCaret.slice(start + 1).toLowerCase() !== name.toLowerCase()) continue
-        if (start === 0 || /[\s([{]/.test(textBeforeCaret[start - 1]!)) return start
-    }
-    return null
+export const HERE_APP_URL = 'app://space-mention/here'
+export const ROWBOAT_APP_URL = 'app://space-mention/rowboat'
+
+export function spaceMemberAppUrl(memberId: string): string {
+    return `app://space-member/${encodeURIComponent(memberId)}`
+}
+
+/** The member id behind a rewritten mention link, or null for any other URL. */
+export function parseSpaceMemberAppUrl(url: string): string | null {
+    const m = /^app:\/\/space-member\/([^/?#]+)$/.exec(url)
+    return m ? decodeURIComponent(m[1]!) : null
 }
 
 // ---------------------------------------------------------------------------

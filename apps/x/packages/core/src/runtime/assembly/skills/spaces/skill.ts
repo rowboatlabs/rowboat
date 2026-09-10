@@ -39,6 +39,12 @@ Never guess an id or a path. Every id comes from one of these calls.
 Messages carry member ids, not names — resolve them with \`list_members\`
 before naming anyone.
 
+To mention someone, write a mention token — a markdown link whose href carries
+their member id: \`[@Their Name](#member:<memberId>)\` (the id from
+\`list_members\`; the label is only a hint). \`[@here](#here)\` addresses
+everyone in the space. A bare name or a bare @word is prose: it reaches
+nobody and badges nobody.
+
 ## Doing things
 
 | Ask | Call |
@@ -56,7 +62,6 @@ before naming anyone.
 | "open that attachment" | \`spaces-download-blob\` → then parse it |
 | "new space", "rename it", "invite link" | \`create_space\` / \`rename_space\` / \`create_invite\` |
 | "send at 9am", "remind me" | \`schedule_message\` |
-| "mute this", "follow that thread" | \`set_notify_pref\` |
 
 "Push / add X to <space>" means updating the right **file** (the obvious one
 in \`list_spaces\`, e.g. a roadmap item goes in roadmap.md), not posting to

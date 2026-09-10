@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { spaces } from '@x/shared'
 import { subscribeSpacesFeed } from '@/lib/spaces-feed'
 import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
-import { applyReaction, mergeMessages, threadRootOf } from '@/lib/spaces-conventions'
+import { applyReaction, mergeMessages } from '@/lib/spaces-conventions'
 import { applyPollVote } from '@/lib/spaces-poll'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
-import { effectiveNotifyLevel, ensureNotifyPrefs, subscribeNotifyPrefs } from '@/hooks/use-spaces-notify'
-import { getTopicLastReadAt, subscribeReadState } from '@/lib/spaces-read-state'
+import { countUnread, noteStreamReadOffset, spaceBadge, subscribeReadState, type SpaceBadge } from '@/lib/spaces-read-state'
+
+export type { SpaceBadge } from '@/lib/spaces-read-state'
 
 // Chat stores for one space under the annotation model (spec §7, 2026-09-01):
 //   stream     — the space's ROOT messages (one flat log; replies live behind
@@ -44,6 +45,9 @@ export function buildPendingMessage(spaceId: string, memberId: string, body: str
         postedAt: new Date().toISOString(),
         offset: Number.MAX_SAFE_INTEGER - 1_000_000 + pendingSeq,
         replyCount: 0,
+        mentions: [],
+        mentionsHere: false,
+        mentionsRowboat: false,
         reactions: [],
         pending: true,
     }
@@ -192,6 +196,9 @@ async function loadStream(orgId: string, spaceId: string): Promise<void> {
         )
         const reachesDeeper = (settled[0]?.offset ?? Infinity) < (res.messages[0]?.offset ?? Infinity)
         streamCacheOnly.delete(k)
+        // The page carries our stream mark — the earliest word on it when a
+        // space opens before the org's snapshot landed.
+        noteStreamReadOffset(orgId, spaceId, res.readOffset)
         setStream(k, {
             messages: [...mergeMessages(settled, res.messages), ...carried],
             topicsByRoot: withTopics(prev?.topicsByRoot ?? new Map(), res.topics),
@@ -426,7 +433,9 @@ function wireBus(): void {
             if (state.messages.some((m) => m.id === edit.messageId)) {
                 setStream(k, {
                     messages: state.messages.map((m) =>
-                        m.id === edit.messageId ? { ...m, body: edit.body, editedAt: edit.at } : m,
+                        m.id === edit.messageId
+                            ? { ...m, body: edit.body, editedAt: edit.at, mentions: edit.mentions, mentionsHere: edit.mentionsHere, mentionsRowboat: edit.mentionsRowboat }
+                            : m,
                     ),
                 })
             }
@@ -816,46 +825,15 @@ function wireUnread(): void {
     subscribeSpaceFeedStore(bumpUnread)
     subscribeReadState(bumpUnread)
     subscribeOrgs(bumpUnread)
-    subscribeNotifyPrefs(bumpUnread)
     streamListeners.add(bumpUnread)
 }
 
-export function countSpaceUnread(orgId: string, spaceId: string, selfMemberId: string): number {
-    const k = key(orgId, spaceId)
-    const state = streamState.get(k)
-    let count = 0
-    // Muted destinations don't badge (the Slack posture) — the messages stay
-    // unread in the pane, they just don't count here. The stream itself mutes
-    // under STREAM_READ_KEY; each thread mutes under its own root.
-    ensureNotifyPrefs(orgId, spaceId)
-    const muted = (dest: string) => effectiveNotifyLevel(orgId, spaceId, dest) === 'mute'
-    const streamMark = getTopicLastReadAt(orgId, spaceId, STREAM_READ_KEY)
-    if (state?.ready) {
-        // New roots since the stream mark (loaded window — exact enough).
-        if (!muted(STREAM_READ_KEY)) {
-            count += state.messages.filter(
-                (m) => !m.pending && !m.failed && !m.deletedAt && (!streamMark || m.postedAt > streamMark) && m.author.memberId !== selfMemberId,
-            ).length
-        }
-        // Threads with replies past their own mark count once each.
-        for (const m of state.messages) {
-            if (m.pending || m.failed || !m.lastReplyAt || (m.replyCount ?? 0) === 0) continue
-            const root = threadRootOf(m)
-            if (muted(root)) continue
-            const mark = getTopicLastReadAt(orgId, spaceId, root)
-            if (!mark || m.lastReplyAt > mark) count += 1
-        }
-        return count
-    }
-    // Stream not loaded: the rail's topic list still says whether anything moved.
-    const feed = getSpaceFeed(orgId, spaceId)
-    if (!feed.loaded) return 0
-    for (const t of feed.topics) {
-        if (t.archived || muted(t.rootMessageId)) continue
-        const mark = getTopicLastReadAt(orgId, spaceId, t.rootMessageId)
-        if (!mark || t.lastActivityAt > mark) count += 1
-    }
-    return count
+/**
+ * The sidebar number — the org's count (unread roots + followed threads with
+ * unread replies), folded live by spaces-read-state. No loaded tail needed.
+ */
+export function countSpaceUnread(orgId: string, spaceId: string, _selfMemberId: string): number {
+    return countUnread(orgId, spaceId)
 }
 
 /**
@@ -879,8 +857,8 @@ export function spaceLastActivityAt(orgId: string, spaceId: string): string | nu
     return latest
 }
 
-/** `${orgId}/${spaceId}` → unread count, for the sidebar badges. */
-export function useSpacesUnreadCounts(): Map<string, number> {
+/** `${orgId}/${spaceId}` → the collapsed row's badge: unread messages, and how many are for me (stream plus followed discussions). */
+export function useSpacesUnreadCounts(): Map<string, SpaceBadge> {
     const version = useSyncExternalStore(
         (l) => {
             wireUnread()
@@ -892,11 +870,10 @@ export function useSpacesUnreadCounts(): Map<string, number> {
         () => unreadVersion,
     )
     return useMemo(() => {
-        const counts = new Map<string, number>()
+        const counts = new Map<string, SpaceBadge>()
         for (const org of getSpacesOrgs()) {
-            for (const space of [...org.spaces, ...org.directs]) {
-                counts.set(key(org.id, space.id), countSpaceUnread(org.id, space.id, org.memberId))
-            }
+            for (const space of org.spaces) counts.set(key(org.id, space.id), spaceBadge(org.id, space.id, false))
+            for (const dm of org.directs) counts.set(key(org.id, dm.id), spaceBadge(org.id, dm.id, true))
         }
         return counts
         // eslint-disable-next-line react-hooks/exhaustive-deps

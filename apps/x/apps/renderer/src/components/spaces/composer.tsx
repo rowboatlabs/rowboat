@@ -23,7 +23,7 @@ import '@/styles/space-composer.css'
 import { noteEmojiUsed, replaceShortcodes, searchEmoji, type EmojiEntry } from '@/lib/emoji-data'
 import { containsRowboatAddress } from '@/lib/spaces-mentions'
 import { schedulePresets } from '@/lib/spaces-schedule'
-import { blobAppUrl, blobWireUrl, encodeMentions, formatBytes, isImageMime, mentionEndingAtCaret } from '@/lib/spaces-presentation'
+import { blobAppUrl, blobWireUrl, formatBytes, isImageMime } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
 
 // The space composer. A plain message box — Enter sends, Shift+Enter breaks a
@@ -370,7 +370,15 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
         const { $from, empty } = editor.state.selection
         const before = empty && $from.parent.isTextblock ? $from.parent.textBetween(0, $from.parentOffset, ' ', ' ') : ''
         const needsSpace = before.length > 0 && !/\s$/.test(before)
-        editor.chain().focus().insertContent({ type: 'text', text: `${needsSpace ? ' ' : ''}@rowboat ` }).run()
+        editor
+            .chain()
+            .focus()
+            .insertContent([
+                ...(needsSpace ? [{ type: 'text', text: ' ' }] : []),
+                { type: 'mention', attrs: { kind: 'rowboat', id: null, label: 'rowboat' } },
+                { type: 'text', text: ' ' },
+            ])
+            .run()
     }
 
     // --- send ----------------------------------------------------------------
@@ -390,7 +398,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     /** The one body builder — send and send-later produce identical wire text. */
     const buildBody = (raw: string): string => {
         const ready = attachments.filter((a) => a.status === 'done' && a.hash)
-        const text = encodeMentions(replaceShortcodes(raw), members)
+        const text = replaceShortcodes(raw)
         const attachmentLines = refs
             ? ready.map((a) => {
                   const dims = a.width && a.height ? { width: a.width, height: a.height } : undefined
@@ -440,7 +448,7 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                     return
                 }
                 // Built-in /ask: rewrite and send through the normal path.
-                await send(`@rowboat ${args}`)
+                await send(`[@rowboat](#rowboat) ${args}`)
                 return
             }
         }
@@ -556,7 +564,8 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
     const sendRecording = async () => {
         const text = await finishRecording('send')
         if (!text) return
-        const body = encodeMentions(replaceShortcodes(text), members)
+        // A transcript has no pills: whatever it says is prose, never an address.
+        const body = replaceShortcodes(text)
         if (body) await onSend(body, agentOptionsFor(text))
     }
 
@@ -631,18 +640,6 @@ export function Composer({ placeholder, onSend, onSchedule, onCreatePoll, busy, 
                 setEmojiDismissed(true)
                 return true
             }
-        }
-        if (e.key === 'Backspace' && editor) {
-            // A mention deletes as one unit (the Discord behavior): with the
-            // caret right at the end of "@Name", the whole token goes, not
-            // the last letter. caretContext bows out for range selections and
-            // code — a cited @Name still edits character by character.
-            const ctx = caretContext(editor)
-            const start = ctx ? mentionEndingAtCaret(ctx.text, members.map((m) => m.displayName)) : null
-            if (ctx && start !== null) {
-                return editor.chain().focus().deleteRange({ from: ctx.from - (ctx.text.length - start), to: ctx.from }).run()
-            }
-            return false
         }
         if (e.key !== 'Enter') return false
         // ⌘Enter always sends — even from inside a code fence.

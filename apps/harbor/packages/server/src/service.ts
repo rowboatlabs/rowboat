@@ -3,6 +3,8 @@ import { createTwoFilesPatch } from 'diff';
 import { monotonicFactory } from 'ulid';
 import {
   inviteUrl,
+  parseMentions,
+  stampsEqual,
   threadRootFromReason,
   type ActingMode,
   type AcceptInviteResult,
@@ -14,6 +16,7 @@ import {
   type DeleteAssetResult,
   type Member,
   type Membership,
+  type MentionStamps,
   type Message,
   type MoveAssetResult,
   type Poll,
@@ -47,8 +50,9 @@ const MESSAGES_PAGE_MAX = 200;
 import type { z } from 'zod';
 import { blobHash, type BlobStore } from './blobs.js';
 import { HarborError } from './errors.js';
-import type { PushSender } from './push.js';
+import type { Notifier } from './notify.js';
 import { SpaceHub } from './hub.js';
+import { legacyToTokens } from './mentions-backfill.js';
 import { merge3 } from './merge.js';
 import { dispositionFor, imageDimensions, resolveMime } from './mime.js';
 import { parseSearchQuery } from './search.js';
@@ -95,9 +99,20 @@ type DeleteMessageInput = z.infer<Routes['deleteMessage']['request']>;
 type EditMessageInput = z.infer<Routes['editMessage']['request']>;
 type VotePollInput = z.infer<Routes['votePoll']['request']>;
 type EndPollInput = z.infer<Routes['endPoll']['request']>;
+type MarkReadInput = z.infer<Routes['markRead']['request']>;
+type UnreadSnapshot = z.infer<Routes['unread']['response']>;
 
 /** Poll duration when the create request names none — Discord's default. */
 const DEFAULT_POLL_HOURS = 24;
+
+/** The stamped addresses as they ride a Message (core.ts). */
+function stampFields(stamps: MentionStamps): Pick<Message, 'mentions' | 'mentionsHere' | 'mentionsRowboat'> {
+  return { mentions: [...stamps.members], mentionsHere: stamps.here, mentionsRowboat: stamps.rowboat };
+}
+
+function stampsOf(message: Message): MentionStamps {
+  return { members: message.mentions, here: message.mentionsHere, rowboat: message.mentionsRowboat };
+}
 
 export interface OrgInfo {
   name: string;
@@ -127,8 +142,8 @@ export class HarborService {
     org: OrgInfo,
     /** Absent = uploads unconfigured on this org (routes refuse loudly, everything else works). */
     private readonly blobs?: BlobStore,
-    /** Absent = no push notifications on this org (PUSH_PLAN.md). */
-    private readonly push?: PushSender,
+    /** Absent = no notifications on this org (notify.ts: frames + push). */
+    private readonly notifier?: Notifier,
   ) {
     this.org = org;
   }
@@ -161,6 +176,28 @@ export class HarborService {
     const membership = await this.store.getMembership(spaceId, ctx.memberId);
     if (!membership) throw new HarborError('forbidden', 'you are not a member of this space');
     return space;
+  }
+
+  // --- mentions (protocol mentions.ts, 2026-09-10) -----------------------------
+  // The org stamps who a message addresses from its mention TOKENS alone —
+  // never from names — and only ids that are members of the space. Every
+  // consumer (unread, Activity, push, chips) reads the stamp.
+
+  private async stampsFor(spaceId: string, body: string): Promise<MentionStamps> {
+    const parsed = parseMentions(body);
+    const members: string[] = [];
+    for (const id of parsed.members) {
+      if (await this.store.getMembership(spaceId, id)) members.push(id);
+    }
+    return { members, here: parsed.here, rowboat: parsed.rowboat };
+  }
+
+  /** A mention follows you into the thread (the org's rule; @here follows nobody). */
+  private async followMentioned(spaceId: string, rootMessageId: string, stamps: MentionStamps, authorId: string, at: string): Promise<void> {
+    for (const id of stamps.members) {
+      if (id === authorId) continue;
+      await this.store.setThreadFollowing(spaceId, rootMessageId, id, true, at);
+    }
   }
 
   /** Append a durable event at `offset` (allocated by the caller inside the space lock) and fan it out. */
@@ -321,6 +358,7 @@ export class HarborService {
       const membership = await this.store.getMembership(spaceId, ctx.memberId);
       if (!membership) return;
       await this.store.deleteMembership(spaceId, ctx.memberId);
+      await this.store.deleteReadMarks(spaceId, ctx.memberId);
       const offset = (await this.store.head(spaceId)) + 1;
       await this.append(spaceId, offset, this.now(), { type: 'membership', membership, action: 'left' });
     });
@@ -984,7 +1022,7 @@ export class HarborService {
     ctx: ActorCtx,
     spaceId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean }> {
+  ): Promise<{ messages: Message[]; topics: Topic[]; hasMore: boolean; readOffset: number }> {
     await this.requireMember(ctx, spaceId);
     // Newest page by default — never the full history. One extra row answers
     // hasMore without a count query.
@@ -1001,7 +1039,12 @@ export class HarborService {
       const topic = await this.store.getTopicByRoot(spaceId, m.id);
       if (topic) topics.push(topic);
     }
-    return { messages: await this.foldPage(spaceId, roots), topics, hasMore };
+    return {
+      messages: await this.foldPage(spaceId, roots),
+      topics,
+      hasMore,
+      readOffset: await this.store.getStreamReadMark(spaceId, ctx.memberId),
+    };
   }
 
   /** A reply's id resolves to its root — callers always land on the thread. */
@@ -1019,7 +1062,14 @@ export class HarborService {
     spaceId: string,
     rootMessageId: string,
     opts?: { beforeOffset?: number; limit?: number },
-  ): Promise<{ root: Message; topic: Topic | null; messages: Message[]; hasMore: boolean }> {
+  ): Promise<{
+    root: Message;
+    topic: Topic | null;
+    messages: Message[];
+    hasMore: boolean;
+    readOffset: number | null;
+    following: boolean;
+  }> {
     await this.requireMember(ctx, spaceId);
     const root = await this.resolveRoot(spaceId, rootMessageId);
     const limit = this.pageLimit(opts?.limit);
@@ -1030,11 +1080,14 @@ export class HarborService {
     const hasMore = window.length > limit;
     const replies = hasMore ? window.slice(1) : window;
     const [foldedRoot] = await this.foldPage(spaceId, [root]);
+    const mark = await this.store.getThreadReadMark(spaceId, root.id, ctx.memberId);
     return {
       root: foldedRoot!,
       topic: (await this.store.getTopicByRoot(spaceId, root.id)) ?? null,
       messages: await this.foldPage(spaceId, replies),
       hasMore,
+      readOffset: mark?.following ? mark.readOffset : null,
+      following: mark?.following ?? false,
     };
   }
 
@@ -1059,6 +1112,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
+    const stamps = await this.stampsFor(spaceId, input.body);
     const result = await this.store.withSpaceLock(spaceId, async () => {
       const at = this.now();
       // The org stamps the poll from its own clock: answer ids 1..n, a
@@ -1089,10 +1143,25 @@ export class HarborService {
           replyCount: 0,
           reactions: [],
           ...(poll ? { poll } : {}),
+          ...stampFields(stamps),
         };
         await this.store.appendMessage(message);
         await this.store.refreshReplyStats(spaceId, root.id);
         await this.append(spaceId, offset, at, { type: 'message', message });
+        // Read state (2026-09-09), the provisional follow rules: replying
+        // follows the thread, and a root's author follows it from the first
+        // reply on (lazily — a reply-less root holds no row). The replier's
+        // mark advances to the reply (posting reads). Direct acts only: an
+        // agent's 3am reply must not read as you having seen the thread.
+        if (author.actingMode === 'direct') {
+          await this.store.setThreadFollowing(spaceId, root.id, ctx.memberId, true, at);
+          await this.store.advanceThreadReadMark(spaceId, root.id, ctx.memberId, offset, at);
+        }
+        if (root.author.memberId !== ctx.memberId && !(await this.store.getThreadReadMark(spaceId, root.id, root.author.memberId))) {
+          await this.store.setThreadFollowing(spaceId, root.id, root.author.memberId, true, at);
+          await this.store.advanceThreadReadMark(spaceId, root.id, root.author.memberId, root.offset, at);
+        }
+        await this.followMentioned(spaceId, root.id, stamps, ctx.memberId, at);
         // Gmail semantics: activity returns an archived topic to the rail.
         const topic = await this.store.getTopicByRoot(spaceId, root.id);
         if (topic?.archived) {
@@ -1121,14 +1190,19 @@ export class HarborService {
         ...(input.anchorChangeSetId ? { anchorChangeSetId: input.anchorChangeSetId } : {}),
         reactions: [],
         ...(poll ? { poll } : {}),
+        ...stampFields(stamps),
       };
       await this.store.appendMessage(message);
       await this.append(spaceId, offset, at, { type: 'message', message });
+      // Posting directly reads the stream up to your own message (read state, 2026-09-09).
+      if (author.actingMode === 'direct') await this.store.advanceStreamReadMark(spaceId, ctx.memberId, offset, at);
+      await this.followMentioned(spaceId, message.id, stamps, ctx.memberId, at);
       return { message };
     });
-    // Push decisions run OUTSIDE the lock and never block the reply
-    // (PUSH_PLAN.md); the sender logs its own failures.
-    if (this.push) void this.push.onMessage(space, result.message);
+    // Notification decisions run OUTSIDE the lock and never block the reply
+    // (notify.ts: the `notify` frame to every connection, push to phones);
+    // the notifier logs its own failures.
+    if (this.notifier) void this.notifier.onMessage(space, result.message);
     return result;
   }
 
@@ -1182,6 +1256,7 @@ export class HarborService {
         }
         root = message;
       } else {
+        const stamps = await this.stampsFor(spaceId, input.body!);
         root = {
           id: this.ulid(),
           spaceId,
@@ -1191,9 +1266,12 @@ export class HarborService {
           offset,
           replyCount: 0,
           reactions: [],
+          ...stampFields(stamps),
         };
         await this.store.appendMessage(root);
         await this.append(spaceId, offset, at, { type: 'message', message: root });
+        if (by.actingMode === 'direct') await this.store.advanceStreamReadMark(spaceId, ctx.memberId, root.offset, at);
+        await this.followMentioned(spaceId, root.id, stamps, ctx.memberId, at);
         offset += 1;
       }
 
@@ -1210,6 +1288,88 @@ export class HarborService {
       await this.append(spaceId, offset, at, { type: 'topic', topic, action: 'created', by });
       return { topic, rootMessage: root };
     });
+  }
+
+  /**
+   * The edit itself: row + stored event rewritten (the sanctioned in-place
+   * rewrite), stamps re-derived, one message_edited event. Shared by
+   * editMessage and the mentions backfill, which edits AS the author. The
+   * caller holds the space lock.
+   */
+  private async applyEdit(
+    spaceId: string,
+    message: Message,
+    body: string,
+    stamps: MentionStamps,
+    by: Attribution,
+    at: string,
+  ): Promise<Message> {
+    await this.store.markMessageEdited(spaceId, message.id, body, at, stamps);
+    const offset = (await this.store.head(spaceId)) + 1;
+    await this.append(spaceId, offset, at, {
+      type: 'message_edited',
+      edit: {
+        spaceId,
+        messageId: message.id,
+        ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
+        body,
+        by,
+        at,
+        ...stampFields(stamps),
+      },
+    });
+    return { ...message, body, editedAt: at, ...stampFields(stamps) };
+  }
+
+  /**
+   * The mentions backfill (2026-09-10, a dogfood decision): the pre-token
+   * spelling — "@<memberId>", bare "@here" / "@rowboat" — becomes mention
+   * tokens through the ORDINARY edit path, attributed to the author, so the
+   * log shows an edit by them and the "(edited)" mark appears; titles go
+   * through retitle the same way. Rows that carry tokens but stale stamps
+   * are restamped in place (derived data, no event). Idempotent: a second
+   * run finds nothing — and a ledger row makes it run ONCE per org, so a
+   * later bare "@<id>" typed as prose is never rewritten behind the author.
+   * Runs at boot, per org, before the faces serve.
+   */
+  async migrateMentions(opts: { force?: boolean } = {}): Promise<{ messages: number; titles: number; restamped: number }> {
+    const out = { messages: 0, titles: 0, restamped: 0 };
+    if (!opts.force && (await this.store.backfillDone('017-mentions'))) return out;
+    const names = new Map((await this.store.listAllMembers()).map((m) => [m.id, m.displayName]));
+    for (const space of await this.store.listAllSpaces()) {
+      await this.store.withSpaceLock(space.id, async () => {
+        for (const m of await this.store.listMessagesBySpace(space.id)) {
+          if (m.deletedAt) continue;
+          // A poll's body is its immutable fallback rendering — left alone.
+          const body = m.poll ? m.body : legacyToTokens(m.body, names);
+          if (body !== m.body) {
+            await this.applyEdit(space.id, m, body, await this.stampsFor(space.id, body), m.author, this.now());
+            out.messages += 1;
+            continue;
+          }
+          const stamps = await this.stampsFor(space.id, m.body);
+          if (!stampsEqual(stamps, stampsOf(m))) {
+            await this.store.restampMessage(space.id, m.id, stamps);
+            out.restamped += 1;
+          }
+        }
+        for (const t of await this.store.listTopics(space.id, true)) {
+          const title = legacyToTokens(t.title, names);
+          if (title === t.title) continue;
+          const updated: Topic = { ...t, title };
+          await this.store.putTopic(updated);
+          const at = this.now();
+          const offset = (await this.store.head(space.id)) + 1;
+          await this.append(space.id, offset, at, { type: 'topic', topic: updated, action: 'retitled', by: t.createdBy });
+          out.titles += 1;
+        }
+      });
+    }
+    await this.store.markBackfillDone('017-mentions', this.now());
+    if (out.messages || out.titles || out.restamped) {
+      console.log(`[harbor] mentions backfill: ${out.messages} messages rewritten, ${out.titles} titles, ${out.restamped} restamped`);
+    }
+    return out;
   }
 
   /**
@@ -1261,9 +1421,9 @@ export class HarborService {
           at,
         },
       });
-      // A poll is content: redacted with the body (the store already dropped it).
+      // A poll is content: redacted with the body (the store already dropped it). A tombstone addresses nobody.
       const { poll: _poll, ...rest } = message;
-      return this.foldLive(spaceId, { ...rest, body: '', deletedAt: at });
+      return this.foldLive(spaceId, { ...rest, body: '', deletedAt: at, mentions: [], mentionsHere: false, mentionsRowboat: false });
     });
   }
 
@@ -1288,6 +1448,7 @@ export class HarborService {
       ...(input.agentName ? { agentName: input.agentName } : {}),
     };
 
+    const stamps = await this.stampsFor(spaceId, input.body);
     return this.store.withSpaceLock(spaceId, async () => {
       const message = await this.store.getMessage(spaceId, messageId);
       if (!message) throw new HarborError('not_found', 'no such message');
@@ -1301,20 +1462,10 @@ export class HarborService {
       if (message.body === input.body) return this.foldLive(spaceId, message);
 
       const at = this.now();
-      await this.store.markMessageEdited(spaceId, messageId, input.body, at);
-      const offset = (await this.store.head(spaceId)) + 1;
-      await this.append(spaceId, offset, at, {
-        type: 'message_edited',
-        edit: {
-          spaceId,
-          messageId,
-          ...(message.threadRoot !== undefined ? { threadRoot: message.threadRoot } : {}),
-          body: input.body,
-          by,
-          at,
-        },
-      });
-      return this.foldLive(spaceId, { ...message, body: input.body, editedAt: at });
+      const edited = await this.applyEdit(spaceId, message, input.body, stamps, by, at);
+      // A newly mentioned member follows the thread from the edit on.
+      await this.followMentioned(spaceId, message.threadRoot ?? message.id, stamps, ctx.memberId, at);
+      return this.foldLive(spaceId, edited);
     });
   }
 
@@ -1597,6 +1748,77 @@ export class HarborService {
   }
 
   // --- live ------------------------------------------------------------------
+
+  // --- read state ------------------------------------------------------------
+  // Per-member cursors the org owns (read state, 2026-09-09) so every device
+  // agrees. Offsets, never timestamps. Never on the log: a mark is private
+  // member state, not a space fact — the member's other connections learn by
+  // an ephemeral read_mark frame, and a reconnecting client refetches unread().
+
+  /** Advance the stream mark, or a followed thread's mark. Monotone; past head refuses. */
+  async markRead(ctx: ActorCtx, spaceId: string, input: MarkReadInput): Promise<{ readOffset: number | null }> {
+    await this.requireMember(ctx, spaceId);
+    const head = await this.store.head(spaceId);
+    if (input.offset > head) {
+      throw new HarborError('invalid_request', `offset ${input.offset} is past the space's head (${head})`);
+    }
+    const at = this.now();
+    let threadRootId: string | undefined;
+    let readOffset: number | undefined;
+    if (input.threadRootId !== undefined) {
+      const root = await this.resolveRoot(spaceId, input.threadRootId);
+      threadRootId = root.id;
+      readOffset = await this.store.advanceThreadReadMark(spaceId, root.id, ctx.memberId, input.offset, at);
+      // Not following: nothing is recorded (v1 tracks followed threads only).
+      if (readOffset === undefined) return { readOffset: null };
+    } else {
+      readOffset = await this.store.advanceStreamReadMark(spaceId, ctx.memberId, input.offset, at);
+    }
+    this.hub.publishToMember(ctx.memberId, {
+      kind: 'read_mark',
+      spaceId,
+      ...(threadRootId !== undefined ? { threadRootId } : {}),
+      offset: readOffset,
+      at,
+    });
+    return { readOffset };
+  }
+
+  /** Follow or unfollow a thread; the mark survives an unfollow. */
+  async followThread(
+    ctx: ActorCtx,
+    spaceId: string,
+    rootMessageId: string,
+    following: boolean,
+  ): Promise<{ following: boolean; readOffset: number }> {
+    await this.requireMember(ctx, spaceId);
+    const root = await this.resolveRoot(spaceId, rootMessageId);
+    const mark = await this.store.setThreadFollowing(spaceId, root.id, ctx.memberId, following, this.now());
+    return { following: mark.following, readOffset: mark.readOffset };
+  }
+
+  /** Every space the member is in (DMs included): cursor, unread roots, unread followed threads. */
+  async unread(ctx: ActorCtx): Promise<UnreadSnapshot> {
+    const spaces = await this.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    const out: UnreadSnapshot['spaces'] = [];
+    for (const space of spaces) {
+      const head = await this.store.head(space.id);
+      const readOffset = await this.store.getStreamReadMark(space.id, ctx.memberId);
+      const threads = await this.store.listUnreadFollowedThreads(space.id, ctx.memberId);
+      out.push({
+        spaceId: space.id,
+        head,
+        readOffset,
+        unreadRoots: await this.store.countUnreadRoots(space.id, ctx.memberId, readOffset),
+        // The number on the space: mentions in unread roots plus mentions in the unread replies of followed threads.
+        unreadMentions:
+          (await this.store.countUnreadRootMentions(space.id, ctx.memberId, readOffset)) +
+          threads.reduce((sum, t) => sum + t.unreadMentions, 0),
+        threads,
+      });
+    }
+    return { spaces: out };
+  }
 
   async publishPresence(
     ctx: ActorCtx,
