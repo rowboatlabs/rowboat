@@ -31,6 +31,24 @@ const props = {
 }
 
 describe('floating ChatSidebar', () => {
+  it('leaves section navigation and titlebar spacing to the parent when embedded', () => {
+    render(<ChatSidebar {...props} floating={false} isOpen isMaximized embedded
+      onNavigateBack={vi.fn()} onNavigateForward={vi.fn()} collapsedLeftPaddingPx={88} />)
+    expect(screen.queryByRole('button', { name: 'Go back' })).toBeNull()
+    const header = screen.getByText('Chat header').parentElement!
+    expect(header.style.paddingLeft).toBe('12px')
+    expect(header.classList.contains('titlebar-drag-region')).toBe(false)
+  })
+
+  it('shows project context in the unified Assistant composer without affecting other sections', () => {
+    const { rerender } = render(<ChatSidebar {...props} isOpen projectName="General" />)
+    expect(screen.getByLabelText('Current project').textContent).toBe('Project: General')
+    rerender(<ChatSidebar {...props} isOpen projectName="Alpha" />)
+    expect(screen.getByLabelText('Current project').textContent).toBe('Project: Alpha')
+    rerender(<ChatSidebar {...props} isOpen />)
+    expect(screen.queryByLabelText('Current project')).toBeNull()
+  })
+
   it('preserves composer instances when minimized, switched and expanded', () => {
     const { rerender } = render(<ChatSidebar {...props} isOpen />)
     fireEvent.change(screen.getByLabelText('first'), { target: { value: 'Unsent draft' } })

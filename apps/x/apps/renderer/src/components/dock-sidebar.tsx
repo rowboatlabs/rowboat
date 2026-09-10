@@ -12,7 +12,6 @@ import { Bell,
   Code2,
   FileText,
   FilePlus,
-  Folder,
   Globe,
   History,
   Home,
@@ -801,22 +800,6 @@ export function DockSidebar({
     return () => clearInterval(tick)
   }, [latestNoteMtime])
 
-  // ----- data: workspace count -----
-  const workspaceCount = useMemo(() => {
-    const find = (nodes: TreeNode[]): TreeNode | null => {
-      for (const n of nodes) {
-        if (n.path === 'knowledge/Workspace') return n
-        if (n.kind === 'dir' && n.children?.length) {
-          const found = find(n.children)
-          if (found) return found
-        }
-      }
-      return null
-    }
-    const node = find(tree)
-    return node?.children?.filter((c) => c.kind === 'dir').length ?? 0
-  }, [tree])
-
   // ----- data: background agents label -----
   const [bgAgentsLabel, setBgAgentsLabel] = useState<string | null>(null)
   const bgAgentsFailed = bgTaskSummaries.some((t) => t.lastRunError)
@@ -931,32 +914,21 @@ export function DockSidebar({
           : (currentBillingPlan?.displayName ?? syncStatusLabel)
   const settingsAlert = outOfCredits || hasOauthError || (!isSyncing && hasServiceErrors)
 
-  // The most recently touched chat, for the Assistant tile (recency only —
-  // pinning shouldn't hijack "continue where I left off").
-  const lastChat = useMemo(() => {
-    const recency = (r: { createdAt: string; modifiedAt?: string }) => {
-      const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
-      return Number.isFinite(ms) ? ms : 0
-    }
-    return [...recentRuns].sort((a, b) => recency(b) - recency(a))[0] ?? null
-  }, [recentRuns])
-
   // ----- the item list -----
   const rows = useMemo<DockRow[]>(() => {
     const items: DockRow[] = [
-      // The top section: Assistant (resumes the most recent chat, falling
-      // back to a fresh one — white tile) with Spaces right under it, then a
+      // The top section: Assistant (restores the last project location)
+      // with Spaces right under it, then a
       // divider before the destinations.
       ...(onOpenRun || onNewChat ? [
         {
           item: {
-            key: 'assistant', label: 'Assistant', icon: MascotFaceIcon as unknown as LucideIcon,
+            key: 'assistant', label: 'Assistant', tourId: 'nav-assistant', icon: MascotFaceIcon as unknown as LucideIcon,
             status: 'Rowboat assistant',
             running: activeNav === 'assistant',
             onClick: () => {
               closeFlyouts()
-              if (lastChat && onOpenRun) onOpenRun(lastChat.id)
-              else onNewChat?.()
+              knowledgeActions.openWorkspaceAt()
             },
           },
         },
@@ -1051,14 +1023,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
         },
       },
-      {
-        item: {
-          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
-          status: workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`,
-          running: activeNav === 'workspaces',
-          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
-        },
-      },
       ...(onToggleBrowser ? [{
         item: {
           key: 'browser', label: 'Browser', icon: Globe,
@@ -1094,8 +1058,8 @@ export function DockSidebar({
     knowledgeUpdatedLabel, knowledgeActions, onOpenApps, pinnedApps, onOpenApp,
     bgAgentsFailed, bgAgentsLabel, onToggleBrowser, browserOpen,
     switcherOnly, openLastSpace, onOpenChatHistory,
-    onNewChat, lastChat, onOpenRun,
-    onOpenBgTasks, workspaceCount, totalSpacesUnread, totalSpaces, spacesOpen, chatsOpen,
+    onNewChat, onOpenRun,
+    onOpenBgTasks, totalSpacesUnread, totalSpaces, spacesOpen, chatsOpen,
     outOfCredits, hasOauthError, settingsStatus, settingsAlert,
   ])
 

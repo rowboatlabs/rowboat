@@ -8,6 +8,7 @@ import { SidebarProvider, useSidebar } from './ui/sidebar'
 const { projects } = vi.hoisted(() => ({ projects: [
     { id: 'alpha', name: 'Alpha', path: 'knowledge/Workspace/Alpha', chats: [{ id: 'chat-1', title: 'Review report', modifiedAt: '2026-09-10' }] },
     { id: 'beta', name: 'Beta', path: 'knowledge/Workspace/Beta', chats: [] },
+    { id: 'default', name: 'General', path: 'knowledge/Workspace', isDefault: true, chats: [{ id: 'general', title: 'General chat', modifiedAt: '2026-09-10' }] },
 ] }))
 vi.mock('@/hooks/use-projects', () => ({ useProjects: () => ({ projects, ready: true, refresh: vi.fn() }) }))
 vi.mock('@/lib/session-title', () => ({ useSessionTitle: () => undefined }))
@@ -25,6 +26,42 @@ function props() {
     }
 }
 describe('Projects rail', () => {
+    it('keeps Files collapsed until a named project is selected', () => {
+        const input = props()
+        const view = render(<ProjectsRail {...input} selectedPath={null} />)
+        expect(screen.getByTitle('Show files')).toBeDisabled()
+        expect(screen.queryByText('Select a project to see its files.')).toBeNull()
+        expect(screen.getByTitle('Show files').closest('section')).toHaveStyle({ flex: '0 0 auto' })
+        view.rerender(<ProjectsRail {...input} selectedPath={projects[2].path} />)
+        expect(screen.getByTitle('Show files')).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByLabelText('Add to project files')).toBeNull()
+        view.rerender(<ProjectsRail {...input} />)
+        expect(screen.getByTitle('Hide files')).toBeEnabled()
+        expect(screen.getByRole('button', { name: 'report.md' })).toBeVisible()
+        view.rerender(<ProjectsRail {...input} selectedPath={projects[2].path} />)
+        expect(screen.getByTitle('Show files')).toHaveAttribute('aria-expanded', 'false')
+    })
+    it('shows General chats in a separate Chats section and keeps their project association', () => {
+        const input = { ...props(), selectedPath: projects[2].path, selectedChat: 'general' }
+        render(<ProjectsRail {...input} />)
+        expect(screen.getAllByRole('button', { name: /^Collapse (Alpha|Beta|General)$/ }).map(button => button.getAttribute('aria-label'))).toEqual(['Collapse Alpha', 'Collapse Beta'])
+        expect(screen.queryByRole('button', { name: 'General' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Chats' })).toBeVisible()
+        expect(screen.queryByRole('button', { name: 'Actions for General' })).toBeNull()
+        const chat = screen.getByRole('button', { name: 'General chat' })
+        expect(chat).toHaveAttribute('aria-current', 'page')
+        fireEvent.click(chat)
+        expect(input.onOpenChat).toHaveBeenCalledWith(projects[2], 'general')
+        fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+        expect(input.onNewChat).toHaveBeenCalledWith(projects[2])
+        fireEvent.click(screen.getByRole('button', { name: 'Projects' }))
+        expect(screen.getByRole('button', { name: 'General chat' })).toBeVisible()
+        expect(screen.queryByRole('button', { name: 'Alpha' })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Chats' }))
+        expect(screen.queryByRole('button', { name: 'General chat' })).toBeNull()
+        fireEvent.click(screen.getByTitle('Show chats'))
+        expect(screen.getByRole('button', { name: 'General chat' })).toBeVisible()
+    })
     it('starts open with all chat lists expanded and supports bulk collapse and expand', () => {
         localStorage.setItem('projects:railOpen', 'false')
         render(<ProjectsRail {...props()} />)
@@ -39,6 +76,7 @@ describe('Projects rail', () => {
         expect(screen.getByRole('button', { name: 'Expand Alpha' })).toHaveAttribute('aria-expanded', 'false')
         expect(screen.getByRole('button', { name: 'Expand Beta' })).toHaveAttribute('aria-expanded', 'false')
         expect(screen.queryByRole('button', { name: 'Review report' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'General chat' })).toBeVisible()
         expect(screen.getByRole('button', { name: 'report.md' })).toBeVisible()
         fireEvent.click(screen.getByRole('button', { name: 'Expand all project chats' }))
         expect(screen.getByRole('button', { name: 'Review report' })).toBeVisible()
