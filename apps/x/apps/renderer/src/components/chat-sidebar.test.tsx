@@ -31,6 +31,15 @@ const props = {
 }
 
 describe('floating ChatSidebar', () => {
+  it('shows project context in the unified Assistant composer without affecting other sections', () => {
+    const { rerender } = render(<ChatSidebar {...props} isOpen projectName="General" />)
+    expect(screen.getByLabelText('Current project').textContent).toBe('Project: General')
+    rerender(<ChatSidebar {...props} isOpen projectName="Alpha" />)
+    expect(screen.getByLabelText('Current project').textContent).toBe('Project: Alpha')
+    rerender(<ChatSidebar {...props} isOpen />)
+    expect(screen.queryByLabelText('Current project')).toBeNull()
+  })
+
   it('preserves composer instances when minimized, switched and expanded', () => {
     const { rerender } = render(<ChatSidebar {...props} isOpen />)
     fireEvent.change(screen.getByLabelText('first'), { target: { value: 'Unsent draft' } })

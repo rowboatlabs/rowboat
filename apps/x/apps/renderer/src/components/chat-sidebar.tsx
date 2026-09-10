@@ -69,6 +69,7 @@ interface ChatSidebarProps {
   onCloseChatTabs: (tabIds: string[]) => void
   activeChatTabId: string
   getChatTabTitle: (tab: ChatTab) => string
+  projectName?: string
   onNewChatTab: () => void
   recentRuns?: { id: string; title?: string; createdAt: string }[]
   onSelectRun?: (runId: string) => void
@@ -165,6 +166,7 @@ export function ChatSidebar({
   onCloseChatTabs,
   activeChatTabId,
   getChatTabTitle,
+  projectName,
   onNewChatTab,
   recentRuns = [],
   onSelectRun,
@@ -567,6 +569,7 @@ export function ChatSidebar({
               <div className={cn('sticky bottom-0 z-10 bg-background pt-0 shadow-lg', floating ? 'pb-3' : 'pb-12')}>
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
+                  {projectName && <div className="mb-2 text-xs text-muted-foreground" aria-label="Current project">Project: {projectName}</div>}
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId && isOpen
                     return (

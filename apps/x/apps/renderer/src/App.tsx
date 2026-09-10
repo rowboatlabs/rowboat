@@ -4893,7 +4893,7 @@ function App() {
         const space = org ? findSpace(org, currentViewState.spaceId) : undefined
         return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
-      case 'workspace': return 'Projects'
+      case 'workspace': return 'Assistant'
       case 'knowledge-view': return 'Brain'
       case 'graph': return 'Graph View'
       case 'suggested-topics': return 'Suggested Topics'
@@ -4933,23 +4933,11 @@ function App() {
   }, [])
 
   const handleNewChatTab = useCallback(() => {
-    if (useBottomTabs || chatTabsRef.current.length > 1) {
-      addAssistantTab()
-      if (isCodeOpen) {
-        closeAllSections()
-        setExpandedFrom(currentViewState)
-      }
-      return
-    }
-    // A fresh tab keeps the other conversations and drafts available.
-    createChatTab()
+    const path = selectedProject?.path ?? projects.find((project) => project.isDefault)?.path ?? WORKSPACE_ROOT
+    projectDraftTabsRef.current.delete(path)
     dismissBrowserOverlay()
-    // "New chat" opens the full-screen chat; remember where we came from so
-    // closing it can restore the section.
-    const from = currentViewState.type === 'chat' ? null : currentViewState
-    closeAllSections()
-    setExpandedFrom(from)
-  }, [dismissBrowserOverlay, closeAllSections, currentViewState, createChatTab, useBottomTabs, addAssistantTab, isCodeOpen])
+    void applyViewStateRef.current?.({ type: 'workspace', path })
+  }, [dismissBrowserOverlay, selectedProject, projects])
 
   // Sidebar variant: add a chat without leaving file/graph context.
   // A caller with a selection already chosen for the fresh chat (the Home
@@ -5292,9 +5280,9 @@ function App() {
     // Remember where we came from so the close button can return.
     const from = currentViewState.type === 'chat' ? null : currentViewState
     dismissBrowserOverlay()
-    closeAllSections()
+    void applyViewStateRef.current?.({ type: 'chat', runId })
     setExpandedFrom(from)
-  }, [closeAllSections, currentViewState, dismissBrowserOverlay])
+  }, [currentViewState, dismissBrowserOverlay, runId])
 
   const handleCloseFullScreenChat = useCallback((): boolean => {
     if (!expandedFrom) return false
@@ -5336,6 +5324,13 @@ function App() {
     // Whether this navigation ENTERS Spaces (vs a click within it) — read
     // before closeAllSections resets the flag.
     const wasSpacesOpen = isSpacesOpen
+    if (view.type === 'chat') {
+      const requestedRunId = view.runId
+      const { projects: latest } = await window.ipc.invoke('projects:list', null)
+      const project = latest.find((item) => item.chats.some((chat) => chat.id === requestedRunId))
+        ?? latest.find((item) => item.isDefault)
+      view = { type: 'workspace', path: project?.path ?? WORKSPACE_ROOT, runId: view.runId ?? undefined }
+    }
     closeAllSections()
     switch (view.type) {
       case 'file':
@@ -5425,18 +5420,8 @@ function App() {
         if (!wasSpacesOpen) setIsChatSidebarOpen(false)
         setIsSpacesOpen(true)
         return
-      case 'chat':
-        if (view.runId) {
-          bindChatToRun(view.runId)
-        } else if (useBottomTabs || chatTabsRef.current.length > 1) {
-          const current = chatTabsRef.current.find((tab) => tab.id === activeChatTabIdRef.current)
-          if (current?.runId) addAssistantTab()
-        } else {
-          handleNewChat()
-        }
-        return
     }
-  }, [closeAllSections, bindChatToRun, handleNewChat, isSpacesOpen, useBottomTabs, addAssistantTab, activateAssistantTab])
+  }, [closeAllSections, bindChatToRun, isSpacesOpen, addAssistantTab, activateAssistantTab])
   applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
@@ -5461,32 +5446,24 @@ function App() {
   }, [appendUnique, applyViewState, cancelRecordingIfActive, setHistory, isBrowserOpen, dismissBrowserOverlay])
 
   const openAssistantRun = useCallback((sessionId: string) => {
-    const project = projects.find((p) => p.chats.some((chat) => chat.id === sessionId))
-    if (project) {
-      void navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
-      return
-    }
-    if (useBottomTabs && !isCodeOpen && !isWorkspaceOpen) {
-      bindChatToRun(sessionId)
-      setIsChatSidebarOpen(true)
-    } else {
-      void navigateToView({ type: 'chat', runId: sessionId })
-    }
-  }, [useBottomTabs, isCodeOpen, bindChatToRun, navigateToView, projects, isWorkspaceOpen])
+    void navigateToView({ type: 'chat', runId: sessionId })
+  }, [navigateToView])
 
   const openProjectChat = useCallback((project: Project, sessionId: string) => {
     void navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
   }, [navigateToView])
   const newProjectChat = useCallback(async (project: Project) => {
-    const { sessionId } = await window.ipc.invoke('projects:createChat', { projectId: project.id })
-    await refreshProjects()
-    await navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
-  }, [navigateToView])
+    projectDraftTabsRef.current.delete(project.path)
+    await applyViewState({ type: 'workspace', path: project.path })
+  }, [applyViewState])
 
   const openProjects = useCallback((path?: string) => {
-    const location = path ? { path } : resolveProjectsLocation(projects, lastProjectLocationRef.current)
-    void navigateToView({ type: 'workspace', ...location })
-  }, [navigateToView, projects])
+    void (async () => {
+      const { projects: latest } = await window.ipc.invoke('projects:list', null)
+      const location = path ? { path } : resolveProjectsLocation(latest, lastProjectLocationRef.current)
+      await navigateToView({ type: 'workspace', ...location })
+    })().catch((error) => toast.error(String(error)))
+  }, [navigateToView])
 
   // Move the maximized/full-screen chat into the right side pane: restore the
   // view we expanded from (or fall back to Home) and dock the chat on the right.
@@ -7218,7 +7195,7 @@ function App() {
       : isEmailOpen ? 'email'
       : isMeetingsOpen ? 'meetings'
       : isCodeOpen ? 'code'
-      : isWorkspaceOpen ? 'workspaces'
+      : isWorkspaceOpen ? 'assistant'
       : (isKnowledgeViewOpen || isGraphOpen || (selectedPath != null && selectedPath.startsWith('knowledge/'))) ? 'knowledge'
       : isBgTasksOpen ? 'agents'
       : isAppsOpen ? 'apps'
@@ -8106,11 +8083,20 @@ function App() {
                 isOpen={dockFullScreen || chatPaneOpen}
                 isMaximized={projectViewActive ? !selectedPath : dockFullScreen || isRightPaneMaximized}
                 chatTabs={chatTabs}
-                onSwitchChatTab={switchChatTab}
+                onSwitchChatTab={(tabId) => {
+                  if (!projectViewActive) { switchChatTab(tabId); return }
+                  const tab = chatTabs.find((item) => item.id === tabId)
+                  if (tab?.runId) { openAssistantRun(tab.runId); return }
+                  const path = [...projectDraftTabsRef.current].find(([, id]) => id === tabId)?.[0]
+                    ?? projects.find((item) => item.isDefault)?.path ?? WORKSPACE_ROOT
+                  projectDraftTabsRef.current.set(path, tabId)
+                  void applyViewState({ type: 'workspace', path })
+                }}
                 onCloseChatTabs={closeChatTabs}
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
                 onNewChatTab={() => { if (projectViewActive && selectedProject) void newProjectChat(selectedProject).catch((e) => toast.error(String(e))); else handleNewChatTabInSidebar() }}
+                projectName={projectViewActive ? selectedProject?.name : undefined}
                 recentRuns={chatRuns}
                 onSelectRun={projectViewActive ? openAssistantRun : bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
