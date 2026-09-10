@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { mcpTools } from '@rowboat/spaces-protocol';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
 
 // Agent-face tests through a real MCP client: the exact path any agent
@@ -38,23 +39,39 @@ async function mcpClient(token: string, headers: Record<string, string> = {}): P
 }
 
 describe('agent face (MCP)', () => {
-  it('lists exactly the twelve protocol tools, with JSON schemas', async () => {
+  it('lists exactly the twenty-seven protocol tools, with JSON schemas', async () => {
     const client = await mcpClient('dev-harsh');
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'asset_history',
+      'create_invite',
+      'create_space',
       'create_topic',
       'delete_asset',
+      'delete_message',
+      'diff',
+      'edit_message',
+      'end_poll',
+      'leave_space',
+      'list_members',
       'list_spaces',
       'list_topics',
       'manage_topic',
       'move_asset',
+      'open_direct',
       'post_message',
       'propose_change',
+      'react',
       'read_asset',
       'read_stream',
       'read_thread',
+      'rename_space',
+      'restore_asset',
       'search_space',
+      'vote_poll',
+      'whoami',
     ]);
+    expect(tools.map((t) => t.name).sort()).toEqual([...mcpTools].map((t) => t.name).sort());
     const propose = tools.find((t) => t.name === 'propose_change')!;
     expect(propose.inputSchema.required).toContain('reason'); // required on this face only
     await client.close();

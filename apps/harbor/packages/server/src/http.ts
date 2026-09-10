@@ -168,6 +168,10 @@ export function buildHttpApp(deps: {
     return reply(c, routes.listMembers.response, { members: await service.listMembers(actor(c), spaceId) });
   });
 
+  app.get(routes.listOrgMembers.path, async (c) => {
+    return reply(c, routes.listOrgMembers.response, { members: await service.listOrgMembers(actor(c)) });
+  });
+
   app.post('/v1/spaces/:spaceId/leave', async (c) => {
     const { spaceId } = parseWith(routes.leaveSpace.params, c.req.param());
     await service.leaveSpace(actor(c), spaceId);

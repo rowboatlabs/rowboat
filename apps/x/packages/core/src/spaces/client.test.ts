@@ -273,6 +273,8 @@ describe('SpacesClient', () => {
     const notes = await ramnique.openDirect('ramnique');
     expect(notes.space).toMatchObject({ kind: 'direct', participants: ['ramnique'] });
     expect((await ramnique.openDirect('ramnique')).created).toBe(false);
+    // The org roster is the union of your spaces (DMs included), deduped, A–Z.
+    expect((await ramnique.listOrgMembers()).map((m) => m.id)).toEqual(['gagan', 'ramnique']);
   });
 
   it('errors carry the wire code', async () => {
@@ -282,6 +284,47 @@ describe('SpacesClient', () => {
     });
     const outsider = new SpacesClient({ baseUrl: harbor.url, token: 'not-a-dev-token' });
     await expect(outsider.listSpaces()).rejects.toBeInstanceOf(SpacesRequestError);
+  });
+});
+
+describe('SpacesClient.listOrgMembers', () => {
+  // The org computes the roster (union of the caller's spaces, DMs included,
+  // deduped, A–Z); the client's job is one GET on the route's path with the
+  // bearer, and the contract check on the way back. Mocked fetch: the route
+  // is protocol-declared, and this pins the wire shape the app relies on.
+  function fakeFetch(body: unknown, status = 200) {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  it('GETs /v1/members with the bearer and returns the members list', async () => {
+    const members = [
+      { id: 'gagan', displayName: 'Gagan', role: 'member' },
+      { id: 'ramnique', displayName: 'Ramnique', role: 'member' },
+    ];
+    const { calls, fetchImpl } = fakeFetch({ members });
+    const client = new SpacesClient({ baseUrl: 'http://org.test/', token: 'dev-ramnique', fetchImpl });
+    expect(await client.listOrgMembers()).toEqual(members);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('http://org.test/v1/members');
+    expect(calls[0].init?.method).toBe('GET');
+    expect((calls[0].init?.headers as Record<string, string>).authorization).toBe('Bearer dev-ramnique');
+  });
+
+  it('rejects a response that breaks the contract', async () => {
+    const { fetchImpl } = fakeFetch({ people: [] });
+    const client = new SpacesClient({ baseUrl: 'http://org.test', token: 'dev-ramnique', fetchImpl });
+    await expect(client.listOrgMembers()).rejects.toMatchObject({ name: 'SpacesRequestError', code: 'internal' });
+  });
+
+  it('surfaces the wire error for an org that does not serve the route', async () => {
+    const { fetchImpl } = fakeFetch({ code: 'not_found', message: 'no such route', retryable: false }, 404);
+    const client = new SpacesClient({ baseUrl: 'http://org.test', token: 'dev-ramnique', fetchImpl });
+    await expect(client.listOrgMembers()).rejects.toMatchObject({ status: 404, code: 'not_found' });
   });
 });
 

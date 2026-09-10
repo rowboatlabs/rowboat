@@ -12,6 +12,7 @@ import {
   isSpacesAvailable,
 } from "../connections.js";
 import { loadDiskSkills } from "./disk-loader.js";
+import { SPACES_TOOL_NAMES } from "../../tools/domains/spaces.js";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
 import docCollabSkill from "./doc-collab/skill.js";
@@ -137,16 +138,10 @@ const definitions: SkillDefinition[] = [
   {
     id: "spaces",
     availability: isSpacesAvailable,
-    title: "Spaces (shared team containers)",
-    summary: "Work in the team's shared spaces — read and update shared files (roadmaps, notes), push standup items, post to the team feed when asked. Use for 'push/add/update ... to <space name>' (e.g. 'push my standup to Roadboard'), 'team roadmap', 'shared doc/space'. Writes are visible to the whole team, attributed to your person.",
+    title: "Spaces (team chat, DMs, shared files)",
+    summary: "Your person's team workspace — like Slack: spaces (channels), DMs, threads, discussions, shared files, members. Use for ANY ask about a space, a DM, a teammate's message, 'message/DM <person>', 'what did the team say about', 'post/reply in <space>', 'push/add/update ... to <space>' (e.g. 'push my standup to Roadboard'), 'team roadmap', 'shared doc'. Attaches the full spaces toolset. Writes are visible to the whole team, attributed to your person.",
     content: spacesSkill,
-    tools: [
-      "listMcpServers",
-      "listMcpTools",
-      "executeMcpTool",
-      "spaces-upload-blob",
-      "spaces-download-blob",
-    ],
+    tools: [...SPACES_TOOL_NAMES],
   },
   {
     id: "composio-integration",

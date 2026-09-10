@@ -18,7 +18,7 @@ team and a Roadboard space (`src/main.ts`).
 
 - **One core, three doors.** `service.ts` is the single implementation; `http.ts`
   (every route in `api.ts`), `ws.ts` (`/v1/live`, subscribe/replay/live frames),
-  and `mcp.ts` (`/mcp`, the six tools over streamable HTTP) are thin
+  and `mcp.ts` (`/mcp`, the twenty-seven tools over streamable HTTP) are thin
   projections. Rowboat's agent gets no privileged path — enforced by there being
   no other door.
 - **Merge engine** (`merge.ts`): line-level three-way, passes the six golden
@@ -135,8 +135,8 @@ team and a Roadboard space (`src/main.ts`).
   carries folded `reactions` groups (first-reacted order) on reads; the copy
   inside a stored `message` event is its at-post snapshot (empty), so clients
   fold `reaction` events or refetch. Attribution rides the reaction
-  (`by: Attribution`) like every other act. Render-face only for now — the
-  six MCP tools deliberately don't react (an agent's ack is a reply).
+  (`by: Attribution`) like every other act. Both faces: the agent's `react`
+  tool is the member's reaction (parity, 2026-09-09).
 - **Message deletion is an author-only tombstone** (`deleteMessage` route + the
   `message_deleted` event): the content plane stays role-flat, so deleter ==
   author, always. The row keeps its id/offset (threads stay anchored) but
@@ -146,7 +146,8 @@ team and a Roadboard space (`src/main.ts`).
   Deletion decrements the topic's `messageCount` without bumping
   `lastActivityAt` and emits no topic event. Re-deleting is an idempotent 200
   no-op. Tombstones take no new reactions (`invalid_request`); removes still
-  work so cleanup stays possible. Render-face only, like reactions.
+  work so cleanup stays possible. Both faces (`delete_message`, author-only
+  on the member id — the member's agent counts as the member).
 - **Message editing is an author-only in-place rewrite** (`editMessage` route +
   the `message_edited` event, 2026-08-26): editor == author, exactly deletion's
   posture. The new body replaces the old everywhere it lives — messages row AND
@@ -155,8 +156,8 @@ team and a Roadboard space (`src/main.ts`).
   replay). `Message` carries `editedAt`; clients render an "(edited)" mark.
   Tombstones refuse (`invalid_request`); an identical body is an idempotent
   200 no-op — no write, no event. Editing bumps neither `lastActivityAt` nor
-  `messageCount` and emits no topic event. Render-face only, like reactions
-  and deletion — an agent's correction is a new message.
+  `messageCount` and emits no topic event. Both faces (`edit_message`,
+  author-only on the member id like deletion).
 - **Polls are a field on a message, the Discord model** (`Message.poll`,
   `postMessage`'s `poll` create block, `votePoll`/`endPoll` routes, the
   `poll_vote`/`poll_ended` events — 2026-09-01). The definition (question ≤300,
@@ -179,11 +180,12 @@ team and a Roadboard space (`src/main.ts`).
   closed. Closed polls and tombstones refuse votes (both directions — a closed
   ballot is sealed); deletion redacts the poll with the body, row and stored
   event alike, and drops its votes (a member-attributed vote must not outlive
-  the poll it was cast on). Agents can neither vote nor end a poll
-  (`actingMode` must be `direct` on both routes — Discord's "apps can't
-  vote"; a poll is a member's question to members, and an app acting under
-  the author's identity must not close it either); render-face only for now,
-  like reactions — the MCP face doesn't expose poll creation yet. Question
+  the poll it was cast on). Any acting mode may vote or end (parity,
+  2026-09-09 — the earlier `actingMode === 'direct'` refusal is gone): a vote
+  cast by a member's agent IS that member's vote, and the author's agent
+  counts as the author for `endPoll`; attribution records how, never who
+  else. The agent face carries all three (`post_message {poll}`,
+  `vote_poll`, `end_poll`). Question
   and answer text are trimmed before the length bounds apply — whitespace-only
   text is refused. Topic listings fold their root like any page read, so a
   poll root card carries its votes. No `is_finalized` dance: every vote lands
@@ -234,7 +236,7 @@ Amended 2026-08-24 (spec §6 binary assets, previously Deferred §12): a proposa
 
 Amended 2026-08-25 (image dimensions, additive): `BlobInfo` gains optional `width`/`height` — pixel dimensions the org parses from the header bytes of sniffed images at upload (same posture as mime: derived from the bytes by the org, never the client's claim; the pattern Slack/Discord/Telegram use). A display hint, never a gate: absent for non-images, unparseable headers, and pre-existing blobs (no backfill). Clients reserve the image's exact box before the bytes arrive — no layout shift. Blob links may carry the dimensions as display-only `w`/`h` query params beside `name` (the nostr-`imeta` idea: the reference itself carries the hint), so message renderers need no lookup; storage ignores them.
 
-Amended 2026-08-26 (namespace ops + the inode model): **the path stays the product's identity; storage keys on an internal per-asset id** — never on the wire — so `moveAsset`, `deleteAsset`, and `restoreAsset` are property updates: history and bytes never relocate, and per-file history is an id filter, not a chain walk. Each op appends one attributed change-set (`ChangeSet.op: move|delete|restore`, `movedFrom` on moves) with `baseVersion === resultVersion` — **only content edits bump versions**. Move follows the propose discipline (declared base; stale = conflict bundle sans regions; occupied destination = refused, never overwritten) and leaves a redirect at the old path: reads answer with the file's current `path` (the client's re-point signal), stale proposes refuse with a pointer, and a fresh create claims the vacant lot. Delete freezes the file in place — listable via `listAssets?includeDeleted` (`state: 'deleted'`), restorable while its path is free; re-creating over a deleted path starts a new lineage and never blocks. The agent face gains `move_asset` and `delete_asset` (reason required); restore is deliberately human-only for now.
+Amended 2026-08-26 (namespace ops + the inode model): **the path stays the product's identity; storage keys on an internal per-asset id** — never on the wire — so `moveAsset`, `deleteAsset`, and `restoreAsset` are property updates: history and bytes never relocate, and per-file history is an id filter, not a chain walk. Each op appends one attributed change-set (`ChangeSet.op: move|delete|restore`, `movedFrom` on moves) with `baseVersion === resultVersion` — **only content edits bump versions**. Move follows the propose discipline (declared base; stale = conflict bundle sans regions; occupied destination = refused, never overwritten) and leaves a redirect at the old path: reads answer with the file's current `path` (the client's re-point signal), stale proposes refuse with a pointer, and a fresh create claims the vacant lot. Delete freezes the file in place — listable via `listAssets?includeDeleted` (`state: 'deleted'`), restorable while its path is free; re-creating over a deleted path starts a new lineage and never blocks. The agent face gains `move_asset` and `delete_asset` (reason required); `restore_asset` followed with parity (2026-09-09, reason required).
 
 **2. Live updates: one WebSocket per org, per-space subscriptions, offset-based resume** (`events.ts`). Every durable fact (change, message, topic update, membership) is an offsetted `SpaceEvent` in one per-space sequence; subscribe with `afterOffset` to replay-then-go-live. Presence is a separate ephemeral frame with no offset. This is the same catch-up pattern as the app's turn-event spine — deliberately familiar. Spec §7 (the feed renders this stream), §9.
 
@@ -252,7 +254,9 @@ Amended 2026-08-25 (relative links, a client convention — no wire change): a *
 
 Amended 2026-08-19 (spec §4: invites/profile/roles): an invite is one shape — an **open bearer secret**; acceptance binds to the authenticated (issuer, subject), and **every bind-time condition is org policy checked in one place at acceptance** (v1: the email-domain rule; a per-person email-bound invite variant was considered and dropped — policy checks never live in the token). Wire impact when built: the accept path gains a policy-refused state; `Member` gains the org-level **admin bit** (membership/policy powers only — the content plane stays role-flat) and later a `handle` (org-unique, deferred until human mentions ship; attribution keys on member id, never name/handle).
 
-**5. The agent face is twelve MCP tools** (`mcp.ts`): `list_spaces`, `read_stream`, `read_thread`, `read_asset`, `propose_change`, `move_asset`, `delete_asset`, `post_message`, `list_topics`, `create_topic`, `manage_topic`, `search_space` — direct projections of the core operations. Semantics live in the tool design: `list_spaces` makes discovery mechanical (space ids + full file listings in one call — agents never guess ids or paths, and never depend on the README-link convention), reads bundle recent history, conflicts return current content + history, so any well-behaved agent gets read-before-write and retry for free. `reason` is **required** on the MCP face (optional on REST) — the spec's "agents always attach a why" convention, enforced where only agents call. Rowboat's own agent uses these exact tools; no privileged path. Spec §9. (Escape hatch: if dogfood grows spaces with very large file counts, the inline listings in `list_spaces` split or paginate — a v0-legal change.)
+**5. The agent face is twenty-seven MCP tools** (`mcp.ts`): `whoami`, `list_members`, `list_spaces`, `open_direct`, `create_space`, `rename_space`, `leave_space`, `create_invite`, `read_stream`, `read_thread`, `search_space`, `post_message`, `edit_message`, `delete_message`, `react`, `vote_poll`, `end_poll`, `list_topics`, `create_topic`, `manage_topic`, `read_asset`, `propose_change`, `move_asset`, `delete_asset`, `restore_asset`, `asset_history`, `diff` — direct projections of the core operations. Semantics live in the tool design: `list_spaces` makes discovery mechanical (space ids + full file listings in one call — agents never guess ids or paths, and never depend on the README-link convention), reads bundle recent history, conflicts return current content + history, so any well-behaved agent gets read-before-write and retry for free. `reason` is **required** on the MCP face (optional on REST) — the spec's "agents always attach a why" convention, enforced where only agents call. Rowboat's own agent uses these exact tools; no privileged path. Spec §9. (Escape hatch: if dogfood grows spaces with very large file counts, the inline listings in `list_spaces` split or paginate — a v0-legal change.)
+
+Amended 2026-09-09 (parity): **the agent face projects every member operation the render face has** — identity (`whoami`), roster (`list_members`, backed by the new `GET /v1/members`: the union of the caller's space rosters, DMs included), DMs, space lifecycle, invites, message edit/delete/react, polls (create, vote, end), file restore/history/diff, versioned reads. An agent acting for a member can do whatever that member can do in the app; **an agent's vote, reaction, or edit is the member's act**, attributed by `actingMode` + `agentName` (how it happened, never who else). The earlier "agents are silent / don't react / don't vote" posture — the twelve-tool face and the `actingMode === 'direct'` refusals on `votePoll`/`endPoll` — is retired; guidance about WHEN an agent should act lives in the agent's skill, not in the tool surface. `reason` stays required on every namespace op (`propose_change`, `move_asset`, `delete_asset`, `restore_asset`). `readOnlyMcpToolNames` names the pure reads.
 
 **6. Conflicts are outcomes; errors are failures** (`changeset.ts`, `errors.ts`). A stale base is a normal result of merge-then-correct, not an error — it returns 200 with everything needed to retry in one round trip (`currentContent`, `currentVersion`, colliding `regions`, `recentHistory`). The error enum is for actual failures, with `read_only_limit` encoding the over-limit-means-read-only rule (spec §4: never lockout).
 

@@ -34,7 +34,7 @@ import { SearchKind, SearchResults } from './search.js';
  * rendering of the poll (question + numbered options) so poll-blind clients
  * still show it; poll-aware clients render the card instead.
  */
-const NewPoll = z.object({
+export const NewPoll = z.object({
   question: z.string().trim().min(1).max(300),
   answers: z
     .array(z.object({ text: z.string().trim().min(1).max(55), emoji: ReactionEmoji.optional() }))
@@ -104,7 +104,8 @@ export const routes = {
    * made it. No invite and no acceptance — the org is the trust boundary,
    * as inside one Slack workspace. The other participant learns of the space
    * by a `space_added` live frame (events.ts) and on their next listing.
-   * Refuses yourself (no self-DM in v1) and unknown members.
+   * Your own id opens your self-DM (2026-09-08: one participant, one
+   * membership, notes to self); unknown members refuse (`not_found`).
    */
   openDirect: {
     method: 'POST',
@@ -159,6 +160,20 @@ export const routes = {
     method: 'GET',
     path: '/v1/spaces/:spaceId/members',
     params: z.object({ spaceId: SpaceId }),
+    response: z.object({ members: z.array(Member) }),
+  },
+  /**
+   * The org roster as THIS member may see it (2026-09-09): the union of the
+   * rosters of every space (DMs included) the caller belongs to, deduped,
+   * sorted by display name. Discovery is bounded by shared membership on
+   * purpose — you can only find people you already share a space with — so
+   * no admin-only directory and no privacy surface beyond what listMembers
+   * already exposes per space. Both faces use it: the app's "New message"
+   * picker and the agent's `list_members` resolve a name to a memberId here.
+   */
+  listOrgMembers: {
+    method: 'GET',
+    path: '/v1/members',
     response: z.object({ members: z.array(Member) }),
   },
   leaveSpace: {
@@ -460,8 +475,9 @@ export const routes = {
    * idempotent no-op on re-add/re-remove). Single-select polls MOVE a vote —
    * adding while another answer holds yours removes that one atomically (a
    * `removed` then an `added` event under one lock). Closed polls (`endedAt`
-   * set or `expiresAt` passed) and tombstones refuse; agents cannot vote
-   * (actingMode must be 'direct' — the Discord posture: apps don't vote).
+   * set or `expiresAt` passed) and tombstones refuse. Any acting mode may
+   * vote (parity, 2026-09-09): a vote cast by a member's agent IS that
+   * member's vote — attribution says how it happened, never who else.
    * Returns the message with the poll's votes (and reactions) folded.
    */
   votePoll: {
@@ -478,7 +494,8 @@ export const routes = {
   },
   /**
    * End a poll early — author-only, like deletion (the content plane stays
-   * role-flat). Sets `endedAt` and emits `poll_ended`. Ending a poll that is
+   * role-flat); the author's agent counts as the author (parity,
+   * 2026-09-09). Sets `endedAt` and emits `poll_ended`. Ending a poll that is
    * already closed (early-ended or naturally expired) is a 200 no-op with no
    * event. Natural expiry needs no call — clients compute it from `expiresAt`.
    */

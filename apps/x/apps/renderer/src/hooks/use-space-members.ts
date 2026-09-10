@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import type { spaces } from '@x/shared'
 
 // The space roster, module-level and persisted per install (localStorage),
@@ -9,6 +9,11 @@ import type { spaces } from '@x/shared'
 
 function key(orgId: string, spaceId: string): string {
     return `${orgId}/${spaceId}`
+}
+
+/** The org-wide roster lives in the same store, under a key no space id can take. */
+function orgKey(orgId: string): string {
+    return `org:${orgId}`
 }
 
 const CACHE_VERSION = 1
@@ -109,8 +114,34 @@ export function prefetchMembers(orgId: string, spaceId: string): void {
  */
 export function refreshMembers(orgId: string, spaceId: string): void {
     const k = key(orgId, spaceId)
-    if (Date.now() - (lastLoadedAt.get(k) ?? 0) < REFRESH_MIN_MS) return
-    void loadMembers(orgId, spaceId)
+    if (Date.now() - (lastLoadedAt.get(k) ?? 0) >= REFRESH_MIN_MS) void loadMembers(orgId, spaceId)
+    // Membership changes in any space change who is in the org's directory too.
+    if (Date.now() - (lastLoadedAt.get(orgKey(orgId)) ?? 0) >= REFRESH_MIN_MS) void loadOrgRoster(orgId, [])
+}
+
+/** The union of whatever per-space rosters are already in, A–Z. */
+function unionOfRosters(orgId: string, spaceIds: readonly string[]): spaces.Member[] {
+    const byId = new Map<string, spaces.Member>()
+    for (const id of spaceIds) for (const m of memberState.get(key(orgId, id)) ?? []) if (!byId.has(m.id)) byId.set(m.id, m)
+    return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName))
+}
+
+async function loadOrgRoster(orgId: string, spaceIds: readonly string[]): Promise<void> {
+    const k = orgKey(orgId)
+    if (membersLoading.has(k)) return
+    membersLoading.add(k)
+    try {
+        const res = await window.ipc.invoke('spaces:listOrgMembers', { orgId })
+        membersCacheOnly.delete(k)
+        lastLoadedAt.set(k, Date.now())
+        setMembers(k, res.members)
+    } catch {
+        // Org unreachable, or an older org without the route: the per-space
+        // rosters the app has already fetched stand in for the directory.
+        if (!memberState.has(k) || membersCacheOnly.has(k)) setMembers(k, unionOfRosters(orgId, spaceIds))
+    } finally {
+        membersLoading.delete(k)
+    }
 }
 
 function subscribeMembers(l: () => void): () => void {
@@ -134,8 +165,8 @@ export function useSpaceMembers(orgId: string, spaceId: string): spaces.Member[]
 
 /**
  * Your own display name on an org — the sidebar's self-DM row shows it the
- * way Slack does ("<name>  you"). Read from any roster already fetched (the
- * self-DM's own, else the first shared space's, warmed here); null until one lands.
+ * way Slack does ("<name>  you"). Read from the org roster (cached, then
+ * refreshed); null until it lands.
  */
 export function useSelfDisplayName(orgId: string, memberId: string, spaceIds: readonly string[]): string | null {
     const roster = useOrgRoster(orgId, spaceIds)
@@ -144,25 +175,21 @@ export function useSelfDisplayName(orgId: string, memberId: string, spaceIds: re
 
 /**
  * Everyone your person shares a space with on this org, A–Z — the people a
- * DM can be opened with. There is no org roster route yet; the rosters the
- * app already fetches ARE the directory (Discord's "people you share a
- * server with" rule, by construction rather than policy).
+ * DM can be opened with. The org computes it (GET /v1/members: the union of
+ * your space rosters, DMs included, deduped — Discord's "people you share a
+ * server with" rule, by construction rather than policy). Cached per org
+ * like the per-space rosters, so the picker's first frame is already full;
+ * refreshed on mount and, throttled, on live activity (refreshMembers).
+ * `spaceIds` only feeds the fallback for an org that does not serve the route.
  */
 export function useOrgRoster(orgId: string, spaceIds: readonly string[]): spaces.Member[] {
     const idsKey = spaceIds.join('|')
-    for (const id of spaceIds) hydrateMembers(key(orgId, id))
+    hydrateMembers(orgKey(orgId))
     const state = useSyncExternalStore(subscribeMembers, () => memberState)
     useEffect(() => {
-        for (const id of spaceIds) void loadMembers(orgId, id)
+        void loadOrgRoster(orgId, spaceIds)
         // The joined key IS the dependency — the array identity changes every render.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orgId, idsKey])
-    return useMemo(() => {
-        const byId = new Map<string, spaces.Member>()
-        for (const id of spaceIds) {
-            for (const m of state.get(key(orgId, id)) ?? []) if (!byId.has(m.id)) byId.set(m.id, m)
-        }
-        return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName))
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state, orgId, idsKey])
+    return state.get(orgKey(orgId)) ?? EMPTY_MEMBERS
 }
