@@ -647,6 +647,17 @@ export const ipcSchemas = {
   // ── New runtime: sessions + turns (session-design.md) ────────────────────
   // Turn-mutating calls return quickly; the renderer follows progress through
   // the turns:events feed and the shared reduceTurn reducer.
+  'projects:list': {
+    req: z.null(),
+    res: z.object({ projects: z.array(z.object({
+      id: z.string(), name: z.string(), path: z.string(),
+      chats: z.array(z.object({ id: z.string(), title: z.string().optional(), modifiedAt: z.string() })),
+    })) }),
+  },
+  'projects:createChat': {
+    req: z.object({ projectId: z.string() }),
+    res: z.object({ sessionId: z.string() }),
+  },
   'sessions:create': {
     req: z.object({ title: z.string().optional() }),
     res: z.object({ sessionId: z.string() }),

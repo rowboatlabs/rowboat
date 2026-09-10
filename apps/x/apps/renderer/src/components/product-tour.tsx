@@ -15,7 +15,6 @@ import tourClipCode from '@/assets/tour/code.mp3'
 import tourClipKnowledge from '@/assets/tour/knowledge.mp3'
 import tourClipAgents from '@/assets/tour/agents.mp3'
 import tourClipApps from '@/assets/tour/apps.mp3'
-import tourClipWorkspaces from '@/assets/tour/workspaces.mp3'
 import tourClipChats from '@/assets/tour/chats.mp3'
 import tourClipComposer from '@/assets/tour/composer.mp3'
 import tourClipDone from '@/assets/tour/done.mp3'
@@ -116,8 +115,8 @@ const TOUR_STEPS: TourStep[] = [
     targetId: 'nav-workspaces',
     navigate: 'workspaces',
     hat: 'explorer',
-    title: 'Workspaces',
-    text: 'Workspaces hold your project folders and files, so related work stays docked together.',
+    title: 'Projects',
+    text: 'Projects keep local files and related chats together. Pick a chat in the rail to work with Rowboat, or open a file alongside it.',
   },
   {
     id: 'chats',
@@ -151,7 +150,6 @@ const TOUR_CLIPS: Record<string, string> = {
   knowledge: tourClipKnowledge,
   agents: tourClipAgents,
   apps: tourClipApps,
-  workspaces: tourClipWorkspaces,
   chats: tourClipChats,
   composer: tourClipComposer,
   done: tourClipDone,

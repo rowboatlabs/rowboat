@@ -7,7 +7,7 @@ import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, FolderOpen, X } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
@@ -41,7 +41,8 @@ import { railKey, type RailSelection } from '@/lib/spaces-selection';
 import { findSpace, getSpacesOrgs, refreshSpacesOrgs, useSpacesOrgs } from '@/hooks/use-spaces';
 import { spaceDisplayName } from '@/lib/spaces-direct';
 import { EmailView } from '@/components/email-view';
-import { WorkspaceView } from '@/components/workspace-view';
+import { ProjectsRail } from '@/components/projects-rail';
+import { useProjects, refreshProjects, type Project } from '@/hooks/use-projects';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { NewPresentationDialog } from '@/components/new-presentation-dialog';
@@ -642,7 +643,7 @@ type ViewState =
   | { type: 'meetings' }
   | { type: 'live-notes' }
   | { type: 'email'; threadId?: string; searchQuery?: string }
-  | { type: 'workspace'; path?: string }
+  | { type: 'workspace'; path?: string; runId?: string; filePath?: string }
   | { type: 'knowledge-view'; folderPath?: string; mode?: KnowledgeViewMode }
   | { type: 'chat-history' }
   | { type: 'home' }
@@ -656,7 +657,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'chat' && b.type === 'chat') return a.runId === b.runId
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
-  if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
+  if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '') && (a.runId ?? '') === (b.runId ?? '') && (a.filePath ?? '') === (b.filePath ?? '')
   if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '') && (a.mode ?? '') === (b.mode ?? '')
   if (a.type === 'email' && b.type === 'email') return (a.threadId ?? '') === (b.threadId ?? '') && (a.searchQuery ?? '') === (b.searchQuery ?? '')
   if (a.type === 'spaces' && b.type === 'spaces') return (a.orgId ?? '') === (b.orgId ?? '') && (a.spaceId ?? '') === (b.spaceId ?? '') && railKey(a.rail) === railKey(b.rail)
@@ -922,6 +923,9 @@ function App() {
   const [isEmailOpen, setIsEmailOpen] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
+  const [projectChatId, setProjectChatId] = useState<string | null>(null)
+  const { projects } = useProjects()
+  const selectedProject = projects.find((p) => workspaceInitialPath === p.path || workspaceInitialPath?.startsWith(`${p.path}/`))
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
   const [knowledgeViewMode, setKnowledgeViewMode] = useState<KnowledgeViewMode>('graph')
   // Folder being browsed inside the knowledge view (null = root overview).
@@ -4809,7 +4813,7 @@ function App() {
     if (isMeetingsOpen) return { type: 'meetings' }
     if (isLiveNotesOpen) return { type: 'live-notes' }
     if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
-    if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
+    if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined, filePath: selectedPath ?? undefined }
     if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined, mode: knowledgeViewMode }
     if (isChatHistoryOpen) return { type: 'chat-history' }
     if (isHomeOpen) return { type: 'home' }
@@ -4820,7 +4824,7 @@ function App() {
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSpacesOpen, spaceSelection, railSelection, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSpacesOpen, spaceSelection, railSelection, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, projectChatId, runId])
 
   // Navigation handlers can be invoked from closures frozen in older renders
   // (Spaces' MessageRow memoizes by data and ignores handler identity), so
@@ -4853,7 +4857,7 @@ function App() {
         const space = org ? findSpace(org, currentViewState.spaceId) : undefined
         return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
-      case 'workspace': return 'Workspace'
+      case 'workspace': return 'Projects'
       case 'knowledge-view': return 'Brain'
       case 'graph': return 'Graph View'
       case 'suggested-topics': return 'Suggested Topics'
@@ -5336,6 +5340,10 @@ function App() {
       case 'workspace':
         setIsWorkspaceOpen(true)
         setWorkspaceInitialPath(view.path ?? null)
+        setProjectChatId(view.runId ?? null)
+        setSelectedPath(view.filePath ?? null)
+        setIsChatSidebarOpen(!!view.runId)
+        if (view.runId) bindChatToRun(view.runId)
         return
       case 'knowledge-view':
         setIsKnowledgeViewOpen(true)
@@ -5387,6 +5395,9 @@ function App() {
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewStateRef.current
+    if (current.type === 'workspace' && nextView.type === 'file') {
+      nextView = { ...current, filePath: nextView.path }
+    }
     if (viewStatesEqual(current, nextView)) {
       if (isBrowserOpen) {
         dismissBrowserOverlay()
@@ -5404,13 +5415,27 @@ function App() {
   }, [appendUnique, applyViewState, cancelRecordingIfActive, setHistory, isBrowserOpen, dismissBrowserOverlay])
 
   const openAssistantRun = useCallback((sessionId: string) => {
-    if (useBottomTabs && !isCodeOpen) {
+    const project = projects.find((p) => p.chats.some((chat) => chat.id === sessionId))
+    if (project) {
+      void navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
+      return
+    }
+    if (useBottomTabs && !isCodeOpen && !isWorkspaceOpen) {
       bindChatToRun(sessionId)
       setIsChatSidebarOpen(true)
     } else {
       void navigateToView({ type: 'chat', runId: sessionId })
     }
-  }, [useBottomTabs, isCodeOpen, bindChatToRun, navigateToView])
+  }, [useBottomTabs, isCodeOpen, bindChatToRun, navigateToView, projects, isWorkspaceOpen])
+
+  const openProjectChat = useCallback((project: Project, sessionId: string) => {
+    void navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
+  }, [navigateToView])
+  const newProjectChat = useCallback(async (project: Project) => {
+    const { sessionId } = await window.ipc.invoke('projects:createChat', { projectId: project.id })
+    await refreshProjects()
+    await navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
+  }, [navigateToView])
 
   // Move the maximized/full-screen chat into the right side pane: restore the
   // view we expanded from (or fall back to Home) and dock the chat on the right.
@@ -6390,7 +6415,7 @@ function App() {
       const target = `${WORKSPACE_ROOT}/${trimmed}`
       const exists = await window.ipc.invoke('workspace:exists', { path: target })
       if (exists.exists) {
-        throw new Error(`A workspace named "${trimmed}" already exists`)
+        throw new Error(`A project named "${trimmed}" already exists`)
       }
       await window.ipc.invoke('workspace:mkdir', { path: target, recursive: true })
       return target
@@ -7025,15 +7050,32 @@ function App() {
   // middle pane is just the session rail and the chat fills the rest, with
   // the workspace drawer at its edge. Before a session is picked the empty
   // state owns the pane and the chat stays out of the way.
+  const projectViewActive = isWorkspaceOpen && !isBrowserOpen
   const codeChatMain = isCodeOpen && activeCodeSession !== null
-  const floatingAssistant = useBottomTabs && !isFullScreenChat && !isCodeOpen && !isBrowserOpen
+  const [projectContentWidth, setProjectContentWidth] = useState(Infinity)
+  useLayoutEffect(() => {
+    if (!projectViewActive) return
+    const documentPane = document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]')
+    const chatPane = document.querySelector<HTMLElement>('[data-chat-sidebar-root]')
+    if (!documentPane || !chatPane) return
+    const measure = () => setProjectContentWidth(documentPane.clientWidth + chatPane.clientWidth)
+    const observer = new ResizeObserver(measure)
+    observer.observe(documentPane)
+    observer.observe(chatPane)
+    measure()
+    return () => observer.disconnect()
+  }, [projectViewActive])
+  const projectDocumentOnly = projectViewActive && !!selectedPath && projectContentWidth < 840
+  const floatingAssistant = useBottomTabs && !isFullScreenChat && !isCodeOpen && !isBrowserOpen && !projectViewActive
   const dockFullScreen = useBottomTabs && isFullScreenChat
-  const showAssistantDock = useBottomTabs && !isCodeOpen
-  const chatPaneOpen = isCodeOpen ? codeChatMain : isChatSidebarOpen
+  const showAssistantDock = useBottomTabs && !isCodeOpen && !projectViewActive
+  const chatPaneOpen = projectViewActive ? !!projectChatId && !projectDocumentOnly : isCodeOpen ? codeChatMain : isChatSidebarOpen
   const isRightPaneOnlyMode = (isRightPaneContext || floatingAssistant) && chatPaneOpen && isRightPaneMaximized
-  const shouldCollapseLeftPane = isRightPaneOnlyMode
+  const shouldCollapseLeftPane = isRightPaneOnlyMode && !projectViewActive
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
+    if (projectViewActive && projectChatId && !selectedPath) return { display: 'none' }
+    if (projectViewActive && selectedPath) return { ...style, width: 0, flex: '1 1 0' }
     if (dockFullScreen) return { display: 'none' }
     if (floatingAssistant && !isRightPaneMaximized) return style
     if (!isRightPaneContext || !chatPaneOpen || isRightPaneMaximized) return style
@@ -7047,7 +7089,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, floatingAssistant, dockFullScreen])
+  }, [projectViewActive, projectChatId, selectedPath, chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, floatingAssistant, dockFullScreen])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -7082,7 +7124,7 @@ function App() {
     : isAppsOpen ? 'apps'
     : isSpacesOpen ? 'spaces'
     : isEmailOpen ? 'email'
-    : isWorkspaceOpen ? 'workspace'
+    : isWorkspaceOpen && !selectedPath ? 'workspace'
     : isKnowledgeViewOpen ? 'knowledge'
     : isChatHistoryOpen ? 'chat-history'
     : selectedPath && isBaseFilePath(selectedPath) ? 'bases'
@@ -7118,11 +7160,11 @@ function App() {
       : isEmailOpen ? 'email'
       : isMeetingsOpen ? 'meetings'
       : isCodeOpen ? 'code'
+      : isWorkspaceOpen ? 'workspaces'
       : (isKnowledgeViewOpen || isGraphOpen || (selectedPath != null && selectedPath.startsWith('knowledge/'))) ? 'knowledge'
       : isBgTasksOpen ? 'agents'
       : isAppsOpen ? 'apps'
       : isSpacesOpen ? 'spaces'
-      : isWorkspaceOpen ? 'workspaces'
       // Full-screen chat (no section, file, or task open) is the Assistant's
       // own surface — it carries the dock dot and the switcher's MRU rank.
       : isFullScreenChat ? 'assistant'
@@ -7192,10 +7234,23 @@ function App() {
               browserOpen={isBrowserOpen}
               switcherOnly={sidebarOpen}
             />
+            {isWorkspaceOpen && !isBrowserOpen && <ProjectsRail
+              tree={tree}
+              selectedPath={workspaceInitialPath}
+              selectedFile={selectedPath}
+              selectedChat={projectChatId}
+              processingRunIds={processingRunIds}
+              actions={knowledgeActions}
+              onSelect={(project) => { void navigateToView({ type: 'workspace', path: project.path }) }}
+              onOpenChat={openProjectChat}
+              onNewChat={newProjectChat}
+              onOpenFile={navigateToFile}
+              onCreateProject={knowledgeActions.createWorkspace}
+            />}
             <SidebarInset
               className={cn(
                 "overflow-hidden! min-h-0 min-w-0",
-                isRightPaneContext && isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen) && "order-3",
+                (projectViewActive || (isRightPaneContext && isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen))) && "order-3",
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
@@ -7299,6 +7354,7 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
+                {isWorkspaceOpen && selectedPath && <button aria-label="Close document" title="Close document" className="titlebar-no-drag rounded p-2 hover:bg-accent" onClick={() => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) }}><X className="size-4" /></button>}
                 {/* Trailing layout control. Always mounted (just toggled invisible
                     when inactive) so its -webkit-app-region:no-drag rect is stable —
                     a freshly-mounted no-drag button inside the drag-region header
@@ -7307,7 +7363,7 @@ function App() {
                   // Any section view (including Code — it was omitted here
                   // once, which left the dock unreopenable from Code).
                   const viewOpen = !isFullScreenChat
-                  const action = isFullScreenChat
+                  const action = projectViewActive ? null : isFullScreenChat
                     ? { onClick: pushChatToSidePane, icon: <ArrowRight className="size-5" />, label: 'Dock chat to side pane' }
                     : (viewOpen && !chatPaneOpen && !isCodeOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
@@ -7568,23 +7624,12 @@ function App() {
               {sectionMounted('workspace') && (
                 <Activity mode={activeMiddle === 'workspace' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <WorkspaceView
-                    tree={tree}
-                    initialPath={workspaceInitialPath}
-                    actions={{
-                      remove: knowledgeActions.remove,
-                      copyPath: knowledgeActions.copyPath,
-                      revealInFileManager: knowledgeActions.revealInFileManager,
-                      createNote: knowledgeActions.createNote,
-                      createPresentation: knowledgeActions.createPresentation,
-                      addGoogleDoc: knowledgeActions.addGoogleDoc,
-                      createFolder: knowledgeActions.createFolder,
-                    }}
-                    onNavigate={(path) => { void navigateToView({ type: 'workspace', path: path === WORKSPACE_ROOT ? undefined : path }) }}
-                    onOpenNote={(path) => navigateToFile(path)}
-                    onCreateWorkspace={async (name) => { await knowledgeActions.createWorkspace(name) }}
-                    onOpenRun={openAssistantRun}
-                  />
+                  <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+                    <FolderOpen className="size-9 text-muted-foreground" />
+                    <h1 className="text-xl font-semibold">{selectedProject?.name ?? 'Projects'}</h1>
+                    <p className="max-w-sm text-sm text-muted-foreground">{selectedProject ? 'Choose a chat or file in the rail, or start a new conversation with Rowboat.' : 'Choose a project in the rail, or create one to organize your chats and local files.'}</p>
+                    {selectedProject && <Button onClick={() => void newProjectChat(selectedProject).catch((e) => toast.error(String(e)))}><Plus className="mr-2 size-4" />New chat</Button>}
+                  </div>
                 </div>
                 </Activity>
               )}
@@ -7981,30 +8026,30 @@ function App() {
               <CodeDiffOpenerProvider onOpenDiff={codeChatMain ? openCodeDiff : null}>
               <ChatSidebar
                 floating={floatingAssistant && !isRightPaneMaximized}
-                keepMounted={useBottomTabs || chatTabs.length > 1}
+                keepMounted={projectViewActive || useBottomTabs || chatTabs.length > 1}
                 onMinimize={showAssistantDock && !dockFullScreen ? () => {
                   setIsChatSidebarOpen(false)
                   setIsRightPaneMaximized(false)
                   requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-assistant-tab="${CSS.escape(activeChatTabId)}"]`)?.focus())
                 } : undefined}
                 onCloseTab={showAssistantDock ? () => closeAssistantTab(activeChatTabId) : undefined}
-                placement={useBottomTabs && isBrowserOpen ? 'right' : chatPanePlacement}
+                placement={projectViewActive ? 'middle' : useBottomTabs && isBrowserOpen ? 'right' : chatPanePlacement}
                 // Code mode: the chat fills whatever the rail and drawer leave.
-                paneSize={codeChatMain ? 'chat-bigger' : chatPaneSize}
-                className={cn(isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen) && "order-2", showAssistantDock && !(floatingAssistant && !isRightPaneMaximized) && 'mb-11')}
+                paneSize={projectViewActive ? (selectedPath ? 'chat-smaller' : 'chat-bigger') : codeChatMain ? 'chat-bigger' : chatPaneSize}
+                className={cn((projectViewActive || (isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen))) && "order-2", showAssistantDock && !(floatingAssistant && !isRightPaneMaximized) && 'mb-11')}
                 defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={dockFullScreen || chatPaneOpen}
-                isMaximized={dockFullScreen || isRightPaneMaximized}
+                isMaximized={projectViewActive ? !selectedPath : dockFullScreen || isRightPaneMaximized}
                 chatTabs={chatTabs}
                 onSwitchChatTab={switchChatTab}
                 onCloseChatTabs={closeChatTabs}
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
-                onNewChatTab={() => handleNewChatTabInSidebar()}
+                onNewChatTab={() => { if (projectViewActive && selectedProject) void newProjectChat(selectedProject).catch((e) => toast.error(String(e))); else handleNewChatTabInSidebar() }}
                 recentRuns={chatRuns}
-                onSelectRun={bindChatToRun}
+                onSelectRun={projectViewActive ? openAssistantRun : bindChatToRun}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
-                onOpenFullScreen={dockFullScreen ? undefined : toggleRightPaneMaximize}
+                onOpenFullScreen={projectViewActive ? (selectedPath ? () => { void navigateToView({ type: 'workspace', path: workspaceInitialPath ?? undefined, runId: projectChatId ?? undefined }) } : undefined) : dockFullScreen ? undefined : toggleRightPaneMaximize}
                 onNavigateBack={() => { void navigateBack() }}
                 onNavigateForward={() => { void navigateForward() }}
                 canNavigateBack={canNavigateBack}

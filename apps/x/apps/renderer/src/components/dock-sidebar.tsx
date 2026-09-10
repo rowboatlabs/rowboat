@@ -1050,8 +1050,8 @@ export function DockSidebar({
       },
       {
         item: {
-          key: 'workspaces', label: 'Workspaces', icon: Folder, tourId: 'nav-workspaces',
-          status: workspaceCount === 0 ? 'No workspaces' : `${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'}`,
+          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          status: workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`,
           running: activeNav === 'workspaces',
           onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
         },

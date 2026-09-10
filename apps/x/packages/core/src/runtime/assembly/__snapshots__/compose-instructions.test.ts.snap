@@ -221,6 +221,8 @@ If Middle pane state is browser, only the URL and page title are supplied; the p
 Remember X.
 
 # User Work Directory
+For a chat in Projects, this is the selected project’s local folder. Use the project folder name as its name, and save project outputs here by default.
+
 The user has chosen the following directory as their current **work directory**:
 
 \`/Users/test/Documents/Work\`
@@ -646,6 +648,8 @@ If Middle pane state is deck, the user has that .pptx presentation open in the s
 If Middle pane state is browser, only the URL and page title are supplied; the page content itself is NOT included. If you need the page content to answer, use the browser tools available to you to read the page. The user may or may not be talking about this page. Only reference or act on this page when the user's message clearly relates to it, such as "this page", "this article", "what I'm looking at", "this site", or "summarize this". For unrelated questions, ignore this page entirely and answer normally. Do not mention that you can see the browser unless it is relevant to the answer.
 
 # User Work Directory
+For a chat in Projects, this is the selected project’s local folder. Use the project folder name as its name, and save project outputs here by default.
+
 The user has chosen the following directory as their current **work directory**:
 
 \`/Users/test/Documents/Work\`
