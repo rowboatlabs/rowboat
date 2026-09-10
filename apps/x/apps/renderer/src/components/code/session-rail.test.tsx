@@ -66,7 +66,7 @@ describe('code rail context menus', () => {
   })
 
   it.each([
-    ['New session', undefined], ['New Claude Code session', 'claude'], ['New Codex session', 'codex'],
+    ['New worktree', undefined], ['New Claude Code worktree', 'claude'], ['New Codex worktree', 'codex'],
   ] as const)('creates %s in the clicked project without collapsing it', (name, agent) => {
     const { onNewSession } = setup()
     openProjectMenu()
@@ -81,7 +81,7 @@ describe('code rail context menus', () => {
       codex: { installed: true, signedIn: false },
     })
     openProjectMenu()
-    for (const name of ['New Claude Code session', 'New Codex session']) {
+    for (const name of ['New Claude Code worktree', 'New Codex worktree']) {
       const item = screen.getByRole('menuitem', { name })
       expect(item).toHaveAttribute('aria-disabled', 'true')
       fireEvent.click(item)
@@ -92,7 +92,7 @@ describe('code rail context menus', () => {
   it('keeps explicit agent choices enabled while status is loading', () => {
     setup(false, null)
     openProjectMenu()
-    expect(screen.getByRole('menuitem', { name: 'New Codex session' })).not.toHaveAttribute('aria-disabled')
+    expect(screen.getByRole('menuitem', { name: 'New Codex worktree' })).not.toHaveAttribute('aria-disabled')
   })
 
   it('removes the clicked project through its existing handler', () => {
@@ -109,4 +109,23 @@ describe('code rail context menus', () => {
     expect(onSetDone).toHaveBeenCalledExactlyOnceWith(target, true)
     expect(onSelectSession).not.toHaveBeenCalled()
   })
+})
+
+it('groups sibling sessions into one worktree and exposes the parent branch control', () => {
+  const worktree = { path: '/wt', branch: 'rowboat/work', baseBranch: 'main' }
+  const onSwitchBranch = vi.fn()
+  const onSelectSession = vi.fn()
+  render(<SessionRail projects={[project]} sessions={[
+    { ...session, worktree }, { ...session, id: 'second', title: 'Second chat', worktree },
+  ]} selectedSessionId="second" statusOf={() => 'idle'} agentsStatus={ready}
+    onSelectSession={onSelectSession} onSwitchBranch={onSwitchBranch}
+    onAddProject={vi.fn()} onRemoveProject={vi.fn()} onNewSession={vi.fn()} onSetDone={vi.fn()} onDeleteSession={vi.fn()} />)
+  expect(screen.getAllByText('rowboat/work')).toHaveLength(1)
+  expect(screen.getByText('2 sessions · Second chat')).toBeTruthy()
+  fireEvent.click(screen.getByText('rowboat/work'))
+  expect(onSelectSession).toHaveBeenCalledWith('second')
+  expect(screen.queryByRole('button', { name: 'Change branch for Example' })).toBeNull()
+  openProjectMenu()
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Change branch' }))
+  expect(onSwitchBranch).toHaveBeenCalledWith('project')
 })

@@ -1442,6 +1442,25 @@ export function createCoreRpcHandlers(opts?: { sessionsIndexReady?: Promise<void
         }))),
       };
     },
+    'codeProject:branches': async (args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.get(args.projectId);
+      if (!project) throw new Error('Project no longer exists.');
+      return codeGit.listBranches(project.path);
+    },
+    'codeProject:switchBranch': async (args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.get(args.projectId);
+      if (!project) throw new Error('Project no longer exists.');
+      return { git: await codeGit.switchBranch(project.path, args.branch) };
+    },
+    'codeSession:baseBranchStatus': async (args) => {
+      return container.resolve<CodeSessionService>('codeSessionService').baseBranchStatus(args.sessionId);
+    },
+    'codeSession:changeBaseBranch': async (args) => {
+      await container.resolve<CodeSessionService>('codeSessionService').changeBaseBranch(args.sessionId, args.baseBranch);
+      return { success: true };
+    },
     'codeSession:create': async (args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       const session = await service.create(args);

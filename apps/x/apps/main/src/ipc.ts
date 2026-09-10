@@ -1755,6 +1755,25 @@ export function setupIpcHandlers() {
         }))),
       };
     },
+    'codeProject:branches': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.get(args.projectId);
+      if (!project) throw new Error('Project no longer exists.');
+      return codeGit.listBranches(project.path);
+    },
+    'codeProject:switchBranch': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.get(args.projectId);
+      if (!project) throw new Error('Project no longer exists.');
+      return { git: await codeGit.switchBranch(project.path, args.branch) };
+    },
+    'codeSession:baseBranchStatus': async (_event, args) => {
+      return container.resolve<CodeSessionService>('codeSessionService').baseBranchStatus(args.sessionId);
+    },
+    'codeSession:changeBaseBranch': async (_event, args) => {
+      await container.resolve<CodeSessionService>('codeSessionService').changeBaseBranch(args.sessionId, args.baseBranch);
+      return { success: true };
+    },
     'codeSession:create': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       const session = await service.create(args);

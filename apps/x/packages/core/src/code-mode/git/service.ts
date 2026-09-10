@@ -293,9 +293,59 @@ export async function fileDiff(cwd: string, relPath: string, opts: { baseRef?: s
     return { oldText, newText, isBinary: false, tooLarge: false };
 }
 
-export async function worktreeAdd(repoPath: string, worktreePath: string, branch: string): Promise<void> {
+export async function listBranches(cwd: string): Promise<{ branches: string[]; currentBranch: string | null }> {
+    const [refs, info] = await Promise.all([
+        git(cwd, ['for-each-ref', '--sort=refname', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads']),
+        repoInfo(cwd),
+    ]);
+    return { branches: refs.trim().split('\n').filter(Boolean), currentBranch: info.branch };
+}
+
+export async function switchBranch(cwd: string, branch: string): Promise<GitRepoInfo> {
+    const { branches } = await listBranches(cwd);
+    if (!branches.includes(branch)) throw new Error('Select an existing local branch.');
+    // Git refuses conflicting local changes and branches checked out elsewhere.
+    await git(cwd, ['switch', '--no-guess', '--', branch]);
+    return repoInfo(cwd);
+}
+
+export async function worktreeAdd(repoPath: string, worktreePath: string, branch: string, baseBranch = 'HEAD'): Promise<string> {
+    // Resolve first so an explicit branch cannot be interpreted as a CLI option,
+    // and checkout changes cannot race the creation's chosen starting commit.
+    const commit = (await git(repoPath, ['rev-parse', '--verify', '--end-of-options', `${baseBranch}^{commit}`])).trim();
     await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-    await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, 'HEAD']);
+    await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, commit]);
+    return commit;
+}
+
+// Refuse all file changes (including ignored files) before repointing a fresh
+// worktree. The stored commit distinguishes an untouched branch from one whose
+// original base branch has subsequently advanced.
+export async function worktreeBaseChangeReason(cwd: string, branch: string, baseCommit?: string): Promise<string | null> {
+    if (!baseCommit) return 'This older worktree has no recorded starting commit. Create a new worktree to use another base.';
+    const head = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+    const current = (await git(cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
+    if (head !== baseCommit || current !== branch) return 'This worktree has commits or branch changes. Create a new worktree to use another base.';
+    if ((await git(cwd, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored'])).trim()) {
+        return 'This worktree has file changes. Remove or save them elsewhere before changing its base.';
+    }
+    for (const operation of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'BISECT_LOG']) {
+        const file = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', operation])).trim();
+        try { await fs.access(file); return 'Finish the current Git operation before changing the base.'; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    return null;
+}
+
+export async function changeWorktreeBase(cwd: string, branch: string, baseCommit: string, baseBranch: string): Promise<string> {
+    const { branches } = await listBranches(cwd);
+    if (!branches.includes(baseBranch) || baseBranch === branch) throw new Error('Select another existing local branch as the base.');
+    const commit = (await git(cwd, ['rev-parse', '--verify', '--end-of-options', `refs/heads/${baseBranch}^{commit}`])).trim();
+    const reason = await worktreeBaseChangeReason(cwd, branch, baseCommit);
+    if (reason) throw new Error(reason);
+    // --keep also protects edits made after the check; never force a checkout.
+    await git(cwd, ['reset', '--keep', commit]);
+    return commit;
 }
 
 export async function worktreeRemove(
@@ -308,9 +358,15 @@ export async function worktreeRemove(
         if (opts.force) args.push('--force');
         args.push(worktreePath);
         await git(repoPath, args);
-    } catch {
-        // The worktree dir may have been deleted by hand — prune the registration.
-        await git(repoPath, ['worktree', 'prune']).catch(() => {});
+    } catch (error) {
+        // Only tolerate an already-missing directory, not a real removal failure.
+        try { await fs.access(worktreePath); } catch (accessError) {
+            if ((accessError as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+            await git(repoPath, ['worktree', 'prune']);
+            if (opts.deleteBranch) await git(repoPath, ['branch', '-D', opts.deleteBranch]);
+            return;
+        }
+        throw error;
     }
     if (opts.deleteBranch) {
         await git(repoPath, ['branch', '-D', opts.deleteBranch]).catch(() => {});

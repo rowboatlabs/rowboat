@@ -1,3 +1,4 @@
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   FilePlus2,
@@ -89,6 +90,7 @@ export function CodeWorkspaceDrawer({
   const rootRef = useRef<HTMLDivElement>(null)
   const [diffPath, setDiffPath] = useState<string | null>(null)
   const [filePath, setFilePath] = useState<string | null>(null)
+  const [cleanupTarget, setCleanupTarget] = useState<boolean | null>(null)
   const [merging, setMerging] = useState(false)
 
   useEffect(() => {
@@ -173,7 +175,7 @@ export function CodeWorkspaceDrawer({
   const handleCleanup = async (deleteBranch: boolean) => {
     const res = await window.ipc.invoke('codeSession:cleanupWorktree', { sessionId: session.id, deleteBranch })
     if (res.success) {
-      toast.success('Worktree removed. The session now works directly in the repo.')
+      toast.success('Worktree removed. Its sessions now work directly in the repo.')
       onSessionChanged()
       onRefreshGit()
     } else {
@@ -195,6 +197,21 @@ export function CodeWorkspaceDrawer({
       )}
       style={{ width, flex: '0 0 auto' }}
     >
+      <AlertDialog open={cleanupTarget !== null} onOpenChange={(open) => { if (!open) setCleanupTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this shared worktree?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This stops all sessions and terminals in this worktree and removes its files, including uncommitted changes.
+              Conversations are kept and will use the main folder. {cleanupTarget ? 'The worktree branch will also be deleted.' : 'The branch will be kept.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (cleanupTarget !== null) void handleCleanup(cleanupTarget).catch((err) => toast.error(String(err))); setCleanupTarget(null) }}>Remove worktree</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div
         onMouseDown={handleResizeStart}
         className={cn(
@@ -260,11 +277,11 @@ export function CodeWorkspaceDrawer({
                     <GitMerge className="size-4" />
                     Merge back into repo
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => void handleCleanup(false)}>
+                  <DropdownMenuItem onClick={() => setCleanupTarget(false)}>
                     <Trash2 className="size-4" />
                     Remove worktree (keep branch)
                   </DropdownMenuItem>
-                  <DropdownMenuItem variant="destructive" onClick={() => void handleCleanup(true)}>
+                  <DropdownMenuItem variant="destructive" onClick={() => setCleanupTarget(true)}>
                     <Trash2 className="size-4" />
                     Remove worktree and branch
                   </DropdownMenuItem>

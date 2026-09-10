@@ -58,6 +58,8 @@ export interface SessionsDependencies {
     // turn's composition SERVER-side so prompt assembly never depends on
     // which client surface sent the message. Injected by DI; the session
     // layer knows nothing about what the pins mean.
+    // Awaited under the session lock before accepting its first turn.
+    beforeSessionStart?: (sessionId: string) => Promise<void>;
     sessionCompositionPins?: (sessionId: string) => Promise<Record<string, JsonValue> | null>;
 }
 
@@ -101,6 +103,7 @@ export class SessionsImpl implements ISessions {
     private readonly idGenerator: IMonotonicallyIncreasingIdGenerator;
     private readonly clock: IClock;
     private readonly sessionBus: ISessionBus;
+    private readonly beforeSessionStart?: (sessionId: string) => Promise<void>;
     private readonly sessionCompositionPins?: (
         sessionId: string,
     ) => Promise<Record<string, JsonValue> | null>;
@@ -125,6 +128,7 @@ export class SessionsImpl implements ISessions {
         clock,
         sessionBus,
         sessionCompositionPins,
+        beforeSessionStart,
     }: SessionsDependencies) {
         this.sessionRepo = sessionRepo;
         this.turnRuntime = turnRuntime;
@@ -132,6 +136,7 @@ export class SessionsImpl implements ISessions {
         this.clock = clock;
         this.sessionBus = sessionBus;
         this.sessionCompositionPins = sessionCompositionPins;
+        this.beforeSessionStart = beforeSessionStart;
     }
 
     // §8.2: scan session files, read each session's latest turn for status.
@@ -357,6 +362,7 @@ export class SessionsImpl implements ISessions {
         input: z.infer<typeof UserMessage>,
         config: SendMessageConfig,
     ): Promise<{ turnId: string }> {
+        if (state.turns.length === 0) await this.beforeSessionStart?.(sessionId);
         let agentRequest = latestTurnState
             ? withActiveSkills(config.agent, deriveActiveSkills(latestTurnState))
             : config.agent;
