@@ -5506,8 +5506,8 @@ function App() {
     openAppsView()
   }, [openAppsView])
 
-  const openSpace = useCallback((orgId: string, spaceId: string) => {
-    void navigateToView({ type: 'spaces', orgId, spaceId })
+  const openSpace = useCallback((orgId: string, spaceId: string, rail: RailSelection = { kind: 'general' }) => {
+    void navigateToView({ type: 'spaces', orgId, spaceId, rail })
   }, [navigateToView])
 
   /** The org's Activity surface (layer 3): everything that involves you, newest first. */
@@ -7653,6 +7653,7 @@ function App() {
                     active={activeMiddle === 'spaces'}
                     selection={spaceSelection}
                     onSelect={setSpaceSelection}
+                    onSwitchSpace={openSpace}
                     railSelection={railSelection}
                     onRailSelect={(rail) => {
                       // In-space navigation is real navigation: each selection is a history entry,

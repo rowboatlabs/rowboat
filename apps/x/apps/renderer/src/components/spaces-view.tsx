@@ -99,9 +99,11 @@ const WhiteboardPane = lazy(() => import('@/components/spaces/whiteboard-pane'))
 // Root view: the selected space (the org/space list lives in the app sidebar)
 // ---------------------------------------------------------------------------
 
-export function SpacesView({ selection, onSelect, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, active = true }: {
+export function SpacesView({ selection, onSelect, onSwitchSpace, railSelection, onRailSelect, onOpenSession, onOpenMessage, onOpenActivity, active = true }: {
     selection: SpaceSelection
     onSelect: (selection: SpaceSelection) => void
+    /** Navigate to the destination and its rail together, without using the current space's selection. */
+    onSwitchSpace: (orgId: string, spaceId: string, selection?: RailSelection) => void
     /** What's selected inside the space (general / a topic / a file) — part of the app's history. */
     railSelection: RailSelection
     onRailSelect: (selection: RailSelection) => void
@@ -155,11 +157,7 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                 space={selectedSpace}
                 selection={railSelection}
                 onSelect={onRailSelect}
-                onSwitchSpace={(orgId, spaceId, next = { kind: 'general' }) => {
-                    onSelect({ orgId, spaceId })
-                    // The old space's rail selection means nothing over there.
-                    onRailSelect(next)
-                }}
+                onSwitchSpace={onSwitchSpace}
                 onOpenSession={onOpenSession}
                 onOpenActivity={onOpenActivity}
                 active={active}
@@ -168,13 +166,9 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
     }
 
     if (selectedOrg) {
-        const openSpace = (orgId: string, spaceId: string) => {
-            onSelect({ orgId, spaceId })
-            onRailSelect({ kind: 'general' })
-        }
         return <div className="spaces-surface flex min-h-0 flex-1 flex-col">
             <header className="spaces-header flex shrink-0 items-center gap-2 border-b border-border">
-                <ServerSwitcher org={selectedOrg} onOpenSpace={openSpace} />
+                <ServerSwitcher org={selectedOrg} onOpenSpace={onSwitchSpace} />
             </header>
             <div className="flex min-h-0 flex-1">
             <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-[var(--rowboat-panel-soft)] p-2">
@@ -182,7 +176,7 @@ export function SpacesView({ selection, onSelect, railSelection, onRailSelect, o
                     <span className="flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                     <ServerOptionsMenu org={selectedOrg} showArchived={emptyShowArchived} onToggleArchived={() => setEmptyShowArchived((value) => !value)} onMenuOpenChange={() => {}} />
                 </div>
-                <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={openSpace} onOpenActivity={onOpenActivity}
+                <ServerSpaceNavigation org={selectedOrg} spaceId="" onOpenSpace={onSwitchSpace} onOpenActivity={onOpenActivity}
                     activityActive={selection?.view === 'activity'}
                     onOpenDiscussion={() => {}} activeDiscussionCount={0} renderActiveDiscussions={() => null} />
             </aside>
