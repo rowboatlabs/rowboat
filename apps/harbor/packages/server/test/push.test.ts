@@ -1,13 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MemoryStore } from '../src/memory-store.js';
-import { PushSender, classifyFor, levelAllows, buildPushText, mentionsRecipient } from '../src/push.js';
+import { PushSender, classifyFor, levelAllows, buildPushText } from '../src/push.js';
 import { startHarbor, type RunningHarbor } from '../src/server.js';
 import { restClient } from './helpers.js';
-import type { Message, Space } from '@rowboat/spaces-protocol';
+import { parseMentions, type Message, type Space } from '@rowboat/spaces-protocol';
 
 // Push notifications (PUSH_PLAN.md): the decision matrix, author exclusion,
 // wire-level registration, and dead-token pruning — all against MemoryStore
-// with a mocked Expo endpoint (no real pushes leave a test).
+// with a mocked Expo endpoint (no real pushes leave a test). "Mention" is the
+// message's STAMP (protocol mentions.ts); the fixture stamps the way the org
+// does, from tokens alone.
 
 const space = (kind: 'shared' | 'direct'): Space =>
   ({ id: '01HZZZZZZZZZZZZZZZZZZZZZZZ', name: 'general', createdAt: new Date().toISOString(), kind }) as Space;
@@ -22,18 +24,19 @@ const msg = (body: string, author = 'harsh'): Message =>
     offset: 1,
     replyCount: 0,
     reactions: [],
+    ...(({ members, here, rowboat }) => ({ mentions: members, mentionsHere: here, mentionsRowboat: rowboat }))(parseMentions(body)),
   }) as Message;
 
 describe('classification', () => {
-  it('mentions beat dm beats message; code spans are cites', () => {
-    expect(classifyFor('gagan', space('shared'), msg('hello @gagan'))).toBe('mention');
-    expect(classifyFor('gagan', space('shared'), msg('hi @here everyone'))).toBe('mention');
+  it('mentions beat dm beats message; only tokens address, and tokens in code are cites', () => {
+    expect(classifyFor('gagan', space('shared'), msg('hello [@Gagan](#member:gagan)'))).toBe('mention');
+    expect(classifyFor('gagan', space('shared'), msg('hi [@here](#here) everyone'))).toBe('mention');
     expect(classifyFor('gagan', space('direct'), msg('just words'))).toBe('dm');
-    expect(classifyFor('gagan', space('direct'), msg('ping @gagan'))).toBe('mention');
+    expect(classifyFor('gagan', space('direct'), msg('ping [@Gagan](#member:gagan)'))).toBe('mention');
     expect(classifyFor('gagan', space('shared'), msg('plain message'))).toBe('message');
-    expect(classifyFor('gagan', space('shared'), msg('`@gagan` in code'))).toBe('message');
-    expect(classifyFor('gagan', space('shared'), msg('```\n@gagan\n```'))).toBe('message');
-    expect(mentionsRecipient('email@gagan.com', 'gagan')).toBe(false); // mid-word @ is not an address
+    expect(classifyFor('gagan', space('shared'), msg('a bare @gagan is prose, not an address'))).toBe('message');
+    expect(classifyFor('gagan', space('shared'), msg('`[@Gagan](#member:gagan)` in code'))).toBe('message');
+    expect(classifyFor('gagan', space('shared'), msg('```\n[@Gagan](#member:gagan)\n```'))).toBe('message');
   });
 
   it('levels gate kinds like Slack', () => {
@@ -47,7 +50,7 @@ describe('classification', () => {
 
   it('titles read like the desktop notifier; mentions resolve to names', () => {
     const names = new Map([['harsh', 'Harsh'], ['gagan', 'Gagan']]);
-    expect(buildPushText({ kind: 'message', space: space('shared'), direct: false, authorName: 'Harsh', body: 'hi @gagan', names }))
+    expect(buildPushText({ kind: 'message', space: space('shared'), direct: false, authorName: 'Harsh', body: 'hi [@G](#member:gagan)', names }))
       .toEqual({ title: 'Harsh · general', body: 'hi @Gagan' });
     expect(buildPushText({ kind: 'mention', space: space('shared'), direct: false, authorName: 'Harsh', body: 'yo', names }).title)
       .toBe('Harsh mentioned you · general');
@@ -82,7 +85,7 @@ describe('PushSender.onMessage', () => {
     const { s, sender, calls } = await setup(null);
     await sender.onMessage(s, msg('plain note', 'harsh'));
     expect(calls).toHaveLength(0); // default 'dms': a plain shared message pushes nobody
-    await sender.onMessage(s, msg('hey @gagan', 'harsh'));
+    await sender.onMessage(s, msg('hey [@Gagan](#member:gagan)', 'harsh'));
     expect(calls).toHaveLength(1);
     expect(calls[0].to).toBe('ExponentPushToken[g1]'); // harsh authored — his token untouched
     expect(calls[0].title).toBe('Harsh mentioned you · general');
@@ -93,7 +96,7 @@ describe('PushSender.onMessage', () => {
     await all.sender.onMessage(all.s, msg('plain note', 'harsh'));
     expect(all.calls).toHaveLength(1);
     const off = await setup('off');
-    await off.sender.onMessage(off.s, msg('hey @gagan', 'harsh'));
+    await off.sender.onMessage(off.s, msg('hey [@Gagan](#member:gagan)', 'harsh'));
     expect(off.calls).toHaveLength(0);
   });
 

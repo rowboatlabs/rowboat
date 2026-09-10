@@ -4,6 +4,7 @@ import type {
   ChangeSet,
   Member,
   Membership,
+  MentionStamps,
   Message,
   Space,
   SpaceEvent,
@@ -142,12 +143,16 @@ export interface UnreadThreadRow {
   lastReplyOffset: number;
   /** Live replies past readOffset, not the member's own. Always ≥ 1 in a listing. */
   unreadReplies: number;
+  /** Of those, the ones addressed to the member (a token naming them, or @here). */
+  unreadMentions: number;
 }
 
 export interface Store {
   // members (org-level)
   getMember(id: string): Promise<Member | undefined>;
   putMember(member: Member): Promise<void>;
+  /** The whole org roster — operator-side reads only (the mentions backfill). */
+  listAllMembers(): Promise<Member[]>;
 
   // identity mapping — (issuer, subject) → member (spec §4: the token proves
   // WHO; this table says which member that is). Written only by the invite
@@ -162,6 +167,8 @@ export interface Store {
   getSpace(id: string): Promise<Space | undefined>;
   /** Shared spaces only unless `includeDirect` — the listing's compatibility posture (api.ts). */
   listSpacesFor(memberId: string, opts?: { includeDirect?: boolean }): Promise<Space[]>;
+  /** Every space on the org, DMs included — operator-side reads only (the mentions backfill). */
+  listAllSpaces(): Promise<Space[]>;
   /** The DM whose participants encode to `directKey` (directKeyFor), if it exists. */
   getDirectSpace(directKey: string): Promise<Space | undefined>;
 
@@ -251,7 +258,10 @@ export interface Store {
    * included. The message_deleted event itself is appended by the service.
    */
   markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void>;
-  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void>;
+  /** Body + the re-stamped addresses (mentions.ts), row and stored event alike; search text follows the body. */
+  markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void>;
+  /** Stamps only (the backfill): derived data, no content change, no event. */
+  restampMessage(spaceId: string, messageId: string, stamps: MentionStamps): Promise<void>;
 
   // search — space-scoped, per kind (the contract categorizes; see
   // protocol search.ts for ordering semantics). Tombstones never match
@@ -318,6 +328,8 @@ export interface Store {
   ): Promise<number | undefined>;
   /** Roots after `afterOffset` that are neither the member's nor tombstoned. */
   countUnreadRoots(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
+  /** Of those, the ones addressed to the member: a mention token naming them, or @here. */
+  countUnreadRootMentions(spaceId: string, memberId: string, afterOffset: number): Promise<number>;
   /** Followed threads with ≥1 live reply past the member's mark by someone else, newest activity first. */
   listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]>;
   /** Every mark the member holds in the space (leave / removal). */
@@ -328,6 +340,11 @@ export interface Store {
   /** `offset` must be head+1 — the caller allocates inside the space lock. */
   appendEvent(spaceId: string, stored: StoredEvent): Promise<void>;
   listEventsAfter(spaceId: string, afterOffset: number): Promise<StoredEvent[]>;
+
+  // one-time passes (the mentions backfill): a ledger so a pass that rewrites
+  // content runs exactly once per org, not on every boot
+  backfillDone(id: string): Promise<boolean>;
+  markBackfillDone(id: string, at: string): Promise<void>;
 
   // atomicity
   withSpaceLock<T>(spaceId: string, fn: () => Promise<T>): Promise<T>;

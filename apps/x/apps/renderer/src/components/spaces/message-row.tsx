@@ -21,7 +21,7 @@ import { SpaceMarkdown, useSpaceRefs } from '@/components/spaces/space-markdown'
 import { frequentEmoji, noteEmojiUsed } from '@/lib/emoji-data'
 import { PIN_EMOJI } from '@/lib/spaces-corpus'
 import {
-    blobAppUrl, encodeMentions, formatFeedTime, formatFullTimestamp, joinImageEmbeds,
+    blobAppUrl, formatFeedTime, formatFullTimestamp, joinImageEmbeds,
     parseBlobAppUrl, resolveMentions, rewriteBlobLinks, splitImageEmbeds, type ImageEmbed,
 } from '@/lib/spaces-presentation'
 import { toast } from '@/lib/toast'
@@ -212,18 +212,16 @@ function MessageRowImpl({
         const parsed = parseBlobAppUrl(rewriteBlobLinks(url, refs))
         return parsed ? blobAppUrl(parsed, parsed.hash, { thumb: 128 }) : url
     }
-    // The editor shows people, the wire stores ids: mentions resolve to names
-    // on open and encode back on save — the same trip the composer's send
-    // path makes, so editing "@Name …" round-trips to "@<memberId> …".
+    // The edit box parses the stored markdown itself: mention tokens become
+    // pills and serialize back to tokens, so nothing is rewritten on the way
+    // in or out.
     const beginEdit = () => {
         const { text, images } = splitImageEmbeds(message.body)
-        const resolved = resolveMentions(text, memberNames)
-        setEdit({ initial: resolved, text: resolved, images, baseline: null })
+        setEdit({ initial: text, text, images, baseline: null })
     }
     const commitEdit = () => {
         if (!edit) return
-        const members = [...memberNames].map(([id, displayName]) => ({ id, displayName }))
-        const body = joinImageEmbeds(encodeMentions(edit.text, members), edit.images)
+        const body = joinImageEmbeds(edit.text, edit.images)
         setEdit(null)
         if (!body || body === message.body) return
         // A no-change save must never rewrite the message, and the assembled

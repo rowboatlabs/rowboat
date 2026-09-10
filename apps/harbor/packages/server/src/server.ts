@@ -117,6 +117,9 @@ export async function startHarbor(options: HarborOptions = {}): Promise<RunningH
     }
   }
 
+  // The mentions backfill (service.migrateMentions): idempotent, runs before the faces serve.
+  await service.migrateMentions();
+
   const issuer = auth.metadata?.()?.authorizationServers[0];
   const app = buildHttpApp({
     service,

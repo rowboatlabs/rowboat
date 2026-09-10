@@ -8,7 +8,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { type SpaceSelection } from '@/components/spaces-view'
 import { openSelfDirect, useSpaceFeed, useSpacesOrgs, type OrgWithSpaces } from '@/hooks/use-spaces'
-import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts } from '@/hooks/use-space-chat'
+import { prefetchStream, spaceLastActivityAt, useSpacesUnreadCounts, type SpaceBadge } from '@/hooks/use-space-chat'
 import { AddOrgDialog, MemberAvatar } from '@/components/spaces/atoms'
 import { NewDirectDialog } from '@/components/spaces/new-direct-dialog'
 import { directAvatarId, isSelfDirect, isSelfDirectUnsupported, markSelfDirectUnsupported, selfDirectFailureMessage, selfDirectRefused, spaceDisplayName } from '@/lib/spaces-direct'
@@ -66,7 +66,7 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpen
 function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
-    unread: Map<string, number>
+    unread: Map<string, SpaceBadge>
     showArchived?: boolean
     activeDiscussionCount?: number
     renderDiscussions?: (spaceId: string) => ReactNode
@@ -194,7 +194,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
             </SidebarMenuItem>
             {org.spaces.map((space) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
-                const count = unread.get(`${org.id}/${space.id}`) ?? 0
+                const badge = unread.get(`${org.id}/${space.id}`) ?? { unread: false, badge: 0 }
                 if (renamingId === space.id) {
                     return <SidebarMenuItem key={space.id}>
                         <div className="flex items-center gap-1 py-0.5 pl-9 pr-2">
@@ -226,9 +226,9 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
                                     >
                                         {/* A space is a channel — # says so. */}
                                         <Hash className="size-3.5 shrink-0 text-muted-foreground" />
-                                        <span className={cn('flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>{space.name}</span>
-                                        {count > 0 && (
-                                            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
+                                        <span className={cn('flex-1 truncate', badge.unread && !active && 'font-medium text-foreground')}>{space.name}</span>
+                                        {badge.badge > 0 && (
+                                            <span className="shrink-0 rounded-full bg-[var(--stream-you-ink)] px-1.5 text-[10px] font-semibold tabular-nums leading-4 text-white" title="messages addressed to you">{badge.badge}</span>
                                         )}
                                     </SidebarMenuButton>
                                 </ContextMenuTrigger>
@@ -267,7 +267,7 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
             )}
             {!directsCollapsed && !org.error && visibleDirects.map((dm) => {
                 const active = activeSpace?.orgId === org.id && activeSpace.spaceId === dm.id
-                const count = unread.get(`${org.id}/${dm.id}`) ?? 0
+                const badge = unread.get(`${org.id}/${dm.id}`) ?? { unread: false, badge: 0 }
                 const self = isSelfDirect(dm, org.memberId)
                 const label = self ? selfName : spaceDisplayName(org, dm)
                 const other = directAvatarId(dm, org.memberId)
@@ -283,12 +283,12 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
                             className="pl-6"
                         >
                             <MemberAvatar id={other} name={label} size="sm" className="size-4 rounded-[3px] text-[8px]" />
-                            <span className={cn('flex-1 truncate', count > 0 && !active && 'font-medium text-foreground')}>
+                            <span className={cn('flex-1 truncate', badge.unread && !active && 'font-medium text-foreground')}>
                                 {label}
                                 {self && <span className="ml-1.5 font-normal text-muted-foreground">you</span>}
                             </span>
-                            {count > 0 && (
-                                <span className="shrink-0 text-[11px] font-semibold tabular-nums text-foreground/80">{count}</span>
+                            {badge.badge > 0 && (
+                                <span className="shrink-0 rounded-full bg-[var(--stream-you-ink)] px-1.5 text-[10px] font-semibold tabular-nums leading-4 text-white" title="unread messages">{badge.badge}</span>
                             )}
                         </SidebarMenuButton>
                     </SidebarMenuItem>

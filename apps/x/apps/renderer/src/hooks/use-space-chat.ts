@@ -5,7 +5,9 @@ import { useSpaceAgentActivity } from '@/lib/spaces-agent-activity'
 import { applyReaction, mergeMessages } from '@/lib/spaces-conventions'
 import { applyPollVote } from '@/lib/spaces-poll'
 import { feedSyncedRecently, getSpaceFeed, getSpacesOrgs, refreshSpaceFeed, subscribeOrgs, subscribeSpaceFeedStore, useSpaceLive } from '@/hooks/use-spaces'
-import { countUnread, noteStreamReadOffset, subscribeReadState } from '@/lib/spaces-read-state'
+import { countUnread, noteStreamReadOffset, spaceBadge, subscribeReadState, type SpaceBadge } from '@/lib/spaces-read-state'
+
+export type { SpaceBadge } from '@/lib/spaces-read-state'
 
 // Chat stores for one space under the annotation model (spec §7, 2026-09-01):
 //   stream     — the space's ROOT messages (one flat log; replies live behind
@@ -43,6 +45,9 @@ export function buildPendingMessage(spaceId: string, memberId: string, body: str
         postedAt: new Date().toISOString(),
         offset: Number.MAX_SAFE_INTEGER - 1_000_000 + pendingSeq,
         replyCount: 0,
+        mentions: [],
+        mentionsHere: false,
+        mentionsRowboat: false,
         reactions: [],
         pending: true,
     }
@@ -428,7 +433,9 @@ function wireBus(): void {
             if (state.messages.some((m) => m.id === edit.messageId)) {
                 setStream(k, {
                     messages: state.messages.map((m) =>
-                        m.id === edit.messageId ? { ...m, body: edit.body, editedAt: edit.at } : m,
+                        m.id === edit.messageId
+                            ? { ...m, body: edit.body, editedAt: edit.at, mentions: edit.mentions, mentionsHere: edit.mentionsHere, mentionsRowboat: edit.mentionsRowboat }
+                            : m,
                     ),
                 })
             }
@@ -850,8 +857,8 @@ export function spaceLastActivityAt(orgId: string, spaceId: string): string | nu
     return latest
 }
 
-/** `${orgId}/${spaceId}` → unread count, for the sidebar badges. */
-export function useSpacesUnreadCounts(): Map<string, number> {
+/** `${orgId}/${spaceId}` → what its sidebar row shows (bold, and the number — mentions, or every message in a DM). */
+export function useSpacesUnreadCounts(): Map<string, SpaceBadge> {
     const version = useSyncExternalStore(
         (l) => {
             wireUnread()
@@ -863,11 +870,10 @@ export function useSpacesUnreadCounts(): Map<string, number> {
         () => unreadVersion,
     )
     return useMemo(() => {
-        const counts = new Map<string, number>()
+        const counts = new Map<string, SpaceBadge>()
         for (const org of getSpacesOrgs()) {
-            for (const space of [...org.spaces, ...org.directs]) {
-                counts.set(key(org.id, space.id), countSpaceUnread(org.id, space.id, org.memberId))
-            }
+            for (const space of org.spaces) counts.set(key(org.id, space.id), spaceBadge(org.id, space.id, false))
+            for (const dm of org.directs) counts.set(key(org.id, dm.id), spaceBadge(org.id, dm.id, true))
         }
         return counts
         // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -134,7 +134,11 @@ export async function startHarborDeployment(options: DeploymentOptions): Promise
     const org = await directory.getByDomain(domain);
     if (!org) return undefined;
     const runtime = buildRuntime(org);
-    if (runtime) runtimes.set(domain, runtime);
+    if (runtime) {
+      // The mentions backfill (service.migrateMentions): idempotent, once per org runtime, before it serves.
+      await runtime.service.migrateMentions();
+      runtimes.set(domain, runtime);
+    }
     return runtime;
   }
 

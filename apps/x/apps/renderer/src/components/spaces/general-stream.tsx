@@ -262,9 +262,10 @@ export function GeneralStream({
 
     const askRowboat = (message: spaces.Message) => {
         const name = memberNames.get(message.author.memberId) ?? message.author.memberId
-        // Quote with names, not wire ids — the composer re-encodes on send.
+        // The quote is a cite, so it carries names, never tokens; the ask is a
+        // token, which the composer's seed path parses into a pill.
         const quote = resolveMentions(message.body, memberNames).split('\n').map((l) => `> ${l}`).join('\n')
-        setSeed({ text: `@rowboat \n\n${quote}\n— ${name}`, nonce: Date.now() })
+        setSeed({ text: `[@rowboat](#rowboat) \n\n${quote}\n— ${name}`, nonce: Date.now() })
     }
 
     // Quote-reply (the Discord gesture): the quoted copy seeds the composer,

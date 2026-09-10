@@ -13,22 +13,26 @@ import { toast } from '@/lib/toast'
 import { MemberProfilePopover } from '@/components/spaces/atoms'
 import { useMemberNames, useSpaceProfiles } from '@/components/spaces/member-text'
 import {
-    decorateMentions,
     imageDimsFromUrl,
     parseAssetWireUrl,
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
+    parseSpaceMemberAppUrl,
     resolveSpaceLink,
     rewriteBlobLinks,
     rewriteFileLinks,
+    rewriteMentionLinks,
     separateImageParagraphs,
+    HERE_APP_URL,
+    ROWBOAT_APP_URL,
     type SpaceRefs,
 } from '@/lib/spaces-presentation'
 
 // The one markdown renderer for space bodies (messages, thread parents).
 // Three responsibilities layered over Streamdown, all space-specific:
-//   1. mentions — decorateMentions via the members context (the mapMentions
-//      walker; fix-it-once rule from the mention sweep),
+//   1. mentions — the wire's link tokens (protocol mentions.ts) rewrite to
+//      app://space-member/<id> pre-parse and render as chips keyed on the ID,
+//      the name coming from the members context (never from the label),
 //   2. blobs — the org's canonical https blob links rewrite to app://space-blob
 //      (served by main through the content-addressed cache), images render
 //      inline, non-image blob links render as a preview card, and
@@ -508,58 +512,33 @@ const spaceComponents: StreamdownComponents = {
         return <ExternalImage src={url} alt={alt ?? ''} />
     },
     a: SpaceAnchor,
-    // decorateMentions renders "@name" as **bold**; the stream dialect shows
-    // those as tinted mention chips. Mention treatment: only the chip is
-    // tinted, never the row — amber when it addresses you (@you, @here),
-    // blue for anyone else. A chip naming a real member opens their profile.
-    strong: MentionStrong,
 }
 
-function MentionStrong({ children, ...props }: ComponentProps<'strong'>) {
+/**
+ * A mention chip, keyed on the ID the token carries — the name is the roster's
+ * current one, never the label (two members with the same name can no longer
+ * collide). Only the chip is tinted, never the row: amber when it addresses
+ * you (@you, @here), blue for anyone else. A member chip opens their profile.
+ */
+function MentionChip({ memberId, broadcast, fallback }: { memberId?: string; broadcast?: 'here' | 'rowboat'; fallback: string }) {
     const names = useMemberNames()
     const { selfId } = useSpaceProfiles()
-    const label = plainLabel(children)
-    if (!label?.startsWith('@')) return <strong {...props}>{children}</strong>
-
-    const broadcast = /^@(here|channel|everyone)$/i.test(label)
-    // The label carries the display name (decorateMentions), so the id comes
-    // from a reverse lookup; an unmatched name still renders as a chip.
-    const name = label.slice(1)
-    let memberId: string | null = null
-    if (!broadcast) {
-        for (const [id, display] of names) {
-            if (display === name) {
-                memberId = id
-                break
-            }
-        }
-    }
-    const addressesMe = broadcast || (!!selfId && memberId === selfId)
+    const label = broadcast ? `@${broadcast}` : `@${(memberId !== undefined ? names.get(memberId) : undefined) ?? fallback.replace(/^@/, '')}`
+    const addressesMe = broadcast === 'here' || (!!selfId && memberId === selfId)
     const chip = cn(
         'rounded-[4px] px-[3px] py-px font-medium',
         addressesMe
             ? 'bg-[var(--stream-you-wash)] text-[var(--stream-you-ink)]'
             : 'bg-[var(--stream-mention-wash)] text-[var(--stream-link)]',
     )
-    // @here/@channel address the room, not a person — no profile to open.
-    if (broadcast) {
-        return (
-            <strong className={chip} {...props}>
-                {children}
-            </strong>
-        )
-    }
-    if (!memberId) {
-        return (
-            <strong className={chip} {...props}>
-                {children}
-            </strong>
-        )
+    // @here and @rowboat address the room and your agent — no profile to open.
+    if (broadcast || memberId === undefined || !names.has(memberId)) {
+        return <strong className={chip}>{label}</strong>
     }
     return (
         <MemberProfilePopover id={memberId}>
             <button type="button" className={cn(chip, 'cursor-pointer hover:brightness-95 dark:hover:brightness-110')}>
-                {children}
+                {label}
             </button>
         </MemberProfilePopover>
     )
@@ -569,6 +548,11 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
     const refs = useContext(SpaceRefsContext)
     const openFile = useContext(SpaceNavContext)
     const url = typeof href === 'string' ? href : ''
+    // Mention tokens arrive here as app links (rewriteMentionLinks) — chips, by id.
+    const mentionId = parseSpaceMemberAppUrl(url)
+    if (mentionId !== null) return <MentionChip memberId={mentionId} fallback={plainLabel(children) ?? mentionId} />
+    if (url === HERE_APP_URL) return <MentionChip broadcast="here" fallback="@here" />
+    if (url === ROWBOAT_APP_URL) return <MentionChip broadcast="rowboat" fallback="@rowboat" />
     if (url.startsWith('app://space-blob/')) {
         return <BlobLinkCard href={url}>{children}</BlobLinkCard>
     }
@@ -602,18 +586,18 @@ function SpaceAnchor({ href, children }: ComponentProps<'a'>) {
 }
 
 // Memoized: a stream re-renders on every presence/typing frame, and markdown
-// is by far the heaviest thing in a row — same body, same refs, same names
-// (both contexts still cut through the memo) means the row's markdown stands.
+// is by far the heaviest thing in a row — same body, same refs means the row's
+// markdown stands (the chips read the members context themselves).
 export const SpaceMarkdown = memo(function SpaceMarkdown({ body, className }: { body: string; className?: string }) {
     const refs = useContext(SpaceRefsContext)
-    const memberNames = useMemberNames()
     const text = useMemo(() => {
         const withBlobs = refs ? rewriteBlobLinks(body, refs) : body
         const withFiles = refs ? rewriteFileLinks(withBlobs, refs) : withBlobs
         // Pre-separator messages joined text and images in one paragraph —
         // normalize so every message gets text above, a clean tile row below.
-        return decorateMentions(separateImageParagraphs(withFiles), memberNames)
-    }, [body, refs, memberNames])
+        // Mentions last: their app links must never look like file links.
+        return rewriteMentionLinks(separateImageParagraphs(withFiles))
+    }, [body, refs])
     return (
         <div className={cn(className)}>
             <MessageImageGallery key={text}>

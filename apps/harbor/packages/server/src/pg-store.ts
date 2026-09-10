@@ -4,13 +4,14 @@ import type {
   ChangeSet,
   Member,
   Membership,
+  MentionStamps,
   Message,
   Poll,
   Space,
   Topic,
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
-import { extractSearchText, matchesAllTerms, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
+import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
 import { type PushLevel,
   directKeyFor,
@@ -146,6 +147,9 @@ interface MessageRow {
   edited_at: string | null;
   poll: Poll | null;
   stream_offset: number;
+  mentions: string[] | null;
+  mentions_here: boolean | null;
+  mentions_rowboat: boolean | null;
 }
 
 function rowToMessage(r: MessageRow): Message {
@@ -167,6 +171,9 @@ function rowToMessage(r: MessageRow): Message {
     reactions: [],
     // The poll definition rides the row; live votes fold in on reads too.
     ...(r.poll !== null && r.poll !== undefined ? { poll: r.poll } : {}),
+    mentions: r.mentions ?? [],
+    mentionsHere: r.mentions_here ?? false,
+    mentionsRowboat: r.mentions_rowboat ?? false,
   };
 }
 
@@ -294,6 +301,14 @@ export class PgStore implements Store {
     return rows[0] ? rowToMember(rows[0]) : undefined;
   }
 
+  async listAllMembers(): Promise<Member[]> {
+    const rows = await this.sql.query<MemberRow>(
+      'select id, display_name, avatar_url, role from members where org_id = $1 order by id',
+      [this.orgId],
+    );
+    return rows.map(rowToMember);
+  }
+
   async putMember(member: Member): Promise<void> {
     await this.sql.query(
       `insert into members (org_id, id, display_name, avatar_url, role) values ($1, $2, $3, $4, $5)
@@ -357,6 +372,14 @@ export class PgStore implements Store {
        where s.org_id = $1 and m.member_id = $2 and ($3::boolean or s.kind <> 'direct')
        order by s.created_at, s.id`,
       [this.orgId, memberId, opts.includeDirect === true],
+    );
+    return rows.map(rowToSpace);
+  }
+
+  async listAllSpaces(): Promise<Space[]> {
+    const rows = await this.sql.query<SpaceRow>(
+      'select id, name, created_at, kind, direct_key from spaces where org_id = $1 order by created_at, id',
+      [this.orgId],
     );
     return rows.map(rowToSpace);
   }
@@ -666,10 +689,10 @@ export class PgStore implements Store {
 
   async putTopic(topic: Topic): Promise<void> {
     await this.sql.query(
-      `insert into topics (id, space_id, root_message_id, title, created_by, created_at, archived)
-       values ($1, $2, $3, $4, $5::jsonb, $6, $7)
+      `insert into topics (id, space_id, root_message_id, title, created_by, created_at, archived, search_text)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
        on conflict (id) do update set
-         title = excluded.title, archived = excluded.archived`,
+         title = excluded.title, archived = excluded.archived, search_text = excluded.search_text`,
       [
         topic.id,
         topic.spaceId,
@@ -678,6 +701,7 @@ export class PgStore implements Store {
         JSON.stringify(topic.createdBy),
         topic.createdAt,
         topic.archived,
+        searchTextFor(topic.title),
       ],
     );
   }
@@ -793,8 +817,8 @@ export class PgStore implements Store {
 
   async appendMessage(message: Message): Promise<void> {
     await this.sql.query(
-      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll)
-       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
+      `insert into messages (id, space_id, thread_root, author, body, posted_at, stream_offset, reply_count, last_reply_at, anchor_change_set_id, poll, mentions, mentions_here, mentions_rowboat, search_text)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15)`,
       [
         message.id,
         message.spaceId,
@@ -807,6 +831,10 @@ export class PgStore implements Store {
         message.lastReplyAt ?? null,
         message.anchorChangeSetId ?? null,
         message.poll ? JSON.stringify(message.poll) : null,
+        JSON.stringify(message.mentions),
+        message.mentionsHere,
+        message.mentionsRowboat,
+        searchTextFor(message.body),
       ],
     );
   }
@@ -826,22 +854,38 @@ export class PgStore implements Store {
     );
   }
 
-  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string): Promise<void> {
+  async markMessageEdited(spaceId: string, messageId: string, body: string, editedAt: string, stamps: MentionStamps): Promise<void> {
     await this.sql.query(
-      `update messages set body = $3, edited_at = $4 where space_id = $1 and id = $2`,
-      [spaceId, messageId, body, editedAt],
+      `update messages set body = $3, edited_at = $4, mentions = $5::jsonb, mentions_here = $6, mentions_rowboat = $7, search_text = $8
+       where space_id = $1 and id = $2`,
+      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat, searchTextFor(body)],
     );
-    // Rewrite the stored message event too — replay must serve the edit.
+    // Rewrite the stored message event too — replay must serve the edit, stamps included.
     await this.sql.query(
-      `update events set event = jsonb_set(jsonb_set(event, '{message,body}', to_jsonb($3::text)), '{message,editedAt}', to_jsonb($4::text))
+      `update events set event = jsonb_set(event, '{message}', (event->'message') || jsonb_build_object(
+         'body', $3::text, 'editedAt', $4::text, 'mentions', $5::jsonb, 'mentionsHere', $6::boolean, 'mentionsRowboat', $7::boolean))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
-      [spaceId, messageId, body, editedAt],
+      [spaceId, messageId, body, editedAt, JSON.stringify(stamps.members), stamps.here, stamps.rowboat],
+    );
+  }
+
+  async restampMessage(spaceId: string, messageId: string, stamps: MentionStamps): Promise<void> {
+    await this.sql.query(
+      `update messages set mentions = $3::jsonb, mentions_here = $4, mentions_rowboat = $5 where space_id = $1 and id = $2`,
+      [spaceId, messageId, JSON.stringify(stamps.members), stamps.here, stamps.rowboat],
+    );
+    await this.sql.query(
+      `update events set event = jsonb_set(event, '{message}', (event->'message') || jsonb_build_object(
+         'mentions', $3::jsonb, 'mentionsHere', $4::boolean, 'mentionsRowboat', $5::boolean))
+       where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
+      [spaceId, messageId, JSON.stringify(stamps.members), stamps.here, stamps.rowboat],
     );
   }
 
   async markMessageDeleted(spaceId: string, messageId: string, deletedAt: string): Promise<void> {
     await this.sql.query(
-      `update messages set body = '', deleted_at = $3, poll = null where space_id = $1 and id = $2`,
+      `update messages set body = '', deleted_at = $3, poll = null, mentions = '[]'::jsonb, mentions_here = false, mentions_rowboat = false, search_text = ''
+       where space_id = $1 and id = $2`,
       [spaceId, messageId, deletedAt],
     );
     // Votes are content too: a member-attributed row must not outlive the poll it was cast on.
@@ -849,7 +893,8 @@ export class PgStore implements Store {
     // Redact the stored message event too — replay must never resurrect the
     // body (nor a poll, which is content the same way).
     await this.sql.query(
-      `update events set event = jsonb_set(jsonb_set(event, '{message,body}', '""'::jsonb), '{message,deletedAt}', to_jsonb($3::text)) #- '{message,poll}'
+      `update events set event = jsonb_set(event, '{message}', ((event->'message') #- '{poll}') || jsonb_build_object(
+         'body', '', 'deletedAt', $3::text, 'mentions', '[]'::jsonb, 'mentionsHere', false, 'mentionsRowboat', false))
        where space_id = $1 and event->>'type' = 'message' and event->'message'->>'id' = $2`,
       [spaceId, messageId, deletedAt],
     );
@@ -1073,19 +1118,36 @@ export class PgStore implements Store {
     return rows[0]?.n ?? 0;
   }
 
+  async countUnreadRootMentions(spaceId: string, memberId: string, afterOffset: number): Promise<number> {
+    const rows = await this.sql.query<{ n: number }>(
+      `select count(*)::int as n from messages
+       where space_id = $1 and thread_root is null and deleted_at is null
+         and stream_offset > $2 and author->>'memberId' <> $3
+         and (mentions_here or mentions @> $4::jsonb)`,
+      [spaceId, afterOffset, memberId, JSON.stringify([memberId])],
+    );
+    return rows[0]?.n ?? 0;
+  }
+
   async listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]> {
     const rows = await this.sql.query<{
       root_message_id: string;
       read_offset: number;
       last_reply_offset: number;
       unread_replies: number;
+      unread_mentions: number;
     }>(
       `select * from (
          select t.root_message_id, t.read_offset, r.last_reply_offset,
                 (select count(*)::int from messages m
                   where m.space_id = t.space_id and m.thread_root = t.root_message_id
                     and m.deleted_at is null and m.stream_offset > t.read_offset
-                    and m.author->>'memberId' <> t.member_id) as unread_replies
+                    and m.author->>'memberId' <> t.member_id) as unread_replies,
+                (select count(*)::int from messages m
+                  where m.space_id = t.space_id and m.thread_root = t.root_message_id
+                    and m.deleted_at is null and m.stream_offset > t.read_offset
+                    and m.author->>'memberId' <> t.member_id
+                    and (m.mentions_here or m.mentions @> jsonb_build_array(t.member_id))) as unread_mentions
            from thread_read_marks t
            join messages r on r.space_id = t.space_id and r.id = t.root_message_id
           where t.space_id = $1 and t.member_id = $2 and t.following
@@ -1099,12 +1161,24 @@ export class PgStore implements Store {
       readOffset: r.read_offset,
       lastReplyOffset: r.last_reply_offset,
       unreadReplies: r.unread_replies,
+      unreadMentions: r.unread_mentions,
     }));
   }
 
   async deleteReadMarks(spaceId: string, memberId: string): Promise<void> {
     await this.sql.query('delete from space_read_marks where space_id = $1 and member_id = $2', [spaceId, memberId]);
     await this.sql.query('delete from thread_read_marks where space_id = $1 and member_id = $2', [spaceId, memberId]);
+  }
+
+  // Backfill ledger: rides schema_migrations under a "backfill:" key, one row
+  // per org (the schema ledger itself is deployment-wide).
+  async backfillDone(id: string): Promise<boolean> {
+    const rows = await this.sql.query<{ id: string }>('select id from schema_migrations where id = $1', [`backfill:${id}:${this.orgId}`]);
+    return rows.length > 0;
+  }
+
+  async markBackfillDone(id: string, at: string): Promise<void> {
+    await this.sql.query('insert into schema_migrations (id, applied_at) values ($1, $2) on conflict (id) do nothing', [`backfill:${id}:${this.orgId}`, at]);
   }
 
   async head(spaceId: string): Promise<number> {

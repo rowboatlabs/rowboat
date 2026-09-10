@@ -78,3 +78,13 @@ prunes immediately; a receipts check ~15 min later prunes the rest.
 `registerWithMac` grows a sibling: after Spaces sign-in the app calls
 `registerPush` on every org it belongs to, and again when the level
 changes. Same Notifications screen, no UI change.
+
+## Amendment 2026-09-10 — mentions are stamped, not parsed
+
+The classifier no longer scans bodies. Mentions on the wire are link tokens
+(`[@Name](#member:<id>)`, `[@here](#here)`) and the org stamps
+`Message.mentions` / `mentionsHere` at post and edit (CONTRACT.md, the
+mentions bullet); `classifyFor` reads the stamp, so a push and a badge can
+never disagree about whether someone was addressed. The per-member level and
+the Expo delivery path are unchanged; the org-side notification policy that
+replaces the level is a later layer of the unread arc.

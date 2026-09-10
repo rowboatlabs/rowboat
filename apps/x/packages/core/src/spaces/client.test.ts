@@ -475,7 +475,7 @@ describe('read state', () => {
     const { message: reply } = await gagan.postMessage(space.id, { threadRoot: message.id, body: 'hi back', actingMode: 'direct' });
     expect(await gagan.listThread(space.id, message.id)).toMatchObject({ following: true, readOffset: reply.offset });
     expect((await ramnique.unread()).spaces.find((s) => s.spaceId === space.id)!.threads).toEqual([
-      { rootMessageId: message.id, readOffset: message.offset, lastReplyOffset: reply.offset, unreadReplies: 1 },
+      { rootMessageId: message.id, readOffset: message.offset, lastReplyOffset: reply.offset, unreadReplies: 1, unreadMentions: 0 },
     ]);
     expect(await ramnique.followThread(space.id, message.id, false)).toEqual({ following: false, readOffset: message.offset });
     expect((await ramnique.unread()).spaces.find((s) => s.spaceId === space.id)!.threads).toEqual([]);

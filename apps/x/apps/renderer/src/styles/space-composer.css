@@ -113,3 +113,13 @@
 .space-composer .ProseMirror img.ProseMirror-selectednode {
   outline: 2px solid var(--ring);
 }
+
+/* A mention pill inside the composer (MentionNode) — one atom, one backspace. */
+.composer-mention {
+    border-radius: 4px;
+    padding: 1px 3px;
+    font-weight: 500;
+    background: var(--stream-mention-wash);
+    color: var(--stream-link);
+    white-space: nowrap;
+}

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
 import { caretContext, composerExtensions, composerMarkdown } from './composer-editor'
-import { encodeMentions, resolveMentions } from '@/lib/spaces-presentation'
 
 // The composer's contract: what the editor holds serializes back to the
 // exact markdown the wire (and every downstream consumer: drafts, slash
@@ -39,7 +38,10 @@ describe('markdown round trip', () => {
         ['image', '![](https://example.com/cat.gif)'],
         ['two paragraphs', 'first\n\nsecond'],
         ['slash command draft', '/ask how do I ship this'],
-        ['mention text', '@Ada Lovelace can you look?'],
+        ['mention text (prose)', '@Ada Lovelace can you look?'],
+        ['member mention token', '[@Ada Lovelace](#member:01HADA) can you look?'],
+        ['here token', 'standup [@here](#here)'],
+        ['rowboat token', '[@rowboat](#rowboat) summarise this'],
     ]
     it.each(cases)('%s', (_name, md) => {
         expect(composerMarkdown(makeEditor(md))).toBe(md)
@@ -87,37 +89,29 @@ describe('formatting commands produce wire markdown', () => {
         expect(composerMarkdown(e)).toBe('```\nhello *raw*\n```')
     })
 
-    it('literal text inserted as a text node survives as text (escaped on the wire)', () => {
-        const e = makeEditor('')
-        e.chain().insertContent({ type: 'text', text: 'a * b _c_' }).run()
-        const md = composerMarkdown(e)
-        expect(e.getText()).toBe('a * b _c_')
-        // Whatever escaping the serializer chose, it must parse back to the same text.
-        expect(makeEditor(md).getText()).toBe('a * b _c_')
+    it('a mention token parses to ONE atom node and serializes back to the same token', () => {
+        const body = 'hey [@Ada Lovelace](#member:01HADA) and [@here](#here), [@rowboat](#rowboat) go'
+        const editor = makeEditor(body)
+        const mentions: Array<{ kind: string; id: string | null; label: string }> = []
+        editor.state.doc.descendants((node) => {
+            if (node.type.name === 'mention') mentions.push(node.attrs as { kind: string; id: string | null; label: string })
+        })
+        expect(mentions).toEqual([
+            { kind: 'member', id: '01HADA', label: 'Ada Lovelace' },
+            { kind: 'here', id: null, label: 'here' },
+            { kind: 'rowboat', id: null, label: 'rowboat' },
+        ])
+        expect(composerMarkdown(editor)).toBe(body)
     })
-})
 
-describe('inline message editor round trip', () => {
-    // The edit box seeds the editor with the posted body (mentions resolved to
-    // names) and saves what it serializes back (mentions re-encoded). Opening
-    // an edit and saving it untouched must reproduce the wire body exactly —
-    // otherwise editing rewrites messages nobody changed.
-    const members = [
-        { id: '01HXAMPLEULIDHARSH000000', displayName: 'Harsh' },
-        { id: '01HXAMPLEULIDRAMNIQUE000', displayName: 'Ramnique Singh' },
-    ]
-    const names = new Map(members.map((m) => [m.id, m.displayName]))
-    const bodies: [string, string][] = [
-        ['a mention', '@01HXAMPLEULIDHARSH000000 see a bunch of things like this'],
-        ['a multi-word mention', 'hey @01HXAMPLEULIDRAMNIQUE000 can you look?'],
-        ['two mentions and formatting', '@01HXAMPLEULIDHARSH000000 **please** ping @01HXAMPLEULIDRAMNIQUE000'],
-        ['@rowboat and @here keep their handles', '@rowboat summarise for @here'],
-        ['a mention mid-list', '- ask @01HXAMPLEULIDHARSH000000\n- then ship'],
-        ['an id cited in code stays literal', 'the id `@01HXAMPLEULIDHARSH000000` is the wire form'],
-    ]
-    it.each(bodies)('%s', (_name, body) => {
-        const editor = makeEditor(resolveMentions(body, names))
-        expect(encodeMentions(composerMarkdown(editor), members)).toBe(body)
+    it('a bare @name stays text — nothing rewrites prose into an address', () => {
+        const editor = makeEditor('@Ada Lovelace can you look?')
+        let nodes = 0
+        editor.state.doc.descendants((node) => {
+            if (node.type.name === 'mention') nodes += 1
+        })
+        expect(nodes).toBe(0)
+        expect(composerMarkdown(editor)).toBe('@Ada Lovelace can you look?')
     })
 })
 

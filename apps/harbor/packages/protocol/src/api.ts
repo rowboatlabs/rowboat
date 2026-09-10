@@ -88,6 +88,12 @@ export const UnreadSpace = z.object({
   readOffset: StreamOffset,
   /** Roots after readOffset, not the member's, not deleted. */
   unreadRoots: z.number().int().nonnegative(),
+  /**
+   * Messages addressed to the member (a mention token naming them, or @here)
+   * past the mark: unread roots plus the unread replies in followed threads.
+   * The sidebar's number; `unreadRoots` is its bold.
+   */
+  unreadMentions: z.number().int().nonnegative(),
   threads: z.array(
     z.object({
       rootMessageId: MessageId,
@@ -95,6 +101,8 @@ export const UnreadSpace = z.object({
       lastReplyOffset: StreamOffset,
       /** Live replies after readOffset, not the member's own. */
       unreadReplies: z.number().int().positive(),
+      /** Of those, the ones addressed to the member. */
+      unreadMentions: z.number().int().nonnegative(),
     }),
   ),
 });

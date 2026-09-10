@@ -552,6 +552,38 @@ export const MIGRATIONS: Migration[] = [
         where r.space_id = s.space_id and r.id = s.thread_root`,
     ],
   },
+  {
+    id: '017-mentions',
+    statements: [
+      // Mentions (2026-09-10, protocol mentions.ts): the org stamps who a
+      // message addresses, from its mention tokens alone. Stamps are derived
+      // columns on the projection row (and mirrored into the stored message
+      // event on write); the boot pass (service.migrateMentions) fills them.
+      `alter table messages add column if not exists mentions jsonb not null default '[]'::jsonb`,
+      `alter table messages add column if not exists mentions_here boolean not null default false`,
+      `alter table messages add column if not exists mentions_rowboat boolean not null default false`,
+      `create index if not exists messages_mentions on messages using gin (mentions)`,
+      // The search index moves off the raw body onto app-computed text
+      // (search.ts searchTextFor): tokens collapse to their key so labels and
+      // the word "member" never index. NOT NULL, no coalesce fallback — a
+      // write path that forgets it fails loudly. Legacy rows take the body
+      // verbatim (the pre-token spelling already tokenized to the bare id).
+      `alter table messages add column if not exists search_text text`,
+      `update messages set search_text = body where search_text is null`,
+      `alter table messages alter column search_text set not null`,
+      `alter table messages drop column if exists body_tsv`,
+      `alter table messages add column body_tsv tsvector
+        generated always as (to_tsvector('simple', coalesce(search_text, ''))) stored`,
+      `create index if not exists messages_search on messages using gin (body_tsv)`,
+      `alter table topics add column if not exists search_text text`,
+      `update topics set search_text = title where search_text is null`,
+      `alter table topics alter column search_text set not null`,
+      `alter table topics drop column if exists title_tsv`,
+      `alter table topics add column title_tsv tsvector
+        generated always as (to_tsvector('simple', search_text)) stored`,
+      `create index if not exists topics_search on topics using gin (title_tsv)`,
+    ],
+  },
 ];
 
 export async function migrate(db: SqlDb): Promise<void> {

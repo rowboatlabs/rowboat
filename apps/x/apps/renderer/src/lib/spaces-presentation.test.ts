@@ -5,7 +5,6 @@ import {
     blobWireUrl,
     buildFileTree,
     decorateMentions,
-    encodeMentions,
     encodeSpaceLinkTarget,
     formatBytes,
     imageDimsFromUrl,
@@ -13,12 +12,13 @@ import {
     initials,
     isUnreadChange,
     joinImageEmbeds,
-    mentionEndingAtCaret,
     splitImageEmbeds,
     orgMonogram,
     parseAssetWireUrl,
     parseBlobAppUrl,
     parseSpaceFileAppUrl,
+    parseSpaceMemberAppUrl,
+    rewriteMentionLinks,
     resolveMentions,
     resolveSpaceLink,
     rewriteBlobLinks,
@@ -193,82 +193,27 @@ describe('toggleTaskAt', () => {
     })
 })
 
-describe('mentions — compose names, wire ids', () => {
-    const members = [
-        { id: '01HXAMPLEULIDRAMNIQUE0000', displayName: 'Ramnique Singh' },
-        { id: '01HXAMPLEULIDRAM00000000', displayName: 'Ramnique' },
-        { id: '01HXAMPLEULIDHARSH000000', displayName: 'Harsh' },
-    ]
+describe('mentions — tokens carry ids, the roster supplies names', () => {
+    const names = new Map([
+        ['01HXAMPLEULIDRAMNIQUE0000', 'Ramnique Singh'],
+        ['01HXAMPLEULIDHARSH000000', 'Harsh'],
+    ])
+    const tok = (id: string, label: string) => `[@${label}](#member:${id})`
 
-    it('encodes display names to member-id addresses, longest name first', () => {
-        expect(encodeMentions('@Ramnique Singh can you look?', members))
-            .toBe('@01HXAMPLEULIDRAMNIQUE0000 can you look?')
-        expect(encodeMentions('ping @Ramnique too', members))
-            .toBe('ping @01HXAMPLEULIDRAM00000000 too')
+    it('decorateMentions bolds the current name; resolveMentions renders it plain', () => {
+        const body = `hey ${tok('01HXAMPLEULIDRAMNIQUE0000', 'Ram')} and [@here](#here)`
+        expect(decorateMentions(body, names)).toBe('hey **@Ramnique Singh** and **@here**')
+        expect(resolveMentions(body, names)).toBe('hey @Ramnique Singh and @here')
+        expect(resolveMentions('`' + tok('01HXAMPLEULIDHARSH000000', 'H') + '` in code, @unknown alone', names))
+            .toBe('`' + tok('01HXAMPLEULIDHARSH000000', 'H') + '` in code, @unknown alone')
     })
 
-    it('matches case-insensitively, at boundaries, with trailing punctuation', () => {
-        expect(encodeMentions('(@harsh)?', members)).toBe('(@01HXAMPLEULIDHARSH000000)?')
-        expect(encodeMentions('email@Harsh.dev stays', members)).toBe('email@Harsh.dev stays')
-    })
-
-    it('leaves code regions, @rowboat, and unknown names alone', () => {
-        expect(encodeMentions('`@Harsh` in code, @Harsh outside', members))
-            .toBe('`@Harsh` in code, @01HXAMPLEULIDHARSH000000 outside')
-        expect(encodeMentions('@rowboat summarise; @Nobody there', members))
-            .toBe('@rowboat summarise; @Nobody there')
-    })
-
-    it('never lets a member named rowboat capture the agent address', () => {
-        expect(encodeMentions('@rowboat go', [{ id: '01HIMPOSTOR', displayName: 'rowboat' }])).toBe('@rowboat go')
-    })
-
-    it('@here stays literal on the wire and decorates like a mention', () => {
-        expect(encodeMentions('@here standup in 5', members)).toBe('@here standup in 5')
-        expect(encodeMentions('@here go', [{ id: '01HIMPOSTOR', displayName: 'here' }])).toBe('@here go')
-        const names = new Map(members.map((m) => [m.id, m.displayName]))
-        expect(decorateMentions('@here standup in 5', names)).toBe('**@here** standup in 5')
-        expect(resolveMentions('`@here` in code stays', names)).toBe('`@here` in code stays')
-    })
-
-    it('round-trips: encoded wire body decorates back to the name', () => {
-        const names = new Map(members.map((m) => [m.id, m.displayName]))
-        expect(decorateMentions(encodeMentions('hey @Ramnique Singh', members), names))
-            .toBe('hey **@Ramnique Singh**')
-    })
-
-    it('resolve then encode round-trips a wire body — the inline editor trip', () => {
-        const names = new Map(members.map((m) => [m.id, m.displayName]))
-        const body = '@01HXAMPLEULIDRAMNIQUE0000 see a bunch of things like this'
-        expect(encodeMentions(resolveMentions(body, names), members)).toBe(body)
-    })
-
-    it('resolveMentions renders names without markup — for titles, crumbs, reasons', () => {
-        const names = new Map(members.map((m) => [m.id, m.displayName]))
-        expect(resolveMentions('ask @01HXAMPLEULIDHARSH000000 about it', names))
-            .toBe('ask @Harsh about it')
-        expect(resolveMentions('`@01HXAMPLEULIDHARSH000000` in code, @unknown alone', names))
-            .toBe('`@01HXAMPLEULIDHARSH000000` in code, @unknown alone')
-        expect(resolveMentions('@rowboat plan this', names)).toBe('@rowboat plan this')
-    })
-
-    it('mentionEndingAtCaret finds the whole token backspace should take', () => {
-        const names = members.map((m) => m.displayName)
-        expect(mentionEndingAtCaret('ping @Harsh', names)).toBe(5)
-        expect(mentionEndingAtCaret('@Harsh', names)).toBe(0)
-        expect(mentionEndingAtCaret('(@harsh', names)).toBe(1) // boundary + case-insensitive
-        expect(mentionEndingAtCaret('hey @Ramnique Singh', names)).toBe(4) // the full long name, whole
-        expect(mentionEndingAtCaret('@rowboat', [])).toBe(0)
-        expect(mentionEndingAtCaret('@here', [])).toBe(0)
-    })
-
-    it('mentionEndingAtCaret stays out of non-mentions', () => {
-        const names = members.map((m) => m.displayName)
-        expect(mentionEndingAtCaret('email@Harsh', names)).toBeNull() // no boundary before @
-        expect(mentionEndingAtCaret('ping @Hars', names)).toBeNull() // caret mid-name
-        expect(mentionEndingAtCaret('ping @Harsh ', names)).toBeNull() // caret past the token
-        expect(mentionEndingAtCaret('`@Harsh', names)).toBeNull() // an opening cite, not an address
-        expect(mentionEndingAtCaret('@Nobody', names)).toBeNull()
+    it('rewriteMentionLinks turns tokens into the app links the anchor renders as chips', () => {
+        expect(rewriteMentionLinks(`ping ${tok('01HXAMPLEULIDHARSH000000', 'Harsh')} [@here](#here) [@rowboat](#rowboat)`))
+            .toBe('ping [@Harsh](app://space-member/01HXAMPLEULIDHARSH000000) [@here](app://space-mention/here) [@rowboat](app://space-mention/rowboat)')
+        expect(rewriteMentionLinks('`' + tok('x', 'X') + '` stays')).toBe('`' + tok('x', 'X') + '` stays')
+        expect(parseSpaceMemberAppUrl('app://space-member/01HXAMPLEULIDHARSH000000')).toBe('01HXAMPLEULIDHARSH000000')
+        expect(parseSpaceMemberAppUrl('app://space-file/o/s/a.md')).toBeNull()
     })
 })
 

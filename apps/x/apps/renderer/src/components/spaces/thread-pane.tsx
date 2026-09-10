@@ -1,6 +1,7 @@
 import { MESSAGE_PROSE } from '@/components/spaces/message-prose'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bot, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Anchor, Archive, ArchiveRestore, ArrowLeft, ArrowUp, Bell, BellOff, Bot, Loader2, MessageSquareOff, MoreHorizontal, Maximize2, Minimize2, Pencil, ShieldAlert, Square, Tag, X } from 'lucide-react'
 import type { spaces } from '@x/shared'
 import { Button } from '@/components/ui/button'
 import {
@@ -25,7 +26,7 @@ import { PollDialogHost } from '@/components/spaces/poll-dialog'
 import { applyPollVote, myPollVotes, postPoll } from '@/lib/spaces-poll'
 import { attributionLabel, formatFeedTime, resolveMentions, shortId } from '@/lib/spaces-presentation'
 import { formatScheduleTime, parseRemindArgs } from '@/lib/spaces-schedule'
-import { getThreadReadState, markThreadRead, noteThread } from '@/lib/spaces-read-state'
+import { getThreadReadState, markThreadRead, noteThread, useReadStateVersion } from '@/lib/spaces-read-state'
 import { toggleSaved, useSaved } from '@/lib/spaces-saved'
 import { maybeInvokeRowboat } from '@/lib/spaces-rowboat'
 import { openResponseChat } from '@/lib/spaces-response-chat'
@@ -312,6 +313,27 @@ export function ThreadPane({
     /** What @rowboat and sessions call this conversation. */
     const threadLabel = topic?.title ?? threadLabelOf(root?.body ?? '')
 
+    // Following (org-owned read state): only a followed thread badges you.
+    // The org follows you in when you reply, when someone replies to your
+    // root, or when you are mentioned; this is the manual override.
+    useReadStateVersion()
+    const following = getThreadReadState(org.id, space.id, rootMessageId)?.following ?? false
+    const toggleFollow = async () => {
+        const next = !following
+        const current = getThreadReadState(org.id, space.id, rootMessageId)
+        noteThread(org.id, space.id, rootMessageId, {
+            following: next,
+            readOffset: current?.readOffset ?? null,
+            ...(root?.lastReplyOffset !== undefined ? { lastReplyOffset: root.lastReplyOffset } : {}),
+        })
+        try {
+            const res = await window.ipc.invoke('spaces:followThread', { orgId: org.id, spaceId: space.id, rootMessageId, following: next })
+            noteThread(org.id, space.id, rootMessageId, { following: res.following, readOffset: res.readOffset })
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Could not update following', 'error')
+        }
+    }
+
     // Optimistic send, same shape as the stream's: render now (dimmed as
     // pending), confirm — or fail into a retry/discard row — in the
     // background. The composer never waits on the round trip.
@@ -346,7 +368,7 @@ export function ThreadPane({
         setFolding(true)
         onFolding?.(true)
         try {
-            const body = `@rowboat fold this thread’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
+            const body = `[@rowboat](#rowboat) fold this thread’s decision into \`${path}\` — keep the file’s structure and put it under the right section. End your change reason with “· thread:${rootMessageId}”.`
             const result = await window.ipc.invoke('spaces:postMessage', { orgId: org.id, spaceId: space.id, threadRoot: rootMessageId, body })
             echo(result.message)
             noteThread(org.id, space.id, rootMessageId, { following: true, readOffset: result.message.offset, lastReplyOffset: result.message.offset })
@@ -690,6 +712,17 @@ export function ThreadPane({
                     // the run ends.
                     <Button variant="ghost" size="xs" className="gap-1 px-2 text-muted-foreground" onClick={() => void openTopicSession()} title="Open the agent chat for this thread">
                         <Bot className="size-3.5" /> Chat
+                    </Button>
+                )}
+                {root && (
+                    <Button
+                        variant="ghost"
+                        size="xs"
+                        className={cn('gap-1 px-2', following ? 'text-foreground' : 'text-muted-foreground')}
+                        onClick={() => void toggleFollow()}
+                        title={following ? 'Following — new replies here badge you. Click to stop.' : 'Follow — new replies here will badge you.'}
+                    >
+                        {following ? <BellOff className="size-3.5" /> : <Bell className="size-3.5" />} {following ? 'Following' : 'Follow'}
                     </Button>
                 )}
                 {topic?.archived && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground">archived</span>}

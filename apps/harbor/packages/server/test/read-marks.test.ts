@@ -126,7 +126,7 @@ describe.each([['memory'], ['postgres']] as const)('read marks (%s store)', (sto
 
     // Harsh authored r4: he now follows it, from the root, with one unread reply.
     expect((await unreadOf(harsh))!.threads).toEqual([
-      { rootMessageId: r4.id, readOffset: r4.offset, lastReplyOffset: arjunReply.offset, unreadReplies: 1 },
+      { rootMessageId: r4.id, readOffset: r4.offset, lastReplyOffset: arjunReply.offset, unreadReplies: 1, unreadMentions: 0 },
     ]);
     // Ramnique never touched the thread: not following, no mark.
     const ramniqueThread = await ramnique.get(`/v1/spaces/${main}/threads/${r4.id}`);
@@ -149,7 +149,7 @@ describe.each([['memory'], ['postgres']] as const)('read marks (%s store)', (sto
   it('unfollowing hides the thread; re-following keeps the mark', async () => {
     const h1 = await post(harsh, 'reply from harsh', r4.id);
     expect((await unreadOf(arjun))!.threads).toEqual([
-      { rootMessageId: r4.id, readOffset: arjunReply.offset, lastReplyOffset: h1.offset, unreadReplies: 1 },
+      { rootMessageId: r4.id, readOffset: arjunReply.offset, lastReplyOffset: h1.offset, unreadReplies: 1, unreadMentions: 0 },
     ]);
 
     const off = await arjun.post(`/v1/spaces/${main}/threads/${r4.id}/follow`, { following: false });

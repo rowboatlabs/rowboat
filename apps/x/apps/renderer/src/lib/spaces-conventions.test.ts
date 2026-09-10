@@ -22,6 +22,9 @@ function msg(over: Partial<spaces.Message> & { id: string }): spaces.Message {
         offset: 1,
         replyCount: 0,
         reactions: [],
+        mentions: [],
+        mentionsHere: false,
+        mentionsRowboat: false,
         ...over,
     }
 }

@@ -17,13 +17,23 @@ export interface ThreadReadState {
     lastReplyOffset: number
     /** Live replies past readOffset by others, when the org told us; null = unknown (the pane derives it). */
     unreadReplies: number | null
+    /** Of those, the ones addressed to me (a mention token naming me, or @here). 0 when unknown. */
+    unreadMentions: number
 }
 
 export interface SpaceReadState {
     head: number
     readOffset: number
     unreadRoots: number
+    /** Messages addressed to me past the marks: unread roots plus unread replies in followed threads. */
+    unreadMentions: number
     threads: Map<string, ThreadReadState>
+}
+
+/** What a sidebar row shows: bold for "something happened here", a number for "someone wants me". */
+export interface SpaceBadge {
+    unread: boolean
+    badge: number
 }
 
 const orgs = new Map<string, Map<string, SpaceReadState>>()
@@ -54,7 +64,7 @@ function space(orgId: string, spaceId: string, create = false): SpaceReadState |
     }
     let state = byOrg.get(spaceId)
     if (!state && create) {
-        state = { head: 0, readOffset: 0, unreadRoots: 0, threads: new Map() }
+        state = { head: 0, readOffset: 0, unreadRoots: 0, unreadMentions: 0, threads: new Map() }
         byOrg.set(spaceId, state)
     }
     return state
@@ -85,13 +95,34 @@ export function isThreadUnread(orgId: string, spaceId: string, rootMessageId: st
     return !!t && threadUnread(t)
 }
 
-/** The sidebar number: unread roots plus followed threads with unread replies. */
+/** Unread roots plus followed threads with unread replies — "something happened here". */
 export function countUnread(orgId: string, spaceId: string): number {
     const s = space(orgId, spaceId)
     if (!s) return 0
     let count = s.unreadRoots
     for (const t of s.threads.values()) if (threadUnread(t)) count += 1
     return count
+}
+
+/**
+ * The Slack posture: bold means something happened where I am, a number
+ * means someone wants me — mentions in a shared space, every unread message
+ * in a DM (a DM is addressed to me by construction).
+ */
+export function spaceBadge(orgId: string, spaceId: string, direct: boolean): SpaceBadge {
+    const s = space(orgId, spaceId)
+    if (!s) return { unread: false, badge: 0 }
+    let unreadThreads = 0
+    let threadMessages = 0
+    for (const t of s.threads.values()) {
+        if (!threadUnread(t)) continue
+        unreadThreads += 1
+        threadMessages += t.unreadReplies ?? 1
+    }
+    return {
+        unread: s.unreadRoots > 0 || unreadThreads > 0,
+        badge: direct ? s.unreadRoots + threadMessages : s.unreadMentions,
+    }
 }
 
 export function useStreamReadOffset(orgId: string, spaceId: string): number {
@@ -126,7 +157,7 @@ export function loadUnread(orgId: string, memberId: string): Promise<void> {
                 // followed thread we learned about from its pane and that the
                 // org left out is, by that omission, read.
                 for (const [root, t] of prev?.get(s.spaceId)?.threads ?? []) {
-                    if (t.following) threads.set(root, { ...t, unreadReplies: 0 })
+                    if (t.following) threads.set(root, { ...t, unreadReplies: 0, unreadMentions: 0 })
                 }
                 for (const t of s.threads) {
                     threads.set(t.rootMessageId, {
@@ -134,9 +165,16 @@ export function loadUnread(orgId: string, memberId: string): Promise<void> {
                         readOffset: t.readOffset,
                         lastReplyOffset: t.lastReplyOffset,
                         unreadReplies: t.unreadReplies,
+                        unreadMentions: t.unreadMentions,
                     })
                 }
-                next.set(s.spaceId, { head: s.head, readOffset: s.readOffset, unreadRoots: s.unreadRoots, threads })
+                next.set(s.spaceId, {
+                    head: s.head,
+                    readOffset: s.readOffset,
+                    unreadRoots: s.unreadRoots,
+                    unreadMentions: s.unreadMentions,
+                    threads,
+                })
             }
             orgs.set(orgId, next)
             emit()
@@ -209,18 +247,34 @@ export function markStreamRead(orgId: string, spaceId: string, offset: number, o
     if (offset > s.head) s.head = offset
     if (offset <= s.readOffset) return
     s.readOffset = offset
-    if (offset >= s.head) s.unreadRoots = 0
+    if (offset >= s.head) streamCaughtUp(s)
     else scheduleReload(orgId) // a partial read — the org recounts what's left
     emit()
     if (opts?.sync !== false) queueMark(orgId, spaceId, undefined, offset)
 }
 
+/** Every root is read: only followed threads can still carry mentions. */
+function streamCaughtUp(s: SpaceReadState): void {
+    s.unreadRoots = 0
+    let mentions = 0
+    for (const t of s.threads.values()) mentions += t.unreadMentions
+    s.unreadMentions = mentions
+}
+
+/** A followed thread is read through `offset`: its numbers leave the space's. */
+function threadCaughtUp(s: SpaceReadState, t: ThreadReadState): void {
+    s.unreadMentions = Math.max(0, s.unreadMentions - t.unreadMentions)
+    t.unreadReplies = 0
+    t.unreadMentions = 0
+}
+
 /** Same for a followed thread. A thread we don't follow takes no mark (the org would record nothing either). */
 export function markThreadRead(orgId: string, spaceId: string, rootMessageId: string, offset: number, opts?: { sync?: boolean }): void {
-    const t = space(orgId, spaceId)?.threads.get(rootMessageId)
-    if (!t?.following || offset <= t.readOffset) return
+    const s = space(orgId, spaceId)
+    const t = s?.threads.get(rootMessageId)
+    if (!s || !t?.following || offset <= t.readOffset) return
     t.readOffset = offset
-    if (offset >= t.lastReplyOffset) t.unreadReplies = 0
+    if (offset >= t.lastReplyOffset) threadCaughtUp(s, t)
     else {
         t.unreadReplies = null
         scheduleReload(orgId)
@@ -251,8 +305,12 @@ export function noteThread(
     const prev = s.threads.get(rootMessageId)
     const readOffset = Math.max(prev?.readOffset ?? 0, info.readOffset ?? 0)
     const lastReplyOffset = Math.max(prev?.lastReplyOffset ?? 0, info.lastReplyOffset ?? 0)
-    const unreadReplies = !info.following || readOffset >= lastReplyOffset ? 0 : (prev?.unreadReplies ?? null)
-    s.threads.set(rootMessageId, { following: info.following, readOffset, lastReplyOffset, unreadReplies })
+    const caughtUp = !info.following || readOffset >= lastReplyOffset
+    const unreadReplies = caughtUp ? 0 : (prev?.unreadReplies ?? null)
+    const unreadMentions = caughtUp ? 0 : (prev?.unreadMentions ?? 0)
+    // A thread that stops counting takes its mentions out of the space's number.
+    if (prev && caughtUp) s.unreadMentions = Math.max(0, s.unreadMentions - prev.unreadMentions)
+    s.threads.set(rootMessageId, { following: info.following, readOffset, lastReplyOffset, unreadReplies, unreadMentions })
     emit()
 }
 
@@ -267,12 +325,12 @@ function applyFrame(orgId: string, frame: spaces.ServerFrame): void {
                 const t = s.threads.get(frame.threadRootId)
                 if (!t || frame.offset <= t.readOffset) return
                 t.readOffset = frame.offset
-                if (frame.offset >= t.lastReplyOffset) t.unreadReplies = 0
+                if (frame.offset >= t.lastReplyOffset) threadCaughtUp(s, t)
                 else scheduleReload(orgId)
             } else {
                 if (frame.offset <= s.readOffset) return
                 s.readOffset = frame.offset
-                if (frame.offset >= s.head) s.unreadRoots = 0
+                if (frame.offset >= s.head) streamCaughtUp(s)
                 else scheduleReload(orgId)
             }
             emit()
@@ -296,15 +354,18 @@ function applyFrame(orgId: string, frame: spaces.ServerFrame): void {
                 const me = memberIds.get(orgId)
                 const mine = me !== undefined && m.author.memberId === me
                 const direct = m.author.actingMode === 'direct'
+                // The org's stamp, never the text: does this message address me?
+                const addressesMe = me !== undefined && (m.mentionsHere || m.mentions.includes(me))
                 if (m.threadRoot === undefined) {
                     // A root. Ours (posted directly) read the stream up to itself.
                     if (mine) {
                         if (direct && m.offset > s.readOffset) {
                             s.readOffset = m.offset
-                            s.unreadRoots = 0
+                            streamCaughtUp(s)
                         }
                     } else if (m.offset > s.readOffset) {
                         s.unreadRoots += 1
+                        if (addressesMe) s.unreadMentions += 1
                     }
                 } else {
                     const t = s.threads.get(m.threadRoot)
@@ -314,17 +375,21 @@ function applyFrame(orgId: string, frame: spaces.ServerFrame): void {
                             if (direct) {
                                 t.following = true
                                 if (m.offset > t.readOffset) t.readOffset = m.offset
-                                t.unreadReplies = 0
+                                threadCaughtUp(s, t)
                             }
                         } else if (t.following && m.offset > t.readOffset) {
                             t.unreadReplies = (t.unreadReplies ?? 0) + 1
+                            if (addressesMe) {
+                                t.unreadMentions += 1
+                                s.unreadMentions += 1
+                            }
                         }
                     } else if (mine && direct) {
                         // Replying follows (the org's rule); our mark rides the reply.
-                        s.threads.set(m.threadRoot, { following: true, readOffset: m.offset, lastReplyOffset: m.offset, unreadReplies: 0 })
+                        s.threads.set(m.threadRoot, { following: true, readOffset: m.offset, lastReplyOffset: m.offset, unreadReplies: 0, unreadMentions: 0 })
                     } else if (!mine) {
                         // A reply in a thread we hold nothing on: we may follow it
-                        // (a root of ours gets followed at its first reply) — the org knows.
+                        // (a root of ours at its first reply, a mention of us) — the org knows.
                         scheduleReload(orgId)
                     }
                 }
@@ -333,6 +398,13 @@ function applyFrame(orgId: string, frame: spaces.ServerFrame): void {
             }
             if (event.type === 'message_deleted' && event.deletion.threadRoot !== undefined && s.threads.has(event.deletion.threadRoot)) {
                 scheduleReload(orgId) // the newest-live-reply offset may have moved back
+            }
+            if (event.type === 'message_edited') {
+                // An edit can add or drop a mention of me on a message already
+                // counted; the org holds the truth, refetch it.
+                const me = memberIds.get(orgId)
+                const edit = event.edit
+                if (me !== undefined && edit.by.memberId !== me && (edit.mentionsHere || edit.mentions.includes(me))) scheduleReload(orgId)
             }
             emit() // head moved
             return

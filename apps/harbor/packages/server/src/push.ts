@@ -1,11 +1,12 @@
-import type { Message, Space } from '@rowboat/spaces-protocol';
+import { mentionsAsText, type Message, type Space } from '@rowboat/spaces-protocol';
 import type { PushLevel, Store } from './store.js';
 
 // Push notifications (PUSH_PLAN.md): the decision + the send, hooked onto the
 // message write path. Slack's tree, cut to v1: per-member level, per-device
-// Expo tokens, classification mention > dm > message (code spans excluded),
-// fire-and-forget batches to Expo's push API, dead tokens pruned via tickets
-// and a delayed receipts check.
+// Expo tokens, classification mention > dm > message, fire-and-forget batches
+// to Expo's push API, dead tokens pruned via tickets and a delayed receipts
+// check. "Mention" is read off the message's STAMPED addresses (protocol
+// mentions.ts, stamped by the org at post) — this module parses no text.
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const EXPO_RECEIPTS_URL = 'https://exp.host/--/api/v2/push/getReceipts';
@@ -19,20 +20,13 @@ export const DEFAULT_PUSH_LEVEL: PushLevel = 'dms';
 
 export type PushKind = 'mention' | 'dm' | 'message';
 
-/** Code regions are cites, not addresses — same line the clients draw. */
-function stripCode(body: string): string {
-  return body.replace(/```[\s\S]*?(?:```|$)/g, ' ').replace(/`[^`\n]*`/g, ' ');
-}
-
-/** Does this message address the member (by wire id) or everyone (@here)? */
-export function mentionsRecipient(body: string, memberId: string): boolean {
-  const stripped = stripCode(body);
-  const hit = new RegExp(`(^|[\\s([{])@(${memberId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|here)(?![\\w.-])`);
-  return hit.test(stripped);
+/** Does this message address the member — a token naming them, or @here? Read off the stamp. */
+export function addressesRecipient(message: Message, memberId: string): boolean {
+  return message.mentionsHere || message.mentions.includes(memberId);
 }
 
 export function classifyFor(memberId: string, space: Space, message: Message): PushKind {
-  if (mentionsRecipient(message.body, memberId)) return 'mention';
+  if (addressesRecipient(message, memberId)) return 'mention';
   if (space.kind === 'direct') return 'dm';
   return 'message';
 }
@@ -44,23 +38,8 @@ export function levelAllows(level: PushLevel, kind: PushKind): boolean {
   return true; // 'all'
 }
 
-/** "@<memberId>" wire addresses → display names, code spans untouched. */
-function resolveMentions(body: string, names: ReadonlyMap<string, string>): string {
-  const parts = body.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g);
-  return parts
-    .map((part, i) => {
-      if (i % 2 === 1) return part;
-      return part.replace(/(^|[\s([{])@([A-Za-z0-9][\w.-]*)/g, (match, pre: string, id: string) => {
-        if (id.toLowerCase() === 'rowboat' || id.toLowerCase() === 'here') return match;
-        const name = names.get(id);
-        return name ? `${pre}@${name}` : match;
-      });
-    })
-    .join('');
-}
-
 function excerpt(body: string, names: ReadonlyMap<string, string>): string {
-  const flat = resolveMentions(body, names).replace(/\s+/g, ' ').trim();
+  const flat = mentionsAsText(body, names).replace(/\s+/g, ' ').trim();
   return flat.length > EXCERPT_MAX ? `${flat.slice(0, EXCERPT_MAX - 1)}…` : flat;
 }
 
