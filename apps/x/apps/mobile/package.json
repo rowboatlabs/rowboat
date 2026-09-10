@@ -11,6 +11,7 @@
     "expo": "~57.0.19",
     "expo-blur": "~57.0.2",
     "expo-camera": "~57.0.2",
+    "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.17",
     "expo-crypto": "~57.0.2",
     "expo-device": "~57.0.1",

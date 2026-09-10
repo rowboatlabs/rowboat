@@ -3,9 +3,11 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useState } from 'react';
 import { ScrollView, Pressable, Text, View } from 'react-native';
 
+import * as Clipboard from 'expo-clipboard';
+
 import { useConnection } from '@/lib/connection';
 import { useSpacesAccount } from '@/lib/spaces/account';
-import { PUSH_LEVELS, getPushLevel, registerWithHarbor, registerWithMac, setPushLevel, type PushLevel } from '@/lib/push';
+import { PUSH_LEVELS, getPushLevel, getPushToken, registerWithHarbor, registerWithMac, setPushLevel, type PushLevel } from '@/lib/push';
 import { useColors } from '@/theme/colors';
 
 // Notification preferences: one global level, enforced by the Mac's watcher.
@@ -15,9 +17,11 @@ export default function NotificationsScreen() {
   const account = useSpacesAccount();
   const [level, setLevel] = useState<PushLevel | null>(null);
   const [state, setState] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
     void getPushLevel().then(setLevel);
+    void getPushToken().then(setToken).catch(() => {});
   }, []);
 
   const pick = async (next: PushLevel) => {
@@ -71,6 +75,21 @@ export default function NotificationsScreen() {
           {state}
         </Text>
       ) : null}
+      {/* Diagnostics: the device's push token — tap to copy. */}
+      {token ? (
+        <Pressable
+          onPress={() => void Clipboard.setStringAsync(token)}
+          style={{ paddingHorizontal: 16, paddingTop: 20 }}
+        >
+          <Text selectable style={{ fontSize: 11, color: colors.tertiaryLabel }}>
+            Device token (tap to copy): {token}
+          </Text>
+        </Pressable>
+      ) : (
+        <Text style={{ fontSize: 11, color: colors.tertiaryLabel, paddingHorizontal: 16, paddingTop: 20 }}>
+          No push token — permission denied or unsupported device.
+        </Text>
+      )}
     </ScrollView>
   );
 }
