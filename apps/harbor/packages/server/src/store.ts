@@ -1,3 +1,4 @@
+import type { ActivityKind } from '@rowboat/spaces-protocol';
 import type {
   Attribution,
   BlobInfo,
@@ -131,6 +132,29 @@ export interface AssetSearchRow {
 }
 
 /** A member's row for one thread: the follow flag and the cursor (read state, 2026-09-09). */
+export interface ActivityQuery {
+  spaceIds: string[];
+  /** Absent = every kind. */
+  kinds?: ReadonlySet<ActivityKind>;
+  /** Strictly older than this (at, then item id) — the page cursor. */
+  before?: { at: string; id: string };
+  limit: number;
+  unreadOnly: boolean;
+}
+
+export interface ActivityRow {
+  /** `m:<messageId>` or `r:<messageId>:<emoji>` — the sort tiebreak and the cursor. */
+  id: string;
+  kind: ActivityKind;
+  spaceId: string;
+  message: Message;
+  /** The author, or every reactor newest first. */
+  actors: Attribution[];
+  emoji?: string;
+  at: string;
+  unread: boolean;
+}
+
 export interface ThreadReadMark {
   following: boolean;
   readOffset: number;
@@ -334,6 +358,19 @@ export interface Store {
   listUnreadFollowedThreads(spaceId: string, memberId: string): Promise<UnreadThreadRow[]>;
   /** Members following a thread (notifications, 2026-09-10): who a reply in it is told about. */
   listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]>;
+
+  // activity (2026-09-10): the member's feed as a query over the facts above
+  /**
+   * Everything involving the member in the given spaces, newest first, at
+   * most `limit` rows, older than `before` when given. Message kinds resolve
+   * by priority (mention > here > dm > reply); reactions fold per (message,
+   * emoji). `unread` is decided here — marks for messages, the seen mark for
+   * reactions — so `unreadOnly` pages correctly.
+   */
+  listActivity(memberId: string, query: ActivityQuery): Promise<ActivityRow[]>;
+  getActivitySeenAt(memberId: string): Promise<string | undefined>;
+  /** Monotone: an older `at` leaves the mark; returns the mark that stands. */
+  advanceActivitySeenAt(memberId: string, at: string): Promise<string>;
   /** Every mark the member holds in the space (leave / removal). */
   deleteReadMarks(spaceId: string, memberId: string): Promise<void>;
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
+import { Bell, ChevronRight, CornerDownRight, Hash, MessagesSquare, Pencil, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import {
@@ -65,7 +65,7 @@ export function SpacesSidebarSection({ active, activeSpace, onOpenSpaces, onOpen
     </SidebarGroup>
 }
 
-function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
+function OrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, activityActive = false, onChanged, renderDiscussions, showArchived = false, activeDiscussionCount }: {
     org: OrgWithSpaces
     activeSpace: SpaceSelection
     unread: Map<string, SpaceBadge>
@@ -73,8 +73,15 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
     activeDiscussionCount?: number
     renderDiscussions?: (spaceId: string) => ReactNode
     onOpenSpace: (orgId: string, spaceId: string) => void
+    /** The org's Activity surface (layer 3); absent = no row. */
+    onOpenActivity?: (orgId: string) => void
+    activityActive?: boolean
     onChanged: () => void
 }) {
+    // The Activity row's number: everything for me across the org's spaces —
+    // the same "for you" the space rows show, summed.
+    let forYou = 0
+    for (const [key, badge] of unread) if (key.startsWith(`${org.id}/`)) forYou += badge.forYou
     const [directsCollapsed, setDirectsCollapsed] = useState(() => sessionStorage.getItem(`spaces:directsCollapsed:${org.id}`) === 'true')
     const [creating, setCreating] = useState(false)
     const [newName, setNewName] = useState('')
@@ -166,6 +173,15 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
 
     return (
         <>
+            {onOpenActivity && (
+                <SidebarMenuItem>
+                    <SidebarMenuButton isActive={activityActive} onClick={() => onOpenActivity(org.id)} className="pl-6">
+                        <Bell className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className={cn('flex-1 truncate', forYou > 0 && !activityActive && 'font-medium text-foreground')}>Activity</span>
+                        {!activityActive && <UnreadBadge badge={{ unread: forYou, forYou }} />}
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            )}
             <SidebarMenuItem>
                 <div className="group/org flex h-7 items-center gap-1.5 rounded-md pl-6 pr-2 text-[11.5px] text-muted-foreground" title={`You are ${org.memberId}`}>
                     <button type="button" onClick={() => setCreating(true)} className="flex flex-1 items-center gap-1.5 text-left hover:text-foreground">
@@ -360,10 +376,12 @@ function OrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, renderDiscu
 }
 
 /** Server navigation lives above the selected space's existing files pane. */
-export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount, showArchived = false }: {
+export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenActivity, activityActive = false, onOpenDiscussion, renderActiveDiscussions, activeDiscussionCount, showArchived = false }: {
     org: OrgWithSpaces
     spaceId: string
     onOpenSpace: (orgId: string, spaceId: string) => void
+    onOpenActivity?: (orgId: string) => void
+    activityActive?: boolean
     onOpenDiscussion: (spaceId: string, selection: RailSelection) => void
     renderActiveDiscussions: (limit: number) => ReactNode
     activeDiscussionCount: number
@@ -373,7 +391,7 @@ export function ServerSpaceNavigation({ org, spaceId, onOpenSpace, onOpenDiscuss
     const unread = useSpacesUnreadCounts()
     return <SidebarMenu>
         <OrgRows org={org} activeSpace={{ orgId: org.id, spaceId }} unread={unread} showArchived={showArchived} activeDiscussionCount={activeDiscussionCount}
-            onOpenSpace={onOpenSpace} onChanged={() => void refresh()}
+            onOpenSpace={onOpenSpace} onOpenActivity={onOpenActivity} activityActive={activityActive} onChanged={() => void refresh()}
             renderDiscussions={(id) => <SpaceDiscussions orgId={org.id} spaceId={id}
                 active={id === spaceId} activeCount={activeDiscussionCount} showArchived={showArchived} renderActive={renderActiveDiscussions}
                 onSelect={(selection) => onOpenDiscussion(id, selection)} />} />

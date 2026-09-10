@@ -1,3 +1,4 @@
+import type { ActivityItem, ActivityKind, ActivityPage } from '@rowboat/spaces-protocol';
 import { randomBytes } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import { monotonicFactory } from 'ulid';
@@ -127,6 +128,18 @@ export interface OrgInfo {
 }
 
 const RECENT_HISTORY = 10;
+const DEFAULT_ACTIVITY_PAGE = 30;
+
+// The activity cursor: the last item's instant and id, joined on a character
+// neither contains (ISO instants and item ids are both `~`-free).
+function encodeActivityCursor(row: { at: string; id: string }): string {
+  return `${row.at}~${row.id}`;
+}
+function decodeActivityCursor(cursor: string): { at: string; id: string } {
+  const i = cursor.indexOf('~');
+  if (i <= 0 || i === cursor.length - 1) throw new HarborError('invalid_request', 'malformed activity cursor');
+  return { at: cursor.slice(0, i), id: cursor.slice(i + 1) };
+}
 const DEFAULT_INVITE_HOURS = 24 * 7;
 
 export class HarborService {
@@ -1795,6 +1808,73 @@ export class HarborService {
     const root = await this.resolveRoot(spaceId, rootMessageId);
     const mark = await this.store.setThreadFollowing(spaceId, root.id, ctx.memberId, following, this.now());
     return { following: mark.following, readOffset: mark.readOffset };
+  }
+
+  // --- activity (2026-09-10) -------------------------------------------------
+  // The member's feed is a query over facts the org already keeps (stamps,
+  // follow rows, DM kind, reactions), never a second table: edits, deletes
+  // and the backfill stay consistent for free, and unread is the read marks'
+  // answer. Cursor = the last item's (at, id), opaque on the wire.
+
+  async activity(
+    ctx: ActorCtx,
+    q: { kinds?: ActivityKind[]; spaceId?: string; unread?: boolean; cursor?: string; limit?: number },
+  ): Promise<ActivityPage> {
+    let spaces = await this.store.listSpacesFor(ctx.memberId, { includeDirect: true });
+    if (q.spaceId !== undefined) {
+      await this.requireMember(ctx, q.spaceId);
+      spaces = spaces.filter((s) => s.id === q.spaceId);
+    }
+    const byId = new Map(spaces.map((s) => [s.id, s]));
+    const limit = q.limit ?? DEFAULT_ACTIVITY_PAGE;
+    const rows = await this.store.listActivity(ctx.memberId, {
+      spaceIds: spaces.map((s) => s.id),
+      ...(q.kinds ? { kinds: new Set(q.kinds) } : {}),
+      ...(q.cursor !== undefined ? { before: decodeActivityCursor(q.cursor) } : {}),
+      limit: limit + 1,
+      unreadOnly: q.unread === true,
+    });
+    const page = rows.slice(0, limit);
+    const items: ActivityItem[] = page.map((r) => {
+      const space = byId.get(r.spaceId)!;
+      return {
+        id: r.id,
+        kind: r.kind,
+        spaceId: r.spaceId,
+        spaceKind: space.kind,
+        spaceName: space.name,
+        ...(r.message.threadRoot !== undefined ? { threadRootId: r.message.threadRoot } : {}),
+        message: r.message,
+        actors: r.actors,
+        ...(r.emoji !== undefined ? { emoji: r.emoji } : {}),
+        at: r.at,
+        unread: r.unread,
+      };
+    });
+    const last = page[page.length - 1];
+    // Names for everyone on the page, from the roster the caller may see —
+    // actors and mention labels alike, so no client walks spaces for names.
+    const wanted = new Set<string>();
+    for (const item of items) {
+      for (const actor of item.actors) wanted.add(actor.memberId);
+      wanted.add(item.message.author.memberId);
+      for (const id of item.message.mentions) wanted.add(id);
+    }
+    const names: Record<string, string> = {};
+    if (wanted.size > 0) {
+      for (const m of await this.listOrgMembers(ctx)) if (wanted.has(m.id)) names[m.id] = m.displayName;
+    }
+    return {
+      items,
+      ...(rows.length > limit && last ? { nextCursor: encodeActivityCursor(last) } : {}),
+      seenAt: (await this.store.getActivitySeenAt(ctx.memberId)) ?? null,
+      names,
+    };
+  }
+
+  /** Reactions through `at` read as seen. Monotone. */
+  async markActivitySeen(ctx: ActorCtx, at: string): Promise<{ seenAt: string }> {
+    return { seenAt: await this.store.advanceActivitySeenAt(ctx.memberId, at) };
   }
 
   /** Every space the member is in (DMs included): cursor, unread roots, unread followed threads. */

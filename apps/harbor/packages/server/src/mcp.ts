@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { mcpTools, NewPoll, type ActingMode, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
+import { mcpTools, NewPoll, type ActingMode, type ActivityItem, type ActivityKind, type SearchKind, relabelMentions, type Message } from '@rowboat/spaces-protocol';
 import { z } from 'zod';
 import type { AuthDriver } from './auth.js';
 import { HarborError } from './errors.js';
@@ -208,6 +208,28 @@ async function dispatch(
       });
       const names = await rosterNames(service, ctx, a.spaceId);
       return { root: relabel(root, names), topic, messages: messages.map((m) => relabel(m, names)), truncated: hasMore };
+    }
+    case 'read_activity': {
+      const a = args as { kinds?: ActivityKind[]; spaceId?: string; unread?: boolean; cursor?: string; limit?: number };
+      const page = await service.activity(ctx, {
+        ...(a.kinds ? { kinds: a.kinds } : {}),
+        ...(a.spaceId !== undefined ? { spaceId: a.spaceId } : {}),
+        ...(a.unread !== undefined ? { unread: a.unread } : {}),
+        ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
+        limit: a.limit ?? 30,
+      });
+      // The page names everyone on it: every body relabelled, every actor
+      // named, so the agent never looks up a name to say who wanted their person.
+      const names = new Map(Object.entries(page.names));
+      return {
+        items: page.items.map((item: ActivityItem) => ({
+          ...item,
+          message: relabel(item.message, names),
+          actors: item.actors.map((actor) => ({ ...actor, displayName: names.get(actor.memberId) ?? actor.memberId })),
+        })),
+        truncated: page.nextCursor !== undefined,
+        ...(page.nextCursor !== undefined ? { cursor: page.nextCursor } : {}),
+      };
     }
     case 'read_asset': {
       const a = args as { spaceId: string; path: string; version?: number };

@@ -22,7 +22,7 @@ export function startSpaceNotifications(): void {
     void notifyIfEnabled('space_mention', {
       title: frame.title,
       message: frame.body,
-      link: spaceLink(orgId, frame.spaceId, frame.threadRootId),
+      link: spaceLink(orgId, frame.spaceId, frame.threadRootId, frame.messageId),
       onlyWhenBackground: true,
     });
   });

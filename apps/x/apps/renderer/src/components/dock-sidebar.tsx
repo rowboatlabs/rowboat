@@ -5,7 +5,7 @@ import { readLastSpace, resolveSpacesLocation } from '@/lib/spaces-navigation'
 
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
+import { Bell,
   AppWindow,
   ArrowUpRight,
   Bot,
@@ -152,6 +152,8 @@ export type DockSidebarProps = {
   onOpenApp?: (folder: string) => void
   /** Open one space (org + space) in the Spaces view. */
   onOpenSpace?: (orgId: string, spaceId: string) => void
+  /** The org's Activity surface (layer 3). */
+  onOpenActivity?: (orgId: string) => void
   onOpenSpaces?: () => void
   /** The space currently open, for highlighting its flyout row. */
   activeSpace?: SpaceSelection
@@ -552,6 +554,7 @@ export function DockSidebar({
   onOpenApps,
   onOpenApp,
   onOpenSpace,
+  onOpenActivity,
   onOpenSpaces,
   activeSpace = null,
   recentRuns = [],
@@ -1424,6 +1427,7 @@ export function DockSidebar({
           unread={spacesUnread}
           activeSpace={activeSpace}
           onOpenSpace={(orgId, spaceId) => { closeFlyouts(); onOpenSpace?.(orgId, spaceId) }}
+          onOpenActivity={onOpenActivity ? (orgId) => { closeFlyouts(); onOpenActivity(orgId) } : undefined}
           onAddOrg={() => setAddOrgOpen(true)}
           onChanged={() => void refreshSpaces()}
           onRequestRemoveOrg={(id, name) => setRemoveOrgTarget({ id, name })}
@@ -1711,6 +1715,7 @@ function SpacesFlyout({
   unread,
   activeSpace,
   onOpenSpace,
+  onOpenActivity,
   onAddOrg,
   onChanged,
   onRequestRemoveOrg,
@@ -1720,6 +1725,7 @@ function SpacesFlyout({
   unread: Map<string, SpaceBadge>
   activeSpace: SpaceSelection
   onOpenSpace: (orgId: string, spaceId: string) => void
+  onOpenActivity?: (orgId: string) => void
   onAddOrg: () => void
   onChanged: () => void
   onRequestRemoveOrg: (orgId: string, name: string) => void
@@ -1754,6 +1760,7 @@ function SpacesFlyout({
             activeSpace={activeSpace}
             unread={unread}
             onOpenSpace={onOpenSpace}
+            onOpenActivity={onOpenActivity}
             onChanged={onChanged}
             onRequestRemoveOrg={onRequestRemoveOrg}
           />
@@ -1763,11 +1770,12 @@ function SpacesFlyout({
   )
 }
 
-function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onRequestRemoveOrg }: {
+function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onOpenActivity, onChanged, onRequestRemoveOrg }: {
   org: OrgWithSpaces
   activeSpace: SpaceSelection
   unread: Map<string, SpaceBadge>
   onOpenSpace: (orgId: string, spaceId: string) => void
+  onOpenActivity?: (orgId: string) => void
   onChanged: () => void
   onRequestRemoveOrg: (orgId: string, name: string) => void
 }) {
@@ -1902,6 +1910,26 @@ function FlyoutOrgRows({ org, activeSpace, unread, onOpenSpace, onChanged, onReq
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {onOpenActivity && (() => {
+        // Everything for me across the org's spaces — the space rows' "for you", summed.
+        let forYou = 0
+        for (const [key, badge] of unread) if (key.startsWith(`${org.id}/`)) forYou += badge.forYou
+        const active = activeSpace?.orgId === org.id && activeSpace.view === 'activity'
+        return (
+          <button
+            type="button"
+            onClick={() => onOpenActivity(org.id)}
+            className={cn(
+              'flex w-full items-center gap-2.5 rounded-[9px] py-2 pl-5 pr-2.5 text-left text-[13.5px] text-foreground/90 hover:bg-accent',
+              active && 'bg-[var(--sidebar-accent)]',
+            )}
+          >
+            <Bell className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className={cn('min-w-0 flex-1 truncate', forYou > 0 && !active && 'font-medium text-foreground')}>Activity</span>
+            {!active && <UnreadBadge badge={{ unread: forYou, forYou }} />}
+          </button>
+        )
+      })()}
       {org.spaces.map((space) => {
         const active = activeSpace?.orgId === org.id && activeSpace.spaceId === space.id
         const badge = unread.get(`${org.id}/${space.id}`) ?? NO_BADGE

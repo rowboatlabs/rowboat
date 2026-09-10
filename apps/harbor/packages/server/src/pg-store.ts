@@ -1,3 +1,5 @@
+import type { ActivityKind, Attribution } from '@rowboat/spaces-protocol';
+import type { ActivityQuery, ActivityRow } from './store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   BlobInfo,
@@ -11,6 +13,7 @@ import type {
   Topic,
 } from '@rowboat/spaces-protocol';
 import { migrate } from './migrations.js';
+import { sortActivity } from './activity-sort.js';
 import { extractSearchText, matchesAllTerms, searchTextFor, snippetAround, toPathPatterns, toTsQueryString, type SearchQuery } from './search.js';
 import type { SqlDb, SqlExecutor } from './sql.js';
 import { type PushLevel,
@@ -1127,6 +1130,88 @@ export class PgStore implements Store {
       [spaceId, afterOffset, memberId, JSON.stringify([memberId])],
     );
     return rows[0]?.n ?? 0;
+  }
+
+  // --- activity (2026-09-10) -------------------------------------------------
+  // Two ordered queries — message kinds, then reactions — each cut to the
+  // page size, merged and cut again: each source's top N contains the merged
+  // top N. Kind and unread are computed in SQL so the filters page correctly.
+
+  async listActivity(memberId: string, q: ActivityQuery): Promise<ActivityRow[]> {
+    if (q.spaceIds.length === 0 || q.limit <= 0) return [];
+    const kinds = q.kinds ? [...q.kinds] : null;
+    const wantMessages = !kinds || kinds.some((k) => k !== 'reaction');
+    const wantReactions = !kinds || kinds.includes('reaction');
+    const out: ActivityRow[] = [];
+    if (wantMessages) {
+      const rows = await this.sql.query<MessageRow & { space_kind: string; kind: ActivityKind; unread: boolean }>(
+        `select * from (
+           select m.*, s.kind as space_kind,
+                  case when m.mentions @> $2::jsonb then 'mention'
+                       when m.mentions_here then 'here'
+                       when s.kind = 'direct' then 'dm'
+                       when m.thread_root is not null and t.following then 'reply'
+                  end as kind,
+                  case when m.thread_root is null then m.stream_offset > coalesce(r.read_offset, 0)
+                       else m.stream_offset > coalesce(t.read_offset, 0) end as unread
+             from messages m
+             join spaces s on s.id = m.space_id
+             left join space_read_marks r on r.space_id = m.space_id and r.member_id = $1
+             left join thread_read_marks t on t.space_id = m.space_id and t.root_message_id = m.thread_root and t.member_id = $1
+            where m.space_id = any($3::text[]) and m.deleted_at is null and m.author->>'memberId' <> $1
+         ) x
+         where x.kind is not null
+           and ($4::text[] is null or x.kind = any($4::text[]))
+           and (not $5::boolean or x.unread)
+           and ($6::text is null or x.posted_at < $6 or (x.posted_at = $6 and ('m:' || x.id) < $7))
+         order by x.posted_at desc, x.id desc
+         limit $8`,
+        [memberId, JSON.stringify([memberId]), q.spaceIds, kinds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit],
+      );
+      for (const r of rows) {
+        const message = rowToMessage(r);
+        out.push({ id: `m:${message.id}`, kind: r.kind, spaceId: message.spaceId, message, actors: [message.author], at: message.postedAt, unread: r.unread });
+      }
+    }
+    if (wantReactions) {
+      const rows = await this.sql.query<{ space_id: string; message_id: string; emoji: string; at: string; actors: Attribution[]; unread: boolean }>(
+        `select * from (
+           select r.space_id, r.message_id, r.emoji, max(r.at) as at,
+                  json_agg(r.attribution order by r.at desc) as actors,
+                  max(r.at) > coalesce((select seen_at from activity_seen where member_id = $1), '') as unread
+             from reactions r
+             join messages m on m.space_id = r.space_id and m.id = r.message_id
+            where r.space_id = any($2::text[]) and r.member_id <> $1 and m.deleted_at is null and m.author->>'memberId' = $1
+            group by r.space_id, r.message_id, r.emoji
+         ) x
+         where (not $3::boolean or x.unread)
+           and ($4::text is null or x.at < $4 or (x.at = $4 and ('r:' || x.message_id || ':' || x.emoji) < $5))
+         order by x.at desc, x.message_id desc, x.emoji desc
+         limit $6`,
+        [memberId, q.spaceIds, q.unreadOnly, q.before?.at ?? null, q.before?.id ?? null, q.limit],
+      );
+      for (const r of rows) {
+        const message = await this.getMessage(r.space_id, r.message_id);
+        if (!message) continue;
+        out.push({ id: `r:${r.message_id}:${r.emoji}`, kind: 'reaction', spaceId: r.space_id, message, actors: r.actors, emoji: r.emoji, at: r.at, unread: r.unread });
+      }
+    }
+    return sortActivity(out).slice(0, q.limit);
+  }
+
+  async getActivitySeenAt(memberId: string): Promise<string | undefined> {
+    const rows = await this.sql.query<{ seen_at: string }>('select seen_at from activity_seen where member_id = $1', [memberId]);
+    return rows[0]?.seen_at;
+  }
+
+  async advanceActivitySeenAt(memberId: string, at: string): Promise<string> {
+    const rows = await this.sql.query<{ seen_at: string }>(
+      `insert into activity_seen (member_id, seen_at) values ($1, $2)
+       on conflict (member_id) do update set seen_at = greatest(activity_seen.seen_at, excluded.seen_at)
+       returning seen_at`,
+      [memberId, at],
+    );
+    return rows[0]!.seen_at;
   }
 
   async listThreadFollowers(spaceId: string, rootMessageId: string): Promise<string[]> {

@@ -9,7 +9,7 @@ import {
   ReadAssetResult,
   RestoreAssetResult,
 } from './changeset.js';
-import { ActingMode, Member, Message, ReactionEmoji, Space, Topic } from './core.js';
+import { ActingMode, Attribution, Member, Message, ReactionEmoji, Space, SpaceKind, Topic } from './core.js';
 import { AssetPath, AssetVersion, BlobHash, ChangeSetId, MemberId, MessageId, SpaceId, StreamOffset, TopicId } from './ids.js';
 import {
   AcceptInvite,
@@ -110,6 +110,56 @@ export type UnreadSpace = z.infer<typeof UnreadSpace>;
 
 export const UnreadSnapshot = z.object({ spaces: z.array(UnreadSpace) });
 export type UnreadSnapshot = z.infer<typeof UnreadSnapshot>;
+
+/**
+ * Activity (2026-09-10, the unread arc's layer 3): everything that involves
+ * the member, across every space and DM they are in, newest first. Not a
+ * table fanned out on write (Slack, Discord, GitHub) but a query over facts
+ * the org already keeps — the stamped mentions, the follow rows, the DM
+ * kind, the reactions (Zulip's Mentions/Inbox views work this way) — so
+ * edits, deletes and the backfill stay consistent for free and there is no
+ * second source of truth beside the read marks. Kinds, in the priority a
+ * single message resolves to: `mention` (a token named you) > `here` >
+ * `dm` (a message in your DM) > `reply` (in a thread you follow); plus
+ * `reaction` (on a message of yours, folded per message and emoji).
+ */
+export const ActivityKind = z.enum(['mention', 'here', 'dm', 'reply', 'reaction']);
+export type ActivityKind = z.infer<typeof ActivityKind>;
+
+export const ActivityItem = z.object({
+  /** Stable identity: `m:<messageId>` for message kinds, `r:<messageId>:<emoji>` for a reaction. */
+  id: z.string(),
+  kind: ActivityKind,
+  spaceId: SpaceId,
+  spaceKind: SpaceKind,
+  spaceName: z.string(),
+  /** The thread the message lives in (absent = a stream root). */
+  threadRootId: MessageId.optional(),
+  /** The message the item is about: theirs for message kinds, yours for a reaction. */
+  message: Message,
+  /** Who did it: the author for message kinds; every reactor, newest first, for a reaction. */
+  actors: z.array(Attribution),
+  emoji: z.string().optional(),
+  at: z.iso.datetime(),
+  /**
+   * Message kinds: the message is past your stream mark (a root) or your
+   * thread mark (a reply) — reading in place clears it, one read-state
+   * truth. Reactions: after your activity-seen mark (`markActivitySeen`).
+   */
+  unread: z.boolean(),
+});
+export type ActivityItem = z.infer<typeof ActivityItem>;
+
+export const ActivityPage = z.object({
+  items: z.array(ActivityItem),
+  /** Present when older items exist: pass it back as `cursor`. */
+  nextCursor: z.string().optional(),
+  /** Your activity-seen mark (reactions before it are read); null = never marked. */
+  seenAt: z.iso.datetime().nullable(),
+  /** Display names for every member on the page (actors and mention tokens), from the org roster the caller may see. */
+  names: z.record(MemberId, z.string()),
+});
+export type ActivityPage = z.infer<typeof ActivityPage>;
 
 export const routes = {
   // --- identity ------------------------------------------------------------
@@ -648,6 +698,43 @@ export const routes = {
     method: 'GET',
     path: '/v1/unread',
     response: UnreadSnapshot,
+  },
+  /**
+   * Activity: everything that involves the member, newest first, cursor
+   * paged (the first time-ordered cross-space pager — `cursor` is opaque,
+   * from the previous page's `nextCursor`). `kinds` narrows to a
+   * comma-separated subset; `spaceId` to one space; `unread=true` to what
+   * the read marks (and the activity-seen mark, for reactions) say is unread.
+   */
+  activity: {
+    method: 'GET',
+    path: '/v1/activity',
+    query: z.object({
+      kinds: z
+        .string()
+        .transform((s) => s.split(',').filter(Boolean))
+        .pipe(z.array(ActivityKind))
+        .optional(),
+      spaceId: SpaceId.optional(),
+      unread: z
+        .enum(['true', 'false'])
+        .transform((v) => v === 'true')
+        .optional(),
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().positive().max(100).optional(),
+    }),
+    response: ActivityPage,
+  },
+  /**
+   * The member has looked at Activity through `at`: reactions at or before
+   * it read as seen. Monotone — an older `at` is a no-op returning the mark.
+   * Message kinds are never marked here; their read state is the space's.
+   */
+  markActivitySeen: {
+    method: 'POST',
+    path: '/v1/activity/seen',
+    request: z.object({ at: z.iso.datetime() }),
+    response: z.object({ seenAt: z.iso.datetime() }),
   },
 
   // --- search ---------------------------------------------------------------

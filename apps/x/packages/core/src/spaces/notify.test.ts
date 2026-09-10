@@ -50,7 +50,7 @@ describe('startSpaceNotifications', () => {
         expect(mocks.notifyIfEnabled).toHaveBeenCalledWith('space_mention', {
             title: 'Harsh mentioned you · Main',
             message: 'hey @Ramnique look',
-            link: 'rowboat://open?type=spaces&orgId=org-1&spaceId=01HZZZZZZZZZZZZZZZZZZZZZZZ',
+            link: 'rowboat://open?type=spaces&orgId=org-1&spaceId=01HZZZZZZZZZZZZZZZZZZZZZZZ&messageId=01HYYYYYYYYYYYYYYYYYYYYYYY',
             onlyWhenBackground: true,
         });
     });
@@ -59,7 +59,7 @@ describe('startSpaceNotifications', () => {
         startSpaceNotifications();
         emit('org-1', notify({ reason: 'reply', threadRootId: '01HXXXXXXXXXXXXXXXXXXXXXXX', title: 'Arjun replied in a thread · Main' }));
         expect(mocks.notifyIfEnabled.mock.calls[0]![1].link).toBe(
-            'rowboat://open?type=spaces&orgId=org-1&spaceId=01HZZZZZZZZZZZZZZZZZZZZZZZ&threadRootId=01HXXXXXXXXXXXXXXXXXXXXXXX',
+            'rowboat://open?type=spaces&orgId=org-1&spaceId=01HZZZZZZZZZZZZZZZZZZZZZZZ&threadRootId=01HXXXXXXXXXXXXXXXXXXXXXXX&messageId=01HYYYYYYYYYYYYYYYYYYYYYYY',
         );
     });
 

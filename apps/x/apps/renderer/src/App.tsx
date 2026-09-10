@@ -38,6 +38,8 @@ import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { SpacesView, type SpaceSelection } from '@/components/spaces-view';
 import { railKey, type RailSelection } from '@/lib/spaces-selection';
+import { STREAM_READ_KEY } from '@/hooks/use-space-chat';
+import { requestJump } from '@/lib/spaces-jump';
 import { findSpace, getSpacesOrgs, refreshSpacesOrgs, useSpacesOrgs } from '@/hooks/use-spaces';
 import { spaceDisplayName } from '@/lib/spaces-direct';
 import { EmailView } from '@/components/email-view';
@@ -650,7 +652,16 @@ type ViewState =
   | { type: 'code' }
   | { type: 'bg-tasks' }
   | { type: 'apps' }
-  | { type: 'spaces'; orgId?: string; spaceId?: string; rail?: RailSelection }
+  | {
+      type: 'spaces'
+      orgId?: string
+      spaceId?: string
+      rail?: RailSelection
+      /** An org-level surface instead of a space: Activity (layer 3, 2026-09-10). */
+      view?: 'activity'
+      /** Scroll to this message once the pane paints (a notification or Activity click). */
+      messageId?: string
+    }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -660,7 +671,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '') && (a.runId ?? '') === (b.runId ?? '') && (a.filePath ?? '') === (b.filePath ?? '')
   if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '') && (a.mode ?? '') === (b.mode ?? '')
   if (a.type === 'email' && b.type === 'email') return (a.threadId ?? '') === (b.threadId ?? '') && (a.searchQuery ?? '') === (b.searchQuery ?? '')
-  if (a.type === 'spaces' && b.type === 'spaces') return (a.orgId ?? '') === (b.orgId ?? '') && (a.spaceId ?? '') === (b.spaceId ?? '') && railKey(a.rail) === railKey(b.rail)
+  if (a.type === 'spaces' && b.type === 'spaces') return (a.orgId ?? '') === (b.orgId ?? '') && (a.spaceId ?? '') === (b.spaceId ?? '') && (a.view ?? '') === (b.view ?? '') && railKey(a.rail) === railKey(b.rail)
   return true // both graph
 }
 
@@ -735,9 +746,17 @@ function parseDeepLink(input: string): ViewState | null {
     case 'spaces': {
       const orgId = params.get('orgId')
       const spaceId = params.get('spaceId')
+      if (orgId && params.get('view') === 'activity') return { type: 'spaces', orgId, view: 'activity' }
       if (!orgId || !spaceId) return { type: 'spaces' }
       const threadRootId = params.get('threadRootId')
-      return { type: 'spaces', orgId, spaceId, ...(threadRootId ? { rail: { kind: 'thread' as const, rootMessageId: threadRootId } } : {}) }
+      const messageId = params.get('messageId')
+      return {
+        type: 'spaces',
+        orgId,
+        spaceId,
+        ...(threadRootId ? { rail: { kind: 'thread' as const, rootMessageId: threadRootId } } : {}),
+        ...(messageId ? { messageId } : {}),
+      }
     }
     default:
       return null
@@ -4857,6 +4876,7 @@ function App() {
       case 'apps': return 'Apps'
       case 'spaces': {
         const org = spacesOrgs.find((o) => o.id === currentViewState.orgId)
+        if (org && currentViewState.view === 'activity') return 'Activity'
         const space = org ? findSpace(org, currentViewState.spaceId) : undefined
         return org && space ? spaceDisplayName(org, space) : 'Spaces'
       }
@@ -5375,8 +5395,10 @@ function App() {
         // through here. With the flag off, closeAllSections has already run,
         // so the app lands on the default full-screen chat.
         if (!SPACES_ENABLED) return
-        if (view.orgId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId ?? '' })
+        if (view.orgId) setSpaceSelection({ orgId: view.orgId, spaceId: view.spaceId ?? '', ...(view.view ? { view: view.view } : {}) })
         setRailSelection(view.rail ?? { kind: 'general' })
+        // A message to land on: the pane consumes the jump once it paints.
+        if (view.messageId) requestJump({ topicId: view.rail?.kind === 'thread' ? view.rail.rootMessageId : STREAM_READ_KEY, messageId: view.messageId })
         // Spaces carries its own conversation surface, so entering it
         // collapses the assistant chat pane by default; in-space navigation
         // (topics, files, history within Spaces) leaves it as the user set it.
@@ -5486,6 +5508,11 @@ function App() {
 
   const openSpace = useCallback((orgId: string, spaceId: string) => {
     void navigateToView({ type: 'spaces', orgId, spaceId })
+  }, [navigateToView])
+
+  /** The org's Activity surface (layer 3): everything that involves you, newest first. */
+  const openActivity = useCallback((orgId: string) => {
+    void navigateToView({ type: 'spaces', orgId, view: 'activity' })
   }, [navigateToView])
 
   const openSpaces = useCallback(async () => {
@@ -7187,6 +7214,7 @@ function App() {
     onOpenApps: openAppsGrid,
     onOpenApp: (folder: string) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() },
     onOpenSpace: openSpace,
+    onOpenActivity: openActivity,
     onOpenSpaces: () => { void openSpaces() },
     activeSpace: spaceSelection,
     recentRuns: chatRuns,
@@ -7629,9 +7657,13 @@ function App() {
                     onRailSelect={(rail) => {
                       // In-space navigation is real navigation: each selection is a history entry,
                       // so the top ‹ › retrace general → topic → file.
-                      if (spaceSelection) void navigateToView({ type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail })
+                      if (spaceSelection && spaceSelection.spaceId) void navigateToView({ type: 'spaces', orgId: spaceSelection.orgId, spaceId: spaceSelection.spaceId, rail })
                       else setRailSelection(rail)
                     }}
+                    // Activity → a message: one navigation entry that opens the
+                    // space (or thread) and lands on the row.
+                    onOpenMessage={(target) => void navigateToView({ type: 'spaces', ...target })}
+                    onOpenActivity={openActivity}
                     onOpenSession={openAssistantRun}
                   />
                 </div>

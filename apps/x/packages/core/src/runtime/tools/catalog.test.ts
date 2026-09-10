@@ -229,6 +229,7 @@ const HISTORICAL_KEY_ORDER = [
     "create_invite",
     "read_stream",
     "read_thread",
+    "read_activity",
     "search_space",
     "post_message",
     "edit_message",
