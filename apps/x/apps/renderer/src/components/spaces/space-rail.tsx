@@ -1,6 +1,7 @@
+import { SecondaryRailToggle } from '@/components/secondary-rail-toggle'
 import { useMemo, useRef, useState } from 'react'
 import { FileListContextMenu } from '@/components/file-list-context-menu'
-import { Archive, ArchiveRestore, Bot, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, CornerDownRight, FileText, FolderPlus, MessageSquareOff, MessagesSquare, MoreHorizontal, Pencil, PenTool, Plus, Trash2, Upload } from 'lucide-react'
 import { spaces } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -145,15 +146,7 @@ export function SpaceRail({
                 <div className="flex shrink-0 items-center gap-0.5 px-2 py-1">
                     <span className="min-w-0 flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Spaces</span>
                     <ServerOptionsMenu org={org} showArchived={showArchived} onToggleArchived={() => setShowArchived((value) => { sessionStorage.setItem(archivedKey, String(!value)); return !value })} onMenuOpenChange={onMenuOpenChange} />
-                    {/* Docked: close. Peeked: the lock — dock it. Same spot, flipped glyph. */}
-                    <button
-                        type="button"
-                        onClick={togglePin}
-                        title={open ? 'Close sidebar' : 'Lock sidebar open'}
-                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                        {open ? <PanelLeftClose className="size-3.5" /> : <PanelLeftOpen className="size-3.5" />}
-                    </button>
+                    <SecondaryRailToggle open={open} onToggle={togglePin} />
                 </div>
                     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
                         <ServerSpaceNavigation org={org} spaceId={spaceId} onOpenSpace={onOpenSpace}

@@ -43,6 +43,7 @@ import { spaceDisplayName } from '@/lib/spaces-direct';
 import { EmailView } from '@/components/email-view';
 import { ProjectsRail } from '@/components/projects-rail';
 import { useProjects, refreshProjects, type Project } from '@/hooks/use-projects';
+import { resolveProjectsLocation, type ProjectLocation } from '@/lib/projects-navigation';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { NewPresentationDialog } from '@/components/new-presentation-dialog';
@@ -202,7 +203,6 @@ const KEEP_ALIVE_SECTIONS: ReadonlySet<MiddleView> = new Set<MiddleView>([
 
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
-// The expanded/collapsed sidebar choice, persisted per machine.
 const SIDEBAR_VIEW_STORAGE_KEY = 'x:sidebar-view'
 const WORKSPACE_ROOT = 'knowledge/Workspace'
 // Sentinel path for the default Bases view (a virtual "file" the bases table
@@ -820,6 +820,7 @@ function ContentHeader({
   canNavigateBack,
   canNavigateForward,
   collapsedLeftPaddingPx,
+  className,
 }: {
   children: React.ReactNode
   onNavigateBack?: () => void
@@ -827,11 +828,12 @@ function ContentHeader({
   canNavigateBack?: boolean
   canNavigateForward?: boolean
   collapsedLeftPaddingPx?: number
+  className?: string
 }) {
   const { state } = useSidebar()
   return (
     <header
-      className="rowboat-titlebar titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-background overflow-hidden"
+      className={cn("rowboat-titlebar titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-background overflow-hidden", className)}
       style={{
         paddingLeft: state === 'collapsed' ? (collapsedLeftPaddingPx ?? 12) : 12,
         paddingRight: 12,
@@ -924,6 +926,7 @@ function App() {
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
   const [projectChatId, setProjectChatId] = useState<string | null>(null)
+  const lastProjectLocationRef = useRef<ProjectLocation | null>(null)
   const { projects } = useProjects()
   const selectedProject = projects.find((p) => workspaceInitialPath === p.path || workspaceInitialPath?.startsWith(`${p.path}/`))
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
@@ -5338,6 +5341,7 @@ function App() {
         }
         return
       case 'workspace':
+        if (view.path) lastProjectLocationRef.current = { path: view.path, runId: view.runId, filePath: view.filePath }
         setIsWorkspaceOpen(true)
         setWorkspaceInitialPath(view.path ?? null)
         setProjectChatId(view.runId ?? null)
@@ -5436,6 +5440,11 @@ function App() {
     await refreshProjects()
     await navigateToView({ type: 'workspace', path: project.path, runId: sessionId })
   }, [navigateToView])
+
+  const openProjects = useCallback((path?: string) => {
+    const location = path ? { path } : resolveProjectsLocation(projects, lastProjectLocationRef.current)
+    void navigateToView({ type: 'workspace', ...location })
+  }, [navigateToView, projects])
 
   // Move the maximized/full-screen chat into the right side pane: restore the
   // view we expanded from (or fall back to Home) and dock the chat on the right.
@@ -5813,7 +5822,7 @@ function App() {
         case 'bg-tasks': void navigateToView({ type: 'bg-tasks' }); break
         case 'chat-history': void navigateToView({ type: 'chat-history' }); break
         case 'knowledge': void navigateToView({ type: 'knowledge-view' }); break
-        case 'workspace': void navigateToView({ type: 'workspace' }); break
+        case 'workspace': openProjects(); break
         case 'code': void navigateToView({ type: 'code' }); break
         case 'apps': openAppsGrid(); break
         case 'spaces': void navigateToView({ type: 'spaces' }); break
@@ -5940,7 +5949,7 @@ function App() {
         break
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigateToFile, navigateToView, openAppsGrid, selectedPath])
+  }, [navigateToFile, navigateToView, openAppsGrid, openProjects, selectedPath])
 
   // Legacy runs:events path: handleRunEvent stashes the result in a ref;
   // polled every render (the triggering event always causes one).
@@ -6397,7 +6406,7 @@ function App() {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
-      void navigateToView({ type: 'workspace', path })
+      openProjects(path)
     },
     openKnowledgeView: () => {
       // Open in the middle pane without touching the chat sidebar — leave it
@@ -6507,7 +6516,7 @@ function App() {
         console.error('Failed to open in file manager:', err)
       })
     },
-  }), [deleteInitialContentForPath, setInitialContentForPath, tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, removeEditorCacheForPath])
+  }), [deleteInitialContentForPath, setInitialContentForPath, tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, openProjects, removeEditorCacheForPath])
 
   // Settings opened from the application menu (Settings… / Keyboard
   // Shortcuts…) — its own dialog instance so the menu can deep-link any tab.
@@ -7055,7 +7064,7 @@ function App() {
   const [projectContentWidth, setProjectContentWidth] = useState(Infinity)
   useLayoutEffect(() => {
     if (!projectViewActive) return
-    const documentPane = document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]')
+    const documentPane = document.querySelector<HTMLElement>('[data-project-document-pane]')
     const chatPane = document.querySelector<HTMLElement>('[data-chat-sidebar-root]')
     if (!documentPane || !chatPane) return
     const measure = () => setProjectContentWidth(documentPane.clientWidth + chatPane.clientWidth)
@@ -7074,7 +7083,8 @@ function App() {
   const shouldCollapseLeftPane = isRightPaneOnlyMode && !projectViewActive
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
-    if (projectViewActive && projectChatId && !selectedPath) return { display: 'none' }
+    // A rail-only pane must size to the rail, overriding SidebarInset's w-full.
+    if (projectViewActive && projectChatId && !selectedPath) return { ...style, width: 'auto', flex: '0 0 auto' }
     if (projectViewActive && selectedPath) return { ...style, width: 0, flex: '1 1 0' }
     if (dockFullScreen) return { display: 'none' }
     if (floatingAssistant && !isRightPaneMaximized) return style
@@ -7132,16 +7142,17 @@ function App() {
     : selectedPath ? 'file'
     : selectedTask ? 'task'
     : 'chat'
+  const keepAliveSection = isWorkspaceOpen ? 'workspace' : activeMiddle
   const [visitedSections, setVisitedSections] = useState<ReadonlySet<MiddleView>>(() => new Set())
   useEffect(() => {
-    if (!KEEP_ALIVE_SECTIONS.has(activeMiddle)) return
+    if (!KEEP_ALIVE_SECTIONS.has(keepAliveSection)) return
     setVisitedSections((prev) => {
-      if (prev.has(activeMiddle)) return prev
+      if (prev.has(keepAliveSection)) return prev
       const next = new Set(prev)
-      next.add(activeMiddle)
+      next.add(keepAliveSection)
       return next
     })
-  }, [activeMiddle])
+  }, [keepAliveSection])
   /** Mounted = visited at least once (or showing now); visible = showing now. */
   const sectionMounted = (key: MiddleView) => activeMiddle === key || visitedSections.has(key)
 
@@ -7234,23 +7245,12 @@ function App() {
               browserOpen={isBrowserOpen}
               switcherOnly={sidebarOpen}
             />
-            {isWorkspaceOpen && !isBrowserOpen && <ProjectsRail
-              tree={tree}
-              selectedPath={workspaceInitialPath}
-              selectedFile={selectedPath}
-              selectedChat={projectChatId}
-              processingRunIds={processingRunIds}
-              actions={knowledgeActions}
-              onSelect={(project) => { void navigateToView({ type: 'workspace', path: project.path }) }}
-              onOpenChat={openProjectChat}
-              onNewChat={newProjectChat}
-              onOpenFile={navigateToFile}
-              onCreateProject={knowledgeActions.createWorkspace}
-            />}
             <SidebarInset
               className={cn(
-                "overflow-hidden! min-h-0 min-w-0",
-                (projectViewActive || (isRightPaneContext && isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen))) && "order-3",
+                "min-h-0 min-w-0",
+                projectViewActive ? "overflow-visible!" : "overflow-hidden!",
+                // Projects keeps the document and its navigation before the chat, like Workspaces.
+                projectViewActive ? "order-2" : (isRightPaneContext && isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen)) && "order-3",
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
@@ -7261,6 +7261,7 @@ function App() {
             >
               {/* Header - also serves as titlebar drag region */}
               <ContentHeader
+                className={projectViewActive ? "[contain:inline-size]" : undefined}
                 onNavigateBack={() => { void navigateBack() }}
                 onNavigateForward={() => { void navigateForward() }}
                 canNavigateBack={canNavigateBack}
@@ -7397,6 +7398,28 @@ function App() {
                   )
                 })()}
               </ContentHeader>
+
+              {/* Secondary rails belong below the titlebar, as in Spaces and Email. */}
+              <div className={projectViewActive ? "flex min-h-0 min-w-0 flex-1" : "contents"}>
+                {/* Keep the shared rail mounted across section visits, like the Spaces view. */}
+                {(isWorkspaceOpen || sectionMounted('workspace')) && <Activity mode={projectViewActive ? 'visible' : 'hidden'}><ProjectsRail
+                  tree={tree}
+                  selectedPath={workspaceInitialPath}
+                  selectedFile={selectedPath}
+                  selectedChat={projectChatId}
+                  processingRunIds={processingRunIds}
+                  actions={knowledgeActions}
+                  onSelect={(project) => { void navigateToView({ type: 'workspace', path: project.path }) }}
+                  onOpenChat={openProjectChat}
+                  onNewChat={newProjectChat}
+                  onOpenFile={navigateToFile}
+                  onCreateProject={knowledgeActions.createWorkspace}
+                /></Activity>}
+              <div
+                data-project-document-pane
+                className={projectViewActive ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" : "contents"}
+                style={projectViewActive && projectChatId && !selectedPath ? { display: 'none' } : undefined}
+              >
 
 {/* Middle pane. Section views wrapped in <Activity> stay
                   mounted once visited — hidden = state+DOM kept, effects
@@ -8017,6 +8040,8 @@ function App() {
               </div>
               </FileCardProvider>
               )}
+              </div>
+              </div>
             </SidebarInset>
 
             {/* Chat pane - shown when viewing files/graph/code. Code sessions
@@ -8033,10 +8058,10 @@ function App() {
                   requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-assistant-tab="${CSS.escape(activeChatTabId)}"]`)?.focus())
                 } : undefined}
                 onCloseTab={showAssistantDock ? () => closeAssistantTab(activeChatTabId) : undefined}
-                placement={projectViewActive ? 'middle' : useBottomTabs && isBrowserOpen ? 'right' : chatPanePlacement}
+                placement={projectViewActive || (useBottomTabs && isBrowserOpen) ? 'right' : chatPanePlacement}
                 // Code mode: the chat fills whatever the rail and drawer leave.
                 paneSize={projectViewActive ? (selectedPath ? 'chat-smaller' : 'chat-bigger') : codeChatMain ? 'chat-bigger' : chatPaneSize}
-                className={cn((projectViewActive || (isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen))) && "order-2", showAssistantDock && !(floatingAssistant && !isRightPaneMaximized) && 'mb-11')}
+                className={cn(projectViewActive ? "order-3" : (isChatPaneInMiddle && !(useBottomTabs && isBrowserOpen)) && "order-2", showAssistantDock && !(floatingAssistant && !isRightPaneMaximized) && 'mb-11')}
                 defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={dockFullScreen || chatPaneOpen}
                 isMaximized={projectViewActive ? !selectedPath : dockFullScreen || isRightPaneMaximized}

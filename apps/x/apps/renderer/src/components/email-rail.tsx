@@ -1,4 +1,5 @@
-import { Inbox, Mail, PanelLeftClose, PanelLeftOpen, PenLine, Sparkles, Star, Tag } from 'lucide-react'
+import { SecondaryRailToggle } from '@/components/secondary-rail-toggle'
+import { Inbox, Mail, PenLine, Sparkles, Star, Tag } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SecondaryRail, type SecondaryRailContext } from '@/components/secondary-rail'
 import { labelNameFor, orderedCategoryIds, type EmailLabelInfo } from '@/lib/email-labels'
@@ -65,15 +66,7 @@ export function EmailRail({
         <div className="flex h-full min-h-0 flex-col">
             <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1.5">
                 <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">Mail</span>
-                {/* Docked: close. Peeked: the lock — dock it. Same spot, flipped glyph. */}
-                <button
-                    type="button"
-                    onClick={togglePin}
-                    title={open ? 'Close sidebar' : 'Lock sidebar open'}
-                    className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                    {open ? <PanelLeftClose className="size-3.5" /> : <PanelLeftOpen className="size-3.5" />}
-                </button>
+                <SecondaryRailToggle open={open} onToggle={togglePin} />
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">

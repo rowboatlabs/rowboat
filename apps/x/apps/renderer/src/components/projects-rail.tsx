@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, CornerDownRight, File, FilePlus, Folder, FolderOpen, FolderPlus, Loader2, MoreHorizontal, PanelLeftClose, Pin, Plus, Presentation, Upload } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown, ChevronRight, CornerDownRight, File, FilePlus, Folder, FolderOpen, FolderPlus, Loader2, MoreHorizontal, Plus, Presentation, Upload } from 'lucide-react'
 import { SecondaryRail } from './secondary-rail'
+import { SecondaryRailToggle } from './secondary-rail-toggle'
 import { SecondaryRailDivider, SecondaryRailSectionHeader } from './secondary-rail-section'
 import { useSecondaryRailSections } from '@/hooks/use-secondary-rail-sections'
 import { Button } from './ui/button'
@@ -37,8 +38,10 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
     onNewChat: (project: Project) => Promise<void>; onOpenFile: (path: string) => void; onCreateProject: (name: string) => Promise<string>
 }) {
     const { projects, ready, error, refresh } = useProjects()
-    const [open, setOpen] = useState(() => localStorage.getItem('projects:railOpen') !== 'false')
-    const [expanded, setExpanded] = useState<Set<string>>(new Set())
+    const [open, setOpen] = useState(true)
+    // Track exceptions so projects discovered asynchronously also start expanded.
+    const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
+    const expanded = new Set(projects.filter(item => !collapsedProjects.has(item.id)).map(item => item.id))
     const [folders, setFolders] = useState<Set<string>>(new Set())
     const {
         bodyRef, bottomRef: filesRef, topStyle: projectsStyle, bottomStyle: filesStyle,
@@ -53,7 +56,7 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
     const uploadTarget = useRef<string | null>(null)
     const project = projects.find((p) => selectedPath === p.path || selectedPath?.startsWith(`${p.path}/`))
     const selectedProjectId = project?.id
-    useEffect(() => { if (selectedProjectId) setExpanded((prev) => new Set(prev).add(selectedProjectId)) }, [selectedProjectId])
+    useEffect(() => { if (selectedProjectId) setCollapsedProjects((prev) => { const next = new Set(prev); next.delete(selectedProjectId); return next }) }, [selectedProjectId])
     const find = (nodes: TreeNode[], target: string): TreeNode | undefined => {
         for (const node of nodes) {
             if (node.path === target) return node
@@ -135,24 +138,37 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
         </DropdownMenuContent>
     </DropdownMenu>
     return <>
-        <SecondaryRail open={open} onTogglePin={() => setOpen((prev) => { localStorage.setItem('projects:railOpen', String(!prev)); return !prev })} widthStorageKey="projects:railWidth"
+        <SecondaryRail open={open} onTogglePin={() => setOpen(value => !value)} widthStorageKey="projects:railWidth"
             persistent={<><input ref={uploadRef} hidden type="file" multiple onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = '' }} /><input ref={uploadFolderRef} hidden type="file" multiple {...{ webkitdirectory: '' }} onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = '' }} /></>}>
             {({ togglePin, onMenuOpenChange }) => {
                 menuChanged = onMenuOpenChange
-                return <div ref={bodyRef} className={cn('flex min-h-0 flex-1 flex-col pt-2', resizing && 'select-none')}>
-                    <div className="flex h-9 shrink-0 items-center px-3">
-                        <span className="flex-1 text-sm font-semibold">Projects</span>
-                        <button title={open ? 'Collapse project rail' : 'Pin project rail'} aria-label={open ? 'Collapse project rail' : 'Pin project rail'} onClick={togglePin} className="rounded p-1 text-muted-foreground hover:bg-accent">{open ? <PanelLeftClose className="size-4" /> : <Pin className="size-4" />}</button>
+                return <div ref={bodyRef} className={cn('flex h-full min-h-0 flex-col', resizing && 'select-none')}>
+                    <div className="flex shrink-0 items-center gap-0.5 px-2 py-1">
+                        <span className="min-w-0 flex-1 px-1 text-[13px] font-semibold text-muted-foreground">Projects</span>
+                        <SecondaryRailToggle open={open} onToggle={togglePin} />
                     </div>
                     <section className="group/section flex min-h-0 flex-col" style={projectsStyle}>
-                        <SecondaryRailSectionHeader label="Projects" collapsed={projectsCollapsed} count={projects.length} onToggle={toggleProjects}><button aria-label="New project" onClick={() => { setDialogError(''); setDialog({ kind: 'project', name: '' }) }} className="rounded p-1 hover:bg-accent"><Plus className="size-3.5" /></button></SecondaryRailSectionHeader>
+                        <SecondaryRailSectionHeader label="Projects" collapsed={projectsCollapsed} count={projects.length} onToggle={toggleProjects}>
+                            <button
+                                type="button"
+                                aria-label={expanded.size > 0 ? 'Collapse all project chats' : 'Expand all project chats'}
+                                title={expanded.size > 0 ? 'Collapse all project chats' : 'Expand all project chats'}
+                                onClick={() => {
+                                    if (expanded.size > 0) setCollapsedProjects(new Set(projects.map(item => item.id)))
+                                    else { setCollapsedProjects(new Set()); if (projectsCollapsed) toggleProjects() }
+                                }}
+                                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                                {expanded.size > 0 ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
+                            </button>
+                            <button aria-label="New project" onClick={() => { setDialogError(''); setDialog({ kind: 'project', name: '' }) }} className="rounded p-1 hover:bg-accent"><Plus className="size-3.5" /></button></SecondaryRailSectionHeader>
                         {!projectsCollapsed && <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                             {!ready && <Loader2 className="m-3 size-4 animate-spin" />}
                             {error && <button className="p-2 text-xs text-destructive" onClick={() => void refresh()}>{error} · Retry</button>}
                             {ready && !error && projects.length === 0 && <p className="p-2 text-xs text-muted-foreground">Create a project to organize chats and local files.</p>}
                             {projects.map((item) => <div key={item.id}>
                                 <div className={cn('group/file flex h-8 items-center rounded', project?.id === item.id ? 'bg-accent/60' : 'hover:bg-accent/50')}>
-                                    <button aria-label={`${expanded.has(item.id) ? 'Collapse' : 'Expand'} ${item.name}`} aria-expanded={expanded.has(item.id)} className="p-1" onClick={() => setExpanded((prev) => { const next = new Set(prev); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next })}><ChevronRight className={cn('size-3', expanded.has(item.id) && 'rotate-90')} /></button>
+                                    <button aria-label={`${expanded.has(item.id) ? 'Collapse' : 'Expand'} ${item.name}`} aria-expanded={expanded.has(item.id)} className="p-1" onClick={() => setCollapsedProjects((prev) => { const next = new Set(prev); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next })}><ChevronRight className={cn('size-3', expanded.has(item.id) && 'rotate-90')} /></button>
                                     <button title={item.name} onClick={() => onSelect(item)} className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13px]"><Folder className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{item.name}</span></button>
                                     <button aria-label={`New chat in ${item.name}`} title="New chat" className="rounded p-1 hover:bg-accent" onClick={() => void run(() => onNewChat(item))}><Plus className="size-3.5" /></button>
                                     {fileMenu({ ...item, kind: 'dir' })}
