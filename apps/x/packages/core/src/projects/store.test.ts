@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_PROJECT_ID, ProjectStore, relativeInside } from './store.js';
+import { ProjectStore, relativeInside } from './store.js';
 import type { SessionIndexEntry } from '@x/shared/dist/sessions.js';
 
 const roots: string[] = [];
@@ -56,7 +56,7 @@ describe('local project associations', () => {
         const [project] = await store.list(sessions);
         expect(project!.chats).toEqual([]);
         await fs.rm(folder, { recursive: true });
-        expect((await store.list(sessions)).map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID]);
+        expect(await store.list(sessions)).toEqual([]);
         await expect(store.createChat(sessions, project!.id)).rejects.toThrow('no longer available');
     });
     it('serializes concurrent creation so no membership is lost', async () => {
@@ -85,35 +85,6 @@ describe('local project associations', () => {
         inFolder = false;
         await fs.writeFile(sidecar, JSON.stringify({ path: '/tmp/elsewhere' }));
         expect((await store.list(sessions))[0]!.chats).toEqual([chat]);
-    });
-    it('always lists General last and includes general chats without changing their working directories', async () => {
-        const { root, sessions, store } = await fixture();
-        await fs.mkdir(path.join(root, 'knowledge/Workspace/Zebra'));
-        const id = await sessions.createSession();
-        const projects = await store.list(sessions);
-        expect(projects.map((p) => p.name)).toEqual(['Alpha', 'Zebra', 'General']);
-        expect(projects.at(-1)).toMatchObject({ id: DEFAULT_PROJECT_ID, isDefault: true, chats: [{ id }] });
-        await expect(fs.stat(path.join(root, 'config', `workdir-${id}.json`))).rejects.toMatchObject({ code: 'ENOENT' });
-        const created = await store.createChat(sessions, DEFAULT_PROJECT_ID);
-        expect((await new ProjectStore(root).list(sessions)).at(-1)!.chats.map((c) => c.id)).toEqual([id, created]);
-    });
-    it('allows a general chat to acquire a folder association and falls back when that folder is deleted', async () => {
-        const { root, folder, sessions, store } = await fixture();
-        const id = await sessions.createSession();
-        await store.list(sessions);
-        await fs.writeFile(path.join(root, 'config', `workdir-${id}.json`), JSON.stringify({ path: folder }));
-        expect((await store.list(sessions))[0]!.chats.map((c) => c.id)).toEqual([id]);
-        await fs.rm(folder, { recursive: true });
-        expect((await store.list(sessions)).at(-1)!.chats.map((c) => c.id)).toEqual([id]);
-    });
-    it('includes general legacy chats once and keeps code sessions excluded', async () => {
-        const { root, sessions } = await fixture();
-        const chat = { id: 'legacy-general', modifiedAt: '2026-09-10' };
-        const code = { id: 'code', modifiedAt: '2026-09-10' };
-        await fs.mkdir(path.join(root, 'code-mode/sessions-meta'), { recursive: true });
-        await fs.writeFile(path.join(root, 'code-mode/sessions-meta/code.json'), '{}');
-        const store = new ProjectStore(root, undefined, undefined, async () => [chat, chat, code]);
-        expect((await store.list(sessions)).at(-1)!.chats).toEqual([chat]);
     });
     it('checks directory boundaries', () => {
         expect(relativeInside('/tmp/project', '/tmp/project/a')).toBe('a');

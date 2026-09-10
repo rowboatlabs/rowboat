@@ -112,11 +112,11 @@ const TOUR_STEPS: TourStep[] = [
   },
   {
     id: 'workspaces',
-    targetId: 'nav-assistant',
+    targetId: 'nav-workspaces',
     navigate: 'workspaces',
     hat: 'explorer',
-    title: 'Assistant',
-    text: 'Assistant organizes your chats and local files into projects. Everyday conversations appear under Chats, below Projects. Pick a chat in the rail to work with Rowboat, or open a file alongside it.',
+    title: 'Projects',
+    text: 'Projects keep local files and related chats together. Pick a chat in the rail to work with Rowboat, or open a file alongside it.',
   },
   {
     id: 'chats',
