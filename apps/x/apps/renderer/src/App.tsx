@@ -7107,9 +7107,7 @@ function App() {
   const shouldCollapseLeftPane = isRightPaneOnlyMode && !projectViewActive
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
-    // A rail-only pane must size to the rail, overriding SidebarInset's w-full.
-    if (projectViewActive && !selectedPath) return { ...style, width: 'auto', flex: '0 0 auto' }
-    if (projectViewActive && selectedPath) return { ...style, width: 0, flex: '1 1 0' }
+    if (projectViewActive) return {}
     if (dockFullScreen) return { display: 'none' }
     if (floatingAssistant && !isRightPaneMaximized) return style
     if (!isRightPaneContext || !chatPaneOpen || isRightPaneMaximized) return style
@@ -7123,7 +7121,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [projectViewActive, selectedPath, chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, floatingAssistant, dockFullScreen])
+  }, [projectViewActive, chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, floatingAssistant, dockFullScreen])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -7270,6 +7268,11 @@ function App() {
               browserOpen={isBrowserOpen}
               switcherOnly={sidebarOpen}
             />
+            <div
+              className={projectViewActive ? 'assistant-section' : 'contents'}
+              data-document-open={projectViewActive && !!selectedPath || undefined}
+              data-chat-open={projectViewActive && chatPaneOpen || undefined}
+            >
             <SidebarInset
               className={cn(
                 "min-h-0 min-w-0",
@@ -7286,7 +7289,6 @@ function App() {
             >
               {/* Header - also serves as titlebar drag region */}
               <ContentHeader
-                className={projectViewActive ? "[contain:inline-size]" : undefined}
                 onNavigateBack={() => { void navigateBack() }}
                 onNavigateForward={() => { void navigateForward() }}
                 canNavigateBack={canNavigateBack}
@@ -7425,7 +7427,7 @@ function App() {
               </ContentHeader>
 
               {/* Secondary rails belong below the titlebar, as in Spaces and Email. */}
-              <div className={projectViewActive ? "flex min-h-0 min-w-0 flex-1" : "contents"}>
+              <div data-assistant-content className={projectViewActive ? "flex min-h-0 min-w-0 flex-1" : "contents"}>
                 {/* Keep the shared rail mounted across section visits, like the Spaces view. */}
                 {(isWorkspaceOpen || sectionMounted('workspace')) && <Activity mode={projectViewActive ? 'visible' : 'hidden'}><ProjectsRail
                   tree={tree}
@@ -8096,6 +8098,7 @@ function App() {
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
                 onNewChatTab={() => { if (projectViewActive && selectedProject) void newProjectChat(selectedProject).catch((e) => toast.error(String(e))); else handleNewChatTabInSidebar() }}
+                embedded={projectViewActive}
                 projectName={projectViewActive ? selectedProject?.name : undefined}
                 recentRuns={chatRuns}
                 onSelectRun={projectViewActive ? openAssistantRun : bindChatToRun}
@@ -8193,6 +8196,7 @@ function App() {
               />
               </CodeDiffOpenerProvider>
             )}
+            </div>
             {useBottomTabs && (
               <AssistantChatDock
                 hidden={!showAssistantDock}

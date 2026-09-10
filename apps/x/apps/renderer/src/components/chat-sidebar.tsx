@@ -69,6 +69,7 @@ interface ChatSidebarProps {
   onCloseChatTabs: (tabIds: string[]) => void
   activeChatTabId: string
   getChatTabTitle: (tab: ChatTab) => string
+  embedded?: boolean
   projectName?: string
   onNewChatTab: () => void
   recentRuns?: { id: string; title?: string; createdAt: string }[]
@@ -166,6 +167,7 @@ export function ChatSidebar({
   onCloseChatTabs,
   activeChatTabId,
   getChatTabTitle,
+  embedded = false,
   projectName,
   onNewChatTab,
   recentRuns = [],
@@ -455,9 +457,9 @@ export function ChatSidebar({
       {showContent && (
         <>
           <header
-            className={cn(floating ? 'titlebar-no-drag' : 'titlebar-drag-region', 'flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar')}
+            className={cn(floating || embedded ? 'titlebar-no-drag' : 'titlebar-drag-region', 'flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar')}
             style={{
-              paddingLeft: isMaximized ? (sidebarState === 'collapsed' ? collapsedLeftPaddingPx : 12) : undefined,
+              paddingLeft: embedded ? 12 : isMaximized ? (sidebarState === 'collapsed' ? collapsedLeftPaddingPx : 12) : undefined,
               paddingRight: isMaximized ? 12 : undefined,
               transition: isMaximized ? 'padding-left 200ms linear' : undefined,
             }}
@@ -465,7 +467,7 @@ export function ChatSidebar({
             {/* Maximized, the pane covers the main ContentHeader — carry the
                 same back/forward pair so history navigation stays reachable
                 (navigating restores the underlying view and un-maximizes). */}
-            {isMaximized && onNavigateBack && onNavigateForward && (
+            {!embedded && isMaximized && onNavigateBack && onNavigateForward && (
               <>
                 <div className="titlebar-no-drag flex items-center gap-1 pr-2 shrink-0">
                   <button
