@@ -4,7 +4,9 @@ import { randomUUID } from 'node:crypto';
 import type { SessionIndexEntry } from '@x/shared/dist/sessions.js';
 
 export interface ProjectChat { id: string; title?: string; modifiedAt: string }
-export interface Project { id: string; name: string; path: string; chats: ProjectChat[] }
+export interface Project { id: string; name: string; path: string; isDefault?: boolean; chats: ProjectChat[] }
+export const DEFAULT_PROJECT_ID = 'default';
+const defaultProject = (): Project => ({ id: DEFAULT_PROJECT_ID, name: 'General', path: 'knowledge/Workspace', isDefault: true, chats: [] });
 interface RecordEntry { id: string; path: string; identity: string }
 interface Registry { projects: RecordEntry[]; chats: Record<string, string> }
 interface Sessions {
@@ -21,7 +23,7 @@ export function relativeInside(parent: string, child: string): string | null {
  * rename, while session membership survives later working-directory changes. */
 export class ProjectStore {
     private pending: Promise<unknown> = Promise.resolve();
-    constructor(private root: string, private legacyChats: (dir: string) => Promise<ProjectChat[]> = async () => [], private legacyChat: (id: string) => Promise<ProjectChat | null> = async () => null) {}
+    constructor(private root: string, private legacyChats: (dir: string) => Promise<ProjectChat[]> = async () => [], private legacyChat: (id: string) => Promise<ProjectChat | null> = async () => null, private generalLegacyChats: () => Promise<ProjectChat[]> = async () => []) {}
     private exclusive<T>(fn: () => Promise<T>): Promise<T> {
         const next = this.pending.then(fn);
         this.pending = next.catch(() => {});
@@ -92,15 +94,19 @@ export class ProjectStore {
             const before = JSON.stringify(registry);
             const live = await this.discover(registry);
             const projects: Project[] = live.map((p) => ({ id: p.id, name: path.basename(p.path), path: p.path, chats: [] }));
+            const fallback = defaultProject();
+            projects.push(fallback);
             const add = async (chat: ProjectChat) => {
                 let projectId = registry.chats[chat.id];
                 if (!projectId) {
                     const dir = await this.workDir(chat.id);
-                    const project = dir ? projects.find((p) => relativeInside(path.join(this.root, p.path), dir) !== null) : undefined;
+                    const project = dir ? projects.find((p) => !p.isDefault && relativeInside(path.join(this.root, p.path), dir) !== null) : undefined;
                     if (project) registry.chats[chat.id] = projectId = project.id;
                 }
-                const project = projects.find((p) => p.id === projectId);
-                if (project && !project.chats.some((c) => c.id === chat.id)) project.chats.push(chat);
+                // Keep the fallback implicit so a general chat can later acquire a
+                // folder association. Preserve saved associations if folders return.
+                const project = projects.find((p) => p.id === projectId) ?? fallback;
+                if (!project.chats.some((c) => c.id === chat.id)) project.chats.push(chat);
             };
             let codeIds = new Set<string>();
             try { codeIds = new Set((await fs.readdir(path.join(this.root, 'code-mode', 'sessions-meta'))).map((name) => name.replace(/\.json$/, ''))); }
@@ -111,8 +117,13 @@ export class ProjectStore {
                 await add({ id: session.sessionId, title: session.title, modifiedAt: session.updatedAt });
             }
             const knownSessions = new Set(sessions.listSessions().map((session) => session.sessionId));
+            for (const chat of await this.generalLegacyChats()) {
+                if (!knownSessions.has(chat.id) && !codeIds.has(chat.id)) await add(chat);
+            }
             for (const project of projects) {
-                for (const chat of await this.legacyChats(path.join(this.root, project.path))) await add(chat);
+                if (!project.isDefault) for (const chat of await this.legacyChats(path.join(this.root, project.path))) {
+                    if (!knownSessions.has(chat.id) && !codeIds.has(chat.id)) await add(chat);
+                }
                 for (const [id, projectId] of Object.entries(registry.chats)) {
                     if (projectId !== project.id || knownSessions.has(id) || codeIds.has(id) || project.chats.some((chat) => chat.id === id)) continue;
                     const chat = await this.legacyChat(id);
@@ -127,11 +138,11 @@ export class ProjectStore {
     createChat(sessions: Sessions, projectId: string): Promise<string> {
         return this.exclusive(async () => {
             const registry = await this.readRegistry();
-            const project = (await this.discover(registry)).find((p) => p.id === projectId);
+            const project = projectId === DEFAULT_PROJECT_ID ? defaultProject() : (await this.discover(registry)).find((p) => p.id === projectId);
             if (!project) throw new Error('Project folder is no longer available');
             const id = await sessions.createSession({});
             await fs.mkdir(path.join(this.root, 'config'), { recursive: true });
-            await fs.writeFile(path.join(this.root, 'config', `workdir-${id}.json`), JSON.stringify({ path: path.join(this.root, project.path) }, null, 2));
+            if (projectId !== DEFAULT_PROJECT_ID) await fs.writeFile(path.join(this.root, 'config', `workdir-${id}.json`), JSON.stringify({ path: path.join(this.root, project.path) }, null, 2));
             registry.chats[id] = projectId;
             await this.save(registry);
             return id;

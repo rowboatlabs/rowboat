@@ -64,6 +64,7 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
             if (target.startsWith(`${node.path}/`)) { const found = find(node.children ?? [], target); if (found) return found }
         }
     }
+    const projectFiles = project ? (find(tree, project.path)?.children ?? []).filter(node => !project.isDefault || !projects.some(item => !item.isDefault && item.path === node.path)) : []
     const run = async (fn: () => Promise<unknown>) => {
         try { await fn(); await refresh() } catch (e) { toast(e instanceof Error ? e.message : 'Project action failed', 'error') }
     }
@@ -174,7 +175,7 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
                                     <button aria-label={`${expanded.has(item.id) ? 'Collapse' : 'Expand'} ${item.name}`} aria-expanded={expanded.has(item.id)} className="p-1" onClick={() => setCollapsedProjects((prev) => { const next = new Set(prev); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next })}><ChevronRight className={cn('size-3', expanded.has(item.id) && 'rotate-90')} /></button>
                                     <button title={item.name} onClick={() => onSelect(item)} className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13px]"><Folder className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{item.name}</span></button>
                                     <button aria-label={`New chat in ${item.name}`} title="New chat" className="rounded p-1 hover:bg-accent" onClick={() => void run(() => onNewChat(item))}><Plus className="size-3.5" /></button>
-                                    {fileMenu({ ...item, kind: 'dir' })}
+                                    {!item.isDefault && fileMenu({ ...item, kind: 'dir' })}
                                 </div>
                                 {expanded.has(item.id) && <div>{item.chats.map((chat) => <ChatRow key={chat.id} working={processingRunIds.has(chat.id)} chat={chat} selected={selectedChat === chat.id && project?.id === item.id} onOpen={() => onOpenChat(item, chat.id)} />)}{item.chats.length === 0 && <button className="h-8 pl-7 text-xs text-muted-foreground hover:text-foreground" onClick={() => void run(() => onNewChat(item))}>Start a chat with Rowboat</button>}</div>}
                             </div>)}
@@ -182,7 +183,7 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
                     </section>
                     <section ref={filesRef} className="group/section flex min-h-0 flex-col" style={filesStyle} onDragOver={(e) => { if (project && Array.from(e.dataTransfer.types).includes('Files')) { e.preventDefault(); e.stopPropagation() } }} onDrop={(e) => { if (project && e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); uploadTarget.current = project.path; void upload(Array.from(e.dataTransfer.files)) } }}>
                         <SecondaryRailDivider {...dividerProps} />
-                        <SecondaryRailSectionHeader label="Files" collapsed={filesCollapsed} count={project ? (find(tree, project.path)?.children?.length ?? 0) : 0} onToggle={toggleFiles}>
+                        <SecondaryRailSectionHeader label="Files" collapsed={filesCollapsed} count={projectFiles.length} onToggle={toggleFiles}>
                             {project && <DropdownMenu onOpenChange={onMenuOpenChange}><DropdownMenuTrigger asChild><button aria-label="Add to project files" className="rounded p-1 hover:bg-accent"><Plus className="size-3.5" /></button></DropdownMenuTrigger><DropdownMenuContent align="end">
                                 <DropdownMenuItem onClick={() => actions.createNote(project.path)}><FilePlus className="mr-2 size-3.5" />New note</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => void run(() => actions.createFolder(project.path))}><FolderPlus className="mr-2 size-3.5" />New folder</DropdownMenuItem>
@@ -201,7 +202,7 @@ export function ProjectsRail({ tree, selectedPath, selectedFile, selectedChat, p
                             { label: 'Add Google Doc', onSelect: () => actions.addGoogleDoc(project.path) },
                             { label: 'Add files…', onSelect: () => { uploadTarget.current = project.path; uploadRef.current?.click() } },
                             { label: 'Add folder…', onSelect: () => { uploadTarget.current = project.path; uploadFolderRef.current?.click() } },
-                        ] : []}><div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{project ? renderFiles(find(tree, project.path)?.children ?? []) : <p className="p-2 text-xs text-muted-foreground">Select a project to see its files.</p>}</div></FileListContextMenu>}
+                        ] : []}><div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{project ? renderFiles(projectFiles) : <p className="p-2 text-xs text-muted-foreground">Select a project to see its files.</p>}</div></FileListContextMenu>}
                     </section>
                 </div>
             }}

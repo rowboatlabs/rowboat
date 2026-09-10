@@ -650,7 +650,7 @@ export const ipcSchemas = {
   'projects:list': {
     req: z.null(),
     res: z.object({ projects: z.array(z.object({
-      id: z.string(), name: z.string(), path: z.string(),
+      id: z.string(), name: z.string(), path: z.string(), isDefault: z.boolean().optional(),
       chats: z.array(z.object({ id: z.string(), title: z.string().optional(), modifiedAt: z.string() })),
     })) }),
   },

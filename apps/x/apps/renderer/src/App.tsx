@@ -7,7 +7,7 @@ import { RunEvent } from '@x/shared/src/runs.js';
 import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, FolderOpen, X } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, SquarePen, X } from 'lucide-react';
 import { cn, compactPath, parentPath } from '@/lib/utils';
 import { SPACES_ENABLED } from '@/lib/feature-flags';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
@@ -944,6 +944,7 @@ function App() {
   const [isEmailOpen, setIsEmailOpen] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
+  const projectDraftTabsRef = useRef(new Map<string, string>())
   const [projectChatId, setProjectChatId] = useState<string | null>(null)
   const lastProjectLocationRef = useRef<ProjectLocation | null>(null)
   const { projects } = useProjects()
@@ -4205,6 +4206,7 @@ function App() {
       && chatTabsRef.current.find((tab) => tab.id === submitTabId)?.chatId === submitTab.chatId
     const submittedSelection = selectionByTabRef.current.get(submitTab.chatId)
     const submittedContext = buildMiddlePaneContext()
+    const submittedProject = isWorkspaceOpen && !projectChatId ? selectedProject : undefined
     if (activeIsProcessing && inCallRef.current) {
       // In-call input arrives at arbitrary moments — a hard
       // drop here silently ate utterances submitted while the previous turn
@@ -4295,7 +4297,9 @@ function App() {
       if (!currentRunId) {
         let creation = creatingSessionByChatRef.current.get(submitTab.chatId)
         if (!creation) {
-          creation = window.ipc.invoke('sessions:create', {})
+          creation = submittedProject
+            ? window.ipc.invoke('projects:createChat', { projectId: submittedProject.id })
+            : window.ipc.invoke('sessions:create', {})
           creatingSessionByChatRef.current.set(submitTab.chatId, creation)
           void creation.catch(() => creatingSessionByChatRef.current.delete(submitTab.chatId))
         }
@@ -4303,6 +4307,14 @@ function App() {
         currentRunId = createdSession.sessionId
         newRunCreatedAt = new Date().toISOString()
         if (isSubmitTabActive()) setRunId(currentRunId)
+        if (submittedProject) {
+          const view = currentViewStateRef.current
+          if (isSubmitTabActive() && view.type === 'workspace' && view.path === submittedProject.path && !view.runId) {
+            setProjectChatId(currentRunId)
+            lastProjectLocationRef.current = { path: submittedProject.path, runId: currentRunId, filePath: view.filePath }
+          }
+          void refreshProjects()
+        }
         analytics.chatSessionCreated(currentRunId)
         // Update active chat tab's runId to the new run
         setChatTabs((prev) => prev.map((tab) => (
@@ -4722,6 +4734,7 @@ function App() {
     setChatTabs((previous) => [...previous, tab])
     activateAssistantTab(tab)
     setIsChatSidebarOpen(true)
+    return tab
   }, [activateAssistantTab])
 
   const closeAssistantTab = useCallback((tabId: string) => {
@@ -5368,6 +5381,13 @@ function App() {
         setSelectedPath(view.filePath ?? null)
         setIsChatSidebarOpen(!!view.runId)
         if (view.runId) bindChatToRun(view.runId)
+        else if (!view.filePath) {
+          const key = view.path ?? ''
+          const draftId = projectDraftTabsRef.current.get(key)
+          const draft = chatTabsRef.current.find((tab) => tab.id === draftId && !tab.runId)
+          if (draft) activateAssistantTab(draft)
+          else projectDraftTabsRef.current.set(key, addAssistantTab().id)
+        }
         return
       case 'knowledge-view':
         setIsKnowledgeViewOpen(true)
@@ -5416,7 +5436,7 @@ function App() {
         }
         return
     }
-  }, [closeAllSections, bindChatToRun, handleNewChat, isSpacesOpen, useBottomTabs, addAssistantTab])
+  }, [closeAllSections, bindChatToRun, handleNewChat, isSpacesOpen, useBottomTabs, addAssistantTab, activateAssistantTab])
   applyViewStateRef.current = applyViewState
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
@@ -7084,8 +7104,8 @@ function App() {
   const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isAppsOpen || isSpacesOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || isBrowserOpen)
   // Code mode with a session selected: the chat is the main surface — the
   // middle pane is just the session rail and the chat fills the rest, with
-  // the workspace drawer at its edge. Before a session is picked the empty
-  // state owns the pane and the chat stays out of the way.
+  // the workspace drawer at its edge. Project roots show the same blank
+  // assistant composer until the first message creates a project session.
   const projectViewActive = isWorkspaceOpen && !isBrowserOpen
   const codeChatMain = isCodeOpen && activeCodeSession !== null
   const [projectContentWidth, setProjectContentWidth] = useState(Infinity)
@@ -7105,13 +7125,13 @@ function App() {
   const floatingAssistant = useBottomTabs && !isFullScreenChat && !isCodeOpen && !isBrowserOpen && !projectViewActive
   const dockFullScreen = useBottomTabs && isFullScreenChat
   const showAssistantDock = useBottomTabs && !isCodeOpen && !projectViewActive
-  const chatPaneOpen = projectViewActive ? !!projectChatId && !projectDocumentOnly : isCodeOpen ? codeChatMain : isChatSidebarOpen
+  const chatPaneOpen = projectViewActive ? (!!projectChatId || !selectedPath) && !projectDocumentOnly : isCodeOpen ? codeChatMain : isChatSidebarOpen
   const isRightPaneOnlyMode = (isRightPaneContext || floatingAssistant) && chatPaneOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode && !projectViewActive
   const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
     const style: React.CSSProperties = { maxWidth: insetMaxWidth }
     // A rail-only pane must size to the rail, overriding SidebarInset's w-full.
-    if (projectViewActive && projectChatId && !selectedPath) return { ...style, width: 'auto', flex: '0 0 auto' }
+    if (projectViewActive && !selectedPath) return { ...style, width: 'auto', flex: '0 0 auto' }
     if (projectViewActive && selectedPath) return { ...style, width: 0, flex: '1 1 0' }
     if (dockFullScreen) return { display: 'none' }
     if (floatingAssistant && !isRightPaneMaximized) return style
@@ -7126,7 +7146,7 @@ function App() {
       return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
     }
     return style
-  }, [projectViewActive, projectChatId, selectedPath, chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, floatingAssistant, dockFullScreen])
+  }, [projectViewActive, selectedPath, chatPaneSize, codeChatMain, codeRailWidth, chatPaneOpen, insetMaxWidth, isRightPaneContext, isRightPaneMaximized, floatingAssistant, dockFullScreen])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -7446,7 +7466,7 @@ function App() {
               <div
                 data-project-document-pane
                 className={projectViewActive ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" : "contents"}
-                style={projectViewActive && projectChatId && !selectedPath ? { display: 'none' } : undefined}
+                style={projectViewActive && !selectedPath ? { display: 'none' } : undefined}
               >
 
 {/* Middle pane. Section views wrapped in <Activity> stay
@@ -7673,18 +7693,6 @@ function App() {
                 <Activity mode={activeMiddle === 'email' ? 'visible' : 'hidden'}>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} onOpenNote={openNoteFromEmail} />
-                </div>
-                </Activity>
-              )}
-              {sectionMounted('workspace') && (
-                <Activity mode={activeMiddle === 'workspace' ? 'visible' : 'hidden'}>
-                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-                    <FolderOpen className="size-9 text-muted-foreground" />
-                    <h1 className="text-xl font-semibold">{selectedProject?.name ?? 'Projects'}</h1>
-                    <p className="max-w-sm text-sm text-muted-foreground">{selectedProject ? 'Choose a chat or file in the rail, or start a new conversation with Rowboat.' : 'Choose a project in the rail, or create one to organize your chats and local files.'}</p>
-                    {selectedProject && <Button onClick={() => void newProjectChat(selectedProject).catch((e) => toast.error(String(e)))}><Plus className="mr-2 size-4" />New chat</Button>}
-                  </div>
                 </div>
                 </Activity>
               )}

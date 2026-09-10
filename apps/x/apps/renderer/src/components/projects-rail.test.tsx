@@ -8,6 +8,7 @@ import { SidebarProvider, useSidebar } from './ui/sidebar'
 const { projects } = vi.hoisted(() => ({ projects: [
     { id: 'alpha', name: 'Alpha', path: 'knowledge/Workspace/Alpha', chats: [{ id: 'chat-1', title: 'Review report', modifiedAt: '2026-09-10' }] },
     { id: 'beta', name: 'Beta', path: 'knowledge/Workspace/Beta', chats: [] },
+    { id: 'default', name: 'General', path: 'knowledge/Workspace', isDefault: true, chats: [{ id: 'general', title: 'General chat', modifiedAt: '2026-09-10' }] },
 ] }))
 vi.mock('@/hooks/use-projects', () => ({ useProjects: () => ({ projects, ready: true, refresh: vi.fn() }) }))
 vi.mock('@/lib/session-title', () => ({ useSessionTitle: () => undefined }))
@@ -25,6 +26,18 @@ function props() {
     }
 }
 describe('Projects rail', () => {
+    it('shows General last, opens its chats and prevents renaming or deleting it', () => {
+        const input = { ...props(), selectedPath: projects[2].path, selectedChat: 'general' }
+        render(<ProjectsRail {...input} />)
+        expect(screen.getAllByRole('button', { name: /^Collapse (Alpha|Beta|General)$/ }).map(button => button.getAttribute('aria-label'))).toEqual(['Collapse Alpha', 'Collapse Beta', 'Collapse General'])
+        expect(screen.queryByRole('button', { name: 'Actions for General' })).toBeNull()
+        const chat = screen.getByRole('button', { name: 'General chat' })
+        expect(chat).toHaveAttribute('aria-current', 'page')
+        fireEvent.click(chat)
+        expect(input.onOpenChat).toHaveBeenCalledWith(projects[2], 'general')
+        fireEvent.click(screen.getByRole('button', { name: 'New chat in General' }))
+        expect(input.onNewChat).toHaveBeenCalledWith(projects[2])
+    })
     it('starts open with all chat lists expanded and supports bulk collapse and expand', () => {
         localStorage.setItem('projects:railOpen', 'false')
         render(<ProjectsRail {...props()} />)
