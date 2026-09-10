@@ -15,8 +15,8 @@ import {
   Folder,
   Globe,
   History,
-  Home,
   LayoutGrid,
+  ListTodo,
   LogIn,
   Mail,
   MessageSquare,
@@ -983,13 +983,6 @@ export function DockSidebar({
       { sep: true as const },
       {
         item: {
-          key: 'home', label: 'Home', icon: Home, tourId: 'nav-home',
-          running: activeNav === 'home',
-          onClick: () => { closeFlyouts(); onOpenHome?.() },
-        },
-      },
-      {
-        item: {
           key: 'email', label: 'Email', icon: Mail, tourId: 'nav-email',
           badge: unreadEmailCount > 0 ? (unreadEmailCount > 99 ? '99+' : String(unreadEmailCount)) : undefined,
           status: previewEmail ? `${formatEmailFrom(previewEmail.from)} · ${previewEmail.subject}` : undefined,
@@ -997,13 +990,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenEmail?.() },
         },
       },
-      ...(codeModeEnabled ? [{
-        item: {
-          key: 'code', label: 'Code', icon: Code2, tourId: 'nav-code',
-          running: activeNav === 'code',
-          onClick: () => { closeFlyouts(); onOpenCode?.() },
-        },
-      }] : []),
       {
         item: {
           key: 'meetings', label: 'Meetings', icon: Mic, tourId: 'nav-meetings',
@@ -1015,6 +1001,13 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenMeetings?.() },
         },
       },
+      ...(codeModeEnabled ? [{
+        item: {
+          key: 'code', label: 'Code', icon: Code2, tourId: 'nav-code',
+          running: activeNav === 'code',
+          onClick: () => { closeFlyouts(); onOpenCode?.() },
+        },
+      }] : []),
       {
         item: {
           key: 'brain', label: 'Brain', icon: FileText, tourId: 'nav-knowledge',
@@ -1023,6 +1016,39 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); knowledgeActions.openKnowledgeView() },
         },
       },
+      {
+        item: {
+          key: 'home', label: 'Todo', icon: ListTodo, tourId: 'nav-home',
+          running: activeNav === 'home',
+          onClick: () => { closeFlyouts(); onOpenHome?.() },
+        },
+      },
+      { sep: true },
+      {
+        item: {
+          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
+          status: workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`,
+          running: activeNav === 'workspaces',
+          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
+        },
+      },
+      {
+        item: {
+          key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
+          badge: bgAgentsFailed ? '!' : undefined,
+          status: bgAgentsLabel ?? undefined,
+          statusAlert: bgAgentsFailed,
+          running: activeNav === 'agents',
+          onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
+        },
+      },
+      ...(onToggleBrowser ? [{
+        item: {
+          key: 'browser', label: 'Browser', icon: Globe,
+          running: browserOpen,
+          onClick: () => { closeFlyouts(); onToggleBrowser() },
+        },
+      }] : []),
       {
         item: {
           key: 'apps', label: 'Apps', icon: LayoutGrid, tourId: 'nav-apps',
@@ -1038,31 +1064,6 @@ export function DockSidebar({
           onClick: () => { closeFlyouts(); onOpenApp?.(folder) },
         },
       })),
-      {
-        item: {
-          key: 'agents', label: 'Background agents', switcherLabel: 'Agents', icon: Bot, tourId: 'nav-agents',
-          badge: bgAgentsFailed ? '!' : undefined,
-          status: bgAgentsLabel ?? undefined,
-          statusAlert: bgAgentsFailed,
-          running: activeNav === 'agents',
-          onClick: () => { closeFlyouts(); onOpenBgTasks?.() },
-        },
-      },
-      {
-        item: {
-          key: 'workspaces', label: 'Projects', icon: Folder, tourId: 'nav-workspaces',
-          status: workspaceCount === 0 ? 'No projects' : `${workspaceCount} project${workspaceCount === 1 ? '' : 's'}`,
-          running: activeNav === 'workspaces',
-          onClick: () => { closeFlyouts(); knowledgeActions.openWorkspaceAt() },
-        },
-      },
-      ...(onToggleBrowser ? [{
-        item: {
-          key: 'browser', label: 'Browser', icon: Globe,
-          running: browserOpen,
-          onClick: () => { closeFlyouts(); onToggleBrowser() },
-        },
-      }] : []),
       { sep: true },
       {
         item: {

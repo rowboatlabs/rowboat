@@ -138,7 +138,7 @@ function updateMenuItem(): MenuItemConstructorOptions {
 
 /** Ordered as the dock is. Number keys cover its nine primary destinations. */
 const GO_ITEMS: ReadonlyArray<{ label: string; type: string; accelerator?: string }> = [
-  { label: "Home", type: "home", accelerator: "CmdOrCtrl+1" },
+  { label: "Todo", type: "home", accelerator: "CmdOrCtrl+1" },
   { label: "Spaces", type: "spaces", accelerator: "CmdOrCtrl+2" },
   { label: "Email", type: "email", accelerator: "CmdOrCtrl+3" },
   { label: "Code", type: "code", accelerator: "CmdOrCtrl+4" },

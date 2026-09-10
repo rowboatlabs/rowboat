@@ -939,8 +939,10 @@ function App() {
   const [newPresentationOpen, setNewPresentationOpen] = useState(false)
   const [newPresentationTargetFolder, setNewPresentationTargetFolder] = useState('knowledge')
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
-  // Default landing view: Home with the chat docked according to appearance settings.
-  const [isHomeOpen, setIsHomeOpen] = useState(true)
+  // Default landing view: the Assistant. No section open means the middle
+  // pane falls through to full-screen chat, which IS the Assistant surface —
+  // so Todo (this flag) starts closed and is one click away in the nav.
+  const [isHomeOpen, setIsHomeOpen] = useState(false)
   // Home surface: the to-do list is the primary tab; the legacy dashboard
   // stays reachable via its Overview toggle.
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
@@ -4846,7 +4848,7 @@ function App() {
   const { orgs: spacesOrgs, loading: spacesLoading } = useSpacesOrgs()
   const currentViewTitle = React.useMemo(() => {
     switch (currentViewState.type) {
-      case 'home': return 'Home'
+      case 'home': return 'Todo'
       case 'chat': return 'Chat'
       case 'chat-history': return 'Chat history'
       case 'code': return 'Code'

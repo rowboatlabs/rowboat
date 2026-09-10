@@ -1470,7 +1470,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           <div className="text-sm font-medium">Default repo</div>
           <div className="text-xs text-muted-foreground">
             Where coding work lands when you don&apos;t name a folder — say &quot;fix the login bug&quot; anywhere
-            (Home, chat, voice) and it runs here on its own isolated branch. Repos are registered in the Code section.
+            (Todo, chat, voice) and it runs here on its own isolated branch. Repos are registered in the Code section.
           </div>
           <Select
             value={defaultProjectId ?? 'auto'}
@@ -1549,7 +1549,7 @@ const ALL_NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string
   {
     key: "todo",
     label: "To-do list",
-    description: "When a to-do you delegated finishes or has something ready for review. Click to open Home.",
+    description: "When a to-do you delegated finishes or has something ready for review. Click to open Todo.",
   },
   {
     key: "meeting_detection",
