@@ -116,7 +116,7 @@ const TOUR_STEPS: TourStep[] = [
     navigate: 'workspaces',
     hat: 'explorer',
     title: 'Assistant',
-    text: 'Assistant organizes your chats and local files into projects. General is for everyday conversations. Pick a chat in the rail to work with Rowboat, or open a file alongside it.',
+    text: 'Assistant organizes your chats and local files into projects. Everyday conversations appear under Chats, below Projects. Pick a chat in the rail to work with Rowboat, or open a file alongside it.',
   },
   {
     id: 'chats',

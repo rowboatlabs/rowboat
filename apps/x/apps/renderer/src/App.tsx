@@ -8296,7 +8296,7 @@ function App() {
                 last so its no-drag region paints over the drag regions. */}
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
-              onNewChat={handleNewChat}
+              onNewChat={handleNewChatTab}
               onWidthChange={setTitlebarControlsWidthPx}
             />
             <MenuSidebarToggleBridge />

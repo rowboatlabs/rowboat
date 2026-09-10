@@ -8,24 +8,27 @@ import { cn } from '@/lib/utils'
  * ones key off group/section, which the PANE carries — hovering anywhere in
  * it shows them).
  */
-export function SecondaryRailSectionHeader({ label, collapsed, count, onToggle, children }: {
+export function SecondaryRailSectionHeader({ label, collapsed, count, onToggle, children, disabled = false, variant = 'default' }: {
     label: string
     collapsed: boolean
     count: number
     onToggle: () => void
     children?: ReactNode
+    disabled?: boolean
+    variant?: 'default' | 'email'
 }) {
     return (
         <div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-1.5">
             <button
                 type="button"
+                disabled={disabled}
                 onClick={onToggle}
                 aria-expanded={!collapsed}
                 title={collapsed ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`}
-                className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-[13px] font-semibold text-muted-foreground hover:text-foreground"
+                className={cn('flex h-full min-w-0 flex-1 items-center gap-2 text-left text-[13px] text-muted-foreground hover:text-foreground', variant === 'email' ? 'font-normal' : 'font-semibold')}
             >
                 <span className="truncate">{label}</span>
-                {collapsed && count > 0 && <span className="font-normal tabular-nums">{count}</span>}
+                {collapsed && count > 0 && <span className={cn('font-normal tabular-nums', variant === 'email' && 'text-[11px] text-muted-foreground/70')}>{count}</span>}
             </button>
             {children}
         </div>
